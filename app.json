@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "Snag",
+    "slug": "snag",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#F9FAFB"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourorg.snag"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F9FAFB"
+      },
+      "package": "com.yourorg.snag",
+      "navigationBar": {
+        "visible": "immersive"
+      }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Snag needs access to your photos to attach images to issue reports.",
+          "cameraPermission": "Snag needs access to your camera to take photos of issues."
+        }
+      ],
+      "expo-asset"
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "name": "Snag",
+      "shortName": "Snag",
+      "description": "Workplace issue reporting",
+      "themeColor": "#2563EB",
+      "backgroundColor": "#F9FAFB",
+      "favicon": "./assets/icon.png"
+    },
+    "extra": {
+      "supabaseUrl": "",
+      "supabaseAnonKey": ""
+    }
+  }
+}

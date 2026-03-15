@@ -1,0 +1,24 @@
+{
+  "name": "Snag",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "forwardPorts": [8081, 19000, 19001],
+  "portsAttributes": {
+    "8081": { "label": "Metro Bundler", "onAutoForward": "notify" },
+    "19000": { "label": "Expo DevTools", "onAutoForward": "silent" },
+    "19001": { "label": "Expo", "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "npm install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.vscode-typescript-next"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+      }
+    }
+  }
+}

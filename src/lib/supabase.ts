@@ -63,8 +63,8 @@ export async function updateProfile(userId: string, updates: Partial<Pick<Profil
 
 // ─── Organisation helpers ─────────────────────────────────────────────────────
 
-export async function createOrganisation(name: string, _userId: string) {
-  const { data, error } = await supabase.rpc('create_organisation', { org_name: name });
+export async function createOrganisation(name: string, userId: string) {
+  const { data, error } = await supabase.rpc('create_organisation', { org_name: name, calling_user_id: userId });
   return { orgId: data, error };
 }
 

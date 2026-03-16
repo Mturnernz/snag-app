@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,14 +20,16 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
 
   async function handleSubmit() {
     if (!email.trim() || !password) {
-      Alert.alert('Required', 'Please enter your email and password.');
+      setMessage({ text: 'Please enter your email and password.', error: true });
       return;
     }
 
     setLoading(true);
+    setMessage(null);
     try {
       const { error } =
         mode === 'signin'
@@ -38,11 +39,11 @@ export default function AuthScreen() {
       if (error) throw error;
 
       if (mode === 'signup') {
-        Alert.alert('Account created', 'Check your email to confirm your account, then sign in.');
+        setMessage({ text: 'Check your email to confirm your account, then sign in.', error: false });
         setMode('signin');
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Something went wrong.');
+      setMessage({ text: err.message ?? 'Something went wrong.', error: true });
     } finally {
       setLoading(false);
     }
@@ -79,6 +80,12 @@ export default function AuthScreen() {
             onSubmitEditing={handleSubmit}
           />
 
+          {message && (
+            <Text style={[styles.message, message.error ? styles.messageError : styles.messageSuccess]}>
+              {message.text}
+            </Text>
+          )}
+
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleSubmit}
@@ -95,7 +102,7 @@ export default function AuthScreen() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity onPress={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>
+        <TouchableOpacity onPress={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setMessage(null); }}>
           <Text style={styles.switchText}>
             {mode === 'signin'
               ? "Don't have an account? Sign up"
@@ -142,6 +149,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     fontSize: Typography.base,
     color: Colors.textPrimary,
+  },
+  message: {
+    fontSize: Typography.sm,
+    textAlign: 'center',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.button,
+  },
+  messageError: {
+    color: '#DC2626',
+    backgroundColor: '#FEF2F2',
+  },
+  messageSuccess: {
+    color: '#16A34A',
+    backgroundColor: '#F0FDF4',
   },
   button: {
     height: MIN_TOUCH_TARGET + 8,

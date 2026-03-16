@@ -48,7 +48,7 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     .from('profiles')
     .select('*, organisation:organisations(*)')
     .eq('id', userId)
-    .single();
+    .maybeSingle();
   return data as Profile | null;
 }
 

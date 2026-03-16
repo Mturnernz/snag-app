@@ -1,9 +1,9 @@
 import 'react-native-url-polyfill/auto';
 import React, { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
-import * as NavigationBar from 'expo-navigation-bar';
 import { Session } from '@supabase/supabase-js';
 
 import { supabase } from './src/lib/supabase';
@@ -15,8 +15,12 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    NavigationBar.setVisibilityAsync('hidden');
-    NavigationBar.setBehaviorAsync('overlay-swipe');
+    if (Platform.OS === 'android') {
+      import('expo-navigation-bar').then(NavigationBar => {
+        NavigationBar.setVisibilityAsync('hidden');
+        NavigationBar.setBehaviorAsync('overlay-swipe');
+      });
+    }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);

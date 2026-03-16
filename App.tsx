@@ -25,15 +25,10 @@ export default function App() {
       });
     }
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      if (session) {
-        const p = await getProfile(session.user.id);
-        setProfile(p);
-      }
-      setLoading(false);
-    });
-
+    // onAuthStateChange fires on initial load (INITIAL_SESSION event) and
+    // also after processing the URL hash from email confirmation links.
+    // Using it exclusively avoids a race condition on web where getSession()
+    // runs before the hash token has been exchanged.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       if (session) {
@@ -42,6 +37,7 @@ export default function App() {
       } else {
         setProfile(null);
       }
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();

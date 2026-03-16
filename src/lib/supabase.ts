@@ -19,6 +19,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: Platform.OS === 'web',
+    // Disable Web Locks API on web — prevents "Lock broken by another request
+    // with the 'steal' option" AbortErrors on page load/reload.
+    ...(Platform.OS === 'web' && {
+      lock: (_name: string, _acquireTimeout: number, fn: () => Promise<unknown>) => fn(),
+    }),
   },
 });
 

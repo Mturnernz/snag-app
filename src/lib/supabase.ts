@@ -2,9 +2,8 @@ import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { Profile, VoteValue } from '../types';
 
-// These are pulled from environment variables.
-// In Expo, EXPO_PUBLIC_ prefix makes them available at build time.
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
@@ -23,7 +22,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-// ─── Auth helpers ────────────────────────────────────────────────────────────
+// ─── Auth helpers ─────────────────────────────────────────────────────────────
 
 export async function signInWithEmail(email: string, password: string) {
   return supabase.auth.signInWithPassword({ email, password });
@@ -42,7 +41,89 @@ export async function getCurrentUser() {
   return user;
 }
 
-// ─── Storage helpers ─────────────────────────────────────────────────────────
+// ─── Profile helpers ──────────────────────────────────────────────────────────
+
+export async function getProfile(userId: string): Promise<Profile | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('*, organisation:organisations(*)')
+    .eq('id', userId)
+    .single();
+  return data as Profile | null;
+}
+
+export async function updateProfile(userId: string, updates: Partial<Pick<Profile, 'name' | 'avatar_url'>>) {
+  return supabase.from('profiles').update(updates).eq('id', userId);
+}
+
+// ─── Organisation helpers ─────────────────────────────────────────────────────
+
+export async function createOrganisation(name: string, userId: string) {
+  // Create the org
+  const { data: org, error: orgError } = await supabase
+    .from('organisations')
+    .insert({ name })
+    .select()
+    .single();
+
+  if (orgError || !org) return { error: orgError };
+
+  // Set the user as admin of the org
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update({ organisation_id: org.id, role: 'admin' })
+    .eq('id', userId);
+
+  return { org, error: profileError };
+}
+
+export async function joinOrganisationByCode(inviteCode: string, userId: string) {
+  // Find the org by invite code (stored on the admin's profile)
+  const { data: adminProfile, error } = await supabase
+    .from('profiles')
+    .select('organisation_id')
+    .eq('invite_code', inviteCode.toUpperCase())
+    .single();
+
+  if (error || !adminProfile?.organisation_id) {
+    return { error: { message: 'Invalid invite code. Please check and try again.' } };
+  }
+
+  const { error: updateError } = await supabase
+    .from('profiles')
+    .update({ organisation_id: adminProfile.organisation_id, role: 'worker' })
+    .eq('id', userId);
+
+  return { error: updateError };
+}
+
+// ─── Vote helpers ─────────────────────────────────────────────────────────────
+
+export async function upsertVote(issueId: string, userId: string, value: VoteValue) {
+  return supabase
+    .from('votes')
+    .upsert({ issue_id: issueId, user_id: userId, value }, { onConflict: 'issue_id,user_id' });
+}
+
+export async function deleteVote(issueId: string, userId: string) {
+  return supabase
+    .from('votes')
+    .delete()
+    .eq('issue_id', issueId)
+    .eq('user_id', userId);
+}
+
+export async function getUserVote(issueId: string, userId: string): Promise<VoteValue | null> {
+  const { data } = await supabase
+    .from('votes')
+    .select('value')
+    .eq('issue_id', issueId)
+    .eq('user_id', userId)
+    .single();
+  return data ? data.value as VoteValue : null;
+}
+
+// ─── Storage helpers ──────────────────────────────────────────────────────────
 
 const ISSUE_PHOTOS_BUCKET = 'issue-photos';
 

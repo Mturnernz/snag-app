@@ -29,16 +29,13 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function IssueCard({ issue, onPress }: Props) {
-  const reporterName = issue.reporter?.name ?? 'Unknown';
+  const reporterName = issue.reporter?.name || 'Unknown';
   const commentCount = issue.comment_count ?? 0;
+  const voteScore = issue.vote_score ?? 0;
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={onPress}
-      activeOpacity={0.85}
-    >
-      {/* Photo or placeholder */}
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
+      {/* Photo */}
       {issue.photo_url ? (
         <Image source={{ uri: issue.photo_url }} style={styles.photo} />
       ) : (
@@ -48,32 +45,35 @@ export default function IssueCard({ issue, onPress }: Props) {
         </View>
       )}
 
+      {/* Status overlay on photo */}
+      <View style={styles.statusOverlay}>
+        <StatusBadge status={issue.status} />
+      </View>
+
       {/* Card body */}
       <View style={styles.body}>
         <Text style={styles.title} numberOfLines={2}>
           {issue.title}
         </Text>
 
-        {/* Badges row */}
+        {/* Badges */}
         <View style={styles.badgeRow}>
-          <CategoryBadge category={issue.category} />
-          <View style={styles.badgeGap} />
           <PriorityBadge priority={issue.priority} />
-          <View style={styles.badgeGap} />
-          <StatusBadge status={issue.status} />
+          <CategoryBadge category={issue.category} />
         </View>
 
-        {/* Meta row */}
-        <Text style={styles.meta}>
-          {reporterName} · {timeAgo(issue.created_at)} · 💬 {commentCount}
-        </Text>
-
-        {/* Assignee */}
-        {issue.assignee ? (
-          <Text style={styles.assignee}>
-            Assigned to {issue.assignee.name}
+        {/* Footer row */}
+        <View style={styles.footer}>
+          <Text style={styles.meta}>
+            {reporterName} · {timeAgo(issue.created_at)}
           </Text>
-        ) : null}
+          <View style={styles.statsRow}>
+            <Text style={styles.stat}>💬 {commentCount}</Text>
+            <Text style={[styles.stat, voteScore > 0 ? styles.statPositive : voteScore < 0 ? styles.statNegative : null]}>
+              {voteScore > 0 ? '▲' : voteScore < 0 ? '▼' : '●'} {Math.abs(voteScore)}
+            </Text>
+          </View>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -89,12 +89,12 @@ const styles = StyleSheet.create({
   },
   photo: {
     width: '100%',
-    height: 180,
+    height: 220,
     backgroundColor: Colors.background,
   },
   photoPlaceholder: {
     width: '100%',
-    height: 180,
+    height: 160,
     backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
@@ -109,8 +109,13 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textMuted,
   },
+  statusOverlay: {
+    position: 'absolute',
+    top: Spacing.md,
+    right: Spacing.md,
+  },
   body: {
-    padding: Spacing.lg,
+    padding: Spacing.md,
     gap: Spacing.sm,
   },
   title: {
@@ -122,19 +127,33 @@ const styles = StyleSheet.create({
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
     gap: Spacing.xs,
+    flexWrap: 'wrap',
   },
-  badgeGap: {
-    width: 0,
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.xs,
   },
   meta: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
+    flex: 1,
   },
-  assignee: {
+  statsRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+  },
+  stat: {
     fontSize: Typography.sm,
-    color: Colors.primary,
+    color: Colors.textMuted,
     fontWeight: Typography.medium,
+  },
+  statPositive: {
+    color: '#16A34A',
+  },
+  statNegative: {
+    color: '#DC2626',
   },
 });

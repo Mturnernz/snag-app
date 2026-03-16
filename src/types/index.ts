@@ -7,6 +7,8 @@ export type IssueCategory =
   | 'broken_equipment'
   | 'health_and_safety'
   | 'other';
+export type UserRole = 'worker' | 'manager' | 'admin';
+export type VoteValue = 1 | -1;
 
 // ─── Database row types ──────────────────────────────────────────────────────
 
@@ -20,8 +22,9 @@ export interface Profile {
   id: string;
   name: string;
   email: string;
-  organisation_id: string;
+  organisation_id: string | null;
   invite_code: string;
+  role: UserRole;
   avatar_url: string | null;
   created_at: string;
   organisation?: Organisation;
@@ -44,6 +47,9 @@ export interface Issue {
   reporter?: Pick<Profile, 'id' | 'name' | 'avatar_url'>;
   assignee?: Pick<Profile, 'id' | 'name' | 'avatar_url'> | null;
   comment_count?: number;
+  vote_score?: number;
+  upvote_count?: number;
+  downvote_count?: number;
 }
 
 export interface Comment {
@@ -54,6 +60,14 @@ export interface Comment {
   created_at: string;
   // Joined
   author?: Pick<Profile, 'id' | 'name' | 'avatar_url'>;
+}
+
+export interface Vote {
+  id: string;
+  issue_id: string;
+  user_id: string;
+  value: VoteValue;
+  created_at: string;
 }
 
 // ─── Navigation param lists ──────────────────────────────────────────────────
@@ -89,4 +103,10 @@ export const CATEGORY_LABELS: Record<IssueCategory, string> = {
   broken_equipment: 'Broken Equipment',
   health_and_safety: 'Health & Safety',
   other: 'Other',
+};
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  worker: 'Worker',
+  manager: 'Manager',
+  admin: 'Admin',
 };

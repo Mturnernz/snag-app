@@ -58,23 +58,9 @@ export async function updateProfile(userId: string, updates: Partial<Pick<Profil
 
 // ─── Organisation helpers ─────────────────────────────────────────────────────
 
-export async function createOrganisation(name: string, userId: string) {
-  // Create the org
-  const { data: org, error: orgError } = await supabase
-    .from('organisations')
-    .insert({ name })
-    .select()
-    .single();
-
-  if (orgError || !org) return { error: orgError };
-
-  // Set the user as admin of the org
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .update({ organisation_id: org.id, role: 'admin' })
-    .eq('id', userId);
-
-  return { org, error: profileError };
+export async function createOrganisation(name: string, _userId: string) {
+  const { data, error } = await supabase.rpc('create_organisation', { org_name: name });
+  return { orgId: data, error };
 }
 
 export async function joinOrganisationByCode(inviteCode: string, userId: string) {

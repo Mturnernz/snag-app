@@ -9,8 +9,6 @@ import {
   Alert,
   ActivityIndicator,
   StyleSheet,
-  ActionSheetIOS,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -70,29 +68,6 @@ export default function ReportIssueScreen() {
     if (!result.canceled) setPhotoUri(result.assets[0].uri);
   }
 
-  function handlePhotoPress() {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Cancel', 'Take Photo', 'Choose from Library'],
-          cancelButtonIndex: 0,
-        },
-        (idx) => {
-          if (idx === 1) takePhoto();
-          if (idx === 2) pickFromLibrary();
-        }
-      );
-    } else if (Platform.OS === 'web') {
-      // Alert.alert is a no-op on web — go straight to the file/camera picker
-      pickFromLibrary();
-    } else {
-      Alert.alert('Add Photo', 'Choose an option', [
-        { text: 'Take Photo', onPress: takePhoto },
-        { text: 'Choose from Library', onPress: pickFromLibrary },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
-  }
 
   // ─── Submit ────────────────────────────────────────────────────────────────
 
@@ -202,15 +177,18 @@ export default function ReportIssueScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity
-            style={styles.photoArea}
-            onPress={handlePhotoPress}
-            activeOpacity={0.7}
-          >
+          <View style={styles.photoArea}>
             <Text style={styles.photoAreaIcon}>📷</Text>
             <Text style={styles.photoAreaLabel}>Add a photo</Text>
-            <Text style={styles.photoAreaSub}>Tap to take or choose</Text>
-          </TouchableOpacity>
+            <View style={styles.photoButtonRow}>
+              <TouchableOpacity style={styles.photoButton} onPress={takePhoto} activeOpacity={0.7}>
+                <Text style={styles.photoButtonText}>Take Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.photoButton} onPress={pickFromLibrary} activeOpacity={0.7}>
+                <Text style={styles.photoButtonText}>Choose from Library</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
 
         {/* Form */}
@@ -344,15 +322,14 @@ const styles = StyleSheet.create({
 
   // Photo
   photoArea: {
-    height: 160,
+    paddingVertical: Spacing.lg,
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: Colors.border,
     borderStyle: 'dashed',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.xs,
+    gap: Spacing.md,
   },
   photoAreaIcon: { fontSize: 32 },
   photoAreaLabel: {
@@ -360,9 +337,27 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
     color: Colors.textSecondary,
   },
-  photoAreaSub: {
+  photoButtonRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    width: '100%',
+  },
+  photoButton: {
+    flex: 1,
+    height: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.button,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.sm,
+  },
+  photoButtonText: {
     fontSize: Typography.sm,
-    color: Colors.textMuted,
+    fontWeight: Typography.medium,
+    color: Colors.textPrimary,
   },
   photoPreviewContainer: {
     position: 'relative',

@@ -4,12 +4,14 @@
 -- ============================================================
 -- Fixes: createOrganisation() calls rpc('create_organisation')
 -- but the function was missing, causing silent failure.
+--
+-- v2: Pass calling_user_id explicitly. SET search_path = public
+-- can cause auth.uid() to return null inside SECURITY DEFINER,
+-- silently skipping the profile UPDATE (org created but user
+-- never linked to it).
 -- ============================================================
 
--- create_organisation: atomically creates an org and assigns the
--- calling user as admin. Runs as SECURITY DEFINER to bypass RLS
--- on the organisations table (no direct INSERT policy needed).
-CREATE OR REPLACE FUNCTION create_organisation(org_name text)
+CREATE OR REPLACE FUNCTION create_organisation(org_name text, calling_user_id uuid)
 RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -27,12 +29,12 @@ BEGIN
   UPDATE profiles
   SET organisation_id = new_org_id,
       role = 'admin'
-  WHERE id = auth.uid();
+  WHERE id = calling_user_id;
 
   RETURN new_org_id;
 END;
 $$;
 
 -- Revoke public execute, grant only to authenticated users
-REVOKE EXECUTE ON FUNCTION create_organisation(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION create_organisation(text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION create_organisation(text, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION create_organisation(text, uuid) TO authenticated;

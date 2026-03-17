@@ -29,15 +29,22 @@ export default function App() {
     // also after processing the URL hash from email confirmation links.
     // Using it exclusively avoids a race condition on web where getSession()
     // runs before the hash token has been exchanged.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
-      if (session) {
+      // Only re-fetch the profile on meaningful auth events.
+      // TOKEN_REFRESHED must not overwrite a profile that was just set by
+      // onComplete() after org creation — that would reset the user back to
+      // OrgSetupScreen.
+      if (event === 'SIGNED_OUT') {
+        setProfile(null);
+        setLoading(false);
+      } else if (session && event !== 'TOKEN_REFRESHED') {
         const p = await getProfile(session.user.id);
         setProfile(p);
+        setLoading(false);
       } else {
-        setProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();

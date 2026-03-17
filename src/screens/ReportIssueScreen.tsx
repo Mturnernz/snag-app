@@ -42,12 +42,13 @@ export default function ReportIssueScreen() {
   const [category, setCategory] = useState<IssueCategory>('niggle');
   const [priority, setPriority] = useState<IssuePriority>('medium');
   const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   // ─── Photo picker ──────────────────────────────────────────────────────────
 
   async function pickFromLibrary() {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [16, 9],
       quality: 0.8,
@@ -81,6 +82,9 @@ export default function ReportIssueScreen() {
           if (idx === 2) pickFromLibrary();
         }
       );
+    } else if (Platform.OS === 'web') {
+      // Alert.alert is a no-op on web — go straight to the file/camera picker
+      pickFromLibrary();
     } else {
       Alert.alert('Add Photo', 'Choose an option', [
         { text: 'Take Photo', onPress: takePhoto },
@@ -131,18 +135,7 @@ export default function ReportIssueScreen() {
 
       if (error) throw error;
 
-      Alert.alert('Issue reported!', 'Your snag has been submitted.', [
-        {
-          text: 'OK',
-          onPress: () => {
-            setTitle('');
-            setDescription('');
-            setCategory('niggle');
-            setPriority('medium');
-            setPhotoUri(null);
-          },
-        },
-      ]);
+      setSubmitted(true);
     } catch (err: any) {
       Alert.alert('Error', err.message ?? 'Could not submit issue.');
     } finally {
@@ -150,7 +143,38 @@ export default function ReportIssueScreen() {
     }
   }
 
+  function resetForm() {
+    setTitle('');
+    setDescription('');
+    setCategory('niggle');
+    setPriority('medium');
+    setPhotoUri(null);
+    setSubmitted(false);
+  }
+
   // ─── Render ────────────────────────────────────────────────────────────────
+
+  if (submitted) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Report a Snag</Text>
+        </View>
+        <View style={styles.successContainer}>
+          <View style={styles.successIconWrap}>
+            <Text style={styles.successIcon}>✓</Text>
+          </View>
+          <Text style={styles.successTitle}>Snag reported!</Text>
+          <Text style={styles.successMessage}>
+            Your issue has been submitted and the team will be notified.
+          </Text>
+          <TouchableOpacity style={styles.submitButton} onPress={resetForm} activeOpacity={0.85}>
+            <Text style={styles.submitLabel}>Report Another Snag</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -459,6 +483,41 @@ const styles = StyleSheet.create({
   priorityLabelActive: {
     color: Colors.white,
     fontWeight: Typography.semibold,
+  },
+
+  // Success confirmation
+  successContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+    gap: Spacing.lg,
+  },
+  successIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  successIcon: {
+    fontSize: 40,
+    color: Colors.white,
+    fontWeight: Typography.bold,
+  },
+  successTitle: {
+    fontSize: Typography.xl,
+    fontWeight: Typography.bold,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  successMessage: {
+    fontSize: Typography.base,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
   },
 
   // Submit button

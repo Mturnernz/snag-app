@@ -15,6 +15,7 @@ export type VoteValue = 1 | -1;
 export interface Organisation {
   id: string;
   name: string;
+  invite_code: string;
   created_at: string;
 }
 
@@ -75,11 +76,13 @@ export interface Vote {
 export type RootStackParamList = {
   Main: undefined;
   IssueDetail: { issueId: string };
+  Reports: undefined;
 };
 
 export type MainTabParamList = {
   Issues: undefined;
   Report: undefined;
+  Admin: undefined;
   Profile: undefined;
 };
 

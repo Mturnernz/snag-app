@@ -19,3 +19,6 @@ web-build/
 
 # Expo
 .expo-shared/
+
+# Local Netlify folder
+.netlify

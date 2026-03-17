@@ -3,26 +3,23 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, StyleSheet } from 'react-native';
 
-import { RootStackParamList, MainTabParamList } from '../types';
+import { RootStackParamList, MainTabParamList, UserRole } from '../types';
 import { Colors, Typography } from '../constants/theme';
 
 import IssueListScreen from '../screens/IssueListScreen';
 import ReportIssueScreen from '../screens/ReportIssueScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import IssueDetailScreen from '../screens/IssueDetailScreen';
+import AdminDashboardScreen from '../screens/AdminDashboardScreen';
+import ReportsScreen from '../screens/ReportsScreen';
 
-// ─── Tab bar icons (simple text/emoji stand-ins until you add an icon library)
+// ─── Tab bar icons ────────────────────────────────────────────────────────────
 
-function TabIcon({
-  label,
-  focused,
-}: {
-  label: string;
-  focused: boolean;
-}) {
+function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   const icons: Record<string, string> = {
     Issues: '☰',
     Report: '＋',
+    Admin: '⚙',
     Profile: '◯',
   };
 
@@ -39,9 +36,12 @@ function TabIcon({
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-function MainTabNavigator() {
+function MainTabNavigator({ userRole }: { userRole: UserRole }) {
+  const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
+
   return (
     <Tab.Navigator
+      initialRouteName="Profile"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: styles.tabBar,
@@ -53,24 +53,34 @@ function MainTabNavigator() {
         ),
       })}
     >
+      <Tab.Screen name="Profile" component={ProfileScreen} />
       <Tab.Screen name="Issues" component={IssueListScreen} />
       <Tab.Screen name="Report" component={ReportIssueScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      {isAdminOrManager && (
+        <Tab.Screen name="Admin" component={AdminDashboardScreen} />
+      )}
     </Tab.Navigator>
   );
 }
 
-// ─── Root Stack (adds IssueDetail on top of tabs) ───────────────────────────
+// ─── Root Stack ───────────────────────────────────────────────────────────────
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export default function RootNavigator() {
+export default function RootNavigator({ userRole }: { userRole: UserRole }) {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Main" component={MainTabNavigator} />
+      <Stack.Screen name="Main">
+        {() => <MainTabNavigator userRole={userRole} />}
+      </Stack.Screen>
       <Stack.Screen
         name="IssueDetail"
         component={IssueDetailScreen}
+        options={{ presentation: 'card', animation: 'slide_from_right' }}
+      />
+      <Stack.Screen
+        name="Reports"
+        component={ReportsScreen}
         options={{ presentation: 'card', animation: 'slide_from_right' }}
       />
     </Stack.Navigator>

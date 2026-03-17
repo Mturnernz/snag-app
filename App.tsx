@@ -11,11 +11,13 @@ import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import AuthScreen from './src/screens/AuthScreen';
 import OrgSetupScreen from './src/screens/OrgSetupScreen';
+import AdminSetupScreen from './src/screens/AdminSetupScreen';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isNewAdmin, setIsNewAdmin] = useState(false);
 
   useEffect(() => {
     if (Platform.OS === 'android') {
@@ -78,6 +80,25 @@ export default function App() {
           onComplete={async () => {
             const p = await getProfile(session.user.id);
             setProfile(p);
+            if (p?.role === 'admin') {
+              setIsNewAdmin(true);
+            }
+          }}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  // First-time admin setup after creating an organisation
+  if (isNewAdmin) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="dark" backgroundColor="#FFFFFF" />
+        <AdminSetupScreen
+          profile={profile}
+          onDone={(name) => {
+            if (name) setProfile(p => p ? { ...p, name } : p);
+            setIsNewAdmin(false);
           }}
         />
       </SafeAreaProvider>
@@ -89,7 +110,7 @@ export default function App() {
     <SafeAreaProvider>
       <NavigationContainer>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <RootNavigator />
+        <RootNavigator userRole={profile.role} />
       </NavigationContainer>
     </SafeAreaProvider>
   );

@@ -14,9 +14,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 
-import { Issue, Comment, RootStackParamList, VoteValue } from '../types';
+import {
+  Issue, Comment, Profile, RootStackParamList, VoteValue,
+  IssueStatus, IssuePriority, IssueCategory,
+  STATUS_LABELS, PRIORITY_LABELS, CATEGORY_LABELS,
+} from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, upsertVote, deleteVote, getUserVote } from '../lib/supabase';
+import { supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers, updateIssue } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
@@ -62,12 +66,27 @@ export default function IssueDetailScreen() {
   const [userVote, setUserVote] = useState<VoteValue | null>(null);
   const [voteLoading, setVoteLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<Profile | null>(null);
+  const [orgMembers, setOrgMembers] = useState<Profile[]>([]);
+  const [editingField, setEditingField] = useState<'status' | 'priority' | 'category' | 'assignee' | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [pendingUpdates, setPendingUpdates] = useState<Parameters<typeof updateIssue>[1]>({});
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionAt, setMentionAt] = useState(-1);
+
+  const canEdit = userProfile?.role === 'admin' || userProfile?.role === 'manager';
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (user) {
         setCurrentUserId(user.id);
         getUserVote(issueId, user.id).then(setUserVote);
+        const profile = await getProfile(user.id);
+        setUserProfile(profile);
+        if (profile?.organisation_id) {
+          getOrgMembers(profile.organisation_id).then(setOrgMembers);
+        }
       }
     });
     fetchIssue();
@@ -138,6 +157,51 @@ export default function IssueDetailScreen() {
     setVoteLoading(false);
   }
 
+  function stageUpdate(updates: Parameters<typeof updateIssue>[1]) {
+    setIssue((prev) => prev ? { ...prev, ...updates } : prev);
+    setPendingUpdates((prev) => ({ ...prev, ...updates }));
+    setEditingField(null);
+  }
+
+  async function handleSave() {
+    if (!issue || saving || Object.keys(pendingUpdates).length === 0) return;
+    setSaving(true);
+    const { error } = await updateIssue(issue.id, pendingUpdates);
+    if (!error) {
+      setPendingUpdates({});
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    }
+    setSaving(false);
+  }
+
+  function toggleField(field: typeof editingField) {
+    setEditingField((prev) => (prev === field ? null : field));
+  }
+
+  function handleCommentChange(text: string) {
+    setCommentText(text);
+    const lastAt = text.lastIndexOf('@');
+    if (lastAt >= 0) {
+      const afterAt = text.slice(lastAt + 1);
+      if (!afterAt.includes(' ') && !afterAt.includes('\n')) {
+        setMentionQuery(afterAt);
+        setMentionAt(lastAt);
+        return;
+      }
+    }
+    setMentionQuery(null);
+    setMentionAt(-1);
+  }
+
+  function insertMention(member: Profile) {
+    const before = commentText.slice(0, mentionAt);
+    const after = commentText.slice(mentionAt + 1 + (mentionQuery?.length ?? 0));
+    setCommentText(before + '@' + member.name + ' ' + after.trimStart());
+    setMentionQuery(null);
+    setMentionAt(-1);
+  }
+
   async function sendComment() {
     if (!commentText.trim() || !currentUserId) return;
     setSendingComment(true);
@@ -150,9 +214,30 @@ export default function IssueDetailScreen() {
 
     if (!error) {
       setCommentText('');
+      setMentionQuery(null);
+      setMentionAt(-1);
       fetchComments();
     }
     setSendingComment(false);
+  }
+
+  const mentionSuggestions = mentionQuery !== null
+    ? orgMembers.filter((m) => m.name.toLowerCase().startsWith(mentionQuery.toLowerCase()))
+    : [];
+
+  function renderCommentBody(body: string) {
+    const parts = body.split(/(@\S+)/g);
+    return (
+      <Text style={styles.commentBody}>
+        {parts.map((part, i) =>
+          part.startsWith('@') ? (
+            <Text key={i} style={styles.mentionText}>{part}</Text>
+          ) : (
+            part
+          )
+        )}
+      </Text>
+    );
   }
 
   if (loadingIssue) {
@@ -228,6 +313,140 @@ export default function IssueDetailScreen() {
             <Text style={styles.description}>{issue.description}</Text>
           ) : null}
 
+          {/* Management card — admins and managers only */}
+          {saveSuccess && (
+            <View style={styles.successBanner}>
+              <Text style={styles.successBannerText}>Snag updated!</Text>
+            </View>
+          )}
+
+          {canEdit && (
+            <View style={styles.manageCard}>
+              <View style={styles.manageTitleRow}>
+                <Text style={styles.manageTitle}>Manage Issue</Text>
+                {Object.keys(pendingUpdates).length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.updateButton, saving && styles.updateButtonDisabled]}
+                    onPress={handleSave}
+                    disabled={saving}
+                    activeOpacity={0.85}
+                  >
+                    {saving
+                      ? <ActivityIndicator size="small" color={Colors.white} />
+                      : <Text style={styles.updateButtonText}>Update Snag</Text>
+                    }
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Status */}
+              <View style={styles.manageRow}>
+                <Text style={styles.manageLabel}>Status</Text>
+                <TouchableOpacity onPress={() => toggleField('status')} style={styles.manageCurrentChip}>
+                  <StatusBadge status={issue.status} />
+                  <Text style={styles.manageChevron}>{editingField === 'status' ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+              </View>
+              {editingField === 'status' && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionRow} contentContainerStyle={styles.optionRowContent}>
+                  {(Object.keys(STATUS_LABELS) as IssueStatus[]).map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      onPress={() => stageUpdate({ status: s })}
+                      style={[styles.optionChip, issue.status === s && styles.optionChipActive]}
+                    >
+                      <Text style={[styles.optionChipText, issue.status === s && styles.optionChipTextActive]}>
+                        {STATUS_LABELS[s]}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              {/* Priority */}
+              <View style={styles.manageRow}>
+                <Text style={styles.manageLabel}>Priority</Text>
+                <TouchableOpacity onPress={() => toggleField('priority')} style={styles.manageCurrentChip}>
+                  <PriorityBadge priority={issue.priority} />
+                  <Text style={styles.manageChevron}>{editingField === 'priority' ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+              </View>
+              {editingField === 'priority' && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionRow} contentContainerStyle={styles.optionRowContent}>
+                  {(Object.keys(PRIORITY_LABELS) as IssuePriority[]).map((p) => (
+                    <TouchableOpacity
+                      key={p}
+                      onPress={() => stageUpdate({ priority: p })}
+                      style={[styles.optionChip, issue.priority === p && styles.optionChipActive]}
+                    >
+                      <Text style={[styles.optionChipText, issue.priority === p && styles.optionChipTextActive]}>
+                        {PRIORITY_LABELS[p]}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              {/* Category */}
+              <View style={styles.manageRow}>
+                <Text style={styles.manageLabel}>Category</Text>
+                <TouchableOpacity onPress={() => toggleField('category')} style={styles.manageCurrentChip}>
+                  <CategoryBadge category={issue.category} />
+                  <Text style={styles.manageChevron}>{editingField === 'category' ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+              </View>
+              {editingField === 'category' && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionRow} contentContainerStyle={styles.optionRowContent}>
+                  {(Object.keys(CATEGORY_LABELS) as IssueCategory[]).map((c) => (
+                    <TouchableOpacity
+                      key={c}
+                      onPress={() => stageUpdate({ category: c })}
+                      style={[styles.optionChip, issue.category === c && styles.optionChipActive]}
+                    >
+                      <Text style={[styles.optionChipText, issue.category === c && styles.optionChipTextActive]}>
+                        {CATEGORY_LABELS[c]}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              {/* Assignee */}
+              <View style={styles.manageRow}>
+                <Text style={styles.manageLabel}>Assignee</Text>
+                <TouchableOpacity onPress={() => toggleField('assignee')} style={styles.manageCurrentChip}>
+                  <Text style={styles.manageCurrentText}>
+                    {issue.assignee ? issue.assignee.name : 'Unassigned'}
+                  </Text>
+                  <Text style={styles.manageChevron}>{editingField === 'assignee' ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+              </View>
+              {editingField === 'assignee' && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionRow} contentContainerStyle={styles.optionRowContent}>
+                  <TouchableOpacity
+                    onPress={() => stageUpdate({ assignee_id: null })}
+                    style={[styles.optionChip, issue.assignee_id === null && styles.optionChipActive]}
+                  >
+                    <Text style={[styles.optionChipText, issue.assignee_id === null && styles.optionChipTextActive]}>
+                      Unassigned
+                    </Text>
+                  </TouchableOpacity>
+                  {orgMembers.map((member) => (
+                    <TouchableOpacity
+                      key={member.id}
+                      onPress={() => stageUpdate({ assignee_id: member.id })}
+                      style={[styles.optionChip, issue.assignee_id === member.id && styles.optionChipActive]}
+                    >
+                      <Text style={[styles.optionChipText, issue.assignee_id === member.id && styles.optionChipTextActive]}>
+                        {member.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          )}
+
           {/* Vote bar */}
           <View style={styles.voteBar}>
             <TouchableOpacity
@@ -282,21 +501,43 @@ export default function IssueDetailScreen() {
                     <Text style={styles.commentTime}>{timeAgo(comment.created_at)}</Text>
                   </View>
                 </View>
-                <Text style={styles.commentBody}>{comment.body}</Text>
+                {renderCommentBody(comment.body)}
               </View>
             ))
           )}
         </View>
       </ScrollView>
 
+      {/* Mention picker */}
+      {mentionSuggestions.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.mentionPicker}
+          contentContainerStyle={styles.mentionPickerContent}
+          keyboardShouldPersistTaps="always"
+        >
+          {mentionSuggestions.map((member) => (
+            <TouchableOpacity
+              key={member.id}
+              style={styles.mentionChip}
+              onPress={() => insertMention(member)}
+            >
+              <AvatarCircle name={member.name} size={22} />
+              <Text style={styles.mentionChipText}>{member.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
       {/* Sticky comment input */}
       <View style={[styles.commentInputBar, { paddingBottom: insets.bottom + 8 }]}>
         <TextInput
           style={styles.commentInput}
-          placeholder="Add a comment..."
+          placeholder="Add a comment… type @ to mention"
           placeholderTextColor={Colors.textMuted}
           value={commentText}
-          onChangeText={setCommentText}
+          onChangeText={handleCommentChange}
           multiline
           maxLength={500}
         />
@@ -382,10 +623,132 @@ const styles = StyleSheet.create({
   commentTime: { fontSize: Typography.xs, color: Colors.textMuted },
   commentBody: { fontSize: Typography.base, color: Colors.textSecondary, lineHeight: 21 },
 
+  // Success banner
+  successBanner: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: Radius.card,
+    borderWidth: 1,
+    borderColor: '#16A34A',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+  },
+  successBannerText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: '#16A34A',
+  },
+
+  // Management card
+  manageCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  manageTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xs,
+  },
+  manageTitle: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  updateButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.button,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    minWidth: 110,
+    alignItems: 'center',
+  },
+  updateButtonDisabled: { opacity: 0.6 },
+  updateButtonText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
+  },
+  manageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 36,
+  },
+  manageLabel: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    fontWeight: Typography.medium,
+    width: 72,
+  },
+  manageCurrentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  manageCurrentText: {
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
+    fontWeight: Typography.medium,
+  },
+  manageChevron: {
+    fontSize: 10,
+    color: Colors.textMuted,
+  },
+  optionRow: { marginTop: Spacing.xs },
+  optionRowContent: { gap: Spacing.sm, paddingVertical: Spacing.xs },
+  optionChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.chip,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  optionChipActive: {
+    backgroundColor: Colors.primaryLight,
+    borderColor: Colors.primary,
+  },
+  optionChipText: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    fontWeight: Typography.medium,
+  },
+  optionChipTextActive: {
+    color: Colors.primary,
+  },
+
   // Comment bar
   commentInputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.sm, paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border },
   commentInput: { flex: 1, minHeight: MIN_TOUCH_TARGET, maxHeight: 100, backgroundColor: Colors.background, borderRadius: Radius.input, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, fontSize: Typography.base, color: Colors.textPrimary },
   sendButton: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, borderRadius: Radius.button, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendButtonDisabled: { opacity: 0.4 },
   sendButtonText: { color: Colors.white, fontSize: 18, fontWeight: Typography.bold },
+
+  // Mention picker
+  mentionPicker: { backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border, maxHeight: 56 },
+  mentionPickerContent: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: Spacing.sm, alignItems: 'center' },
+  mentionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: Radius.button,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  mentionChipText: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.medium },
+
+  // Inline mention highlight in comment bodies
+  mentionText: { color: Colors.primary, fontWeight: Typography.semibold },
 });

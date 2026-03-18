@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, AppState } from 'react-native';
 
 import { RootStackParamList, MainTabParamList, UserRole } from '../types';
 import { Colors, Typography } from '../constants/theme';
+import { supabase } from '../lib/supabase';
 
 import IssueListScreen from '../screens/IssueListScreen';
 import ReportIssueScreen from '../screens/ReportIssueScreen';
@@ -12,6 +13,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import IssueDetailScreen from '../screens/IssueDetailScreen';
 import AdminDashboardScreen from '../screens/AdminDashboardScreen';
 import ReportsScreen from '../screens/ReportsScreen';
+import LeaderboardScreen from '../screens/LeaderboardScreen';
 
 // ─── Tab bar icons ────────────────────────────────────────────────────────────
 
@@ -38,6 +40,32 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 function MainTabNavigator({ userRole }: { userRole: UserRole }) {
   const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
+  const [openIssueCount, setOpenIssueCount] = useState<number>(0);
+
+  const fetchOpenCount = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('organisation_id')
+      .eq('id', user.id)
+      .single();
+    if (!profile?.organisation_id) return;
+    const { count } = await supabase
+      .from('issues')
+      .select('id', { count: 'exact', head: true })
+      .eq('organisation_id', profile.organisation_id)
+      .eq('status', 'open');
+    setOpenIssueCount(count ?? 0);
+  }, []);
+
+  useEffect(() => {
+    fetchOpenCount();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') fetchOpenCount();
+    });
+    return () => sub.remove();
+  }, [fetchOpenCount]);
 
   return (
     <Tab.Navigator
@@ -54,7 +82,11 @@ function MainTabNavigator({ userRole }: { userRole: UserRole }) {
       })}
     >
       <Tab.Screen name="Profile" component={ProfileScreen} />
-      <Tab.Screen name="Issues" component={IssueListScreen} />
+      <Tab.Screen
+        name="Issues"
+        component={IssueListScreen}
+        options={{ tabBarBadge: openIssueCount > 0 ? openIssueCount : undefined }}
+      />
       <Tab.Screen name="Report" component={ReportIssueScreen} />
       {isAdminOrManager && (
         <Tab.Screen name="Admin" component={AdminDashboardScreen} />
@@ -81,6 +113,11 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
       <Stack.Screen
         name="Reports"
         component={ReportsScreen}
+        options={{ presentation: 'card', animation: 'slide_from_right' }}
+      />
+      <Stack.Screen
+        name="Leaderboard"
+        component={LeaderboardScreen}
         options={{ presentation: 'card', animation: 'slide_from_right' }}
       />
     </Stack.Navigator>

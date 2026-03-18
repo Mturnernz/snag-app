@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import * as Haptics from 'expo-haptics';
 import {
   View,
   Text,
@@ -21,6 +22,7 @@ import {
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers, updateIssue } from '../lib/supabase';
+import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
@@ -74,6 +76,7 @@ export default function IssueDetailScreen() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionAt, setMentionAt] = useState(-1);
+  const [authorPoints, setAuthorPoints] = useState<Record<string, number>>({});
 
   const canEdit = userProfile?.role === 'admin' || userProfile?.role === 'manager';
 
@@ -92,6 +95,14 @@ export default function IssueDetailScreen() {
     fetchIssue();
     fetchComments();
   }, [issueId]);
+
+  // Re-fetch author points once we know the org (profile may load after comments)
+  useEffect(() => {
+    if (comments.length > 0 && userProfile?.organisation_id) {
+      const authorIds = [...new Set(comments.map((c) => c.author_id))];
+      fetchAuthorPoints(authorIds, userProfile.organisation_id);
+    }
+  }, [userProfile?.organisation_id]);
 
   async function fetchIssue() {
     setLoadingIssue(true);
@@ -122,16 +133,38 @@ export default function IssueDetailScreen() {
       .eq('issue_id', issueId)
       .order('created_at', { ascending: true });
 
-    if (data) setComments(data as Comment[]);
+    if (data) {
+      setComments(data as Comment[]);
+      // Fetch points for all comment authors
+      const authorIds = [...new Set(data.map((c: any) => c.author_id))];
+      if (authorIds.length > 0 && userProfile?.organisation_id) {
+        fetchAuthorPoints(authorIds, userProfile.organisation_id);
+      }
+    }
+  }
+
+  async function fetchAuthorPoints(authorIds: string[], orgId: string) {
+    const { data } = await supabase
+      .from('user_points')
+      .select('user_id, points')
+      .in('user_id', authorIds)
+      .eq('org_id', orgId);
+    if (data) {
+      const map: Record<string, number> = {};
+      for (const row of data) map[row.user_id] = row.points;
+      setAuthorPoints(map);
+    }
   }
 
   async function handleVote(value: VoteValue) {
     if (!currentUserId || voteLoading) return;
     setVoteLoading(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     if (userVote === value) {
-      // Tapping same vote removes it
-      await deleteVote(issueId, currentUserId);
+      // Optimistic: remove vote immediately
+      const prevVote = userVote;
+      const prevIssue = issue;
       setUserVote(null);
       setIssue((prev) => prev ? {
         ...prev,
@@ -139,9 +172,17 @@ export default function IssueDetailScreen() {
         upvote_count: value === 1 ? (prev.upvote_count ?? 1) - 1 : prev.upvote_count,
         downvote_count: value === -1 ? (prev.downvote_count ?? 1) - 1 : prev.downvote_count,
       } : prev);
+      const { error } = await deleteVote(issueId, currentUserId);
+      if (error) {
+        // Revert on failure
+        setUserVote(prevVote);
+        setIssue(prevIssue);
+      }
     } else {
+      // Optimistic: apply new vote immediately
+      const prevVote = userVote;
+      const prevIssue = issue;
       const previous = userVote ?? 0;
-      await upsertVote(issueId, currentUserId, value);
       setUserVote(value);
       setIssue((prev) => prev ? {
         ...prev,
@@ -153,11 +194,18 @@ export default function IssueDetailScreen() {
           ? (prev.downvote_count ?? 0) + 1
           : previous === -1 ? (prev.downvote_count ?? 1) - 1 : prev.downvote_count,
       } : prev);
+      const { error } = await upsertVote(issueId, currentUserId, value);
+      if (error) {
+        // Revert on failure
+        setUserVote(prevVote);
+        setIssue(prevIssue);
+      }
     }
     setVoteLoading(false);
   }
 
   function stageUpdate(updates: Parameters<typeof updateIssue>[1]) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIssue((prev) => prev ? { ...prev, ...updates } : prev);
     setPendingUpdates((prev) => ({ ...prev, ...updates }));
     setEditingField(null);
@@ -497,7 +545,12 @@ export default function IssueDetailScreen() {
                 <View style={styles.commentHeader}>
                   <AvatarCircle name={comment.author?.name ?? '?'} size={30} />
                   <View style={styles.commentMeta}>
-                    <Text style={styles.commentAuthor}>{comment.author?.name ?? 'Unknown'}</Text>
+                    <View style={styles.commentAuthorRow}>
+                      <Text style={styles.commentAuthor}>{comment.author?.name ?? 'Unknown'}</Text>
+                      <Text style={styles.commentTitleBadge}>
+                        {getUserTitle(authorPoints[comment.author_id] ?? 0)}
+                      </Text>
+                    </View>
                     <Text style={styles.commentTime}>{timeAgo(comment.created_at)}</Text>
                   </View>
                 </View>
@@ -619,7 +672,9 @@ const styles = StyleSheet.create({
   avatar: { backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: Colors.primary, fontWeight: Typography.bold },
   commentMeta: { flex: 1 },
+  commentAuthorRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexWrap: 'wrap' },
   commentAuthor: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  commentTitleBadge: { fontSize: Typography.xs, color: Colors.textMuted, fontStyle: 'italic' },
   commentTime: { fontSize: Typography.xs, color: Colors.textMuted },
   commentBody: { fontSize: Typography.base, color: Colors.textSecondary, lineHeight: 21 },
 

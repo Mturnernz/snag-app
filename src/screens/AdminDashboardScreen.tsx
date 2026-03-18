@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Clipboard,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -112,6 +113,7 @@ export default function AdminDashboardScreen() {
   const [members, setMembers] = useState<Profile[]>([]);
   const [issueCounts, setIssueCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [updatingRole, setUpdatingRole] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -151,6 +153,12 @@ export default function AdminDashboardScreen() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
   async function handleRoleChange(member: Profile, newRole: UserRole) {
     setUpdatingRole(member.id);
@@ -205,7 +213,10 @@ export default function AdminDashboardScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+      >
 
         {/* Invite code */}
         {orgInviteCode && (
@@ -245,9 +256,20 @@ export default function AdminDashboardScreen() {
           ))}
 
           {members.length === 0 && (
-            <Text style={styles.emptyText}>
-              No members yet. Share your invite code to get started.
-            </Text>
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyIcon}>👥</Text>
+              <Text style={styles.emptyTitle}>No team members yet</Text>
+              <Text style={styles.emptyText}>
+                Share the invite code above with your team so they can join.
+              </Text>
+              {orgInviteCode && (
+                <TouchableOpacity style={styles.emptyAction} onPress={handleCopyCode} activeOpacity={0.85}>
+                  <Text style={styles.emptyActionText}>
+                    {copied ? '✓ Copied!' : `Copy Code: ${orgInviteCode}`}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
 
@@ -466,10 +488,41 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl,
+    gap: Spacing.sm,
+  },
+  emptyIcon: {
+    fontSize: 40,
+    marginBottom: Spacing.xs,
+  },
+  emptyTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
   emptyText: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
     textAlign: 'center',
-    paddingVertical: Spacing.xl,
+    lineHeight: 18,
+    paddingHorizontal: Spacing.md,
+  },
+  emptyAction: {
+    marginTop: Spacing.sm,
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.button,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET - 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyActionText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
   },
 });

@@ -165,3 +165,65 @@ left join profiles p on p.id = i.reporter_id
 left join profiles a on a.id = i.assignee_id
 left join comments c on c.issue_id = i.id
 group by i.id, p.name, p.avatar_url, a.name, a.avatar_url;
+
+-- ─── Gamification — Snag Points ──────────────────────────────────────────────
+-- Migration applied 2026-03-19 via Supabase MCP
+
+-- User points aggregate (per org)
+create table if not exists user_points (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid references auth.users not null,
+  org_id     uuid references organisations not null,
+  points     int default 0,
+  updated_at timestamptz default now(),
+  unique(user_id, org_id)
+);
+
+-- Points audit log
+create table if not exists points_log (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid references auth.users not null,
+  org_id     uuid references organisations not null,
+  event      text not null,
+  points     int not null,
+  issue_id   uuid references issues,
+  created_at timestamptz default now()
+);
+
+alter table user_points enable row level security;
+alter table points_log enable row level security;
+
+create policy "Org members can view points" on user_points
+  for select using (
+    org_id in (select organisation_id from profiles where id = auth.uid())
+  );
+
+create policy "System can manage points" on user_points
+  for all using (true) with check (true);
+
+create policy "Org members can view points log" on points_log
+  for select using (
+    org_id in (select organisation_id from profiles where id = auth.uid())
+  );
+
+create policy "System can insert points log" on points_log
+  for insert with check (true);
+
+-- Atomic increment function used by award-points Edge Function
+create or replace function increment_user_points(
+  p_user_id uuid,
+  p_org_id uuid,
+  p_points int
+) returns void
+language plpgsql
+security definer
+as $$
+begin
+  insert into user_points (user_id, org_id, points, updated_at)
+  values (p_user_id, p_org_id, p_points, now())
+  on conflict (user_id, org_id)
+  do update set
+    points = user_points.points + excluded.points,
+    updated_at = now();
+end;
+$$;

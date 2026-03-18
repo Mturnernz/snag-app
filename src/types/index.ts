@@ -77,6 +77,7 @@ export type RootStackParamList = {
   Main: undefined;
   IssueDetail: { issueId: string };
   Reports: undefined;
+  Leaderboard: undefined;
 };
 
 export type MainTabParamList = {

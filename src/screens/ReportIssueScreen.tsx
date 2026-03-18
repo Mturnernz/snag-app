@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as Haptics from 'expo-haptics';
 import {
   View,
   Text,
@@ -110,6 +111,7 @@ export default function ReportIssueScreen() {
 
       if (error) throw error;
 
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
     } catch (err: any) {
       Alert.alert('Error', err.message ?? 'Could not submit issue.');
@@ -195,9 +197,14 @@ export default function ReportIssueScreen() {
         <View style={styles.form}>
           {/* Title */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>
-              Title <Text style={styles.required}>*</Text>
-            </Text>
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.fieldLabel}>
+                Title <Text style={styles.required}>*</Text>
+              </Text>
+              <Text style={[styles.charCount, title.length > 108 && styles.charCountWarn]}>
+                {title.length} / 120
+              </Text>
+            </View>
             <TextInput
               style={styles.input}
               placeholder="e.g. Broken fire exit door"
@@ -211,7 +218,12 @@ export default function ReportIssueScreen() {
 
           {/* Description */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Description</Text>
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.fieldLabel}>Description</Text>
+              <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
+                {description.length} / 300
+              </Text>
+            </View>
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Describe the issue in more detail..."
@@ -221,6 +233,7 @@ export default function ReportIssueScreen() {
               multiline
               numberOfLines={4}
               textAlignVertical="top"
+              maxLength={300}
             />
           </View>
 
@@ -394,12 +407,24 @@ const styles = StyleSheet.create({
   fieldGroup: {
     gap: Spacing.sm,
   },
+  fieldLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   fieldLabel: {
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
   },
   required: {
+    color: Colors.danger,
+  },
+  charCount: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+  },
+  charCountWarn: {
     color: Colors.danger,
   },
   input: {

@@ -143,7 +143,24 @@ export default function IssueListScreen() {
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No issues found.</Text>
+              <Text style={styles.emptyIcon}>🔧</Text>
+              <Text style={styles.emptyTitle}>
+                {filter === 'all' ? 'No snags yet' : `No ${filter.replace('_', ' ')} snags`}
+              </Text>
+              <Text style={styles.emptyText}>
+                {filter === 'all'
+                  ? 'Be the first to report an issue in your workplace.'
+                  : 'Try a different filter or report a new issue.'}
+              </Text>
+              {filter === 'all' && (
+                <TouchableOpacity
+                  style={styles.emptyAction}
+                  onPress={() => navigation.navigate('Main' as any, { screen: 'Report' } as any)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.emptyActionText}>Report a Snag</Text>
+                </TouchableOpacity>
+              )}
             </View>
           }
         />
@@ -209,9 +226,38 @@ const styles = StyleSheet.create({
   emptyContainer: {
     alignItems: 'center',
     paddingTop: 64,
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.sm,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: Spacing.sm,
+  },
+  emptyTitle: {
+    fontSize: Typography.lg,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+    textAlign: 'center',
   },
   emptyText: {
     fontSize: Typography.base,
     color: Colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  emptyAction: {
+    marginTop: Spacing.md,
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyActionText: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
   },
 });

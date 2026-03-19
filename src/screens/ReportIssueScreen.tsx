@@ -36,6 +36,8 @@ export default function ReportIssueScreen() {
   const insets = useSafeAreaInsets();
 
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [uploadTask, setUploadTask] = useState<Promise<string | null> | null>(null);
+  const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<IssueCategory>('niggle');
@@ -45,14 +47,26 @@ export default function ReportIssueScreen() {
 
   // ─── Photo picker ──────────────────────────────────────────────────────────
 
+  function startEagerUpload(uri: string) {
+    const fileName = `${Date.now()}.jpg`;
+    setIsPhotoUploading(true);
+    const task = uploadIssuePhoto(uri, fileName).finally(() => setIsPhotoUploading(false));
+    setUploadTask(task);
+  }
+
   async function pickFromLibrary() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
       allowsEditing: true,
       aspect: [16, 9],
-      quality: 0.8,
+      quality: 0.5,
+      exif: false,
     });
-    if (!result.canceled) setPhotoUri(result.assets[0].uri);
+    if (!result.canceled) {
+      const uri = result.assets[0].uri;
+      setPhotoUri(uri);
+      startEagerUpload(uri);
+    }
   }
 
   async function takePhoto() {
@@ -64,9 +78,14 @@ export default function ReportIssueScreen() {
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [16, 9],
-      quality: 0.8,
+      quality: 0.5,
+      exif: false,
     });
-    if (!result.canceled) setPhotoUri(result.assets[0].uri);
+    if (!result.canceled) {
+      const uri = result.assets[0].uri;
+      setPhotoUri(uri);
+      startEagerUpload(uri);
+    }
   }
 
 
@@ -91,11 +110,15 @@ export default function ReportIssueScreen() {
 
       if (!profile?.organisation_id) throw new Error('No organisation found');
 
-      // Upload photo if present
+      // Await eager upload (already in-flight since photo was selected), or
+      // fall back to uploading now if somehow no task exists.
       let photoUrl: string | null = null;
       if (photoUri) {
-        const fileName = `${user.id}-${Date.now()}.jpg`;
-        photoUrl = await uploadIssuePhoto(photoUri, fileName);
+        if (uploadTask) {
+          photoUrl = await uploadTask;
+        } else {
+          photoUrl = await uploadIssuePhoto(photoUri, `${Date.now()}.jpg`);
+        }
       }
 
       const { error } = await supabase.from('issues').insert({
@@ -126,6 +149,8 @@ export default function ReportIssueScreen() {
     setCategory('niggle');
     setPriority('medium');
     setPhotoUri(null);
+    setUploadTask(null);
+    setIsPhotoUploading(false);
     setSubmitted(false);
   }
 
@@ -171,9 +196,15 @@ export default function ReportIssueScreen() {
         {photoUri ? (
           <View style={styles.photoPreviewContainer}>
             <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+            {isPhotoUploading && (
+              <View style={styles.photoUploadingOverlay}>
+                <ActivityIndicator color={Colors.white} size="small" />
+                <Text style={styles.photoUploadingText}>Uploading…</Text>
+              </View>
+            )}
             <TouchableOpacity
               style={styles.photoRemoveButton}
-              onPress={() => setPhotoUri(null)}
+              onPress={() => { setPhotoUri(null); setUploadTask(null); setIsPhotoUploading(false); }}
             >
               <Text style={styles.photoRemoveText}>✕</Text>
             </TouchableOpacity>
@@ -382,6 +413,23 @@ const styles = StyleSheet.create({
   photoPreview: {
     width: '100%',
     height: 220,
+  },
+  photoUploadingOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    gap: 6,
+  },
+  photoUploadingText: {
+    color: Colors.white,
+    fontSize: Typography.sm,
+    fontWeight: Typography.medium,
   },
   photoRemoveButton: {
     position: 'absolute',

@@ -75,53 +75,44 @@ export default function LeaderboardScreen() {
   const fetchLeaderboard = useCallback(async () => {
     if (!orgId) return;
 
-    let data: { user_id: string; points: number }[] = [];
+    let data: { user_id: string; points: number; name: string }[] = [];
 
     if (filter === 'all') {
-      // Use user_points aggregate table
+      // user_points is already aggregated — join with profiles in one query
       const { data: rows } = await supabase
         .from('user_points')
-        .select('user_id, points')
+        .select('user_id, points, profile:profiles(name)')
         .eq('org_id', orgId)
-        .order('points', { ascending: false });
-      data = rows ?? [];
+        .order('points', { ascending: false })
+        .limit(50);
+
+      data = (rows ?? []).map((r: any) => ({
+        user_id: r.user_id,
+        points: r.points,
+        name: r.profile?.name || 'Unknown',
+      }));
     } else {
-      // Sum points_log for the time period
+      // Use Postgres GROUP BY aggregation via RPC to avoid fetching every row
       const since = new Date();
       if (filter === 'week') since.setDate(since.getDate() - 7);
       if (filter === 'month') since.setDate(since.getDate() - 30);
 
-      const { data: rows } = await supabase
-        .from('points_log')
-        .select('user_id, points')
-        .eq('org_id', orgId)
-        .gte('created_at', since.toISOString());
+      const { data: rows } = await supabase.rpc('get_leaderboard', {
+        p_org_id: orgId,
+        p_since: since.toISOString(),
+      });
 
-      // Aggregate by user
-      const totals: Record<string, number> = {};
-      for (const row of rows ?? []) {
-        totals[row.user_id] = (totals[row.user_id] ?? 0) + row.points;
-      }
-      data = Object.entries(totals)
-        .map(([user_id, points]) => ({ user_id, points }))
-        .sort((a, b) => b.points - a.points);
-    }
-
-    // Fetch names for all users in the result
-    const userIds = data.map((r) => r.user_id);
-    const { data: profiles } = userIds.length > 0
-      ? await supabase.from('profiles').select('id, name').in('id', userIds)
-      : { data: [] };
-
-    const nameMap: Record<string, string> = {};
-    for (const p of profiles ?? []) {
-      nameMap[p.id] = p.name || 'Unknown';
+      data = (rows ?? []).map((r: any) => ({
+        user_id: r.user_id,
+        points: r.total_points,
+        name: r.name || 'Unknown',
+      }));
     }
 
     setEntries(
       data.map((row, i) => ({
         user_id: row.user_id,
-        name: nameMap[row.user_id] ?? 'Unknown',
+        name: row.name,
         points: row.points,
         rank: i + 1,
       }))

@@ -51,7 +51,7 @@ export async function getCurrentUser() {
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('*, organisation:organisations(*)')
+    .select('id, name, email, organisation_id, invite_code, role, avatar_url, created_at, organisation:organisations(id, name, invite_code, created_at)')
     .eq('id', userId)
     .maybeSingle();
   if (error) console.error('getProfile error:', error);
@@ -82,7 +82,7 @@ export async function joinOrganisationByCode(inviteCode: string, _userId: string
 export async function getOrgMembers(orgId: string): Promise<Profile[]> {
   const { data } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, name, email, role, avatar_url, organisation_id, invite_code, created_at')
     .eq('organisation_id', orgId)
     .order('created_at', { ascending: true });
   return (data ?? []) as Profile[];

@@ -6,13 +6,14 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Image,
   Alert,
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 import {
   IssueCategory,
@@ -47,10 +48,16 @@ export default function ReportIssueScreen() {
 
   // ─── Photo picker ──────────────────────────────────────────────────────────
 
-  function startEagerUpload(uri: string) {
+  async function compressAndUpload(uri: string) {
     const fileName = `${Date.now()}.jpg`;
     setIsPhotoUploading(true);
-    const task = uploadIssuePhoto(uri, fileName).finally(() => setIsPhotoUploading(false));
+    // Resize to max 1200px on the longest side and compress to ~70% JPEG quality
+    const compressed = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 1200 } }],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    const task = uploadIssuePhoto(compressed.uri, fileName).finally(() => setIsPhotoUploading(false));
     setUploadTask(task);
   }
 
@@ -59,13 +66,13 @@ export default function ReportIssueScreen() {
       mediaTypes: 'images',
       allowsEditing: true,
       aspect: [16, 9],
-      quality: 0.5,
+      quality: 1,
       exif: false,
     });
     if (!result.canceled) {
       const uri = result.assets[0].uri;
       setPhotoUri(uri);
-      startEagerUpload(uri);
+      compressAndUpload(uri);
     }
   }
 
@@ -78,13 +85,13 @@ export default function ReportIssueScreen() {
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [16, 9],
-      quality: 0.5,
+      quality: 1,
       exif: false,
     });
     if (!result.canceled) {
       const uri = result.assets[0].uri;
       setPhotoUri(uri);
-      startEagerUpload(uri);
+      compressAndUpload(uri);
     }
   }
 
@@ -195,7 +202,12 @@ export default function ReportIssueScreen() {
         {/* Photo area */}
         {photoUri ? (
           <View style={styles.photoPreviewContainer}>
-            <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+            <Image
+              source={{ uri: photoUri }}
+              style={styles.photoPreview}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
             {isPhotoUploading && (
               <View style={styles.photoUploadingOverlay}>
                 <ActivityIndicator color={Colors.white} size="small" />

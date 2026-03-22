@@ -41,8 +41,9 @@ export default function IssueListScreen() {
   const fetchIssues = useCallback(async () => {
     let query = supabase
       .from('issues_with_details')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .select('id, title, status, priority, category, photo_url, created_at, reporter_id, reporter_name, reporter_avatar, assignee_id, assignee_name, comment_count, vote_score')
+      .order('created_at', { ascending: false })
+      .limit(50);
 
     if (filter !== 'all') {
       query = query.eq('status', filter);
@@ -134,6 +135,11 @@ export default function IssueListScreen() {
             { paddingBottom: insets.bottom + 16 },
           ]}
           ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
+          removeClippedSubviews
+          windowSize={5}
+          initialNumToRender={8}
+          maxToRenderPerBatch={5}
+          updateCellsBatchingPeriod={50}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

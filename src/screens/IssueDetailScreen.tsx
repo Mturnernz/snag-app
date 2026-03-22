@@ -3,7 +3,6 @@ import * as Haptics from 'expo-haptics';
 import {
   View,
   Text,
-  Image,
   ScrollView,
   TextInput,
   TouchableOpacity,
@@ -12,6 +11,7 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 
@@ -81,19 +81,27 @@ export default function IssueDetailScreen() {
   const canEdit = userProfile?.role === 'admin' || userProfile?.role === 'manager';
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (user) {
-        setCurrentUserId(user.id);
-        getUserVote(issueId, user.id).then(setUserVote);
-        const profile = await getProfile(user.id);
-        setUserProfile(profile);
-        if (profile?.organisation_id) {
-          getOrgMembers(profile.organisation_id).then(setOrgMembers);
-        }
-      }
-    });
+    // Kick off issue + comments in parallel immediately
     fetchIssue();
     fetchComments();
+
+    // Auth-dependent queries — get user once then fan out in parallel
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      setCurrentUserId(user.id);
+
+      const [vote, profile] = await Promise.all([
+        getUserVote(issueId, user.id),
+        getProfile(user.id),
+      ]);
+
+      setUserVote(vote);
+      setUserProfile(profile);
+
+      if (profile?.organisation_id) {
+        getOrgMembers(profile.organisation_id).then(setOrgMembers);
+      }
+    });
   }, [issueId]);
 
   // Re-fetch author points once we know the org (profile may load after comments)
@@ -108,7 +116,7 @@ export default function IssueDetailScreen() {
     setLoadingIssue(true);
     const { data } = await supabase
       .from('issues_with_details')
-      .select('*')
+      .select('id, title, description, status, priority, category, photo_url, created_at, updated_at, reporter_id, reporter_name, reporter_avatar, assignee_id, assignee_name, comment_count, vote_score, upvote_count, downvote_count, organisation_id')
       .eq('id', issueId)
       .single();
 
@@ -326,7 +334,14 @@ export default function IssueDetailScreen() {
       >
         {/* Hero photo */}
         {issue.photo_url ? (
-          <Image source={{ uri: issue.photo_url }} style={styles.heroPhoto} />
+          <Image
+            source={{ uri: issue.photo_url }}
+            style={styles.heroPhoto}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+            transition={200}
+          />
         ) : (
           <View style={styles.heroPlaceholder}>
             <Text style={{ fontSize: 36 }}>📷</Text>

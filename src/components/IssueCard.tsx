@@ -2,10 +2,10 @@ import React from 'react';
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Issue } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import StatusBadge from './StatusBadge';
@@ -28,7 +28,20 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export default function IssueCard({ issue, onPress }: Props) {
+// Append Supabase Storage transform params to serve a 400px-wide thumbnail
+// instead of the full-resolution image in list views.
+function thumbnailUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set('width', '400');
+    u.searchParams.set('quality', '70');
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+function IssueCard({ issue, onPress }: Props) {
   const reporterName = issue.reporter?.name || 'Unknown';
   const commentCount = issue.comment_count ?? 0;
   const voteScore = issue.vote_score ?? 0;
@@ -37,7 +50,14 @@ export default function IssueCard({ issue, onPress }: Props) {
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
       {/* Photo */}
       {issue.photo_url ? (
-        <Image source={{ uri: issue.photo_url }} style={styles.photo} />
+        <Image
+          source={{ uri: thumbnailUrl(issue.photo_url) }}
+          style={styles.photo}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+          transition={200}
+        />
       ) : (
         <View style={styles.photoPlaceholder}>
           <Text style={styles.photoPlaceholderIcon}>📷</Text>
@@ -78,6 +98,8 @@ export default function IssueCard({ issue, onPress }: Props) {
     </TouchableOpacity>
   );
 }
+
+export default React.memo(IssueCard);
 
 const styles = StyleSheet.create({
   card: {

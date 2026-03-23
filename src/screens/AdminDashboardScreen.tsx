@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Profile, Organisation, UserRole, ROLE_LABELS, RootStackParamList } from '../types';
 import { supabase, getOrgMembers, updateMemberRole } from '../lib/supabase';
+import { useUserProfile } from '../context/UserProfileContext';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -108,8 +109,9 @@ function MemberCard({
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  // Profile and orgId come from context — no auth re-fetch on mount.
+  const { profile: currentUser, orgId } = useUserProfile();
 
-  const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [members, setMembers] = useState<Profile[]>([]);
   const [issueCounts, setIssueCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -118,39 +120,25 @@ export default function AdminDashboardScreen() {
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!orgId) { setLoading(false); return; }
 
-    const { data } = await supabase
-      .from('profiles')
-      .select('*, organisation:organisations(id, name, invite_code)')
-      .eq('id', user.id)
-      .single();
+    const [list, issuesRes] = await Promise.all([
+      getOrgMembers(orgId),
+      supabase
+        .from('issues')
+        .select('reporter_id')
+        .eq('organisation_id', orgId),
+    ]);
 
-    if (data) {
-      const profile = data as Profile;
-      setCurrentUser(profile);
+    setMembers(list);
 
-      if (profile.organisation_id) {
-        const [list, issuesRes] = await Promise.all([
-          getOrgMembers(profile.organisation_id),
-          supabase
-            .from('issues')
-            .select('reporter_id')
-            .eq('organisation_id', profile.organisation_id),
-        ]);
-
-        setMembers(list);
-
-        const counts: Record<string, number> = {};
-        for (const row of issuesRes.data ?? []) {
-          counts[row.reporter_id] = (counts[row.reporter_id] ?? 0) + 1;
-        }
-        setIssueCounts(counts);
-      }
+    const counts: Record<string, number> = {};
+    for (const row of issuesRes.data ?? []) {
+      counts[row.reporter_id] = (counts[row.reporter_id] ?? 0) + 1;
     }
+    setIssueCounts(counts);
     setLoading(false);
-  }, []);
+  }, [orgId]);
 
   useEffect(() => { load(); }, [load]);
 

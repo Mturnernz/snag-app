@@ -20,8 +20,10 @@ import {
   IssueStatus, IssuePriority, IssueCategory,
   STATUS_LABELS, PRIORITY_LABELS, CATEGORY_LABELS,
 } from '../types';
+// Profile is used for orgMembers array type
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers, updateIssue } from '../lib/supabase';
+import { supabase, upsertVote, deleteVote, getUserVote, getOrgMembers, updateIssue } from '../lib/supabase';
+import { useUserProfile } from '../context/UserProfileContext';
 import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -60,6 +62,9 @@ export default function IssueDetailScreen() {
   const route = useRoute<Route>();
   const { issueId } = route.params;
 
+  // Auth + profile from context — no per-screen re-fetch needed.
+  const { userId: currentUserId, profile: userProfile, orgId } = useUserProfile();
+
   const [issue, setIssue] = useState<Issue | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingIssue, setLoadingIssue] = useState(true);
@@ -67,8 +72,6 @@ export default function IssueDetailScreen() {
   const [sendingComment, setSendingComment] = useState(false);
   const [userVote, setUserVote] = useState<VoteValue | null>(null);
   const [voteLoading, setVoteLoading] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [userProfile, setUserProfile] = useState<Profile | null>(null);
   const [orgMembers, setOrgMembers] = useState<Profile[]>([]);
   const [editingField, setEditingField] = useState<'status' | 'priority' | 'category' | 'assignee' | null>(null);
   const [saving, setSaving] = useState(false);
@@ -81,42 +84,33 @@ export default function IssueDetailScreen() {
   const canEdit = userProfile?.role === 'admin' || userProfile?.role === 'manager';
 
   useEffect(() => {
-    // Kick off issue + comments in parallel immediately
     fetchIssue();
     fetchComments();
 
-    // Auth-dependent queries — get user once then fan out in parallel
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return;
-      setCurrentUserId(user.id);
+    // Fetch the user's vote (only needs userId, already from context)
+    if (currentUserId) {
+      getUserVote(issueId, currentUserId).then(setUserVote);
+    }
 
-      const [vote, profile] = await Promise.all([
-        getUserVote(issueId, user.id),
-        getProfile(user.id),
-      ]);
-
-      setUserVote(vote);
-      setUserProfile(profile);
-
-      if (profile?.organisation_id) {
-        getOrgMembers(profile.organisation_id).then(setOrgMembers);
-      }
-    });
+    // Only admins/managers need org members (for the assignee picker)
+    if (canEdit && orgId) {
+      getOrgMembers(orgId).then(setOrgMembers);
+    }
   }, [issueId]);
 
-  // Re-fetch author points once we know the org (profile may load after comments)
+  // Re-fetch author points once org is known
   useEffect(() => {
-    if (comments.length > 0 && userProfile?.organisation_id) {
+    if (comments.length > 0 && orgId) {
       const authorIds = [...new Set(comments.map((c) => c.author_id))];
-      fetchAuthorPoints(authorIds, userProfile.organisation_id);
+      fetchAuthorPoints(authorIds, orgId);
     }
-  }, [userProfile?.organisation_id]);
+  }, [orgId]);
 
   async function fetchIssue() {
     setLoadingIssue(true);
     const { data } = await supabase
       .from('issues_with_details')
-      .select('id, title, description, status, priority, category, photo_url, created_at, updated_at, reporter_id, reporter_name, reporter_avatar, assignee_id, assignee_name, comment_count, vote_score, upvote_count, downvote_count, organisation_id')
+      .select('id, title, description, status, priority, category, photo_url, created_at, updated_at, reporter_id, reporter_name, reporter_avatar, assignee_id, assignee_name, assignee_avatar, comment_count, vote_score, upvote_count, downvote_count, organisation_id')
       .eq('id', issueId)
       .single();
 
@@ -143,10 +137,9 @@ export default function IssueDetailScreen() {
 
     if (data) {
       setComments(data as Comment[]);
-      // Fetch points for all comment authors
       const authorIds = [...new Set(data.map((c: any) => c.author_id))];
-      if (authorIds.length > 0 && userProfile?.organisation_id) {
-        fetchAuthorPoints(authorIds, userProfile.organisation_id);
+      if (authorIds.length > 0 && orgId) {
+        fetchAuthorPoints(authorIds, orgId);
       }
     }
   }

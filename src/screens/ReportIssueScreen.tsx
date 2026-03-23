@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   View,
@@ -23,6 +23,7 @@ import {
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase, uploadIssuePhoto } from '../lib/supabase';
+import { useUserProfile } from '../context/UserProfileContext';
 
 const CATEGORIES: IssueCategory[] = [
   'niggle',
@@ -35,9 +36,9 @@ const PRIORITIES: IssuePriority[] = ['low', 'medium', 'high'];
 
 export default function ReportIssueScreen() {
   const insets = useSafeAreaInsets();
+  const { userId, orgId } = useUserProfile();
 
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [uploadTask, setUploadTask] = useState<Promise<string | null> | null>(null);
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -48,17 +49,26 @@ export default function ReportIssueScreen() {
 
   // ─── Photo picker ──────────────────────────────────────────────────────────
 
-  async function compressAndUpload(uri: string) {
+  // Store the upload promise in a ref so handleSubmit can access it synchronously
+  // even if the user taps Submit while compression is still in progress.
+  const uploadTaskRef = useRef<Promise<string | null> | null>(null);
+
+  function startCompressAndUpload(uri: string) {
     const fileName = `${Date.now()}.jpg`;
     setIsPhotoUploading(true);
-    // Resize to max 1200px on the longest side and compress to ~70% JPEG quality
-    const compressed = await ImageManipulator.manipulateAsync(
+    // Build the full compression→upload pipeline as a single promise chain,
+    // assigned to the ref synchronously before any async work begins.
+    // This eliminates the race condition where handleSubmit ran before
+    // the previous async compressAndUpload set state.
+    const task = ImageManipulator.manipulateAsync(
       uri,
       [{ resize: { width: 1200 } }],
       { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    const task = uploadIssuePhoto(compressed.uri, fileName).finally(() => setIsPhotoUploading(false));
-    setUploadTask(task);
+    )
+      .then(compressed => uploadIssuePhoto(compressed.uri, fileName))
+      .finally(() => setIsPhotoUploading(false));
+
+    uploadTaskRef.current = task;
   }
 
   async function pickFromLibrary() {
@@ -72,7 +82,7 @@ export default function ReportIssueScreen() {
     if (!result.canceled) {
       const uri = result.assets[0].uri;
       setPhotoUri(uri);
-      compressAndUpload(uri);
+      startCompressAndUpload(uri);
     }
   }
 
@@ -91,7 +101,7 @@ export default function ReportIssueScreen() {
     if (!result.canceled) {
       const uri = result.assets[0].uri;
       setPhotoUri(uri);
-      compressAndUpload(uri);
+      startCompressAndUpload(uri);
     }
   }
 
@@ -103,29 +113,19 @@ export default function ReportIssueScreen() {
       Alert.alert('Title required', 'Please give the issue a title.');
       return;
     }
+    if (!userId || !orgId) {
+      Alert.alert('Error', 'Not signed in.');
+      return;
+    }
 
     setSubmitting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organisation_id')
-        .eq('id', user.id)
-        .single();
-
-      if (!profile?.organisation_id) throw new Error('No organisation found');
-
-      // Await eager upload (already in-flight since photo was selected), or
-      // fall back to uploading now if somehow no task exists.
+      // Await the upload pipeline started when the photo was picked.
+      // uploadTaskRef.current is set synchronously so it's always available
+      // even if the user submits before compression completes.
       let photoUrl: string | null = null;
       if (photoUri) {
-        if (uploadTask) {
-          photoUrl = await uploadTask;
-        } else {
-          photoUrl = await uploadIssuePhoto(photoUri, `${Date.now()}.jpg`);
-        }
+        photoUrl = await (uploadTaskRef.current ?? Promise.resolve(null));
       }
 
       const { error } = await supabase.from('issues').insert({
@@ -135,8 +135,8 @@ export default function ReportIssueScreen() {
         category,
         priority,
         status: 'open',
-        reporter_id: user.id,
-        organisation_id: profile.organisation_id,
+        reporter_id: userId,
+        organisation_id: orgId,
       });
 
       if (error) throw error;
@@ -156,8 +156,8 @@ export default function ReportIssueScreen() {
     setCategory('niggle');
     setPriority('medium');
     setPhotoUri(null);
-    setUploadTask(null);
     setIsPhotoUploading(false);
+    uploadTaskRef.current = null;
     setSubmitted(false);
   }
 
@@ -216,7 +216,7 @@ export default function ReportIssueScreen() {
             )}
             <TouchableOpacity
               style={styles.photoRemoveButton}
-              onPress={() => { setPhotoUri(null); setUploadTask(null); setIsPhotoUploading(false); }}
+              onPress={() => { setPhotoUri(null); uploadTaskRef.current = null; setIsPhotoUploading(false); }}
             >
               <Text style={styles.photoRemoveText}>✕</Text>
             </TouchableOpacity>

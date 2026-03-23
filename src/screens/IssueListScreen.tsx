@@ -16,6 +16,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Issue, IssueStatus, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase } from '../lib/supabase';
+import { useUserProfile } from '../context/UserProfileContext';
 import IssueCard from '../components/IssueCard';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -33,15 +34,18 @@ export default function IssueListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
 
+  const { orgId } = useUserProfile();
   const [filter, setFilter] = useState<FilterOption>('all');
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchIssues = useCallback(async () => {
+    if (!orgId) return;
     let query = supabase
       .from('issues_with_details')
       .select('id, title, status, priority, category, photo_url, created_at, reporter_id, reporter_name, reporter_avatar, assignee_id, assignee_name, comment_count, vote_score')
+      .eq('organisation_id', orgId)
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -65,7 +69,7 @@ export default function IssueListScreen() {
         }))
       );
     }
-  }, [filter]);
+  }, [filter, orgId]);
 
   useEffect(() => {
     setLoading(true);

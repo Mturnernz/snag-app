@@ -23,6 +23,7 @@
     "expo-image-manipulator": "^55.0.11",
     "expo-image-picker": "~17.0.10",
     "expo-navigation-bar": "~5.0.10",
+    "expo-splash-screen": "^55.0.12",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",

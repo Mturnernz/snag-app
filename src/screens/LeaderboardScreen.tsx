@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase } from '../lib/supabase';
+import { useUserProfile } from '../context/UserProfileContext';
 import { getUserTitle } from '../lib/points';
 
 type FilterOption = 'week' | 'month' | 'all';
@@ -49,28 +50,12 @@ const RANK_MEDALS: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 export default function LeaderboardScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const { userId: currentUserId, orgId } = useUserProfile();
 
   const [filter, setFilter] = useState<FilterOption>('week');
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [orgId, setOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return;
-      setCurrentUserId(user.id);
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organisation_id')
-        .eq('id', user.id)
-        .single();
-      if (profile?.organisation_id) {
-        setOrgId(profile.organisation_id);
-      }
-    });
-  }, []);
 
   const fetchLeaderboard = useCallback(async () => {
     if (!orgId) return;

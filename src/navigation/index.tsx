@@ -6,6 +6,7 @@ import { View, Text, StyleSheet, AppState } from 'react-native';
 import { RootStackParamList, MainTabParamList, UserRole } from '../types';
 import { Colors, Typography } from '../constants/theme';
 import { supabase } from '../lib/supabase';
+import { useUserProfile } from '../context/UserProfileContext';
 
 import IssueListScreen from '../screens/IssueListScreen';
 import ReportIssueScreen from '../screens/ReportIssueScreen';
@@ -41,23 +42,18 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 function MainTabNavigator({ userRole }: { userRole: UserRole }) {
   const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
   const [openIssueCount, setOpenIssueCount] = useState<number>(0);
+  const { orgId } = useUserProfile();
 
+  // orgId comes from context — no need to re-fetch auth or profile here.
   const fetchOpenCount = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('organisation_id')
-      .eq('id', user.id)
-      .single();
-    if (!profile?.organisation_id) return;
+    if (!orgId) return;
     const { count } = await supabase
       .from('issues')
       .select('id', { count: 'exact', head: true })
-      .eq('organisation_id', profile.organisation_id)
+      .eq('organisation_id', orgId)
       .eq('status', 'open');
     setOpenIssueCount(count ?? 0);
-  }, []);
+  }, [orgId]);
 
   useEffect(() => {
     fetchOpenCount();

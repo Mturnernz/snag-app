@@ -106,7 +106,8 @@ export default function ReportIssueScreen() {
 
     setSubmitting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
 
       const { data: profile } = await supabase

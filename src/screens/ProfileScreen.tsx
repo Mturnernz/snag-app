@@ -69,24 +69,30 @@ export default function ProfileScreen() {
   }, []);
 
   async function fetchProfile() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) { setLoading(false); return; }
 
-    const { data } = await supabase
-      .from('profiles')
-      .select('*, organisation:organisations(id, name, invite_code)')
-      .eq('id', user.id)
-      .single();
+      const { data } = await supabase
+        .from('profiles')
+        .select('*, organisation:organisations(id, name)')
+        .eq('id', user.id)
+        .single();
 
-    if (data) {
-      setProfile(data as Profile);
-      setNameInput(data.name ?? '');
-      fetchIssueCounts(user.id);
-      if (data.organisation_id) {
-        fetchUserPoints(user.id, data.organisation_id);
+      if (data) {
+        setProfile(data as Profile);
+        setNameInput(data.name ?? '');
+        fetchIssueCounts(user.id);
+        if (data.organisation_id) {
+          fetchUserPoints(user.id, data.organisation_id);
+        }
       }
+    } catch (e) {
+      console.error('Profile load error:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function fetchUserPoints(userId: string, orgId: string) {
@@ -118,7 +124,8 @@ export default function ProfileScreen() {
     const trimmed = nameInput.trim();
     if (!trimmed) return;
     setSavingName(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (user) {
       const { error } = await supabase
         .from('profiles')
@@ -148,7 +155,7 @@ export default function ProfileScreen() {
   }
 
   function copyInviteCode() {
-    const code = (profile?.organisation as Organisation | undefined)?.invite_code;
+    const code = profile?.invite_code;
     if (code) {
       Clipboard.setString(code);
       setShowCopiedToast(true);
@@ -167,7 +174,7 @@ export default function ProfileScreen() {
   const displayName = profile?.name || 'Your Name';
   const org = profile?.organisation as Organisation | undefined;
   const orgName = org?.name ?? 'No Organisation';
-  const orgInviteCode = org?.invite_code ?? null;
+  const orgInviteCode = profile?.invite_code ?? null;
   const roleLabel = profile?.role ? ROLE_LABELS[profile.role] : null;
   const totalIssues = issueCounts
     ? Object.values(issueCounts).reduce((a, b) => a + b, 0)

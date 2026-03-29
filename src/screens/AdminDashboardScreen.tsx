@@ -118,38 +118,44 @@ export default function AdminDashboardScreen() {
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) { setLoading(false); return; }
 
-    const { data } = await supabase
-      .from('profiles')
-      .select('*, organisation:organisations(id, name, invite_code)')
-      .eq('id', user.id)
-      .single();
+      const { data } = await supabase
+        .from('profiles')
+        .select('*, organisation:organisations(id, name)')
+        .eq('id', user.id)
+        .single();
 
-    if (data) {
-      const profile = data as Profile;
-      setCurrentUser(profile);
+      if (data) {
+        const profile = data as Profile;
+        setCurrentUser(profile);
 
-      if (profile.organisation_id) {
-        const [list, issuesRes] = await Promise.all([
-          getOrgMembers(profile.organisation_id),
-          supabase
-            .from('issues')
-            .select('reporter_id')
-            .eq('organisation_id', profile.organisation_id),
-        ]);
+        if (profile.organisation_id) {
+          const [list, issuesRes] = await Promise.all([
+            getOrgMembers(profile.organisation_id),
+            supabase
+              .from('issues')
+              .select('reporter_id')
+              .eq('organisation_id', profile.organisation_id),
+          ]);
 
-        setMembers(list);
+          setMembers(list);
 
-        const counts: Record<string, number> = {};
-        for (const row of issuesRes.data ?? []) {
-          counts[row.reporter_id] = (counts[row.reporter_id] ?? 0) + 1;
+          const counts: Record<string, number> = {};
+          for (const row of issuesRes.data ?? []) {
+            counts[row.reporter_id] = (counts[row.reporter_id] ?? 0) + 1;
+          }
+          setIssueCounts(counts);
         }
-        setIssueCounts(counts);
       }
+    } catch (e) {
+      console.error('Admin load error:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -170,7 +176,7 @@ export default function AdminDashboardScreen() {
   }
 
   function handleCopyCode() {
-    const code = (currentUser?.organisation as Organisation | undefined)?.invite_code;
+    const code = currentUser?.invite_code;
     if (!code) return;
     Clipboard.setString(code);
     setCopied(true);
@@ -186,7 +192,7 @@ export default function AdminDashboardScreen() {
   }
 
   const org = currentUser?.organisation as Organisation | undefined;
-  const orgInviteCode = org?.invite_code;
+  const orgInviteCode = currentUser?.invite_code;
   const orgName = org?.name ?? 'Your Organisation';
   const isAdmin = currentUser?.role === 'admin';
 

@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Profile, Organisation, IssueStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase, signOut } from '../lib/supabase';
+import { friendlyError } from '../lib/errors';
 import { getUserTitle } from '../lib/points';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -55,6 +56,12 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
   const [showCopiedToast, setShowCopiedToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  function showToast(message: string) {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 2500);
+  }
 
   // Name editing
   const [editingName, setEditingName] = useState(false);
@@ -127,6 +134,8 @@ export default function ProfileScreen() {
       if (!error) {
         setProfile((p) => p ? { ...p, name: trimmed } : p);
         setEditingName(false);
+      } else {
+        showToast(friendlyError('updateProfile', error));
       }
     }
     setSavingName(false);
@@ -313,7 +322,7 @@ export default function ProfileScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
-      <Toast message="Copied to clipboard!" visible={showCopiedToast} />
+      <Toast message={showCopiedToast ? 'Copied to clipboard!' : (toastMessage ?? '')} visible={showCopiedToast || toastMessage !== null} />
     </View>
   );
 }

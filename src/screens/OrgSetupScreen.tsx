@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createOrganisation, joinOrganisationByCode, signOut } from '../lib/supabase';
+import { friendlyError } from '../lib/errors';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 
 interface Props {
@@ -37,7 +38,7 @@ export default function OrgSetupScreen({ userId, onComplete }: Props) {
     setError(null);
     const { error } = await createOrganisation(orgName.trim(), userId);
     if (error) {
-      setError(error.message ?? 'Could not create organisation.');
+      setError(friendlyError('createOrganisation', error));
     } else {
       onComplete();
     }
@@ -53,7 +54,7 @@ export default function OrgSetupScreen({ userId, onComplete }: Props) {
     setError(null);
     const { error } = await joinOrganisationByCode(inviteCode.trim(), userId);
     if (error) {
-      setError(error.message ?? 'Could not join organisation.');
+      setError(friendlyError('joinOrganisation', error));
     } else {
       onComplete();
     }

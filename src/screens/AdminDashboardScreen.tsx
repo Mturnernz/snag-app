@@ -15,7 +15,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Profile, Organisation, UserRole, ROLE_LABELS, RootStackParamList } from '../types';
 import { supabase, getOrgMembers, updateMemberRole } from '../lib/supabase';
+import { friendlyError } from '../lib/errors';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
+import Toast from '../components/Toast';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -116,6 +118,7 @@ export default function AdminDashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [updatingRole, setUpdatingRole] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -165,6 +168,9 @@ export default function AdminDashboardScreen() {
     const { error } = await updateMemberRole(member.id, newRole);
     if (!error) {
       setMembers(prev => prev.map(m => m.id === member.id ? { ...m, role: newRole } : m));
+    } else {
+      setErrorToast(friendlyError('updateRole', error));
+      setTimeout(() => setErrorToast(null), 3000);
     }
     setUpdatingRole(null);
   }
@@ -274,6 +280,7 @@ export default function AdminDashboardScreen() {
         </View>
 
       </ScrollView>
+      <Toast message={errorToast ?? ''} visible={errorToast !== null} />
     </View>
   );
 }

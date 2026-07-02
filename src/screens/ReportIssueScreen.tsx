@@ -23,6 +23,7 @@ import {
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase, uploadIssuePhoto } from '../lib/supabase';
+import { friendlyError } from '../lib/errors';
 
 const CATEGORIES: IssueCategory[] = [
   'niggle',
@@ -144,7 +145,7 @@ export default function ReportIssueScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
     } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not submit issue.');
+      Alert.alert('Error', friendlyError('submitIssue', err));
     } finally {
       setSubmitting(false);
     }

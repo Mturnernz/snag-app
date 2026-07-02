@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { signInWithEmail, signUpWithEmail } from '../lib/supabase';
+import { friendlyError } from '../lib/errors';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 
 export default function AuthScreen() {
@@ -43,7 +44,7 @@ export default function AuthScreen() {
         setMode('signin');
       }
     } catch (err: any) {
-      setMessage({ text: err.message ?? 'Something went wrong.', error: true });
+      setMessage({ text: friendlyError(mode === 'signin' ? 'signIn' : 'signUp', err), error: true });
     } finally {
       setLoading(false);
     }

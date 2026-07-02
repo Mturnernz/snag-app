@@ -22,10 +22,12 @@ import {
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers, updateIssue } from '../lib/supabase';
+import { friendlyError } from '../lib/errors';
 import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
+import Toast from '../components/Toast';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
 
@@ -77,6 +79,12 @@ export default function IssueDetailScreen() {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionAt, setMentionAt] = useState(-1);
   const [authorPoints, setAuthorPoints] = useState<Record<string, number>>({});
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+
+  function showError(action: string, error: unknown) {
+    setErrorToast(friendlyError(action, error));
+    setTimeout(() => setErrorToast(null), 3000);
+  }
 
   const canEdit = userProfile?.role === 'admin' || userProfile?.role === 'manager';
 
@@ -185,6 +193,7 @@ export default function IssueDetailScreen() {
         // Revert on failure
         setUserVote(prevVote);
         setIssue(prevIssue);
+        showError('vote', error);
       }
     } else {
       // Optimistic: apply new vote immediately
@@ -207,6 +216,7 @@ export default function IssueDetailScreen() {
         // Revert on failure
         setUserVote(prevVote);
         setIssue(prevIssue);
+        showError('vote', error);
       }
     }
     setVoteLoading(false);
@@ -227,6 +237,8 @@ export default function IssueDetailScreen() {
       setPendingUpdates({});
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+    } else {
+      showError('updateIssue', error);
     }
     setSaving(false);
   }
@@ -273,6 +285,8 @@ export default function IssueDetailScreen() {
       setMentionQuery(null);
       setMentionAt(-1);
       fetchComments();
+    } else {
+      showError('comment', error);
     }
     setSendingComment(false);
   }
@@ -553,7 +567,7 @@ export default function IssueDetailScreen() {
           <Text style={styles.commentsHeader}>Comments ({comments.length})</Text>
 
           {comments.length === 0 ? (
-            <Text style={styles.noComments}>No comments yet.</Text>
+            <Text style={styles.noComments}>No comments yet — add the first one below.</Text>
           ) : (
             comments.map((comment) => (
               <View key={comment.id} style={styles.commentBubble}>
@@ -621,6 +635,8 @@ export default function IssueDetailScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      <Toast message={errorToast ?? ''} visible={errorToast !== null} />
     </KeyboardAvoidingView>
   );
 }

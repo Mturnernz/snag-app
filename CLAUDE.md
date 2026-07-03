@@ -2,7 +2,27 @@
 
 This file tells Claude Code everything it needs to know to work effectively on this project.
 
-## What is SNAG?
+**Read `MVP-SPEC.md` (product intent + golden rules) and
+`Snag-Architecture-Build-Plan.md` (system layout, backend contract,
+milestones) before any non-trivial work.** The golden rules there —
+migrations only, RLS everywhere with RPC-only writes, append-only evidence,
+snags never deleted, secrets via Vault/env, one PR per milestone — override
+anything else in this file.
+
+## Two products live in this repo — know which one you're touching
+
+1. **Snagv1 (the live product)** — the web app in `apps/web` +
+   the Supabase project `wpkdpukpllxuyqqlxkxf` (migrations in
+   `supabase/migrations/`, edge functions `notify-snag` and
+   `export-investigation` in `supabase/functions/`). Deployed at
+   snagv1.netlify.app. **All current work happens here.**
+2. **Legacy mobile prototype** — the Expo app at the repo root (`App.tsx`,
+   `src/`), built against a different, now-INACTIVE Supabase project whose
+   schema is `supabase/schema.sql` (plus the `award-points` function).
+   The rest of this file documents that prototype; leave it alone unless
+   explicitly asked.
+
+## What is SNAG? (legacy mobile prototype)
 
 A React Native / Expo mobile app for workplace issue reporting. Workers photograph and report
 problems (broken equipment, health & safety hazards, niggles). Managers can triage, assign,

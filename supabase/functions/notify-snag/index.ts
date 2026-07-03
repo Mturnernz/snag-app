@@ -1,6 +1,6 @@
-// SNAPSHOT of the notify-snag edge function as deployed to the Snagv1
-// project (version 9, recovered 2026-07-03). This file is now the source
-// of truth — edit here and redeploy via Supabase MCP deploy_edge_function.
+// notify-snag: email notifications via Resend, called from DB triggers/RPCs
+// (dispatch_snag_notification / dispatch_rca_notification) with an internal
+// secret header. Source of truth is this file — redeploy via Supabase MCP.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -13,7 +13,14 @@ const APP_URL = Deno.env.get("SNAG_APP_URL") ?? "https://snagv1.netlify.app";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-type Event = "serious_created" | "niggle_assigned" | "snag_sorted" | "niggle_escalated";
+type Event =
+  | "serious_created"
+  | "niggle_assigned"
+  | "snag_sorted"
+  | "niggle_escalated"
+  | "rca_assigned"
+  | "rca_submitted"
+  | "rca_rejected";
 
 async function sendEmail(to: string[], subject: string, text: string) {
   if (!RESEND_API_KEY || to.length === 0) {
@@ -40,17 +47,28 @@ async function sendEmail(to: string[], subject: string, text: string) {
   }
 }
 
+async function emailOf(profileId: string | null): Promise<string | null> {
+  if (!profileId) return null;
+  const { data } = await supabase.from("profiles").select("email").eq("id", profileId).maybeSingle();
+  return data?.email ?? null;
+}
+
 Deno.serve(async (req: Request) => {
   if (!INTERNAL_SECRET || req.headers.get("x-snag-internal-secret") !== INTERNAL_SECRET) {
     return new Response("Forbidden", { status: 403 });
   }
 
-  const { event, snag_id } = (await req.json()) as { event: Event; snag_id: string };
+  const { event, snag_id, rca_id } = (await req.json()) as {
+    event: Event;
+    snag_id: string;
+    rca_id?: string;
+  };
 
   const { data: snag } = await supabase.from("snags").select("*").eq("id", snag_id).maybeSingle();
   if (!snag) return new Response("ok");
 
-  const link = `${APP_URL}/snag/${snag_id}`;
+  const link = `${APP_URL}/snags/${snag_id}`;
+  const rcaLink = `${APP_URL}/snags/${snag_id}/rca`;
 
   if (event === "serious_created") {
     const { data: members } = await supabase
@@ -66,14 +84,10 @@ Deno.serve(async (req: Request) => {
       `A ${snag.kind} was just reported.\n\n${snag.description ?? ""}\n\nSee it here: ${link}`
     );
   } else if (event === "niggle_assigned" && snag.owner_id) {
-    const { data: owner } = await supabase
-      .from("profiles")
-      .select("email")
-      .eq("id", snag.owner_id)
-      .maybeSingle();
-    if (owner?.email) {
+    const email = await emailOf(snag.owner_id);
+    if (email) {
       await sendEmail(
-        [owner.email],
+        [email],
         `You've been assigned a snag (${snag.reference})`,
         `You're the owner of ${snag.reference}: ${snag.description ?? "(see photo)"}\n\nSort it here: ${link}`
       );
@@ -98,19 +112,52 @@ Deno.serve(async (req: Request) => {
       }\n\nSee it here: ${link}`
     );
   } else if (event === "snag_sorted") {
-    const { data: reporter } = await supabase
-      .from("profiles")
-      .select("email")
-      .eq("id", snag.reporter_id)
-      .maybeSingle();
-    if (reporter?.email) {
+    const email = await emailOf(snag.reporter_id);
+    if (email) {
       await sendEmail(
-        [reporter.email],
+        [email],
         `Sorted — ${snag.reference}`,
         `The thing you flagged (${snag.reference}) is sorted.${
           snag.resolution_note ? `\n\n${snag.resolution_note}` : ""
         }\n\nSee it here: ${link}`
       );
+    }
+  } else if (event === "rca_assigned" || event === "rca_submitted" || event === "rca_rejected") {
+    if (!rca_id) return new Response("ok");
+    const { data: rca } = await supabase.from("snag_rca").select("*").eq("id", rca_id).maybeSingle();
+    if (!rca) return new Response("ok");
+
+    if (event === "rca_assigned") {
+      const email = await emailOf(rca.assigned_to);
+      if (email) {
+        await sendEmail(
+          [email],
+          `You've been asked to complete a Root Cause Analysis (${snag.reference})`,
+          `A 5-Whys Root Cause Analysis on ${snag.reference} has been delegated to you.\n\n${
+            snag.description ?? ""
+          }\n\nComplete it here: ${rcaLink}`
+        );
+      }
+    } else if (event === "rca_submitted") {
+      const email = await emailOf(rca.assigned_by);
+      if (email) {
+        await sendEmail(
+          [email],
+          `RCA submitted for review (${snag.reference})`,
+          `The Root Cause Analysis on ${snag.reference} has been submitted and is waiting for your review.\n\nReview it here: ${rcaLink}`
+        );
+      }
+    } else {
+      const email = await emailOf(rca.assigned_to);
+      if (email) {
+        await sendEmail(
+          [email],
+          `RCA sent back for another look (${snag.reference})`,
+          `Your Root Cause Analysis on ${snag.reference} was sent back.${
+            rca.rejection_note ? `\n\nNote from the reviewer: ${rca.rejection_note}` : ""
+          }\n\nPick it up here: ${rcaLink}`
+        );
+      }
     }
   }
 

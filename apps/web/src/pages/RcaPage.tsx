@@ -32,8 +32,11 @@ export default function RcaPage() {
   );
   const [rejectNote, setRejectNote] = useState('');
 
+  const rcaOpen = rca != null && !['accepted', 'cancelled'].includes(rca.status);
+  const needAssigneeList = canEdit && rca?.status !== 'accepted';
+
   useEffect(() => {
-    if (!snag || !canEdit) return;
+    if (!snag || !needAssigneeList) return;
     async function loadAssignees() {
       const [memberRes, supervisorRes, adminRes] = await Promise.all([
         supabase.from('site_members').select('user_id').eq('site_id', snag!.site_id),
@@ -53,7 +56,7 @@ export default function RcaPage() {
       setAssignees(profiles ?? []);
     }
     loadAssignees();
-  }, [snag, canEdit]);
+  }, [snag, needAssigneeList]);
 
   // Seed the form from saved steps; pre-fill Why 1 from the snag
   // description, and chain Answer N -> Why N+1 (both editable) — this is
@@ -180,6 +183,25 @@ export default function RcaPage() {
     }, 'Sent back to the assignee with your note.');
   }
 
+  async function handleReassign(e: React.FormEvent) {
+    e.preventDefault();
+    if (!rca || !assignee) return;
+    await run('reassignRca', async () => {
+      await rpcOrThrow(supabase.rpc('reassign_rca', { p_rca_id: rca.id, p_new_assignee_id: assignee }));
+      setAssignee('');
+      await reload();
+    }, 'RCA reassigned — the new assignee has been emailed.');
+  }
+
+  async function handleCancel() {
+    if (!rca) return;
+    if (!window.confirm('Cancel this RCA? The snag returns to sorted; a new RCA can be assigned later.')) return;
+    await run('cancelRca', async () => {
+      await rpcOrThrow(supabase.rpc('cancel_rca', { p_rca_id: rca.id }));
+      await reload();
+    }, 'RCA cancelled — the snag is back to sorted.');
+  }
+
   if (snagLoading || rcaLoading) return <p className="meta">Loading RCA…</p>;
   if (!snag) {
     return (
@@ -219,8 +241,8 @@ export default function RcaPage() {
         {notice && <div className="success-banner">{notice}</div>}
       </div>
 
-      {/* No RCA yet: assign form (supervisors, sorted snags only) */}
-      {!rca && (
+      {/* No RCA yet (or last one cancelled): assign form (supervisors, sorted snags only) */}
+      {(!rca || rca.status === 'cancelled') && (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
           {canEdit && snag.status === 'sorted' ? (
             <form onSubmit={handleAssign} style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
@@ -306,6 +328,36 @@ export default function RcaPage() {
               Send back
             </button>
           </form>
+        </div>
+      )}
+
+      {/* Supervisor: reassign / cancel an unfinished RCA */}
+      {canEdit && rcaOpen && (
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+          <strong>Reassign or cancel</strong>
+          {rca!.status !== 'submitted' && (
+            <form onSubmit={handleReassign} style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+              <select
+                className="input"
+                style={{ flex: 1 }}
+                value={assignee}
+                onChange={(e) => setAssignee(e.target.value)}
+              >
+                <option value="">Reassign to…</option>
+                {assignees
+                  .filter((m) => m.id !== rca!.assigned_to)
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>{m.name || m.email}</option>
+                  ))}
+              </select>
+              <button className="btn-secondary" type="submit" disabled={busy || !assignee}>
+                Reassign
+              </button>
+            </form>
+          )}
+          <button className="btn-secondary" onClick={handleCancel} disabled={busy}>
+            Cancel RCA (snag returns to sorted)
+          </button>
         </div>
       )}
     </div>

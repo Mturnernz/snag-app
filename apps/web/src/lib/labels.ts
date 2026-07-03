@@ -36,6 +36,7 @@ export const RCA_STATUS_LABELS: Record<Enums<'rca_status'>, string> = {
   submitted: 'Awaiting review',
   accepted: 'Accepted',
   rejected: 'Sent back',
+  cancelled: 'Cancelled',
 };
 
 export const DEBRIEF_FORMAT_LABELS: Record<Enums<'debrief_format'>, string> = {

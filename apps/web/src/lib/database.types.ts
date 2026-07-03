@@ -1071,6 +1071,7 @@ export type Database = {
       }
       can_edit_site: { Args: { p_site_id: string }; Returns: boolean }
       can_view_site: { Args: { p_site_id: string }; Returns: boolean }
+      cancel_rca: { Args: { p_rca_id: string }; Returns: undefined }
       complete_checklist_step: {
         Args: {
           p_snag_id: string
@@ -1167,6 +1168,10 @@ export type Database = {
       record_investigation_export: {
         Args: { p_file_path: string; p_snag_id: string }
         Returns: string
+      }
+      reassign_rca: {
+        Args: { p_new_assignee_id: string; p_rca_id: string }
+        Returns: undefined
       }
       reject_rca: {
         Args: { p_rca_id: string; p_rejection_note: string }
@@ -1314,6 +1319,7 @@ export type Database = {
         | "submitted"
         | "accepted"
         | "rejected"
+        | "cancelled"
       snag_kind: "fixit" | "improvement" | "hazard" | "incident"
       snag_severity: "minor" | "moderate" | "injury" | "critical"
       snag_status:
@@ -1466,6 +1472,7 @@ export const Constants = {
         "submitted",
         "accepted",
         "rejected",
+        "cancelled",
       ],
       snag_kind: ["fixit", "improvement", "hazard", "incident"],
       snag_severity: ["minor", "moderate", "injury", "critical"],

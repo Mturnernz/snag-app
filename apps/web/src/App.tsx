@@ -5,6 +5,9 @@ import LoginPage from './pages/LoginPage';
 import InvitePage from './pages/InvitePage';
 import SnagListPage from './pages/SnagListPage';
 import SnagDetailPage from './pages/SnagDetailPage';
+import RcaPage from './pages/RcaPage';
+import DebriefListPage from './pages/DebriefListPage';
+import DebriefPage from './pages/DebriefPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { loading, session } = useSession();
@@ -40,6 +43,9 @@ export default function App() {
       >
         <Route index element={<SnagListPage />} />
         <Route path="snags/:id" element={<SnagDetailPage />} />
+        <Route path="snags/:id/rca" element={<RcaPage />} />
+        <Route path="snags/:id/debriefs" element={<DebriefListPage />} />
+        <Route path="snags/:id/debriefs/:debriefId" element={<DebriefPage />} />
         <Route path="snag/:id" element={<LegacySnagRedirect />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

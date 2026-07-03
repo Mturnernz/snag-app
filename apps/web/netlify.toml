@@ -1,0 +1,13 @@
+# Netlify site for the Snagv1 web app.
+# Site settings: base directory = apps/web (this file is then picked up).
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -319,7 +319,7 @@ export default function DebriefPage() {
               </div>
             ))}
             <button
-              className="btn-secondary"
+              className="btn-secondary self-start"
               type="submit"
               disabled={busy || hotFindings.every((f) => !f.trim())}
             >
@@ -351,7 +351,7 @@ export default function DebriefPage() {
               value={findingText}
               onChange={(e) => setFindingText(e.target.value)}
             />
-            <button className="btn-secondary" type="submit" disabled={busy || !findingText.trim()}>
+            <button className="btn-secondary self-start" type="submit" disabled={busy || !findingText.trim()}>
               Add finding
             </button>
           </form>
@@ -470,7 +470,7 @@ export default function DebriefPage() {
               value={lessonText}
               onChange={(e) => setLessonText(e.target.value)}
             />
-            <button className="btn-secondary" type="submit" disabled={busy || !lessonText.trim()}>
+            <button className="btn-secondary self-start" type="submit" disabled={busy || !lessonText.trim()}>
               Add lesson
             </button>
           </form>

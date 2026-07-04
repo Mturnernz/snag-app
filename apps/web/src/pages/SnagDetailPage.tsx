@@ -415,7 +415,7 @@ export default function SnagDetailPage() {
                   value={witnessText}
                   onChange={(e) => setWitnessText(e.target.value)}
                 />
-                <button className="btn-secondary" type="submit" disabled={busy || !witnessName.trim() || !witnessText.trim()}>
+                <button className="btn-secondary self-start" type="submit" disabled={busy || !witnessName.trim() || !witnessText.trim()}>
                   Add statement
                 </button>
               </form>
@@ -441,7 +441,7 @@ export default function SnagDetailPage() {
                   value={evidenceCaption}
                   onChange={(e) => setEvidenceCaption(e.target.value)}
                 />
-                <button className="btn-secondary" type="submit" disabled={busy || !evidenceFile}>
+                <button className="btn-secondary self-start" type="submit" disabled={busy || !evidenceFile}>
                   Add evidence
                 </button>
               </form>
@@ -468,7 +468,7 @@ export default function SnagDetailPage() {
                   onChange={(e) => setRootCauseText(e.target.value)}
                   rows={4}
                 />
-                <button className="btn-secondary" type="submit" disabled={busy || !rootCauseText.trim()}>
+                <button className="btn-secondary self-start" type="submit" disabled={busy || !rootCauseText.trim()}>
                   Save root cause
                 </button>
               </form>
@@ -489,7 +489,7 @@ export default function SnagDetailPage() {
             ) : (
               record.actions.map((a) => (
                 <div key={a.id} className="list-row">
-                  <span>
+                  <span className={a.status === 'done' ? 'done-item' : undefined}>
                     {a.status === 'done' ? '✓ ' : ''}{a.description}
                     <span className="meta" style={{ marginLeft: 8 }}>
                       {memberName(a.owner_id)} · due {formatDate(a.due_date)}
@@ -526,7 +526,7 @@ export default function SnagDetailPage() {
                   />
                 </div>
                 <button
-                  className="btn-secondary"
+                  className="btn-secondary self-start"
                   type="submit"
                   disabled={busy || !actionText.trim() || !actionOwner || !actionDue}
                 >

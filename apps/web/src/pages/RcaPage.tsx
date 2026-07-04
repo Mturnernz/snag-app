@@ -442,7 +442,7 @@ export default function RcaPage() {
               onChange={(e) => setRejectNote(e.target.value)}
               rows={2}
             />
-            <button className="btn-secondary" type="submit" disabled={busy || !rejectNote.trim()}>
+            <button className="btn-secondary self-start" type="submit" disabled={busy || !rejectNote.trim()}>
               Send back
             </button>
           </form>

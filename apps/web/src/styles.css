@@ -134,6 +134,16 @@ textarea.input {
   font-style: italic;
 }
 
+/* A button at the end of a stacked (column-flex) form shouldn't stretch
+   to full width — only the page's primary action gets that weight. */
+.self-start {
+  align-self: flex-start;
+}
+
+.done-item {
+  color: var(--color-text-muted);
+}
+
 .pill {
   display: inline-block;
   padding: 2px 8px;

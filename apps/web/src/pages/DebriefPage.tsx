@@ -6,6 +6,7 @@ import { DEBRIEF_FORMAT_LABELS, formatDate, formatDateTime } from '../lib/labels
 import { useSnag } from '../hooks/useSnag';
 import { useDebrief } from '../hooks/useDebriefs';
 import { useMembers } from '../hooks/useMembers';
+import { downloadWorksheet, importWorksheet } from '../lib/worksheet';
 
 // Hot debriefs structure the findings as three prompts; formal debriefs
 // keep free-form findings. Both feed add_debrief_finding.
@@ -35,6 +36,15 @@ export default function DebriefPage() {
   const [hotFindings, setHotFindings] = useState<string[]>(['', '', '']);
   const [attendeeId, setAttendeeId] = useState('');
   const [lessonText, setLessonText] = useState('');
+
+  // Worksheet round-trip (formal debriefs): parsed values wait here for
+  // review — each is saved through the normal RPC, or dismissed. Attendee
+  // names from paper can't be auto-matched to profiles, so they're shown
+  // for manual adding.
+  const [pendingFindings, setPendingFindings] = useState<string[]>([]);
+  const [pendingLessons, setPendingLessons] = useState<string[]>([]);
+  const [worksheetAttendees, setWorksheetAttendees] = useState<string[]>([]);
+  const [worksheetBanner, setWorksheetBanner] = useState<string | null>(null);
 
   async function run(action: string, fn: () => Promise<unknown>, doneMessage?: string) {
     setBusy(true);
@@ -112,6 +122,56 @@ export default function DebriefPage() {
     });
   }
 
+  async function handleDownloadWorksheet() {
+    await run('worksheet', () => downloadWorksheet(snag!.id, 'debrief'));
+  }
+
+  async function handleUploadWorksheet(file: File) {
+    await run('worksheetImport', async () => {
+      const { parsed } = await importWorksheet(snag!.id, 'debrief', file);
+      const findingsFound = Object.entries(parsed)
+        .filter(([k, v]) => /^finding_[1-6]$/.test(k) && v.trim())
+        .map(([, v]) => v.trim());
+      const lessonsFound = Object.entries(parsed)
+        .filter(([k, v]) => /^lesson_[1-6]$/.test(k) && v.trim())
+        .map(([, v]) => v.trim());
+      const attendeesFound = Object.entries(parsed)
+        .filter(([k, v]) => /^attendee_[1-8]$/.test(k) && v.trim())
+        .map(([, v]) => v.trim());
+
+      if (findingsFound.length === 0 && lessonsFound.length === 0 && attendeesFound.length === 0) {
+        setWorksheetBanner(
+          'Worksheet saved to the record (see Evidence on the snag). No typed fields were found — type the findings and lessons in below.'
+        );
+        return;
+      }
+      setPendingFindings(findingsFound);
+      setPendingLessons(lessonsFound);
+      setWorksheetAttendees(attendeesFound);
+      setWorksheetBanner(
+        'Loaded from your uploaded worksheet — check each item, then save the ones to keep. The PDF itself is on the record as evidence.'
+      );
+    });
+  }
+
+  async function savePendingFinding(index: number) {
+    await addFinding(pendingFindings[index]);
+    setPendingFindings((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function savePendingLesson(index: number) {
+    const text = pendingLessons[index];
+    if (!debrief || !text.trim()) return;
+    await run('lesson', async () => {
+      await rpcOrThrow(supabase.rpc('add_debrief_lesson', {
+        p_debrief_id: debrief.id,
+        p_lesson_text: text.trim(),
+      }));
+      await reloadLessons();
+    });
+    setPendingLessons((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleComplete() {
     if (!debrief) return;
     if (!window.confirm('Complete this debrief? It can’t be edited afterwards — start a new one if more comes up.')) return;
@@ -161,6 +221,43 @@ export default function DebriefPage() {
         {notice && <div className="success-banner">{notice}</div>}
       </div>
 
+      {/* Worksheet round-trip (formal debriefs) */}
+      {editable && debrief.format === 'formal' && (
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+          <strong>Prefer paper or a PDF reader?</strong>
+          <p className="meta" style={{ margin: 0 }}>
+            Download the worksheet, run the debrief off it, then upload it here. The
+            upload always goes on the record as evidence; typed findings and lessons
+            wait below for you to check and save.
+          </p>
+          {worksheetBanner && <div className="success-banner">{worksheetBanner}</div>}
+          {worksheetAttendees.length > 0 && (
+            <p className="meta" style={{ margin: 0 }}>
+              Attendees on the worksheet: {worksheetAttendees.join(', ')} — add them from
+              the attendee picker below.
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button className="btn-secondary" onClick={handleDownloadWorksheet} disabled={busy}>
+              Download worksheet (PDF)
+            </button>
+            <label className="btn-secondary" style={{ display: 'inline-flex', alignItems: 'center' }}>
+              Upload completed worksheet
+              <input
+                type="file"
+                accept="application/pdf"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadWorksheet(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
       {/* Findings */}
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
         <strong>Findings</strong>
@@ -200,6 +297,21 @@ export default function DebriefPage() {
             </button>
           </form>
         )}
+        {editable && pendingFindings.map((text, i) => (
+          <div key={`pending-${i}`} className="error-banner" style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ flex: 1 }}>From worksheet: “{text}”</span>
+            <button type="button" className="btn-secondary" onClick={() => savePendingFinding(i)} disabled={busy}>
+              Save finding
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setPendingFindings((prev) => prev.filter((_, j) => j !== i))}
+            >
+              Discard
+            </button>
+          </div>
+        ))}
         {editable && debrief.format === 'formal' && (
           <form onSubmit={handleFormalFinding} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
             <textarea
@@ -261,6 +373,21 @@ export default function DebriefPage() {
             </div>
           ))
         )}
+        {editable && pendingLessons.map((text, i) => (
+          <div key={`pending-${i}`} className="error-banner" style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ flex: 1 }}>From worksheet: “{text}”</span>
+            <button type="button" className="btn-secondary" onClick={() => savePendingLesson(i)} disabled={busy}>
+              Save lesson
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setPendingLessons((prev) => prev.filter((_, j) => j !== i))}
+            >
+              Discard
+            </button>
+          </div>
+        ))}
         {editable && (
           <form onSubmit={handleAddLesson} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
             <textarea

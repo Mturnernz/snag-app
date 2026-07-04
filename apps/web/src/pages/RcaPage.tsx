@@ -7,6 +7,22 @@ import { useSession } from '../hooks/useSession';
 import { useSnag } from '../hooks/useSnag';
 import { useRca } from '../hooks/useRca';
 import { useMembers } from '../hooks/useMembers';
+import { downloadWorksheet, importWorksheet } from '../lib/worksheet';
+
+// A worksheet value that clashes with already-typed text: the user picks,
+// nothing is overwritten silently.
+function ConflictPicker({ worksheetValue, onPick }: { worksheetValue: string; onPick: (useWorksheet: boolean) => void }) {
+  return (
+    <div
+      className="error-banner"
+      style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', flexWrap: 'wrap' }}
+    >
+      <span style={{ flex: 1 }}>Worksheet says: “{worksheetValue}”</span>
+      <button type="button" className="btn-secondary" onClick={() => onPick(true)}>Use worksheet</button>
+      <button type="button" className="btn-secondary" onClick={() => onPick(false)}>Keep mine</button>
+    </div>
+  );
+}
 
 // The focused page an RCA assignee lands on (deep-linked from email).
 // Shows only what the RCA needs — the full investigation stays on SnagDetail.
@@ -31,6 +47,12 @@ export default function RcaPage() {
     Array.from({ length: 5 }, () => ({ why: '', answer: '' }))
   );
   const [rejectNote, setRejectNote] = useState('');
+
+  // Worksheet round-trip: values read from an uploaded PDF that CONFLICT
+  // with what's already typed — the user picks per field, never a silent
+  // overwrite. Keyed "why_1".."answer_5".
+  const [worksheetConflicts, setWorksheetConflicts] = useState<Record<string, string>>({});
+  const [worksheetBanner, setWorksheetBanner] = useState<string | null>(null);
 
   const rcaOpen = rca != null && !['accepted', 'cancelled'].includes(rca.status);
   const needAssigneeList = canEdit && rca?.status !== 'accepted';
@@ -202,6 +224,59 @@ export default function RcaPage() {
     }, 'RCA cancelled — the snag is back to sorted.');
   }
 
+  async function handleDownloadWorksheet() {
+    await run('worksheet', () => downloadWorksheet(snag!.id, 'rca'));
+  }
+
+  async function handleUploadWorksheet(file: File) {
+    await run('worksheetImport', async () => {
+      const { parsed } = await importWorksheet(snag!.id, 'rca', file);
+      const hasFields = Object.keys(parsed).some((k) => /^(why|answer)_[1-5]$/.test(k));
+      if (!hasFields) {
+        setWorksheetBanner(
+          'Worksheet saved to the record (see Evidence on the snag). No typed fields were found — type the answers into the form below.'
+        );
+        return;
+      }
+      const conflicts: Record<string, string> = {};
+      setSteps((prev) =>
+        prev.map((step, i) => {
+          const next = { ...step };
+          for (const field of ['why', 'answer'] as const) {
+            const value = parsed[`${field}_${i + 1}`]?.trim();
+            if (!value) continue;
+            if (!next[field].trim()) {
+              next[field] = value;
+            } else if (next[field].trim() !== value) {
+              conflicts[`${field}_${i + 1}`] = value;
+            }
+          }
+          return next;
+        })
+      );
+      setWorksheetConflicts(conflicts);
+      setWorksheetBanner(
+        Object.keys(conflicts).length > 0
+          ? 'Loaded from your uploaded worksheet — some fields already had different text; pick which version to keep, check each answer, then save.'
+          : 'Loaded from your uploaded worksheet — check each answer, then save. The PDF itself is on the record as evidence.'
+      );
+    });
+  }
+
+  function resolveConflict(key: string, useWorksheet: boolean) {
+    const value = worksheetConflicts[key];
+    if (useWorksheet && value) {
+      const [field, indexStr] = key.split('_') as ['why' | 'answer', string];
+      const index = Number(indexStr) - 1;
+      setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)));
+    }
+    setWorksheetConflicts((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
   if (snagLoading || rcaLoading) return <p className="meta">Loading RCA…</p>;
   if (!snag) {
     return (
@@ -276,6 +351,37 @@ export default function RcaPage() {
         </div>
       )}
 
+      {/* Worksheet round-trip */}
+      {rca && editable && (
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+          <strong>Prefer paper or a PDF reader?</strong>
+          <p className="meta" style={{ margin: 0 }}>
+            Download the worksheet, fill it in (typed or by hand), then upload it here.
+            The upload always goes on the record as evidence; typed answers pre-fill
+            the form below for you to check and save.
+          </p>
+          {worksheetBanner && <div className="success-banner">{worksheetBanner}</div>}
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button className="btn-secondary" onClick={handleDownloadWorksheet} disabled={busy}>
+              Download worksheet (PDF)
+            </button>
+            <label className="btn-secondary" style={{ display: 'inline-flex', alignItems: 'center' }}>
+              Upload completed worksheet
+              <input
+                type="file"
+                accept="application/pdf"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadWorksheet(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
       {/* 5-Whys form */}
       {rca && (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
@@ -289,6 +395,12 @@ export default function RcaPage() {
                 onChange={(e) => updateStep(i, 'why', e.target.value)}
                 disabled={!editable}
               />
+              {worksheetConflicts[`why_${i + 1}`] && (
+                <ConflictPicker
+                  worksheetValue={worksheetConflicts[`why_${i + 1}`]}
+                  onPick={(useWorksheet) => resolveConflict(`why_${i + 1}`, useWorksheet)}
+                />
+              )}
               <textarea
                 className="input"
                 placeholder="Because…"
@@ -298,6 +410,12 @@ export default function RcaPage() {
                 onBlur={() => editable && handleSaveStep(i)}
                 disabled={!editable}
               />
+              {worksheetConflicts[`answer_${i + 1}`] && (
+                <ConflictPicker
+                  worksheetValue={worksheetConflicts[`answer_${i + 1}`]}
+                  onPick={(useWorksheet) => resolveConflict(`answer_${i + 1}`, useWorksheet)}
+                />
+              )}
             </div>
           ))}
 

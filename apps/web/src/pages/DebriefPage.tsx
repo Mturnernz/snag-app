@@ -5,6 +5,7 @@ import { friendlyError } from '../lib/errors';
 import { DEBRIEF_FORMAT_LABELS, formatDate, formatDateTime } from '../lib/labels';
 import { useSnag } from '../hooks/useSnag';
 import { useDebrief } from '../hooks/useDebriefs';
+import { useRca } from '../hooks/useRca';
 import { useMembers } from '../hooks/useMembers';
 import { downloadWorksheet, importWorksheet } from '../lib/worksheet';
 
@@ -27,6 +28,7 @@ export default function DebriefPage() {
     loading,
   } = useDebrief(debriefId);
   const { members, memberName } = useMembers();
+  const { rca } = useRca(id);
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -45,6 +47,12 @@ export default function DebriefPage() {
   const [pendingLessons, setPendingLessons] = useState<string[]>([]);
   const [worksheetAttendees, setWorksheetAttendees] = useState<string[]>([]);
   const [worksheetBanner, setWorksheetBanner] = useState<string | null>(null);
+
+  // "Make this a corrective action" — the existing corrective-action form,
+  // inline, pre-filled with the lesson text.
+  const [actionFromLesson, setActionFromLesson] = useState<{ lessonId: string; text: string } | null>(null);
+  const [actionOwner, setActionOwner] = useState('');
+  const [actionDue, setActionDue] = useState('');
 
   async function run(action: string, fn: () => Promise<unknown>, doneMessage?: string) {
     setBusy(true);
@@ -172,9 +180,31 @@ export default function DebriefPage() {
     setPendingLessons((prev) => prev.filter((_, i) => i !== index));
   }
 
+  async function handleCreateActionFromLesson(e: React.FormEvent) {
+    e.preventDefault();
+    if (!snag || !actionFromLesson || !actionOwner || !actionDue) return;
+    await run('actionFromLesson', async () => {
+      await rpcOrThrow(supabase.rpc('create_corrective_action', {
+        p_snag_id: snag.id,
+        p_description: actionFromLesson.text,
+        p_owner_id: actionOwner,
+        p_due_date: actionDue,
+      }));
+      setActionFromLesson(null);
+      setActionOwner('');
+      setActionDue('');
+    }, 'Corrective action created from the lesson — it’s on the snag’s action list.');
+  }
+
   async function handleComplete() {
     if (!debrief) return;
-    if (!window.confirm('Complete this debrief? It can’t be edited afterwards — start a new one if more comes up.')) return;
+    // Soft warning, not a block: completing a formal debrief before the
+    // root cause is accepted means the lessons may still change.
+    const warnNoRca =
+      debrief.format === 'formal' && rca?.status !== 'accepted'
+        ? 'The root cause hasn’t been accepted yet — lessons may change. Complete anyway?\n\n'
+        : '';
+    if (!window.confirm(`${warnNoRca}Complete this debrief? It can’t be edited afterwards — start a new one if more comes up.`)) return;
     await run('completeDebrief', async () => {
       await rpcOrThrow(supabase.rpc('complete_debrief', { p_debrief_id: debrief.id }));
       await reloadDebrief();
@@ -370,6 +400,49 @@ export default function DebriefPage() {
             <div key={l.id} style={{ borderLeft: '3px solid var(--color-border)', paddingLeft: 12 }}>
               <p style={{ margin: 0 }}>{l.lesson_text}</p>
               <span className="meta">{memberName(l.created_by)} · {formatDateTime(l.created_at)}</span>
+              {canEdit && (
+                actionFromLesson?.lessonId === l.id ? (
+                  <form
+                    onSubmit={handleCreateActionFromLesson}
+                    style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 8, flexWrap: 'wrap' }}
+                  >
+                    <select
+                      className="input"
+                      style={{ flex: 1, minWidth: 140 }}
+                      value={actionOwner}
+                      onChange={(e) => setActionOwner(e.target.value)}
+                    >
+                      <option value="">Owner…</option>
+                      {members.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name || m.email}</option>
+                      ))}
+                    </select>
+                    <input
+                      className="input"
+                      style={{ flex: 1, minWidth: 140 }}
+                      type="date"
+                      value={actionDue}
+                      onChange={(e) => setActionDue(e.target.value)}
+                    />
+                    <button className="btn-secondary" type="submit" disabled={busy || !actionOwner || !actionDue}>
+                      Create action
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => setActionFromLesson(null)}>
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <div style={{ marginTop: 6 }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setActionFromLesson({ lessonId: l.id, text: l.lesson_text })}
+                    >
+                      Make this a corrective action
+                    </button>
+                  </div>
+                )
+              )}
             </div>
           ))
         )}

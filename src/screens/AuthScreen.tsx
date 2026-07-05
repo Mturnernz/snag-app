@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -13,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { signInWithEmail, signUpWithEmail } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
+import Button from '../components/Button';
 
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
@@ -86,20 +86,13 @@ export default function AuthScreen() {
             </Text>
           )}
 
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
+          <Button
+            label={mode === 'signin' ? 'Sign In' : 'Create Account'}
             onPress={handleSubmit}
-            disabled={loading}
-            activeOpacity={0.85}
-          >
-            {loading ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.buttonLabel}>
-                {mode === 'signin' ? 'Sign In' : 'Create Account'}
-              </Text>
-            )}
-          </TouchableOpacity>
+            loading={loading}
+            fullWidth
+            style={styles.submitButton}
+          />
         </View>
 
         <TouchableOpacity onPress={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setMessage(null); }}>
@@ -126,7 +119,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xl,
   },
   appName: {
-    fontSize: 40,
+    fontSize: Typography.xxxl + 8,
     fontWeight: Typography.bold,
     color: Colors.primary,
     textAlign: 'center',
@@ -158,28 +151,15 @@ const styles = StyleSheet.create({
     borderRadius: Radius.button,
   },
   messageError: {
-    color: '#DC2626',
-    backgroundColor: '#FEF2F2',
+    color: Colors.danger,
+    backgroundColor: Colors.priority.highBg,
   },
   messageSuccess: {
-    color: '#16A34A',
-    backgroundColor: '#F0FDF4',
+    color: Colors.success,
+    backgroundColor: Colors.successBg,
   },
-  button: {
-    height: MIN_TOUCH_TARGET + 8,
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.button,
-    alignItems: 'center',
-    justifyContent: 'center',
+  submitButton: {
     marginTop: Spacing.sm,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonLabel: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.white,
   },
   switchText: {
     fontSize: Typography.sm,

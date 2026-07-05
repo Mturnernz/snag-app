@@ -12,6 +12,7 @@ import RootNavigator from './src/navigation';
 import AuthScreen from './src/screens/AuthScreen';
 import OrgSetupScreen from './src/screens/OrgSetupScreen';
 import AdminSetupScreen from './src/screens/AdminSetupScreen';
+import { ToastProvider } from './src/hooks/useToast';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -65,7 +66,9 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <AuthScreen />
+        <ToastProvider>
+          <AuthScreen />
+        </ToastProvider>
       </SafeAreaProvider>
     );
   }
@@ -75,16 +78,18 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <OrgSetupScreen
-          userId={session.user.id}
-          onComplete={async () => {
-            const p = await getProfile(session.user.id);
-            setProfile(p);
-            if (p?.role === 'admin') {
-              setIsNewAdmin(true);
-            }
-          }}
-        />
+        <ToastProvider>
+          <OrgSetupScreen
+            userId={session.user.id}
+            onComplete={async () => {
+              const p = await getProfile(session.user.id);
+              setProfile(p);
+              if (p?.role === 'admin') {
+                setIsNewAdmin(true);
+              }
+            }}
+          />
+        </ToastProvider>
       </SafeAreaProvider>
     );
   }
@@ -94,13 +99,15 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <AdminSetupScreen
-          profile={profile}
-          onDone={(name) => {
-            if (name) setProfile(p => p ? { ...p, name } : p);
-            setIsNewAdmin(false);
-          }}
-        />
+        <ToastProvider>
+          <AdminSetupScreen
+            profile={profile}
+            onDone={(name) => {
+              if (name) setProfile(p => p ? { ...p, name } : p);
+              setIsNewAdmin(false);
+            }}
+          />
+        </ToastProvider>
       </SafeAreaProvider>
     );
   }
@@ -110,7 +117,9 @@ export default function App() {
     <SafeAreaProvider>
       <NavigationContainer>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <RootNavigator userRole={profile.role} />
+        <ToastProvider>
+          <RootNavigator userRole={profile.role} />
+        </ToastProvider>
       </NavigationContainer>
     </SafeAreaProvider>
   );

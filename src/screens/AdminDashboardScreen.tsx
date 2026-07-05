@@ -6,7 +6,6 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Clipboard,
   RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -15,22 +14,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Profile, Organisation, UserRole, ROLE_LABELS, RootStackParamList } from '../types';
 import { supabase, getOrgMembers, updateMemberRole } from '../lib/supabase';
-import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Spacing, Typography, Radius } from '../constants/theme';
+import Card from '../components/Card';
+import Avatar from '../components/Avatar';
+import Chip from '../components/Chip';
+import Icon from '../components/Icon';
+import EmptyState from '../components/EmptyState';
+import InviteCodeCard from '../components/InviteCodeCard';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 const ROLES: UserRole[] = ['worker', 'manager', 'admin'];
-
-const ROLE_COLORS: Record<UserRole, { active: string; text: string }> = {
-  worker:  { active: Colors.border,        text: Colors.textSecondary },
-  manager: { active: Colors.primaryLight,  text: Colors.primary },
-  admin:   { active: '#FEF3C7',            text: '#B45309' },
-};
-
-function initials(name: string, email: string): string {
-  const src = name.trim() || email;
-  return src.split(/[\s@]/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
-}
+const ROLE_OPTIONS = ROLES.map((r) => ({ key: r, label: ROLE_LABELS[r] }));
 
 function MemberCard({
   member,
@@ -47,13 +42,11 @@ function MemberCard({
   updatingRole: boolean;
   onRoleChange: (role: UserRole) => void;
 }) {
+  const canEdit = isAdmin && !isSelf;
   return (
-    <View style={styles.memberCard}>
-      {/* Avatar + info row */}
+    <Card variant="elevated" style={styles.memberCard}>
       <View style={styles.memberTop}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials(member.name, member.email)}</Text>
-        </View>
+        <Avatar name={member.name} email={member.email} size={40} />
         <View style={styles.memberInfo}>
           <View style={styles.memberNameRow}>
             <Text style={styles.memberName} numberOfLines={1}>
@@ -69,39 +62,16 @@ function MemberCard({
         </View>
       </View>
 
-      {/* Role selector */}
-      <View style={styles.roleSelector}>
-        {updatingRole ? (
-          <ActivityIndicator size="small" color={Colors.primary} style={styles.roleSpinner} />
-        ) : (
-          ROLES.map(role => {
-            const active = member.role === role;
-            const colors = ROLE_COLORS[role];
-            const canTap = isAdmin && !isSelf;
-            return (
-              <TouchableOpacity
-                key={role}
-                style={[
-                  styles.roleBtn,
-                  active && { backgroundColor: colors.active },
-                  !active && styles.roleBtnInactive,
-                ]}
-                onPress={() => canTap && !active && onRoleChange(role)}
-                activeOpacity={canTap && !active ? 0.7 : 1}
-                disabled={!canTap || active}
-              >
-                <Text style={[
-                  styles.roleBtnText,
-                  active ? { color: colors.text, fontWeight: Typography.semibold } : undefined,
-                ]}>
-                  {ROLE_LABELS[role]}
-                </Text>
-              </TouchableOpacity>
-            );
-          })
-        )}
-      </View>
-    </View>
+      {updatingRole ? (
+        <ActivityIndicator size="small" color={Colors.primary} style={styles.roleSpinner} />
+      ) : canEdit ? (
+        <Chip options={ROLE_OPTIONS} value={member.role} onChange={onRoleChange} variant="segmented" />
+      ) : (
+        <View style={styles.roleReadout}>
+          <Text style={styles.roleReadoutText}>{ROLE_LABELS[member.role]}</Text>
+        </View>
+      )}
+    </Card>
   );
 }
 
@@ -115,7 +85,6 @@ export default function AdminDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingRole, setUpdatingRole] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -169,14 +138,6 @@ export default function AdminDashboardScreen() {
     setUpdatingRole(null);
   }
 
-  function handleCopyCode() {
-    const code = (currentUser?.organisation as Organisation | undefined)?.invite_code;
-    if (!code) return;
-    Clipboard.setString(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -190,7 +151,6 @@ export default function AdminDashboardScreen() {
   const orgName = org?.name ?? 'Your Organisation';
   const isAdmin = currentUser?.role === 'admin';
 
-  // Sort: admins first, then managers, then workers; alphabetically within each group
   const sorted = [...members].sort((a, b) => {
     const ri = (r: UserRole) => ROLES.indexOf(r);
     if (ri(b.role) !== ri(a.role)) return ri(b.role) - ri(a.role);
@@ -209,7 +169,8 @@ export default function AdminDashboardScreen() {
           onPress={() => navigation.navigate('Reports')}
           activeOpacity={0.8}
         >
-          <Text style={styles.reportsBtnText}>Reports →</Text>
+          <Text style={styles.reportsBtnText}>Reports</Text>
+          <Icon name="chevron-forward" size="sm" color={Colors.primary} />
         </TouchableOpacity>
       </View>
 
@@ -218,25 +179,13 @@ export default function AdminDashboardScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
 
-        {/* Invite code */}
         {orgInviteCode && (
-          <View style={styles.inviteCard}>
-            <Text style={styles.sectionLabel}>ORGANISATION INVITE CODE</Text>
-            <View style={styles.inviteRow}>
-              <Text style={styles.inviteCode}>{orgInviteCode}</Text>
-              <TouchableOpacity style={styles.copyBtn} onPress={handleCopyCode} activeOpacity={0.7}>
-                <Text style={[styles.copyBtnText, copied && styles.copyBtnDone]}>
-                  {copied ? '✓ Copied' : '⧉ Copy'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.inviteHint}>
-              Share this code with colleagues — they'll join as Workers by default.
-            </Text>
-          </View>
+          <InviteCodeCard
+            code={orgInviteCode}
+            hint="Share this code with colleagues — they'll join as Workers by default."
+          />
         )}
 
-        {/* User access management */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionLabel}>MANAGE USER ACCESS</Text>
@@ -256,20 +205,11 @@ export default function AdminDashboardScreen() {
           ))}
 
           {members.length === 0 && (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>👥</Text>
-              <Text style={styles.emptyTitle}>No team members yet</Text>
-              <Text style={styles.emptyText}>
-                Share the invite code above with your team so they can join.
-              </Text>
-              {orgInviteCode && (
-                <TouchableOpacity style={styles.emptyAction} onPress={handleCopyCode} activeOpacity={0.85}>
-                  <Text style={styles.emptyActionText}>
-                    {copied ? '✓ Copied!' : `Copy Code: ${orgInviteCode}`}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <EmptyState
+              icon="people-outline"
+              title="No team members yet"
+              message="Share the invite code above with your team so they can join."
+            />
           )}
         </View>
 
@@ -290,7 +230,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
 
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -312,6 +251,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   reportsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     backgroundColor: Colors.primaryLight,
@@ -328,52 +270,6 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
   },
 
-  // Invite card
-  inviteCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.lg,
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  inviteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  inviteCode: {
-    fontSize: Typography.xl,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
-    letterSpacing: 4,
-  },
-  copyBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.background,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    minWidth: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-  },
-  copyBtnText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-  },
-  copyBtnDone: {
-    color: '#10B981',
-  },
-  inviteHint: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    lineHeight: 18,
-  },
-
-  // Section
   section: {
     gap: Spacing.sm,
   },
@@ -394,33 +290,13 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // Member card
   memberCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
     gap: Spacing.sm,
   },
   memberTop: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.md,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  avatarText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.bold,
-    color: Colors.primary,
   },
   memberInfo: {
     flex: 1,
@@ -464,65 +340,19 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // Role selector
-  roleSelector: {
-    flexDirection: 'row',
-    gap: Spacing.xs,
-  },
   roleSpinner: {
-    flex: 1,
-    height: MIN_TOUCH_TARGET - 16,
+    height: 38,
   },
-  roleBtn: {
-    flex: 1,
-    height: 32,
-    borderRadius: Radius.chip,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roleBtnInactive: {
-    backgroundColor: Colors.background,
-  },
-  roleBtnText: {
-    fontSize: Typography.xs,
-    color: Colors.textMuted,
-  },
-
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: Spacing.xl,
-    gap: Spacing.sm,
-  },
-  emptyIcon: {
-    fontSize: 40,
-    marginBottom: Spacing.xs,
-  },
-  emptyTitle: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  emptyText: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 18,
-    paddingHorizontal: Spacing.md,
-  },
-  emptyAction: {
-    marginTop: Spacing.sm,
-    backgroundColor: Colors.primary,
+  roleReadout: {
+    height: 38,
     borderRadius: Radius.button,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    minHeight: MIN_TOUCH_TARGET - 8,
+    backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emptyActionText: {
+  roleReadoutText: {
     fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.white,
+    fontWeight: Typography.medium,
+    color: Colors.textSecondary,
   },
 });

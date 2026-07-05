@@ -1,36 +1,42 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet, AppState } from 'react-native';
+import { StyleSheet, AppState } from 'react-native';
 
 import { RootStackParamList, MainTabParamList, UserRole } from '../types';
 import { Colors, Typography } from '../constants/theme';
 import { supabase } from '../lib/supabase';
+import Icon from '../components/Icon';
 
 import IssueListScreen from '../screens/IssueListScreen';
 import ReportIssueScreen from '../screens/ReportIssueScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import IssueDetailScreen from '../screens/IssueDetailScreen';
+import ManageIssueScreen from '../screens/ManageIssueScreen';
 import AdminDashboardScreen from '../screens/AdminDashboardScreen';
 import ReportsScreen from '../screens/ReportsScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
+import ReportIncidentDetailsScreen from '../screens/ReportIncidentDetailsScreen';
+import ReportIncidentReviewScreen from '../screens/ReportIncidentReviewScreen';
+import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 
 // ─── Tab bar icons ────────────────────────────────────────────────────────────
 
-function TabIcon({ label, focused }: { label: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    Issues: '☰',
-    Report: '＋',
-    Admin: '⚙',
-    Profile: '◯',
-  };
+const TAB_ICONS: Record<string, { active: React.ComponentProps<typeof Icon>['name']; inactive: React.ComponentProps<typeof Icon>['name'] }> = {
+  Report: { active: 'add-circle', inactive: 'add-circle-outline' },
+  Issues: { active: 'list', inactive: 'list-outline' },
+  Admin: { active: 'settings', inactive: 'settings-outline' },
+  Profile: { active: 'person-circle', inactive: 'person-circle-outline' },
+};
 
+function TabIcon({ label, focused }: { label: string; focused: boolean }) {
+  const icons = TAB_ICONS[label];
   return (
-    <View style={styles.tabIconContainer}>
-      <Text style={[styles.tabIconText, focused && styles.tabIconFocused]}>
-        {icons[label] ?? label[0]}
-      </Text>
-    </View>
+    <Icon
+      name={focused ? icons.active : icons.inactive}
+      size="lg"
+      color={focused ? Colors.primary : Colors.textMuted}
+    />
   );
 }
 
@@ -69,7 +75,7 @@ function MainTabNavigator({ userRole }: { userRole: UserRole }) {
 
   return (
     <Tab.Navigator
-      initialRouteName="Profile"
+      initialRouteName="Report"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: styles.tabBar,
@@ -81,13 +87,13 @@ function MainTabNavigator({ userRole }: { userRole: UserRole }) {
         ),
       })}
     >
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Report" component={ReportIssueScreen} />
       <Tab.Screen
         name="Issues"
         component={IssueListScreen}
         options={{ tabBarBadge: openIssueCount > 0 ? openIssueCount : undefined }}
       />
-      <Tab.Screen name="Report" component={ReportIssueScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
       {isAdminOrManager && (
         <Tab.Screen name="Admin" component={AdminDashboardScreen} />
       )}
@@ -101,26 +107,43 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator({ userRole }: { userRole: UserRole }) {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Main">
-        {() => <MainTabNavigator userRole={userRole} />}
-      </Stack.Screen>
-      <Stack.Screen
-        name="IssueDetail"
-        component={IssueDetailScreen}
-        options={{ presentation: 'card', animation: 'slide_from_right' }}
-      />
-      <Stack.Screen
-        name="Reports"
-        component={ReportsScreen}
-        options={{ presentation: 'card', animation: 'slide_from_right' }}
-      />
-      <Stack.Screen
-        name="Leaderboard"
-        component={LeaderboardScreen}
-        options={{ presentation: 'card', animation: 'slide_from_right' }}
-      />
-    </Stack.Navigator>
+    <IncidentDraftProvider>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Main">
+          {() => <MainTabNavigator userRole={userRole} />}
+        </Stack.Screen>
+        <Stack.Screen
+          name="IssueDetail"
+          component={IssueDetailScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="ManageIssue"
+          component={ManageIssueScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Reports"
+          component={ReportsScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Leaderboard"
+          component={LeaderboardScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="ReportIncidentDetails"
+          component={ReportIncidentDetailsScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="ReportIncidentReview"
+          component={ReportIncidentReviewScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+      </Stack.Navigator>
+    </IncidentDraftProvider>
   );
 }
 
@@ -138,16 +161,5 @@ const styles = StyleSheet.create({
   tabBarLabel: {
     fontSize: Typography.xs,
     fontWeight: Typography.medium,
-  },
-  tabIconContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabIconText: {
-    fontSize: 20,
-    color: Colors.textMuted,
-  },
-  tabIconFocused: {
-    color: Colors.primary,
   },
 });

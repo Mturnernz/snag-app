@@ -7,10 +7,11 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Issue } from '../types';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, Shadow, IconSize } from '../constants/theme';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
+import Icon from './Icon';
 
 interface Props {
   issue: Issue;
@@ -60,7 +61,7 @@ function IssueCard({ issue, onPress }: Props) {
         />
       ) : (
         <View style={styles.photoPlaceholder}>
-          <Text style={styles.photoPlaceholderIcon}>📷</Text>
+          <Icon name="camera-outline" size={IconSize.xl} color={Colors.textMuted} />
           <Text style={styles.photoPlaceholderText}>No photo</Text>
         </View>
       )}
@@ -88,10 +89,25 @@ function IssueCard({ issue, onPress }: Props) {
             {reporterName} · {timeAgo(issue.created_at)}
           </Text>
           <View style={styles.statsRow}>
-            <Text style={styles.stat}>💬 {commentCount}</Text>
-            <Text style={[styles.stat, voteScore > 0 ? styles.statPositive : voteScore < 0 ? styles.statNegative : null]}>
-              {voteScore > 0 ? '▲' : voteScore < 0 ? '▼' : '●'} {Math.abs(voteScore)}
-            </Text>
+            <View style={styles.statGroup}>
+              <Icon name="chatbubble-outline" size="sm" color={Colors.textMuted} />
+              <Text style={styles.stat}>{commentCount}</Text>
+            </View>
+            <View style={styles.statGroup}>
+              <Icon
+                name={voteScore > 0 ? 'caret-up' : voteScore < 0 ? 'caret-down' : 'remove'}
+                size="sm"
+                color={voteScore > 0 ? Colors.success : voteScore < 0 ? Colors.danger : Colors.textMuted}
+              />
+              <Text
+                style={[
+                  styles.stat,
+                  voteScore > 0 ? styles.statPositive : voteScore < 0 ? styles.statNegative : null,
+                ]}
+              >
+                {Math.abs(voteScore)}
+              </Text>
+            </View>
           </View>
         </View>
       </View>
@@ -105,9 +121,8 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
     overflow: 'hidden',
+    ...Shadow.sm,
   },
   photo: {
     width: '100%',
@@ -120,12 +135,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
-  },
-  photoPlaceholderIcon: {
-    fontSize: 28,
-    marginBottom: 4,
   },
   photoPlaceholderText: {
     fontSize: Typography.sm,
@@ -149,7 +161,7 @@ const styles = StyleSheet.create({
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
+    gap: Spacing.sm,
     flexWrap: 'wrap',
   },
   footer: {
@@ -167,15 +179,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.md,
   },
+  statGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
   stat: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
     fontWeight: Typography.medium,
   },
   statPositive: {
-    color: '#16A34A',
+    color: Colors.success,
   },
   statNegative: {
-    color: '#DC2626',
+    color: Colors.danger,
   },
 });

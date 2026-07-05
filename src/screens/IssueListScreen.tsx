@@ -3,8 +3,6 @@ import {
   View,
   Text,
   FlatList,
-  ScrollView,
-  TouchableOpacity,
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
@@ -14,9 +12,11 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { Issue, IssueStatus, RootStackParamList } from '../types';
-import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Spacing, Typography } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
+import Chip from '../components/Chip';
+import EmptyState from '../components/EmptyState';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -52,7 +52,6 @@ export default function IssueListScreen() {
     const { data, error } = await query;
 
     if (!error && data) {
-      // Map flat view columns back to nested shape
       setIssues(
         data.map((row: any) => ({
           ...row,
@@ -80,40 +79,14 @@ export default function IssueListScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Snags</Text>
       </View>
 
-      {/* Filter chips */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterRow}
-      >
-        {FILTER_OPTIONS.map((opt) => (
-          <TouchableOpacity
-            key={opt.key}
-            style={[
-              styles.chip,
-              filter === opt.key && styles.chipActive,
-            ]}
-            onPress={() => setFilter(opt.key)}
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[
-                styles.chipLabel,
-                filter === opt.key && styles.chipLabelActive,
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={styles.filterWrap}>
+        <Chip options={FILTER_OPTIONS} value={filter} onChange={setFilter} variant="chip" />
+      </View>
 
-      {/* Issue list */}
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={Colors.primary} />
@@ -134,7 +107,7 @@ export default function IssueListScreen() {
             styles.listContent,
             { paddingBottom: insets.bottom + 16 },
           ]}
-          ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
+          ItemSeparatorComponent={() => <View style={{ height: Spacing.lg }} />}
           removeClippedSubviews
           windowSize={5}
           initialNumToRender={8}
@@ -148,26 +121,21 @@ export default function IssueListScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>🔧</Text>
-              <Text style={styles.emptyTitle}>
-                {filter === 'all' ? 'No snags yet' : `No ${filter.replace('_', ' ')} snags`}
-              </Text>
-              <Text style={styles.emptyText}>
-                {filter === 'all'
+            <EmptyState
+              icon="build-outline"
+              title={filter === 'all' ? 'No snags yet' : `No ${filter.replace('_', ' ')} snags`}
+              message={
+                filter === 'all'
                   ? 'Be the first to report an issue in your workplace.'
-                  : 'Try a different filter or report a new issue.'}
-              </Text>
-              {filter === 'all' && (
-                <TouchableOpacity
-                  style={styles.emptyAction}
-                  onPress={() => navigation.navigate('Main' as any, { screen: 'Report' } as any)}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.emptyActionText}>Report a Snag</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+                  : 'Try a different filter or report a new issue.'
+              }
+              actionLabel={filter === 'all' ? 'Report a Snag' : undefined}
+              onAction={
+                filter === 'all'
+                  ? () => navigation.navigate('Main' as any, { screen: 'Report' } as any)
+                  : undefined
+              }
+            />
           }
         />
       )}
@@ -192,34 +160,12 @@ const styles = StyleSheet.create({
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
   },
-  filterRow: {
+  filterWrap: {
+    backgroundColor: Colors.surface,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    gap: Spacing.sm,
-  },
-  chip: {
-    height: 34,
-    paddingHorizontal: Spacing.md,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.sm,
-  },
-  chipActive: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
-  },
-  chipLabel: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-  },
-  chipLabelActive: {
-    color: Colors.primary,
-    fontWeight: Typography.semibold,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
   listContent: {
     padding: Spacing.lg,
@@ -228,42 +174,5 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingTop: 64,
-    paddingHorizontal: Spacing.xl,
-    gap: Spacing.sm,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: Spacing.sm,
-  },
-  emptyTitle: {
-    fontSize: Typography.lg,
-    fontWeight: Typography.semibold,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  emptyText: {
-    fontSize: Typography.base,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  emptyAction: {
-    marginTop: Spacing.md,
-    backgroundColor: Colors.primary,
-    borderRadius: 8,
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyActionText: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.white,
   },
 });

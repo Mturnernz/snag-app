@@ -27,14 +27,15 @@ export const Colors = {
     closedBg: '#F3F4F6',
   },
 
-  // Priority colours
+  // Priority colours — only "high" carries an alert colour; low/medium are
+  // rendered as neutral dots so they never collide with status badge hues.
   priority: {
     high: '#EF4444',
     highBg: '#FEF2F2',
-    medium: '#F59E0B',
-    mediumBg: '#FFFBEB',
-    low: '#3B82F6',
-    lowBg: '#EFF6FF',
+    medium: '#6B7280',
+    mediumBg: '#F3F4F6',
+    low: '#9CA3AF',
+    lowBg: '#F3F4F6',
   },
 
   // Category pill — muted background tones
@@ -48,6 +49,17 @@ export const Colors = {
     other: '#7C3AED',
     otherBg: '#EDE9FE',
   },
+
+  // Success — save confirmations, positive vote state, "copied" feedback
+  success: '#16A34A',
+  successBg: '#F0FDF4',
+  successBorder: '#BBF7D0',
+
+  // Serious / incident lane identity colour — reserved exclusively for the
+  // health & safety category and the incident report flow. Never reused for
+  // "priority" so it can't collide with priority.high.
+  serious: '#DC2626',
+  seriousBg: '#FEE2E2',
 
   white: '#FFFFFF',
   black: '#000000',
@@ -80,6 +92,7 @@ export const Typography = {
   lg: 18,
   xl: 22,
   xxl: 28,
+  xxxl: 32,
 
   // Font weights — React Native uses string literals
   regular: '400' as const,
@@ -89,3 +102,39 @@ export const Typography = {
 };
 
 export const MIN_TOUCH_TARGET = 48;
+
+// Elevation scale. Elevated surfaces (Card variant="elevated") drop their
+// border and use one of these instead; nested rows inside lists stay
+// border-only so long scrolling lists don't stack shadows.
+export const Shadow = {
+  sm: {
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  md: {
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  lg: {
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+} as const;
+
+// Icon sizing scale — pass directly as the `size` prop to Icon/Ionicons.
+export const IconSize = {
+  sm: 16,
+  md: 20,
+  lg: 24,
+  xl: 32,
+  xxl: 40,
+};

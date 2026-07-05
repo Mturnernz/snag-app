@@ -76,8 +76,11 @@ export interface Vote {
 export type RootStackParamList = {
   Main: undefined;
   IssueDetail: { issueId: string };
+  ManageIssue: { issueId: string };
   Reports: undefined;
   Leaderboard: undefined;
+  ReportIncidentDetails: undefined;
+  ReportIncidentReview: undefined;
 };
 
 export type MainTabParamList = {

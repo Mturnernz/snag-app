@@ -49,14 +49,17 @@ snag/
 
 ## Design System (DO NOT deviate from these)
 
-All tokens are in `src/constants/theme.ts`. Never hardcode colours or spacing values inline.
+All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or shadow values inline — always reference a token, including for one-off "success"/"copied" states (`Colors.success`/`successBg`) and the health & safety / incident-lane identity colour (`Colors.serious`/`seriousBg`).
 
 - **Background**: `#F9FAFB` (near-white)
 - **Surface / cards**: `#FFFFFF`
-- **Border**: `#E5E7EB` (1px, no shadows)
+- **Border**: `#E5E7EB` (1px) — used on flat/nested surfaces (rows inside lists)
+- **Elevation**: use the `Shadow` scale (`sm`/`md`/`lg`) for standalone surfaces instead of borders — `sm` for list cards, `md` for standalone cards (stats, invite code, comments), `lg` for hero/sticky bars and modals/dialogs. An elevated card drops its border; don't combine both on the same surface.
 - **Primary accent**: `#2563EB` (Tailwind blue-600)
 - **Text**: primary `#111827`, secondary `#6B7280`, muted `#9CA3AF`
 - **Card radius**: 12px | **Button radius**: 8px | **Chip radius**: 4px
+- **Icons**: `@expo/vector-icons` (Ionicons) via the shared `Icon` component — never emoji/unicode glyphs. `-outline` variants by default; filled reserved for the active tab, active vote, and the serious-lane header icon. Size from the `IconSize` scale.
+- **Priority badges**: only `high` carries an alert colour (`Colors.priority.high`); `low`/`medium` render as neutral dots — this avoids colliding with status badge colours.
 - **Minimum touch target**: 48px (use `MIN_TOUCH_TARGET` constant)
 - **Font**: System (San Francisco on iOS) — no custom typeface
 - **Light mode only** — no dark mode handling needed

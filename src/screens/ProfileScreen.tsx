@@ -8,9 +8,7 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  Clipboard,
 } from 'react-native';
-import Toast from '../components/Toast';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Profile, Organisation, IssueStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
@@ -19,22 +17,14 @@ import { supabase, signOut } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Avatar from '../components/Avatar';
+import Card from '../components/Card';
+import Button from '../components/Button';
+import Icon from '../components/Icon';
+import InviteCodeCard from '../components/InviteCodeCard';
+import { useToast } from '../hooks/useToast';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-function AvatarCircle({ name, size = 72 }: { name: string; size?: number }) {
-  const initials = name
-    .split(' ')
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-  return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.avatarInitials, { fontSize: size * 0.36 }]}>{initials}</Text>
-    </View>
-  );
-}
 
 type IssueCounts = Record<IssueStatus, number>;
 
@@ -50,11 +40,11 @@ const STATUS_COLORS: Record<IssueStatus, { text: string; bg: string }> = {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  const { showToast } = useToast();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userPoints, setUserPoints] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
-  const [showCopiedToast, setShowCopiedToast] = useState(false);
 
   // Name editing
   const [editingName, setEditingName] = useState(false);
@@ -147,15 +137,6 @@ export default function ProfileScreen() {
     ]);
   }
 
-  function copyInviteCode() {
-    const code = (profile?.organisation as Organisation | undefined)?.invite_code;
-    if (code) {
-      Clipboard.setString(code);
-      setShowCopiedToast(true);
-      setTimeout(() => setShowCopiedToast(false), 2000);
-    }
-  }
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -175,7 +156,6 @@ export default function ProfileScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Profile</Text>
       </View>
@@ -186,9 +166,8 @@ export default function ProfileScreen() {
       >
         {/* Avatar + name */}
         <View style={styles.profileSection}>
-          <AvatarCircle name={displayName} size={72} />
+          <Avatar name={displayName} size={72} />
 
-          {/* Name — view or edit */}
           {editingName ? (
             <View style={styles.nameEditRow}>
               <TextInput
@@ -224,13 +203,12 @@ export default function ProfileScreen() {
               activeOpacity={0.7}
             >
               <Text style={styles.name}>{displayName}</Text>
-              <Text style={styles.editIcon}>✎</Text>
+              <Icon name="create-outline" size="sm" color={Colors.textMuted} />
             </TouchableOpacity>
           )}
 
           <Text style={styles.email}>{profile?.email ?? ''}</Text>
 
-          {/* Org + role pills */}
           <View style={styles.orgPill}>
             <Text style={styles.orgPillText}>{orgName}</Text>
           </View>
@@ -239,6 +217,8 @@ export default function ProfileScreen() {
               <Text style={styles.rolePillText}>{roleLabel}</Text>
             </View>
           )}
+
+          {/* Team activity — gamification, kept low-key next to identity info */}
           <View style={styles.titleRow}>
             <Text style={styles.userTitle}>{getUserTitle(userPoints)}</Text>
             <Text style={styles.userPoints}>{userPoints} pts</Text>
@@ -248,13 +228,14 @@ export default function ProfileScreen() {
             onPress={() => navigation.navigate('Leaderboard')}
             activeOpacity={0.8}
           >
-            <Text style={styles.leaderboardBtnText}>🏆 View Leaderboard</Text>
+            <Icon name="trophy-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.leaderboardBtnText}>View Leaderboard</Text>
           </TouchableOpacity>
         </View>
 
         {/* My reporting stats */}
         {issueCounts !== null && (
-          <View style={styles.statsCard}>
+          <Card variant="elevated" style={styles.statsCard}>
             <View style={styles.statsHeader}>
               <Text style={styles.statsTitle}>My Reported Issues</Text>
               <Text style={styles.statsTotal}>{totalIssues} total</Text>
@@ -274,46 +255,19 @@ export default function ProfileScreen() {
                 </View>
               ))}
             </View>
-          </View>
+          </Card>
         )}
 
-        {/* Invite code card — shown to all org members so anyone can invite colleagues */}
-        {orgInviteCode ? (
-          <View style={styles.inviteCard}>
-            <View style={styles.inviteRow}>
-              <View>
-                <Text style={styles.inviteLabel}>Invite code</Text>
-                <Text style={styles.inviteCode}>{orgInviteCode}</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.copyButton}
-                onPress={copyInviteCode}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.copyIcon}>⧉</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.inviteHint}>
-              Share this code with colleagues to join your organisation.
-            </Text>
-          </View>
-        ) : null}
+        {orgInviteCode ? <InviteCodeCard code={orgInviteCode} variant="compact" /> : null}
 
-        {/* Sign out */}
-        <TouchableOpacity
-          style={styles.signOutButton}
+        <Button
+          label="Sign Out"
+          variant="dangerOutline"
           onPress={handleSignOut}
-          disabled={signingOut}
-          activeOpacity={0.8}
-        >
-          {signingOut ? (
-            <ActivityIndicator color={Colors.danger} size="small" />
-          ) : (
-            <Text style={styles.signOutLabel}>Sign Out</Text>
-          )}
-        </TouchableOpacity>
+          loading={signingOut}
+          icon="log-out-outline"
+        />
       </ScrollView>
-      <Toast message="Copied to clipboard!" visible={showCopiedToast} />
     </View>
   );
 }
@@ -350,18 +304,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xl,
     gap: Spacing.sm,
   },
-  avatar: {
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.sm,
-  },
-  avatarInitials: {
-    color: Colors.primary,
-    fontWeight: Typography.bold,
-  },
 
-  // Name display + edit
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -371,10 +314,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.xl,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
-  },
-  editIcon: {
-    fontSize: Typography.base,
-    color: Colors.textMuted,
   },
   nameEditRow: {
     flexDirection: 'row',
@@ -423,7 +362,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 4,
     backgroundColor: Colors.primaryLight,
-    borderRadius: 99,
+    borderRadius: Radius.avatar,
   },
   orgPillText: {
     fontSize: Typography.sm,
@@ -434,7 +373,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 4,
     backgroundColor: Colors.border,
-    borderRadius: 99,
+    borderRadius: Radius.avatar,
   },
   rolePillText: {
     fontSize: Typography.sm,
@@ -442,29 +381,32 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 
-  // Title + leaderboard
+  // Team activity — deliberately muted, secondary to identity
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    marginTop: Spacing.xs,
+    marginTop: Spacing.md,
   },
   userTitle: {
     fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
+    fontWeight: Typography.medium,
+    color: Colors.textMuted,
   },
   userPoints: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
   },
   leaderboardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
     marginTop: Spacing.xs,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
     borderRadius: Radius.button,
     borderWidth: 1,
-    borderColor: Colors.primary,
+    borderColor: Colors.border,
   },
   leaderboardBtnText: {
     fontSize: Typography.sm,
@@ -474,11 +416,6 @@ const styles = StyleSheet.create({
 
   // Issue stats
   statsCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.lg,
     gap: Spacing.md,
   },
   statsHeader: {
@@ -516,61 +453,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Invite card
-  inviteCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  inviteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  inviteLabel: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    fontWeight: Typography.medium,
-    marginBottom: 2,
-  },
-  inviteCode: {
-    fontSize: Typography.xl,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
-    letterSpacing: 3,
-  },
-  copyButton: {
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  copyIcon: {
-    fontSize: 22,
-    color: Colors.textSecondary,
-  },
-  inviteHint: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    lineHeight: 18,
-  },
-
-  // Sign out
-  signOutButton: {
-    height: MIN_TOUCH_TARGET,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.surface,
-  },
-  signOutLabel: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.danger,
-  },
 });

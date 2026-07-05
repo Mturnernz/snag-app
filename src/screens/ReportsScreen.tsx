@@ -1,13 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-} from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { supabase, getOrgStats, OrgStats } from '../lib/supabase';
@@ -15,16 +7,18 @@ import {
   STATUS_LABELS, PRIORITY_LABELS, CATEGORY_LABELS,
   IssueStatus, IssuePriority, IssueCategory,
 } from '../types';
-import { Colors, Spacing, Typography, Radius } from '../constants/theme';
+import { Colors, Spacing, Typography } from '../constants/theme';
+import ScreenHeader from '../components/ScreenHeader';
+import Card from '../components/Card';
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function StatBox({ label, value, accent }: { label: string; value: number; accent?: string }) {
   return (
-    <View style={styles.statBox}>
+    <Card variant="elevated" style={styles.statBox}>
       <Text style={[styles.statValue, accent ? { color: accent } : undefined]}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    </Card>
   );
 }
 
@@ -78,7 +72,6 @@ function categoryColor(c: IssueCategory): string {
 
 export default function ReportsScreen() {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
   const [stats, setStats] = useState<OrgStats | null>(null);
   const [orgName, setOrgName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -119,18 +112,9 @@ export default function ReportsScreen() {
     : 0;
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Reports</Text>
-          {orgName ? <Text style={styles.headerSub}>{orgName}</Text> : null}
-        </View>
-        <View style={styles.backBtn} />
-      </View>
+    <View style={styles.container}>
+      <ScreenHeader title="Reports" />
+      {orgName ? <Text style={styles.headerSub}>{orgName}</Text> : null}
 
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}>
 
@@ -144,14 +128,14 @@ export default function ReportsScreen() {
 
         {/* Open rate callout */}
         {stats.totalIssues > 0 && (
-          <View style={styles.callout}>
+          <Card variant="flat" style={styles.callout}>
             <Text style={styles.calloutValue}>{openRate}%</Text>
             <Text style={styles.calloutLabel}>of issues are currently open</Text>
-          </View>
+          </Card>
         )}
 
         {/* By Status */}
-        <View style={styles.card}>
+        <Card variant="elevated" style={styles.card}>
           <Text style={styles.cardTitle}>By Status</Text>
           {(Object.keys(STATUS_LABELS) as IssueStatus[]).map(s => (
             <BarRow
@@ -162,10 +146,10 @@ export default function ReportsScreen() {
               color={statusColor(s)}
             />
           ))}
-        </View>
+        </Card>
 
         {/* By Priority */}
-        <View style={styles.card}>
+        <Card variant="elevated" style={styles.card}>
           <Text style={styles.cardTitle}>By Priority</Text>
           {(Object.keys(PRIORITY_LABELS) as IssuePriority[]).map(p => (
             <BarRow
@@ -176,10 +160,10 @@ export default function ReportsScreen() {
               color={priorityColor(p)}
             />
           ))}
-        </View>
+        </Card>
 
         {/* By Category */}
-        <View style={styles.card}>
+        <Card variant="elevated" style={styles.card}>
           <Text style={styles.cardTitle}>By Category</Text>
           {(Object.keys(CATEGORY_LABELS) as IssueCategory[]).map(c => (
             <BarRow
@@ -190,7 +174,7 @@ export default function ReportsScreen() {
               color={categoryColor(c)}
             />
           ))}
-        </View>
+        </Card>
 
         {stats.totalIssues === 0 && (
           <Text style={styles.emptyText}>No issues reported yet. Reports will appear here once your team starts logging issues.</Text>
@@ -212,36 +196,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: Colors.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  backBtn: {
-    width: 64,
-  },
-  backText: {
-    fontSize: Typography.sm,
-    color: Colors.primary,
-    fontWeight: Typography.medium,
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: Typography.xl,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
-  },
   headerSub: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
-    marginTop: 2,
+    textAlign: 'center',
+    paddingTop: Spacing.sm,
+    backgroundColor: Colors.surface,
   },
   scroll: {
     padding: Spacing.lg,
@@ -254,11 +214,6 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
     alignItems: 'center',
     gap: 2,
   },
@@ -274,13 +229,11 @@ const styles = StyleSheet.create({
   },
   callout: {
     backgroundColor: Colors.primaryLight,
-    borderRadius: Radius.card,
-    padding: Spacing.lg,
     alignItems: 'center',
     marginBottom: Spacing.sm,
   },
   calloutValue: {
-    fontSize: 36,
+    fontSize: Typography.xxxl,
     fontWeight: Typography.bold,
     color: Colors.primary,
   },
@@ -290,11 +243,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   card: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.lg,
     gap: Spacing.md,
     marginBottom: Spacing.lg,
   },

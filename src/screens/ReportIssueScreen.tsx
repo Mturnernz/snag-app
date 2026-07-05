@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   View,
@@ -7,37 +7,44 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
   IssueCategory,
   IssuePriority,
   CATEGORY_LABELS,
   PRIORITY_LABELS,
+  RootStackParamList,
 } from '../types';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, uploadIssuePhoto } from '../lib/supabase';
+import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
+import { supabase } from '../lib/supabase';
+import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
+import CollapsibleSection from '../components/CollapsibleSection';
+import Chip from '../components/Chip';
+import Button from '../components/Button';
+import Icon from '../components/Icon';
 
-const CATEGORIES: IssueCategory[] = [
-  'niggle',
-  'broken_equipment',
-  'health_and_safety',
-  'other',
-];
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const PRIORITIES: IssuePriority[] = ['low', 'medium', 'high'];
+const CATEGORY_OPTIONS = (Object.keys(CATEGORY_LABELS) as IssueCategory[]).map((c) => ({
+  key: c,
+  label: CATEGORY_LABELS[c],
+}));
+
+const PRIORITY_OPTIONS = (Object.keys(PRIORITY_LABELS) as IssuePriority[]).map((p) => ({
+  key: p,
+  label: PRIORITY_LABELS[p],
+}));
 
 export default function ReportIssueScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<Nav>();
+  const photoPickerRef = useRef<PhotoPickerHandle>(null);
 
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [uploadTask, setUploadTask] = useState<Promise<string | null> | null>(null);
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -45,58 +52,6 @@ export default function ReportIssueScreen() {
   const [priority, setPriority] = useState<IssuePriority>('medium');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-
-  // ─── Photo picker ──────────────────────────────────────────────────────────
-
-  async function compressAndUpload(uri: string) {
-    const fileName = `${Date.now()}.jpg`;
-    setIsPhotoUploading(true);
-    // Resize to max 1200px on the longest side and compress to ~70% JPEG quality
-    const compressed = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 1200 } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    const task = uploadIssuePhoto(compressed.uri, fileName).finally(() => setIsPhotoUploading(false));
-    setUploadTask(task);
-  }
-
-  async function pickFromLibrary() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 1,
-      exif: false,
-    });
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setPhotoUri(uri);
-      compressAndUpload(uri);
-    }
-  }
-
-  async function takePhoto() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera access is needed to take photos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 1,
-      exif: false,
-    });
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setPhotoUri(uri);
-      compressAndUpload(uri);
-    }
-  }
-
-
-  // ─── Submit ────────────────────────────────────────────────────────────────
 
   async function handleSubmit() {
     if (!title.trim()) {
@@ -117,16 +72,7 @@ export default function ReportIssueScreen() {
 
       if (!profile?.organisation_id) throw new Error('No organisation found');
 
-      // Await eager upload (already in-flight since photo was selected), or
-      // fall back to uploading now if somehow no task exists.
-      let photoUrl: string | null = null;
-      if (photoUri) {
-        if (uploadTask) {
-          photoUrl = await uploadTask;
-        } else {
-          photoUrl = await uploadIssuePhoto(photoUri, `${Date.now()}.jpg`);
-        }
-      }
+      const photoUrl = await photoPickerRef.current?.getPhotoUrl() ?? null;
 
       const { error } = await supabase.from('issues').insert({
         title: title.trim(),
@@ -155,13 +101,9 @@ export default function ReportIssueScreen() {
     setDescription('');
     setCategory('niggle');
     setPriority('medium');
-    setPhotoUri(null);
-    setUploadTask(null);
-    setIsPhotoUploading(false);
+    photoPickerRef.current?.reset();
     setSubmitted(false);
   }
-
-  // ─── Render ────────────────────────────────────────────────────────────────
 
   if (submitted) {
     return (
@@ -171,15 +113,13 @@ export default function ReportIssueScreen() {
         </View>
         <View style={styles.successContainer}>
           <View style={styles.successIconWrap}>
-            <Text style={styles.successIcon}>✓</Text>
+            <Icon name="checkmark" size={IconSize.xl} color={Colors.white} />
           </View>
           <Text style={styles.successTitle}>Snag reported!</Text>
           <Text style={styles.successMessage}>
             Your issue has been submitted and the team will be notified.
           </Text>
-          <TouchableOpacity style={styles.submitButton} onPress={resetForm} activeOpacity={0.85}>
-            <Text style={styles.submitLabel}>Report Another Snag</Text>
-          </TouchableOpacity>
+          <Button label="Report Another Snag" onPress={resetForm} fullWidth />
         </View>
       </View>
     );
@@ -187,7 +127,6 @@ export default function ReportIssueScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Report a Snag</Text>
       </View>
@@ -199,67 +138,50 @@ export default function ReportIssueScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Photo area */}
-        {photoUri ? (
-          <View style={styles.photoPreviewContainer}>
-            <Image
-              source={{ uri: photoUri }}
-              style={styles.photoPreview}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-            />
-            {isPhotoUploading && (
-              <View style={styles.photoUploadingOverlay}>
-                <ActivityIndicator color={Colors.white} size="small" />
-                <Text style={styles.photoUploadingText}>Uploading…</Text>
-              </View>
-            )}
-            <TouchableOpacity
-              style={styles.photoRemoveButton}
-              onPress={() => { setPhotoUri(null); setUploadTask(null); setIsPhotoUploading(false); }}
-            >
-              <Text style={styles.photoRemoveText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.photoArea}>
-            <Text style={styles.photoAreaIcon}>📷</Text>
-            <Text style={styles.photoAreaLabel}>Add a photo</Text>
-            <View style={styles.photoButtonRow}>
-              <TouchableOpacity style={styles.photoButton} onPress={takePhoto} activeOpacity={0.7}>
-                <Text style={styles.photoButtonText}>Take Photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.photoButton} onPress={pickFromLibrary} activeOpacity={0.7}>
-                <Text style={styles.photoButtonText}>Choose from Library</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+        <PhotoPicker ref={photoPickerRef} onUploadingChange={setIsPhotoUploading} />
 
-        {/* Form */}
-        <View style={styles.form}>
-          {/* Title */}
-          <View style={styles.fieldGroup}>
-            <View style={styles.fieldLabelRow}>
-              <Text style={styles.fieldLabel}>
-                Title <Text style={styles.required}>*</Text>
-              </Text>
-              <Text style={[styles.charCount, title.length > 108 && styles.charCountWarn]}>
-                {title.length} / 120
-              </Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Broken fire exit door"
-              placeholderTextColor={Colors.textMuted}
-              value={title}
-              onChangeText={setTitle}
-              returnKeyType="next"
-              maxLength={120}
-            />
+        {/* Title — the only required field on the fast path */}
+        <View style={styles.fieldGroup}>
+          <View style={styles.fieldLabelRow}>
+            <Text style={styles.fieldLabel}>
+              Title <Text style={styles.required}>*</Text>
+            </Text>
+            <Text style={[styles.charCount, title.length > 108 && styles.charCountWarn]}>
+              {title.length} / 120
+            </Text>
           </View>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. Broken fire exit door"
+            placeholderTextColor={Colors.textMuted}
+            value={title}
+            onChangeText={setTitle}
+            returnKeyType="next"
+            maxLength={120}
+          />
+        </View>
 
-          {/* Description */}
+        {/* Submit — one primary action */}
+        <Button
+          label="Submit Report"
+          onPress={handleSubmit}
+          loading={submitting}
+          disabled={isPhotoUploading}
+          fullWidth
+        />
+
+        {/* Serious lane — subordinate, deliberately quieter than the primary CTA */}
+        <TouchableOpacity
+          style={styles.incidentLink}
+          onPress={() => navigation.navigate('ReportIncidentDetails')}
+          activeOpacity={0.7}
+        >
+          <Icon name="warning-outline" size="sm" color={Colors.serious} />
+          <Text style={styles.incidentLinkText}>Report a serious incident instead</Text>
+        </TouchableOpacity>
+
+        {/* Progressive disclosure — everything else, collapsed by default */}
+        <CollapsibleSection label="More details">
           <View style={styles.fieldGroup}>
             <View style={styles.fieldLabelRow}>
               <Text style={styles.fieldLabel}>Description</Text>
@@ -280,75 +202,16 @@ export default function ReportIssueScreen() {
             />
           </View>
 
-          {/* Category */}
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>Category</Text>
-            <View style={styles.segmentRow}>
-              {CATEGORIES.map((cat) => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[
-                    styles.segmentOption,
-                    category === cat && styles.segmentOptionActive,
-                  ]}
-                  onPress={() => setCategory(cat)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.segmentLabel,
-                      category === cat && styles.segmentLabelActive,
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {CATEGORY_LABELS[cat]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Chip options={CATEGORY_OPTIONS} value={category} onChange={setCategory} variant="chip" />
           </View>
 
-          {/* Priority */}
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>Priority</Text>
-            <View style={styles.priorityRow}>
-              {PRIORITIES.map((p) => (
-                <TouchableOpacity
-                  key={p}
-                  style={[
-                    styles.priorityOption,
-                    priority === p && styles.priorityOptionActive,
-                  ]}
-                  onPress={() => setPriority(p)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.priorityLabel,
-                      priority === p && styles.priorityLabelActive,
-                    ]}
-                  >
-                    {PRIORITY_LABELS[p]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Chip options={PRIORITY_OPTIONS} value={priority} onChange={setPriority} variant="segmented" />
           </View>
-
-          {/* Submit */}
-          <TouchableOpacity
-            style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-            onPress={handleSubmit}
-            disabled={submitting}
-            activeOpacity={0.85}
-          >
-            {submitting ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.submitLabel}>Submit Report</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+        </CollapsibleSection>
       </ScrollView>
     </View>
   );
@@ -376,94 +239,6 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
   },
 
-  // Photo
-  photoArea: {
-    paddingVertical: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  photoAreaIcon: { fontSize: 32 },
-  photoAreaLabel: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
-  },
-  photoButtonRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    width: '100%',
-  },
-  photoButton: {
-    flex: 1,
-    height: MIN_TOUCH_TARGET,
-    backgroundColor: Colors.background,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.sm,
-  },
-  photoButtonText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textPrimary,
-  },
-  photoPreviewContainer: {
-    position: 'relative',
-    borderRadius: Radius.card,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  photoPreview: {
-    width: '100%',
-    height: 220,
-  },
-  photoUploadingOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    gap: 6,
-  },
-  photoUploadingText: {
-    color: Colors.white,
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-  },
-  photoRemoveButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoRemoveText: {
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: Typography.bold,
-  },
-
-  // Form
-  form: {
-    gap: Spacing.lg,
-  },
   fieldGroup: {
     gap: Spacing.sm,
   },
@@ -503,66 +278,17 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
   },
 
-  // Category segmented
-  segmentRow: {
+  incidentLink: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: Spacing.xs,
-    flexWrap: 'wrap',
+    paddingVertical: Spacing.sm,
   },
-  segmentOption: {
-    flex: 1,
-    minWidth: '45%',
-    minHeight: MIN_TOUCH_TARGET,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.sm,
-  },
-  segmentOptionActive: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
-  },
-  segmentLabel: {
+  incidentLinkText: {
     fontSize: Typography.sm,
     fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-  },
-  segmentLabelActive: {
-    color: Colors.primary,
-    fontWeight: Typography.semibold,
-  },
-
-  // Priority row
-  priorityRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  priorityOption: {
-    flex: 1,
-    height: MIN_TOUCH_TARGET,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  priorityOptionActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  priorityLabel: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-  },
-  priorityLabelActive: {
-    color: Colors.white,
-    fontWeight: Typography.semibold,
+    color: Colors.serious,
   },
 
   // Success confirmation
@@ -577,15 +303,10 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.success,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.sm,
-  },
-  successIcon: {
-    fontSize: 40,
-    color: Colors.white,
-    fontWeight: Typography.bold,
   },
   successTitle: {
     fontSize: Typography.xl,
@@ -598,23 +319,5 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
-  },
-
-  // Submit button
-  submitButton: {
-    height: MIN_TOUCH_TARGET + 8,
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.button,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: Spacing.sm,
-  },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
-  submitLabel: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.white,
   },
 });

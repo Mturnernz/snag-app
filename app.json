@@ -7,17 +7,20 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
       "backgroundColor": "#F9FAFB"
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.yourorg.snag"
+      "bundleIdentifier": "com.snag.app"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#F9FAFB"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2563EB"
       },
-      "package": "com.yourorg.snag",
+      "package": "com.snag.app",
       "navigationBar": {
         "visible": "immersive"
       }

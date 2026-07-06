@@ -14,14 +14,12 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
-  IssueCategory,
-  IssuePriority,
-  CATEGORY_LABELS,
-  PRIORITY_LABELS,
+  SnagKind,
+  KIND_LABELS,
   RootStackParamList,
 } from '../types';
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase } from '../lib/supabase';
+import { supabase, getProfile, getDefaultSiteId, createSnag } from '../lib/supabase';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import CollapsibleSection from '../components/CollapsibleSection';
 import Chip from '../components/Chip';
@@ -30,15 +28,9 @@ import Icon from '../components/Icon';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const CATEGORY_OPTIONS = (Object.keys(CATEGORY_LABELS) as IssueCategory[]).map((c) => ({
-  key: c,
-  label: CATEGORY_LABELS[c],
-}));
-
-const PRIORITY_OPTIONS = (Object.keys(PRIORITY_LABELS) as IssuePriority[]).map((p) => ({
-  key: p,
-  label: PRIORITY_LABELS[p],
-}));
+const KIND_OPTIONS = (Object.keys(KIND_LABELS) as SnagKind[])
+  .filter((k) => k === 'fixit' || k === 'improvement') // hazard/incident belong to the serious lane
+  .map((k) => ({ key: k, label: KIND_LABELS[k] }));
 
 export default function ReportIssueScreen() {
   const insets = useSafeAreaInsets();
@@ -46,16 +38,15 @@ export default function ReportIssueScreen() {
   const photoPickerRef = useRef<PhotoPickerHandle>(null);
 
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
-  const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState<IssueCategory>('niggle');
-  const [priority, setPriority] = useState<IssuePriority>('medium');
+  const [kind, setKind] = useState<SnagKind>('fixit');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [reference, setReference] = useState<string | null>(null);
 
   async function handleSubmit() {
-    if (!title.trim()) {
-      Alert.alert('Title required', 'Please give the issue a title.');
+    if (!description.trim()) {
+      Alert.alert('Description required', "Tell us what's wrong.");
       return;
     }
 
@@ -64,45 +55,42 @@ export default function ReportIssueScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organisation_id')
-        .eq('id', user.id)
-        .single();
+      const profile = await getProfile(user.id);
+      if (!profile?.org_id) throw new Error('No organisation found');
 
-      if (!profile?.organisation_id) throw new Error('No organisation found');
+      const siteId = await getDefaultSiteId(profile.org_id);
+      if (!siteId) throw new Error('No site found for your organisation');
 
-      const photoUrl = await photoPickerRef.current?.getPhotoUrl() ?? null;
+      const photoPath = await photoPickerRef.current?.getPhotoUrl() ?? null;
 
-      const { error } = await supabase.from('issues').insert({
-        title: title.trim(),
-        description: description.trim() || null,
-        photo_url: photoUrl,
-        category,
-        priority,
-        status: 'open',
-        reporter_id: user.id,
-        organisation_id: profile.organisation_id,
+      const { data, error } = await createSnag({
+        kind,
+        description: description.trim(),
+        severity: null,
+        photoPath,
+        latitude: null,
+        longitude: null,
+        siteId,
       });
 
       if (error) throw error;
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setReference(data?.reference ?? null);
       setSubmitted(true);
     } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not submit issue.');
+      Alert.alert('Error', err.message ?? 'Could not submit snag.');
     } finally {
       setSubmitting(false);
     }
   }
 
   function resetForm() {
-    setTitle('');
     setDescription('');
-    setCategory('niggle');
-    setPriority('medium');
+    setKind('fixit');
     photoPickerRef.current?.reset();
     setSubmitted(false);
+    setReference(null);
   }
 
   if (submitted) {
@@ -117,7 +105,7 @@ export default function ReportIssueScreen() {
           </View>
           <Text style={styles.successTitle}>Snag reported!</Text>
           <Text style={styles.successMessage}>
-            Your issue has been submitted and the team will be notified.
+            {reference ? `${reference} has` : 'Your snag has'} been submitted and the team will be notified.
           </Text>
           <Button label="Report Another Snag" onPress={resetForm} fullWidth />
         </View>
@@ -140,24 +128,26 @@ export default function ReportIssueScreen() {
       >
         <PhotoPicker ref={photoPickerRef} onUploadingChange={setIsPhotoUploading} />
 
-        {/* Title — the only required field on the fast path */}
+        {/* Description — the only required field on the fast path */}
         <View style={styles.fieldGroup}>
           <View style={styles.fieldLabelRow}>
             <Text style={styles.fieldLabel}>
-              Title <Text style={styles.required}>*</Text>
+              What's wrong? <Text style={styles.required}>*</Text>
             </Text>
-            <Text style={[styles.charCount, title.length > 108 && styles.charCountWarn]}>
-              {title.length} / 120
+            <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
+              {description.length} / 300
             </Text>
           </View>
           <TextInput
-            style={styles.input}
-            placeholder="e.g. Broken fire exit door"
+            style={[styles.input, styles.textArea]}
+            placeholder="e.g. Broken fire exit door in the main warehouse"
             placeholderTextColor={Colors.textMuted}
-            value={title}
-            onChangeText={setTitle}
-            returnKeyType="next"
-            maxLength={120}
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+            maxLength={300}
           />
         </View>
 
@@ -183,33 +173,8 @@ export default function ReportIssueScreen() {
         {/* Progressive disclosure — everything else, collapsed by default */}
         <CollapsibleSection label="More details">
           <View style={styles.fieldGroup}>
-            <View style={styles.fieldLabelRow}>
-              <Text style={styles.fieldLabel}>Description</Text>
-              <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
-                {description.length} / 300
-              </Text>
-            </View>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Describe the issue in more detail..."
-              placeholderTextColor={Colors.textMuted}
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-              maxLength={300}
-            />
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Category</Text>
-            <Chip options={CATEGORY_OPTIONS} value={category} onChange={setCategory} variant="chip" />
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Priority</Text>
-            <Chip options={PRIORITY_OPTIONS} value={priority} onChange={setPriority} variant="segmented" />
+            <Text style={styles.fieldLabel}>Type</Text>
+            <Chip options={KIND_OPTIONS} value={kind} onChange={setKind} variant="segmented" />
           </View>
         </CollapsibleSection>
       </ScrollView>

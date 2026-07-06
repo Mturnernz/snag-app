@@ -4,23 +4,27 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { IssuePriority, PRIORITY_LABELS, RootStackParamList } from '../types';
+import { SnagKind, SnagSeverity, SEVERITY_LABELS, KIND_LABELS, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase } from '../lib/supabase';
+import { supabase, getProfile, getDefaultSiteId, createSnag } from '../lib/supabase';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import ScreenHeader from '../components/ScreenHeader';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
-import CategoryBadge from '../components/CategoryBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const PRIORITY_OPTIONS = (Object.keys(PRIORITY_LABELS) as IssuePriority[]).map((p) => ({
-  key: p,
-  label: PRIORITY_LABELS[p],
+const SEVERITY_OPTIONS = (Object.keys(SEVERITY_LABELS) as SnagSeverity[]).map((s) => ({
+  key: s,
+  label: SEVERITY_LABELS[s],
 }));
+
+const KIND_OPTIONS: { key: SnagKind; label: string }[] = [
+  { key: 'hazard', label: KIND_LABELS.hazard },
+  { key: 'incident', label: KIND_LABELS.incident },
+];
 
 export default function ReportIncidentDetailsScreen() {
   const insets = useSafeAreaInsets();
@@ -28,13 +32,13 @@ export default function ReportIncidentDetailsScreen() {
   const photoPickerRef = useRef<PhotoPickerHandle>(null);
   const { draft, setDraft, setSubmitHandler } = useIncidentDraft();
 
-  const [title, setTitle] = useState(draft.title);
   const [description, setDescription] = useState(draft.description);
-  const [priority, setPriority] = useState<IssuePriority>(draft.priority);
+  const [kind, setKind] = useState<SnagKind>(draft.kind);
+  const [severity, setSeverity] = useState<SnagSeverity>(draft.severity);
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-  const touched = title.trim().length > 0 || description.trim().length > 0;
+  const touched = description.trim().length > 0;
 
   function handleBack() {
     if (touched) {
@@ -45,41 +49,39 @@ export default function ReportIncidentDetailsScreen() {
   }
 
   function handleNext() {
-    if (!title.trim()) {
-      Alert.alert('Title required', 'Please describe what happened.');
+    if (!description.trim()) {
+      Alert.alert('Description required', 'Please describe what happened.');
       return;
     }
 
-    setDraft({ title: title.trim(), description: description.trim(), priority, hasPhoto: !!photoPickerRef.current });
+    const hasPhoto = !!photoPickerRef.current;
+    setDraft({ description: description.trim(), kind, severity, hasPhoto });
 
     setSubmitHandler(async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { error: 'Not authenticated' };
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('organisation_id')
-          .eq('id', user.id)
-          .single();
+        const profile = await getProfile(user.id);
+        if (!profile?.org_id) return { error: 'No organisation found' };
 
-        if (!profile?.organisation_id) return { error: 'No organisation found' };
+        const siteId = await getDefaultSiteId(profile.org_id);
+        if (!siteId) return { error: 'No site found for your organisation' };
 
-        const photoUrl = await photoPickerRef.current?.getPhotoUrl() ?? null;
+        const photoPath = await photoPickerRef.current?.getPhotoUrl() ?? null;
 
-        const { data, error } = await supabase.from('issues').insert({
-          title: title.trim(),
-          description: description.trim() || null,
-          photo_url: photoUrl,
-          category: 'health_and_safety',
-          priority,
-          status: 'open',
-          reporter_id: user.id,
-          organisation_id: profile.organisation_id,
-        }).select('id').single();
+        const { data, error } = await createSnag({
+          kind,
+          description: description.trim(),
+          severity,
+          photoPath,
+          latitude: null,
+          longitude: null,
+          siteId,
+        });
 
         if (error) return { error: error.message };
-        return { issueId: data?.id };
+        return { snagId: data?.id, reference: data?.reference };
       } catch (err: any) {
         return { error: err.message ?? 'Could not submit incident report.' };
       }
@@ -102,29 +104,14 @@ export default function ReportIncidentDetailsScreen() {
         </Text>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Category</Text>
-          <View style={styles.lockedCategory}>
-            <CategoryBadge category="health_and_safety" />
-            <Text style={styles.lockedHint}>Locked for this flow</Text>
-          </View>
+          <Text style={styles.fieldLabel}>Type</Text>
+          <Chip options={KIND_OPTIONS} value={kind} onChange={setKind} variant="segmented" />
         </View>
 
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>
             What happened <Text style={styles.required}>*</Text>
           </Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. Forklift near-miss in loading bay"
-            placeholderTextColor={Colors.textMuted}
-            value={title}
-            onChangeText={setTitle}
-            maxLength={120}
-          />
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Details</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder="Describe what happened, who was involved, and any immediate actions taken..."
@@ -145,7 +132,7 @@ export default function ReportIncidentDetailsScreen() {
 
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>Severity</Text>
-          <Chip options={PRIORITY_OPTIONS} value={priority} onChange={setPriority} variant="segmented" />
+          <Chip options={SEVERITY_OPTIONS} value={severity} onChange={setSeverity} variant="segmented" />
         </View>
 
         <Button
@@ -201,15 +188,6 @@ const styles = StyleSheet.create({
   },
   required: {
     color: Colors.danger,
-  },
-  lockedCategory: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  lockedHint: {
-    fontSize: Typography.xs,
-    color: Colors.textMuted,
   },
   input: {
     minHeight: MIN_TOUCH_TARGET,

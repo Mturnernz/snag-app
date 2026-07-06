@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,15 +6,16 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Issue } from '../types';
+import { Snag } from '../types';
 import { Colors, Radius, Spacing, Typography, Shadow, IconSize } from '../constants/theme';
+import { getSnagPhotoUrl } from '../lib/supabase';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
 import Icon from './Icon';
 
 interface Props {
-  issue: Issue;
+  issue: Snag;
   onPress: () => void;
 }
 
@@ -43,16 +44,31 @@ function thumbnailUrl(url: string): string {
 }
 
 function IssueCard({ issue, onPress }: Props) {
-  const reporterName = issue.reporter?.name || 'Unknown';
+  const reporterName = issue.reporter_name || issue.reporter?.name || 'Unknown';
   const commentCount = issue.comment_count ?? 0;
   const voteScore = issue.vote_score ?? 0;
+
+  // snag-photos is a private bucket — photo_path is a storage path, not a
+  // renderable URL, so resolve a short-lived signed URL for display.
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (issue.photo_path) {
+      getSnagPhotoUrl(issue.photo_path).then((url) => {
+        if (!cancelled) setPhotoUrl(url);
+      });
+    } else {
+      setPhotoUrl(null);
+    }
+    return () => { cancelled = true; };
+  }, [issue.photo_path]);
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
       {/* Photo */}
-      {issue.photo_url ? (
+      {photoUrl ? (
         <Image
-          source={{ uri: thumbnailUrl(issue.photo_url) }}
+          source={{ uri: thumbnailUrl(photoUrl) }}
           style={styles.photo}
           contentFit="cover"
           cachePolicy="memory-disk"
@@ -73,14 +89,15 @@ function IssueCard({ issue, onPress }: Props) {
 
       {/* Card body */}
       <View style={styles.body}>
+        <Text style={styles.reference}>{issue.reference}</Text>
         <Text style={styles.title} numberOfLines={2}>
-          {issue.title}
+          {issue.description || 'No description'}
         </Text>
 
         {/* Badges */}
         <View style={styles.badgeRow}>
-          <PriorityBadge priority={issue.priority} />
-          <CategoryBadge category={issue.category} />
+          <CategoryBadge kind={issue.kind} />
+          <PriorityBadge severity={issue.severity} />
         </View>
 
         {/* Footer row */}
@@ -151,6 +168,12 @@ const styles = StyleSheet.create({
   body: {
     padding: Spacing.md,
     gap: Spacing.sm,
+  },
+  reference: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
   },
   title: {
     fontSize: Typography.lg,

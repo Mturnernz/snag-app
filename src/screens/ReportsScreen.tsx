@@ -4,8 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { supabase, getOrgStats, OrgStats } from '../lib/supabase';
 import {
-  STATUS_LABELS, PRIORITY_LABELS, CATEGORY_LABELS,
-  IssueStatus, IssuePriority, IssueCategory,
+  STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
+  SnagStatus, SnagKind, SnagSeverity,
 } from '../types';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import ScreenHeader from '../components/ScreenHeader';
@@ -39,33 +39,35 @@ function BarRow({
   );
 }
 
-function statusColor(s: IssueStatus): string {
-  const map: Record<IssueStatus, string> = {
-    open: Colors.status.open,
+function statusColor(s: SnagStatus): string {
+  const map: Record<SnagStatus, string> = {
+    flagged: Colors.status.flagged,
     in_progress: Colors.status.inProgress,
+    sorted: Colors.status.sorted,
     resolved: Colors.status.resolved,
-    closed: Colors.status.closed,
+    rca_pending: Colors.status.rcaPending,
   };
   return map[s];
 }
 
-function priorityColor(p: IssuePriority): string {
-  const map: Record<IssuePriority, string> = {
-    high: Colors.priority.high,
-    medium: Colors.priority.medium,
-    low: Colors.priority.low,
+function kindColor(k: SnagKind): string {
+  const map: Record<SnagKind, string> = {
+    fixit: Colors.category.niggle,
+    improvement: Colors.category.other,
+    hazard: Colors.category.brokenEquipment,
+    incident: Colors.category.healthAndSafety,
   };
-  return map[p];
+  return map[k];
 }
 
-function categoryColor(c: IssueCategory): string {
-  const map: Record<IssueCategory, string> = {
-    niggle: Colors.category.niggle,
-    broken_equipment: Colors.category.brokenEquipment,
-    health_and_safety: Colors.category.healthAndSafety,
-    other: Colors.category.other,
+function severityColor(s: SnagSeverity): string {
+  const map: Record<SnagSeverity, string> = {
+    minor: Colors.priority.low,
+    moderate: Colors.priority.medium,
+    injury: Colors.category.brokenEquipment,
+    critical: Colors.priority.high,
   };
-  return map[c];
+  return map[s];
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -86,13 +88,13 @@ export default function ReportsScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('organisation_id, organisation:organisations(name)')
+      .select('org_id, organisation:organisations(name)')
       .eq('id', user.id)
       .single();
 
-    if (data?.organisation_id) {
+    if (data?.org_id) {
       setOrgName((data.organisation as any)?.name ?? '');
-      setStats(await getOrgStats(data.organisation_id));
+      setStats(await getOrgStats(data.org_id));
     }
     setLoading(false);
   }
@@ -107,8 +109,8 @@ export default function ReportsScreen() {
 
   if (!stats) return null;
 
-  const openRate = stats.totalIssues > 0
-    ? Math.round((stats.byStatus.open / stats.totalIssues) * 100)
+  const openRate = stats.totalSnags > 0
+    ? Math.round((stats.byStatus.flagged / stats.totalSnags) * 100)
     : 0;
 
   return (
@@ -120,64 +122,64 @@ export default function ReportsScreen() {
 
         {/* Summary row */}
         <View style={styles.summaryRow}>
-          <StatBox label="Total Issues" value={stats.totalIssues} />
+          <StatBox label="Total Snags" value={stats.totalSnags} />
           <StatBox label="Members" value={stats.totalMembers} />
-          <StatBox label="Open" value={stats.byStatus.open} accent={Colors.status.open} />
-          <StatBox label="High" value={stats.byPriority.high} accent={Colors.priority.high} />
+          <StatBox label="Flagged" value={stats.byStatus.flagged} accent={Colors.status.flagged} />
+          <StatBox label="Critical" value={stats.bySeverity.critical} accent={Colors.priority.high} />
         </View>
 
         {/* Open rate callout */}
-        {stats.totalIssues > 0 && (
+        {stats.totalSnags > 0 && (
           <Card variant="flat" style={styles.callout}>
             <Text style={styles.calloutValue}>{openRate}%</Text>
-            <Text style={styles.calloutLabel}>of issues are currently open</Text>
+            <Text style={styles.calloutLabel}>of snags are still flagged</Text>
           </Card>
         )}
 
         {/* By Status */}
         <Card variant="elevated" style={styles.card}>
           <Text style={styles.cardTitle}>By Status</Text>
-          {(Object.keys(STATUS_LABELS) as IssueStatus[]).map(s => (
+          {(Object.keys(STATUS_LABELS) as SnagStatus[]).map(s => (
             <BarRow
               key={s}
               label={STATUS_LABELS[s]}
               count={stats.byStatus[s]}
-              total={stats.totalIssues}
+              total={stats.totalSnags}
               color={statusColor(s)}
             />
           ))}
         </Card>
 
-        {/* By Priority */}
+        {/* By Type */}
         <Card variant="elevated" style={styles.card}>
-          <Text style={styles.cardTitle}>By Priority</Text>
-          {(Object.keys(PRIORITY_LABELS) as IssuePriority[]).map(p => (
+          <Text style={styles.cardTitle}>By Type</Text>
+          {(Object.keys(KIND_LABELS) as SnagKind[]).map(k => (
             <BarRow
-              key={p}
-              label={PRIORITY_LABELS[p]}
-              count={stats.byPriority[p]}
-              total={stats.totalIssues}
-              color={priorityColor(p)}
+              key={k}
+              label={KIND_LABELS[k]}
+              count={stats.byKind[k]}
+              total={stats.totalSnags}
+              color={kindColor(k)}
             />
           ))}
         </Card>
 
-        {/* By Category */}
+        {/* By Severity */}
         <Card variant="elevated" style={styles.card}>
-          <Text style={styles.cardTitle}>By Category</Text>
-          {(Object.keys(CATEGORY_LABELS) as IssueCategory[]).map(c => (
+          <Text style={styles.cardTitle}>By Severity</Text>
+          {(Object.keys(SEVERITY_LABELS) as SnagSeverity[]).map(s => (
             <BarRow
-              key={c}
-              label={CATEGORY_LABELS[c]}
-              count={stats.byCategory[c]}
-              total={stats.totalIssues}
-              color={categoryColor(c)}
+              key={s}
+              label={SEVERITY_LABELS[s]}
+              count={stats.bySeverity[s]}
+              total={stats.totalSnags}
+              color={severityColor(s)}
             />
           ))}
         </Card>
 
-        {stats.totalIssues === 0 && (
-          <Text style={styles.emptyText}>No issues reported yet. Reports will appear here once your team starts logging issues.</Text>
+        {stats.totalSnags === 0 && (
+          <Text style={styles.emptyText}>No snags reported yet. Reports will appear here once your team starts logging them.</Text>
         )}
 
       </ScrollView>

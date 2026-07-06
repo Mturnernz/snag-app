@@ -1,21 +1,21 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { IssuePriority } from '../types';
+import { SnagKind, SnagSeverity } from '../types';
 
 export interface IncidentDraft {
-  title: string;
   description: string;
-  priority: IssuePriority;
+  kind: SnagKind; // constrained to 'hazard' | 'incident' within this flow
+  severity: SnagSeverity;
   hasPhoto: boolean;
 }
 
 const INITIAL_DRAFT: IncidentDraft = {
-  title: '',
   description: '',
-  priority: 'high',
+  kind: 'incident',
+  severity: 'moderate',
   hasPhoto: false,
 };
 
-type SubmitFn = () => Promise<{ error?: string; issueId?: string }>;
+type SubmitFn = () => Promise<{ error?: string; snagId?: string; reference?: string }>;
 
 interface IncidentDraftContextValue {
   draft: IncidentDraft;

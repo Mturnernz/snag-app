@@ -19,6 +19,6 @@ export interface PointsLogRow {
   org_id: string;
   event: string;
   points: number;
-  issue_id: string | null;
+  snag_id: string | null;
   created_at: string;
 }

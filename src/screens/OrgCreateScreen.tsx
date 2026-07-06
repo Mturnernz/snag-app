@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { createOrganisation } from '../lib/supabase';
+import { createOrganisationAndOwner } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -12,7 +12,7 @@ interface Props {
   onBack: () => void;
 }
 
-export default function OrgCreateScreen({ userId, onComplete, onBack }: Props) {
+export default function OrgCreateScreen({ onComplete, onBack }: Props) {
   const insets = useSafeAreaInsets();
   const [orgName, setOrgName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,7 +25,9 @@ export default function OrgCreateScreen({ userId, onComplete, onBack }: Props) {
     }
     setLoading(true);
     setError(null);
-    const { error } = await createOrganisation(orgName.trim(), userId);
+    // Owner name is intentionally blank here — AdminSetupScreen collects and
+    // saves the real name right after org creation via updateProfile.
+    const { error } = await createOrganisationAndOwner(orgName.trim(), '');
     if (error) {
       setError(error.message ?? 'Could not create organisation.');
     } else {

@@ -11,8 +11,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Profile, Organisation, IssueStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Profile, Organisation, SnagStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
+import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { supabase, signOut } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
 import { useNavigation } from '@react-navigation/native';
@@ -21,26 +21,24 @@ import Avatar from '../components/Avatar';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
-import InviteCodeCard from '../components/InviteCodeCard';
-import { useToast } from '../hooks/useToast';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type IssueCounts = Record<IssueStatus, number>;
+type SnagCounts = Record<SnagStatus, number>;
 
-const STATUS_ORDER: IssueStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
+const STATUS_ORDER: SnagStatus[] = ['flagged', 'in_progress', 'sorted', 'resolved', 'rca_pending'];
 
-const STATUS_COLORS: Record<IssueStatus, { text: string; bg: string }> = {
-  open: { text: Colors.status.open, bg: Colors.status.openBg },
+const STATUS_COLORS: Record<SnagStatus, { text: string; bg: string }> = {
+  flagged: { text: Colors.status.flagged, bg: Colors.status.flaggedBg },
   in_progress: { text: Colors.status.inProgress, bg: Colors.status.inProgressBg },
+  sorted: { text: Colors.status.sorted, bg: Colors.status.sortedBg },
   resolved: { text: Colors.status.resolved, bg: Colors.status.resolvedBg },
-  closed: { text: Colors.status.closed, bg: Colors.status.closedBg },
+  rca_pending: { text: Colors.status.rcaPending, bg: Colors.status.rcaPendingBg },
 };
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { showToast } = useToast();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userPoints, setUserPoints] = useState<number>(0);
   const [loading, setLoading] = useState(true);
@@ -51,8 +49,8 @@ export default function ProfileScreen() {
   const [nameInput, setNameInput] = useState('');
   const [savingName, setSavingName] = useState(false);
 
-  // Issue stats
-  const [issueCounts, setIssueCounts] = useState<IssueCounts | null>(null);
+  // Snag stats
+  const [snagCounts, setSnagCounts] = useState<SnagCounts | null>(null);
 
   useEffect(() => {
     fetchProfile();
@@ -64,16 +62,16 @@ export default function ProfileScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('*, organisation:organisations(id, name, invite_code)')
+      .select('*, organisation:organisations(id, name, industry, plan_tier, created_at)')
       .eq('id', user.id)
       .single();
 
     if (data) {
-      setProfile(data as Profile);
+      setProfile(data as unknown as Profile);
       setNameInput(data.name ?? '');
-      fetchIssueCounts(user.id);
-      if (data.organisation_id) {
-        fetchUserPoints(user.id, data.organisation_id);
+      fetchSnagCounts(user.id);
+      if (data.org_id) {
+        fetchUserPoints(user.id, data.org_id);
       }
     }
     setLoading(false);
@@ -89,19 +87,19 @@ export default function ProfileScreen() {
     if (data) setUserPoints(data.points ?? 0);
   }
 
-  async function fetchIssueCounts(userId: string) {
+  async function fetchSnagCounts(userId: string) {
     const { data } = await supabase
-      .from('issues')
+      .from('snags')
       .select('status')
       .eq('reporter_id', userId);
 
     if (!data) return;
 
-    const counts: IssueCounts = { open: 0, in_progress: 0, resolved: 0, closed: 0 };
+    const counts: SnagCounts = { flagged: 0, in_progress: 0, sorted: 0, resolved: 0, rca_pending: 0 };
     for (const row of data) {
-      if (row.status in counts) counts[row.status as IssueStatus]++;
+      if (row.status in counts) counts[row.status as SnagStatus]++;
     }
-    setIssueCounts(counts);
+    setSnagCounts(counts);
   }
 
   async function handleSaveName() {
@@ -148,10 +146,9 @@ export default function ProfileScreen() {
   const displayName = profile?.name || 'Your Name';
   const org = profile?.organisation as Organisation | undefined;
   const orgName = org?.name ?? 'No Organisation';
-  const orgInviteCode = org?.invite_code ?? null;
   const roleLabel = profile?.role ? ROLE_LABELS[profile.role] : null;
-  const totalIssues = issueCounts
-    ? Object.values(issueCounts).reduce((a, b) => a + b, 0)
+  const totalSnags = snagCounts
+    ? Object.values(snagCounts).reduce((a, b) => a + b, 0)
     : 0;
 
   return (
@@ -234,11 +231,11 @@ export default function ProfileScreen() {
         </View>
 
         {/* My reporting stats */}
-        {issueCounts !== null && (
+        {snagCounts !== null && (
           <Card variant="elevated" style={styles.statsCard}>
             <View style={styles.statsHeader}>
-              <Text style={styles.statsTitle}>My Reported Issues</Text>
-              <Text style={styles.statsTotal}>{totalIssues} total</Text>
+              <Text style={styles.statsTitle}>My Reported Snags</Text>
+              <Text style={styles.statsTotal}>{totalSnags} total</Text>
             </View>
             <View style={styles.statsGrid}>
               {STATUS_ORDER.map((status) => (
@@ -247,7 +244,7 @@ export default function ProfileScreen() {
                   style={[styles.statItem, { backgroundColor: STATUS_COLORS[status].bg }]}
                 >
                   <Text style={[styles.statCount, { color: STATUS_COLORS[status].text }]}>
-                    {issueCounts[status]}
+                    {snagCounts[status]}
                   </Text>
                   <Text style={[styles.statLabel, { color: STATUS_COLORS[status].text }]}>
                     {STATUS_LABELS[status]}
@@ -257,8 +254,6 @@ export default function ProfileScreen() {
             </View>
           </Card>
         )}
-
-        {orgInviteCode ? <InviteCodeCard code={orgInviteCode} variant="compact" /> : null}
 
         <Button
           label="Sign Out"
@@ -414,7 +409,7 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
 
-  // Issue stats
+  // Snag stats
   statsCard: {
     gap: Spacing.md,
   },
@@ -435,9 +430,11 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     gap: Spacing.sm,
+    flexWrap: 'wrap',
   },
   statItem: {
-    flex: 1,
+    flexBasis: '18%',
+    flexGrow: 1,
     borderRadius: Radius.chip,
     paddingVertical: Spacing.sm,
     alignItems: 'center',

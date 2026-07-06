@@ -4,8 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { PRIORITY_LABELS, RootStackParamList } from '../types';
-import { Colors, Spacing, Typography, Radius } from '../constants/theme';
+import { RootStackParamList } from '../types';
+import { Colors, Spacing, Typography } from '../constants/theme';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -24,16 +24,18 @@ export default function ReportIncidentReviewScreen() {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [reference, setReference] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   async function handleSubmit() {
     setSubmitting(true);
-    const { error } = await submit();
+    const { error, reference: ref } = await submit();
     setSubmitting(false);
     if (error) {
       Alert.alert('Error', error);
       return;
     }
+    setReference(ref ?? null);
     setSubmitted(true);
   }
 
@@ -50,7 +52,7 @@ export default function ReportIncidentReviewScreen() {
           <Icon name="shield-checkmark-outline" size="xxl" color={Colors.serious} />
           <Text style={styles.successTitle}>Incident report submitted</Text>
           <Text style={styles.successMessage}>
-            This has been logged as a formal record and your team has been notified.
+            {reference ? `${reference} has` : 'This has'} been logged as a formal record and your team has been notified.
           </Text>
           <Button label="Done" variant="serious" onPress={handleDone} fullWidth />
         </View>
@@ -69,22 +71,16 @@ export default function ReportIncidentReviewScreen() {
 
         <Card variant="elevated" style={styles.card}>
           <View style={styles.row}>
-            <Text style={styles.label}>Category</Text>
-            <CategoryBadge category="health_and_safety" />
+            <Text style={styles.label}>Type</Text>
+            <CategoryBadge kind={draft.kind} />
           </View>
           <View style={styles.row}>
             <Text style={styles.label}>Severity</Text>
-            <PriorityBadge priority={draft.priority} />
+            <PriorityBadge severity={draft.severity} />
           </View>
           <View style={styles.divider} />
           <Text style={styles.label}>What happened</Text>
-          <Text style={styles.value}>{draft.title}</Text>
-          {draft.description ? (
-            <>
-              <Text style={styles.label}>Details</Text>
-              <Text style={styles.value}>{draft.description}</Text>
-            </>
-          ) : null}
+          <Text style={styles.value}>{draft.description}</Text>
           <View style={styles.row}>
             <Text style={styles.label}>Evidence</Text>
             <Text style={styles.value}>{draft.hasPhoto ? 'Photo attached' : 'No photo attached'}</Text>

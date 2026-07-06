@@ -17,10 +17,13 @@ import { useNavigation, useRoute, useFocusEffect, RouteProp } from '@react-navig
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
-  Issue, Comment, Profile, RootStackParamList, VoteValue,
+  SnagStatus, SnagKind, SnagLane, SnagSeverity, Comment, Profile, RootStackParamList, VoteValue,
 } from '../types';
 import { Colors, Radius, Spacing, Typography, IconSize } from '../constants/theme';
-import { supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers } from '../lib/supabase';
+import {
+  supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers,
+  addComment, getSnagPhotoUrl,
+} from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -32,6 +35,23 @@ import Icon from '../components/Icon';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+interface IssueDetail {
+  id: string;
+  reference: string;
+  description: string | null;
+  status: SnagStatus;
+  kind: SnagKind;
+  lane: SnagLane;
+  severity: SnagSeverity | null;
+  created_at: string;
+  reporter?: { id: string; name: string };
+  owner?: { id: string; name: string } | null;
+  comment_count?: number;
+  vote_score?: number;
+  upvote_count?: number;
+  downvote_count?: number;
+}
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -50,7 +70,8 @@ export default function IssueDetailScreen() {
   const route = useRoute<Route>();
   const { issueId } = route.params;
 
-  const [issue, setIssue] = useState<Issue | null>(null);
+  const [issue, setIssue] = useState<IssueDetail | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingIssue, setLoadingIssue] = useState(true);
   const [commentText, setCommentText] = useState('');
@@ -64,8 +85,8 @@ export default function IssueDetailScreen() {
   const [mentionAt, setMentionAt] = useState(-1);
   const [authorPoints, setAuthorPoints] = useState<Record<string, number>>({});
 
-  const canEdit = userProfile?.role === 'admin' || userProfile?.role === 'manager';
-  const isSerious = issue?.category === 'health_and_safety';
+  const canEdit = userProfile?.role === 'officer_admin' || userProfile?.role === 'supervisor';
+  const isSerious = issue?.lane === 'serious';
 
   useEffect(() => {
     fetchIssue();
@@ -83,8 +104,8 @@ export default function IssueDetailScreen() {
       setUserVote(vote);
       setUserProfile(profile);
 
-      if (profile?.organisation_id) {
-        getOrgMembers(profile.organisation_id).then(setOrgMembers);
+      if (profile?.org_id) {
+        getOrgMembers(profile.org_id).then(setOrgMembers);
       }
     });
   }, [issueId]);
@@ -98,29 +119,30 @@ export default function IssueDetailScreen() {
   );
 
   useEffect(() => {
-    if (comments.length > 0 && userProfile?.organisation_id) {
+    if (comments.length > 0 && userProfile?.org_id) {
       const authorIds = [...new Set(comments.map((c) => c.author_id))];
-      fetchAuthorPoints(authorIds, userProfile.organisation_id);
+      fetchAuthorPoints(authorIds, userProfile.org_id);
     }
-  }, [userProfile?.organisation_id]);
+  }, [userProfile?.org_id]);
 
   async function fetchIssue() {
     const { data } = await supabase
-      .from('issues_with_details')
-      .select('id, title, description, status, priority, category, photo_url, created_at, updated_at, reporter_id, reporter_name, reporter_avatar, assignee_id, assignee_name, assignee_avatar, comment_count, vote_score, upvote_count, downvote_count, organisation_id')
+      .from('snags_with_details')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id')
       .eq('id', issueId)
       .single();
 
     if (data) {
       setIssue({
         ...data,
-        reporter: data.reporter_id
-          ? { id: data.reporter_id, name: data.reporter_name, avatar_url: data.reporter_avatar }
-          : undefined,
-        assignee: data.assignee_id
-          ? { id: data.assignee_id, name: data.assignee_name, avatar_url: data.assignee_avatar }
-          : null,
+        reporter: data.reporter_id ? { id: data.reporter_id, name: data.reporter_name } : undefined,
+        owner: data.owner_id ? { id: data.owner_id, name: data.owner_name } : null,
       });
+      if (data.photo_path) {
+        getSnagPhotoUrl(data.photo_path).then(setPhotoUrl);
+      } else {
+        setPhotoUrl(null);
+      }
     }
     setLoadingIssue(false);
   }
@@ -128,15 +150,15 @@ export default function IssueDetailScreen() {
   async function fetchComments() {
     const { data } = await supabase
       .from('comments')
-      .select('*, author:profiles(id, name, avatar_url)')
-      .eq('issue_id', issueId)
+      .select('*, author:profiles(id, name)')
+      .eq('snag_id', issueId)
       .order('created_at', { ascending: true });
 
     if (data) {
       setComments(data as Comment[]);
       const authorIds = [...new Set(data.map((c: any) => c.author_id))];
-      if (authorIds.length > 0 && userProfile?.organisation_id) {
-        fetchAuthorPoints(authorIds, userProfile.organisation_id);
+      if (authorIds.length > 0 && userProfile?.org_id) {
+        fetchAuthorPoints(authorIds, userProfile.org_id);
       }
     }
   }
@@ -225,11 +247,7 @@ export default function IssueDetailScreen() {
     if (!commentText.trim() || !currentUserId) return;
     setSendingComment(true);
 
-    const { error } = await supabase.from('comments').insert({
-      issue_id: issueId,
-      author_id: currentUserId,
-      body: commentText.trim(),
-    });
+    const { error } = await addComment(issueId, commentText.trim());
 
     if (!error) {
       setCommentText('');
@@ -270,7 +288,7 @@ export default function IssueDetailScreen() {
   if (!issue) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={{ color: Colors.textMuted }}>Issue not found.</Text>
+        <Text style={{ color: Colors.textMuted }}>Snag not found.</Text>
       </View>
     );
   }
@@ -309,9 +327,9 @@ export default function IssueDetailScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Hero photo */}
-        {issue.photo_url ? (
+        {photoUrl ? (
           <Image
-            source={{ uri: issue.photo_url }}
+            source={{ uri: photoUrl }}
             style={styles.heroPhoto}
             contentFit="cover"
             cachePolicy="memory-disk"
@@ -325,14 +343,15 @@ export default function IssueDetailScreen() {
         )}
 
         <View style={[styles.content, isSerious && styles.contentSerious]}>
-          {/* Title */}
-          <Text style={styles.title}>{issue.title}</Text>
+          {/* Reference + title */}
+          <Text style={styles.reference}>{issue.reference}</Text>
+          <Text style={styles.title}>{issue.description || 'No description'}</Text>
 
           {/* Badges — status before controls: current state shown up front */}
           <View style={styles.badgeRow}>
             <StatusBadge status={issue.status} />
-            <PriorityBadge priority={issue.priority} />
-            <CategoryBadge category={issue.category} />
+            <CategoryBadge kind={issue.kind} />
+            <PriorityBadge severity={issue.severity} />
           </View>
 
           {/* Meta */}
@@ -340,15 +359,11 @@ export default function IssueDetailScreen() {
             Reported by {issue.reporter?.name ?? 'Unknown'} · {timeAgo(issue.created_at)}
           </Text>
 
-          {issue.assignee ? (
-            <Text style={styles.assigneeText}>Assigned to {issue.assignee.name}</Text>
+          {issue.owner ? (
+            <Text style={styles.assigneeText}>Assigned to {issue.owner.name}</Text>
           ) : (
             <Text style={styles.unassigned}>Unassigned</Text>
           )}
-
-          {issue.description ? (
-            <Text style={styles.description}>{issue.description}</Text>
-          ) : null}
 
           {/* Vote bar */}
           <Card variant="elevated" style={styles.voteBar}>
@@ -477,6 +492,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 3,
     borderTopColor: Colors.serious,
   },
+  reference: { fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.textMuted, letterSpacing: 0.5 },
   title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary, lineHeight: 36 },
   badgeRow: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
   meta: { fontSize: Typography.sm, color: Colors.textMuted },

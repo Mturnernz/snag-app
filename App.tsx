@@ -74,7 +74,7 @@ export default function App() {
   }
 
   // Signed in but not yet in an organisation
-  if (!profile?.organisation_id) {
+  if (!profile?.org_id) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
@@ -84,7 +84,7 @@ export default function App() {
             onComplete={async () => {
               const p = await getProfile(session.user.id);
               setProfile(p);
-              if (p?.role === 'admin') {
+              if (p?.role === 'officer_admin') {
                 setIsNewAdmin(true);
               }
             }}

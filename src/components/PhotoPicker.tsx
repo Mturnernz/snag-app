@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { uploadIssuePhoto } from '../lib/supabase';
+import { uploadSnagPhoto } from '../lib/supabase';
 import Icon from './Icon';
 
 export interface PhotoPickerHandle {
@@ -31,7 +31,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ onUploadingChange },
       [{ resize: { width: 1200 } }],
       { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
     );
-    const task = uploadIssuePhoto(compressed.uri, fileName).finally(() => {
+    const task = uploadSnagPhoto(compressed.uri, fileName).finally(() => {
       setIsUploading(false);
       onUploadingChange?.(false);
     });
@@ -83,7 +83,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ onUploadingChange },
     getPhotoUrl: async () => {
       if (!photoUri) return null;
       if (uploadTask) return uploadTask;
-      return uploadIssuePhoto(photoUri, `${Date.now()}.jpg`);
+      return uploadSnagPhoto(photoUri, `${Date.now()}.jpg`);
     },
     reset: removePhoto,
   }));

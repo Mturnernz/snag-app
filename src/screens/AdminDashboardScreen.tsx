@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -13,31 +14,43 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Profile, Organisation, UserRole, ROLE_LABELS, RootStackParamList } from '../types';
-import { supabase, getOrgMembers, updateMemberRole } from '../lib/supabase';
-import { Colors, Spacing, Typography, Radius } from '../constants/theme';
+import {
+  supabase, getOrgMembers, updateMemberRole, inviteUser, getPendingInvites,
+} from '../lib/supabase';
+import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Card from '../components/Card';
 import Avatar from '../components/Avatar';
 import Chip from '../components/Chip';
+import Button from '../components/Button';
 import Icon from '../components/Icon';
 import EmptyState from '../components/EmptyState';
-import InviteCodeCard from '../components/InviteCodeCard';
+import { useToast } from '../hooks/useToast';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const ROLES: UserRole[] = ['worker', 'manager', 'admin'];
+const ROLES: UserRole[] = ['worker', 'supervisor', 'officer_admin'];
 const ROLE_OPTIONS = ROLES.map((r) => ({ key: r, label: ROLE_LABELS[r] }));
+
+interface PendingInvite {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: string;
+  created_at: string;
+  expires_at: string;
+}
 
 function MemberCard({
   member,
   isSelf,
-  issueCount,
+  snagCount,
   isAdmin,
   updatingRole,
   onRoleChange,
 }: {
   member: Profile;
   isSelf: boolean;
-  issueCount: number;
+  snagCount: number;
   isAdmin: boolean;
   updatingRole: boolean;
   onRoleChange: (role: UserRole) => void;
@@ -57,8 +70,8 @@ function MemberCard({
           <Text style={styles.memberEmail} numberOfLines={1}>{member.email}</Text>
         </View>
         <View style={styles.issuesBadge}>
-          <Text style={styles.issuesBadgeCount}>{issueCount}</Text>
-          <Text style={styles.issuesBadgeLabel}>issue{issueCount !== 1 ? 's' : ''}</Text>
+          <Text style={styles.issuesBadgeCount}>{snagCount}</Text>
+          <Text style={styles.issuesBadgeLabel}>snag{snagCount !== 1 ? 's' : ''}</Text>
         </View>
       </View>
 
@@ -78,13 +91,19 @@ function MemberCard({
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  const { showToast } = useToast();
 
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [members, setMembers] = useState<Profile[]>([]);
-  const [issueCounts, setIssueCounts] = useState<Record<string, number>>({});
+  const [snagCounts, setSnagCounts] = useState<Record<string, number>>({});
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingRole, setUpdatingRole] = useState<string | null>(null);
+
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<UserRole>('worker');
+  const [sendingInvite, setSendingInvite] = useState(false);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -92,30 +111,29 @@ export default function AdminDashboardScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('*, organisation:organisations(id, name, invite_code)')
+      .select('*, organisation:organisations(id, name, industry, plan_tier, created_at)')
       .eq('id', user.id)
       .single();
 
     if (data) {
-      const profile = data as Profile;
+      const profile = data as unknown as Profile;
       setCurrentUser(profile);
 
-      if (profile.organisation_id) {
-        const [list, issuesRes] = await Promise.all([
-          getOrgMembers(profile.organisation_id),
-          supabase
-            .from('issues')
-            .select('reporter_id')
-            .eq('organisation_id', profile.organisation_id),
+      if (profile.org_id) {
+        const [list, snagsRes, invites] = await Promise.all([
+          getOrgMembers(profile.org_id),
+          supabase.from('snags').select('reporter_id').eq('org_id', profile.org_id),
+          getPendingInvites(profile.org_id),
         ]);
 
         setMembers(list);
+        setPendingInvites(invites as PendingInvite[]);
 
         const counts: Record<string, number> = {};
-        for (const row of issuesRes.data ?? []) {
+        for (const row of snagsRes.data ?? []) {
           counts[row.reporter_id] = (counts[row.reporter_id] ?? 0) + 1;
         }
-        setIssueCounts(counts);
+        setSnagCounts(counts);
       }
     }
     setLoading(false);
@@ -138,6 +156,21 @@ export default function AdminDashboardScreen() {
     setUpdatingRole(null);
   }
 
+  async function handleSendInvite() {
+    if (!inviteEmail.trim()) return;
+    setSendingInvite(true);
+    const { error } = await inviteUser(inviteEmail.trim(), inviteRole, null);
+    setSendingInvite(false);
+    if (!error) {
+      showToast('Invite sent');
+      setInviteEmail('');
+      setInviteRole('worker');
+      if (currentUser?.org_id) {
+        getPendingInvites(currentUser.org_id).then(setPendingInvites);
+      }
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -147,9 +180,8 @@ export default function AdminDashboardScreen() {
   }
 
   const org = currentUser?.organisation as Organisation | undefined;
-  const orgInviteCode = org?.invite_code;
   const orgName = org?.name ?? 'Your Organisation';
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'officer_admin';
 
   const sorted = [...members].sort((a, b) => {
     const ri = (r: UserRole) => ROLES.indexOf(r);
@@ -179,11 +211,33 @@ export default function AdminDashboardScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
 
-        {orgInviteCode && (
-          <InviteCodeCard
-            code={orgInviteCode}
-            hint="Share this code with colleagues — they'll join as Workers by default."
-          />
+        {isAdmin && (
+          <Card variant="elevated" style={styles.inviteCard}>
+            <Text style={styles.sectionLabel}>INVITE A TEAM MEMBER</Text>
+            <TextInput
+              style={styles.inviteInput}
+              placeholder="colleague@example.com"
+              placeholderTextColor={Colors.textMuted}
+              value={inviteEmail}
+              onChangeText={setInviteEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+            <Chip options={ROLE_OPTIONS} value={inviteRole} onChange={setInviteRole} variant="segmented" />
+            <Button label="Send Invite" onPress={handleSendInvite} loading={sendingInvite} fullWidth />
+
+            {pendingInvites.length > 0 && (
+              <View style={styles.pendingList}>
+                <Text style={styles.pendingLabel}>PENDING</Text>
+                {pendingInvites.map((invite) => (
+                  <View key={invite.id} style={styles.pendingRow}>
+                    <Text style={styles.pendingEmail} numberOfLines={1}>{invite.email}</Text>
+                    <Text style={styles.pendingRole}>{ROLE_LABELS[invite.role]}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </Card>
         )}
 
         <View style={styles.section}>
@@ -197,7 +251,7 @@ export default function AdminDashboardScreen() {
               key={member.id}
               member={member}
               isSelf={member.id === currentUser?.id}
-              issueCount={issueCounts[member.id] ?? 0}
+              snagCount={snagCounts[member.id] ?? 0}
               isAdmin={isAdmin}
               updatingRole={updatingRole === member.id}
               onRoleChange={(role) => handleRoleChange(member, role)}
@@ -208,7 +262,7 @@ export default function AdminDashboardScreen() {
             <EmptyState
               icon="people-outline"
               title="No team members yet"
-              message="Share the invite code above with your team so they can join."
+              message="Invite your team above so they can join."
             />
           )}
         </View>
@@ -268,6 +322,47 @@ const styles = StyleSheet.create({
   scroll: {
     padding: Spacing.lg,
     gap: Spacing.lg,
+  },
+
+  inviteCard: {
+    gap: Spacing.sm,
+  },
+  inviteInput: {
+    height: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.input,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  pendingList: {
+    marginTop: Spacing.sm,
+    gap: Spacing.xs,
+  },
+  pendingLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.textMuted,
+    letterSpacing: 0.8,
+  },
+  pendingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  pendingEmail: {
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
+    flex: 1,
+  },
+  pendingRole: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
   },
 
   section: {

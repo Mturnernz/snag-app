@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { joinOrganisationByCode } from '../lib/supabase';
+import { getInvitePreview, acceptInvite, InvitePreview } from '../lib/supabase';
+import { ROLE_LABELS } from '../types';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
+import Card from '../components/Card';
 import Icon from '../components/Icon';
 
 interface Props {
@@ -12,26 +14,50 @@ interface Props {
   onBack: () => void;
 }
 
-export default function OrgJoinScreen({ userId, onComplete, onBack }: Props) {
+export default function OrgJoinScreen({ onComplete, onBack }: Props) {
   const insets = useSafeAreaInsets();
-  const [inviteCode, setInviteCode] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [token, setToken] = useState('');
+  const [preview, setPreview] = useState<InvitePreview | null>(null);
+  const [name, setName] = useState('');
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleJoinOrg() {
-    if (!inviteCode.trim()) {
-      setError('Please enter an invite code.');
+  async function handleLookUp() {
+    if (!token.trim()) {
+      setError('Please paste the invite code from your email.');
       return;
     }
-    setLoading(true);
+    setLoadingPreview(true);
     setError(null);
-    const { error } = await joinOrganisationByCode(inviteCode.trim(), userId);
-    if (error) {
-      setError(error.message ?? 'Could not join organisation.');
-    } else {
-      onComplete();
+    const { data, error } = await getInvitePreview(token.trim());
+    setLoadingPreview(false);
+
+    if (error || !data) {
+      setError('That invite code is invalid or has expired.');
+      return;
     }
-    setLoading(false);
+    if (data.status !== 'pending') {
+      setError('That invite has already been used or was revoked.');
+      return;
+    }
+    setPreview(data as InvitePreview);
+  }
+
+  async function handleAccept() {
+    if (!name.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+    setAccepting(true);
+    setError(null);
+    const { error } = await acceptInvite(token.trim(), name.trim());
+    setAccepting(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    onComplete();
   }
 
   return (
@@ -40,25 +66,54 @@ export default function OrgJoinScreen({ userId, onComplete, onBack }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.inner}>
-        <Text style={styles.heading}>Enter invite code</Text>
-        <Text style={styles.subheading}>Ask your manager for the 6-character code from their profile.</Text>
+        {!preview ? (
+          <>
+            <Text style={styles.heading}>Enter your invite code</Text>
+            <Text style={styles.subheading}>Paste the code your admin or supervisor emailed you.</Text>
 
-        <TextInput
-          style={[styles.input, styles.codeInput]}
-          placeholder="ABC123"
-          placeholderTextColor={Colors.textMuted}
-          value={inviteCode}
-          onChangeText={(t) => setInviteCode(t.toUpperCase())}
-          autoCapitalize="characters"
-          maxLength={6}
-          returnKeyType="done"
-          onSubmitEditing={handleJoinOrg}
-          autoFocus
-        />
+            <TextInput
+              style={styles.input}
+              placeholder="Invite code"
+              placeholderTextColor={Colors.textMuted}
+              value={token}
+              onChangeText={setToken}
+              autoCapitalize="none"
+              returnKeyType="done"
+              onSubmitEditing={handleLookUp}
+              autoFocus
+            />
 
-        {error && <Text style={styles.errorText}>{error}</Text>}
+            {error && <Text style={styles.errorText}>{error}</Text>}
 
-        <Button label="Join Organisation" onPress={handleJoinOrg} loading={loading} fullWidth />
+            <Button label="Look Up Invite" onPress={handleLookUp} loading={loadingPreview} fullWidth />
+          </>
+        ) : (
+          <>
+            <Text style={styles.heading}>Join {preview.org_name}</Text>
+            <Text style={styles.subheading}>
+              {preview.site_name ? `${preview.site_name} · ` : ''}{ROLE_LABELS[preview.role]}
+            </Text>
+
+            <Card variant="outlined">
+              <Text style={styles.previewEmail}>{preview.email}</Text>
+            </Card>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Your name"
+              placeholderTextColor={Colors.textMuted}
+              value={name}
+              onChangeText={setName}
+              returnKeyType="done"
+              onSubmitEditing={handleAccept}
+              autoFocus
+            />
+
+            {error && <Text style={styles.errorText}>{error}</Text>}
+
+            <Button label="Accept & Join" onPress={handleAccept} loading={accepting} fullWidth />
+          </>
+        )}
 
         <TouchableOpacity onPress={onBack} style={styles.backRow}>
           <Icon name="arrow-back" size="sm" color={Colors.primary} />
@@ -93,6 +148,11 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: -Spacing.sm,
   },
+  previewEmail: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
   input: {
     height: MIN_TOUCH_TARGET,
     backgroundColor: Colors.surface,
@@ -102,12 +162,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     fontSize: Typography.base,
     color: Colors.textPrimary,
-  },
-  codeInput: {
-    textAlign: 'center',
-    fontSize: Typography.xxl,
-    fontWeight: Typography.bold,
-    letterSpacing: 8,
   },
   errorText: {
     fontSize: Typography.sm,

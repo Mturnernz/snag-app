@@ -15,16 +15,18 @@ export const Colors = {
   textSecondary: '#6B7280',
   textMuted: '#9CA3AF',
 
-  // Status colours
+  // Status colours (Snagv1's real snag_status enum: flagged/in_progress/sorted/resolved/rca_pending)
   status: {
-    open: '#3B82F6',
-    openBg: '#EFF6FF',
+    flagged: '#3B82F6',
+    flaggedBg: '#EFF6FF',
     inProgress: '#F59E0B',
     inProgressBg: '#FFFBEB',
+    sorted: '#0D9488',
+    sortedBg: '#F0FDFA',
     resolved: '#10B981',
     resolvedBg: '#ECFDF5',
-    closed: '#9CA3AF',
-    closedBg: '#F3F4F6',
+    rcaPending: '#DC2626',
+    rcaPendingBg: '#FEE2E2',
   },
 
   // Priority colours — only "high" carries an alert colour; low/medium are

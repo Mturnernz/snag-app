@@ -57,11 +57,11 @@ export default function LeaderboardScreen() {
       setCurrentUserId(user.id);
       const { data: profile } = await supabase
         .from('profiles')
-        .select('organisation_id')
+        .select('org_id')
         .eq('id', user.id)
         .single();
-      if (profile?.organisation_id) {
-        setOrgId(profile.organisation_id);
+      if (profile?.org_id) {
+        setOrgId(profile.org_id);
       }
     });
   }, []);

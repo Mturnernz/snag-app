@@ -6,11 +6,11 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 
 import {
   Profile, RootStackParamList,
-  IssueStatus, IssuePriority, IssueCategory,
-  STATUS_LABELS, PRIORITY_LABELS, CATEGORY_LABELS,
+  SnagStatus, SnagKind, SnagSeverity,
+  STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
 } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
-import { supabase, getOrgMembers, updateIssue } from '../lib/supabase';
+import { supabase, getOrgMembers, updateSnagStatus, recategoriseSnag, assignSnagOwner } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -21,16 +21,23 @@ import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
 
 type Route = RouteProp<RootStackParamList, 'ManageIssue'>;
-type EditingField = 'status' | 'priority' | 'category' | 'assignee' | null;
+type EditingField = 'status' | 'severity' | 'kind' | 'assignee' | null;
 
 interface ManagedIssue {
   id: string;
-  status: IssueStatus;
-  priority: IssuePriority;
-  category: IssueCategory;
-  assignee_id: string | null;
-  assignee: { id: string; name: string } | null;
-  organisation_id: string;
+  status: SnagStatus;
+  kind: SnagKind;
+  severity: SnagSeverity | null;
+  owner_id: string | null;
+  owner: { id: string; name: string } | null;
+  org_id: string;
+}
+
+interface PendingUpdates {
+  status?: SnagStatus;
+  kind?: SnagKind;
+  severity?: SnagSeverity | null;
+  owner_id?: string | null;
 }
 
 export default function ManageIssueScreen() {
@@ -45,7 +52,7 @@ export default function ManageIssueScreen() {
   const [loading, setLoading] = useState(true);
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [saving, setSaving] = useState(false);
-  const [pendingUpdates, setPendingUpdates] = useState<Parameters<typeof updateIssue>[1]>({});
+  const [pendingUpdates, setPendingUpdates] = useState<PendingUpdates>({});
 
   useEffect(() => {
     load();
@@ -54,8 +61,8 @@ export default function ManageIssueScreen() {
   async function load() {
     setLoading(true);
     const { data } = await supabase
-      .from('issues_with_details')
-      .select('id, status, priority, category, assignee_id, assignee_name, organisation_id')
+      .from('snags_with_details')
+      .select('id, status, kind, severity, owner_id, owner_name, org_id')
       .eq('id', issueId)
       .single();
 
@@ -63,22 +70,28 @@ export default function ManageIssueScreen() {
       setIssue({
         id: data.id,
         status: data.status,
-        priority: data.priority,
-        category: data.category,
-        assignee_id: data.assignee_id,
-        assignee: data.assignee_id ? { id: data.assignee_id, name: data.assignee_name } : null,
-        organisation_id: data.organisation_id,
+        kind: data.kind,
+        severity: data.severity,
+        owner_id: data.owner_id,
+        owner: data.owner_id ? { id: data.owner_id, name: data.owner_name } : null,
+        org_id: data.org_id,
       });
-      if (data.organisation_id) {
-        getOrgMembers(data.organisation_id).then(setOrgMembers);
+      if (data.org_id) {
+        getOrgMembers(data.org_id).then(setOrgMembers);
       }
     }
     setLoading(false);
   }
 
-  function stageUpdate(updates: Parameters<typeof updateIssue>[1]) {
+  function stageUpdate(updates: PendingUpdates) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIssue((prev) => prev ? { ...prev, ...updates } : prev);
+    setIssue((prev) => prev ? {
+      ...prev,
+      ...updates,
+      owner: updates.owner_id !== undefined
+        ? (updates.owner_id ? orgMembers.find((m) => m.id === updates.owner_id) ?? prev.owner : null)
+        : prev.owner,
+    } : prev);
     setPendingUpdates((prev) => ({ ...prev, ...updates }));
     setEditingField(null);
   }
@@ -86,8 +99,27 @@ export default function ManageIssueScreen() {
   async function handleSave() {
     if (!issue || saving || Object.keys(pendingUpdates).length === 0) return;
     setSaving(true);
-    const { error } = await updateIssue(issue.id, pendingUpdates);
+
+    const calls: Promise<{ error: any }>[] = [];
+
+    if (pendingUpdates.status !== undefined) {
+      calls.push(updateSnagStatus(issue.id, pendingUpdates.status));
+    }
+    if (pendingUpdates.kind !== undefined || pendingUpdates.severity !== undefined) {
+      calls.push(recategoriseSnag(
+        issue.id,
+        pendingUpdates.kind ?? issue.kind,
+        pendingUpdates.severity !== undefined ? pendingUpdates.severity : issue.severity
+      ));
+    }
+    if (pendingUpdates.owner_id !== undefined) {
+      calls.push(assignSnagOwner(issue.id, pendingUpdates.owner_id));
+    }
+
+    const results = await Promise.all(calls);
+    const error = results.find((r) => r.error)?.error ?? null;
     setSaving(false);
+
     if (!error) {
       showToast('Snag updated');
       navigation.goBack();
@@ -124,7 +156,7 @@ export default function ManageIssueScreen() {
           </View>
           {editingField === 'status' && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-              {(Object.keys(STATUS_LABELS) as IssueStatus[]).map((s) => (
+              {(Object.keys(STATUS_LABELS) as SnagStatus[]).map((s) => (
                 <TouchableOpacity
                   key={s}
                   onPress={() => stageUpdate({ status: s })}
@@ -138,60 +170,68 @@ export default function ManageIssueScreen() {
             </ScrollView>
           )}
 
-          {/* Priority */}
+          {/* Type (kind) */}
           <View style={styles.row}>
-            <Text style={styles.label}>Priority</Text>
-            <TouchableOpacity onPress={() => toggleField('priority')} style={styles.currentChip}>
-              <PriorityBadge priority={issue.priority} />
-              <Icon name={editingField === 'priority' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
+            <Text style={styles.label}>Type</Text>
+            <TouchableOpacity onPress={() => toggleField('kind')} style={styles.currentChip}>
+              <CategoryBadge kind={issue.kind} />
+              <Icon name={editingField === 'kind' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
             </TouchableOpacity>
           </View>
-          {editingField === 'priority' && (
+          {editingField === 'kind' && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-              {(Object.keys(PRIORITY_LABELS) as IssuePriority[]).map((p) => (
+              {(Object.keys(KIND_LABELS) as SnagKind[]).map((k) => (
                 <TouchableOpacity
-                  key={p}
-                  onPress={() => stageUpdate({ priority: p })}
-                  style={[styles.optionChip, issue.priority === p && styles.optionChipActive]}
+                  key={k}
+                  onPress={() => stageUpdate({ kind: k })}
+                  style={[styles.optionChip, issue.kind === k && styles.optionChipActive]}
                 >
-                  <Text style={[styles.optionChipText, issue.priority === p && styles.optionChipTextActive]}>
-                    {PRIORITY_LABELS[p]}
+                  <Text style={[styles.optionChipText, issue.kind === k && styles.optionChipTextActive]}>
+                    {KIND_LABELS[k]}
                   </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
           )}
 
-          {/* Category */}
+          {/* Severity */}
           <View style={styles.row}>
-            <Text style={styles.label}>Category</Text>
-            <TouchableOpacity onPress={() => toggleField('category')} style={styles.currentChip}>
-              <CategoryBadge category={issue.category} />
-              <Icon name={editingField === 'category' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
+            <Text style={styles.label}>Severity</Text>
+            <TouchableOpacity onPress={() => toggleField('severity')} style={styles.currentChip}>
+              {issue.severity ? <PriorityBadge severity={issue.severity} /> : <Text style={styles.currentText}>Not assessed</Text>}
+              <Icon name={editingField === 'severity' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
             </TouchableOpacity>
           </View>
-          {editingField === 'category' && (
+          {editingField === 'severity' && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-              {(Object.keys(CATEGORY_LABELS) as IssueCategory[]).map((c) => (
+              <TouchableOpacity
+                onPress={() => stageUpdate({ severity: null })}
+                style={[styles.optionChip, issue.severity === null && styles.optionChipActive]}
+              >
+                <Text style={[styles.optionChipText, issue.severity === null && styles.optionChipTextActive]}>
+                  Not assessed
+                </Text>
+              </TouchableOpacity>
+              {(Object.keys(SEVERITY_LABELS) as SnagSeverity[]).map((s) => (
                 <TouchableOpacity
-                  key={c}
-                  onPress={() => stageUpdate({ category: c })}
-                  style={[styles.optionChip, issue.category === c && styles.optionChipActive]}
+                  key={s}
+                  onPress={() => stageUpdate({ severity: s })}
+                  style={[styles.optionChip, issue.severity === s && styles.optionChipActive]}
                 >
-                  <Text style={[styles.optionChipText, issue.category === c && styles.optionChipTextActive]}>
-                    {CATEGORY_LABELS[c]}
+                  <Text style={[styles.optionChipText, issue.severity === s && styles.optionChipTextActive]}>
+                    {SEVERITY_LABELS[s]}
                   </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
           )}
 
-          {/* Assignee */}
+          {/* Owner (assignee) */}
           <View style={styles.row}>
-            <Text style={styles.label}>Assignee</Text>
+            <Text style={styles.label}>Owner</Text>
             <TouchableOpacity onPress={() => toggleField('assignee')} style={styles.currentChip}>
               <Text style={styles.currentText}>
-                {issue.assignee ? issue.assignee.name : 'Unassigned'}
+                {issue.owner ? issue.owner.name : 'Unassigned'}
               </Text>
               <Icon name={editingField === 'assignee' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
             </TouchableOpacity>
@@ -199,20 +239,20 @@ export default function ManageIssueScreen() {
           {editingField === 'assignee' && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
               <TouchableOpacity
-                onPress={() => stageUpdate({ assignee_id: null })}
-                style={[styles.optionChip, issue.assignee_id === null && styles.optionChipActive]}
+                onPress={() => stageUpdate({ owner_id: null })}
+                style={[styles.optionChip, issue.owner_id === null && styles.optionChipActive]}
               >
-                <Text style={[styles.optionChipText, issue.assignee_id === null && styles.optionChipTextActive]}>
+                <Text style={[styles.optionChipText, issue.owner_id === null && styles.optionChipTextActive]}>
                   Unassigned
                 </Text>
               </TouchableOpacity>
               {orgMembers.map((member) => (
                 <TouchableOpacity
                   key={member.id}
-                  onPress={() => stageUpdate({ assignee_id: member.id })}
-                  style={[styles.optionChip, issue.assignee_id === member.id && styles.optionChipActive]}
+                  onPress={() => stageUpdate({ owner_id: member.id })}
+                  style={[styles.optionChip, issue.owner_id === member.id && styles.optionChipActive]}
                 >
-                  <Text style={[styles.optionChipText, issue.assignee_id === member.id && styles.optionChipTextActive]}>
+                  <Text style={[styles.optionChipText, issue.owner_id === member.id && styles.optionChipTextActive]}>
                     {member.name}
                   </Text>
                 </TouchableOpacity>

@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { Issue, IssueStatus, RootStackParamList } from '../types';
+import { Snag, SnagStatus, STATUS_LABELS, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
@@ -20,13 +20,14 @@ import EmptyState from '../components/EmptyState';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type FilterOption = 'all' | IssueStatus;
+type FilterOption = 'all' | SnagStatus;
 
 const FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'open', label: 'Open' },
-  { key: 'in_progress', label: 'In Progress' },
-  { key: 'resolved', label: 'Resolved' },
+  { key: 'flagged', label: STATUS_LABELS.flagged },
+  { key: 'in_progress', label: STATUS_LABELS.in_progress },
+  { key: 'sorted', label: STATUS_LABELS.sorted },
+  { key: 'resolved', label: STATUS_LABELS.resolved },
 ];
 
 export default function IssueListScreen() {
@@ -34,14 +35,14 @@ export default function IssueListScreen() {
   const navigation = useNavigation<Nav>();
 
   const [filter, setFilter] = useState<FilterOption>('all');
-  const [issues, setIssues] = useState<Issue[]>([]);
+  const [issues, setIssues] = useState<Snag[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchIssues = useCallback(async () => {
     let query = supabase
-      .from('issues_with_details')
-      .select('id, title, status, priority, category, photo_url, created_at, reporter_id, reporter_name, reporter_avatar, assignee_id, assignee_name, comment_count, vote_score')
+      .from('snags_with_details')
+      .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description')
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -55,12 +56,8 @@ export default function IssueListScreen() {
       setIssues(
         data.map((row: any) => ({
           ...row,
-          reporter: row.reporter_id
-            ? { id: row.reporter_id, name: row.reporter_name, avatar_url: row.reporter_avatar }
-            : undefined,
-          assignee: row.assignee_id
-            ? { id: row.assignee_id, name: row.assignee_name, avatar_url: row.assignee_avatar }
-            : null,
+          reporter: row.reporter_id ? { id: row.reporter_id, name: row.reporter_name } : undefined,
+          owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : null,
         }))
       );
     }

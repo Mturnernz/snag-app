@@ -45,7 +45,7 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 function MainTabNavigator({ userRole }: { userRole: UserRole }) {
-  const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
+  const isAdminOrManager = userRole === 'officer_admin' || userRole === 'supervisor';
   const [openIssueCount, setOpenIssueCount] = useState<number>(0);
 
   const fetchOpenCount = useCallback(async () => {
@@ -53,15 +53,15 @@ function MainTabNavigator({ userRole }: { userRole: UserRole }) {
     if (!user) return;
     const { data: profile } = await supabase
       .from('profiles')
-      .select('organisation_id')
+      .select('org_id')
       .eq('id', user.id)
       .single();
-    if (!profile?.organisation_id) return;
+    if (!profile?.org_id) return;
     const { count } = await supabase
-      .from('issues')
+      .from('snags')
       .select('id', { count: 'exact', head: true })
-      .eq('organisation_id', profile.organisation_id)
-      .eq('status', 'open');
+      .eq('org_id', profile.org_id)
+      .eq('status', 'flagged');
     setOpenIssueCount(count ?? 0);
   }, []);
 

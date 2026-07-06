@@ -2,12 +2,11 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Profile, Organisation } from '../types';
+import { Profile } from '../types';
 import { updateProfile } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Card from '../components/Card';
 import Button from '../components/Button';
-import InviteCodeCard from '../components/InviteCodeCard';
 
 interface Props {
   profile: Profile;
@@ -18,8 +17,6 @@ export default function AdminSetupScreen({ profile, onDone }: Props) {
   const insets = useSafeAreaInsets();
   const [name, setName] = useState(profile.name ?? '');
   const [saving, setSaving] = useState(false);
-
-  const orgInviteCode = (profile.organisation as Organisation | undefined)?.invite_code ?? profile.invite_code;
 
   async function handleDone() {
     setSaving(true);
@@ -44,10 +41,8 @@ export default function AdminSetupScreen({ profile, onDone }: Props) {
       <Text style={styles.appName}>Snag</Text>
       <Text style={styles.heading}>Welcome, Admin!</Text>
       <Text style={styles.subheading}>
-        <Text style={styles.bold}>{orgName}</Text> is ready. Set your name and share your invite code so your team can join.
+        <Text style={styles.bold}>{orgName}</Text> is ready. Set your name to get started — you can invite your team from the Admin tab.
       </Text>
-
-      <InviteCodeCard code={orgInviteCode} />
 
       <Card variant="elevated" elevation="md">
         <Text style={styles.cardLabel}>YOUR NAME</Text>

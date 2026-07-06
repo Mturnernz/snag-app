@@ -1,21 +1,23 @@
 import React from 'react';
-import { IssuePriority, PRIORITY_LABELS } from '../types';
+import { SnagSeverity, SEVERITY_LABELS } from '../types';
 import { Colors } from '../constants/theme';
 import Badge from './Badge';
 
 interface Props {
-  priority: IssuePriority;
+  severity: SnagSeverity | null;
 }
 
-export default function PriorityBadge({ priority }: Props) {
-  const label = PRIORITY_LABELS[priority];
+export default function PriorityBadge({ severity }: Props) {
+  if (!severity) return null;
+  const label = SEVERITY_LABELS[severity];
 
-  if (priority === 'high') {
-    return (
-      <Badge label={label} color={Colors.priority.high} bg={Colors.priority.highBg} variant="solid" />
-    );
+  if (severity === 'critical') {
+    return <Badge label={label} color={Colors.priority.high} bg={Colors.priority.highBg} variant="solid" />;
+  }
+  if (severity === 'injury') {
+    return <Badge label={label} color={Colors.category.brokenEquipment} bg={Colors.category.brokenEquipmentBg} variant="solid" />;
   }
 
-  const color = priority === 'medium' ? Colors.priority.medium : Colors.priority.low;
+  const color = severity === 'moderate' ? Colors.priority.medium : Colors.priority.low;
   return <Badge label={label} color={color} variant="dot" />;
 }

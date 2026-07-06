@@ -2,6 +2,7 @@
   "expo": {
     "name": "Snag",
     "slug": "snag",
+    "owner": "mturnernz1",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -47,7 +48,10 @@
     },
     "extra": {
       "supabaseUrl": "",
-      "supabaseAnonKey": ""
+      "supabaseAnonKey": "",
+      "eas": {
+        "projectId": "fc3e5412-bd53-459a-b572-d7d85283377b"
+      }
     }
   }
 }

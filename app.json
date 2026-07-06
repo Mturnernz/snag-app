@@ -21,10 +21,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#2563EB"
       },
-      "package": "com.snag.app",
-      "navigationBar": {
-        "visible": "immersive"
-      }
+      "package": "com.snag.app"
     },
     "plugins": [
       [
@@ -34,7 +31,14 @@
           "cameraPermission": "Snag needs access to your camera to take photos of issues."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-navigation-bar",
+        {
+          "visibility": "hidden",
+          "behavior": "overlay-swipe"
+        }
+      ]
     ],
     "web": {
       "bundler": "metro",

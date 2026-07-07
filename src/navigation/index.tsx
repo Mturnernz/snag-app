@@ -12,7 +12,6 @@ import IssueListScreen from '../screens/IssueListScreen';
 import ReportIssueScreen from '../screens/ReportIssueScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import IssueDetailScreen from '../screens/IssueDetailScreen';
-import ManageIssueScreen from '../screens/ManageIssueScreen';
 import AdminDashboardScreen from '../screens/AdminDashboardScreen';
 import ReportsScreen from '../screens/ReportsScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
@@ -115,11 +114,6 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
         <Stack.Screen
           name="IssueDetail"
           component={IssueDetailScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="ManageIssue"
-          component={ManageIssueScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
         <Stack.Screen

@@ -131,7 +131,6 @@ export type RootStackParamList = {
   // `issueId` here refers to a snags.id — the param name is kept for
   // minimal navigation-call churn even though the underlying entity is a Snag.
   IssueDetail: { issueId: string };
-  ManageIssue: { issueId: string };
   Reports: undefined;
   Leaderboard: undefined;
   ReportIncidentDetails: undefined;

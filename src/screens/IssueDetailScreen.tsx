@@ -16,8 +16,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, useFocusEffect, RouteProp } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useRoute, useFocusEffect, RouteProp } from '@react-navigation/native';
 
 import {
   SnagStatus, SnagKind, SnagLane, SnagSeverity, Comment, Profile, RootStackParamList, VoteValue,
@@ -31,13 +30,13 @@ import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
+import ManageIssuePanel from '../components/ManageIssuePanel';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
-type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 interface IssueDetail {
   id: string;
@@ -69,7 +68,6 @@ function timeAgo(dateStr: string): string {
 
 export default function IssueDetailScreen() {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { issueId } = route.params;
 
@@ -114,8 +112,8 @@ export default function IssueDetailScreen() {
     });
   }, [issueId]);
 
-  // Re-fetch the issue whenever this screen regains focus — e.g. after a
-  // manager edits it on ManageIssueScreen and navigates back.
+  // Re-fetch the issue whenever this screen regains focus so it never shows
+  // stale data after navigating away and back.
   useFocusEffect(
     useCallback(() => {
       fetchIssue();
@@ -312,21 +310,6 @@ export default function IssueDetailScreen() {
       <ScreenHeader
         title={isSerious ? 'Health & Safety Report' : 'Snag Details'}
         tone={isSerious ? 'serious' : 'default'}
-        rightSlot={
-          canEdit ? (
-            <TouchableOpacity
-              onPress={() => navigation.navigate('ManageIssue', { issueId })}
-              hitSlop={8}
-              style={styles.manageButton}
-            >
-              <Icon
-                name="options-outline"
-                size="lg"
-                color={isSerious ? Colors.white : Colors.textPrimary}
-              />
-            </TouchableOpacity>
-          ) : null
-        }
       />
 
       <ScrollView
@@ -394,6 +377,21 @@ export default function IssueDetailScreen() {
             <Text style={styles.assigneeText}>Assigned to {issue.owner.name}</Text>
           ) : (
             <Text style={styles.unassigned}>Unassigned</Text>
+          )}
+
+          {/* Manage — inline for supervisors/admins, boxed between the
+              assignee line and the vote bar (replaces the old header
+              button that pushed a separate ManageIssue screen). */}
+          {canEdit && (
+            <ManageIssuePanel
+              issueId={issue.id}
+              status={issue.status}
+              kind={issue.kind}
+              severity={issue.severity}
+              owner={issue.owner ?? null}
+              orgMembers={orgMembers}
+              onUpdated={fetchIssue}
+            />
           )}
 
           {/* Vote bar */}
@@ -514,7 +512,6 @@ export default function IssueDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
-  manageButton: { padding: Spacing.xs },
   scroll: { flex: 1 },
   heroPhoto: { width: '100%', height: 280, backgroundColor: Colors.background },
   heroPlaceholder: { width: '100%', height: 200, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, alignItems: 'center', justifyContent: 'center' },

@@ -6,21 +6,25 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
+  TouchableOpacity,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { Snag, SnagStatus, STATUS_LABELS, RootStackParamList } from '../types';
-import { Colors, Spacing, Typography } from '../constants/theme';
+import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
 import EmptyState from '../components/EmptyState';
+import Icon from '../components/Icon';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 type FilterOption = 'all' | SnagStatus;
+type SortOption = 'newest' | 'site' | 'comments' | 'votes';
 
 const FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -29,11 +33,20 @@ const FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
   { key: 'resolved', label: STATUS_LABELS.resolved },
 ];
 
+const SORT_OPTIONS: { key: SortOption; label: string; icon: React.ComponentProps<typeof Icon>['name'] }[] = [
+  { key: 'newest', label: 'Newest first', icon: 'time-outline' },
+  { key: 'site', label: 'Site', icon: 'business-outline' },
+  { key: 'comments', label: 'Most commented', icon: 'chatbubble-outline' },
+  { key: 'votes', label: 'Highest voted', icon: 'caret-up-outline' },
+];
+
 export default function IssueListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
 
   const [filter, setFilter] = useState<FilterOption>('all');
+  const [sort, setSort] = useState<SortOption>('newest');
+  const [sortModalVisible, setSortModalVisible] = useState(false);
   const [issues, setIssues] = useState<Snag[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,9 +54,23 @@ export default function IssueListScreen() {
   const fetchIssues = useCallback(async () => {
     let query = supabase
       .from('snags_with_details')
-      .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description')
-      .order('created_at', { ascending: false })
+      .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_name')
       .limit(50);
+
+    switch (sort) {
+      case 'site':
+        query = query.order('site_name', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
+        break;
+      case 'comments':
+        query = query.order('comment_count', { ascending: false }).order('created_at', { ascending: false });
+        break;
+      case 'votes':
+        query = query.order('vote_score', { ascending: false }).order('created_at', { ascending: false });
+        break;
+      case 'newest':
+      default:
+        query = query.order('created_at', { ascending: false });
+    }
 
     if (filter !== 'all') {
       query = query.eq('status', filter);
@@ -60,7 +87,7 @@ export default function IssueListScreen() {
         }))
       );
     }
-  }, [filter]);
+  }, [filter, sort]);
 
   useEffect(() => {
     setLoading(true);
@@ -80,8 +107,40 @@ export default function IssueListScreen() {
       </View>
 
       <View style={styles.filterWrap}>
-        <Chip options={FILTER_OPTIONS} value={filter} onChange={setFilter} variant="chip" />
+        <View style={styles.filterChips}>
+          <Chip options={FILTER_OPTIONS} value={filter} onChange={setFilter} variant="chip" />
+        </View>
+        <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)} activeOpacity={0.7}>
+          <Icon name="swap-vertical-outline" size="sm" color={Colors.textSecondary} />
+          <Text style={styles.sortButtonText}>{SORT_OPTIONS.find((o) => o.key === sort)?.label}</Text>
+        </TouchableOpacity>
       </View>
+
+      <Modal visible={sortModalVisible} transparent animationType="fade" onRequestClose={() => setSortModalVisible(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSortModalVisible(false)}>
+          <View style={styles.sortSheet}>
+            <Text style={styles.sortSheetTitle}>Sort by</Text>
+            {SORT_OPTIONS.map((option) => {
+              const active = option.key === sort;
+              return (
+                <TouchableOpacity
+                  key={option.key}
+                  style={styles.sortOption}
+                  onPress={() => {
+                    setSort(option.key);
+                    setSortModalVisible(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Icon name={option.icon} size="md" color={active ? Colors.primary : Colors.textSecondary} />
+                  <Text style={[styles.sortOptionText, active && styles.sortOptionTextActive]}>{option.label}</Text>
+                  {active && <Icon name="checkmark" size="sm" color={Colors.primary} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -157,11 +216,69 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   filterWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     backgroundColor: Colors.surface,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+  },
+  filterChips: {
+    flex: 1,
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    height: 34,
+    paddingHorizontal: Spacing.md,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  sortButtonText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.medium,
+    color: Colors.textSecondary,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17, 24, 39, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  sortSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.card,
+    borderTopRightRadius: Radius.card,
+    padding: Spacing.lg,
+    paddingBottom: Spacing.xl,
+    gap: Spacing.xs,
+    ...Shadow.lg,
+  },
+  sortSheetTitle: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.bold,
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+    marginBottom: Spacing.sm,
+  },
+  sortOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  sortOptionText: {
+    flex: 1,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  sortOptionTextActive: {
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
   },
   listContent: {
     padding: Spacing.lg,

@@ -15,6 +15,7 @@ export interface Organisation {
   name: string;
   industry: string | null;
   plan_tier: string;
+  join_code: string;
   created_at: string;
 }
 
@@ -33,6 +34,7 @@ export interface Profile {
   email: string;
   role: UserRole;
   created_at: string;
+  removed_at?: string | null;
   organisation?: Organisation;
 }
 
@@ -61,6 +63,7 @@ export interface Snag {
   severity: SnagSeverity | null;
   description: string | null;
   photo_path: string | null;
+  photo_paths: string[];
   occurred_at: string;
   latitude: number | null;
   longitude: number | null;

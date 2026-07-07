@@ -53,8 +53,9 @@ export async function getCurrentUser() {
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, org_id, name, email, role, created_at, organisation:organisations(id, name, industry, plan_tier, created_at)')
+    .select('id, org_id, name, email, role, created_at, organisation:organisations(id, name, industry, plan_tier, join_code, created_at)')
     .eq('id', userId)
+    .is('removed_at', null)
     .maybeSingle();
   if (error) console.error('getProfile error:', error);
   return data as unknown as Profile | null;
@@ -115,6 +116,28 @@ export async function getPendingInvites(orgId: string) {
   return data ?? [];
 }
 
+// ─── QR join code ─────────────────────────────────────────────────────────────
+
+export async function regenerateOrgJoinCode() {
+  const { data, error } = await supabase.rpc('regenerate_org_join_code');
+  return { code: data as string | null, error };
+}
+
+export interface OrgJoinPreview {
+  org_id: string;
+  org_name: string;
+}
+
+export async function getOrgByJoinCode(code: string) {
+  const { data, error } = await supabase.rpc('get_org_by_join_code', { p_code: code }).single();
+  return { data: data as OrgJoinPreview | null, error };
+}
+
+export async function joinOrgViaCode(code: string, name: string) {
+  const { error } = await supabase.rpc('join_org_via_code', { p_code: code, p_name: name });
+  return { error };
+}
+
 // A real site picker is a Phase 4 feature (multi-site isn't in this pass's
 // scope). Reports still need a valid site_id, so resolve the user's first
 // site membership — falling back to the org's first site if they have none —
@@ -141,12 +164,17 @@ export async function getOrgMembers(orgId: string): Promise<Profile[]> {
     .from('profiles')
     .select('id, org_id, name, email, role, created_at')
     .eq('org_id', orgId)
+    .is('removed_at', null)
     .order('created_at', { ascending: true });
   return (data ?? []) as Profile[];
 }
 
 export async function updateMemberRole(memberId: string, role: UserRole) {
   return supabase.rpc('update_member_role', { p_member_id: memberId, p_role: role });
+}
+
+export async function removeOrgMember(memberId: string) {
+  return supabase.rpc('remove_org_member', { p_member_id: memberId });
 }
 
 export interface OrgStats {
@@ -185,7 +213,7 @@ export async function createSnag(params: {
   kind: SnagKind;
   description: string | null;
   severity: SnagSeverity | null;
-  photoPath: string | null;
+  photoPaths: string[];
   latitude: number | null;
   longitude: number | null;
   siteId: string;
@@ -194,7 +222,7 @@ export async function createSnag(params: {
     p_kind: params.kind,
     p_description: params.description,
     p_severity: params.severity,
-    p_photo_path: params.photoPath,
+    p_photo_paths: params.photoPaths,
     p_latitude: params.latitude,
     p_longitude: params.longitude,
     p_site_id: params.siteId,

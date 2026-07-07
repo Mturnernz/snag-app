@@ -33,6 +33,12 @@
       ],
       "expo-asset",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Snag needs access to your camera to scan a join QR code."
+        }
+      ],
+      [
         "expo-navigation-bar",
         {
           "visibility": "hidden",

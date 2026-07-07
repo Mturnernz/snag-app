@@ -12,10 +12,12 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import QRCode from 'react-native-qrcode-svg';
 
 import { Profile, Organisation, UserRole, ROLE_LABELS, RootStackParamList } from '../types';
 import {
-  supabase, getOrgMembers, updateMemberRole, inviteUser, getPendingInvites,
+  supabase, getOrgMembers, updateMemberRole, removeOrgMember, inviteUser, getPendingInvites,
+  regenerateOrgJoinCode,
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Card from '../components/Card';
@@ -24,6 +26,7 @@ import Chip from '../components/Chip';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
 import EmptyState from '../components/EmptyState';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useToast } from '../hooks/useToast';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -46,14 +49,18 @@ function MemberCard({
   snagCount,
   isAdmin,
   updatingRole,
+  removing,
   onRoleChange,
+  onRemove,
 }: {
   member: Profile;
   isSelf: boolean;
   snagCount: number;
   isAdmin: boolean;
   updatingRole: boolean;
+  removing: boolean;
   onRoleChange: (role: UserRole) => void;
+  onRemove: () => void;
 }) {
   const canEdit = isAdmin && !isSelf;
   return (
@@ -75,15 +82,53 @@ function MemberCard({
         </View>
       </View>
 
-      {updatingRole ? (
-        <ActivityIndicator size="small" color={Colors.primary} style={styles.roleSpinner} />
-      ) : canEdit ? (
-        <Chip options={ROLE_OPTIONS} value={member.role} onChange={onRoleChange} variant="segmented" />
-      ) : (
-        <View style={styles.roleReadout}>
-          <Text style={styles.roleReadoutText}>{ROLE_LABELS[member.role]}</Text>
+      <View style={styles.memberActionsRow}>
+        <View style={styles.roleControl}>
+          {updatingRole ? (
+            <ActivityIndicator size="small" color={Colors.primary} style={styles.roleSpinner} />
+          ) : canEdit ? (
+            <Chip options={ROLE_OPTIONS} value={member.role} onChange={onRoleChange} variant="segmented" />
+          ) : (
+            <View style={styles.roleReadout}>
+              <Text style={styles.roleReadoutText}>{ROLE_LABELS[member.role]}</Text>
+            </View>
+          )}
         </View>
-      )}
+
+        {canEdit && (
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={onRemove}
+            disabled={removing}
+            hitSlop={8}
+          >
+            {removing ? (
+              <ActivityIndicator size="small" color={Colors.danger} />
+            ) : (
+              <Icon name="trash-outline" size="md" color={Colors.danger} />
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+    </Card>
+  );
+}
+
+function PendingMemberCard({ invite }: { invite: PendingInvite }) {
+  return (
+    <Card variant="elevated" style={styles.memberCard}>
+      <View style={styles.memberTop}>
+        <Avatar name={invite.email} email={invite.email} size={40} />
+        <View style={styles.memberInfo}>
+          <View style={styles.memberNameRow}>
+            <Text style={styles.memberName} numberOfLines={1}>{invite.email}</Text>
+            <View style={styles.pendingPill}>
+              <Text style={styles.pendingPillText}>Pending</Text>
+            </View>
+          </View>
+          <Text style={styles.memberEmail} numberOfLines={1}>{ROLE_LABELS[invite.role]} invite</Text>
+        </View>
+      </View>
     </Card>
   );
 }
@@ -100,6 +145,10 @@ export default function AdminDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingRole, setUpdatingRole] = useState<string | null>(null);
+  const [removingMember, setRemovingMember] = useState<string | null>(null);
+  const [memberToRemove, setMemberToRemove] = useState<Profile | null>(null);
+  const [regeneratingCode, setRegeneratingCode] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<UserRole>('worker');
@@ -111,7 +160,7 @@ export default function AdminDashboardScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('*, organisation:organisations(id, name, industry, plan_tier, created_at)')
+      .select('*, organisation:organisations(id, name, industry, plan_tier, join_code, created_at)')
       .eq('id', user.id)
       .single();
 
@@ -154,6 +203,36 @@ export default function AdminDashboardScreen() {
       setMembers(prev => prev.map(m => m.id === member.id ? { ...m, role: newRole } : m));
     }
     setUpdatingRole(null);
+  }
+
+  async function handleRemoveMember() {
+    if (!memberToRemove) return;
+    const member = memberToRemove;
+    setMemberToRemove(null);
+    setRemovingMember(member.id);
+    const { error } = await removeOrgMember(member.id);
+    setRemovingMember(null);
+    if (!error) {
+      setMembers(prev => prev.filter(m => m.id !== member.id));
+      showToast(`${member.name || member.email} removed from ${orgName}`);
+    } else {
+      showToast(error.message ?? 'Could not remove member');
+    }
+  }
+
+  async function handleRegenerateCode() {
+    setConfirmRegenerate(false);
+    setRegeneratingCode(true);
+    const { code, error } = await regenerateOrgJoinCode();
+    setRegeneratingCode(false);
+    if (code) {
+      setCurrentUser(prev => prev && prev.organisation
+        ? { ...prev, organisation: { ...prev.organisation, join_code: code } }
+        : prev);
+      showToast('Join code regenerated — old QR codes no longer work');
+    } else {
+      showToast(error?.message ?? 'Could not regenerate join code');
+    }
   }
 
   async function handleSendInvite() {
@@ -225,25 +304,35 @@ export default function AdminDashboardScreen() {
             />
             <Chip options={ROLE_OPTIONS} value={inviteRole} onChange={setInviteRole} variant="segmented" />
             <Button label="Send Invite" onPress={handleSendInvite} loading={sendingInvite} fullWidth />
+          </Card>
+        )}
 
-            {pendingInvites.length > 0 && (
-              <View style={styles.pendingList}>
-                <Text style={styles.pendingLabel}>PENDING</Text>
-                {pendingInvites.map((invite) => (
-                  <View key={invite.id} style={styles.pendingRow}>
-                    <Text style={styles.pendingEmail} numberOfLines={1}>{invite.email}</Text>
-                    <Text style={styles.pendingRole}>{ROLE_LABELS[invite.role]}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+        {isAdmin && org?.join_code && (
+          <Card variant="elevated" style={styles.qrCard}>
+            <Text style={styles.sectionLabel}>SCAN TO JOIN</Text>
+            <Text style={styles.qrHint}>
+              Anyone who scans this joins {orgName} as a worker. Regenerate it to invalidate old QR codes.
+            </Text>
+            <View style={styles.qrWrap}>
+              <QRCode value={org.join_code} size={180} />
+            </View>
+            <Button
+              label="Regenerate Code"
+              variant="outline"
+              onPress={() => setConfirmRegenerate(true)}
+              loading={regeneratingCode}
+              fullWidth
+            />
           </Card>
         )}
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionLabel}>MANAGE USER ACCESS</Text>
-            <Text style={styles.sectionCount}>{members.length} member{members.length !== 1 ? 's' : ''}</Text>
+            <Text style={styles.sectionCount}>
+              {members.length} member{members.length !== 1 ? 's' : ''}
+              {pendingInvites.length > 0 ? ` · ${pendingInvites.length} pending` : ''}
+            </Text>
           </View>
 
           {sorted.map(member => (
@@ -254,11 +343,17 @@ export default function AdminDashboardScreen() {
               snagCount={snagCounts[member.id] ?? 0}
               isAdmin={isAdmin}
               updatingRole={updatingRole === member.id}
+              removing={removingMember === member.id}
               onRoleChange={(role) => handleRoleChange(member, role)}
+              onRemove={() => setMemberToRemove(member)}
             />
           ))}
 
-          {members.length === 0 && (
+          {pendingInvites.map((invite) => (
+            <PendingMemberCard key={invite.id} invite={invite} />
+          ))}
+
+          {members.length === 0 && pendingInvites.length === 0 && (
             <EmptyState
               icon="people-outline"
               title="No team members yet"
@@ -268,6 +363,28 @@ export default function AdminDashboardScreen() {
         </View>
 
       </ScrollView>
+
+      <ConfirmDialog
+        visible={!!memberToRemove}
+        title="Remove this member?"
+        message={`${memberToRemove?.name || memberToRemove?.email} will immediately lose access to ${orgName}. Their past reports and comments stay on record.`}
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={handleRemoveMember}
+        onCancel={() => setMemberToRemove(null)}
+      />
+
+      <ConfirmDialog
+        visible={confirmRegenerate}
+        title="Regenerate join code?"
+        message="Any QR codes or posters showing the current code will stop working immediately."
+        confirmLabel="Regenerate"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={handleRegenerateCode}
+        onCancel={() => setConfirmRegenerate(false)}
+      />
     </View>
   );
 }
@@ -337,34 +454,19 @@ const styles = StyleSheet.create({
     fontSize: Typography.base,
     color: Colors.textPrimary,
   },
-  pendingList: {
-    marginTop: Spacing.sm,
-    gap: Spacing.xs,
+  qrCard: {
+    gap: Spacing.sm,
+    alignItems: 'stretch',
   },
-  pendingLabel: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    color: Colors.textMuted,
-    letterSpacing: 0.8,
-  },
-  pendingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  pendingEmail: {
+  qrHint: {
     fontSize: Typography.sm,
-    color: Colors.textPrimary,
-    flex: 1,
+    color: Colors.textSecondary,
+    lineHeight: 18,
   },
-  pendingRole: {
-    fontSize: Typography.xs,
-    color: Colors.textMuted,
+  qrWrap: {
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
   },
-
   section: {
     gap: Spacing.sm,
   },
@@ -435,6 +537,33 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
+  memberActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  roleControl: {
+    flex: 1,
+  },
+  deleteButton: {
+    width: 38,
+    height: 38,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.priority.highBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingPill: {
+    backgroundColor: Colors.status.inProgressBg,
+    borderRadius: Radius.chip,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  pendingPillText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.status.inProgress,
+  },
   roleSpinner: {
     height: 38,
   },

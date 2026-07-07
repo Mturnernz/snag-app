@@ -8,10 +8,11 @@ import Icon from '../components/Icon';
 interface Props {
   onSelectCreate: () => void;
   onSelectJoin: () => void;
+  onSelectScan: () => void;
   onSignOut: () => void;
 }
 
-export default function OrgChoiceScreen({ onSelectCreate, onSelectJoin, onSignOut }: Props) {
+export default function OrgChoiceScreen({ onSelectCreate, onSelectJoin, onSelectScan, onSignOut }: Props) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -37,6 +38,16 @@ export default function OrgChoiceScreen({ onSelectCreate, onSelectJoin, onSignOu
             <View style={styles.optionText}>
               <Text style={styles.optionTitle}>Join with invite code</Text>
               <Text style={styles.optionDesc}>I have a code from my manager</Text>
+            </View>
+          </Card>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={onSelectScan} activeOpacity={0.85}>
+          <Card variant="elevated" style={styles.optionCard}>
+            <Icon name="qr-code-outline" size="xl" color={Colors.primary} />
+            <View style={styles.optionText}>
+              <Text style={styles.optionTitle}>Scan a QR code</Text>
+              <Text style={styles.optionDesc}>Scan the workplace code posted on-site</Text>
             </View>
           </Card>
         </TouchableOpacity>

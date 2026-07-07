@@ -3,13 +3,14 @@ import { signOut } from '../lib/supabase';
 import OrgChoiceScreen from './OrgChoiceScreen';
 import OrgCreateScreen from './OrgCreateScreen';
 import OrgJoinScreen from './OrgJoinScreen';
+import ScanJoinCodeScreen from './ScanJoinCodeScreen';
 
 interface Props {
   userId: string;
   onComplete: () => void;
 }
 
-type Mode = 'choose' | 'create' | 'join';
+type Mode = 'choose' | 'create' | 'join' | 'scan';
 
 export default function OrgSetupScreen({ userId, onComplete }: Props) {
   const [mode, setMode] = useState<Mode>('choose');
@@ -22,10 +23,15 @@ export default function OrgSetupScreen({ userId, onComplete }: Props) {
     return <OrgJoinScreen userId={userId} onComplete={onComplete} onBack={() => setMode('choose')} />;
   }
 
+  if (mode === 'scan') {
+    return <ScanJoinCodeScreen onComplete={onComplete} onBack={() => setMode('choose')} />;
+  }
+
   return (
     <OrgChoiceScreen
       onSelectCreate={() => setMode('create')}
       onSelectJoin={() => setMode('join')}
+      onSelectScan={() => setMode('scan')}
       onSignOut={() => signOut()}
     />
   );

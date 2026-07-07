@@ -5,14 +5,14 @@ export interface IncidentDraft {
   description: string;
   kind: SnagKind; // constrained to 'hazard' | 'incident' within this flow
   severity: SnagSeverity;
-  hasPhoto: boolean;
+  photoCount: number;
 }
 
 const INITIAL_DRAFT: IncidentDraft = {
   description: '',
   kind: 'incident',
   severity: 'moderate',
-  hasPhoto: false,
+  photoCount: 0,
 };
 
 type SubmitFn = () => Promise<{ error?: string; snagId?: string; reference?: string }>;

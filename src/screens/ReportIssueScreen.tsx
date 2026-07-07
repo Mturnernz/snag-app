@@ -1,10 +1,9 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   ScrollView,
   Alert,
   StyleSheet,
@@ -21,7 +20,6 @@ import {
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase, getProfile, getDefaultSiteId, createSnag } from '../lib/supabase';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
-import CollapsibleSection from '../components/CollapsibleSection';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -43,6 +41,16 @@ export default function ReportIssueScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [reference, setReference] = useState<string | null>(null);
+  const [orgId, setOrgId] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const profile = await getProfile(user.id);
+      setOrgId(profile?.org_id ?? null);
+    })();
+  }, []);
 
   async function handleSubmit() {
     if (!description.trim()) {
@@ -61,13 +69,13 @@ export default function ReportIssueScreen() {
       const siteId = await getDefaultSiteId(profile.org_id);
       if (!siteId) throw new Error('No site found for your organisation');
 
-      const photoPath = await photoPickerRef.current?.getPhotoUrl() ?? null;
+      const photoPaths = await photoPickerRef.current?.getPhotoUrls() ?? [];
 
       const { data, error } = await createSnag({
         kind,
         description: description.trim(),
         severity: null,
-        photoPath,
+        photoPaths,
         latitude: null,
         longitude: null,
         siteId,
@@ -126,7 +134,7 @@ export default function ReportIssueScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <PhotoPicker ref={photoPickerRef} onUploadingChange={setIsPhotoUploading} />
+        <PhotoPicker ref={photoPickerRef} orgId={orgId} onUploadingChange={setIsPhotoUploading} />
 
         {/* Description — the only required field on the fast path */}
         <View style={styles.fieldGroup}>
@@ -151,6 +159,12 @@ export default function ReportIssueScreen() {
           />
         </View>
 
+        {/* Type — always visible, no longer tucked behind a collapse */}
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Type</Text>
+          <Chip options={KIND_OPTIONS} value={kind} onChange={setKind} variant="segmented" />
+        </View>
+
         {/* Submit — one primary action */}
         <Button
           label="Submit Report"
@@ -160,23 +174,14 @@ export default function ReportIssueScreen() {
           fullWidth
         />
 
-        {/* Serious lane — subordinate, deliberately quieter than the primary CTA */}
-        <TouchableOpacity
-          style={styles.incidentLink}
+        {/* Serious lane — clearly clickable, but visually quieter than the primary CTA */}
+        <Button
+          label="Report a Serious Incident"
+          variant="seriousOutline"
+          icon="warning-outline"
           onPress={() => navigation.navigate('ReportIncidentDetails')}
-          activeOpacity={0.7}
-        >
-          <Icon name="warning-outline" size="sm" color={Colors.serious} />
-          <Text style={styles.incidentLinkText}>Report a serious incident instead</Text>
-        </TouchableOpacity>
-
-        {/* Progressive disclosure — everything else, collapsed by default */}
-        <CollapsibleSection label="More details">
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Type</Text>
-            <Chip options={KIND_OPTIONS} value={kind} onChange={setKind} variant="segmented" />
-          </View>
-        </CollapsibleSection>
+          fullWidth
+        />
       </ScrollView>
     </View>
   );
@@ -241,19 +246,6 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 100,
     paddingTop: Spacing.sm,
-  },
-
-  incidentLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.xs,
-    paddingVertical: Spacing.sm,
-  },
-  incidentLinkText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.serious,
   },
 
   // Success confirmation

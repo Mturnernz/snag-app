@@ -103,7 +103,7 @@ function IssueCard({ issue, onPress }: Props) {
         {/* Footer row */}
         <View style={styles.footer}>
           <Text style={styles.meta}>
-            {reporterName} · {timeAgo(issue.created_at)}
+            {issue.site_name ? `${issue.site_name} · ` : ''}{reporterName} · {timeAgo(issue.created_at)}
           </Text>
           <View style={styles.statsRow}>
             <View style={styles.statGroup}>

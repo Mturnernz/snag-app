@@ -10,6 +10,9 @@ import {
   Platform,
   StyleSheet,
   ActivityIndicator,
+  Dimensions,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -71,7 +74,8 @@ export default function IssueDetailScreen() {
   const { issueId } = route.params;
 
   const [issue, setIssue] = useState<IssueDetail | null>(null);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingIssue, setLoadingIssue] = useState(true);
   const [commentText, setCommentText] = useState('');
@@ -128,7 +132,7 @@ export default function IssueDetailScreen() {
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id')
       .eq('id', issueId)
       .single();
 
@@ -138,10 +142,14 @@ export default function IssueDetailScreen() {
         reporter: data.reporter_id ? { id: data.reporter_id, name: data.reporter_name } : undefined,
         owner: data.owner_id ? { id: data.owner_id, name: data.owner_name } : null,
       });
-      if (data.photo_path) {
-        getSnagPhotoUrl(data.photo_path).then(setPhotoUrl);
+      const paths: string[] = data.photo_paths?.length ? data.photo_paths : data.photo_path ? [data.photo_path] : [];
+      setActivePhotoIndex(0);
+      if (paths.length > 0) {
+        Promise.all(paths.map((p) => getSnagPhotoUrl(p))).then((urls) =>
+          setPhotoUrls(urls.filter((u): u is string => Boolean(u)))
+        );
       } else {
-        setPhotoUrl(null);
+        setPhotoUrls([]);
       }
     }
     setLoadingIssue(false);
@@ -326,16 +334,39 @@ export default function IssueDetailScreen() {
         contentContainerStyle={{ paddingBottom: 80 }}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Hero photo */}
-        {photoUrl ? (
-          <Image
-            source={{ uri: photoUrl }}
-            style={styles.heroPhoto}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-            transition={200}
-          />
+        {/* Hero photo — swipeable gallery when more than one is attached */}
+        {photoUrls.length > 0 ? (
+          <View>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+                const index = Math.round(e.nativeEvent.contentOffset.x / Dimensions.get('window').width);
+                setActivePhotoIndex(index);
+              }}
+              scrollEventThrottle={32}
+            >
+              {photoUrls.map((url, i) => (
+                <Image
+                  key={url}
+                  source={{ uri: url }}
+                  style={[styles.heroPhoto, { width: Dimensions.get('window').width }]}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  placeholder={i === 0 ? { blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' } : undefined}
+                  transition={200}
+                />
+              ))}
+            </ScrollView>
+            {photoUrls.length > 1 && (
+              <View style={styles.photoDots}>
+                {photoUrls.map((url, i) => (
+                  <View key={url} style={[styles.photoDot, i === activePhotoIndex && styles.photoDotActive]} />
+                ))}
+              </View>
+            )}
+          </View>
         ) : (
           <View style={styles.heroPlaceholder}>
             <Icon name="camera-outline" size={IconSize.xxl} color={Colors.textMuted} />
@@ -487,6 +518,24 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   heroPhoto: { width: '100%', height: 280, backgroundColor: Colors.background },
   heroPlaceholder: { width: '100%', height: 200, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, alignItems: 'center', justifyContent: 'center' },
+  photoDots: {
+    position: 'absolute',
+    bottom: Spacing.sm,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+  },
+  photoDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  photoDotActive: {
+    backgroundColor: Colors.white,
+  },
   content: { padding: Spacing.lg, gap: Spacing.md },
   contentSerious: {
     borderTopWidth: 3,

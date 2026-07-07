@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Alert, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -37,6 +37,17 @@ export default function ReportIncidentDetailsScreen() {
   const [severity, setSeverity] = useState<SnagSeverity>(draft.severity);
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [photoCount, setPhotoCount] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const profile = await getProfile(user.id);
+      setOrgId(profile?.org_id ?? null);
+    })();
+  }, []);
 
   const touched = description.trim().length > 0;
 
@@ -54,8 +65,7 @@ export default function ReportIncidentDetailsScreen() {
       return;
     }
 
-    const hasPhoto = !!photoPickerRef.current;
-    setDraft({ description: description.trim(), kind, severity, hasPhoto });
+    setDraft({ description: description.trim(), kind, severity, photoCount });
 
     setSubmitHandler(async () => {
       try {
@@ -68,13 +78,13 @@ export default function ReportIncidentDetailsScreen() {
         const siteId = await getDefaultSiteId(profile.org_id);
         if (!siteId) return { error: 'No site found for your organisation' };
 
-        const photoPath = await photoPickerRef.current?.getPhotoUrl() ?? null;
+        const photoPaths = await photoPickerRef.current?.getPhotoUrls() ?? [];
 
         const { data, error } = await createSnag({
           kind,
           description: description.trim(),
           severity,
-          photoPath,
+          photoPaths,
           latitude: null,
           longitude: null,
           siteId,
@@ -127,7 +137,12 @@ export default function ReportIncidentDetailsScreen() {
 
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>Evidence</Text>
-          <PhotoPicker ref={photoPickerRef} onUploadingChange={setIsPhotoUploading} />
+          <PhotoPicker
+            ref={photoPickerRef}
+            orgId={orgId}
+            onUploadingChange={setIsPhotoUploading}
+            onPhotosChange={setPhotoCount}
+          />
         </View>
 
         <View style={styles.fieldGroup}>

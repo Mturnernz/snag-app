@@ -10,7 +10,7 @@ import {
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET, Shadow } from '../constants/theme';
 import Icon from './Icon';
 
-type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerOutline' | 'serious';
+type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerOutline' | 'serious' | 'seriousOutline';
 
 interface Props {
   label: string;
@@ -31,6 +31,7 @@ const VARIANT_STYLES: Record<Variant, { bg: string; text: string; border?: strin
   danger: { bg: Colors.danger, text: Colors.white, shadow: true },
   dangerOutline: { bg: 'transparent', text: Colors.danger, border: Colors.danger },
   serious: { bg: Colors.serious, text: Colors.white, shadow: true },
+  seriousOutline: { bg: 'transparent', text: Colors.serious, border: Colors.serious },
 };
 
 export default function Button({

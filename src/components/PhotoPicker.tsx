@@ -1,5 +1,5 @@
-import React, { forwardRef, useImperativeHandle, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet, Alert } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -7,35 +7,71 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../consta
 import { uploadSnagPhoto } from '../lib/supabase';
 import Icon from './Icon';
 
+const MAX_PHOTOS = 5;
+const THUMB_SIZE = 92;
+
+interface PhotoItem {
+  id: string;
+  uri: string;
+  uploadTask: Promise<string | null>;
+  isUploading: boolean;
+}
+
 export interface PhotoPickerHandle {
-  /** Resolves the uploaded photo URL, awaiting any in-flight upload. Returns null if no photo was picked. */
-  getPhotoUrl: () => Promise<string | null>;
+  /** Resolves the uploaded photo paths, awaiting any in-flight uploads. Skips any that failed to upload. */
+  getPhotoUrls: () => Promise<string[]>;
   reset: () => void;
 }
 
 interface Props {
+  /** Storage paths are scoped by org (required by the bucket's RLS policy), so uploads wait until this is known. */
+  orgId: string | null;
   onUploadingChange?: (uploading: boolean) => void;
+  onPhotosChange?: (count: number) => void;
 }
 
-const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ onUploadingChange }, ref) => {
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [uploadTask, setUploadTask] = useState<Promise<string | null> | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ orgId, onUploadingChange, onPhotosChange }, ref) => {
+  const [photos, setPhotos] = useState<PhotoItem[]>([]);
 
-  async function compressAndUpload(uri: string) {
-    const fileName = `${Date.now()}.jpg`;
-    setIsUploading(true);
-    onUploadingChange?.(true);
-    const compressed = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 1200 } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    const task = uploadSnagPhoto(compressed.uri, fileName).finally(() => {
-      setIsUploading(false);
-      onUploadingChange?.(false);
+  useEffect(() => {
+    onPhotosChange?.(photos.length);
+  }, [photos.length, onPhotosChange]);
+
+  function setUploading(id: string, isUploading: boolean) {
+    setPhotos((prev) => {
+      const next = prev.map((p) => (p.id === id ? { ...p, isUploading } : p));
+      onUploadingChange?.(next.some((p) => p.isUploading));
+      return next;
     });
-    setUploadTask(task);
+  }
+
+  async function addPhoto(uri: string) {
+    if (!orgId) return;
+    const id = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    const fileName = `${orgId}/${id}.jpg`;
+
+    const task = (async () => {
+      const compressed = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1200 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      return uploadSnagPhoto(compressed.uri, fileName);
+    })().finally(() => setUploading(id, false));
+
+    setPhotos((prev) => {
+      const next = [...prev, { id, uri, uploadTask: task, isUploading: true }];
+      onUploadingChange?.(true);
+      return next;
+    });
+  }
+
+  function offerSource() {
+    Alert.alert('Add a photo', undefined, [
+      { text: 'Take Photo', onPress: takePhoto },
+      { text: 'Choose from Library', onPress: pickFromLibrary },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   }
 
   async function pickFromLibrary() {
@@ -47,9 +83,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ onUploadingChange },
       exif: false,
     });
     if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setPhotoUri(uri);
-      compressAndUpload(uri);
+      addPhoto(result.assets[0].uri);
     }
   }
 
@@ -66,58 +100,64 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ onUploadingChange },
       exif: false,
     });
     if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setPhotoUri(uri);
-      compressAndUpload(uri);
+      addPhoto(result.assets[0].uri);
     }
   }
 
-  function removePhoto() {
-    setPhotoUri(null);
-    setUploadTask(null);
-    setIsUploading(false);
-    onUploadingChange?.(false);
+  function removePhoto(id: string) {
+    setPhotos((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      onUploadingChange?.(next.some((p) => p.isUploading));
+      return next;
+    });
   }
 
   useImperativeHandle(ref, () => ({
-    getPhotoUrl: async () => {
-      if (!photoUri) return null;
-      if (uploadTask) return uploadTask;
-      return uploadSnagPhoto(photoUri, `${Date.now()}.jpg`);
+    getPhotoUrls: async () => {
+      const paths = await Promise.all(photos.map((p) => p.uploadTask));
+      return paths.filter((p): p is string => Boolean(p));
     },
-    reset: removePhoto,
+    reset: () => setPhotos([]),
   }));
 
-  if (photoUri) {
+  if (photos.length === 0) {
     return (
-      <View style={styles.previewContainer}>
-        <Image source={{ uri: photoUri }} style={styles.preview} contentFit="cover" cachePolicy="memory-disk" />
-        {isUploading && (
-          <View style={styles.uploadingOverlay}>
-            <ActivityIndicator color={Colors.white} size="small" />
-            <Text style={styles.uploadingText}>Uploading…</Text>
-          </View>
-        )}
-        <TouchableOpacity style={styles.removeButton} onPress={removePhoto} hitSlop={8}>
-          <Icon name="close" size="sm" color={Colors.white} />
-        </TouchableOpacity>
+      <View style={styles.area}>
+        <Icon name="camera-outline" size="xl" color={Colors.textSecondary} />
+        <Text style={styles.label}>Add up to {MAX_PHOTOS} photos</Text>
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.button} onPress={takePhoto} activeOpacity={0.7} disabled={!orgId}>
+            <Text style={styles.buttonText}>Take Photo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.button} onPress={pickFromLibrary} activeOpacity={0.7} disabled={!orgId}>
+            <Text style={styles.buttonText}>Choose from Library</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.area}>
-      <Icon name="camera-outline" size="xl" color={Colors.textSecondary} />
-      <Text style={styles.label}>Add a photo</Text>
-      <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.button} onPress={takePhoto} activeOpacity={0.7}>
-          <Text style={styles.buttonText}>Take Photo</Text>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
+      {photos.map((photo) => (
+        <View key={photo.id} style={styles.thumbWrap}>
+          <Image source={{ uri: photo.uri }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" />
+          {photo.isUploading && (
+            <View style={styles.uploadingOverlay}>
+              <ActivityIndicator color={Colors.white} size="small" />
+            </View>
+          )}
+          <TouchableOpacity style={styles.removeButton} onPress={() => removePhoto(photo.id)} hitSlop={8}>
+            <Icon name="close" size="sm" color={Colors.white} />
+          </TouchableOpacity>
+        </View>
+      ))}
+      {photos.length < MAX_PHOTOS && (
+        <TouchableOpacity style={styles.addTile} onPress={offerSource} activeOpacity={0.7}>
+          <Icon name="add" size="lg" color={Colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.button} onPress={pickFromLibrary} activeOpacity={0.7}>
-          <Text style={styles.buttonText}>Choose from Library</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      )}
+    </ScrollView>
   );
 });
 
@@ -161,42 +201,51 @@ const styles = StyleSheet.create({
     fontWeight: Typography.medium,
     color: Colors.textPrimary,
   },
-  previewContainer: {
+  thumbRow: {
+    gap: Spacing.sm,
+  },
+  thumbWrap: {
     position: 'relative',
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
     borderRadius: Radius.card,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  preview: {
+  thumb: {
     width: '100%',
-    height: 220,
+    height: '100%',
   },
   uploadingOverlay: {
     position: 'absolute',
-    bottom: 0,
+    top: 0,
     left: 0,
     right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.45)',
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
-    gap: 6,
-  },
-  uploadingText: {
-    color: Colors.white,
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
   },
   removeButton: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addTile: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: Radius.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
+    backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
   },

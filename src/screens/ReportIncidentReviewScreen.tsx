@@ -83,7 +83,11 @@ export default function ReportIncidentReviewScreen() {
           <Text style={styles.value}>{draft.description}</Text>
           <View style={styles.row}>
             <Text style={styles.label}>Evidence</Text>
-            <Text style={styles.value}>{draft.hasPhoto ? 'Photo attached' : 'No photo attached'}</Text>
+            <Text style={styles.value}>
+              {draft.photoCount > 0
+                ? `${draft.photoCount} photo${draft.photoCount !== 1 ? 's' : ''} attached`
+                : 'No photo attached'}
+            </Text>
           </View>
         </Card>
 

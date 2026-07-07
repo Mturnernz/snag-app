@@ -15,14 +15,12 @@ export const Colors = {
   textSecondary: '#6B7280',
   textMuted: '#9CA3AF',
 
-  // Status colours (Snagv1's real snag_status enum: flagged/in_progress/sorted/resolved/rca_pending)
+  // Status colours (Snagv1's real snag_status enum: flagged/in_progress/resolved/rca_pending)
   status: {
     flagged: '#3B82F6',
     flaggedBg: '#EFF6FF',
     inProgress: '#F59E0B',
     inProgressBg: '#FFFBEB',
-    sorted: '#0D9488',
-    sortedBg: '#F0FDFA',
     resolved: '#10B981',
     resolvedBg: '#ECFDF5',
     rcaPending: '#DC2626',

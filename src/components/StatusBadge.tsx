@@ -10,7 +10,6 @@ interface Props {
 const statusConfig: Record<SnagStatus, { color: string; bg: string }> = {
   flagged: { color: Colors.status.flagged, bg: Colors.status.flaggedBg },
   in_progress: { color: Colors.status.inProgress, bg: Colors.status.inProgressBg },
-  sorted: { color: Colors.status.sorted, bg: Colors.status.sortedBg },
   resolved: { color: Colors.status.resolved, bg: Colors.status.resolvedBg },
   rca_pending: { color: Colors.status.rcaPending, bg: Colors.status.rcaPendingBg },
 };

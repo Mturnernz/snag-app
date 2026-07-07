@@ -43,7 +43,6 @@ function statusColor(s: SnagStatus): string {
   const map: Record<SnagStatus, string> = {
     flagged: Colors.status.flagged,
     in_progress: Colors.status.inProgress,
-    sorted: Colors.status.sorted,
     resolved: Colors.status.resolved,
     rca_pending: Colors.status.rcaPending,
   };

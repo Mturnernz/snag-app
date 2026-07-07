@@ -166,7 +166,7 @@ export async function getOrgStats(orgId: string): Promise<OrgStats> {
   const totalMembers = membersRes.count ?? 0;
   const snags = (snagsRes.data ?? []) as { status: SnagStatus; kind: SnagKind; severity: SnagSeverity | null }[];
 
-  const byStatus: Record<SnagStatus, number> = { flagged: 0, in_progress: 0, sorted: 0, resolved: 0, rca_pending: 0 };
+  const byStatus: Record<SnagStatus, number> = { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 };
   const byKind: Record<SnagKind, number> = { fixit: 0, improvement: 0, hazard: 0, incident: 0 };
   const bySeverity: Record<SnagSeverity, number> = { minor: 0, moderate: 0, injury: 0, critical: 0 };
 

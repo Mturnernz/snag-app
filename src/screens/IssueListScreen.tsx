@@ -26,7 +26,6 @@ const FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'flagged', label: STATUS_LABELS.flagged },
   { key: 'in_progress', label: STATUS_LABELS.in_progress },
-  { key: 'sorted', label: STATUS_LABELS.sorted },
   { key: 'resolved', label: STATUS_LABELS.resolved },
 ];
 

@@ -3,7 +3,7 @@
 export type SnagKind = 'fixit' | 'improvement' | 'hazard' | 'incident';
 export type SnagLane = 'niggle' | 'serious'; // generated column, read-only
 export type SnagSeverity = 'minor' | 'moderate' | 'injury' | 'critical';
-export type SnagStatus = 'flagged' | 'in_progress' | 'sorted' | 'resolved' | 'rca_pending';
+export type SnagStatus = 'flagged' | 'in_progress' | 'resolved' | 'rca_pending';
 export type UserRole = 'worker' | 'supervisor' | 'officer_admin';
 export type InviteStatus = 'pending' | 'accepted' | 'revoked';
 export type VoteValue = 1 | -1;
@@ -147,7 +147,6 @@ export type MainTabParamList = {
 export const STATUS_LABELS: Record<SnagStatus, string> = {
   flagged: 'Flagged',
   in_progress: 'In Progress',
-  sorted: 'Sorted',
   resolved: 'Resolved',
   rca_pending: 'RCA Pending',
 };

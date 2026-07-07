@@ -16,7 +16,7 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 type Event =
   | "serious_created"
   | "niggle_assigned"
-  | "snag_sorted"
+  | "snag_resolved"
   | "niggle_escalated"
   | "rca_assigned"
   | "rca_submitted"
@@ -111,13 +111,13 @@ Deno.serve(async (req: Request) => {
         snag.description ?? ""
       }\n\nSee it here: ${link}`
     );
-  } else if (event === "snag_sorted") {
+  } else if (event === "snag_resolved") {
     const email = await emailOf(snag.reporter_id);
     if (email) {
       await sendEmail(
         [email],
-        `Sorted — ${snag.reference}`,
-        `The thing you flagged (${snag.reference}) is sorted.${
+        `Resolved — ${snag.reference}`,
+        `The thing you flagged (${snag.reference}) is resolved.${
           snag.resolution_note ? `\n\n${snag.resolution_note}` : ""
         }\n\nSee it here: ${link}`
       );

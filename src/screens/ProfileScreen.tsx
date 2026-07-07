@@ -26,12 +26,11 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 type SnagCounts = Record<SnagStatus, number>;
 
-const STATUS_ORDER: SnagStatus[] = ['flagged', 'in_progress', 'sorted', 'resolved', 'rca_pending'];
+const STATUS_ORDER: SnagStatus[] = ['flagged', 'in_progress', 'resolved', 'rca_pending'];
 
 const STATUS_COLORS: Record<SnagStatus, { text: string; bg: string }> = {
   flagged: { text: Colors.status.flagged, bg: Colors.status.flaggedBg },
   in_progress: { text: Colors.status.inProgress, bg: Colors.status.inProgressBg },
-  sorted: { text: Colors.status.sorted, bg: Colors.status.sortedBg },
   resolved: { text: Colors.status.resolved, bg: Colors.status.resolvedBg },
   rca_pending: { text: Colors.status.rcaPending, bg: Colors.status.rcaPendingBg },
 };
@@ -95,7 +94,7 @@ export default function ProfileScreen() {
 
     if (!data) return;
 
-    const counts: SnagCounts = { flagged: 0, in_progress: 0, sorted: 0, resolved: 0, rca_pending: 0 };
+    const counts: SnagCounts = { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 };
     for (const row of data) {
       if (row.status in counts) counts[row.status as SnagStatus]++;
     }

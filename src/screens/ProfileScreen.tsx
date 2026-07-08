@@ -13,9 +13,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Profile, Organisation, SnagStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
-import { supabase, signOut } from '../lib/supabase';
+import { supabase, signOut, getMemberships, setActiveOrg, Membership } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
-import { useNavigation } from '@react-navigation/native';
+import { useToast } from '../hooks/useToast';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Avatar from '../components/Avatar';
 import Card from '../components/Card';
@@ -38,6 +39,7 @@ const STATUS_COLORS: Record<SnagStatus, { text: string; bg: string }> = {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  const { showToast } = useToast();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userPoints, setUserPoints] = useState<number>(0);
   const [loading, setLoading] = useState(true);
@@ -51,9 +53,21 @@ export default function ProfileScreen() {
   // Snag stats
   const [snagCounts, setSnagCounts] = useState<SnagCounts | null>(null);
 
+  // Organisations (multi-org)
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [switchingOrg, setSwitchingOrg] = useState<string | null>(null);
+
   useEffect(() => {
     fetchProfile();
   }, []);
+
+  // Refresh when regaining focus — e.g. after scanning a QR code switched
+  // or added an organisation.
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchProfile();
+    }, [])
+  );
 
   async function fetchProfile() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -73,7 +87,21 @@ export default function ProfileScreen() {
         fetchUserPoints(user.id, data.org_id);
       }
     }
+    getMemberships().then(setMemberships);
     setLoading(false);
+  }
+
+  async function handleSwitchOrg(membership: Membership) {
+    if (membership.is_active || switchingOrg) return;
+    setSwitchingOrg(membership.org_id);
+    const { error } = await setActiveOrg(membership.org_id);
+    setSwitchingOrg(null);
+    if (!error) {
+      showToast(`Now reporting to ${membership.org_name}`);
+      fetchProfile();
+    } else {
+      showToast(error.message ?? 'Could not switch organisation');
+    }
   }
 
   async function fetchUserPoints(userId: string, orgId: string) {
@@ -254,6 +282,40 @@ export default function ProfileScreen() {
           </Card>
         )}
 
+        {/* Organisations — switch between memberships, or scan a QR to
+            join/switch on-site. */}
+        <Card variant="elevated" style={styles.orgsCard}>
+          <Text style={styles.orgsTitle}>Organisations</Text>
+          {memberships.map((m) => (
+            <TouchableOpacity
+              key={m.org_id}
+              style={styles.orgRow}
+              onPress={() => handleSwitchOrg(m)}
+              disabled={m.is_active || switchingOrg !== null}
+              activeOpacity={0.7}
+            >
+              <View style={styles.orgRowText}>
+                <Text style={styles.orgRowName}>{m.org_name}</Text>
+                <Text style={styles.orgRowRole}>{ROLE_LABELS[m.role]}</Text>
+              </View>
+              {switchingOrg === m.org_id ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : m.is_active ? (
+                <Icon name="checkmark-circle" size="md" color={Colors.primary} />
+              ) : (
+                <Text style={styles.orgSwitchHint}>Switch</Text>
+              )}
+            </TouchableOpacity>
+          ))}
+          <Button
+            label="Scan QR to join or switch"
+            variant="outline"
+            icon="qr-code-outline"
+            onPress={() => navigation.navigate('ScanOrgCode')}
+            fullWidth
+          />
+        </Card>
+
         <Button
           label="Sign Out"
           variant="dangerOutline"
@@ -403,6 +465,41 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   leaderboardBtnText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.medium,
+    color: Colors.primary,
+  },
+
+  // Organisations
+  orgsCard: {
+    gap: Spacing.sm,
+  },
+  orgsTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  orgRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingVertical: Spacing.xs,
+  },
+  orgRowText: {
+    flex: 1,
+    gap: 2,
+  },
+  orgRowName: {
+    fontSize: Typography.base,
+    fontWeight: Typography.medium,
+    color: Colors.textPrimary,
+  },
+  orgRowRole: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+  },
+  orgSwitchHint: {
     fontSize: Typography.sm,
     fontWeight: Typography.medium,
     color: Colors.primary,

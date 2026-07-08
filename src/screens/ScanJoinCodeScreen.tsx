@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getOrgByJoinCode, joinOrgViaCode, OrgJoinPreview } from '../lib/supabase';
+import { getOrgByJoinCode, joinOrgViaCode, getMemberships, setActiveOrg, OrgJoinPreview } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
 import Card from '../components/Card';
@@ -19,6 +19,7 @@ export default function ScanJoinCodeScreen({ onComplete, onBack }: Props) {
   const [scanned, setScanned] = useState(false);
   const [preview, setPreview] = useState<OrgJoinPreview | null>(null);
   const [scannedCode, setScannedCode] = useState<string | null>(null);
+  const [switchedTo, setSwitchedTo] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +35,20 @@ export default function ScanJoinCodeScreen({ onComplete, onBack }: Props) {
       setScanned(false);
       return;
     }
+
+    // Already a member? The scan is a switch, not a join — no name prompt.
+    const memberships = await getMemberships();
+    if (memberships.some((m) => m.org_id === org.org_id)) {
+      const { error: switchError } = await setActiveOrg(org.org_id);
+      if (switchError) {
+        setError(switchError.message ?? 'Could not switch organisation.');
+        setScanned(false);
+        return;
+      }
+      setSwitchedTo(org.org_name);
+      return;
+    }
+
     setScannedCode(data);
     setPreview(org);
   }
@@ -61,6 +76,21 @@ export default function ScanJoinCodeScreen({ onComplete, onBack }: Props) {
     setName('');
     setError(null);
     setScanned(false);
+  }
+
+  if (switchedTo) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View style={styles.inner}>
+          <Icon name="swap-horizontal-outline" size="xxl" color={Colors.primary} />
+          <Text style={styles.heading}>Now reporting to {switchedTo}</Text>
+          <Text style={styles.subheading}>
+            Everything you flag and view is scoped to this organisation until you switch again.
+          </Text>
+          <Button label="Done" onPress={onComplete} fullWidth />
+        </View>
+      </View>
+    );
   }
 
   if (preview) {

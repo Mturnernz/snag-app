@@ -135,6 +135,7 @@ export type RootStackParamList = {
   Leaderboard: undefined;
   ReportIncidentDetails: undefined;
   ReportIncidentReview: undefined;
+  ScanOrgCode: undefined;
 };
 
 export type MainTabParamList = {

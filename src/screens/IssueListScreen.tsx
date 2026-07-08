@@ -10,7 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { Snag, SnagStatus, STATUS_LABELS, RootStackParamList } from '../types';
@@ -93,6 +93,14 @@ export default function IssueListScreen() {
     setLoading(true);
     fetchIssues().finally(() => setLoading(false));
   }, [fetchIssues]);
+
+  // Refetch on focus — the visible snags are scoped to the active org, which
+  // may have changed (org switcher / QR scan) since this tab last rendered.
+  useFocusEffect(
+    useCallback(() => {
+      fetchIssues();
+    }, [fetchIssues])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

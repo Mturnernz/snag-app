@@ -17,6 +17,7 @@ import ReportsScreen from '../screens/ReportsScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ReportIncidentDetailsScreen from '../screens/ReportIncidentDetailsScreen';
 import ReportIncidentReviewScreen from '../screens/ReportIncidentReviewScreen';
+import ScanJoinCodeScreen from '../screens/ScanJoinCodeScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 
 // ─── Tab bar icons ────────────────────────────────────────────────────────────
@@ -136,6 +137,17 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
           component={ReportIncidentReviewScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
+        <Stack.Screen
+          name="ScanOrgCode"
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        >
+          {({ navigation }) => (
+            <ScanJoinCodeScreen
+              onComplete={() => navigation.goBack()}
+              onBack={() => navigation.goBack()}
+            />
+          )}
+        </Stack.Screen>
       </Stack.Navigator>
     </IncidentDraftProvider>
   );

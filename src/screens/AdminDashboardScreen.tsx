@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
@@ -189,6 +189,10 @@ export default function AdminDashboardScreen() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Reload on focus — the org this dashboard manages is the active org,
+  // which may have changed via the Profile switcher or a QR scan.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

@@ -50,12 +50,15 @@ export async function getCurrentUser() {
 
 // ─── Profile helpers ──────────────────────────────────────────────────────────
 
+// profiles.org_id/role mirror the user's ACTIVE membership (kept in sync by
+// set_active_org and the membership RPCs), so this shape stays correct across
+// org switches. Org-membership lockout is enforced server-side by RLS, not by
+// the deprecated profiles.removed_at column.
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
     .select('id, org_id, name, email, role, created_at, organisation:organisations(id, name, industry, plan_tier, join_code, created_at)')
     .eq('id', userId)
-    .is('removed_at', null)
     .maybeSingle();
   if (error) console.error('getProfile error:', error);
   return data as unknown as Profile | null;
@@ -159,13 +162,11 @@ export async function getDefaultSiteId(orgId: string): Promise<string | null> {
 
 // ─── Admin helpers ────────────────────────────────────────────────────────────
 
-export async function getOrgMembers(orgId: string): Promise<Profile[]> {
-  const { data } = await supabase
-    .from('profiles')
-    .select('id, org_id, name, email, role, created_at')
-    .eq('org_id', orgId)
-    .is('removed_at', null)
-    .order('created_at', { ascending: true });
+// Member lists come from org_memberships (via RPC), not profiles.org_id —
+// that column mirrors each user's *active* org, which for multi-org members
+// may be a different organisation right now.
+export async function getOrgMembers(_orgId?: string): Promise<Profile[]> {
+  const { data } = await supabase.rpc('get_org_members');
   return (data ?? []) as Profile[];
 }
 
@@ -175,6 +176,24 @@ export async function updateMemberRole(memberId: string, role: UserRole) {
 
 export async function removeOrgMember(memberId: string) {
   return supabase.rpc('remove_org_member', { p_member_id: memberId });
+}
+
+// ─── Multi-org membership helpers ─────────────────────────────────────────────
+
+export interface Membership {
+  org_id: string;
+  org_name: string;
+  role: UserRole;
+  is_active: boolean;
+}
+
+export async function getMemberships(): Promise<Membership[]> {
+  const { data } = await supabase.rpc('get_my_memberships');
+  return (data ?? []) as Membership[];
+}
+
+export async function setActiveOrg(orgId: string) {
+  return supabase.rpc('set_active_org', { p_org_id: orgId });
 }
 
 export interface OrgStats {

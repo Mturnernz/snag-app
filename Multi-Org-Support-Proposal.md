@@ -1,7 +1,10 @@
 # Multi-organisation support — design proposal
 
-Not implemented. This is a design document for a dedicated future effort, per
-the decision to keep this pass scoped to a proposal only.
+**Status: Phases 1–3 implemented** (migration
+`20260707200000_multi_org_memberships.sql`, applied to Snagv1, plus the client
+switcher/QR-switch work on the same branch). **Phase 4 (public organisations)
+is not yet built** — its open questions below (anonymous sign-in, public
+comment visibility, rate limits) need decisions first.
 
 ## Problem
 

@@ -8,11 +8,12 @@ import ScanJoinCodeScreen from './ScanJoinCodeScreen';
 interface Props {
   userId: string;
   onComplete: () => void;
+  onPublicReporter: () => void;
 }
 
 type Mode = 'choose' | 'create' | 'join' | 'scan';
 
-export default function OrgSetupScreen({ userId, onComplete }: Props) {
+export default function OrgSetupScreen({ userId, onComplete, onPublicReporter }: Props) {
   const [mode, setMode] = useState<Mode>('choose');
 
   if (mode === 'create') {
@@ -32,6 +33,7 @@ export default function OrgSetupScreen({ userId, onComplete }: Props) {
       onSelectCreate={() => setMode('create')}
       onSelectJoin={() => setMode('join')}
       onSelectScan={() => setMode('scan')}
+      onSelectPublic={onPublicReporter}
       onSignOut={() => signOut()}
     />
   );

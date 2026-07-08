@@ -41,11 +41,13 @@ type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
 interface IssueDetail {
   id: string;
   reference: string;
+  org_id: string;
   description: string | null;
   status: SnagStatus;
   kind: SnagKind;
   lane: SnagLane;
   severity: SnagSeverity | null;
+  is_public_submission?: boolean;
   created_at: string;
   reporter?: { id: string; name: string };
   owner?: { id: string; name: string } | null;
@@ -87,7 +89,11 @@ export default function IssueDetailScreen() {
   const [mentionAt, setMentionAt] = useState(-1);
   const [authorPoints, setAuthorPoints] = useState<Record<string, number>>({});
 
-  const canEdit = userProfile?.role === 'officer_admin' || userProfile?.role === 'supervisor';
+  // Voting/commenting are internal engagement mechanics — only members of
+  // the snag's own organisation get them. A public reporter (or a member
+  // viewing their own cross-org report) sees status + details only.
+  const isOrgMember = Boolean(userProfile?.org_id && issue && userProfile.org_id === issue.org_id);
+  const canEdit = isOrgMember && (userProfile?.role === 'officer_admin' || userProfile?.role === 'supervisor');
   const isSerious = issue?.lane === 'serious';
 
   useEffect(() => {
@@ -130,7 +136,7 @@ export default function IssueDetailScreen() {
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, is_public_submission')
       .eq('id', issueId)
       .single();
 
@@ -390,11 +396,13 @@ export default function IssueDetailScreen() {
               severity={issue.severity}
               owner={issue.owner ?? null}
               orgMembers={orgMembers}
+              isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={fetchIssue}
             />
           )}
 
-          {/* Vote bar */}
+          {/* Vote bar — org members only */}
+          {isOrgMember && (
           <Card variant="elevated" style={styles.voteBar}>
             <TouchableOpacity
               style={[styles.voteButton, userVote === 1 && styles.voteButtonUpActive]}
@@ -430,10 +438,19 @@ export default function IssueDetailScreen() {
               </Text>
             </TouchableOpacity>
           </Card>
+          )}
 
-          <View style={styles.divider} />
+          {!isOrgMember && (
+            <Text style={styles.publicViewerNote}>
+              You'll see status updates for this report here. The team is on it.
+            </Text>
+          )}
 
-          {/* Comments */}
+          {isOrgMember && <View style={styles.divider} />}
+
+          {/* Comments — internal, hidden from public reporters */}
+          {isOrgMember && (
+          <>
           <Text style={styles.commentsHeader}>Comments ({comments.length})</Text>
 
           {comments.length === 0 ? (
@@ -457,11 +474,13 @@ export default function IssueDetailScreen() {
               </Card>
             ))
           )}
+          </>
+          )}
         </View>
       </ScrollView>
 
       {/* Mention picker */}
-      {mentionSuggestions.length > 0 && (
+      {isOrgMember && mentionSuggestions.length > 0 && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -482,7 +501,8 @@ export default function IssueDetailScreen() {
         </ScrollView>
       )}
 
-      {/* Sticky comment input */}
+      {/* Sticky comment input — org members only */}
+      {isOrgMember && (
       <View style={[styles.commentInputBar, { paddingBottom: insets.bottom + 8 }]}>
         <TextInput
           style={styles.commentInput}
@@ -505,6 +525,7 @@ export default function IssueDetailScreen() {
           )}
         </TouchableOpacity>
       </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -576,6 +597,12 @@ const styles = StyleSheet.create({
   voteScoreLabel: { fontSize: Typography.xs, color: Colors.textMuted },
 
   divider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.md },
+  publicViewerNote: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+    marginTop: Spacing.sm,
+  },
   commentsHeader: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
   noComments: { fontSize: Typography.sm, color: Colors.textMuted, fontStyle: 'italic' },
   commentBubble: { gap: Spacing.sm },

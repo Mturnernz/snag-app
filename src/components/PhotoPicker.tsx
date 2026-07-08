@@ -24,13 +24,15 @@ export interface PhotoPickerHandle {
 }
 
 interface Props {
-  /** Storage paths are scoped by org (required by the bucket's RLS policy), so uploads wait until this is known. */
-  orgId: string | null;
+  /** Storage folder prefix required by the bucket's RLS policies: the org id
+   *  for members, or the user's own id for public submissions. Uploads wait
+   *  until this is known. */
+  pathPrefix: string | null;
   onUploadingChange?: (uploading: boolean) => void;
   onPhotosChange?: (count: number) => void;
 }
 
-const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ orgId, onUploadingChange, onPhotosChange }, ref) => {
+const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, onUploadingChange, onPhotosChange }, ref) => {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
 
   useEffect(() => {
@@ -46,9 +48,9 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ orgId, onUploadingCh
   }
 
   async function addPhoto(uri: string) {
-    if (!orgId) return;
+    if (!pathPrefix) return;
     const id = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
-    const fileName = `${orgId}/${id}.jpg`;
+    const fileName = `${pathPrefix}/${id}.jpg`;
 
     const task = (async () => {
       const compressed = await ImageManipulator.manipulateAsync(
@@ -126,10 +128,10 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ orgId, onUploadingCh
         <Icon name="camera-outline" size="xl" color={Colors.textSecondary} />
         <Text style={styles.label}>Add up to {MAX_PHOTOS} photos</Text>
         <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.button} onPress={takePhoto} activeOpacity={0.7} disabled={!orgId}>
+          <TouchableOpacity style={styles.button} onPress={takePhoto} activeOpacity={0.7} disabled={!pathPrefix}>
             <Text style={styles.buttonText}>Take Photo</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.button} onPress={pickFromLibrary} activeOpacity={0.7} disabled={!orgId}>
+          <TouchableOpacity style={styles.button} onPress={pickFromLibrary} activeOpacity={0.7} disabled={!pathPrefix}>
             <Text style={styles.buttonText}>Choose from Library</Text>
           </TouchableOpacity>
         </View>

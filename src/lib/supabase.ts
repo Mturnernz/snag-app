@@ -57,7 +57,7 @@ export async function getCurrentUser() {
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, org_id, name, email, role, created_at, organisation:organisations(id, name, industry, plan_tier, join_code, created_at)')
+    .select('id, org_id, name, email, role, created_at, organisation:organisations(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
     .eq('id', userId)
     .maybeSingle();
   if (error) console.error('getProfile error:', error);
@@ -194,6 +194,55 @@ export async function getMemberships(): Promise<Membership[]> {
 
 export async function setActiveOrg(orgId: string) {
   return supabase.rpc('set_active_org', { p_org_id: orgId });
+}
+
+// ─── Public organisations ─────────────────────────────────────────────────────
+
+export interface PublicOrg {
+  org_id: string;
+  org_name: string;
+}
+
+export async function searchPublicOrgs(query?: string): Promise<PublicOrg[]> {
+  const { data } = await supabase.rpc('search_public_orgs', { p_query: query ?? null });
+  return (data ?? []) as PublicOrg[];
+}
+
+export async function createPublicSnag(params: {
+  orgId: string;
+  description: string;
+  photoPaths: string[];
+  isHazard: boolean;
+  reporterName?: string | null;
+}) {
+  const { data, error } = await supabase.rpc('create_public_snag', {
+    p_org_id: params.orgId,
+    p_description: params.description,
+    p_photo_paths: params.photoPaths,
+    p_is_hazard: params.isHazard,
+    p_reporter_name: params.reporterName ?? null,
+  }).single();
+  return { data: data as { id: string; reference: string } | null, error };
+}
+
+export async function setOrgPublicMode(enabled: boolean, intakeSiteId?: string | null) {
+  return supabase.rpc('set_org_public_mode', {
+    p_enabled: enabled,
+    p_intake_site_id: intakeSiteId ?? null,
+  });
+}
+
+export async function blockPublicReporter(snagId: string) {
+  return supabase.rpc('block_public_reporter', { p_snag_id: snagId });
+}
+
+export async function getOrgSites(orgId: string): Promise<{ id: string; name: string }[]> {
+  const { data } = await supabase
+    .from('sites')
+    .select('id, name')
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: true });
+  return data ?? [];
 }
 
 export interface OrgStats {

@@ -7,7 +7,7 @@ import {
   STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
 } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
-import { updateSnagStatus, recategoriseSnag, assignSnagOwner } from '../lib/supabase';
+import { updateSnagStatus, recategoriseSnag, assignSnagOwner, blockPublicReporter } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
 import Card from './Card';
 import Button from './Button';
@@ -15,6 +15,7 @@ import Icon from './Icon';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
+import ConfirmDialog from './ConfirmDialog';
 
 type EditingField = 'status' | 'severity' | 'kind' | 'assignee' | null;
 
@@ -32,18 +33,30 @@ interface Props {
   severity: SnagSeverity | null;
   owner: { id: string; name: string } | null;
   orgMembers: Profile[];
+  /** Public submissions expose a block-reporter action. */
+  isPublicSubmission?: boolean;
   /** Called after a successful save so the parent can re-fetch the issue. */
   onUpdated: () => void;
 }
 
 export default function ManageIssuePanel({
-  issueId, status, kind, severity, owner, orgMembers, onUpdated,
+  issueId, status, kind, severity, owner, orgMembers, isPublicSubmission = false, onUpdated,
 }: Props) {
   const { showToast } = useToast();
 
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [saving, setSaving] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState<PendingUpdates>({});
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+
+  async function handleBlockReporter() {
+    setConfirmBlock(false);
+    setBlocking(true);
+    const { error } = await blockPublicReporter(issueId);
+    setBlocking(false);
+    showToast(error ? (error.message ?? 'Could not block reporter') : 'Reporter blocked');
+  }
 
   // Staged (displayed) values: pending edit wins over the current issue value.
   const shownStatus = pendingUpdates.status ?? status;
@@ -224,6 +237,28 @@ export default function ManageIssuePanel({
           fullWidth
         />
       )}
+
+      {isPublicSubmission && (
+        <Button
+          label="Block Reporter"
+          variant="dangerOutline"
+          icon="hand-left-outline"
+          onPress={() => setConfirmBlock(true)}
+          loading={blocking}
+          fullWidth
+        />
+      )}
+
+      <ConfirmDialog
+        visible={confirmBlock}
+        title="Block this reporter?"
+        message="They will no longer be able to submit public reports to your organisation. Their existing reports stay on record."
+        confirmLabel="Block"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={handleBlockReporter}
+        onCancel={() => setConfirmBlock(false)}
+      />
     </Card>
   );
 }

@@ -9,10 +9,11 @@ interface Props {
   onSelectCreate: () => void;
   onSelectJoin: () => void;
   onSelectScan: () => void;
+  onSelectPublic: () => void;
   onSignOut: () => void;
 }
 
-export default function OrgChoiceScreen({ onSelectCreate, onSelectJoin, onSelectScan, onSignOut }: Props) {
+export default function OrgChoiceScreen({ onSelectCreate, onSelectJoin, onSelectScan, onSelectPublic, onSignOut }: Props) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -48,6 +49,16 @@ export default function OrgChoiceScreen({ onSelectCreate, onSelectJoin, onSelect
             <View style={styles.optionText}>
               <Text style={styles.optionTitle}>Scan a QR code</Text>
               <Text style={styles.optionDesc}>Scan the workplace code posted on-site</Text>
+            </View>
+          </Card>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={onSelectPublic} activeOpacity={0.85}>
+          <Card variant="elevated" style={styles.optionCard}>
+            <Icon name="megaphone-outline" size="xl" color={Colors.primary} />
+            <View style={styles.optionText}>
+              <Text style={styles.optionTitle}>Just report an issue</Text>
+              <Text style={styles.optionDesc}>Send a report to a public organisation — no need to join</Text>
             </View>
           </Card>
         </TouchableOpacity>

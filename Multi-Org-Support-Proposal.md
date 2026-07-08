@@ -1,10 +1,17 @@
 # Multi-organisation support — design proposal
 
-**Status: Phases 1–3 implemented** (migration
-`20260707200000_multi_org_memberships.sql`, applied to Snagv1, plus the client
-switcher/QR-switch work on the same branch). **Phase 4 (public organisations)
-is not yet built** — its open questions below (anonymous sign-in, public
-comment visibility, rate limits) need decisions first.
+**Status: all four phases implemented.** Phases 1–3: migration
+`20260707200000_multi_org_memberships.sql` + client switcher/QR-switch.
+Phase 4 (public organisations): migration `20260708090000_public_orgs.sql` +
+org picker/public submit flow, with these decisions locked in: full email
+accounts for public reporters (anonymous sign-in deferred), a public
+"safety hazard" toggle (arrives as hazard/moderate and fires the serious-lane
+notification), a 5-reports-per-hour rate limit, and no public replies
+(reporters see status + resolution note only). The Phase 4 migration also
+fixed a live security hole: `snags_with_details` bypassed RLS entirely
+(postgres-owned view without `security_invoker`), letting any authenticated
+user read every org's snags — now `security_invoker = true` with a
+`reporter_id = auth.uid()` policy branch.
 
 ## Problem
 

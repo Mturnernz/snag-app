@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { supabase, getProfile } from './src/lib/supabase';
 import { Profile } from './src/types';
@@ -14,11 +15,20 @@ import OrgSetupScreen from './src/screens/OrgSetupScreen';
 import AdminSetupScreen from './src/screens/AdminSetupScreen';
 import { ToastProvider } from './src/hooks/useToast';
 
+const PUBLIC_REPORTER_KEY = 'snag.publicReporterMode';
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isNewAdmin, setIsNewAdmin] = useState(false);
+  // "Just report an issue" — a signed-in user with no organisation who only
+  // submits to public orgs. Persisted so app restarts skip the org-setup gate.
+  const [publicReporter, setPublicReporter] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(PUBLIC_REPORTER_KEY).then((v) => setPublicReporter(v === 'true'));
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === 'android') {
@@ -73,8 +83,9 @@ export default function App() {
     );
   }
 
-  // Signed in but not yet in an organisation
-  if (!profile?.org_id) {
+  // Signed in but not yet in an organisation (unless they've chosen the
+  // public-reporter path, which needs no organisation at all).
+  if (!profile?.org_id && !publicReporter) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
@@ -88,6 +99,10 @@ export default function App() {
                 setIsNewAdmin(true);
               }
             }}
+            onPublicReporter={() => {
+              AsyncStorage.setItem(PUBLIC_REPORTER_KEY, 'true');
+              setPublicReporter(true);
+            }}
           />
         </ToastProvider>
       </SafeAreaProvider>
@@ -95,7 +110,7 @@ export default function App() {
   }
 
   // First-time admin setup after creating an organisation
-  if (isNewAdmin) {
+  if (isNewAdmin && profile) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
@@ -118,7 +133,9 @@ export default function App() {
       <NavigationContainer>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
         <ToastProvider>
-          <RootNavigator userRole={profile.role} />
+          {/* Public reporters may have no profile row yet — worker-level UI,
+              with the Admin tab role-gated away. */}
+          <RootNavigator userRole={profile?.role ?? 'worker'} />
         </ToastProvider>
       </NavigationContainer>
     </SafeAreaProvider>

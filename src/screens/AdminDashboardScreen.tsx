@@ -17,7 +17,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { Profile, Organisation, UserRole, ROLE_LABELS, RootStackParamList } from '../types';
 import {
   supabase, getOrgMembers, updateMemberRole, removeOrgMember, inviteUser, getPendingInvites,
-  regenerateOrgJoinCode,
+  regenerateOrgJoinCode, setOrgPublicMode, getOrgSites,
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Card from '../components/Card';
@@ -150,6 +150,11 @@ export default function AdminDashboardScreen() {
   const [regeneratingCode, setRegeneratingCode] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
 
+  // Public reports (Phase 4)
+  const [orgSites, setOrgSites] = useState<{ id: string; name: string }[]>([]);
+  const [intakeSiteId, setIntakeSiteId] = useState<string | null>(null);
+  const [savingPublicMode, setSavingPublicMode] = useState(false);
+
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<UserRole>('worker');
   const [sendingInvite, setSendingInvite] = useState(false);
@@ -160,7 +165,7 @@ export default function AdminDashboardScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('*, organisation:organisations(id, name, industry, plan_tier, join_code, created_at)')
+      .select('*, organisation:organisations(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
       .eq('id', user.id)
       .single();
 
@@ -169,14 +174,17 @@ export default function AdminDashboardScreen() {
       setCurrentUser(profile);
 
       if (profile.org_id) {
-        const [list, snagsRes, invites] = await Promise.all([
+        const [list, snagsRes, invites, sites] = await Promise.all([
           getOrgMembers(profile.org_id),
           supabase.from('snags').select('reporter_id').eq('org_id', profile.org_id),
           getPendingInvites(profile.org_id),
+          getOrgSites(profile.org_id),
         ]);
 
         setMembers(list);
         setPendingInvites(invites as PendingInvite[]);
+        setOrgSites(sites);
+        setIntakeSiteId(profile.organisation?.public_intake_site_id ?? sites[0]?.id ?? null);
 
         const counts: Record<string, number> = {};
         for (const row of snagsRes.data ?? []) {
@@ -236,6 +244,22 @@ export default function AdminDashboardScreen() {
       showToast('Join code regenerated — old QR codes no longer work');
     } else {
       showToast(error?.message ?? 'Could not regenerate join code');
+    }
+  }
+
+  async function handleTogglePublicMode(enable: boolean) {
+    if (enable && !intakeSiteId) {
+      showToast('Add a site first — public reports need somewhere to land');
+      return;
+    }
+    setSavingPublicMode(true);
+    const { error } = await setOrgPublicMode(enable, enable ? intakeSiteId : null);
+    setSavingPublicMode(false);
+    if (!error) {
+      showToast(enable ? 'Now accepting public reports' : 'Public reports turned off');
+      load();
+    } else {
+      showToast(error.message ?? 'Could not update public mode');
     }
   }
 
@@ -327,6 +351,56 @@ export default function AdminDashboardScreen() {
               loading={regeneratingCode}
               fullWidth
             />
+          </Card>
+        )}
+
+        {isAdmin && (
+          <Card variant="elevated" style={styles.publicCard}>
+            <Text style={styles.sectionLabel}>PUBLIC REPORTS</Text>
+            {org?.is_public ? (
+              <>
+                <Text style={styles.publicHint}>
+                  Anyone can find {orgName} in the app and submit a report
+                  {orgSites.find((s) => s.id === org.public_intake_site_id)
+                    ? ` — reports land in ${orgSites.find((s) => s.id === org.public_intake_site_id)!.name}`
+                    : ''}
+                  . They only ever see their own submissions.
+                </Text>
+                <Button
+                  label="Stop Accepting Public Reports"
+                  variant="outline"
+                  onPress={() => handleTogglePublicMode(false)}
+                  loading={savingPublicMode}
+                  fullWidth
+                />
+              </>
+            ) : (
+              <>
+                <Text style={styles.publicHint}>
+                  Let anyone — not just members — submit reports to {orgName}. Pick the site that
+                  receives them.
+                </Text>
+                {orgSites.length > 0 ? (
+                  <Chip
+                    options={orgSites.map((s) => ({ key: s.id, label: s.name }))}
+                    value={intakeSiteId ?? ''}
+                    onChange={(id) => setIntakeSiteId(id)}
+                    variant="segmented"
+                  />
+                ) : (
+                  <Text style={styles.publicHintMuted}>
+                    Your organisation has no sites yet — add one before enabling public reports.
+                  </Text>
+                )}
+                <Button
+                  label="Accept Public Reports"
+                  onPress={() => handleTogglePublicMode(true)}
+                  loading={savingPublicMode}
+                  disabled={orgSites.length === 0}
+                  fullWidth
+                />
+              </>
+            )}
           </Card>
         )}
 
@@ -461,6 +535,19 @@ const styles = StyleSheet.create({
   qrCard: {
     gap: Spacing.sm,
     alignItems: 'stretch',
+  },
+  publicCard: {
+    gap: Spacing.sm,
+  },
+  publicHint: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  publicHintMuted: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
   },
   qrHint: {
     fontSize: Typography.sm,

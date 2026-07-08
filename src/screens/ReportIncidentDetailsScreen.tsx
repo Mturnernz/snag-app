@@ -139,7 +139,7 @@ export default function ReportIncidentDetailsScreen() {
           <Text style={styles.fieldLabel}>Evidence</Text>
           <PhotoPicker
             ref={photoPickerRef}
-            orgId={orgId}
+            pathPrefix={orgId}
             onUploadingChange={setIsPhotoUploading}
             onPhotosChange={setPhotoCount}
           />

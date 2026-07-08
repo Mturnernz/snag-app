@@ -18,7 +18,9 @@ import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ReportIncidentDetailsScreen from '../screens/ReportIncidentDetailsScreen';
 import ReportIncidentReviewScreen from '../screens/ReportIncidentReviewScreen';
 import ScanJoinCodeScreen from '../screens/ScanJoinCodeScreen';
+import ChooseReportOrgScreen from '../screens/ChooseReportOrgScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
+import { ReportTargetProvider } from '../context/ReportTargetContext';
 
 // ─── Tab bar icons ────────────────────────────────────────────────────────────
 
@@ -108,6 +110,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export default function RootNavigator({ userRole }: { userRole: UserRole }) {
   return (
     <IncidentDraftProvider>
+      <ReportTargetProvider>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main">
           {() => <MainTabNavigator userRole={userRole} />}
@@ -148,7 +151,13 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
             />
           )}
         </Stack.Screen>
+        <Stack.Screen
+          name="ChooseReportOrg"
+          component={ChooseReportOrgScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
       </Stack.Navigator>
+      </ReportTargetProvider>
     </IncidentDraftProvider>
   );
 }

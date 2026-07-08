@@ -23,7 +23,7 @@ import Icon from '../components/Icon';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type FilterOption = 'all' | SnagStatus;
+type FilterOption = 'all' | 'public' | SnagStatus;
 type SortOption = 'newest' | 'site' | 'comments' | 'votes';
 
 const FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
@@ -31,6 +31,13 @@ const FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
   { key: 'flagged', label: STATUS_LABELS.flagged },
   { key: 'in_progress', label: STATUS_LABELS.in_progress },
   { key: 'resolved', label: STATUS_LABELS.resolved },
+];
+
+// Members also get a chip for the public-submissions queue; their default
+// view shows internal reports only.
+const MEMBER_FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
+  ...FILTER_OPTIONS,
+  { key: 'public', label: 'Public' },
 ];
 
 const SORT_OPTIONS: { key: SortOption; label: string; icon: React.ComponentProps<typeof Icon>['name'] }[] = [
@@ -48,14 +55,36 @@ export default function IssueListScreen() {
   const [sort, setSort] = useState<SortOption>('newest');
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [issues, setIssues] = useState<Snag[]>([]);
+  const [hasOrg, setHasOrg] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchIssues = useCallback(async () => {
+    // Re-check org state every fetch — it changes with the org switcher, and
+    // it decides both the screen title and the public-submission filtering.
+    const { data: { user } } = await supabase.auth.getUser();
+    let memberOfOrg = false;
+    if (user) {
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('org_id')
+        .eq('id', user.id)
+        .maybeSingle();
+      memberOfOrg = Boolean(prof?.org_id);
+    }
+    setHasOrg(memberOfOrg);
+
     let query = supabase
       .from('snags_with_details')
-      .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_name')
+      .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_name, is_public_submission')
       .limit(50);
+
+    if (memberOfOrg) {
+      // Members: internal reports by default; the Public chip shows the
+      // public-submissions queue. Public reporters (no org) see all their
+      // own reports — RLS already scopes them.
+      query = query.eq('is_public_submission', filter === 'public');
+    }
 
     switch (sort) {
       case 'site':
@@ -72,7 +101,7 @@ export default function IssueListScreen() {
         query = query.order('created_at', { ascending: false });
     }
 
-    if (filter !== 'all') {
+    if (filter !== 'all' && filter !== 'public') {
       query = query.eq('status', filter);
     }
 
@@ -111,12 +140,17 @@ export default function IssueListScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Snags</Text>
+        <Text style={styles.headerTitle}>{hasOrg === false ? 'My Reports' : 'Snags'}</Text>
       </View>
 
       <View style={styles.filterWrap}>
         <View style={styles.filterChips}>
-          <Chip options={FILTER_OPTIONS} value={filter} onChange={setFilter} variant="chip" />
+          <Chip
+            options={hasOrg ? MEMBER_FILTER_OPTIONS : FILTER_OPTIONS}
+            value={filter}
+            onChange={setFilter}
+            variant="chip"
+          />
         </View>
         <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)} activeOpacity={0.7}>
           <Icon name="swap-vertical-outline" size="sm" color={Colors.textSecondary} />

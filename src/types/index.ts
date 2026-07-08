@@ -16,6 +16,8 @@ export interface Organisation {
   industry: string | null;
   plan_tier: string;
   join_code: string;
+  is_public: boolean;
+  public_intake_site_id: string | null;
   created_at: string;
 }
 
@@ -74,6 +76,7 @@ export interface Snag {
   resolution_note: string | null;
   retained_until: string;
   is_notifiable: boolean;
+  is_public_submission?: boolean;
   resolved_by: string | null;
   resolved_at: string | null;
   confirmed_by: string | null;
@@ -136,6 +139,7 @@ export type RootStackParamList = {
   ReportIncidentDetails: undefined;
   ReportIncidentReview: undefined;
   ScanOrgCode: undefined;
+  ChooseReportOrg: undefined;
 };
 
 export type MainTabParamList = {

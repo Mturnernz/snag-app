@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,14 +6,16 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Issue } from '../types';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Snag } from '../types';
+import { Colors, Radius, Spacing, Typography, Shadow, IconSize } from '../constants/theme';
+import { getSnagPhotoUrl } from '../lib/supabase';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
+import Icon from './Icon';
 
 interface Props {
-  issue: Issue;
+  issue: Snag;
   onPress: () => void;
 }
 
@@ -42,16 +44,31 @@ function thumbnailUrl(url: string): string {
 }
 
 function IssueCard({ issue, onPress }: Props) {
-  const reporterName = issue.reporter?.name || 'Unknown';
+  const reporterName = issue.reporter_name || issue.reporter?.name || 'Unknown';
   const commentCount = issue.comment_count ?? 0;
   const voteScore = issue.vote_score ?? 0;
+
+  // snag-photos is a private bucket — photo_path is a storage path, not a
+  // renderable URL, so resolve a short-lived signed URL for display.
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (issue.photo_path) {
+      getSnagPhotoUrl(issue.photo_path).then((url) => {
+        if (!cancelled) setPhotoUrl(url);
+      });
+    } else {
+      setPhotoUrl(null);
+    }
+    return () => { cancelled = true; };
+  }, [issue.photo_path]);
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
       {/* Photo */}
-      {issue.photo_url ? (
+      {photoUrl ? (
         <Image
-          source={{ uri: thumbnailUrl(issue.photo_url) }}
+          source={{ uri: thumbnailUrl(photoUrl) }}
           style={styles.photo}
           contentFit="cover"
           cachePolicy="memory-disk"
@@ -60,7 +77,7 @@ function IssueCard({ issue, onPress }: Props) {
         />
       ) : (
         <View style={styles.photoPlaceholder}>
-          <Text style={styles.photoPlaceholderIcon}>📷</Text>
+          <Icon name="camera-outline" size={IconSize.xl} color={Colors.textMuted} />
           <Text style={styles.photoPlaceholderText}>No photo</Text>
         </View>
       )}
@@ -72,26 +89,42 @@ function IssueCard({ issue, onPress }: Props) {
 
       {/* Card body */}
       <View style={styles.body}>
+        <Text style={styles.reference}>{issue.reference}</Text>
         <Text style={styles.title} numberOfLines={2}>
-          {issue.title}
+          {issue.description || 'No description'}
         </Text>
 
         {/* Badges */}
         <View style={styles.badgeRow}>
-          <PriorityBadge priority={issue.priority} />
-          <CategoryBadge category={issue.category} />
+          <CategoryBadge kind={issue.kind} />
+          <PriorityBadge severity={issue.severity} />
         </View>
 
         {/* Footer row */}
         <View style={styles.footer}>
           <Text style={styles.meta}>
-            {reporterName} · {timeAgo(issue.created_at)}
+            {issue.site_name ? `${issue.site_name} · ` : ''}{reporterName} · {timeAgo(issue.created_at)}
           </Text>
           <View style={styles.statsRow}>
-            <Text style={styles.stat}>💬 {commentCount}</Text>
-            <Text style={[styles.stat, voteScore > 0 ? styles.statPositive : voteScore < 0 ? styles.statNegative : null]}>
-              {voteScore > 0 ? '▲' : voteScore < 0 ? '▼' : '●'} {Math.abs(voteScore)}
-            </Text>
+            <View style={styles.statGroup}>
+              <Icon name="chatbubble-outline" size="sm" color={Colors.textMuted} />
+              <Text style={styles.stat}>{commentCount}</Text>
+            </View>
+            <View style={styles.statGroup}>
+              <Icon
+                name={voteScore > 0 ? 'caret-up' : voteScore < 0 ? 'caret-down' : 'remove'}
+                size="sm"
+                color={voteScore > 0 ? Colors.success : voteScore < 0 ? Colors.danger : Colors.textMuted}
+              />
+              <Text
+                style={[
+                  styles.stat,
+                  voteScore > 0 ? styles.statPositive : voteScore < 0 ? styles.statNegative : null,
+                ]}
+              >
+                {Math.abs(voteScore)}
+              </Text>
+            </View>
           </View>
         </View>
       </View>
@@ -105,9 +138,8 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
     overflow: 'hidden',
+    ...Shadow.sm,
   },
   photo: {
     width: '100%',
@@ -120,12 +152,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
-  },
-  photoPlaceholderIcon: {
-    fontSize: 28,
-    marginBottom: 4,
   },
   photoPlaceholderText: {
     fontSize: Typography.sm,
@@ -140,6 +169,12 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     gap: Spacing.sm,
   },
+  reference: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+  },
   title: {
     fontSize: Typography.lg,
     fontWeight: Typography.semibold,
@@ -149,7 +184,7 @@ const styles = StyleSheet.create({
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
+    gap: Spacing.sm,
     flexWrap: 'wrap',
   },
   footer: {
@@ -167,15 +202,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.md,
   },
+  statGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
   stat: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
     fontWeight: Typography.medium,
   },
   statPositive: {
-    color: '#16A34A',
+    color: Colors.success,
   },
   statNegative: {
-    color: '#DC2626',
+    color: Colors.danger,
   },
 });

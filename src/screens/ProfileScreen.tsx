@@ -8,65 +8,66 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  Clipboard,
 } from 'react-native';
-import Toast from '../components/Toast';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Profile, Organisation, IssueStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, signOut } from '../lib/supabase';
+import { Profile, Organisation, SnagStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
+import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { supabase, signOut, getMemberships, setActiveOrg, Membership } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
-import { useNavigation } from '@react-navigation/native';
+import { useToast } from '../hooks/useToast';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Avatar from '../components/Avatar';
+import Card from '../components/Card';
+import Button from '../components/Button';
+import Icon from '../components/Icon';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-function AvatarCircle({ name, size = 72 }: { name: string; size?: number }) {
-  const initials = name
-    .split(' ')
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-  return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.avatarInitials, { fontSize: size * 0.36 }]}>{initials}</Text>
-    </View>
-  );
-}
+type SnagCounts = Record<SnagStatus, number>;
 
-type IssueCounts = Record<IssueStatus, number>;
+const STATUS_ORDER: SnagStatus[] = ['flagged', 'in_progress', 'resolved', 'rca_pending'];
 
-const STATUS_ORDER: IssueStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
-
-const STATUS_COLORS: Record<IssueStatus, { text: string; bg: string }> = {
-  open: { text: Colors.status.open, bg: Colors.status.openBg },
+const STATUS_COLORS: Record<SnagStatus, { text: string; bg: string }> = {
+  flagged: { text: Colors.status.flagged, bg: Colors.status.flaggedBg },
   in_progress: { text: Colors.status.inProgress, bg: Colors.status.inProgressBg },
   resolved: { text: Colors.status.resolved, bg: Colors.status.resolvedBg },
-  closed: { text: Colors.status.closed, bg: Colors.status.closedBg },
+  rca_pending: { text: Colors.status.rcaPending, bg: Colors.status.rcaPendingBg },
 };
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  const { showToast } = useToast();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userPoints, setUserPoints] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
-  const [showCopiedToast, setShowCopiedToast] = useState(false);
 
   // Name editing
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [savingName, setSavingName] = useState(false);
 
-  // Issue stats
-  const [issueCounts, setIssueCounts] = useState<IssueCounts | null>(null);
+  // Snag stats
+  const [snagCounts, setSnagCounts] = useState<SnagCounts | null>(null);
+
+  // Organisations (multi-org)
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [switchingOrg, setSwitchingOrg] = useState<string | null>(null);
 
   useEffect(() => {
     fetchProfile();
   }, []);
+
+  // Refresh when regaining focus — e.g. after scanning a QR code switched
+  // or added an organisation.
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchProfile();
+    }, [])
+  );
 
   async function fetchProfile() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -74,19 +75,33 @@ export default function ProfileScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('*, organisation:organisations(id, name, invite_code)')
+      .select('*, organisation:organisations(id, name, industry, plan_tier, created_at)')
       .eq('id', user.id)
       .single();
 
     if (data) {
-      setProfile(data as Profile);
+      setProfile(data as unknown as Profile);
       setNameInput(data.name ?? '');
-      fetchIssueCounts(user.id);
-      if (data.organisation_id) {
-        fetchUserPoints(user.id, data.organisation_id);
+      fetchSnagCounts(user.id);
+      if (data.org_id) {
+        fetchUserPoints(user.id, data.org_id);
       }
     }
+    getMemberships().then(setMemberships);
     setLoading(false);
+  }
+
+  async function handleSwitchOrg(membership: Membership) {
+    if (membership.is_active || switchingOrg) return;
+    setSwitchingOrg(membership.org_id);
+    const { error } = await setActiveOrg(membership.org_id);
+    setSwitchingOrg(null);
+    if (!error) {
+      showToast(`Now reporting to ${membership.org_name}`);
+      fetchProfile();
+    } else {
+      showToast(error.message ?? 'Could not switch organisation');
+    }
   }
 
   async function fetchUserPoints(userId: string, orgId: string) {
@@ -99,19 +114,19 @@ export default function ProfileScreen() {
     if (data) setUserPoints(data.points ?? 0);
   }
 
-  async function fetchIssueCounts(userId: string) {
+  async function fetchSnagCounts(userId: string) {
     const { data } = await supabase
-      .from('issues')
+      .from('snags')
       .select('status')
       .eq('reporter_id', userId);
 
     if (!data) return;
 
-    const counts: IssueCounts = { open: 0, in_progress: 0, resolved: 0, closed: 0 };
+    const counts: SnagCounts = { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 };
     for (const row of data) {
-      if (row.status in counts) counts[row.status as IssueStatus]++;
+      if (row.status in counts) counts[row.status as SnagStatus]++;
     }
-    setIssueCounts(counts);
+    setSnagCounts(counts);
   }
 
   async function handleSaveName() {
@@ -147,15 +162,6 @@ export default function ProfileScreen() {
     ]);
   }
 
-  function copyInviteCode() {
-    const code = (profile?.organisation as Organisation | undefined)?.invite_code;
-    if (code) {
-      Clipboard.setString(code);
-      setShowCopiedToast(true);
-      setTimeout(() => setShowCopiedToast(false), 2000);
-    }
-  }
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -167,15 +173,13 @@ export default function ProfileScreen() {
   const displayName = profile?.name || 'Your Name';
   const org = profile?.organisation as Organisation | undefined;
   const orgName = org?.name ?? 'No Organisation';
-  const orgInviteCode = org?.invite_code ?? null;
   const roleLabel = profile?.role ? ROLE_LABELS[profile.role] : null;
-  const totalIssues = issueCounts
-    ? Object.values(issueCounts).reduce((a, b) => a + b, 0)
+  const totalSnags = snagCounts
+    ? Object.values(snagCounts).reduce((a, b) => a + b, 0)
     : 0;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Profile</Text>
       </View>
@@ -186,9 +190,8 @@ export default function ProfileScreen() {
       >
         {/* Avatar + name */}
         <View style={styles.profileSection}>
-          <AvatarCircle name={displayName} size={72} />
+          <Avatar name={displayName} size={72} />
 
-          {/* Name — view or edit */}
           {editingName ? (
             <View style={styles.nameEditRow}>
               <TextInput
@@ -224,13 +227,12 @@ export default function ProfileScreen() {
               activeOpacity={0.7}
             >
               <Text style={styles.name}>{displayName}</Text>
-              <Text style={styles.editIcon}>✎</Text>
+              <Icon name="create-outline" size="sm" color={Colors.textMuted} />
             </TouchableOpacity>
           )}
 
           <Text style={styles.email}>{profile?.email ?? ''}</Text>
 
-          {/* Org + role pills */}
           <View style={styles.orgPill}>
             <Text style={styles.orgPillText}>{orgName}</Text>
           </View>
@@ -239,6 +241,8 @@ export default function ProfileScreen() {
               <Text style={styles.rolePillText}>{roleLabel}</Text>
             </View>
           )}
+
+          {/* Team activity — gamification, kept low-key next to identity info */}
           <View style={styles.titleRow}>
             <Text style={styles.userTitle}>{getUserTitle(userPoints)}</Text>
             <Text style={styles.userPoints}>{userPoints} pts</Text>
@@ -248,16 +252,17 @@ export default function ProfileScreen() {
             onPress={() => navigation.navigate('Leaderboard')}
             activeOpacity={0.8}
           >
-            <Text style={styles.leaderboardBtnText}>🏆 View Leaderboard</Text>
+            <Icon name="trophy-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.leaderboardBtnText}>View Leaderboard</Text>
           </TouchableOpacity>
         </View>
 
         {/* My reporting stats */}
-        {issueCounts !== null && (
-          <View style={styles.statsCard}>
+        {snagCounts !== null && (
+          <Card variant="elevated" style={styles.statsCard}>
             <View style={styles.statsHeader}>
-              <Text style={styles.statsTitle}>My Reported Issues</Text>
-              <Text style={styles.statsTotal}>{totalIssues} total</Text>
+              <Text style={styles.statsTitle}>My Reported Snags</Text>
+              <Text style={styles.statsTotal}>{totalSnags} total</Text>
             </View>
             <View style={styles.statsGrid}>
               {STATUS_ORDER.map((status) => (
@@ -266,7 +271,7 @@ export default function ProfileScreen() {
                   style={[styles.statItem, { backgroundColor: STATUS_COLORS[status].bg }]}
                 >
                   <Text style={[styles.statCount, { color: STATUS_COLORS[status].text }]}>
-                    {issueCounts[status]}
+                    {snagCounts[status]}
                   </Text>
                   <Text style={[styles.statLabel, { color: STATUS_COLORS[status].text }]}>
                     {STATUS_LABELS[status]}
@@ -274,46 +279,51 @@ export default function ProfileScreen() {
                 </View>
               ))}
             </View>
-          </View>
+          </Card>
         )}
 
-        {/* Invite code card — shown to all org members so anyone can invite colleagues */}
-        {orgInviteCode ? (
-          <View style={styles.inviteCard}>
-            <View style={styles.inviteRow}>
-              <View>
-                <Text style={styles.inviteLabel}>Invite code</Text>
-                <Text style={styles.inviteCode}>{orgInviteCode}</Text>
+        {/* Organisations — switch between memberships, or scan a QR to
+            join/switch on-site. */}
+        <Card variant="elevated" style={styles.orgsCard}>
+          <Text style={styles.orgsTitle}>Organisations</Text>
+          {memberships.map((m) => (
+            <TouchableOpacity
+              key={m.org_id}
+              style={styles.orgRow}
+              onPress={() => handleSwitchOrg(m)}
+              disabled={m.is_active || switchingOrg !== null}
+              activeOpacity={0.7}
+            >
+              <View style={styles.orgRowText}>
+                <Text style={styles.orgRowName}>{m.org_name}</Text>
+                <Text style={styles.orgRowRole}>{ROLE_LABELS[m.role]}</Text>
               </View>
-              <TouchableOpacity
-                style={styles.copyButton}
-                onPress={copyInviteCode}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.copyIcon}>⧉</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.inviteHint}>
-              Share this code with colleagues to join your organisation.
-            </Text>
-          </View>
-        ) : null}
+              {switchingOrg === m.org_id ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : m.is_active ? (
+                <Icon name="checkmark-circle" size="md" color={Colors.primary} />
+              ) : (
+                <Text style={styles.orgSwitchHint}>Switch</Text>
+              )}
+            </TouchableOpacity>
+          ))}
+          <Button
+            label="Scan QR to join or switch"
+            variant="outline"
+            icon="qr-code-outline"
+            onPress={() => navigation.navigate('ScanOrgCode')}
+            fullWidth
+          />
+        </Card>
 
-        {/* Sign out */}
-        <TouchableOpacity
-          style={styles.signOutButton}
+        <Button
+          label="Sign Out"
+          variant="dangerOutline"
           onPress={handleSignOut}
-          disabled={signingOut}
-          activeOpacity={0.8}
-        >
-          {signingOut ? (
-            <ActivityIndicator color={Colors.danger} size="small" />
-          ) : (
-            <Text style={styles.signOutLabel}>Sign Out</Text>
-          )}
-        </TouchableOpacity>
+          loading={signingOut}
+          icon="log-out-outline"
+        />
       </ScrollView>
-      <Toast message="Copied to clipboard!" visible={showCopiedToast} />
     </View>
   );
 }
@@ -350,18 +360,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xl,
     gap: Spacing.sm,
   },
-  avatar: {
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.sm,
-  },
-  avatarInitials: {
-    color: Colors.primary,
-    fontWeight: Typography.bold,
-  },
 
-  // Name display + edit
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -371,10 +370,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.xl,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
-  },
-  editIcon: {
-    fontSize: Typography.base,
-    color: Colors.textMuted,
   },
   nameEditRow: {
     flexDirection: 'row',
@@ -423,7 +418,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 4,
     backgroundColor: Colors.primaryLight,
-    borderRadius: 99,
+    borderRadius: Radius.avatar,
   },
   orgPillText: {
     fontSize: Typography.sm,
@@ -434,7 +429,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 4,
     backgroundColor: Colors.border,
-    borderRadius: 99,
+    borderRadius: Radius.avatar,
   },
   rolePillText: {
     fontSize: Typography.sm,
@@ -442,29 +437,32 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 
-  // Title + leaderboard
+  // Team activity — deliberately muted, secondary to identity
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    marginTop: Spacing.xs,
+    marginTop: Spacing.md,
   },
   userTitle: {
     fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
+    fontWeight: Typography.medium,
+    color: Colors.textMuted,
   },
   userPoints: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
   },
   leaderboardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
     marginTop: Spacing.xs,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
     borderRadius: Radius.button,
     borderWidth: 1,
-    borderColor: Colors.primary,
+    borderColor: Colors.border,
   },
   leaderboardBtnText: {
     fontSize: Typography.sm,
@@ -472,13 +470,43 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
 
-  // Issue stats
+  // Organisations
+  orgsCard: {
+    gap: Spacing.sm,
+  },
+  orgsTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  orgRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingVertical: Spacing.xs,
+  },
+  orgRowText: {
+    flex: 1,
+    gap: 2,
+  },
+  orgRowName: {
+    fontSize: Typography.base,
+    fontWeight: Typography.medium,
+    color: Colors.textPrimary,
+  },
+  orgRowRole: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+  },
+  orgSwitchHint: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.medium,
+    color: Colors.primary,
+  },
+
+  // Snag stats
   statsCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.lg,
     gap: Spacing.md,
   },
   statsHeader: {
@@ -498,9 +526,11 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     gap: Spacing.sm,
+    flexWrap: 'wrap',
   },
   statItem: {
-    flex: 1,
+    flexBasis: '18%',
+    flexGrow: 1,
     borderRadius: Radius.chip,
     paddingVertical: Spacing.sm,
     alignItems: 'center',
@@ -516,61 +546,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Invite card
-  inviteCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  inviteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  inviteLabel: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    fontWeight: Typography.medium,
-    marginBottom: 2,
-  },
-  inviteCode: {
-    fontSize: Typography.xl,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
-    letterSpacing: 3,
-  },
-  copyButton: {
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  copyIcon: {
-    fontSize: 22,
-    color: Colors.textSecondary,
-  },
-  inviteHint: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    lineHeight: 18,
-  },
-
-  // Sign out
-  signOutButton: {
-    height: MIN_TOUCH_TARGET,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.surface,
-  },
-  signOutLabel: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.danger,
-  },
 });

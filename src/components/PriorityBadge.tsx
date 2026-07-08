@@ -1,40 +1,23 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { IssuePriority, PRIORITY_LABELS } from '../types';
-import { Colors, Radius, Typography } from '../constants/theme';
+import { SnagSeverity, SEVERITY_LABELS } from '../types';
+import { Colors } from '../constants/theme';
+import Badge from './Badge';
 
 interface Props {
-  priority: IssuePriority;
+  severity: SnagSeverity | null;
 }
 
-const priorityConfig: Record<
-  IssuePriority,
-  { label: string; color: string; bg: string }
-> = {
-  high: { label: PRIORITY_LABELS.high, color: Colors.priority.high, bg: Colors.priority.highBg },
-  medium: { label: PRIORITY_LABELS.medium, color: Colors.priority.medium, bg: Colors.priority.mediumBg },
-  low: { label: PRIORITY_LABELS.low, color: Colors.priority.low, bg: Colors.priority.lowBg },
-};
+export default function PriorityBadge({ severity }: Props) {
+  if (!severity) return null;
+  const label = SEVERITY_LABELS[severity];
 
-export default function PriorityBadge({ priority }: Props) {
-  const cfg = priorityConfig[priority];
-  return (
-    <View style={[styles.badge, { backgroundColor: cfg.bg }]}>
-      <Text style={[styles.label, { color: cfg.color }]}>{cfg.label}</Text>
-    </View>
-  );
+  if (severity === 'critical') {
+    return <Badge label={label} color={Colors.priority.high} bg={Colors.priority.highBg} variant="solid" />;
+  }
+  if (severity === 'injury') {
+    return <Badge label={label} color={Colors.category.brokenEquipment} bg={Colors.category.brokenEquipmentBg} variant="solid" />;
+  }
+
+  const color = severity === 'moderate' ? Colors.priority.medium : Colors.priority.low;
+  return <Badge label={label} color={color} variant="dot" />;
 }
-
-const styles = StyleSheet.create({
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: Radius.chip,
-    alignSelf: 'flex-start',
-  },
-  label: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.semibold,
-    letterSpacing: 0.2,
-  },
-});

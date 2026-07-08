@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   View,
@@ -6,101 +6,75 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  Switch,
   Alert,
-  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
-  IssueCategory,
-  IssuePriority,
-  CATEGORY_LABELS,
-  PRIORITY_LABELS,
+  SnagKind,
+  KIND_LABELS,
+  RootStackParamList,
 } from '../types';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, uploadIssuePhoto } from '../lib/supabase';
+import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
+import { supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag } from '../lib/supabase';
+import { useReportTarget } from '../context/ReportTargetContext';
+import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
+import Chip from '../components/Chip';
+import Button from '../components/Button';
+import Icon from '../components/Icon';
 
-const CATEGORIES: IssueCategory[] = [
-  'niggle',
-  'broken_equipment',
-  'health_and_safety',
-  'other',
-];
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const PRIORITIES: IssuePriority[] = ['low', 'medium', 'high'];
+const KIND_OPTIONS = (Object.keys(KIND_LABELS) as SnagKind[])
+  .filter((k) => k === 'fixit' || k === 'improvement') // hazard/incident belong to the serious lane
+  .map((k) => ({ key: k, label: KIND_LABELS[k] }));
 
 export default function ReportIssueScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<Nav>();
+  const photoPickerRef = useRef<PhotoPickerHandle>(null);
+  const { target, clearTarget } = useReportTarget();
 
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [uploadTask, setUploadTask] = useState<Promise<string | null> | null>(null);
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
-  const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState<IssueCategory>('niggle');
-  const [priority, setPriority] = useState<IssuePriority>('medium');
+  const [kind, setKind] = useState<SnagKind>('fixit');
+  const [isHazard, setIsHazard] = useState(false);
+  const [reporterName, setReporterName] = useState('');
+  const [hasProfileName, setHasProfileName] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submittedTo, setSubmittedTo] = useState<string | null>(null);
+  const [reference, setReference] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [orgId, setOrgId] = useState<string | null>(null);
 
-  // ─── Photo picker ──────────────────────────────────────────────────────────
+  // Refetched on focus: the active org (which scopes member submissions and
+  // the photo upload folder) can change via the org switcher or a QR scan.
+  useFocusEffect(
+    React.useCallback(() => {
+      (async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        setUserId(user.id);
+        const profile = await getProfile(user.id);
+        setOrgId(profile?.org_id ?? null);
+        setHasProfileName(Boolean(profile?.name));
+      })();
+    }, [])
+  );
 
-  async function compressAndUpload(uri: string) {
-    const fileName = `${Date.now()}.jpg`;
-    setIsPhotoUploading(true);
-    // Resize to max 1200px on the longest side and compress to ~70% JPEG quality
-    const compressed = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 1200 } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    const task = uploadIssuePhoto(compressed.uri, fileName).finally(() => setIsPhotoUploading(false));
-    setUploadTask(task);
-  }
-
-  async function pickFromLibrary() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 1,
-      exif: false,
-    });
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setPhotoUri(uri);
-      compressAndUpload(uri);
-    }
-  }
-
-  async function takePhoto() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera access is needed to take photos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 1,
-      exif: false,
-    });
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setPhotoUri(uri);
-      compressAndUpload(uri);
-    }
-  }
-
-
-  // ─── Submit ────────────────────────────────────────────────────────────────
+  const isPublicSubmission = target !== null;
+  // Members upload photos into their org's folder; public submissions go into
+  // the reporter's own user folder (each has a matching storage RLS policy).
+  const photoPathPrefix = isPublicSubmission ? userId : orgId;
 
   async function handleSubmit() {
-    if (!title.trim()) {
-      Alert.alert('Title required', 'Please give the issue a title.');
+    if (!description.trim()) {
+      Alert.alert('Description required', "Tell us what's wrong.");
       return;
     }
 
@@ -109,59 +83,60 @@ export default function ReportIssueScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organisation_id')
-        .eq('id', user.id)
-        .single();
+      const photoPaths = await photoPickerRef.current?.getPhotoUrls() ?? [];
 
-      if (!profile?.organisation_id) throw new Error('No organisation found');
+      if (isPublicSubmission && target) {
+        const { data, error } = await createPublicSnag({
+          orgId: target.orgId,
+          description: description.trim(),
+          photoPaths,
+          isHazard,
+          reporterName: reporterName.trim() || null,
+        });
+        if (error) throw error;
+        setSubmittedTo(target.orgName);
+        setReference(data?.reference ?? null);
+      } else {
+        const profile = await getProfile(user.id);
+        if (!profile?.org_id) throw new Error('No organisation found');
 
-      // Await eager upload (already in-flight since photo was selected), or
-      // fall back to uploading now if somehow no task exists.
-      let photoUrl: string | null = null;
-      if (photoUri) {
-        if (uploadTask) {
-          photoUrl = await uploadTask;
-        } else {
-          photoUrl = await uploadIssuePhoto(photoUri, `${Date.now()}.jpg`);
-        }
+        const siteId = await getDefaultSiteId(profile.org_id);
+        if (!siteId) throw new Error('No site found for your organisation');
+
+        const { data, error } = await createSnag({
+          kind,
+          description: description.trim(),
+          severity: null,
+          photoPaths,
+          latitude: null,
+          longitude: null,
+          siteId,
+        });
+        if (error) throw error;
+        setSubmittedTo(profile.organisation?.name ?? null);
+        setReference(data?.reference ?? null);
       }
-
-      const { error } = await supabase.from('issues').insert({
-        title: title.trim(),
-        description: description.trim() || null,
-        photo_url: photoUrl,
-        category,
-        priority,
-        status: 'open',
-        reporter_id: user.id,
-        organisation_id: profile.organisation_id,
-      });
-
-      if (error) throw error;
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
     } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not submit issue.');
+      Alert.alert('Error', err.message ?? 'Could not submit snag.');
     } finally {
       setSubmitting(false);
     }
   }
 
   function resetForm() {
-    setTitle('');
     setDescription('');
-    setCategory('niggle');
-    setPriority('medium');
-    setPhotoUri(null);
-    setUploadTask(null);
-    setIsPhotoUploading(false);
+    setKind('fixit');
+    setIsHazard(false);
+    setReporterName('');
+    photoPickerRef.current?.reset();
     setSubmitted(false);
+    setSubmittedTo(null);
+    setReference(null);
+    clearTarget();
   }
-
-  // ─── Render ────────────────────────────────────────────────────────────────
 
   if (submitted) {
     return (
@@ -171,15 +146,37 @@ export default function ReportIssueScreen() {
         </View>
         <View style={styles.successContainer}>
           <View style={styles.successIconWrap}>
-            <Text style={styles.successIcon}>✓</Text>
+            <Icon name="checkmark" size={IconSize.xl} color={Colors.white} />
           </View>
           <Text style={styles.successTitle}>Snag reported!</Text>
           <Text style={styles.successMessage}>
-            Your issue has been submitted and the team will be notified.
+            {reference ?? 'Your snag'} has been submitted
+            {submittedTo ? ` to ${submittedTo}` : ''} and the team will be notified.
           </Text>
-          <TouchableOpacity style={styles.submitButton} onPress={resetForm} activeOpacity={0.85}>
-            <Text style={styles.submitLabel}>Report Another Snag</Text>
-          </TouchableOpacity>
+          <Button label="Report Another Snag" onPress={resetForm} fullWidth />
+        </View>
+      </View>
+    );
+  }
+
+  // No org and no target yet: a public reporter's entry point.
+  if (!orgId && !isPublicSubmission) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Report a Snag</Text>
+        </View>
+        <View style={styles.successContainer}>
+          <Icon name="business-outline" size={IconSize.xxl} color={Colors.textSecondary} />
+          <Text style={styles.successTitle}>Who is this report for?</Text>
+          <Text style={styles.successMessage}>
+            Pick the organisation you want to send your report to.
+          </Text>
+          <Button
+            label="Choose an Organisation"
+            onPress={() => navigation.navigate('ChooseReportOrg')}
+            fullWidth
+          />
         </View>
       </View>
     );
@@ -187,7 +184,6 @@ export default function ReportIssueScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Report a Snag</Text>
       </View>
@@ -199,156 +195,110 @@ export default function ReportIssueScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Photo area */}
-        {photoUri ? (
-          <View style={styles.photoPreviewContainer}>
-            <Image
-              source={{ uri: photoUri }}
-              style={styles.photoPreview}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-            />
-            {isPhotoUploading && (
-              <View style={styles.photoUploadingOverlay}>
-                <ActivityIndicator color={Colors.white} size="small" />
-                <Text style={styles.photoUploadingText}>Uploading…</Text>
-              </View>
-            )}
-            <TouchableOpacity
-              style={styles.photoRemoveButton}
-              onPress={() => { setPhotoUri(null); setUploadTask(null); setIsPhotoUploading(false); }}
-            >
-              <Text style={styles.photoRemoveText}>✕</Text>
+        {/* Cross-org submissions always show which org will receive this. */}
+        {isPublicSubmission && target && (
+          <View style={styles.targetPill}>
+            <Icon name="business-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.targetPillText}>
+              Reporting to: <Text style={styles.targetPillOrg}>{target.orgName}</Text>
+            </Text>
+            <TouchableOpacity onPress={() => navigation.navigate('ChooseReportOrg')} hitSlop={8}>
+              <Text style={styles.targetPillChange}>Change</Text>
             </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.photoArea}>
-            <Text style={styles.photoAreaIcon}>📷</Text>
-            <Text style={styles.photoAreaLabel}>Add a photo</Text>
-            <View style={styles.photoButtonRow}>
-              <TouchableOpacity style={styles.photoButton} onPress={takePhoto} activeOpacity={0.7}>
-                <Text style={styles.photoButtonText}>Take Photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.photoButton} onPress={pickFromLibrary} activeOpacity={0.7}>
-                <Text style={styles.photoButtonText}>Choose from Library</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         )}
 
-        {/* Form */}
-        <View style={styles.form}>
-          {/* Title */}
-          <View style={styles.fieldGroup}>
-            <View style={styles.fieldLabelRow}>
-              <Text style={styles.fieldLabel}>
-                Title <Text style={styles.required}>*</Text>
-              </Text>
-              <Text style={[styles.charCount, title.length > 108 && styles.charCountWarn]}>
-                {title.length} / 120
-              </Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Broken fire exit door"
-              placeholderTextColor={Colors.textMuted}
-              value={title}
-              onChangeText={setTitle}
-              returnKeyType="next"
-              maxLength={120}
-            />
-          </View>
+        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} onUploadingChange={setIsPhotoUploading} />
 
-          {/* Description */}
-          <View style={styles.fieldGroup}>
-            <View style={styles.fieldLabelRow}>
-              <Text style={styles.fieldLabel}>Description</Text>
-              <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
-                {description.length} / 300
-              </Text>
-            </View>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Describe the issue in more detail..."
-              placeholderTextColor={Colors.textMuted}
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-              maxLength={300}
-            />
+        {/* Description — the only required field on the fast path */}
+        <View style={styles.fieldGroup}>
+          <View style={styles.fieldLabelRow}>
+            <Text style={styles.fieldLabel}>
+              What's wrong? <Text style={styles.required}>*</Text>
+            </Text>
+            <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
+              {description.length} / 300
+            </Text>
           </View>
-
-          {/* Category */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Category</Text>
-            <View style={styles.segmentRow}>
-              {CATEGORIES.map((cat) => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[
-                    styles.segmentOption,
-                    category === cat && styles.segmentOptionActive,
-                  ]}
-                  onPress={() => setCategory(cat)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.segmentLabel,
-                      category === cat && styles.segmentLabelActive,
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {CATEGORY_LABELS[cat]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Priority */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Priority</Text>
-            <View style={styles.priorityRow}>
-              {PRIORITIES.map((p) => (
-                <TouchableOpacity
-                  key={p}
-                  style={[
-                    styles.priorityOption,
-                    priority === p && styles.priorityOptionActive,
-                  ]}
-                  onPress={() => setPriority(p)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.priorityLabel,
-                      priority === p && styles.priorityLabelActive,
-                    ]}
-                  >
-                    {PRIORITY_LABELS[p]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Submit */}
-          <TouchableOpacity
-            style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-            onPress={handleSubmit}
-            disabled={submitting}
-            activeOpacity={0.85}
-          >
-            {submitting ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.submitLabel}>Submit Report</Text>
-            )}
-          </TouchableOpacity>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="e.g. Broken fire exit door in the main warehouse"
+            placeholderTextColor={Colors.textMuted}
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+            maxLength={300}
+          />
         </View>
+
+        {isPublicSubmission ? (
+          <>
+            {!hasProfileName && (
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>Your name (optional)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="So the team knows who reported this"
+                  placeholderTextColor={Colors.textMuted}
+                  value={reporterName}
+                  onChangeText={setReporterName}
+                />
+              </View>
+            )}
+
+            {/* Public reporters don't pick internal categories — just a
+                safety-hazard flag the org's staff can triage. */}
+            <View style={styles.hazardRow}>
+              <View style={styles.hazardText}>
+                <Text style={styles.fieldLabel}>This is a safety hazard</Text>
+                <Text style={styles.hazardHint}>Flags the report for urgent attention</Text>
+              </View>
+              <Switch
+                value={isHazard}
+                onValueChange={setIsHazard}
+                trackColor={{ false: Colors.border, true: Colors.seriousBg }}
+                thumbColor={isHazard ? Colors.serious : Colors.surface}
+              />
+            </View>
+          </>
+        ) : (
+          // Type — members only
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Type</Text>
+            <Chip options={KIND_OPTIONS} value={kind} onChange={setKind} variant="segmented" />
+          </View>
+        )}
+
+        {/* Submit — one primary action */}
+        <Button
+          label="Submit Report"
+          onPress={handleSubmit}
+          loading={submitting}
+          disabled={isPhotoUploading}
+          fullWidth
+        />
+
+        {!isPublicSubmission && (
+          <>
+            {/* Serious lane — clearly clickable, but visually quieter than the primary CTA */}
+            <Button
+              label="Report a Serious Incident"
+              variant="seriousOutline"
+              icon="warning-outline"
+              onPress={() => navigation.navigate('ReportIncidentDetails')}
+              fullWidth
+            />
+
+            <Button
+              label="Submit to another organisation…"
+              variant="ghost"
+              onPress={() => navigation.navigate('ChooseReportOrg')}
+              fullWidth
+            />
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -376,94 +326,30 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
   },
 
-  // Photo
-  photoArea: {
-    paddingVertical: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  photoAreaIcon: { fontSize: 32 },
-  photoAreaLabel: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
-  },
-  photoButtonRow: {
+  targetPill: {
     flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    width: '100%',
-  },
-  photoButton: {
-    flex: 1,
-    height: MIN_TOUCH_TARGET,
-    backgroundColor: Colors.background,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.sm,
+    gap: Spacing.sm,
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.button,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
-  photoButtonText: {
+  targetPillText: {
+    flex: 1,
     fontSize: Typography.sm,
-    fontWeight: Typography.medium,
     color: Colors.textPrimary,
   },
-  photoPreviewContainer: {
-    position: 'relative',
-    borderRadius: Radius.card,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  photoPreview: {
-    width: '100%',
-    height: 220,
-  },
-  photoUploadingOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    gap: 6,
-  },
-  photoUploadingText: {
-    color: Colors.white,
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-  },
-  photoRemoveButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoRemoveText: {
-    color: Colors.white,
-    fontSize: 12,
+  targetPillOrg: {
     fontWeight: Typography.bold,
+    color: Colors.primary,
+  },
+  targetPillChange: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
   },
 
-  // Form
-  form: {
-    gap: Spacing.lg,
-  },
   fieldGroup: {
     gap: Spacing.sm,
   },
@@ -503,66 +389,24 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
   },
 
-  // Category segmented
-  segmentRow: {
+  hazardRow: {
     flexDirection: 'row',
-    gap: Spacing.xs,
-    flexWrap: 'wrap',
-  },
-  segmentOption: {
-    flex: 1,
-    minWidth: '45%',
-    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.md,
     backgroundColor: Colors.surface,
-    borderRadius: Radius.button,
+    borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.sm,
+    padding: Spacing.md,
   },
-  segmentOptionActive: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
-  },
-  segmentLabel: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-  },
-  segmentLabelActive: {
-    color: Colors.primary,
-    fontWeight: Typography.semibold,
-  },
-
-  // Priority row
-  priorityRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  priorityOption: {
+  hazardText: {
     flex: 1,
-    height: MIN_TOUCH_TARGET,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 2,
   },
-  priorityOptionActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  priorityLabel: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-  },
-  priorityLabelActive: {
-    color: Colors.white,
-    fontWeight: Typography.semibold,
+  hazardHint: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
   },
 
   // Success confirmation
@@ -577,15 +421,10 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.success,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.sm,
-  },
-  successIcon: {
-    fontSize: 40,
-    color: Colors.white,
-    fontWeight: Typography.bold,
   },
   successTitle: {
     fontSize: Typography.xl,
@@ -598,23 +437,5 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
-  },
-
-  // Submit button
-  submitButton: {
-    height: MIN_TOUCH_TARGET + 8,
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.button,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: Spacing.sm,
-  },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
-  submitLabel: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.white,
   },
 });

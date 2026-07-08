@@ -2,58 +2,71 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Clipboard,
   RefreshControl,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import QRCode from 'react-native-qrcode-svg';
 
 import { Profile, Organisation, UserRole, ROLE_LABELS, RootStackParamList } from '../types';
-import { supabase, getOrgMembers, updateMemberRole } from '../lib/supabase';
+import {
+  supabase, getOrgMembers, updateMemberRole, removeOrgMember, inviteUser, getPendingInvites,
+  regenerateOrgJoinCode, setOrgPublicMode, getOrgSites,
+} from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
+import Card from '../components/Card';
+import Avatar from '../components/Avatar';
+import Chip from '../components/Chip';
+import Button from '../components/Button';
+import Icon from '../components/Icon';
+import EmptyState from '../components/EmptyState';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { useToast } from '../hooks/useToast';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const ROLES: UserRole[] = ['worker', 'manager', 'admin'];
+const ROLES: UserRole[] = ['worker', 'supervisor', 'officer_admin'];
+const ROLE_OPTIONS = ROLES.map((r) => ({ key: r, label: ROLE_LABELS[r] }));
 
-const ROLE_COLORS: Record<UserRole, { active: string; text: string }> = {
-  worker:  { active: Colors.border,        text: Colors.textSecondary },
-  manager: { active: Colors.primaryLight,  text: Colors.primary },
-  admin:   { active: '#FEF3C7',            text: '#B45309' },
-};
-
-function initials(name: string, email: string): string {
-  const src = name.trim() || email;
-  return src.split(/[\s@]/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+interface PendingInvite {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: string;
+  created_at: string;
+  expires_at: string;
 }
 
 function MemberCard({
   member,
   isSelf,
-  issueCount,
+  snagCount,
   isAdmin,
   updatingRole,
+  removing,
   onRoleChange,
+  onRemove,
 }: {
   member: Profile;
   isSelf: boolean;
-  issueCount: number;
+  snagCount: number;
   isAdmin: boolean;
   updatingRole: boolean;
+  removing: boolean;
   onRoleChange: (role: UserRole) => void;
+  onRemove: () => void;
 }) {
+  const canEdit = isAdmin && !isSelf;
   return (
-    <View style={styles.memberCard}>
-      {/* Avatar + info row */}
+    <Card variant="elevated" style={styles.memberCard}>
       <View style={styles.memberTop}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials(member.name, member.email)}</Text>
-        </View>
+        <Avatar name={member.name} email={member.email} size={40} />
         <View style={styles.memberInfo}>
           <View style={styles.memberNameRow}>
             <Text style={styles.memberName} numberOfLines={1}>
@@ -64,58 +77,87 @@ function MemberCard({
           <Text style={styles.memberEmail} numberOfLines={1}>{member.email}</Text>
         </View>
         <View style={styles.issuesBadge}>
-          <Text style={styles.issuesBadgeCount}>{issueCount}</Text>
-          <Text style={styles.issuesBadgeLabel}>issue{issueCount !== 1 ? 's' : ''}</Text>
+          <Text style={styles.issuesBadgeCount}>{snagCount}</Text>
+          <Text style={styles.issuesBadgeLabel}>snag{snagCount !== 1 ? 's' : ''}</Text>
         </View>
       </View>
 
-      {/* Role selector */}
-      <View style={styles.roleSelector}>
-        {updatingRole ? (
-          <ActivityIndicator size="small" color={Colors.primary} style={styles.roleSpinner} />
-        ) : (
-          ROLES.map(role => {
-            const active = member.role === role;
-            const colors = ROLE_COLORS[role];
-            const canTap = isAdmin && !isSelf;
-            return (
-              <TouchableOpacity
-                key={role}
-                style={[
-                  styles.roleBtn,
-                  active && { backgroundColor: colors.active },
-                  !active && styles.roleBtnInactive,
-                ]}
-                onPress={() => canTap && !active && onRoleChange(role)}
-                activeOpacity={canTap && !active ? 0.7 : 1}
-                disabled={!canTap || active}
-              >
-                <Text style={[
-                  styles.roleBtnText,
-                  active ? { color: colors.text, fontWeight: Typography.semibold } : undefined,
-                ]}>
-                  {ROLE_LABELS[role]}
-                </Text>
-              </TouchableOpacity>
-            );
-          })
+      <View style={styles.memberActionsRow}>
+        <View style={styles.roleControl}>
+          {updatingRole ? (
+            <ActivityIndicator size="small" color={Colors.primary} style={styles.roleSpinner} />
+          ) : canEdit ? (
+            <Chip options={ROLE_OPTIONS} value={member.role} onChange={onRoleChange} variant="segmented" />
+          ) : (
+            <View style={styles.roleReadout}>
+              <Text style={styles.roleReadoutText}>{ROLE_LABELS[member.role]}</Text>
+            </View>
+          )}
+        </View>
+
+        {canEdit && (
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={onRemove}
+            disabled={removing}
+            hitSlop={8}
+          >
+            {removing ? (
+              <ActivityIndicator size="small" color={Colors.danger} />
+            ) : (
+              <Icon name="trash-outline" size="md" color={Colors.danger} />
+            )}
+          </TouchableOpacity>
         )}
       </View>
-    </View>
+    </Card>
+  );
+}
+
+function PendingMemberCard({ invite }: { invite: PendingInvite }) {
+  return (
+    <Card variant="elevated" style={styles.memberCard}>
+      <View style={styles.memberTop}>
+        <Avatar name={invite.email} email={invite.email} size={40} />
+        <View style={styles.memberInfo}>
+          <View style={styles.memberNameRow}>
+            <Text style={styles.memberName} numberOfLines={1}>{invite.email}</Text>
+            <View style={styles.pendingPill}>
+              <Text style={styles.pendingPillText}>Pending</Text>
+            </View>
+          </View>
+          <Text style={styles.memberEmail} numberOfLines={1}>{ROLE_LABELS[invite.role]} invite</Text>
+        </View>
+      </View>
+    </Card>
   );
 }
 
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  const { showToast } = useToast();
 
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [members, setMembers] = useState<Profile[]>([]);
-  const [issueCounts, setIssueCounts] = useState<Record<string, number>>({});
+  const [snagCounts, setSnagCounts] = useState<Record<string, number>>({});
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingRole, setUpdatingRole] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [removingMember, setRemovingMember] = useState<string | null>(null);
+  const [memberToRemove, setMemberToRemove] = useState<Profile | null>(null);
+  const [regeneratingCode, setRegeneratingCode] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+
+  // Public reports (Phase 4)
+  const [orgSites, setOrgSites] = useState<{ id: string; name: string }[]>([]);
+  const [intakeSiteId, setIntakeSiteId] = useState<string | null>(null);
+  const [savingPublicMode, setSavingPublicMode] = useState(false);
+
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<UserRole>('worker');
+  const [sendingInvite, setSendingInvite] = useState(false);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -123,36 +165,42 @@ export default function AdminDashboardScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('*, organisation:organisations(id, name, invite_code)')
+      .select('*, organisation:organisations(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
       .eq('id', user.id)
       .single();
 
     if (data) {
-      const profile = data as Profile;
+      const profile = data as unknown as Profile;
       setCurrentUser(profile);
 
-      if (profile.organisation_id) {
-        const [list, issuesRes] = await Promise.all([
-          getOrgMembers(profile.organisation_id),
-          supabase
-            .from('issues')
-            .select('reporter_id')
-            .eq('organisation_id', profile.organisation_id),
+      if (profile.org_id) {
+        const [list, snagsRes, invites, sites] = await Promise.all([
+          getOrgMembers(profile.org_id),
+          supabase.from('snags').select('reporter_id').eq('org_id', profile.org_id),
+          getPendingInvites(profile.org_id),
+          getOrgSites(profile.org_id),
         ]);
 
         setMembers(list);
+        setPendingInvites(invites as PendingInvite[]);
+        setOrgSites(sites);
+        setIntakeSiteId(profile.organisation?.public_intake_site_id ?? sites[0]?.id ?? null);
 
         const counts: Record<string, number> = {};
-        for (const row of issuesRes.data ?? []) {
+        for (const row of snagsRes.data ?? []) {
           counts[row.reporter_id] = (counts[row.reporter_id] ?? 0) + 1;
         }
-        setIssueCounts(counts);
+        setSnagCounts(counts);
       }
     }
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Reload on focus — the org this dashboard manages is the active org,
+  // which may have changed via the Profile switcher or a QR scan.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -169,12 +217,65 @@ export default function AdminDashboardScreen() {
     setUpdatingRole(null);
   }
 
-  function handleCopyCode() {
-    const code = (currentUser?.organisation as Organisation | undefined)?.invite_code;
-    if (!code) return;
-    Clipboard.setString(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function handleRemoveMember() {
+    if (!memberToRemove) return;
+    const member = memberToRemove;
+    setMemberToRemove(null);
+    setRemovingMember(member.id);
+    const { error } = await removeOrgMember(member.id);
+    setRemovingMember(null);
+    if (!error) {
+      setMembers(prev => prev.filter(m => m.id !== member.id));
+      showToast(`${member.name || member.email} removed from ${orgName}`);
+    } else {
+      showToast(error.message ?? 'Could not remove member');
+    }
+  }
+
+  async function handleRegenerateCode() {
+    setConfirmRegenerate(false);
+    setRegeneratingCode(true);
+    const { code, error } = await regenerateOrgJoinCode();
+    setRegeneratingCode(false);
+    if (code) {
+      setCurrentUser(prev => prev && prev.organisation
+        ? { ...prev, organisation: { ...prev.organisation, join_code: code } }
+        : prev);
+      showToast('Join code regenerated — old QR codes no longer work');
+    } else {
+      showToast(error?.message ?? 'Could not regenerate join code');
+    }
+  }
+
+  async function handleTogglePublicMode(enable: boolean) {
+    if (enable && !intakeSiteId) {
+      showToast('Add a site first — public reports need somewhere to land');
+      return;
+    }
+    setSavingPublicMode(true);
+    const { error } = await setOrgPublicMode(enable, enable ? intakeSiteId : null);
+    setSavingPublicMode(false);
+    if (!error) {
+      showToast(enable ? 'Now accepting public reports' : 'Public reports turned off');
+      load();
+    } else {
+      showToast(error.message ?? 'Could not update public mode');
+    }
+  }
+
+  async function handleSendInvite() {
+    if (!inviteEmail.trim()) return;
+    setSendingInvite(true);
+    const { error } = await inviteUser(inviteEmail.trim(), inviteRole, null);
+    setSendingInvite(false);
+    if (!error) {
+      showToast('Invite sent');
+      setInviteEmail('');
+      setInviteRole('worker');
+      if (currentUser?.org_id) {
+        getPendingInvites(currentUser.org_id).then(setPendingInvites);
+      }
+    }
   }
 
   if (loading) {
@@ -186,11 +287,9 @@ export default function AdminDashboardScreen() {
   }
 
   const org = currentUser?.organisation as Organisation | undefined;
-  const orgInviteCode = org?.invite_code;
   const orgName = org?.name ?? 'Your Organisation';
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'officer_admin';
 
-  // Sort: admins first, then managers, then workers; alphabetically within each group
   const sorted = [...members].sort((a, b) => {
     const ri = (r: UserRole) => ROLES.indexOf(r);
     if (ri(b.role) !== ri(a.role)) return ri(b.role) - ri(a.role);
@@ -209,7 +308,8 @@ export default function AdminDashboardScreen() {
           onPress={() => navigation.navigate('Reports')}
           activeOpacity={0.8}
         >
-          <Text style={styles.reportsBtnText}>Reports →</Text>
+          <Text style={styles.reportsBtnText}>Reports</Text>
+          <Icon name="chevron-forward" size="sm" color={Colors.primary} />
         </TouchableOpacity>
       </View>
 
@@ -218,29 +318,99 @@ export default function AdminDashboardScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
 
-        {/* Invite code */}
-        {orgInviteCode && (
-          <View style={styles.inviteCard}>
-            <Text style={styles.sectionLabel}>ORGANISATION INVITE CODE</Text>
-            <View style={styles.inviteRow}>
-              <Text style={styles.inviteCode}>{orgInviteCode}</Text>
-              <TouchableOpacity style={styles.copyBtn} onPress={handleCopyCode} activeOpacity={0.7}>
-                <Text style={[styles.copyBtnText, copied && styles.copyBtnDone]}>
-                  {copied ? '✓ Copied' : '⧉ Copy'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.inviteHint}>
-              Share this code with colleagues — they'll join as Workers by default.
-            </Text>
-          </View>
+        {isAdmin && (
+          <Card variant="elevated" style={styles.inviteCard}>
+            <Text style={styles.sectionLabel}>INVITE A TEAM MEMBER</Text>
+            <TextInput
+              style={styles.inviteInput}
+              placeholder="colleague@example.com"
+              placeholderTextColor={Colors.textMuted}
+              value={inviteEmail}
+              onChangeText={setInviteEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+            <Chip options={ROLE_OPTIONS} value={inviteRole} onChange={setInviteRole} variant="segmented" />
+            <Button label="Send Invite" onPress={handleSendInvite} loading={sendingInvite} fullWidth />
+          </Card>
         )}
 
-        {/* User access management */}
+        {isAdmin && org?.join_code && (
+          <Card variant="elevated" style={styles.qrCard}>
+            <Text style={styles.sectionLabel}>SCAN TO JOIN</Text>
+            <Text style={styles.qrHint}>
+              Anyone who scans this joins {orgName} as a worker. Regenerate it to invalidate old QR codes.
+            </Text>
+            <View style={styles.qrWrap}>
+              <QRCode value={org.join_code} size={180} />
+            </View>
+            <Button
+              label="Regenerate Code"
+              variant="outline"
+              onPress={() => setConfirmRegenerate(true)}
+              loading={regeneratingCode}
+              fullWidth
+            />
+          </Card>
+        )}
+
+        {isAdmin && (
+          <Card variant="elevated" style={styles.publicCard}>
+            <Text style={styles.sectionLabel}>PUBLIC REPORTS</Text>
+            {org?.is_public ? (
+              <>
+                <Text style={styles.publicHint}>
+                  Anyone can find {orgName} in the app and submit a report
+                  {orgSites.find((s) => s.id === org.public_intake_site_id)
+                    ? ` — reports land in ${orgSites.find((s) => s.id === org.public_intake_site_id)!.name}`
+                    : ''}
+                  . They only ever see their own submissions.
+                </Text>
+                <Button
+                  label="Stop Accepting Public Reports"
+                  variant="outline"
+                  onPress={() => handleTogglePublicMode(false)}
+                  loading={savingPublicMode}
+                  fullWidth
+                />
+              </>
+            ) : (
+              <>
+                <Text style={styles.publicHint}>
+                  Let anyone — not just members — submit reports to {orgName}. Pick the site that
+                  receives them.
+                </Text>
+                {orgSites.length > 0 ? (
+                  <Chip
+                    options={orgSites.map((s) => ({ key: s.id, label: s.name }))}
+                    value={intakeSiteId ?? ''}
+                    onChange={(id) => setIntakeSiteId(id)}
+                    variant="segmented"
+                  />
+                ) : (
+                  <Text style={styles.publicHintMuted}>
+                    Your organisation has no sites yet — add one before enabling public reports.
+                  </Text>
+                )}
+                <Button
+                  label="Accept Public Reports"
+                  onPress={() => handleTogglePublicMode(true)}
+                  loading={savingPublicMode}
+                  disabled={orgSites.length === 0}
+                  fullWidth
+                />
+              </>
+            )}
+          </Card>
+        )}
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionLabel}>MANAGE USER ACCESS</Text>
-            <Text style={styles.sectionCount}>{members.length} member{members.length !== 1 ? 's' : ''}</Text>
+            <Text style={styles.sectionCount}>
+              {members.length} member{members.length !== 1 ? 's' : ''}
+              {pendingInvites.length > 0 ? ` · ${pendingInvites.length} pending` : ''}
+            </Text>
           </View>
 
           {sorted.map(member => (
@@ -248,32 +418,51 @@ export default function AdminDashboardScreen() {
               key={member.id}
               member={member}
               isSelf={member.id === currentUser?.id}
-              issueCount={issueCounts[member.id] ?? 0}
+              snagCount={snagCounts[member.id] ?? 0}
               isAdmin={isAdmin}
               updatingRole={updatingRole === member.id}
+              removing={removingMember === member.id}
               onRoleChange={(role) => handleRoleChange(member, role)}
+              onRemove={() => setMemberToRemove(member)}
             />
           ))}
 
-          {members.length === 0 && (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>👥</Text>
-              <Text style={styles.emptyTitle}>No team members yet</Text>
-              <Text style={styles.emptyText}>
-                Share the invite code above with your team so they can join.
-              </Text>
-              {orgInviteCode && (
-                <TouchableOpacity style={styles.emptyAction} onPress={handleCopyCode} activeOpacity={0.85}>
-                  <Text style={styles.emptyActionText}>
-                    {copied ? '✓ Copied!' : `Copy Code: ${orgInviteCode}`}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+          {pendingInvites.map((invite) => (
+            <PendingMemberCard key={invite.id} invite={invite} />
+          ))}
+
+          {members.length === 0 && pendingInvites.length === 0 && (
+            <EmptyState
+              icon="people-outline"
+              title="No team members yet"
+              message="Invite your team above so they can join."
+            />
           )}
         </View>
 
       </ScrollView>
+
+      <ConfirmDialog
+        visible={!!memberToRemove}
+        title="Remove this member?"
+        message={`${memberToRemove?.name || memberToRemove?.email} will immediately lose access to ${orgName}. Their past reports and comments stay on record.`}
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={handleRemoveMember}
+        onCancel={() => setMemberToRemove(null)}
+      />
+
+      <ConfirmDialog
+        visible={confirmRegenerate}
+        title="Regenerate join code?"
+        message="Any QR codes or posters showing the current code will stop working immediately."
+        confirmLabel="Regenerate"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={handleRegenerateCode}
+        onCancel={() => setConfirmRegenerate(false)}
+      />
     </View>
   );
 }
@@ -290,7 +479,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
 
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -312,6 +500,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   reportsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     backgroundColor: Colors.primaryLight,
@@ -328,52 +519,45 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
   },
 
-  // Invite card
   inviteCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.lg,
     gap: Spacing.sm,
-    marginBottom: Spacing.lg,
   },
-  inviteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  inviteCode: {
-    fontSize: Typography.xl,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
-    letterSpacing: 4,
-  },
-  copyBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+  inviteInput: {
+    height: MIN_TOUCH_TARGET,
     backgroundColor: Colors.background,
-    borderRadius: Radius.button,
+    borderRadius: Radius.input,
     borderWidth: 1,
     borderColor: Colors.border,
-    minWidth: MIN_TOUCH_TARGET,
-    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
   },
-  copyBtnText: {
+  qrCard: {
+    gap: Spacing.sm,
+    alignItems: 'stretch',
+  },
+  publicCard: {
+    gap: Spacing.sm,
+  },
+  publicHint: {
     fontSize: Typography.sm,
-    fontWeight: Typography.medium,
     color: Colors.textSecondary,
-  },
-  copyBtnDone: {
-    color: '#10B981',
-  },
-  inviteHint: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
     lineHeight: 18,
   },
-
-  // Section
+  publicHintMuted: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+  },
+  qrHint: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  qrWrap: {
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+  },
   section: {
     gap: Spacing.sm,
   },
@@ -394,33 +578,13 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // Member card
   memberCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
     gap: Spacing.sm,
   },
   memberTop: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.md,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  avatarText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.bold,
-    color: Colors.primary,
   },
   memberInfo: {
     flex: 1,
@@ -464,65 +628,46 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // Role selector
-  roleSelector: {
+  memberActionsRow: {
     flexDirection: 'row',
-    gap: Spacing.xs,
-  },
-  roleSpinner: {
-    flex: 1,
-    height: MIN_TOUCH_TARGET - 16,
-  },
-  roleBtn: {
-    flex: 1,
-    height: 32,
-    borderRadius: Radius.chip,
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roleBtnInactive: {
-    backgroundColor: Colors.background,
-  },
-  roleBtnText: {
-    fontSize: Typography.xs,
-    color: Colors.textMuted,
-  },
-
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: Spacing.xl,
     gap: Spacing.sm,
   },
-  emptyIcon: {
-    fontSize: 40,
-    marginBottom: Spacing.xs,
+  roleControl: {
+    flex: 1,
   },
-  emptyTitle: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  emptyText: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 18,
-    paddingHorizontal: Spacing.md,
-  },
-  emptyAction: {
-    marginTop: Spacing.sm,
-    backgroundColor: Colors.primary,
+  deleteButton: {
+    width: 38,
+    height: 38,
     borderRadius: Radius.button,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    minHeight: MIN_TOUCH_TARGET - 8,
+    backgroundColor: Colors.priority.highBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emptyActionText: {
+  pendingPill: {
+    backgroundColor: Colors.status.inProgressBg,
+    borderRadius: Radius.chip,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  pendingPillText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.status.inProgress,
+  },
+  roleSpinner: {
+    height: 38,
+  },
+  roleReadout: {
+    height: 38,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleReadoutText: {
     fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.white,
+    fontWeight: Typography.medium,
+    color: Colors.textSecondary,
   },
 });

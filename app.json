@@ -2,25 +2,26 @@
   "expo": {
     "name": "Snag",
     "slug": "snag",
+    "owner": "mturnernz1",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
       "backgroundColor": "#F9FAFB"
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.yourorg.snag"
+      "bundleIdentifier": "com.snag.app"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#F9FAFB"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2563EB"
       },
-      "package": "com.yourorg.snag",
-      "navigationBar": {
-        "visible": "immersive"
-      }
+      "package": "com.snag.app"
     },
     "plugins": [
       [
@@ -30,7 +31,20 @@
           "cameraPermission": "Snag needs access to your camera to take photos of issues."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Snag needs access to your camera to scan a join QR code."
+        }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "visibility": "hidden",
+          "behavior": "overlay-swipe"
+        }
+      ]
     ],
     "web": {
       "bundler": "metro",
@@ -44,7 +58,10 @@
     },
     "extra": {
       "supabaseUrl": "",
-      "supabaseAnonKey": ""
+      "supabaseAnonKey": "",
+      "eas": {
+        "projectId": "fc3e5412-bd53-459a-b572-d7d85283377b"
+      }
     }
   }
 }

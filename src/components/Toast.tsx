@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Text, StyleSheet } from 'react-native';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, Shadow } from '../constants/theme';
 
 interface Props {
   message: string;
@@ -42,11 +42,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
     zIndex: 999,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 5,
+    ...Shadow.lg,
   },
   text: {
     color: Colors.white,

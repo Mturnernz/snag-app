@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { supabase, getProfile } from './src/lib/supabase';
 import { Profile } from './src/types';
@@ -12,12 +13,22 @@ import RootNavigator from './src/navigation';
 import AuthScreen from './src/screens/AuthScreen';
 import OrgSetupScreen from './src/screens/OrgSetupScreen';
 import AdminSetupScreen from './src/screens/AdminSetupScreen';
+import { ToastProvider } from './src/hooks/useToast';
+
+const PUBLIC_REPORTER_KEY = 'snag.publicReporterMode';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isNewAdmin, setIsNewAdmin] = useState(false);
+  // "Just report an issue" — a signed-in user with no organisation who only
+  // submits to public orgs. Persisted so app restarts skip the org-setup gate.
+  const [publicReporter, setPublicReporter] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(PUBLIC_REPORTER_KEY).then((v) => setPublicReporter(v === 'true'));
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === 'android') {
@@ -65,42 +76,53 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <AuthScreen />
+        <ToastProvider>
+          <AuthScreen />
+        </ToastProvider>
       </SafeAreaProvider>
     );
   }
 
-  // Signed in but not yet in an organisation
-  if (!profile?.organisation_id) {
+  // Signed in but not yet in an organisation (unless they've chosen the
+  // public-reporter path, which needs no organisation at all).
+  if (!profile?.org_id && !publicReporter) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <OrgSetupScreen
-          userId={session.user.id}
-          onComplete={async () => {
-            const p = await getProfile(session.user.id);
-            setProfile(p);
-            if (p?.role === 'admin') {
-              setIsNewAdmin(true);
-            }
-          }}
-        />
+        <ToastProvider>
+          <OrgSetupScreen
+            userId={session.user.id}
+            onComplete={async () => {
+              const p = await getProfile(session.user.id);
+              setProfile(p);
+              if (p?.role === 'officer_admin') {
+                setIsNewAdmin(true);
+              }
+            }}
+            onPublicReporter={() => {
+              AsyncStorage.setItem(PUBLIC_REPORTER_KEY, 'true');
+              setPublicReporter(true);
+            }}
+          />
+        </ToastProvider>
       </SafeAreaProvider>
     );
   }
 
   // First-time admin setup after creating an organisation
-  if (isNewAdmin) {
+  if (isNewAdmin && profile) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <AdminSetupScreen
-          profile={profile}
-          onDone={(name) => {
-            if (name) setProfile(p => p ? { ...p, name } : p);
-            setIsNewAdmin(false);
-          }}
-        />
+        <ToastProvider>
+          <AdminSetupScreen
+            profile={profile}
+            onDone={(name) => {
+              if (name) setProfile(p => p ? { ...p, name } : p);
+              setIsNewAdmin(false);
+            }}
+          />
+        </ToastProvider>
       </SafeAreaProvider>
     );
   }
@@ -110,7 +132,11 @@ export default function App() {
     <SafeAreaProvider>
       <NavigationContainer>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
-        <RootNavigator userRole={profile.role} />
+        <ToastProvider>
+          {/* Public reporters may have no profile row yet — worker-level UI,
+              with the Admin tab role-gated away. */}
+          <RootNavigator userRole={profile?.role ?? 'worker'} />
+        </ToastProvider>
       </NavigationContainer>
     </SafeAreaProvider>
   );

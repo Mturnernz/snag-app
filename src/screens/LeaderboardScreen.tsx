@@ -1,19 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
 
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Spacing, Typography } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
+import ScreenHeader from '../components/ScreenHeader';
+import Chip from '../components/Chip';
+import Card from '../components/Card';
+import Avatar from '../components/Avatar';
+import EmptyState from '../components/EmptyState';
 
 type FilterOption = 'week' | 'month' | 'all';
 
@@ -30,25 +26,23 @@ const FILTERS: { key: FilterOption; label: string }[] = [
   { key: 'all', label: 'All Time' },
 ];
 
-function AvatarCircle({ name, size = 40 }: { name: string; size?: number }) {
-  const initials = name
-    .split(' ')
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
+function RankBadge({ rank }: { rank: number }) {
+  if (rank <= 3) {
+    return (
+      <View style={styles.rankCircle}>
+        <Text style={styles.rankCircleText}>{rank}</Text>
+      </View>
+    );
+  }
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.avatarText, { fontSize: size * 0.36 }]}>{initials}</Text>
+    <View style={styles.rankCell}>
+      <Text style={styles.rankNumber}>{rank}</Text>
     </View>
   );
 }
 
-const RANK_MEDALS: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
-
 export default function LeaderboardScreen() {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
 
   const [filter, setFilter] = useState<FilterOption>('week');
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
@@ -63,11 +57,11 @@ export default function LeaderboardScreen() {
       setCurrentUserId(user.id);
       const { data: profile } = await supabase
         .from('profiles')
-        .select('organisation_id')
+        .select('org_id')
         .eq('id', user.id)
         .single();
-      if (profile?.organisation_id) {
-        setOrgId(profile.organisation_id);
+      if (profile?.org_id) {
+        setOrgId(profile.org_id);
       }
     });
   }, []);
@@ -78,7 +72,6 @@ export default function LeaderboardScreen() {
     let data: { user_id: string; points: number; name: string }[] = [];
 
     if (filter === 'all') {
-      // user_points is already aggregated — join with profiles in one query
       const { data: rows } = await supabase
         .from('user_points')
         .select('user_id, points, profile:profiles(name)')
@@ -92,7 +85,6 @@ export default function LeaderboardScreen() {
         name: r.profile?.name || 'Unknown',
       }));
     } else {
-      // Use Postgres GROUP BY aggregation via RPC to avoid fetching every row
       const since = new Date();
       if (filter === 'week') since.setDate(since.getDate() - 7);
       if (filter === 'month') since.setDate(since.getDate() - 30);
@@ -131,23 +123,15 @@ export default function LeaderboardScreen() {
     setRefreshing(false);
   }, [fetchLeaderboard]);
 
-  // Find current user's rank for pinned footer
   const currentUserEntry = entries.find((e) => e.user_id === currentUserId);
   const showPinnedFooter = currentUserEntry && currentUserEntry.rank > 5;
 
   const renderItem = ({ item }: { item: LeaderboardEntry }) => {
     const isMe = item.user_id === currentUserId;
-    const medal = RANK_MEDALS[item.rank];
     return (
-      <View style={[styles.row, isMe && styles.rowMe]}>
-        <View style={styles.rankCell}>
-          {medal ? (
-            <Text style={styles.medal}>{medal}</Text>
-          ) : (
-            <Text style={styles.rankNumber}>{item.rank}</Text>
-          )}
-        </View>
-        <AvatarCircle name={item.name} size={36} />
+      <Card variant="elevated" style={[styles.row, isMe && styles.rowMe] as any}>
+        <RankBadge rank={item.rank} />
+        <Avatar name={item.name} size={36} ring={isMe} />
         <View style={styles.nameCell}>
           <Text style={styles.entryName} numberOfLines={1}>
             {item.name}{isMe ? ' (you)' : ''}
@@ -155,34 +139,16 @@ export default function LeaderboardScreen() {
           <Text style={styles.entryTitle}>{getUserTitle(item.points)}</Text>
         </View>
         <Text style={styles.pointsLabel}>{item.points} pts</Text>
-      </View>
+      </Card>
     );
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Leaderboard</Text>
-      </View>
+    <View style={styles.container}>
+      <ScreenHeader title="Leaderboard" />
 
-      {/* Filter tabs */}
-      <View style={styles.filterRow}>
-        {FILTERS.map((f) => (
-          <TouchableOpacity
-            key={f.key}
-            style={[styles.filterTab, filter === f.key && styles.filterTabActive]}
-            onPress={() => setFilter(f.key)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.filterTabText, filter === f.key && styles.filterTabTextActive]}>
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.filterWrap}>
+        <Chip options={FILTERS} value={filter} onChange={setFilter} variant="segmented" />
       </View>
 
       {loading ? (
@@ -203,25 +169,20 @@ export default function LeaderboardScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
           }
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>🏆</Text>
-              <Text style={styles.emptyTitle}>No scores yet</Text>
-              <Text style={styles.emptyText}>
-                Submit and resolve issues to earn points and appear on the leaderboard.
-              </Text>
-            </View>
+            <EmptyState
+              icon="trophy-outline"
+              title="No scores yet"
+              message="Submit and resolve issues to earn points and appear on the leaderboard."
+            />
           }
         />
       )}
 
-      {/* Pinned current user row when outside top 5 */}
       {showPinnedFooter && currentUserEntry && (
         <View style={[styles.pinnedFooter, { paddingBottom: insets.bottom + 8 }]}>
-          <View style={styles.row}>
-            <View style={styles.rankCell}>
-              <Text style={styles.rankNumber}>{currentUserEntry.rank}</Text>
-            </View>
-            <AvatarCircle name={currentUserEntry.name} size={36} />
+          <Card variant="elevated" style={styles.row}>
+            <RankBadge rank={currentUserEntry.rank} />
+            <Avatar name={currentUserEntry.name} size={36} ring />
             <View style={styles.nameCell}>
               <Text style={styles.entryName} numberOfLines={1}>
                 {currentUserEntry.name} (you)
@@ -229,7 +190,7 @@ export default function LeaderboardScreen() {
               <Text style={styles.entryTitle}>{getUserTitle(currentUserEntry.points)}</Text>
             </View>
             <Text style={styles.pointsLabel}>{currentUserEntry.points} pts</Text>
-          </View>
+          </Card>
         </View>
       )}
     </View>
@@ -239,62 +200,12 @@ export default function LeaderboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  backBtn: {
-    paddingVertical: Spacing.xs,
-    paddingRight: Spacing.sm,
-    minHeight: MIN_TOUCH_TARGET,
-    justifyContent: 'center',
-  },
-  backBtnText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.primary,
-  },
-  headerTitle: {
-    fontSize: Typography.xl,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
-  },
-  filterRow: {
-    flexDirection: 'row',
+  filterWrap: {
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
     paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.sm,
-    gap: Spacing.xs,
-  },
-  filterTab: {
-    flex: 1,
-    paddingVertical: Spacing.sm,
-    alignItems: 'center',
-    borderRadius: Radius.chip,
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  filterTabActive: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
-  },
-  filterTabText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-  },
-  filterTabTextActive: {
-    color: Colors.primary,
-    fontWeight: Typography.semibold,
+    paddingBottom: Spacing.md,
   },
   listContent: {
     padding: Spacing.lg,
@@ -303,35 +214,33 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
     gap: Spacing.md,
   },
   rowMe: {
+    borderWidth: 1,
     borderColor: Colors.primary,
-    backgroundColor: Colors.primaryLight,
   },
   rankCell: {
     width: 32,
     alignItems: 'center',
   },
-  medal: { fontSize: 22 },
   rankNumber: {
     fontSize: Typography.lg,
     fontWeight: Typography.bold,
     color: Colors.textMuted,
   },
-  avatar: {
+  rankCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: Colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {
-    color: Colors.primary,
+  rankCircleText: {
+    fontSize: Typography.sm,
     fontWeight: Typography.bold,
+    color: Colors.primary,
   },
   nameCell: {
     flex: 1,
@@ -351,25 +260,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     fontWeight: Typography.bold,
     color: Colors.primary,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingTop: 64,
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.xl,
-  },
-  emptyIcon: { fontSize: 48, marginBottom: Spacing.sm },
-  emptyTitle: {
-    fontSize: Typography.lg,
-    fontWeight: Typography.semibold,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  emptyText: {
-    fontSize: Typography.base,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
   },
   pinnedFooter: {
     borderTopWidth: 2,

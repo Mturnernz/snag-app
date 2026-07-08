@@ -39,24 +39,29 @@ snag/
 │   │   └── ProfileScreen.tsx      # Tab 3 — user info, invite code, sign out
 │   └── components/
 │       ├── IssueCard.tsx          # List card: photo, title, badges, meta
-│       ├── StatusBadge.tsx        # Coloured pill: open / in_progress / resolved / closed
-│       ├── PriorityBadge.tsx      # Coloured pill: low / medium / high
-│       └── CategoryBadge.tsx      # Coloured pill: niggle / broken_equipment / etc.
+│       ├── StatusBadge.tsx        # Coloured pill: flagged / in_progress / resolved / rca_pending
+│       ├── PriorityBadge.tsx      # Coloured pill: severity (minor/moderate/injury/critical)
+│       └── CategoryBadge.tsx      # Coloured pill: fixit / improvement / hazard / incident
 ├── supabase/
-│   └── schema.sql                 # Full Postgres schema — run this first in Supabase SQL Editor
+│   ├── migrations/                # Real Snagv1 schema history (source of truth — see below)
+│   ├── functions/                 # Deployed edge functions (notify-snag, export-investigation, ...)
+│   └── schema.sql                 # Stale prototype scaffold — do not run against Snagv1
 └── .env.example                   # Copy to .env — add your Supabase URL + anon key
 ```
 
 ## Design System (DO NOT deviate from these)
 
-All tokens are in `src/constants/theme.ts`. Never hardcode colours or spacing values inline.
+All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or shadow values inline — always reference a token, including for one-off "success"/"copied" states (`Colors.success`/`successBg`) and the health & safety / incident-lane identity colour (`Colors.serious`/`seriousBg`).
 
 - **Background**: `#F9FAFB` (near-white)
 - **Surface / cards**: `#FFFFFF`
-- **Border**: `#E5E7EB` (1px, no shadows)
+- **Border**: `#E5E7EB` (1px) — used on flat/nested surfaces (rows inside lists)
+- **Elevation**: use the `Shadow` scale (`sm`/`md`/`lg`) for standalone surfaces instead of borders — `sm` for list cards, `md` for standalone cards (stats, invite code, comments), `lg` for hero/sticky bars and modals/dialogs. An elevated card drops its border; don't combine both on the same surface.
 - **Primary accent**: `#2563EB` (Tailwind blue-600)
 - **Text**: primary `#111827`, secondary `#6B7280`, muted `#9CA3AF`
 - **Card radius**: 12px | **Button radius**: 8px | **Chip radius**: 4px
+- **Icons**: `@expo/vector-icons` (Ionicons) via the shared `Icon` component — never emoji/unicode glyphs. `-outline` variants by default; filled reserved for the active tab, active vote, and the serious-lane header icon. Size from the `IconSize` scale.
+- **Priority badges**: only `high` carries an alert colour (`Colors.priority.high`); `low`/`medium` render as neutral dots — this avoids colliding with status badge colours.
 - **Minimum touch target**: 48px (use `MIN_TOUCH_TARGET` constant)
 - **Font**: System (San Francisco on iOS) — no custom typeface
 - **Light mode only** — no dark mode handling needed
@@ -69,15 +74,30 @@ All tokens are in `src/constants/theme.ts`. Never hardcode colours or spacing va
 
 ## Database
 
-Schema is in `supabase/schema.sql`. Run it in Supabase → SQL Editor → New Query.
+The app's live backend is the **Snagv1** Supabase project (`wpkdpukpllxuyqqlxkxf`), not the
+`schema.sql` scaffold below. `supabase/schema.sql` and `supabase/migration_*.sql` are leftovers
+from an earlier, now-inactive prototype project and do not reflect what's deployed — don't run them
+against Snagv1. The real schema history lives in `supabase/migrations/` (recovered from Snagv1's
+`schema_migrations`, timestamped, "SNAPSHOT — do NOT re-apply") and in `MVP-SPEC.md` /
+`Snag-Architecture-Build-Plan.md` at the repo root.
 
-Key tables: `organisations`, `profiles`, `issues`, `comments`
+Key tables: `organisations`, `profiles`, `sites`, `snags`, `comments`, `votes`, plus the
+investigation/RCA/debrief tables (`checklist_completions`, `witness_statements`,
+`evidence_items`, `investigations`, `corrective_actions`, `snag_rca`, `rca_why_steps`,
+`snag_debriefs`).
 
-Key view: `issues_with_details` — issues joined with reporter/assignee names + comment count.
-Always query this view for the issue list and detail screen.
+Key view: `snags_with_details` — snags joined with reporter/owner/site names and
+comment/evidence/vote/checklist counts. Always query this view for the issue list and detail
+screens (mirrored in the mobile app's `src/types/index.ts`).
 
-After running the schema, create a **public** Storage bucket named `issue-photos` in
-Supabase → Storage → New Bucket.
+`snag_status` is `flagged | in_progress | resolved | rca_pending` — `resolved` is the single
+terminal status for both the niggle lane (fixit/improvement) and the serious lane
+(hazard/incident); serious snags can only reach it once the guided investigation
+(`update_snag_status`'s checklist/witness/evidence/root-cause/corrective-action checks) is
+complete. There is no separate "sorted" status — it was retired and collapsed into `resolved`.
+
+Photos/evidence go to the `snag-photos` and `snag-evidence` Storage buckets (private,
+org-folder-scoped via RLS), not a public `issue-photos` bucket.
 
 ## Supabase MCP (for Claude Code)
 
@@ -123,8 +143,9 @@ For a simulator: press `i` for iOS Simulator or `a` for Android emulator.
 3. Register it in `src/navigation/index.tsx`
 
 ### Add a new Supabase table
-1. Write the migration SQL in `supabase/schema.sql` (append, don't replace)
-2. Run it in Supabase SQL Editor
+1. Write a new timestamped file in `supabase/migrations/` (don't edit past migrations)
+2. Apply it to the Snagv1 project (`wpkdpukpllxuyqqlxkxf`) via the Supabase MCP `apply_migration`/
+   `execute_sql` tools, or paste it into Supabase → SQL Editor
 3. Add the TypeScript type to `src/types/index.ts`
 
 ### Modify the design

@@ -8,6 +8,8 @@ import {
   ScrollView,
   Switch,
   Alert,
+  Modal,
+  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,7 +22,7 @@ import {
   RootStackParamList,
 } from '../types';
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag } from '../lib/supabase';
+import { supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag, getMemberships, setActiveOrg, Membership } from '../lib/supabase';
 import { useReportTarget } from '../context/ReportTargetContext';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
@@ -51,6 +53,10 @@ export default function ReportIssueScreen() {
   const [reference, setReference] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgName, setOrgName] = useState<string | null>(null);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [showOrgPicker, setShowOrgPicker] = useState(false);
+  const [switchingOrg, setSwitchingOrg] = useState(false);
 
   // Refetched on focus: the active org (which scopes member submissions and
   // the photo upload folder) can change via the org switcher or a QR scan.
@@ -62,10 +68,32 @@ export default function ReportIssueScreen() {
         setUserId(user.id);
         const profile = await getProfile(user.id);
         setOrgId(profile?.org_id ?? null);
+        setOrgName(profile?.organisation?.name ?? null);
         setHasProfileName(Boolean(profile?.name));
+        setMemberships(await getMemberships());
       })();
     }, [])
   );
+
+  async function handleSwitchOrg(m: Membership) {
+    setShowOrgPicker(false);
+    if (m.is_active) return;
+    setSwitchingOrg(true);
+    try {
+      await setActiveOrg(m.org_id);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const profile = await getProfile(user.id);
+        setOrgId(profile?.org_id ?? null);
+        setOrgName(profile?.organisation?.name ?? null);
+        setMemberships(await getMemberships());
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message ?? 'Could not switch organisation.');
+    } finally {
+      setSwitchingOrg(false);
+    }
+  }
 
   const isPublicSubmission = target !== null;
   // Members upload photos into their org's folder; public submissions go into
@@ -208,6 +236,31 @@ export default function ReportIssueScreen() {
           </View>
         )}
 
+        {/* Member submissions show which org they're reporting into. With more
+            than one membership it's a tappable switcher; otherwise a label. */}
+        {!isPublicSubmission && orgName && (
+          <TouchableOpacity
+            style={styles.orgPill}
+            onPress={() => memberships.length > 1 && setShowOrgPicker(true)}
+            activeOpacity={memberships.length > 1 ? 0.7 : 1}
+            disabled={memberships.length <= 1 || switchingOrg}
+          >
+            <Icon name="business-outline" size="sm" color={Colors.primary} />
+            <View style={styles.orgPillText}>
+              <Text style={styles.orgPillLabel}>Reporting into</Text>
+              <Text style={styles.orgPillOrg} numberOfLines={1}>{orgName}</Text>
+            </View>
+            {switchingOrg ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : memberships.length > 1 ? (
+              <View style={styles.orgPillChangeRow}>
+                <Text style={styles.orgPillChange}>Change</Text>
+                <Icon name="chevron-down" size="sm" color={Colors.primary} />
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        )}
+
         <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} onUploadingChange={setIsPhotoUploading} />
 
         {/* Description — the only required field on the fast path */}
@@ -300,6 +353,39 @@ export default function ReportIssueScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* Org switcher — only reachable for multi-org members */}
+      <Modal
+        visible={showOrgPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowOrgPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowOrgPicker(false)}
+        >
+          <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Report into</Text>
+            <Text style={styles.modalHint}>Choose which organisation this snag goes to.</Text>
+            {memberships.map((m) => (
+              <TouchableOpacity
+                key={m.org_id}
+                style={styles.orgOption}
+                onPress={() => handleSwitchOrg(m)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.orgOptionText}>
+                  <Text style={styles.orgOptionName}>{m.org_name}</Text>
+                  <Text style={styles.orgOptionRole}>{m.role.replace('_', ' ')}</Text>
+                </View>
+                {m.is_active && <Icon name="checkmark" size="md" color={Colors.primary} />}
+              </TouchableOpacity>
+            ))}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -348,6 +434,87 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
     color: Colors.primary,
+  },
+
+  orgPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  orgPillText: {
+    flex: 1,
+    gap: 1,
+  },
+  orgPillLabel: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+  },
+  orgPillOrg: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  orgPillChangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  orgPillChange: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
+  },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.card,
+    borderTopRightRadius: Radius.card,
+    padding: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  modalTitle: {
+    fontSize: Typography.lg,
+    fontWeight: Typography.bold,
+    color: Colors.textPrimary,
+  },
+  modalHint: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.sm,
+  },
+  orgOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.button,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  orgOptionText: {
+    flex: 1,
+    gap: 2,
+  },
+  orgOptionName: {
+    fontSize: Typography.base,
+    fontWeight: Typography.medium,
+    color: Colors.textPrimary,
+  },
+  orgOptionRole: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    textTransform: 'capitalize',
   },
 
   fieldGroup: {

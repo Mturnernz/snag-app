@@ -7,8 +7,8 @@ import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { supabase, getProfile } from './src/lib/supabase';
-import { getPendingIntent, clearPendingIntent, PendingJoin } from './src/lib/pendingIntent';
+import { supabase, getProfile, createOrganisationAndOwner } from './src/lib/supabase';
+import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import AuthScreen from './src/screens/AuthScreen';
@@ -29,7 +29,7 @@ export default function App() {
   // Intent captured on the login screen (QR scan / create-org) to resume
   // right after sign-up instead of showing the generic chooser.
   const [pendingJoin, setPendingJoin] = useState<PendingJoin | null>(null);
-  const [pendingCreate, setPendingCreate] = useState(false);
+  const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem(PUBLIC_REPORTER_KEY).then((v) => setPublicReporter(v === 'true'));
@@ -42,7 +42,7 @@ export default function App() {
   function clearIntent() {
     clearPendingIntent();
     setPendingJoin(null);
-    setPendingCreate(false);
+    setPendingCreate(null);
   }
 
   useEffect(() => {
@@ -67,19 +67,32 @@ export default function App() {
         setProfile(null);
         setLoading(false);
       } else if (session && event !== 'TOKEN_REFRESHED') {
-        const p = await getProfile(session.user.id);
-        setProfile(p);
+        let p = await getProfile(session.user.id);
         // Pick up any intent captured on the login screen after this
         // component mounted; drop it if the account already has an org.
         const { join, create } = await getPendingIntent();
         if (p?.org_id) {
           if (join || create) clearPendingIntent();
           setPendingJoin(null);
-          setPendingCreate(false);
+          setPendingCreate(null);
+        } else if (create) {
+          // Combined create-org flow: the account now exists, so create the
+          // organisation (and its default site) automatically and drop the
+          // user straight into the app — no OrgSetup/AdminSetup detour. On
+          // failure we keep the stored intent (so a restart can retry) and
+          // fall through to the manual org-setup chooser.
+          const { error } = await createOrganisationAndOwner(create.orgName, create.name);
+          if (!error) {
+            await clearPendingIntent();
+            p = await getProfile(session.user.id);
+          }
+          setPendingJoin(null);
+          setPendingCreate(null);
         } else {
           setPendingJoin(join);
           setPendingCreate(create);
         }
+        setProfile(p);
         setLoading(false);
       } else {
         setLoading(false);
@@ -118,7 +131,7 @@ export default function App() {
         <ToastProvider>
           <OrgSetupScreen
             userId={session.user.id}
-            initialMode={pendingCreate ? 'create' : undefined}
+            initialMode={undefined}
             pendingJoin={pendingJoin}
             onClearPending={clearIntent}
             onComplete={async () => {

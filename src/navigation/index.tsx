@@ -19,6 +19,7 @@ import ReportIncidentDetailsScreen from '../screens/ReportIncidentDetailsScreen'
 import ReportIncidentReviewScreen from '../screens/ReportIncidentReviewScreen';
 import ScanJoinCodeScreen from '../screens/ScanJoinCodeScreen';
 import ChooseReportOrgScreen from '../screens/ChooseReportOrgScreen';
+import ManageOrganisationScreen from '../screens/ManageOrganisationScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 import { ReportTargetProvider } from '../context/ReportTargetContext';
 
@@ -154,6 +155,11 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
         <Stack.Screen
           name="ChooseReportOrg"
           component={ChooseReportOrgScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="ManageOrganisation"
+          component={ManageOrganisationScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
       </Stack.Navigator>

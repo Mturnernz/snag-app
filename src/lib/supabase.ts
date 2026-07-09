@@ -245,6 +245,74 @@ export async function getOrgSites(orgId: string): Promise<{ id: string; name: st
   return data ?? [];
 }
 
+// ─── Site & organisation management (admin) ───────────────────────────────────
+
+export interface SiteDetail {
+  id: string;
+  name: string;
+  location: string | null;
+  memberIds: string[];
+  supervisorIds: string[];
+  defaultOwnerId: string | null;
+}
+
+// Sites for the active org, each with its member/supervisor/default-owner ids.
+// Everything is org-scoped by RLS via current_org_id().
+export async function getSitesWithDetail(): Promise<SiteDetail[]> {
+  const { data: sites } = await supabase
+    .from('sites')
+    .select('id, name, location')
+    .order('created_at', { ascending: true });
+  if (!sites || sites.length === 0) return [];
+
+  const siteIds = sites.map((s) => s.id);
+  const [membersRes, supsRes, ownersRes] = await Promise.all([
+    supabase.from('site_members').select('site_id, user_id').in('site_id', siteIds),
+    supabase.from('site_supervisors').select('site_id, user_id').in('site_id', siteIds),
+    supabase.from('site_default_owners').select('site_id, owner_id').in('site_id', siteIds),
+  ]);
+  const members = membersRes.data ?? [];
+  const sups = supsRes.data ?? [];
+  const owners = ownersRes.data ?? [];
+
+  return sites.map((s: any) => ({
+    id: s.id,
+    name: s.name,
+    location: s.location,
+    memberIds: members.filter((m: any) => m.site_id === s.id).map((m: any) => m.user_id),
+    supervisorIds: sups.filter((m: any) => m.site_id === s.id).map((m: any) => m.user_id),
+    defaultOwnerId: owners.find((o: any) => o.site_id === s.id)?.owner_id ?? null,
+  }));
+}
+
+export async function createSite(name: string, location?: string | null) {
+  return supabase.rpc('create_site', { p_name: name, p_location: location ?? null });
+}
+
+export async function addSiteMember(siteId: string, userId: string) {
+  return supabase.rpc('add_site_member', { p_site_id: siteId, p_user_id: userId });
+}
+
+export async function removeSiteMember(siteId: string, userId: string) {
+  return supabase.rpc('remove_site_member', { p_site_id: siteId, p_user_id: userId });
+}
+
+export async function assignSiteSupervisor(siteId: string, userId: string) {
+  return supabase.rpc('assign_site_supervisor', { p_site_id: siteId, p_user_id: userId });
+}
+
+export async function removeSiteSupervisor(siteId: string, userId: string) {
+  return supabase.rpc('remove_site_supervisor', { p_site_id: siteId, p_user_id: userId });
+}
+
+export async function setSiteDefaultOwner(siteId: string, ownerId: string) {
+  return supabase.rpc('set_site_default_owner', { p_site_id: siteId, p_owner_id: ownerId });
+}
+
+export async function renameOrganisation(name: string) {
+  return supabase.rpc('rename_organisation', { p_name: name });
+}
+
 export interface OrgStats {
   totalMembers: number;
   totalSnags: number;

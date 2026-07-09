@@ -140,6 +140,7 @@ export type RootStackParamList = {
   ReportIncidentReview: undefined;
   ScanOrgCode: undefined;
   ChooseReportOrg: undefined;
+  ManageOrganisation: undefined;
 };
 
 export type MainTabParamList = {

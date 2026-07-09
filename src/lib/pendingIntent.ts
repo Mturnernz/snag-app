@@ -13,21 +13,36 @@ export interface PendingJoin {
   orgName: string;
 }
 
+// The combined create-org screen collects the org name and the owner's name up
+// front, so the organisation can be created automatically on first sign-in
+// with no further screens.
+export interface PendingCreate {
+  orgName: string;
+  name: string;
+}
+
 export async function setPendingJoin(join: PendingJoin) {
   await AsyncStorage.multiSet([[JOIN_KEY, JSON.stringify(join)], [CREATE_KEY, '']]);
 }
 
-export async function setPendingCreate() {
-  await AsyncStorage.multiSet([[CREATE_KEY, 'true'], [JOIN_KEY, '']]);
+export async function setPendingCreate(create: PendingCreate) {
+  await AsyncStorage.multiSet([[CREATE_KEY, JSON.stringify(create)], [JOIN_KEY, '']]);
 }
 
-export async function getPendingIntent(): Promise<{ join: PendingJoin | null; create: boolean }> {
+export async function getPendingIntent(): Promise<{ join: PendingJoin | null; create: PendingCreate | null }> {
   const [[, joinRaw], [, createRaw]] = await AsyncStorage.multiGet([JOIN_KEY, CREATE_KEY]);
   let join: PendingJoin | null = null;
+  let create: PendingCreate | null = null;
   if (joinRaw) {
     try { join = JSON.parse(joinRaw); } catch { /* ignore */ }
   }
-  return { join, create: createRaw === 'true' };
+  if (createRaw) {
+    try {
+      const parsed = JSON.parse(createRaw);
+      if (parsed && typeof parsed === 'object' && parsed.orgName) create = parsed;
+    } catch { /* ignore legacy 'true' values */ }
+  }
+  return { join, create };
 }
 
 export async function clearPendingIntent() {

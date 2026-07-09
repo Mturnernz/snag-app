@@ -8,6 +8,7 @@ import { Session } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { supabase, getProfile } from './src/lib/supabase';
+import { getPendingIntent, clearPendingIntent, PendingJoin } from './src/lib/pendingIntent';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import AuthScreen from './src/screens/AuthScreen';
@@ -25,10 +26,24 @@ export default function App() {
   // "Just report an issue" — a signed-in user with no organisation who only
   // submits to public orgs. Persisted so app restarts skip the org-setup gate.
   const [publicReporter, setPublicReporter] = useState(false);
+  // Intent captured on the login screen (QR scan / create-org) to resume
+  // right after sign-up instead of showing the generic chooser.
+  const [pendingJoin, setPendingJoin] = useState<PendingJoin | null>(null);
+  const [pendingCreate, setPendingCreate] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem(PUBLIC_REPORTER_KEY).then((v) => setPublicReporter(v === 'true'));
+    getPendingIntent().then(({ join, create }) => {
+      setPendingJoin(join);
+      setPendingCreate(create);
+    });
   }, []);
+
+  function clearIntent() {
+    clearPendingIntent();
+    setPendingJoin(null);
+    setPendingCreate(false);
+  }
 
   useEffect(() => {
     if (Platform.OS === 'android') {
@@ -54,6 +69,17 @@ export default function App() {
       } else if (session && event !== 'TOKEN_REFRESHED') {
         const p = await getProfile(session.user.id);
         setProfile(p);
+        // Pick up any intent captured on the login screen after this
+        // component mounted; drop it if the account already has an org.
+        const { join, create } = await getPendingIntent();
+        if (p?.org_id) {
+          if (join || create) clearPendingIntent();
+          setPendingJoin(null);
+          setPendingCreate(false);
+        } else {
+          setPendingJoin(join);
+          setPendingCreate(create);
+        }
         setLoading(false);
       } else {
         setLoading(false);
@@ -92,7 +118,11 @@ export default function App() {
         <ToastProvider>
           <OrgSetupScreen
             userId={session.user.id}
+            initialMode={pendingCreate ? 'create' : undefined}
+            pendingJoin={pendingJoin}
+            onClearPending={clearIntent}
             onComplete={async () => {
+              clearIntent();
               const p = await getProfile(session.user.id);
               setProfile(p);
               if (p?.role === 'officer_admin') {

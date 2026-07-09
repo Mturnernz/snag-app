@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, StyleSheet } from 'react-native';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getOrgByJoinCode, joinOrgViaCode, getMemberships, setActiveOrg, OrgJoinPreview } from '../lib/supabase';
@@ -11,9 +11,15 @@ import Icon from '../components/Icon';
 interface Props {
   onComplete: () => void;
   onBack: () => void;
+  /** Pre-auth mode (login screen): a successful scan reports the org back to
+   *  the caller instead of joining — joining needs a signed-in user. */
+  onCodeScanned?: (org: { code: string; orgId: string; orgName: string }) => void;
+  /** Skip the camera: look this code up on mount and go straight to the
+   *  join step. Used after sign-up to resume a scan made on the login page. */
+  initialCode?: string;
 }
 
-export default function ScanJoinCodeScreen({ onComplete, onBack }: Props) {
+export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, initialCode }: Props) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -24,6 +30,20 @@ export default function ScanJoinCodeScreen({ onComplete, onBack }: Props) {
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Resume-a-scan mode: the code was captured on the login page; look it up
+  // and jump straight to the join step.
+  useEffect(() => {
+    if (!initialCode) return;
+    getOrgByJoinCode(initialCode).then(({ data: org, error: lookupError }) => {
+      if (lookupError || !org) {
+        setError('That join code is no longer valid — it may have been regenerated. Scan the poster again.');
+        return;
+      }
+      setScannedCode(initialCode);
+      setPreview(org);
+    });
+  }, [initialCode]);
+
   async function handleScan({ data }: BarcodeScanningResult) {
     if (scanned) return;
     setScanned(true);
@@ -33,6 +53,12 @@ export default function ScanJoinCodeScreen({ onComplete, onBack }: Props) {
     if (lookupError || !org) {
       setError('That QR code is not a valid Snag join code.');
       setScanned(false);
+      return;
+    }
+
+    // Pre-auth mode: report the org back to the login screen.
+    if (onCodeScanned) {
+      onCodeScanned({ code: data, orgId: org.org_id, orgName: org.org_name });
       return;
     }
 
@@ -123,6 +149,28 @@ export default function ScanJoinCodeScreen({ onComplete, onBack }: Props) {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+    );
+  }
+
+  // Resume-a-scan mode never needs the camera: show a spinner while the code
+  // is looked up, or the error if the code has been regenerated since.
+  if (initialCode) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View style={styles.inner}>
+          {error ? (
+            <>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity onPress={onBack} style={styles.backRow}>
+                <Icon name="arrow-back" size="sm" color={Colors.primary} />
+                <Text style={styles.backText}>Back</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <ActivityIndicator color={Colors.primary} />
+          )}
+        </View>
+      </View>
     );
   }
 

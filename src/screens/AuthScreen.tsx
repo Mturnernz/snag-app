@@ -1,18 +1,25 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
+  ScrollView,
   Platform,
   StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { signInWithEmail, signUpWithEmail } from '../lib/supabase';
+import {
+  getPendingIntent, setPendingJoin, setPendingCreate, clearPendingIntent, PendingJoin,
+} from '../lib/pendingIntent';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
+import Card from '../components/Card';
+import Icon from '../components/Icon';
+import ScanJoinCodeScreen from './ScanJoinCodeScreen';
 
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
@@ -21,6 +28,19 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+
+  // First-time intent, captured before the account exists and resumed after
+  // sign-up (see src/lib/pendingIntent.ts).
+  const [showScanner, setShowScanner] = useState(false);
+  const [pendingJoin, setPendingJoinState] = useState<PendingJoin | null>(null);
+  const [pendingCreate, setPendingCreateState] = useState(false);
+
+  useEffect(() => {
+    getPendingIntent().then(({ join, create }) => {
+      setPendingJoinState(join);
+      setPendingCreateState(create);
+    });
+  }, []);
 
   async function handleSubmit() {
     if (!email.trim() || !password) {
@@ -49,14 +69,61 @@ export default function AuthScreen() {
     }
   }
 
+  function handleScanned(org: { code: string; orgId: string; orgName: string }) {
+    setPendingJoin({ code: org.code, orgName: org.orgName });
+    setPendingJoinState({ code: org.code, orgName: org.orgName });
+    setPendingCreateState(false);
+    setShowScanner(false);
+    setMode('signup');
+  }
+
+  function handleCreateIntent() {
+    setPendingCreate();
+    setPendingCreateState(true);
+    setPendingJoinState(null);
+    setMode('signup');
+  }
+
+  function handleClearIntent() {
+    clearPendingIntent();
+    setPendingJoinState(null);
+    setPendingCreateState(false);
+  }
+
+  if (showScanner) {
+    return (
+      <ScanJoinCodeScreen
+        onCodeScanned={handleScanned}
+        onComplete={() => setShowScanner(false)}
+        onBack={() => setShowScanner(false)}
+      />
+    );
+  }
+
+  const intentBanner = pendingJoin
+    ? `You're joining ${pendingJoin.orgName} — ${mode === 'signup' ? 'create your account' : 'sign in'} to continue.`
+    : pendingCreate
+      ? `You'll set up your organisation right after ${mode === 'signup' ? 'creating your account' : 'signing in'}.`
+      : null;
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.inner}>
+      <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
         <Text style={styles.appName}>Snag</Text>
         <Text style={styles.tagline}>Workplace issue reporting</Text>
+
+        {intentBanner && (
+          <View style={styles.intentBanner}>
+            <Icon name={pendingJoin ? 'business-outline' : 'sparkles-outline'} size="sm" color={Colors.primary} />
+            <Text style={styles.intentBannerText}>{intentBanner}</Text>
+            <TouchableOpacity onPress={handleClearIntent} hitSlop={8}>
+              <Icon name="close" size="sm" color={Colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={styles.form}>
           <TextInput
@@ -102,7 +169,35 @@ export default function AuthScreen() {
               : 'Already have an account? Sign in'}
           </Text>
         </TouchableOpacity>
-      </View>
+
+        {/* First-time entry points: capture the intent here, resume it right
+            after the account exists. */}
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>New to Snag?</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        <TouchableOpacity onPress={() => setShowScanner(true)} activeOpacity={0.85}>
+          <Card variant="elevated" style={styles.optionCard}>
+            <Icon name="qr-code-outline" size="xl" color={Colors.primary} />
+            <View style={styles.optionText}>
+              <Text style={styles.optionTitle}>Scan your company's QR code</Text>
+              <Text style={styles.optionDesc}>Join your workplace from the poster on-site</Text>
+            </View>
+          </Card>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={handleCreateIntent} activeOpacity={0.85}>
+          <Card variant="elevated" style={styles.optionCard}>
+            <Icon name="business-outline" size="xl" color={Colors.primary} />
+            <View style={styles.optionText}>
+              <Text style={styles.optionTitle}>Create an organisation</Text>
+              <Text style={styles.optionDesc}>Set up Snag for your workplace</Text>
+            </View>
+          </Card>
+        </TouchableOpacity>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -113,10 +208,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   inner: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: Spacing.xl,
-    gap: Spacing.xl,
+    paddingVertical: Spacing.xl,
+    gap: Spacing.lg,
   },
   appName: {
     fontSize: Typography.xxxl + 8,
@@ -128,7 +224,21 @@ const styles = StyleSheet.create({
     fontSize: Typography.base,
     color: Colors.textSecondary,
     textAlign: 'center',
-    marginTop: -Spacing.lg,
+    marginTop: -Spacing.md,
+  },
+  intentBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.button,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  intentBannerText: {
+    flex: 1,
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
   },
   form: {
     gap: Spacing.md,
@@ -165,5 +275,38 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.primary,
     textAlign: 'center',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  dividerText: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+  },
+  optionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  optionText: {
+    flex: 1,
+    gap: 2,
+  },
+  optionTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  optionDesc: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
   },
 });

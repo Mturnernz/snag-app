@@ -6,7 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { SnagKind, SnagSeverity, SEVERITY_LABELS, KIND_LABELS, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, getProfile, getDefaultSiteId, createSnag } from '../lib/supabase';
+import { supabase, getDefaultSiteId, createSnag, resolveActiveOrg } from '../lib/supabase';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import ScreenHeader from '../components/ScreenHeader';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
@@ -42,10 +42,8 @@ export default function ReportIncidentDetailsScreen() {
 
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const profile = await getProfile(user.id);
-      setOrgId(profile?.org_id ?? null);
+      const org = await resolveActiveOrg();
+      setOrgId(org?.orgId ?? null);
     })();
   }, []);
 
@@ -72,10 +70,10 @@ export default function ReportIncidentDetailsScreen() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { error: 'Not authenticated' };
 
-        const profile = await getProfile(user.id);
-        if (!profile?.org_id) return { error: 'No organisation found' };
+        const org = await resolveActiveOrg();
+        if (!org) return { error: 'No organisation found' };
 
-        const siteId = await getDefaultSiteId(profile.org_id);
+        const siteId = await getDefaultSiteId(org.orgId);
         if (!siteId) return { error: 'No site found for your organisation' };
 
         const photoPaths = await photoPickerRef.current?.getPhotoUrls() ?? [];

@@ -197,6 +197,24 @@ export async function setActiveOrg(orgId: string) {
   return supabase.rpc('set_active_org', { p_org_id: orgId });
 }
 
+// Resolve which org the user reports into, driven by the membership RPC rather
+// than the (embed-heavy, occasionally-null) profiles read. Returns the active
+// org; if none is active but the user belongs to exactly one org, defaults to
+// it (set_active_org). Returns null only for users with no membership at all.
+export async function resolveActiveOrg(): Promise<{ orgId: string; orgName: string } | null> {
+  const memberships = await getMemberships();
+  if (memberships.length === 0) return null;
+
+  const active = memberships.find((m) => m.is_active);
+  if (active) return { orgId: active.org_id, orgName: active.org_name };
+
+  if (memberships.length === 1) {
+    await setActiveOrg(memberships[0].org_id);
+    return { orgId: memberships[0].org_id, orgName: memberships[0].org_name };
+  }
+  return null; // multi-org, none active — let the user choose
+}
+
 // ─── Public organisations ─────────────────────────────────────────────────────
 
 export interface PublicOrg {

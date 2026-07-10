@@ -22,7 +22,7 @@ import {
   RootStackParamList,
 } from '../types';
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag, getMemberships, setActiveOrg, Membership } from '../lib/supabase';
+import { supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag, getMemberships, setActiveOrg, resolveActiveOrg, Membership } from '../lib/supabase';
 import { useReportTarget } from '../context/ReportTargetContext';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
@@ -66,11 +66,14 @@ export default function ReportIssueScreen() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
         setUserId(user.id);
-        const profile = await getProfile(user.id);
-        setOrgId(profile?.org_id ?? null);
-        setOrgName(profile?.organisation?.name ?? null);
-        setHasProfileName(Boolean(profile?.name));
+        // Resolve the reporting org from memberships (robust; single-org users
+        // default automatically) rather than the profiles read.
+        const org = await resolveActiveOrg();
+        setOrgId(org?.orgId ?? null);
+        setOrgName(org?.orgName ?? null);
         setMemberships(await getMemberships());
+        const profile = await getProfile(user.id);
+        setHasProfileName(Boolean(profile?.name));
       })();
     }, [])
   );
@@ -125,10 +128,9 @@ export default function ReportIssueScreen() {
         setSubmittedTo(target.orgName);
         setReference(data?.reference ?? null);
       } else {
-        const profile = await getProfile(user.id);
-        if (!profile?.org_id) throw new Error('No organisation found');
+        if (!orgId) throw new Error('No organisation found');
 
-        const siteId = await getDefaultSiteId(profile.org_id);
+        const siteId = await getDefaultSiteId(orgId);
         if (!siteId) throw new Error('No site found for your organisation');
 
         const { data, error } = await createSnag({
@@ -141,7 +143,7 @@ export default function ReportIssueScreen() {
           siteId,
         });
         if (error) throw error;
-        setSubmittedTo(profile.organisation?.name ?? null);
+        setSubmittedTo(orgName);
         setReference(data?.reference ?? null);
       }
 

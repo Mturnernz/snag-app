@@ -7,7 +7,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { supabase, getProfile, createOrganisationAndOwner } from './src/lib/supabase';
+import { supabase, getProfile, createOrganisationAndOwner, resolveActiveOrg } from './src/lib/supabase';
 import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
@@ -89,8 +89,18 @@ export default function App() {
           setPendingJoin(null);
           setPendingCreate(null);
         } else {
-          setPendingJoin(join);
-          setPendingCreate(create);
+          // No mirrored org yet, but the account may belong to one (e.g. a
+          // worker whose active org was never set, or a single-org member).
+          // Default it from memberships before falling back to org setup.
+          const org = await resolveActiveOrg();
+          if (org) {
+            p = await getProfile(session.user.id);
+            setPendingJoin(null);
+            setPendingCreate(null);
+          } else {
+            setPendingJoin(join);
+            setPendingCreate(create);
+          }
         }
         setProfile(p);
         setLoading(false);

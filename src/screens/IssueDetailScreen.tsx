@@ -25,6 +25,7 @@ import { Colors, Radius, Spacing, Typography, IconSize } from '../constants/them
 import {
   supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers,
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
+  getSiteAssignees, SiteAssignee,
 } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
@@ -43,6 +44,7 @@ interface IssueDetail {
   id: string;
   reference: string;
   org_id: string;
+  site_id: string;
   description: string | null;
   status: SnagStatus;
   kind: SnagKind;
@@ -106,6 +108,7 @@ export default function IssueDetailScreen() {
   const [mentionAt, setMentionAt] = useState(-1);
   const [authorPoints, setAuthorPoints] = useState<Record<string, number>>({});
   const [investigation, setInvestigation] = useState<InvestigationState | null>(null);
+  const [siteAssignees, setSiteAssignees] = useState<SiteAssignee[]>([]);
 
   // Voting/commenting are internal engagement mechanics — only members of
   // the snag's own organisation get them. A public reporter (or a member
@@ -162,10 +165,18 @@ export default function IssueDetailScreen() {
 
   useEffect(() => { fetchInvestigation(); }, [fetchInvestigation]);
 
+  // Owner picker candidates are scoped to the snag's site (its members and
+  // supervisors, plus org admins).
+  useEffect(() => {
+    if (canEdit && issue?.site_id) {
+      getSiteAssignees(issue.site_id).then(setSiteAssignees);
+    }
+  }, [canEdit, issue?.site_id]);
+
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, is_public_submission')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, is_public_submission')
       .eq('id', issueId)
       .single();
 
@@ -425,7 +436,7 @@ export default function IssueDetailScreen() {
               kind={issue.kind}
               severity={issue.severity}
               owner={issue.owner ?? null}
-              orgMembers={orgMembers}
+              assignees={siteAssignees}
               resolveBlockReason={computeResolveBlockReason(issue.status, investigation)}
               isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={() => { fetchIssue(); fetchInvestigation(); }}

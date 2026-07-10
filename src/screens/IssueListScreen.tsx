@@ -23,7 +23,7 @@ import Icon from '../components/Icon';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type FilterOption = 'all' | 'public' | SnagStatus;
+type FilterOption = 'all' | 'public' | 'unassigned' | SnagStatus;
 type SortOption = 'newest' | 'site' | 'comments' | 'votes';
 
 const FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
@@ -33,10 +33,11 @@ const FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
   { key: 'resolved', label: STATUS_LABELS.resolved },
 ];
 
-// Members also get a chip for the public-submissions queue; their default
-// view shows internal reports only.
+// Members also get an "Unassigned" triage queue and the public-submissions
+// queue; their default view shows internal reports only.
 const MEMBER_FILTER_OPTIONS: { key: FilterOption; label: string }[] = [
   ...FILTER_OPTIONS,
+  { key: 'unassigned', label: 'Unassigned' },
   { key: 'public', label: 'Public' },
 ];
 
@@ -101,7 +102,11 @@ export default function IssueListScreen() {
         query = query.order('created_at', { ascending: false });
     }
 
-    if (filter !== 'all' && filter !== 'public') {
+    if (filter === 'unassigned') {
+      // Supervisor triage queue — snags with no owner yet (RLS already scopes
+      // these to the viewer's sites).
+      query = query.is('owner_id', null);
+    } else if (filter !== 'all' && filter !== 'public') {
       query = query.eq('status', filter);
     }
 

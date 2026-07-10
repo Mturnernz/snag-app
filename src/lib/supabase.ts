@@ -379,6 +379,19 @@ export async function assignSnagOwner(snagId: string, ownerId: string | null) {
   return supabase.rpc('assign_snag_owner', { p_snag_id: snagId, p_owner_id: ownerId });
 }
 
+// People who can own a snag at a given site: the site's members + supervisors,
+// plus the org's admins. Used to scope the owner picker to the snag's site.
+export interface SiteAssignee {
+  id: string;
+  name: string;
+  role: UserRole;
+}
+
+export async function getSiteAssignees(siteId: string): Promise<SiteAssignee[]> {
+  const { data } = await supabase.rpc('get_site_assignees', { p_site_id: siteId });
+  return (data ?? []) as SiteAssignee[];
+}
+
 // ─── Resolution & investigation ───────────────────────────────────────────────
 // Niggles resolve via resolve_snag (a note is required server-side). Serious
 // snags resolve via update_snag_status('resolved'), which the server gates behind

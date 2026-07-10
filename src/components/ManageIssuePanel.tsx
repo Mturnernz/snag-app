@@ -3,11 +3,13 @@ import * as Haptics from 'expo-haptics';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, StyleSheet } from 'react-native';
 
 import {
-  Profile, SnagStatus, SnagKind, SnagSeverity, SnagLane,
-  STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
+  SnagStatus, SnagKind, SnagSeverity, SnagLane,
+  STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, ROLE_LABELS,
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { updateSnagStatus, recategoriseSnag, assignSnagOwner, blockPublicReporter, resolveSnag } from '../lib/supabase';
+import {
+  updateSnagStatus, recategoriseSnag, assignSnagOwner, blockPublicReporter, resolveSnag, SiteAssignee,
+} from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
 import Card from './Card';
 import Button from './Button';
@@ -33,7 +35,8 @@ interface Props {
   kind: SnagKind;
   severity: SnagSeverity | null;
   owner: { id: string; name: string } | null;
-  orgMembers: Profile[];
+  /** Site-scoped assignees for the owner picker (site members/supervisors + admins). */
+  assignees: SiteAssignee[];
   /** Serious lane only: null = resolvable, otherwise the reason Resolve is
    *  blocked (e.g. "Checklist 2/5"). Ignored for niggles. */
   resolveBlockReason?: string | null;
@@ -44,7 +47,7 @@ interface Props {
 }
 
 export default function ManageIssuePanel({
-  issueId, status, lane, kind, severity, owner, orgMembers,
+  issueId, status, lane, kind, severity, owner, assignees,
   resolveBlockReason = null, isPublicSubmission = false, onUpdated,
 }: Props) {
   const { showToast } = useToast();
@@ -101,7 +104,7 @@ export default function ManageIssuePanel({
   const shownKind = pendingUpdates.kind ?? kind;
   const shownSeverity = pendingUpdates.severity !== undefined ? pendingUpdates.severity : severity;
   const shownOwner = pendingUpdates.owner_id !== undefined
-    ? (pendingUpdates.owner_id ? orgMembers.find((m) => m.id === pendingUpdates.owner_id) ?? null : null)
+    ? (pendingUpdates.owner_id ? assignees.find((m) => m.id === pendingUpdates.owner_id) ?? null : null)
     : owner;
 
   function stageUpdate(updates: PendingUpdates) {
@@ -262,14 +265,14 @@ export default function ManageIssuePanel({
               Unassigned
             </Text>
           </TouchableOpacity>
-          {orgMembers.map((member) => (
+          {assignees.map((member) => (
             <TouchableOpacity
               key={member.id}
               onPress={() => stageUpdate({ owner_id: member.id })}
               style={[styles.optionChip, shownOwner?.id === member.id && styles.optionChipActive]}
             >
               <Text style={[styles.optionChipText, shownOwner?.id === member.id && styles.optionChipTextActive]}>
-                {member.name}
+                {member.name} · {ROLE_LABELS[member.role]}
               </Text>
             </TouchableOpacity>
           ))}

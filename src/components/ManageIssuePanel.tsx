@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import * as Haptics from 'expo-haptics';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, StyleSheet } from 'react-native';
 
 import {
-  Profile, SnagStatus, SnagKind, SnagSeverity,
+  Profile, SnagStatus, SnagKind, SnagSeverity, SnagLane,
   STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
 } from '../types';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
-import { updateSnagStatus, recategoriseSnag, assignSnagOwner, blockPublicReporter } from '../lib/supabase';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { updateSnagStatus, recategoriseSnag, assignSnagOwner, blockPublicReporter, resolveSnag } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
 import Card from './Card';
 import Button from './Button';
@@ -29,26 +29,64 @@ interface PendingUpdates {
 interface Props {
   issueId: string;
   status: SnagStatus;
+  lane: SnagLane;
   kind: SnagKind;
   severity: SnagSeverity | null;
   owner: { id: string; name: string } | null;
   orgMembers: Profile[];
+  /** Serious lane only: null = resolvable, otherwise the reason Resolve is
+   *  blocked (e.g. "Checklist 2/5"). Ignored for niggles. */
+  resolveBlockReason?: string | null;
   /** Public submissions expose a block-reporter action. */
   isPublicSubmission?: boolean;
-  /** Called after a successful save so the parent can re-fetch the issue. */
+  /** Called after a successful save/resolve so the parent can re-fetch the issue. */
   onUpdated: () => void;
 }
 
 export default function ManageIssuePanel({
-  issueId, status, kind, severity, owner, orgMembers, isPublicSubmission = false, onUpdated,
+  issueId, status, lane, kind, severity, owner, orgMembers,
+  resolveBlockReason = null, isPublicSubmission = false, onUpdated,
 }: Props) {
   const { showToast } = useToast();
+
+  const isSerious = lane === 'serious';
+  const isOpen = status === 'flagged' || status === 'in_progress';
 
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [saving, setSaving] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState<PendingUpdates>({});
   const [confirmBlock, setConfirmBlock] = useState(false);
   const [blocking, setBlocking] = useState(false);
+
+  // Resolve is a distinct action (not part of the staged status/kind/severity
+  // edits): niggles go via resolve_snag (note required), serious via
+  // update_snag_status('resolved') once the investigation gate is clear.
+  const [resolveModalOpen, setResolveModalOpen] = useState(false);
+  const [resolveNote, setResolveNote] = useState('');
+  const [resolving, setResolving] = useState(false);
+
+  const resolveBlocked = isSerious && resolveBlockReason !== null;
+
+  async function handleResolve() {
+    if (!isSerious && !resolveNote.trim()) {
+      showToast('Add a note describing what was done');
+      return;
+    }
+    setResolving(true);
+    const { error } = isSerious
+      ? await updateSnagStatus(issueId, 'resolved', resolveNote.trim() || null)
+      : await resolveSnag(issueId, resolveNote.trim());
+    setResolving(false);
+    if (!error) {
+      setResolveModalOpen(false);
+      setResolveNote('');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showToast('Snag resolved');
+      onUpdated();
+    } else {
+      showToast(error.message ?? 'Could not resolve snag');
+    }
+  }
 
   async function handleBlockReporter() {
     setConfirmBlock(false);
@@ -115,17 +153,26 @@ export default function ManageIssuePanel({
     <Card variant="elevated" style={styles.card}>
       <Text style={styles.panelLabel}>MANAGE ISSUE</Text>
 
-      {/* Status */}
+      {/* Status — serious snags can toggle flagged/in_progress; niggles have
+          no in-progress transition server-side, so their status is read-only
+          here and only moves via Resolve. rca_pending / resolved are never
+          user-settable. */}
       <View style={styles.row}>
         <Text style={styles.label}>Status</Text>
-        <TouchableOpacity onPress={() => toggleField('status')} style={styles.currentChip}>
-          <StatusBadge status={shownStatus} />
-          <Icon name={editingField === 'status' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
-        </TouchableOpacity>
+        {isSerious && isOpen ? (
+          <TouchableOpacity onPress={() => toggleField('status')} style={styles.currentChip}>
+            <StatusBadge status={shownStatus} />
+            <Icon name={editingField === 'status' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.currentChip}>
+            <StatusBadge status={shownStatus} />
+          </View>
+        )}
       </View>
-      {editingField === 'status' && (
+      {isSerious && isOpen && editingField === 'status' && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-          {(Object.keys(STATUS_LABELS) as SnagStatus[]).map((s) => (
+          {(['flagged', 'in_progress'] as SnagStatus[]).map((s) => (
             <TouchableOpacity
               key={s}
               onPress={() => stageUpdate({ status: s })}
@@ -238,6 +285,23 @@ export default function ManageIssuePanel({
         />
       )}
 
+      {/* Resolve — the single terminal action for both lanes. Disabled with a
+          reason on serious snags until the investigation gate is satisfied. */}
+      {isOpen && (
+        <View style={styles.resolveSection}>
+          <Button
+            label="Resolve Snag"
+            icon="checkmark-circle-outline"
+            onPress={() => { setResolveNote(''); setResolveModalOpen(true); }}
+            disabled={resolveBlocked}
+            fullWidth
+          />
+          {resolveBlocked && (
+            <Text style={styles.resolveBlockedText}>{resolveBlockReason}</Text>
+          )}
+        </View>
+      )}
+
       {isPublicSubmission && (
         <Button
           label="Block Reporter"
@@ -248,6 +312,32 @@ export default function ManageIssuePanel({
           fullWidth
         />
       )}
+
+      <Modal visible={resolveModalOpen} transparent animationType="fade" onRequestClose={() => setResolveModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Resolve snag</Text>
+            <Text style={styles.modalHint}>
+              {isSerious
+                ? 'Add an optional closing note for the record.'
+                : 'Add a note describing what was done to fix this.'}
+            </Text>
+            <TextInput
+              style={styles.noteInput}
+              placeholder="What was done?"
+              placeholderTextColor={Colors.textMuted}
+              value={resolveNote}
+              onChangeText={setResolveNote}
+              multiline
+              textAlignVertical="top"
+            />
+            <View style={styles.modalButtons}>
+              <Button label="Cancel" variant="outline" onPress={() => setResolveModalOpen(false)} style={styles.modalButton} />
+              <Button label="Resolve" onPress={handleResolve} loading={resolving} style={styles.modalButton} />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <ConfirmDialog
         visible={confirmBlock}
@@ -315,5 +405,57 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textSecondary,
     fontWeight: Typography.medium,
+  },
+
+  resolveSection: {
+    gap: Spacing.xs,
+  },
+  resolveBlockedText: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    textAlign: 'center',
+  },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.lg,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.card,
+    padding: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  modalTitle: {
+    fontSize: Typography.lg,
+    fontWeight: Typography.bold,
+    color: Colors.textPrimary,
+  },
+  modalHint: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+  },
+  noteInput: {
+    minHeight: 88,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.input,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
+  modalButton: {
+    flex: 1,
   },
 });

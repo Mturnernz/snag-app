@@ -28,11 +28,14 @@ interface Props {
    *  for members, or the user's own id for public submissions. Uploads wait
    *  until this is known. */
   pathPrefix: string | null;
+  /** Storage bucket to upload into. Defaults to snag-photos; the investigation
+   *  evidence picker passes 'snag-evidence'. */
+  bucket?: string;
   onUploadingChange?: (uploading: boolean) => void;
   onPhotosChange?: (count: number) => void;
 }
 
-const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, onUploadingChange, onPhotosChange }, ref) => {
+const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, onUploadingChange, onPhotosChange }, ref) => {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
 
   useEffect(() => {
@@ -58,7 +61,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, onUpload
         [{ resize: { width: 1200 } }],
         { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
       );
-      return uploadSnagPhoto(compressed.uri, fileName);
+      return uploadSnagPhoto(compressed.uri, fileName, bucket);
     })().finally(() => setUploading(id, false));
 
     setPhotos((prev) => {

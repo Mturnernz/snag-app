@@ -24,13 +24,14 @@ import {
 import { Colors, Radius, Spacing, Typography, IconSize } from '../constants/theme';
 import {
   supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers,
-  addComment, getSnagPhotoUrl,
+  addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
 } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
 import ManageIssuePanel from '../components/ManageIssuePanel';
+import InvestigationPanel from '../components/InvestigationPanel';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Avatar from '../components/Avatar';
@@ -55,6 +56,22 @@ interface IssueDetail {
   vote_score?: number;
   upvote_count?: number;
   downvote_count?: number;
+}
+
+// Mirrors the serious-lane resolve gate in update_snag_status: the first
+// unmet condition (in server order) is the reason Resolve is blocked.
+function computeResolveBlockReason(
+  status: SnagStatus | undefined,
+  inv: InvestigationState | null,
+): string | null {
+  if (status === 'rca_pending') return 'RCA in progress — accept or reject it first';
+  if (!inv) return 'Loading investigation…';
+  if (inv.completedSteps.length < 5) return `Finish the checklist (${inv.completedSteps.length}/5)`;
+  if (inv.witnesses.length === 0) return 'Add a witness statement';
+  if (inv.evidence.length === 0) return 'Add evidence';
+  if (!inv.rootCause || !inv.rootCause.trim()) return 'Record a root cause';
+  if (inv.openCorrectiveActions > 0) return 'Close corrective actions';
+  return null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -88,6 +105,7 @@ export default function IssueDetailScreen() {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionAt, setMentionAt] = useState(-1);
   const [authorPoints, setAuthorPoints] = useState<Record<string, number>>({});
+  const [investigation, setInvestigation] = useState<InvestigationState | null>(null);
 
   // Voting/commenting are internal engagement mechanics — only members of
   // the snag's own organisation get them. A public reporter (or a member
@@ -132,6 +150,17 @@ export default function IssueDetailScreen() {
       fetchAuthorPoints(authorIds, userProfile.org_id);
     }
   }, [userProfile?.org_id]);
+
+  // Serious-lane investigation state powers the progress panel and the
+  // resolve gate. Only fetched for editors of a serious snag.
+  const canManageInvestigation = isSerious && canEdit;
+
+  const fetchInvestigation = useCallback(async () => {
+    if (!canManageInvestigation) { setInvestigation(null); return; }
+    setInvestigation(await getInvestigationState(issueId));
+  }, [canManageInvestigation, issueId]);
+
+  useEffect(() => { fetchInvestigation(); }, [fetchInvestigation]);
 
   async function fetchIssue() {
     const { data } = await supabase
@@ -392,12 +421,24 @@ export default function IssueDetailScreen() {
             <ManageIssuePanel
               issueId={issue.id}
               status={issue.status}
+              lane={issue.lane}
               kind={issue.kind}
               severity={issue.severity}
               owner={issue.owner ?? null}
               orgMembers={orgMembers}
+              resolveBlockReason={computeResolveBlockReason(issue.status, investigation)}
               isPublicSubmission={issue.is_public_submission ?? false}
-              onUpdated={fetchIssue}
+              onUpdated={() => { fetchIssue(); fetchInvestigation(); }}
+            />
+          )}
+
+          {/* Serious-lane investigation — clear the resolve gate in-app */}
+          {canManageInvestigation && investigation && (
+            <InvestigationPanel
+              issueId={issue.id}
+              orgId={issue.org_id}
+              state={investigation}
+              onChanged={() => { fetchInvestigation(); fetchIssue(); }}
             />
           )}
 

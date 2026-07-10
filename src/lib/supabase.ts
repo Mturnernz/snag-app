@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import {
   Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
+  ChecklistStep, WitnessStatement, EvidenceItem,
 } from '../types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -378,6 +379,67 @@ export async function assignSnagOwner(snagId: string, ownerId: string | null) {
   return supabase.rpc('assign_snag_owner', { p_snag_id: snagId, p_owner_id: ownerId });
 }
 
+// ─── Resolution & investigation ───────────────────────────────────────────────
+// Niggles resolve via resolve_snag (a note is required server-side). Serious
+// snags resolve via update_snag_status('resolved'), which the server gates behind
+// a completed investigation (see getInvestigationState / update_snag_status).
+
+export async function resolveSnag(snagId: string, note: string) {
+  return supabase.rpc('resolve_snag', { p_snag_id: snagId, p_note: note });
+}
+
+export async function completeChecklistStep(snagId: string, step: ChecklistStep) {
+  return supabase.rpc('complete_checklist_step', { p_snag_id: snagId, p_step: step });
+}
+
+export async function addWitnessStatement(snagId: string, witnessName: string, statementText: string) {
+  return supabase.rpc('add_witness_statement', {
+    p_snag_id: snagId,
+    p_witness_name: witnessName,
+    p_statement_text: statementText,
+  });
+}
+
+export async function addEvidenceItem(snagId: string, mediaPath: string, caption?: string | null) {
+  return supabase.rpc('add_evidence_item', {
+    p_snag_id: snagId,
+    p_media_path: mediaPath,
+    p_caption: caption ?? null,
+  });
+}
+
+export async function setRootCause(snagId: string, rootCauseText: string) {
+  return supabase.rpc('set_root_cause', { p_snag_id: snagId, p_root_cause_text: rootCauseText });
+}
+
+export interface InvestigationState {
+  completedSteps: ChecklistStep[];
+  witnesses: WitnessStatement[];
+  evidence: EvidenceItem[];
+  rootCause: string | null;
+  openCorrectiveActions: number;
+}
+
+// Reads the five investigation tables for a serious snag — all org-scoped by RLS.
+// Drives the live progress display and the serious-lane resolve gate.
+export async function getInvestigationState(snagId: string): Promise<InvestigationState> {
+  const [stepsRes, witnessRes, evidenceRes, investigationRes, actionsRes] = await Promise.all([
+    supabase.from('checklist_completions').select('step').eq('snag_id', snagId),
+    supabase.from('witness_statements').select('*').eq('snag_id', snagId).order('taken_at', { ascending: true }),
+    supabase.from('evidence_items').select('*').eq('snag_id', snagId).order('sort_index', { ascending: true }),
+    supabase.from('investigations').select('root_cause_text').eq('snag_id', snagId).maybeSingle(),
+    supabase.from('corrective_actions').select('id', { count: 'exact', head: true }).eq('snag_id', snagId).eq('status', 'open'),
+  ]);
+
+  return {
+    completedSteps: (stepsRes.data ?? []).map((r: any) => r.step as ChecklistStep),
+    witnesses: (witnessRes.data ?? []) as WitnessStatement[],
+    evidence: (evidenceRes.data ?? []) as EvidenceItem[],
+    rootCause: (investigationRes.data as any)?.root_cause_text ?? null,
+    openCorrectiveActions: actionsRes.count ?? 0,
+  };
+}
+
 export async function markSnagSeen(snagId: string) {
   return supabase.rpc('mark_snag_seen', { p_snag_id: snagId });
 }
@@ -420,13 +482,18 @@ export async function awardPoints(event: string, points: number, snagId?: string
 // and resolve a short-lived signed URL whenever a photo needs to be displayed.
 
 const SNAG_PHOTOS_BUCKET = 'snag-photos';
+const SNAG_EVIDENCE_BUCKET = 'snag-evidence';
 
-export async function uploadSnagPhoto(localUri: string, fileName: string): Promise<string | null> {
+export async function uploadSnagPhoto(
+  localUri: string,
+  fileName: string,
+  bucket: string = SNAG_PHOTOS_BUCKET,
+): Promise<string | null> {
   const response = await fetch(localUri);
   const blob = await response.blob();
 
   const { data, error } = await supabase.storage
-    .from(SNAG_PHOTOS_BUCKET)
+    .from(bucket)
     .upload(fileName, blob, {
       contentType: 'image/jpeg',
       upsert: false,
@@ -443,6 +510,15 @@ export async function uploadSnagPhoto(localUri: string, fileName: string): Promi
 export async function getSnagPhotoUrl(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage
     .from(SNAG_PHOTOS_BUCKET)
+    .createSignedUrl(path, 60 * 60);
+  if (error || !data) return null;
+  return data.signedUrl;
+}
+
+// Evidence photos live in the private snag-evidence bucket (org-folder scoped).
+export async function getEvidencePhotoUrl(path: string): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(SNAG_EVIDENCE_BUCKET)
     .createSignedUrl(path, 60 * 60);
   if (error || !data) return null;
   return data.signedUrl;

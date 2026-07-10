@@ -4,6 +4,12 @@ export type SnagKind = 'fixit' | 'improvement' | 'hazard' | 'incident';
 export type SnagLane = 'niggle' | 'serious'; // generated column, read-only
 export type SnagSeverity = 'minor' | 'moderate' | 'injury' | 'critical';
 export type SnagStatus = 'flagged' | 'in_progress' | 'resolved' | 'rca_pending';
+export type ChecklistStep =
+  | 'make_safe'
+  | 'preserve_scene'
+  | 'capture_evidence'
+  | 'identify_witnesses'
+  | 'find_root_cause';
 export type UserRole = 'worker' | 'supervisor' | 'officer_admin';
 export type InviteStatus = 'pending' | 'accepted' | 'revoked';
 export type VoteValue = 1 | -1;
@@ -127,6 +133,27 @@ export interface UserPoints {
   updated_at: string;
 }
 
+// ─── Investigation (serious lane) ────────────────────────────────────────────
+
+export interface WitnessStatement {
+  id: string;
+  snag_id: string;
+  witness_name: string;
+  statement_text: string;
+  taken_by: string;
+  taken_at: string;
+}
+
+export interface EvidenceItem {
+  id: string;
+  snag_id: string;
+  uploaded_by: string;
+  media_path: string;
+  caption: string | null;
+  captured_at: string;
+  sort_index: number;
+}
+
 // ─── Navigation param lists ──────────────────────────────────────────────────
 
 export type RootStackParamList = {
@@ -178,3 +205,17 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   supervisor: 'Supervisor',
   officer_admin: 'Officer Admin',
 };
+
+// Ordered to match the server's checklist_step enum — the first-response steps
+// a supervisor works through before a serious snag can be resolved.
+export const CHECKLIST_STEP_LABELS: Record<ChecklistStep, string> = {
+  make_safe: 'Make the area safe',
+  preserve_scene: 'Preserve the scene',
+  capture_evidence: 'Capture evidence',
+  identify_witnesses: 'Identify witnesses',
+  find_root_cause: 'Find the root cause',
+};
+
+export const CHECKLIST_STEPS: ChecklistStep[] = [
+  'make_safe', 'preserve_scene', 'capture_evidence', 'identify_witnesses', 'find_root_cause',
+];

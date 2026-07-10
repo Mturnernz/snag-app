@@ -336,23 +336,14 @@ export default function ReportIssueScreen() {
         />
 
         {!isPublicSubmission && (
-          <>
-            {/* Serious lane — clearly clickable, but visually quieter than the primary CTA */}
-            <Button
-              label="Report a Serious Incident"
-              variant="seriousOutline"
-              icon="warning-outline"
-              onPress={() => navigation.navigate('ReportIncidentDetails')}
-              fullWidth
-            />
-
-            <Button
-              label="Submit to another organisation…"
-              variant="ghost"
-              onPress={() => navigation.navigate('ChooseReportOrg')}
-              fullWidth
-            />
-          </>
+          // Serious lane — clearly clickable, but visually quieter than the primary CTA
+          <Button
+            label="Report a Serious Incident"
+            variant="seriousOutline"
+            icon="warning-outline"
+            onPress={() => navigation.navigate('ReportIncidentDetails')}
+            fullWidth
+          />
         )}
       </ScrollView>
 

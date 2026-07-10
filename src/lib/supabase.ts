@@ -58,7 +58,7 @@ export async function getCurrentUser() {
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, org_id, name, email, role, created_at, organisation:organisations(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
+    .select('id, org_id, name, email, role, created_at, organisation:organisations!profiles_org_id_fkey(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
     .eq('id', userId)
     .maybeSingle();
   if (error) console.error('getProfile error:', error);

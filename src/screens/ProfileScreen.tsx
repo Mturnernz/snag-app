@@ -75,7 +75,7 @@ export default function ProfileScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('*, organisation:organisations(id, name, industry, plan_tier, created_at)')
+      .select('*, organisation:organisations!profiles_org_id_fkey(id, name, industry, plan_tier, created_at)')
       .eq('id', user.id)
       .single();
 

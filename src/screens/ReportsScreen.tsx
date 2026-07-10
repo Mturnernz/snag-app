@@ -87,7 +87,7 @@ export default function ReportsScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('org_id, organisation:organisations(name)')
+      .select('org_id, organisation:organisations!profiles_org_id_fkey(name)')
       .eq('id', user.id)
       .single();
 

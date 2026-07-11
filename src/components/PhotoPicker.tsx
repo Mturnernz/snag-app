@@ -80,15 +80,17 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   }
 
   async function pickFromLibrary() {
+    const remaining = MAX_PHOTOS - photos.length;
+    if (remaining <= 0) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
-      allowsEditing: true,
-      aspect: [16, 9],
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
       quality: 1,
       exif: false,
     });
     if (!result.canceled) {
-      addPhoto(result.assets[0].uri);
+      result.assets.forEach((asset) => addPhoto(asset.uri));
     }
   }
 
@@ -98,9 +100,9 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
       Alert.alert('Permission required', 'Camera access is needed to take photos.');
       return;
     }
+    // No allowsEditing — the camera's own retake/use-photo confirmation is
+    // enough; a forced crop step after every shot was extra friction.
     const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [16, 9],
       quality: 1,
       exif: false,
     });

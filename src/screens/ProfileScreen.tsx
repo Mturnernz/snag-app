@@ -87,7 +87,9 @@ export default function ProfileScreen() {
         fetchUserPoints(user.id, data.org_id);
       }
     }
-    getMemberships().then((ms) => {
+    getMemberships().then((all) => {
+      // Deactivated orgs are hidden everywhere except the admin tab.
+      const ms = all.filter((m) => m.org_active);
       setMemberships(ms);
       ms.forEach((m) => {
         getOrgSnagSummary(m.org_id).then((summary) => {

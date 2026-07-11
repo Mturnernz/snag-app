@@ -40,7 +40,8 @@ export default function ChooseReportOrgScreen() {
   const [switching, setSwitching] = useState<string | null>(null);
 
   useEffect(() => {
-    getMemberships().then(setMemberships);
+    // Deactivated orgs aren't reportable — hide them from the picker.
+    getMemberships().then((ms) => setMemberships(ms.filter((m) => m.org_active)));
     AsyncStorage.getItem(RECENT_KEY).then((raw) => {
       if (raw) {
         try { setRecent(JSON.parse(raw)); } catch { /* ignore */ }

@@ -26,7 +26,9 @@ export default function OrgSwitcherHeader({ title, role, orgName, onSwitched }: 
 
   useFocusEffect(
     useCallback(() => {
-      getMemberships().then(setMemberships);
+      // Deactivated orgs aren't switchable from here — they're only managed
+      // from the admin tab.
+      getMemberships().then((ms) => setMemberships(ms.filter((m) => m.org_active)));
     }, [])
   );
 

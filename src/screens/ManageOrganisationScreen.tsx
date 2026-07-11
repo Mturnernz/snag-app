@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
+import * as Clipboard from 'expo-clipboard';
 
 import { Profile, Organisation, UserRole, ROLE_LABELS } from '../types';
 import {
@@ -223,6 +224,12 @@ export default function ManageOrganisationScreen() {
   }
 
   // ── QR ───────────────────────────────────────────────────────────────────
+  async function handleCopyCode() {
+    if (!org?.join_code) return;
+    await Clipboard.setStringAsync(org.join_code);
+    showToast('Join code copied');
+  }
+
   async function handleRegenerateCode() {
     setConfirmRegenerate(false);
     setRegeneratingCode(true);
@@ -483,6 +490,10 @@ export default function ManageOrganisationScreen() {
             <View style={styles.qrWrap}>
               <QRCode value={org.join_code} size={180} />
             </View>
+            <TouchableOpacity style={styles.codeRow} onPress={handleCopyCode} activeOpacity={0.7}>
+              <Text style={styles.codeText} selectable>{org.join_code}</Text>
+              <Icon name="copy-outline" size="md" color={Colors.primary} />
+            </TouchableOpacity>
             <Button label="Regenerate Code" variant="outline" onPress={() => setConfirmRegenerate(true)} loading={regeneratingCode} fullWidth />
           </Card>
         )}
@@ -728,6 +739,12 @@ const styles = StyleSheet.create({
 
   qrCard: { gap: Spacing.sm, alignItems: 'stretch' },
   qrWrap: { alignItems: 'center', paddingVertical: Spacing.md },
+  codeRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.background, borderRadius: Radius.button,
+    paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md,
+  },
+  codeText: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary, letterSpacing: 4 },
 
   // Modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },

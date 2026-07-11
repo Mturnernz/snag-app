@@ -29,6 +29,9 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
   const [name, setName] = useState('');
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [manualEntry, setManualEntry] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const [manualSubmitting, setManualSubmitting] = useState(false);
 
   // Resume-a-scan mode: the code was captured on the login page; look it up
   // and jump straight to the join step.
@@ -44,22 +47,21 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
     });
   }, [initialCode]);
 
-  async function handleScan({ data }: BarcodeScanningResult) {
-    if (scanned) return;
-    setScanned(true);
-    setError(null);
-
-    const { data: org, error: lookupError } = await getOrgByJoinCode(data);
+  // Shared by the camera scan and the manual-entry path — resolves a code
+  // string to an org and routes into the same scan/switch/join steps either
+  // way. Returns whether resolution succeeded (caller resets its own busy
+  // state on failure).
+  async function resolveCode(code: string, invalidMessage: string): Promise<boolean> {
+    const { data: org, error: lookupError } = await getOrgByJoinCode(code);
     if (lookupError || !org) {
-      setError('That QR code is not a valid Snag join code.');
-      setScanned(false);
-      return;
+      setError(invalidMessage);
+      return false;
     }
 
     // Pre-auth mode: report the org back to the login screen.
     if (onCodeScanned) {
-      onCodeScanned({ code: data, orgId: org.org_id, orgName: org.org_name });
-      return;
+      onCodeScanned({ code, orgId: org.org_id, orgName: org.org_name });
+      return true;
     }
 
     // Already a member? The scan is a switch, not a join — no name prompt.
@@ -68,15 +70,32 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
       const { error: switchError } = await setActiveOrg(org.org_id);
       if (switchError) {
         setError(switchError.message ?? 'Could not switch organisation.');
-        setScanned(false);
-        return;
+        return false;
       }
       setSwitchedTo(org.org_name);
-      return;
+      return true;
     }
 
-    setScannedCode(data);
+    setScannedCode(code);
     setPreview(org);
+    return true;
+  }
+
+  async function handleScan({ data }: BarcodeScanningResult) {
+    if (scanned) return;
+    setScanned(true);
+    setError(null);
+    const ok = await resolveCode(data, 'That QR code is not a valid Snag join code.');
+    if (!ok) setScanned(false);
+  }
+
+  async function handleManualSubmit() {
+    const code = manualCode.trim().toUpperCase();
+    if (!code) return;
+    setManualSubmitting(true);
+    setError(null);
+    await resolveCode(code, 'That code is not a valid Snag join code.');
+    setManualSubmitting(false);
   }
 
   async function handleJoin() {
@@ -152,6 +171,42 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
     );
   }
 
+  if (manualEntry) {
+    return (
+      <KeyboardAvoidingView
+        style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.inner}>
+          <Text style={styles.heading}>Enter your company code</Text>
+          <Text style={styles.subheading}>Ask an admin for your organisation's 8-character join code.</Text>
+
+          <TextInput
+            style={[styles.input, styles.codeInput]}
+            placeholder="ABCD1234"
+            placeholderTextColor={Colors.textMuted}
+            value={manualCode}
+            onChangeText={(t) => setManualCode(t.toUpperCase())}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={8}
+            returnKeyType="done"
+            onSubmitEditing={handleManualSubmit}
+            autoFocus
+          />
+
+          {error && <Text style={styles.errorText}>{error}</Text>}
+
+          <Button label="Continue" onPress={handleManualSubmit} loading={manualSubmitting} disabled={!manualCode.trim()} fullWidth />
+          <TouchableOpacity onPress={() => { setManualEntry(false); setManualCode(''); setError(null); }} style={styles.backRow}>
+            <Icon name="arrow-back" size="sm" color={Colors.primary} />
+            <Text style={styles.backText}>Back</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
+
   // Resume-a-scan mode never needs the camera: show a spinner while the code
   // is looked up, or the error if the code has been regenerated since.
   if (initialCode) {
@@ -186,6 +241,10 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
           <Text style={styles.heading}>Camera access needed</Text>
           <Text style={styles.subheading}>Snag needs your camera to scan a join QR code.</Text>
           <Button label="Grant Camera Access" onPress={requestPermission} fullWidth />
+          <TouchableOpacity onPress={() => setManualEntry(true)} style={styles.backRow}>
+            <Icon name="keypad-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.backText}>Or enter your company code</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={onBack} style={styles.backRow}>
             <Icon name="arrow-back" size="sm" color={Colors.primary} />
             <Text style={styles.backText}>Back</Text>
@@ -210,6 +269,10 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
         </View>
       </CameraView>
       <Card variant="flat" style={styles.bottomBar}>
+        <TouchableOpacity onPress={() => setManualEntry(true)} style={styles.backRow}>
+          <Icon name="keypad-outline" size="sm" color={Colors.primary} />
+          <Text style={styles.backText}>Or enter your company code</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={onBack} style={styles.backRow}>
           <Icon name="arrow-back" size="sm" color={Colors.primary} />
           <Text style={styles.backText}>Back</Text>
@@ -259,6 +322,7 @@ const styles = StyleSheet.create({
   bottomBar: {
     alignItems: 'center',
     paddingVertical: Spacing.md,
+    gap: Spacing.sm,
   },
   inner: {
     flex: 1,
@@ -289,6 +353,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     fontSize: Typography.base,
     color: Colors.textPrimary,
+  },
+  codeInput: {
+    textAlign: 'center',
+    fontSize: Typography.xl,
+    fontWeight: Typography.bold,
+    letterSpacing: 4,
   },
   errorText: {
     fontSize: Typography.sm,

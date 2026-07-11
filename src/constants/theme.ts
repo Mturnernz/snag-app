@@ -66,6 +66,16 @@ export const Colors = {
   danger: '#EF4444',
 };
 
+// Card alert borders — a deliberate, narrow exception to "elevated cards
+// drop their border": severity/kind-driven borders that make injury,
+// critical, and improvement snags immediately scannable in the list, layered
+// on top of the card's normal shadow rather than replacing it.
+export const CardAlertBorder = {
+  injury: Colors.black,
+  critical: Colors.priority.high,
+  improvement: Colors.category.other,
+};
+
 export const Radius = {
   card: 12,
   button: 8,

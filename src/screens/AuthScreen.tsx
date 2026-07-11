@@ -13,16 +13,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { signInWithEmail, signUpWithEmail } from '../lib/supabase';
 import {
-  getPendingIntent, setPendingJoin, clearPendingIntent, PendingJoin, PendingCreate,
+  getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate,
 } from '../lib/pendingIntent';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Icon from '../components/Icon';
-import ScanJoinCodeScreen from './ScanJoinCodeScreen';
+import SignUpScreen from './SignUpScreen';
 import CreateOrgAccountScreen from './CreateOrgAccountScreen';
 
-type View_ = 'main' | 'scan' | 'joinAccount' | 'signup' | 'createOrg';
+type View_ = 'main' | 'signup' | 'signUpFlow' | 'createOrg';
 
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
@@ -79,12 +79,6 @@ export default function AuthScreen() {
     setView('main');
   }
 
-  function handleScanned(org: { code: string; orgId: string; orgName: string }) {
-    setPendingJoin({ code: org.code, orgName: org.orgName });
-    setPendingJoinState({ code: org.code, orgName: org.orgName });
-    setView('joinAccount');
-  }
-
   function handleClearIntent() {
     clearPendingIntent();
     setPendingJoinState(null);
@@ -93,12 +87,15 @@ export default function AuthScreen() {
 
   // ── Sub-views ────────────────────────────────────────────────────────────
 
-  if (view === 'scan') {
+  if (view === 'signUpFlow') {
     return (
-      <ScanJoinCodeScreen
-        onCodeScanned={handleScanned}
-        onComplete={() => setView('main')}
+      <SignUpScreen
         onBack={() => setView('main')}
+        onDone={(msg) => {
+          getPendingIntent().then(({ join }) => setPendingJoinState(join));
+          setMessage({ text: msg, error: false });
+          setView('main');
+        }}
       />
     );
   }
@@ -116,9 +113,8 @@ export default function AuthScreen() {
     );
   }
 
-  // Account form used for plain sign-up and join-after-scan sign-up.
-  if (view === 'signup' || view === 'joinAccount') {
-    const joining = view === 'joinAccount' && pendingJoin;
+  // Plain sign-up (no org context) — offered after a failed sign-in attempt.
+  if (view === 'signup') {
     return (
       <KeyboardAvoidingView
         style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
@@ -127,12 +123,6 @@ export default function AuthScreen() {
         <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
           <Text style={styles.appName}>Snag</Text>
           <Text style={styles.heading}>Create your account</Text>
-          {joining && (
-            <View style={styles.intentBanner}>
-              <Icon name="business-outline" size="sm" color={Colors.primary} />
-              <Text style={styles.intentBannerText}>You're joining {pendingJoin!.orgName}.</Text>
-            </View>
-          )}
 
           <View style={styles.form}>
             <TextInput
@@ -236,12 +226,12 @@ export default function AuthScreen() {
           <View style={styles.dividerLine} />
         </View>
 
-        <TouchableOpacity onPress={() => setView('scan')} activeOpacity={0.85}>
+        <TouchableOpacity onPress={() => setView('signUpFlow')} activeOpacity={0.85}>
           <Card variant="elevated" style={styles.optionCard}>
-            <Icon name="qr-code-outline" size="xl" color={Colors.primary} />
+            <Icon name="person-add-outline" size="xl" color={Colors.primary} />
             <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Scan your company's QR code</Text>
-              <Text style={styles.optionDesc}>Join your workplace from the poster on-site</Text>
+              <Text style={styles.optionTitle}>Sign Up</Text>
+              <Text style={styles.optionDesc}>Join your workplace with a company code or QR scan</Text>
             </View>
           </Card>
         </TouchableOpacity>

@@ -17,9 +17,13 @@ interface Props {
   /** Skip the camera: look this code up on mount and go straight to the
    *  join step. Used after sign-up to resume a scan made on the login page. */
   initialCode?: string;
+  /** Paired with `initialCode` — when the name was already collected earlier
+   *  in the flow (the sign-up stepper), join immediately instead of asking
+   *  for it again on the preview step. */
+  initialName?: string;
 }
 
-export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, initialCode }: Props) {
+export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, initialCode, initialName }: Props) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -34,17 +38,33 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
   const [manualSubmitting, setManualSubmitting] = useState(false);
 
   // Resume-a-scan mode: the code was captured on the login page; look it up
-  // and jump straight to the join step.
+  // and jump straight to the join step. If the name was already collected
+  // too (the sign-up stepper), join immediately instead of asking again.
   useEffect(() => {
     if (!initialCode) return;
-    getOrgByJoinCode(initialCode).then(({ data: org, error: lookupError }) => {
+    (async () => {
+      const { data: org, error: lookupError } = await getOrgByJoinCode(initialCode);
       if (lookupError || !org) {
         setError('That join code is no longer valid — it may have been regenerated. Scan the poster again.');
         return;
       }
+      if (initialName && initialName.trim()) {
+        setAccepting(true);
+        const { error: joinError } = await joinOrgViaCode(initialCode, initialName.trim());
+        setAccepting(false);
+        if (joinError) {
+          setError(joinError.message ?? 'That join code is invalid or has expired.');
+          setName(initialName);
+          setScannedCode(initialCode);
+          setPreview(org);
+          return;
+        }
+        onComplete();
+        return;
+      }
       setScannedCode(initialCode);
       setPreview(org);
-    });
+    })();
   }, [initialCode]);
 
   // Shared by the camera scan and the manual-entry path — resolves a code

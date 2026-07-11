@@ -11,6 +11,9 @@ const CREATE_KEY = 'snag.pendingCreate';
 export interface PendingJoin {
   code: string;
   orgName: string;
+  /** Captured up front by the sign-up flow so the post-auth resume step
+   *  doesn't have to ask for it again. */
+  name: string;
 }
 
 // The combined create-org screen collects the org name and the owner's name up

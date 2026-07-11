@@ -36,6 +36,7 @@ export default function OrgSetupScreen({
     return (
       <ScanJoinCodeScreen
         initialCode={pendingJoin.code}
+        initialName={pendingJoin.name}
         onComplete={() => { onClearPending?.(); onComplete(); }}
         onBack={backToChoice}
       />

@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,7 +23,10 @@ import {
   RootStackParamList,
 } from '../types';
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag, getMemberships, setActiveOrg, resolveActiveOrg, Membership } from '../lib/supabase';
+import {
+  supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag, getMemberships, setActiveOrg,
+  resolveActiveOrg, Membership, getWorkGroupsWithDetail, getWorkGroupImageUrl, WorkGroupDetail,
+} from '../lib/supabase';
 import { useReportTarget } from '../context/ReportTargetContext';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
@@ -59,6 +63,27 @@ export default function ReportIssueScreen() {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [showOrgPicker, setShowOrgPicker] = useState(false);
   const [switchingOrg, setSwitchingOrg] = useState(false);
+  const [workGroups, setWorkGroups] = useState<WorkGroupDetail[]>([]);
+  const [wgImageUrls, setWgImageUrls] = useState<Record<string, string>>({});
+  const [showGroupPicker, setShowGroupPicker] = useState(false);
+
+  // Work groups only apply to member (not public) submissions, and are
+  // scoped to whichever org is currently active — refetched whenever that
+  // changes (focus, or an explicit org switch below).
+  async function loadWorkGroups(hasOrg: boolean) {
+    if (!hasOrg) { setWorkGroups([]); setWgImageUrls({}); return; }
+    const groups = await getWorkGroupsWithDetail();
+    setWorkGroups(groups);
+    const withImages = groups.filter((g) => g.imagePath);
+    if (withImages.length > 0) {
+      const entries = await Promise.all(
+        withImages.map(async (g) => [g.id, await getWorkGroupImageUrl(g.imagePath!)] as const)
+      );
+      setWgImageUrls(Object.fromEntries(entries.filter((e): e is [string, string] => Boolean(e[1]))));
+    } else {
+      setWgImageUrls({});
+    }
+  }
 
   // Refetched on focus: the active org (which scopes member submissions and
   // the photo upload folder) can change via the org switcher or a QR scan.
@@ -76,6 +101,7 @@ export default function ReportIssueScreen() {
         setMemberships(await getMemberships());
         const profile = await getProfile(user.id);
         setHasProfileName(Boolean(profile?.name));
+        await loadWorkGroups(Boolean(org));
       })();
     }, [])
   );
@@ -92,6 +118,7 @@ export default function ReportIssueScreen() {
         setOrgId(profile?.org_id ?? null);
         setOrgName(profile?.organisation?.name ?? null);
         setMemberships(await getMemberships());
+        await loadWorkGroups(Boolean(profile?.org_id));
       }
     } catch (err: any) {
       Alert.alert('Error', err.message ?? 'Could not switch organisation.');
@@ -105,12 +132,23 @@ export default function ReportIssueScreen() {
   // the reporter's own user folder (each has a matching storage RLS policy).
   const photoPathPrefix = isPublicSubmission ? userId : orgId;
 
-  async function handleSubmit() {
+  // Capture -> [select work group] -> submit. The grid only ever appears for
+  // member submissions when the org has defined any work groups; tapping a
+  // tile submits immediately (no separate confirm step).
+  function handleSubmit() {
     if (!description.trim()) {
       Alert.alert('Description required', "Tell us what's wrong.");
       return;
     }
+    if (!isPublicSubmission && workGroups.length > 0) {
+      setShowGroupPicker(true);
+      return;
+    }
+    doSubmit(null);
+  }
 
+  async function doSubmit(workGroupId: string | null) {
+    setShowGroupPicker(false);
     setSubmitting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -143,6 +181,7 @@ export default function ReportIssueScreen() {
           latitude: null,
           longitude: null,
           siteId,
+          workGroupId,
         });
         if (error) throw error;
         setSubmittedTo(orgName);
@@ -387,6 +426,43 @@ export default function ReportIssueScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Work group picker — capture -> select work group -> submit. Tapping
+          a tile submits immediately, including the "Submit" default tile. */}
+      <Modal
+        visible={showGroupPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowGroupPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowGroupPicker(false)}
+        >
+          <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Select a work group</Text>
+            <Text style={styles.modalHint}>Which team should handle this?</Text>
+            <ScrollView contentContainerStyle={styles.groupGrid}>
+              {workGroups.map((wg) => (
+                <TouchableOpacity
+                  key={wg.id}
+                  style={[styles.groupTile, { backgroundColor: wg.color ?? Colors.textSecondary }]}
+                  onPress={() => doSubmit(wg.id)}
+                  activeOpacity={0.85}
+                  disabled={submitting}
+                >
+                  {wg.imagePath && wgImageUrls[wg.id] && (
+                    <Image source={{ uri: wgImageUrls[wg.id] }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+                  )}
+                  <View style={styles.groupTileOverlay} />
+                  <Text style={styles.groupTileText} numberOfLines={2}>{wg.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -519,6 +595,33 @@ const styles = StyleSheet.create({
     fontSize: Typography.xs,
     color: Colors.textMuted,
     textTransform: 'capitalize',
+  },
+
+  groupGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    paddingTop: Spacing.sm,
+  },
+  groupTile: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    aspectRatio: 1.3,
+    borderRadius: Radius.card,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.md,
+  },
+  groupTileOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  groupTileText: {
+    fontSize: Typography.base,
+    fontWeight: Typography.bold,
+    color: Colors.white,
+    textAlign: 'center',
   },
 
   fieldGroup: {

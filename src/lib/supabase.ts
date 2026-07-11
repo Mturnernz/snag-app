@@ -341,6 +341,70 @@ export async function setSiteDefaultOwner(siteId: string, ownerId: string) {
   return supabase.rpc('set_site_default_owner', { p_site_id: siteId, p_owner_id: ownerId });
 }
 
+// ─── Work groups ────────────────────────────────────────────────────────────
+// Org-defined sub-teams a worker can route a snag to at report time. Mirrors
+// getSitesWithDetail's shape: work groups + their supervisor ids, read
+// directly (RLS-scoped) rather than through an RPC.
+
+export interface WorkGroupDetail {
+  id: string;
+  name: string;
+  color: string | null;
+  imagePath: string | null;
+  isDefault: boolean;
+  supervisorIds: string[];
+}
+
+export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
+  const { data: groups } = await supabase
+    .from('work_groups')
+    .select('id, name, color, image_path, is_default')
+    .order('is_default', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (!groups || groups.length === 0) return [];
+
+  const ids = groups.map((g) => g.id);
+  const { data: sups } = await supabase
+    .from('work_group_supervisors')
+    .select('work_group_id, user_id')
+    .in('work_group_id', ids);
+
+  return groups.map((g: any) => ({
+    id: g.id,
+    name: g.name,
+    color: g.color,
+    imagePath: g.image_path,
+    isDefault: g.is_default,
+    supervisorIds: (sups ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.user_id),
+  }));
+}
+
+export async function createWorkGroup(name: string, color?: string | null, imagePath?: string | null) {
+  return supabase.rpc('create_work_group', { p_name: name, p_color: color ?? null, p_image_path: imagePath ?? null });
+}
+
+export async function assignWorkGroupSupervisor(workGroupId: string, userId: string) {
+  return supabase.rpc('assign_work_group_supervisor', { p_work_group_id: workGroupId, p_user_id: userId });
+}
+
+export async function removeWorkGroupSupervisor(workGroupId: string, userId: string) {
+  return supabase.rpc('remove_work_group_supervisor', { p_work_group_id: workGroupId, p_user_id: userId });
+}
+
+const WORK_GROUP_IMAGES_BUCKET = 'work-group-images';
+
+export async function uploadWorkGroupImage(localUri: string, fileName: string): Promise<string | null> {
+  return uploadSnagPhoto(localUri, fileName, WORK_GROUP_IMAGES_BUCKET);
+}
+
+export async function getWorkGroupImageUrl(path: string): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(WORK_GROUP_IMAGES_BUCKET)
+    .createSignedUrl(path, 60 * 60);
+  if (error || !data) return null;
+  return data.signedUrl;
+}
+
 export async function renameOrganisation(name: string) {
   return supabase.rpc('rename_organisation', { p_name: name });
 }
@@ -405,6 +469,7 @@ export async function createSnag(params: {
   latitude: number | null;
   longitude: number | null;
   siteId: string;
+  workGroupId?: string | null;
 }) {
   const { data, error } = await supabase.rpc('create_snag', {
     p_kind: params.kind,
@@ -414,6 +479,7 @@ export async function createSnag(params: {
     p_latitude: params.latitude,
     p_longitude: params.longitude,
     p_site_id: params.siteId,
+    p_work_group_id: params.workGroupId ?? null,
   }).single();
   return { data: data as { id: string; reference: string } | null, error };
 }

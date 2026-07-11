@@ -2,19 +2,29 @@ import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
+  TouchableOpacity,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Modal,
 } from 'react-native';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Organisation, Profile, SnagStatus, STATUS_LABELS, UserRole, RootStackParamList } from '../types';
-import { supabase, getOrgStats, OrgStats, getMemberships, setOrganisationActive, Membership } from '../lib/supabase';
-import { Colors, Spacing, Typography, Radius } from '../constants/theme';
+import {
+  supabase, getOrgStats, OrgStats, getMemberships, setOrganisationActive, Membership,
+  getOrgMembers, getWorkGroupsWithDetail, createWorkGroup, assignWorkGroupSupervisor,
+  removeWorkGroupSupervisor, uploadWorkGroupImage, getWorkGroupImageUrl, WorkGroupDetail,
+} from '../lib/supabase';
+import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../constants/theme';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -44,6 +54,18 @@ export default function AdminDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Work groups
+  const [workGroups, setWorkGroups] = useState<WorkGroupDetail[]>([]);
+  const [wgImageUrls, setWgImageUrls] = useState<Record<string, string>>({});
+  const [supervisors, setSupervisors] = useState<Profile[]>([]);
+  const [managingGroup, setManagingGroup] = useState<WorkGroupDetail | null>(null);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupColor, setNewGroupColor] = useState<string>(WorkGroupPalette[0]);
+  const [newGroupImageUri, setNewGroupImageUri] = useState<string | null>(null);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
+  const canManageWorkGroups = role === 'officer_admin' || role === 'supervisor';
+
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
@@ -54,10 +76,12 @@ export default function AdminDashboardScreen() {
       .eq('id', user.id)
       .single();
 
+    let profileRole: UserRole | null = null;
     if (data) {
       const profile = data as unknown as Profile;
       setOrg((profile.organisation as Organisation | undefined) ?? null);
       setRole(profile.role);
+      profileRole = profile.role;
       setIsAdmin(profile.role === 'officer_admin');
       if (profile.org_id) setStats(await getOrgStats(profile.org_id));
     }
@@ -66,6 +90,21 @@ export default function AdminDashboardScreen() {
     // deactivated orgs remain visible/manageable.
     const memberships = await getMemberships();
     setOwnedOrgs(memberships.filter((m) => m.role === 'officer_admin'));
+
+    if (profileRole === 'officer_admin' || profileRole === 'supervisor') {
+      const groups = await getWorkGroupsWithDetail();
+      setWorkGroups(groups);
+      const withImages = groups.filter((g) => g.imagePath);
+      if (withImages.length > 0) {
+        const entries = await Promise.all(
+          withImages.map(async (g) => [g.id, await getWorkGroupImageUrl(g.imagePath!)] as const)
+        );
+        setWgImageUrls(Object.fromEntries(entries.filter((e): e is [string, string] => Boolean(e[1]))));
+      } else {
+        setWgImageUrls({});
+      }
+      getOrgMembers().then((members) => setSupervisors(members.filter((m) => m.role === 'supervisor')));
+    }
 
     setLoading(false);
   }, []);
@@ -95,6 +134,37 @@ export default function AdminDashboardScreen() {
         },
       ]
     );
+  }
+
+  async function pickGroupImage() {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1, exif: false });
+    if (result.canceled) return;
+    const compressed = await ImageManipulator.manipulateAsync(
+      result.assets[0].uri,
+      [{ resize: { width: 400 } }],
+      { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    setNewGroupImageUri(compressed.uri);
+  }
+
+  async function handleCreateGroup() {
+    if (!newGroupName.trim() || !org) return;
+    setCreatingGroup(true);
+    let imagePath: string | null = null;
+    if (newGroupImageUri) {
+      const fileName = `${org.id}/${Date.now()}.jpg`;
+      imagePath = await uploadWorkGroupImage(newGroupImageUri, fileName);
+    }
+    const { error } = await createWorkGroup(newGroupName.trim(), imagePath ? null : newGroupColor, imagePath);
+    setCreatingGroup(false);
+    if (!error) {
+      setNewGroupName('');
+      setNewGroupColor(WorkGroupPalette[0]);
+      setNewGroupImageUri(null);
+      await load();
+    } else {
+      Alert.alert('Error', error.message ?? 'Could not create work group');
+    }
   }
 
   // Reload on focus — the org this dashboard reflects is the active org, which
@@ -174,6 +244,82 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
+        {/* Work groups — supervisors can create groups; only an admin can
+            assign supervisors to one. */}
+        {canManageWorkGroups && (
+          <Card variant="elevated" style={styles.wgCard}>
+            <Text style={styles.sectionLabel}>WORK GROUPS</Text>
+            <Text style={styles.hint}>
+              Route snags to a team (e.g. Vehicles, Kitchen, Facilities) after they're submitted. A "Submit" default
+              group appears automatically once you add your first one.
+            </Text>
+
+            {workGroups.filter((g) => !g.isDefault).map((wg) => (
+              <View key={wg.id} style={styles.wgRow}>
+                {wg.imagePath && wgImageUrls[wg.id] ? (
+                  <Image source={{ uri: wgImageUrls[wg.id] }} style={styles.wgSwatch} contentFit="cover" />
+                ) : (
+                  <View style={[styles.wgSwatch, { backgroundColor: wg.color ?? Colors.textMuted }]} />
+                )}
+                <View style={styles.wgInfo}>
+                  <Text style={styles.wgName}>{wg.name}</Text>
+                  <Text style={styles.wgMeta}>
+                    {wg.supervisorIds.length} supervisor{wg.supervisorIds.length !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+                <Button label="Manage" variant="outline" onPress={() => setManagingGroup(wg)} />
+              </View>
+            ))}
+
+            {workGroups.filter((g) => !g.isDefault).length === 0 && (
+              <Text style={styles.hintMuted}>No work groups yet — add one below.</Text>
+            )}
+
+            <Text style={styles.fieldLabel}>Add a work group</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Vehicles"
+              placeholderTextColor={Colors.textMuted}
+              value={newGroupName}
+              onChangeText={setNewGroupName}
+            />
+
+            {newGroupImageUri ? (
+              <View style={styles.imagePreviewRow}>
+                <Image source={{ uri: newGroupImageUri }} style={styles.imagePreview} contentFit="cover" />
+                <TouchableOpacity onPress={() => setNewGroupImageUri(null)}>
+                  <Text style={styles.removeImageText}>Remove image</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.fieldLabel}>Colour</Text>
+                <View style={styles.paletteRow}>
+                  {WorkGroupPalette.map((c) => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.swatchOption, { backgroundColor: c }, newGroupColor === c && styles.swatchOptionActive]}
+                      onPress={() => setNewGroupColor(c)}
+                    />
+                  ))}
+                </View>
+                <TouchableOpacity onPress={pickGroupImage}>
+                  <Text style={styles.uploadImageText}>Or upload an image</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <Button
+              label="Add Work Group"
+              onPress={handleCreateGroup}
+              loading={creatingGroup}
+              disabled={!newGroupName.trim()}
+              fullWidth
+              style={styles.topGap}
+            />
+          </Card>
+        )}
+
         {/* Owned organisations, active or not — the only place a deactivated
             org stays visible and manageable. */}
         {ownedOrgs.length > 0 && (
@@ -206,7 +352,99 @@ export default function AdminDashboardScreen() {
           </Card>
         )}
       </ScrollView>
+
+      <WorkGroupSupervisorModal
+        group={managingGroup}
+        supervisors={supervisors}
+        isAdmin={isAdmin}
+        onClose={() => setManagingGroup(null)}
+        onChanged={load}
+      />
     </View>
+  );
+}
+
+// ── Work group supervisor modal ──────────────────────────────────────────────
+// Lists every org supervisor with an assign/unassign toggle. Only an admin
+// can toggle — a supervisor viewing this sees the roster but can't change it,
+// matching "only the owner allocates supervisors".
+function WorkGroupSupervisorModal({
+  group,
+  supervisors,
+  isAdmin,
+  onClose,
+  onChanged,
+}: {
+  group: WorkGroupDetail | null;
+  supervisors: Profile[];
+  isAdmin: boolean;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const insets = useSafeAreaInsets();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  if (!group) return null;
+
+  async function toggle(userId: string, active: boolean) {
+    if (!isAdmin || !group) return;
+    setBusy(userId);
+    const { error } = active
+      ? await removeWorkGroupSupervisor(group.id, userId)
+      : await assignWorkGroupSupervisor(group.id, userId);
+    if (error) Alert.alert('Error', error.message ?? 'Could not update this work group');
+    await onChanged();
+    setBusy(null);
+  }
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle} numberOfLines={1}>{group.name}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={8}>
+              <Icon name="close" size="md" color={Colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.modalHint}>
+            {isAdmin
+              ? 'Snags routed here auto-assign to the supervisor if exactly one is set.'
+              : 'Only an admin can change who supervises this work group.'}
+          </Text>
+
+          <ScrollView style={styles.modalScroll}>
+            {supervisors.map((s) => {
+              const active = group.supervisorIds.includes(s.id);
+              return (
+                <View key={s.id} style={styles.assignRow}>
+                  <Text style={styles.assignName} numberOfLines={1}>{s.name || s.email}</Text>
+                  <TouchableOpacity
+                    style={[styles.toggle, active && styles.toggleActive, !isAdmin && styles.toggleDisabled]}
+                    onPress={() => toggle(s.id, active)}
+                    disabled={!isAdmin || busy === s.id}
+                    activeOpacity={0.7}
+                  >
+                    {busy === s.id ? (
+                      <ActivityIndicator size="small" color={active ? Colors.white : Colors.primary} />
+                    ) : (
+                      <Text style={[styles.toggleText, active && styles.toggleTextActive]}>
+                        {active ? 'Supervisor' : 'Assign'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+            {supervisors.length === 0 && (
+              <Text style={styles.hintMuted}>No supervisors in this organisation yet.</Text>
+            )}
+          </ScrollView>
+
+          <Button label="Done" onPress={onClose} fullWidth style={styles.topGap} />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -257,4 +495,60 @@ const styles = StyleSheet.create({
   statusPillText: { fontSize: Typography.xs, fontWeight: Typography.semibold },
   statusPillTextActive: { color: Colors.success },
   statusPillTextInactive: { color: Colors.priority.medium },
+
+  // Work groups
+  wgCard: { gap: Spacing.sm },
+  hint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
+  hintMuted: { fontSize: Typography.sm, color: Colors.textMuted, fontStyle: 'italic' },
+  fieldLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary, marginTop: Spacing.xs },
+  topGap: { marginTop: Spacing.sm },
+  input: {
+    minHeight: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.input,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  wgRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.xs },
+  wgSwatch: { width: 40, height: 40, borderRadius: Radius.button },
+  wgInfo: { flex: 1, gap: 2 },
+  wgName: { fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textPrimary },
+  wgMeta: { fontSize: Typography.xs, color: Colors.textMuted },
+  paletteRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  swatchOption: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
+  swatchOptionActive: { borderColor: Colors.textPrimary },
+  uploadImageText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.primary, marginTop: Spacing.xs },
+  imagePreviewRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  imagePreview: { width: 60, height: 60, borderRadius: Radius.button, backgroundColor: Colors.background },
+  removeImageText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.danger },
+
+  // Work group supervisor modal
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.card, borderTopRightRadius: Radius.card,
+    padding: Spacing.lg, gap: Spacing.sm, maxHeight: '85%',
+  },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalTitle: { flex: 1, fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
+  modalHint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
+  modalScroll: { marginTop: Spacing.sm },
+  assignRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm,
+    paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  assignName: { flex: 1, fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textPrimary },
+  toggle: {
+    minWidth: 84, height: 34, paddingHorizontal: Spacing.sm, borderRadius: Radius.button,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  toggleActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  toggleDisabled: { opacity: 0.5 },
+  toggleText: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textSecondary },
+  toggleTextActive: { color: Colors.white },
 });

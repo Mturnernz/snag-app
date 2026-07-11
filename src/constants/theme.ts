@@ -66,6 +66,20 @@ export const Colors = {
   danger: '#EF4444',
 };
 
+// Work group tile colours — a curated palette an admin/supervisor picks from
+// rather than a freeform colour picker, so tiles always stay legible with
+// white icon/label text on top.
+export const WorkGroupPalette = [
+  '#2563EB', // blue
+  '#DC2626', // red
+  '#16A34A', // green
+  '#D97706', // amber
+  '#7C3AED', // purple
+  '#0891B2', // cyan
+  '#DB2777', // pink
+  '#4B5563', // slate
+];
+
 // Card alert borders — a deliberate, narrow exception to "elevated cards
 // drop their border": severity/kind-driven borders that make injury,
 // critical, and improvement snags immediately scannable in the list, layered

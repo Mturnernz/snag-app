@@ -16,7 +16,8 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRoute, useFocusEffect, RouteProp } from '@react-navigation/native';
+import { useRoute, useNavigation, useFocusEffect, RouteProp } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
   SnagStatus, SnagKind, SnagLane, SnagSeverity, Comment, Profile, RootStackParamList, VoteValue,
@@ -25,7 +26,7 @@ import { Colors, Radius, Spacing, Typography, IconSize } from '../constants/them
 import {
   supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers,
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
-  getSiteAssignees, SiteAssignee,
+  getSiteAssignees, SiteAssignee, unmergeSnag,
 } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
@@ -37,8 +38,10 @@ import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 interface IssueDetail {
   id: string;
@@ -58,6 +61,14 @@ interface IssueDetail {
   vote_score?: number;
   upvote_count?: number;
   downvote_count?: number;
+  parent_snag_id?: string | null;
+  child_count?: number;
+}
+
+interface MergedChild {
+  id: string;
+  reference: string;
+  status: SnagStatus;
 }
 
 // Mirrors the serious-lane resolve gate in update_snag_status: the first
@@ -90,9 +101,13 @@ function timeAgo(dateStr: string): string {
 export default function IssueDetailScreen() {
   const insets = useSafeAreaInsets();
   const route = useRoute<Route>();
+  const navigation = useNavigation<Nav>();
   const { issueId } = route.params;
 
   const [issue, setIssue] = useState<IssueDetail | null>(null);
+  const [parentReference, setParentReference] = useState<string | null>(null);
+  const [children, setChildren] = useState<MergedChild[]>([]);
+  const [childToRemove, setChildToRemove] = useState<MergedChild | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -176,7 +191,7 @@ export default function IssueDetailScreen() {
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, is_public_submission')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, is_public_submission, parent_snag_id, child_count')
       .eq('id', issueId)
       .single();
 
@@ -195,8 +210,38 @@ export default function IssueDetailScreen() {
       } else {
         setPhotoUrls([]);
       }
+
+      // Merge state — these two are mutually exclusive per the
+      // single-level-hierarchy invariant enforced server-side.
+      if (data.child_count > 0) {
+        const { data: kids } = await supabase
+          .from('snags_with_details')
+          .select('id, reference, status')
+          .eq('parent_snag_id', issueId)
+          .order('created_at', { ascending: true });
+        setChildren((kids ?? []) as MergedChild[]);
+        setParentReference(null);
+      } else if (data.parent_snag_id) {
+        const { data: parent } = await supabase
+          .from('snags_with_details')
+          .select('reference')
+          .eq('id', data.parent_snag_id)
+          .single();
+        setParentReference(parent?.reference ?? null);
+        setChildren([]);
+      } else {
+        setChildren([]);
+        setParentReference(null);
+      }
     }
     setLoadingIssue(false);
+  }
+
+  async function handleUnmerge() {
+    if (!childToRemove) return;
+    const { error } = await unmergeSnag(childToRemove.id);
+    setChildToRemove(null);
+    if (!error) fetchIssue();
   }
 
   async function fetchComments() {
@@ -443,6 +488,43 @@ export default function IssueDetailScreen() {
             />
           )}
 
+          {/* Merge — a snag is either a parent (with children below) or a
+              child (with a banner pointing at its parent), never both. */}
+          {parentReference && (
+            <TouchableOpacity
+              style={styles.mergeBanner}
+              onPress={() => issue.parent_snag_id && navigation.push('IssueDetail', { issueId: issue.parent_snag_id })}
+              activeOpacity={0.7}
+            >
+              <Icon name="git-merge-outline" size="sm" color={Colors.primary} />
+              <Text style={styles.mergeBannerText}>Merged into {parentReference}</Text>
+              <Icon name="chevron-forward" size="sm" color={Colors.primary} />
+            </TouchableOpacity>
+          )}
+
+          {children.length > 0 && (
+            <Card variant="elevated" style={styles.mergedCard}>
+              <Text style={styles.mergedHeader}>Merged snags ({children.length})</Text>
+              {children.map((child) => (
+                <View key={child.id} style={styles.mergedRow}>
+                  <TouchableOpacity
+                    style={styles.mergedRowMain}
+                    onPress={() => navigation.push('IssueDetail', { issueId: child.id })}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.mergedRowRef}>{child.reference}</Text>
+                    <StatusBadge status={child.status} />
+                  </TouchableOpacity>
+                  {canEdit && (
+                    <TouchableOpacity onPress={() => setChildToRemove(child)} hitSlop={8}>
+                      <Icon name="close-circle-outline" size="md" color={Colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </Card>
+          )}
+
           {/* Serious-lane investigation — clear the resolve gate in-app */}
           {canManageInvestigation && investigation && (
             <InvestigationPanel
@@ -578,6 +660,17 @@ export default function IssueDetailScreen() {
         </TouchableOpacity>
       </View>
       )}
+
+      <ConfirmDialog
+        visible={!!childToRemove}
+        title="Remove from this merge?"
+        message={`${childToRemove?.reference} will become an independent snag again with its own status.`}
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={handleUnmerge}
+        onCancel={() => setChildToRemove(null)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -689,4 +782,29 @@ const styles = StyleSheet.create({
   mentionChipText: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.medium },
 
   mentionText: { color: Colors.primary, fontWeight: Typography.semibold },
+
+  // Merge
+  mergeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.button,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  mergeBannerText: { flex: 1, fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.primary },
+  mergedCard: { gap: Spacing.sm, marginTop: Spacing.sm },
+  mergedHeader: { fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.textMuted, letterSpacing: 0.5 },
+  mergedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  mergedRowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  mergedRowRef: { flex: 1, fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textPrimary },
 });

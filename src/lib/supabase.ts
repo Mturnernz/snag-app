@@ -452,6 +452,31 @@ export async function resolveSnag(snagId: string, note: string) {
   return supabase.rpc('resolve_snag', { p_snag_id: snagId, p_note: note });
 }
 
+// ─── Merge (parent/child) ───────────────────────────────────────────────────
+// Creates (or reuses) a parent snag and attaches the rest of the selection as
+// its children — see merge_snags for the disambiguation rules around
+// kind/severity/site when the selection doesn't already agree.
+export async function mergeSnags(params: {
+  snagIds: string[];
+  description?: string | null;
+  kind?: SnagKind | null;
+  severity?: SnagSeverity | null;
+  siteId?: string | null;
+}) {
+  const { data, error } = await supabase.rpc('merge_snags', {
+    p_snag_ids: params.snagIds,
+    p_description: params.description ?? null,
+    p_kind: params.kind ?? null,
+    p_severity: params.severity ?? null,
+    p_site_id: params.siteId ?? null,
+  }).single();
+  return { data: data as { id: string; reference: string } | null, error };
+}
+
+export async function unmergeSnag(snagId: string) {
+  return supabase.rpc('unmerge_snag', { p_snag_id: snagId });
+}
+
 export async function completeChecklistStep(snagId: string, step: ChecklistStep) {
   return supabase.rpc('complete_checklist_step', { p_snag_id: snagId, p_step: step });
 }

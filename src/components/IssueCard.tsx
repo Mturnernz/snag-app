@@ -22,6 +22,11 @@ interface Props {
   /** Smaller photo/title and a one-line footer, for the 2-column grid. */
   compact?: boolean;
   onPress: () => void;
+  /** Enters merge select mode on the list screen. */
+  onLongPress?: () => void;
+  /** Whether select mode is active — tapping toggles selection instead of navigating. */
+  selectable?: boolean;
+  selected?: boolean;
 }
 
 function timeAgo(dateStr: string): string {
@@ -84,7 +89,7 @@ function StatsRow({ commentCount, voteScore }: { commentCount: number; voteScore
   );
 }
 
-function IssueCard({ issue, photoUrl, compact, onPress }: Props) {
+function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable, selected }: Props) {
   const reporterName = issue.reporter_name || issue.reporter?.name || 'Unknown';
   const commentCount = issue.comment_count ?? 0;
   const voteScore = issue.vote_score ?? 0;
@@ -96,10 +101,22 @@ function IssueCard({ issue, photoUrl, compact, onPress }: Props) {
         styles.card,
         compact && styles.cardCompact,
         borderColor && { borderWidth: 2, borderColor },
+        selected && styles.cardSelected,
       ]}
       onPress={onPress}
+      onLongPress={onLongPress}
       activeOpacity={0.85}
     >
+      {selectable && (
+        <View style={styles.selectOverlay}>
+          <Icon
+            name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+            size="lg"
+            color={selected ? Colors.primary : Colors.white}
+          />
+        </View>
+      )}
+
       {/* Photo */}
       {photoUrl ? (
         <Image
@@ -165,6 +182,16 @@ const styles = StyleSheet.create({
   },
   cardCompact: {
     flex: 1,
+  },
+  cardSelected: {
+    borderWidth: 2,
+    borderColor: Colors.primary,
+  },
+  selectOverlay: {
+    position: 'absolute',
+    top: Spacing.md,
+    left: Spacing.md,
+    zIndex: 1,
   },
   photo: {
     width: '100%',

@@ -91,6 +91,12 @@ export interface Snag {
   escalated_by: string | null;
   escalated_at: string | null;
   approver_id: string | null;
+  // Merge (parent/child) — a status change on a parent cascades to every
+  // child; a child otherwise behaves like an ordinary snag.
+  parent_snag_id?: string | null;
+  merged_by?: string | null;
+  merged_at?: string | null;
+  child_count?: number;
   // Joined relations (populated when read via the frontend's own queries)
   reporter?: Pick<Profile, 'id' | 'name'>;
   owner?: Pick<Profile, 'id' | 'name'> | null;

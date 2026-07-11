@@ -3,21 +3,28 @@ import {
   View,
   Text,
   FlatList,
+  TextInput,
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
   TouchableOpacity,
   Modal,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { Snag, SnagStatus, STATUS_LABELS, UserRole, RootStackParamList } from '../types';
+import {
+  Snag, SnagStatus, SnagKind, SnagSeverity, STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, UserRole, RootStackParamList,
+} from '../types';
 import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme';
-import { supabase, getSnagPhotoUrls, getProfile } from '../lib/supabase';
+import { supabase, getSnagPhotoUrls, getProfile, mergeSnags } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
+import Button from '../components/Button';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
@@ -64,6 +71,13 @@ export default function IssueListScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Merge — long-press a card to enter select mode. selectedIds is ordered:
+  // the first entry is the "anchor" whose content seeds the new parent.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [mergeModalVisible, setMergeModalVisible] = useState(false);
+  const canMerge = role === 'officer_admin' || role === 'supervisor';
+
   const fetchIssues = useCallback(async () => {
     // Re-check org state every fetch — it changes with the org switcher, and
     // it decides both the screen title and the public-submission filtering.
@@ -79,7 +93,7 @@ export default function IssueListScreen() {
 
     let query = supabase
       .from('snags_with_details')
-      .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_name, is_public_submission')
+      .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission')
       .limit(50);
 
     if (memberOfOrg) {
@@ -150,6 +164,34 @@ export default function IssueListScreen() {
     setRefreshing(false);
   }, [fetchIssues]);
 
+  function handleLongPress(id: string) {
+    if (!canMerge) return;
+    setSelectMode(true);
+    setSelectedIds([id]);
+  }
+
+  function handleCardPress(item: Snag) {
+    if (selectMode) {
+      setSelectedIds((prev) =>
+        prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id]
+      );
+      return;
+    }
+    navigation.navigate('IssueDetail', { issueId: item.id });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds([]);
+  }
+
+  async function handleMerged(newSnag: { id: string; reference: string }) {
+    setMergeModalVisible(false);
+    exitSelectMode();
+    await fetchIssues();
+    navigation.navigate('IssueDetail', { issueId: newSnag.id });
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <OrgSwitcherHeader
@@ -159,20 +201,34 @@ export default function IssueListScreen() {
         onSwitched={fetchIssues}
       />
 
-      <View style={styles.filterWrap}>
-        <View style={styles.filterChips}>
-          <Chip
-            options={hasOrg ? MEMBER_FILTER_OPTIONS : FILTER_OPTIONS}
-            value={filter}
-            onChange={setFilter}
-            variant="chip"
+      {selectMode ? (
+        <View style={styles.selectBar}>
+          <TouchableOpacity onPress={exitSelectMode} style={styles.selectBarCancel}>
+            <Text style={styles.selectBarCancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.selectBarCount}>{selectedIds.length} selected</Text>
+          <Button
+            label="Merge Snags"
+            onPress={() => setMergeModalVisible(true)}
+            disabled={selectedIds.length < 2}
           />
         </View>
-        <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)} activeOpacity={0.7}>
-          <Icon name="swap-vertical-outline" size="sm" color={Colors.textSecondary} />
-          <Text style={styles.sortButtonText}>{SORT_OPTIONS.find((o) => o.key === sort)?.label}</Text>
-        </TouchableOpacity>
-      </View>
+      ) : (
+        <View style={styles.filterWrap}>
+          <View style={styles.filterChips}>
+            <Chip
+              options={hasOrg ? MEMBER_FILTER_OPTIONS : FILTER_OPTIONS}
+              value={filter}
+              onChange={setFilter}
+              variant="chip"
+            />
+          </View>
+          <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)} activeOpacity={0.7}>
+            <Icon name="swap-vertical-outline" size="sm" color={Colors.textSecondary} />
+            <Text style={styles.sortButtonText}>{SORT_OPTIONS.find((o) => o.key === sort)?.label}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <Modal visible={sortModalVisible} transparent animationType="fade" onRequestClose={() => setSortModalVisible(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSortModalVisible(false)}>
@@ -215,9 +271,10 @@ export default function IssueListScreen() {
               issue={item}
               compact
               photoUrl={item.photo_path ? photoUrls[item.photo_path] ?? null : null}
-              onPress={() =>
-                navigation.navigate('IssueDetail', { issueId: item.id })
-              }
+              onPress={() => handleCardPress(item)}
+              onLongPress={() => handleLongPress(item.id)}
+              selectable={selectMode}
+              selected={selectedIds.includes(item.id)}
             />
           )}
           contentContainerStyle={[
@@ -256,7 +313,169 @@ export default function IssueListScreen() {
           }
         />
       )}
+
+      <MergeModal
+        visible={mergeModalVisible}
+        snags={issues.filter((i) => selectedIds.includes(i.id))}
+        anchorId={selectedIds[0]}
+        onCancel={() => setMergeModalVisible(false)}
+        onMerged={handleMerged}
+      />
     </View>
+  );
+}
+
+// ── Merge modal ──────────────────────────────────────────────────────────────
+// Always shows an editable description (pre-filled from the anchor — the
+// first card long-pressed). Kind/severity/site pickers only appear when that
+// field is actually ambiguous across the current selection; severity is only
+// blocking when the resolved kind is hazard/incident.
+function MergeModal({
+  visible,
+  snags,
+  anchorId,
+  onCancel,
+  onMerged,
+}: {
+  visible: boolean;
+  snags: Snag[];
+  anchorId: string | undefined;
+  onCancel: () => void;
+  onMerged: (snag: { id: string; reference: string }) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [description, setDescription] = useState('');
+  const [pickedKind, setPickedKind] = useState<SnagKind | null>(null);
+  const [pickedSeverity, setPickedSeverity] = useState<SnagSeverity | null>(null);
+  const [pickedSiteId, setPickedSiteId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const anchor = snags.find((s) => s.id === anchorId) ?? snags[0];
+  const kindValues = [...new Set(snags.map((s) => s.kind))];
+  const kindAmbiguous = kindValues.length > 1;
+  const resolvedKind = kindAmbiguous ? pickedKind : kindValues[0] ?? null;
+
+  const severityValues = [...new Set(snags.map((s) => s.severity).filter((v): v is SnagSeverity => Boolean(v)))];
+  const severityAmbiguous = (resolvedKind === 'hazard' || resolvedKind === 'incident') && severityValues.length > 1;
+
+  const siteOptions = [...new Map(snags.map((s) => [s.site_id, s.site_name ?? 'Unknown site'])).entries()];
+  const siteAmbiguous = siteOptions.length > 1;
+
+  useEffect(() => {
+    if (!visible) return;
+    setDescription(anchor?.description ?? '');
+    setPickedKind(null);
+    setPickedSeverity(null);
+    setPickedSiteId(null);
+    setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, anchorId]);
+
+  if (!visible) return null;
+
+  const canConfirm =
+    snags.length >= 2 &&
+    (!kindAmbiguous || pickedKind) &&
+    (!severityAmbiguous || pickedSeverity) &&
+    (!siteAmbiguous || pickedSiteId);
+
+  async function handleConfirm() {
+    setSubmitting(true);
+    setError(null);
+    const { data, error: mergeError } = await mergeSnags({
+      snagIds: snags.map((s) => s.id),
+      description: description.trim() || null,
+      kind: pickedKind,
+      severity: pickedSeverity,
+      siteId: pickedSiteId,
+    });
+    setSubmitting(false);
+    if (mergeError || !data) {
+      setError(mergeError?.message ?? 'Could not merge those snags');
+      return;
+    }
+    onMerged(data);
+  }
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onCancel}>
+      <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Merge {snags.length} snags</Text>
+            <TouchableOpacity onPress={onCancel} hitSlop={8}>
+              <Icon name="close" size="md" color={Colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.modalHint}>
+            This creates a parent snag covering all {snags.length}. Changing the parent's status will change
+            every child's status too — each child keeps its current status until then.
+          </Text>
+
+          <ScrollView keyboardShouldPersistTaps="handled" style={styles.modalScroll}>
+            <Text style={styles.fieldLabel}>Description</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              placeholder="What's the combined issue?"
+              placeholderTextColor={Colors.textMuted}
+            />
+
+            {kindAmbiguous && (
+              <>
+                <Text style={styles.fieldLabel}>These have different categories — pick one</Text>
+                <Chip<SnagKind | ''>
+                  options={kindValues.map((k) => ({ key: k, label: KIND_LABELS[k] }))}
+                  value={pickedKind ?? ''}
+                  onChange={(k) => setPickedKind(k || null)}
+                  variant="segmented"
+                />
+              </>
+            )}
+
+            {severityAmbiguous && (
+              <>
+                <Text style={styles.fieldLabel}>These have different severities — pick one</Text>
+                <Chip<SnagSeverity | ''>
+                  options={severityValues.map((s) => ({ key: s, label: SEVERITY_LABELS[s] }))}
+                  value={pickedSeverity ?? ''}
+                  onChange={(s) => setPickedSeverity(s || null)}
+                  variant="segmented"
+                />
+              </>
+            )}
+
+            {siteAmbiguous && (
+              <>
+                <Text style={styles.fieldLabel}>These are at different sites — pick one</Text>
+                <Chip
+                  options={siteOptions.map(([id, name]) => ({ key: id ?? '', label: name }))}
+                  value={pickedSiteId ?? ''}
+                  onChange={setPickedSiteId}
+                  variant="segmented"
+                />
+              </>
+            )}
+
+            {error && <Text style={styles.modalError}>{error}</Text>}
+          </ScrollView>
+
+          <View style={styles.modalActions}>
+            <Button label="Cancel" variant="outline" onPress={onCancel} style={styles.flex1} />
+            <Button
+              label="Confirm Merge"
+              onPress={handleConfirm}
+              loading={submitting}
+              disabled={!canConfirm}
+              style={styles.flex1}
+            />
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -294,6 +513,58 @@ const styles = StyleSheet.create({
     fontWeight: Typography.medium,
     color: Colors.textSecondary,
   },
+
+  // Merge select mode
+  selectBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  selectBarCancel: { paddingVertical: Spacing.xs },
+  selectBarCancelText: { fontSize: Typography.base, color: Colors.primary },
+  selectBarCount: { flex: 1, fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
+
+  // Merge modal
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.card, borderTopRightRadius: Radius.card,
+    padding: Spacing.lg, gap: Spacing.sm, maxHeight: '85%',
+  },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalTitle: { flex: 1, fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
+  modalHint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
+  modalScroll: { marginTop: Spacing.sm },
+  fieldLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary, marginTop: Spacing.sm, marginBottom: Spacing.xs },
+  modalInput: {
+    minHeight: 80,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.input,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+    textAlignVertical: 'top',
+  },
+  modalError: {
+    fontSize: Typography.sm,
+    color: Colors.danger,
+    backgroundColor: Colors.priority.highBg,
+    borderRadius: Radius.button,
+    padding: Spacing.sm,
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+  },
+  modalActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
+  flex1: { flex: 1 },
+
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(17, 24, 39, 0.5)',

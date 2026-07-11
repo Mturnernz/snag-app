@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet, Alert } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,6 +20,10 @@ interface PhotoItem {
 export interface PhotoPickerHandle {
   /** Resolves the uploaded photo paths, awaiting any in-flight uploads. Skips any that failed to upload. */
   getPhotoUrls: () => Promise<string[]>;
+  /** Raw local URIs of the current picks, independent of upload state — used
+   *  to carry photos over to another PhotoPicker instance (e.g. switching
+   *  from the niggle form into the serious-incident flow). */
+  getLocalUris: () => string[];
   reset: () => void;
 }
 
@@ -31,12 +35,16 @@ interface Props {
   /** Storage bucket to upload into. Defaults to snag-photos; the investigation
    *  evidence picker passes 'snag-evidence'. */
   bucket?: string;
+  /** Local URIs to pre-load on mount (once pathPrefix is known), e.g. photos
+   *  carried over from another report flow. Only seeded once. */
+  initialUris?: string[];
   onUploadingChange?: (uploading: boolean) => void;
   onPhotosChange?: (count: number) => void;
 }
 
-const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, onUploadingChange, onPhotosChange }, ref) => {
+const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, initialUris, onUploadingChange, onPhotosChange }, ref) => {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
+  const seededRef = useRef(false);
 
   useEffect(() => {
     onPhotosChange?.(photos.length);
@@ -70,6 +78,15 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
       return next;
     });
   }
+
+  // Seed with photos carried over from another PhotoPicker instance, once
+  // pathPrefix is known (uploads can't start before then). Runs once.
+  useEffect(() => {
+    if (seededRef.current || !pathPrefix || !initialUris || initialUris.length === 0) return;
+    seededRef.current = true;
+    initialUris.slice(0, MAX_PHOTOS).forEach((uri) => addPhoto(uri));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathPrefix, initialUris]);
 
   function offerSource() {
     Alert.alert('Add a photo', undefined, [
@@ -124,6 +141,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
       const paths = await Promise.all(photos.map((p) => p.uploadTask));
       return paths.filter((p): p is string => Boolean(p));
     },
+    getLocalUris: () => photos.map((p) => p.uri),
     reset: () => setPhotos([]),
   }));
 

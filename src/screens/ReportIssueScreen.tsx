@@ -24,6 +24,7 @@ import {
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag, getMemberships, setActiveOrg, resolveActiveOrg, Membership } from '../lib/supabase';
 import { useReportTarget } from '../context/ReportTargetContext';
+import { useIncidentDraft } from '../context/IncidentDraftContext';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
@@ -40,6 +41,7 @@ export default function ReportIssueScreen() {
   const navigation = useNavigation<Nav>();
   const photoPickerRef = useRef<PhotoPickerHandle>(null);
   const { target, clearTarget } = useReportTarget();
+  const { setDraft } = useIncidentDraft();
 
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [description, setDescription] = useState('');
@@ -341,7 +343,13 @@ export default function ReportIssueScreen() {
             label="Report a Serious Incident"
             variant="seriousOutline"
             icon="warning-outline"
-            onPress={() => navigation.navigate('ReportIncidentDetails')}
+            onPress={() => {
+              setDraft({
+                description,
+                photoUris: photoPickerRef.current?.getLocalUris() ?? [],
+              });
+              navigation.navigate('ReportIncidentDetails');
+            }}
             fullWidth
           />
         )}
@@ -443,15 +451,18 @@ const styles = StyleSheet.create({
   orgPillText: {
     flex: 1,
     gap: 1,
+    alignItems: 'center',
   },
   orgPillLabel: {
     fontSize: Typography.xs,
     color: Colors.textMuted,
+    textAlign: 'center',
   },
   orgPillOrg: {
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
+    textAlign: 'center',
   },
   orgPillChangeRow: {
     flexDirection: 'row',

@@ -138,6 +138,7 @@ export default function ReportIncidentDetailsScreen() {
           <PhotoPicker
             ref={photoPickerRef}
             pathPrefix={orgId}
+            initialUris={draft.photoUris}
             onUploadingChange={setIsPhotoUploading}
             onPhotosChange={setPhotoCount}
           />

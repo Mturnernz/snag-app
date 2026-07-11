@@ -6,6 +6,9 @@ export interface IncidentDraft {
   kind: SnagKind; // constrained to 'hazard' | 'incident' within this flow
   severity: SnagSeverity;
   photoCount: number;
+  /** Local file URIs carried over from the niggle form's photo picker when
+   *  the reporter switches to "Report a Serious Incident" mid-report. */
+  photoUris: string[];
 }
 
 const INITIAL_DRAFT: IncidentDraft = {
@@ -13,6 +16,7 @@ const INITIAL_DRAFT: IncidentDraft = {
   kind: 'incident',
   severity: 'moderate',
   photoCount: 0,
+  photoUris: [],
 };
 
 type SubmitFn = () => Promise<{ error?: string; snagId?: string; reference?: string }>;

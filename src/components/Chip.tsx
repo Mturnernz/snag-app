@@ -61,14 +61,15 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   chip: {
-    height: 34,
     paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
     borderRadius: 17,
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   chipActive: {
     backgroundColor: Colors.primaryLight,

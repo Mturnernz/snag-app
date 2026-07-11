@@ -13,9 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { Snag, SnagStatus, STATUS_LABELS, RootStackParamList } from '../types';
+import { Snag, SnagStatus, STATUS_LABELS, ROLE_LABELS, UserRole, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme';
-import { supabase, getSnagPhotoUrls } from '../lib/supabase';
+import { supabase, getSnagPhotoUrls, getProfile } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
 import EmptyState from '../components/EmptyState';
@@ -58,6 +58,8 @@ export default function IssueListScreen() {
   const [issues, setIssues] = useState<Snag[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [hasOrg, setHasOrg] = useState<boolean | null>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
+  const [orgName, setOrgName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -67,12 +69,10 @@ export default function IssueListScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     let memberOfOrg = false;
     if (user) {
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('org_id')
-        .eq('id', user.id)
-        .maybeSingle();
-      memberOfOrg = Boolean(prof?.org_id);
+      const profile = await getProfile(user.id);
+      memberOfOrg = Boolean(profile?.org_id);
+      setRole(profile?.role ?? null);
+      setOrgName(profile?.organisation?.name ?? null);
     }
     setHasOrg(memberOfOrg);
 
@@ -114,13 +114,17 @@ export default function IssueListScreen() {
     const { data, error } = await query;
 
     if (!error && data) {
-      setIssues(
-        data.map((row: any) => ({
-          ...row,
-          reporter: row.reporter_id ? { id: row.reporter_id, name: row.reporter_name } : undefined,
-          owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : null,
-        }))
-      );
+      const mapped = data.map((row: any) => ({
+        ...row,
+        reporter: row.reporter_id ? { id: row.reporter_id, name: row.reporter_name } : undefined,
+        owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : null,
+      }));
+      // Injury snags float to the top regardless of the active sort, unless
+      // already resolved — everything else keeps its existing relative order
+      // (Array.sort is stable).
+      const isPinned = (s: Snag) => s.severity === 'injury' && s.status !== 'resolved';
+      mapped.sort((a, b) => Number(isPinned(b)) - Number(isPinned(a)));
+      setIssues(mapped);
       const paths = data.map((row: any) => row.photo_path).filter(Boolean);
       getSnagPhotoUrls(paths).then(setPhotoUrls);
     }
@@ -148,7 +152,15 @@ export default function IssueListScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{hasOrg === false ? 'My Reports' : 'Snags'}</Text>
+        <View style={styles.headerSide}>
+          <Text style={styles.headerTitle}>{hasOrg === false ? 'My Reports' : 'Snags'}</Text>
+        </View>
+        <View style={styles.headerCenter}>
+          {role && <Text style={styles.headerRole} numberOfLines={1}>{ROLE_LABELS[role]}</Text>}
+        </View>
+        <View style={[styles.headerSide, styles.headerSideRight]}>
+          {orgName && <Text style={styles.headerOrgName} numberOfLines={1}>{orgName}</Text>}
+        </View>
       </View>
 
       <View style={styles.filterWrap}>
@@ -200,9 +212,12 @@ export default function IssueListScreen() {
         <FlatList
           data={issues}
           keyExtractor={(item) => item.id}
+          numColumns={2}
+          columnWrapperStyle={styles.columnWrapper}
           renderItem={({ item }) => (
             <IssueCard
               issue={item}
+              compact
               photoUrl={item.photo_path ? photoUrls[item.photo_path] ?? null : null}
               onPress={() =>
                 navigation.navigate('IssueDetail', { issueId: item.id })
@@ -213,7 +228,7 @@ export default function IssueListScreen() {
             styles.listContent,
             { paddingBottom: insets.bottom + 16 },
           ]}
-          ItemSeparatorComponent={() => <View style={{ height: Spacing.lg }} />}
+          ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           removeClippedSubviews
           windowSize={5}
           initialNumToRender={8}
@@ -255,6 +270,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: Colors.surface,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
@@ -265,6 +282,26 @@ const styles = StyleSheet.create({
     fontSize: Typography.xl,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
+  },
+  headerSide: {
+    flex: 1,
+  },
+  headerSideRight: {
+    alignItems: 'flex-end',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  headerRole: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textSecondary,
+  },
+  headerOrgName: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
   },
   filterWrap: {
     flexDirection: 'row',
@@ -333,6 +370,9 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: Spacing.lg,
+  },
+  columnWrapper: {
+    gap: Spacing.sm,
   },
   loadingContainer: {
     flex: 1,

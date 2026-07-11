@@ -7,13 +7,14 @@ import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { supabase, getProfile, createOrganisationAndOwner, resolveActiveOrg } from './src/lib/supabase';
+import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiveOrg, getMemberships, Membership } from './src/lib/supabase';
 import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import AuthScreen from './src/screens/AuthScreen';
 import OrgSetupScreen from './src/screens/OrgSetupScreen';
 import AdminSetupScreen from './src/screens/AdminSetupScreen';
+import OrgInactiveScreen from './src/screens/OrgInactiveScreen';
 import { ToastProvider } from './src/hooks/useToast';
 
 const PUBLIC_REPORTER_KEY = 'snag.publicReporterMode';
@@ -23,6 +24,10 @@ export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isNewAdmin, setIsNewAdmin] = useState(false);
+  // Every org this user belongs to has been deactivated — non-null only in
+  // that case. Checked ahead of the org-setup gate below since profile.org_id
+  // is a mirror that can go stale if the org was deactivated after it was set.
+  const [inactiveMemberships, setInactiveMemberships] = useState<Membership[] | null>(null);
   // "Just report an issue" — a signed-in user with no organisation who only
   // submits to public orgs. Persisted so app restarts skip the org-setup gate.
   const [publicReporter, setPublicReporter] = useState(false);
@@ -45,6 +50,61 @@ export default function App() {
     setPendingCreate(null);
   }
 
+  // Resolves profile/org/pending-intent state for a signed-in user. Shared by
+  // the auth-state listener and OrgInactiveScreen's "check again"/reactivate
+  // flow, since both need the exact same resolution logic.
+  async function loadUserState(userId: string) {
+    // Checked first and independent of profile.org_id, which is just a mirror
+    // that can go stale if the org was deactivated after it was last set.
+    const memberships = await getMemberships();
+    const allInactive = memberships.length > 0 && memberships.every((m) => !m.org_active);
+    if (allInactive) {
+      setInactiveMemberships(memberships);
+      setProfile(await getProfile(userId));
+      setLoading(false);
+      return;
+    }
+    setInactiveMemberships(null);
+
+    let p = await getProfile(userId);
+    // Pick up any intent captured on the login screen after this component
+    // mounted; drop it if the account already has an org.
+    const { join, create } = await getPendingIntent();
+    if (p?.org_id) {
+      if (join || create) clearPendingIntent();
+      setPendingJoin(null);
+      setPendingCreate(null);
+    } else if (create) {
+      // Combined create-org flow: the account now exists, so create the
+      // organisation (and its default site) automatically and drop the user
+      // straight into the app — no OrgSetup/AdminSetup detour. On failure we
+      // keep the stored intent (so a restart can retry) and fall through to
+      // the manual org-setup chooser.
+      const { error } = await createOrganisationAndOwner(create.orgName, create.name);
+      if (!error) {
+        await clearPendingIntent();
+        p = await getProfile(userId);
+      }
+      setPendingJoin(null);
+      setPendingCreate(null);
+    } else {
+      // No mirrored org yet, but the account may belong to one (e.g. a
+      // worker whose active org was never set, or a single-org member).
+      // Default it from memberships before falling back to org setup.
+      const org = await resolveActiveOrg();
+      if (org) {
+        p = await getProfile(userId);
+        setPendingJoin(null);
+        setPendingCreate(null);
+      } else {
+        setPendingJoin(join);
+        setPendingCreate(create);
+      }
+    }
+    setProfile(p);
+    setLoading(false);
+  }
+
   useEffect(() => {
     if (Platform.OS === 'android') {
       import('expo-navigation-bar').then(NavigationBar => {
@@ -65,45 +125,10 @@ export default function App() {
       // OrgSetupScreen.
       if (event === 'SIGNED_OUT') {
         setProfile(null);
+        setInactiveMemberships(null);
         setLoading(false);
       } else if (session && event !== 'TOKEN_REFRESHED') {
-        let p = await getProfile(session.user.id);
-        // Pick up any intent captured on the login screen after this
-        // component mounted; drop it if the account already has an org.
-        const { join, create } = await getPendingIntent();
-        if (p?.org_id) {
-          if (join || create) clearPendingIntent();
-          setPendingJoin(null);
-          setPendingCreate(null);
-        } else if (create) {
-          // Combined create-org flow: the account now exists, so create the
-          // organisation (and its default site) automatically and drop the
-          // user straight into the app — no OrgSetup/AdminSetup detour. On
-          // failure we keep the stored intent (so a restart can retry) and
-          // fall through to the manual org-setup chooser.
-          const { error } = await createOrganisationAndOwner(create.orgName, create.name);
-          if (!error) {
-            await clearPendingIntent();
-            p = await getProfile(session.user.id);
-          }
-          setPendingJoin(null);
-          setPendingCreate(null);
-        } else {
-          // No mirrored org yet, but the account may belong to one (e.g. a
-          // worker whose active org was never set, or a single-org member).
-          // Default it from memberships before falling back to org setup.
-          const org = await resolveActiveOrg();
-          if (org) {
-            p = await getProfile(session.user.id);
-            setPendingJoin(null);
-            setPendingCreate(null);
-          } else {
-            setPendingJoin(join);
-            setPendingCreate(create);
-          }
-        }
-        setProfile(p);
-        setLoading(false);
+        await loadUserState(session.user.id);
       } else {
         setLoading(false);
       }
@@ -127,6 +152,22 @@ export default function App() {
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
         <ToastProvider>
           <AuthScreen />
+        </ToastProvider>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Every org this user belongs to has been deactivated.
+  if (inactiveMemberships) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="dark" backgroundColor="#FFFFFF" />
+        <ToastProvider>
+          <OrgInactiveScreen
+            memberships={inactiveMemberships}
+            onRecheck={() => loadUserState(session.user.id)}
+            onSignOut={signOut}
+          />
         </ToastProvider>
       </SafeAreaProvider>
     );

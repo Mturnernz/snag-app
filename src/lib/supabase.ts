@@ -362,6 +362,26 @@ export async function getOrgStats(orgId: string): Promise<OrgStats> {
   return { totalMembers, totalSnags: snags.length, byStatus, byKind, bySeverity };
 }
 
+export interface OrgSnagSummary {
+  total: number;
+  flagged: number;
+  in_progress: number;
+  resolved: number;
+  rca_pending: number;
+}
+
+// snags' RLS only exposes the active org's rows, so this RPC is needed to
+// summarise a non-active org you belong to (e.g. the Profile screen's org
+// list) — it re-checks real membership itself rather than relying on RLS.
+export async function getOrgSnagSummary(orgId: string): Promise<OrgSnagSummary | null> {
+  const { data, error } = await supabase.rpc('get_org_snag_summary', { p_org_id: orgId }).maybeSingle();
+  if (error) {
+    console.error('getOrgSnagSummary error:', error);
+    return null;
+  }
+  return data as OrgSnagSummary | null;
+}
+
 // ─── Snag helpers ─────────────────────────────────────────────────────────────
 
 export async function createSnag(params: {

@@ -13,15 +13,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Profile, Organisation, SnagStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
-import { supabase, signOut, getMemberships, setActiveOrg, Membership } from '../lib/supabase';
+import { supabase, signOut, getMemberships, getOrgSnagSummary, OrgSnagSummary, Membership } from '../lib/supabase';
 import { getUserTitle } from '../lib/points';
-import { useToast } from '../hooks/useToast';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Avatar from '../components/Avatar';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
+import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -39,7 +39,6 @@ const STATUS_COLORS: Record<SnagStatus, { text: string; bg: string }> = {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { showToast } = useToast();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userPoints, setUserPoints] = useState<number>(0);
   const [loading, setLoading] = useState(true);
@@ -53,9 +52,10 @@ export default function ProfileScreen() {
   // Snag stats
   const [snagCounts, setSnagCounts] = useState<SnagCounts | null>(null);
 
-  // Organisations (multi-org)
+  // Organisations (multi-org) — read-only summary list; switching happens
+  // via the header now.
   const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [switchingOrg, setSwitchingOrg] = useState<string | null>(null);
+  const [orgSummaries, setOrgSummaries] = useState<Record<string, OrgSnagSummary | null>>({});
 
   useEffect(() => {
     fetchProfile();
@@ -87,21 +87,15 @@ export default function ProfileScreen() {
         fetchUserPoints(user.id, data.org_id);
       }
     }
-    getMemberships().then(setMemberships);
+    getMemberships().then((ms) => {
+      setMemberships(ms);
+      ms.forEach((m) => {
+        getOrgSnagSummary(m.org_id).then((summary) => {
+          setOrgSummaries((prev) => ({ ...prev, [m.org_id]: summary }));
+        });
+      });
+    });
     setLoading(false);
-  }
-
-  async function handleSwitchOrg(membership: Membership) {
-    if (membership.is_active || switchingOrg) return;
-    setSwitchingOrg(membership.org_id);
-    const { error } = await setActiveOrg(membership.org_id);
-    setSwitchingOrg(null);
-    if (!error) {
-      showToast(`Now reporting to ${membership.org_name}`);
-      fetchProfile();
-    } else {
-      showToast(error.message ?? 'Could not switch organisation');
-    }
   }
 
   async function fetchUserPoints(userId: string, orgId: string) {
@@ -180,9 +174,12 @@ export default function ProfileScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Profile</Text>
-      </View>
+      <OrgSwitcherHeader
+        title="Profile"
+        role={profile?.role ?? null}
+        orgName={org?.name ?? null}
+        onSwitched={fetchProfile}
+      />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
@@ -282,33 +279,35 @@ export default function ProfileScreen() {
           </Card>
         )}
 
-        {/* Organisations — switch between memberships, or scan a QR to
-            join/switch on-site. */}
+        {/* Organisations — a read-only summary of every org you belong to.
+            Switch which one is active from the header above, or scan a QR
+            to join a new one. */}
         <Card variant="elevated" style={styles.orgsCard}>
           <Text style={styles.orgsTitle}>Organisations</Text>
-          {memberships.map((m) => (
-            <TouchableOpacity
-              key={m.org_id}
-              style={styles.orgRow}
-              onPress={() => handleSwitchOrg(m)}
-              disabled={m.is_active || switchingOrg !== null}
-              activeOpacity={0.7}
-            >
-              <View style={styles.orgRowText}>
-                <Text style={styles.orgRowName}>{m.org_name}</Text>
-                <Text style={styles.orgRowRole}>{ROLE_LABELS[m.role]}</Text>
+          {memberships.map((m) => {
+            const summary = orgSummaries[m.org_id];
+            return (
+              <View key={m.org_id} style={styles.orgRow}>
+                <View style={styles.orgRowText}>
+                  <View style={styles.orgRowNameRow}>
+                    <Text style={styles.orgRowName}>{m.org_name}</Text>
+                    {m.is_active && (
+                      <Icon name="checkmark-circle" size="sm" color={Colors.primary} />
+                    )}
+                  </View>
+                  <Text style={styles.orgRowRole}>{ROLE_LABELS[m.role]}</Text>
+                </View>
+                <View style={styles.orgRowSummary}>
+                  <Text style={styles.orgRowSummaryCount}>
+                    {summary === undefined ? '…' : summary?.total ?? 0}
+                  </Text>
+                  <Text style={styles.orgRowSummaryLabel}>snags</Text>
+                </View>
               </View>
-              {switchingOrg === m.org_id ? (
-                <ActivityIndicator size="small" color={Colors.primary} />
-              ) : m.is_active ? (
-                <Icon name="checkmark-circle" size="md" color={Colors.primary} />
-              ) : (
-                <Text style={styles.orgSwitchHint}>Switch</Text>
-              )}
-            </TouchableOpacity>
-          ))}
+            );
+          })}
           <Button
-            label="Scan QR to join or switch"
+            label="Scan QR to join"
             variant="outline"
             icon="qr-code-outline"
             onPress={() => navigation.navigate('ScanOrgCode')}
@@ -338,18 +337,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.background,
-  },
-  header: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  headerTitle: {
-    fontSize: Typography.xl,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
   },
   content: {
     padding: Spacing.lg,
@@ -490,6 +477,11 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  orgRowNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
   orgRowName: {
     fontSize: Typography.base,
     fontWeight: Typography.medium,
@@ -499,10 +491,17 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textMuted,
   },
-  orgSwitchHint: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.primary,
+  orgRowSummary: {
+    alignItems: 'center',
+  },
+  orgRowSummaryCount: {
+    fontSize: Typography.lg,
+    fontWeight: Typography.bold,
+    color: Colors.textPrimary,
+  },
+  orgRowSummaryLabel: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
   },
 
   // Snag stats

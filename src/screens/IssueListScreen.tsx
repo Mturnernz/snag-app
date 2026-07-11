@@ -15,7 +15,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { Snag, SnagStatus, STATUS_LABELS, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme';
-import { supabase } from '../lib/supabase';
+import { supabase, getSnagPhotoUrls } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
 import EmptyState from '../components/EmptyState';
@@ -56,6 +56,7 @@ export default function IssueListScreen() {
   const [sort, setSort] = useState<SortOption>('newest');
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [issues, setIssues] = useState<Snag[]>([]);
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [hasOrg, setHasOrg] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -120,6 +121,8 @@ export default function IssueListScreen() {
           owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : null,
         }))
       );
+      const paths = data.map((row: any) => row.photo_path).filter(Boolean);
+      getSnagPhotoUrls(paths).then(setPhotoUrls);
     }
   }, [filter, sort]);
 
@@ -200,6 +203,7 @@ export default function IssueListScreen() {
           renderItem={({ item }) => (
             <IssueCard
               issue={item}
+              photoUrl={item.photo_path ? photoUrls[item.photo_path] ?? null : null}
               onPress={() =>
                 navigation.navigate('IssueDetail', { issueId: item.id })
               }

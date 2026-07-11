@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
 import { Image } from 'expo-image';
 import { Snag } from '../types';
 import { Colors, Radius, Spacing, Typography, Shadow, IconSize } from '../constants/theme';
-import { getSnagPhotoUrl } from '../lib/supabase';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
@@ -16,6 +15,10 @@ import Icon from './Icon';
 
 interface Props {
   issue: Snag;
+  /** Pre-resolved signed URL for issue.photo_path — the list screen fetches
+   *  every visible card's URL in one batched call rather than each card
+   *  resolving its own. */
+  photoUrl?: string | null;
   onPress: () => void;
 }
 
@@ -43,25 +46,10 @@ function thumbnailUrl(url: string): string {
   }
 }
 
-function IssueCard({ issue, onPress }: Props) {
+function IssueCard({ issue, photoUrl, onPress }: Props) {
   const reporterName = issue.reporter_name || issue.reporter?.name || 'Unknown';
   const commentCount = issue.comment_count ?? 0;
   const voteScore = issue.vote_score ?? 0;
-
-  // snag-photos is a private bucket — photo_path is a storage path, not a
-  // renderable URL, so resolve a short-lived signed URL for display.
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (issue.photo_path) {
-      getSnagPhotoUrl(issue.photo_path).then((url) => {
-        if (!cancelled) setPhotoUrl(url);
-      });
-    } else {
-      setPhotoUrl(null);
-    }
-    return () => { cancelled = true; };
-  }, [issue.photo_path]);
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>

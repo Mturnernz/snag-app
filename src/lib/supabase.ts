@@ -542,8 +542,27 @@ export async function getSnagPhotoUrl(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage
     .from(SNAG_PHOTOS_BUCKET)
     .createSignedUrl(path, 60 * 60);
+  if (error) console.error('getSnagPhotoUrl error:', path, error);
   if (error || !data) return null;
   return data.signedUrl;
+}
+
+// Batched sibling of getSnagPhotoUrl for list views — one request for every
+// visible card's cover photo instead of one signed-URL call per card, which
+// was cheap to trip up (a slow/rate-limited response for any single card
+// silently left it on the "No photo" placeholder forever).
+export async function getSnagPhotoUrls(paths: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(paths)];
+  if (unique.length === 0) return {};
+  const { data, error } = await supabase.storage
+    .from(SNAG_PHOTOS_BUCKET)
+    .createSignedUrls(unique, 60 * 60);
+  if (error) console.error('getSnagPhotoUrls error:', error);
+  const map: Record<string, string> = {};
+  for (const row of data ?? []) {
+    if (row.signedUrl && !row.error) map[row.path ?? ''] = row.signedUrl;
+  }
+  return map;
 }
 
 // Evidence photos live in the private snag-evidence bucket (org-folder scoped).

@@ -15,7 +15,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { Snag, SnagStatus, STATUS_LABELS, ROLE_LABELS, UserRole, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme';
-import { supabase, getSnagPhotoUrls, getProfile } from '../lib/supabase';
+import { supabase, getSnagPhotoUrls, getProfile, getMemberships, setActiveOrg, Membership } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
 import EmptyState from '../components/EmptyState';
@@ -60,6 +60,9 @@ export default function IssueListScreen() {
   const [hasOrg, setHasOrg] = useState<boolean | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [orgName, setOrgName] = useState<string | null>(null);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [showOrgSwitcher, setShowOrgSwitcher] = useState(false);
+  const [switchingOrg, setSwitchingOrg] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -73,6 +76,7 @@ export default function IssueListScreen() {
       memberOfOrg = Boolean(profile?.org_id);
       setRole(profile?.role ?? null);
       setOrgName(profile?.organisation?.name ?? null);
+      setMemberships(await getMemberships());
     }
     setHasOrg(memberOfOrg);
 
@@ -149,9 +153,26 @@ export default function IssueListScreen() {
     setRefreshing(false);
   }, [fetchIssues]);
 
+  async function handleSwitchOrg(m: Membership) {
+    setShowOrgSwitcher(false);
+    if (m.is_active) return;
+    setSwitchingOrg(true);
+    try {
+      await setActiveOrg(m.org_id);
+      await fetchIssues();
+    } finally {
+      setSwitchingOrg(false);
+    }
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
+      <TouchableOpacity
+        style={styles.header}
+        activeOpacity={memberships.length > 1 ? 0.7 : 1}
+        disabled={memberships.length <= 1 || switchingOrg}
+        onPress={() => setShowOrgSwitcher(true)}
+      >
         <View style={styles.headerSide}>
           <Text style={styles.headerTitle}>{hasOrg === false ? 'My Reports' : 'Snags'}</Text>
         </View>
@@ -159,9 +180,40 @@ export default function IssueListScreen() {
           {role && <Text style={styles.headerRole} numberOfLines={1}>{ROLE_LABELS[role]}</Text>}
         </View>
         <View style={[styles.headerSide, styles.headerSideRight]}>
-          {orgName && <Text style={styles.headerOrgName} numberOfLines={1}>{orgName}</Text>}
+          {switchingOrg ? (
+            <ActivityIndicator size="small" color={Colors.primary} />
+          ) : (
+            <View style={styles.headerOrgRow}>
+              {orgName && <Text style={styles.headerOrgName} numberOfLines={1}>{orgName}</Text>}
+              {memberships.length > 1 && (
+                <Icon name="chevron-down" size="sm" color={Colors.primary} />
+              )}
+            </View>
+          )}
         </View>
-      </View>
+      </TouchableOpacity>
+
+      <Modal visible={showOrgSwitcher} transparent animationType="fade" onRequestClose={() => setShowOrgSwitcher(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowOrgSwitcher(false)}>
+          <View style={styles.sortSheet}>
+            <Text style={styles.sortSheetTitle}>Switch organisation</Text>
+            {memberships.map((m) => (
+              <TouchableOpacity
+                key={m.org_id}
+                style={styles.orgOption}
+                onPress={() => handleSwitchOrg(m)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.orgOptionText}>
+                  <Text style={styles.orgOptionName}>{m.org_name}</Text>
+                  <Text style={styles.orgOptionRole}>{ROLE_LABELS[m.role]}</Text>
+                </View>
+                {m.is_active && <Icon name="checkmark-circle" size="md" color={Colors.primary} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <View style={styles.filterWrap}>
         <View style={styles.filterChips}>
@@ -298,10 +350,33 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
     color: Colors.textSecondary,
   },
+  headerOrgRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
   headerOrgName: {
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
     color: Colors.primary,
+  },
+  orgOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.md,
+  },
+  orgOptionText: {
+    gap: 1,
+  },
+  orgOptionName: {
+    fontSize: Typography.base,
+    fontWeight: Typography.medium,
+    color: Colors.textPrimary,
+  },
+  orgOptionRole: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
   },
   filterWrap: {
     flexDirection: 'row',

@@ -11,12 +11,13 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Organisation, Profile, SnagStatus, STATUS_LABELS, RootStackParamList } from '../types';
+import { Organisation, Profile, SnagStatus, STATUS_LABELS, UserRole, RootStackParamList } from '../types';
 import { supabase, getOrgStats, OrgStats } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
+import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -34,6 +35,7 @@ export default function AdminDashboardScreen() {
   const navigation = useNavigation<Nav>();
 
   const [org, setOrg] = useState<Organisation | null>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [stats, setStats] = useState<OrgStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,6 +54,7 @@ export default function AdminDashboardScreen() {
     if (data) {
       const profile = data as unknown as Profile;
       setOrg((profile.organisation as Organisation | undefined) ?? null);
+      setRole(profile.role);
       setIsAdmin(profile.role === 'officer_admin');
       if (profile.org_id) setStats(await getOrgStats(profile.org_id));
     }
@@ -76,14 +79,9 @@ export default function AdminDashboardScreen() {
     );
   }
 
-  const orgName = org?.name ?? 'Your Organisation';
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Admin</Text>
-        <Text style={styles.headerSub}>{orgName}</Text>
-      </View>
+      <OrgSwitcherHeader title="Admin" role={role} orgName={org?.name ?? null} onSwitched={load} />
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}
@@ -147,16 +145,6 @@ export default function AdminDashboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
-
-  header: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  headerTitle: { fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.textPrimary },
-  headerSub: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: 2 },
 
   scroll: { padding: Spacing.lg, gap: Spacing.lg },
 

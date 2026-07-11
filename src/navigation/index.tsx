@@ -94,7 +94,10 @@ function MainTabNavigator({ userRole }: { userRole: UserRole }) {
       <Tab.Screen
         name="Issues"
         component={IssueListScreen}
-        options={{ tabBarBadge: openIssueCount > 0 ? openIssueCount : undefined }}
+        options={{
+          tabBarLabel: 'Snags',
+          tabBarBadge: openIssueCount > 0 ? openIssueCount : undefined,
+        }}
       />
       <Tab.Screen name="Profile" component={ProfileScreen} />
       {isAdminOrManager && (

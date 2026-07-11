@@ -185,7 +185,13 @@ export interface Membership {
   org_id: string;
   org_name: string;
   role: UserRole;
+  /** This is the user's current active-org pick — NOT whether the org itself
+   *  is enabled. See org_active for that. */
   is_active: boolean;
+  /** Whether the organisation itself is active (not deactivated by its
+   *  officer_admin). Deactivated orgs are excluded from pickers/switchers
+   *  everywhere except the admin tab's own management list. */
+  org_active: boolean;
 }
 
 export async function getMemberships(): Promise<Membership[]> {
@@ -197,20 +203,27 @@ export async function setActiveOrg(orgId: string) {
   return supabase.rpc('set_active_org', { p_org_id: orgId });
 }
 
+export async function setOrganisationActive(orgId: string, active: boolean) {
+  return supabase.rpc('set_organisation_active', { p_org_id: orgId, p_active: active });
+}
+
 // Resolve which org the user reports into, driven by the membership RPC rather
 // than the (embed-heavy, occasionally-null) profiles read. Returns the active
-// org; if none is active but the user belongs to exactly one org, defaults to
-// it (set_active_org). Returns null only for users with no membership at all.
+// org; if none is active but the user belongs to exactly one (active) org,
+// defaults to it (set_active_org). Returns null if the user has no usable
+// (active-org) membership at all — either genuinely no membership, or every
+// org they belong to has been deactivated.
 export async function resolveActiveOrg(): Promise<{ orgId: string; orgName: string } | null> {
   const memberships = await getMemberships();
-  if (memberships.length === 0) return null;
+  const usable = memberships.filter((m) => m.org_active);
+  if (usable.length === 0) return null;
 
-  const active = memberships.find((m) => m.is_active);
+  const active = usable.find((m) => m.is_active);
   if (active) return { orgId: active.org_id, orgName: active.org_name };
 
-  if (memberships.length === 1) {
-    await setActiveOrg(memberships[0].org_id);
-    return { orgId: memberships[0].org_id, orgName: memberships[0].org_name };
+  if (usable.length === 1) {
+    await setActiveOrg(usable[0].org_id);
+    return { orgId: usable[0].org_id, orgName: usable[0].org_name };
   }
   return null; // multi-org, none active — let the user choose
 }

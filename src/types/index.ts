@@ -25,6 +25,7 @@ export interface Organisation {
   is_public: boolean;
   public_intake_site_id: string | null;
   created_at: string;
+  is_active: boolean;
 }
 
 export interface Site {

@@ -383,6 +383,12 @@ export async function createWorkGroup(name: string, color?: string | null, image
   return supabase.rpc('create_work_group', { p_name: name, p_color: color ?? null, p_image_path: imagePath ?? null });
 }
 
+export async function updateWorkGroup(workGroupId: string, name: string, color?: string | null, imagePath?: string | null) {
+  return supabase.rpc('update_work_group', {
+    p_work_group_id: workGroupId, p_name: name, p_color: color ?? null, p_image_path: imagePath ?? null,
+  });
+}
+
 export async function assignWorkGroupSupervisor(workGroupId: string, userId: string) {
   return supabase.rpc('assign_work_group_supervisor', { p_work_group_id: workGroupId, p_user_id: userId });
 }

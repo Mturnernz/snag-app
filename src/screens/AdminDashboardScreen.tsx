@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Organisation, Profile, SnagStatus, STATUS_LABELS, UserRole, RootStackParamList } from '../types';
 import {
   supabase, getOrgStats, OrgStats, getMemberships, setOrganisationActive, Membership,
-  getOrgMembers, getWorkGroupsWithDetail, createWorkGroup, assignWorkGroupSupervisor,
+  getOrgMembers, getWorkGroupsWithDetail, createWorkGroup, updateWorkGroup, assignWorkGroupSupervisor,
   removeWorkGroupSupervisor, uploadWorkGroupImage, getWorkGroupImageUrl, WorkGroupDetail,
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../constants/theme';
@@ -145,6 +145,25 @@ export default function AdminDashboardScreen() {
       { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
     );
     setNewGroupImageUri(compressed.uri);
+  }
+
+  // Called after any change to a work group so both the list and (if open)
+  // the "Manage" modal's snapshot stay in sync — mirrors ManageOrganisation-
+  // Screen's refreshSites, using the freshly-fetched array directly rather
+  // than reading back from React state to avoid a stale-closure race.
+  async function refreshWorkGroups() {
+    const groups = await getWorkGroupsWithDetail();
+    setWorkGroups(groups);
+    setManagingGroup((prev) => (prev ? groups.find((g) => g.id === prev.id) ?? null : null));
+    const withImages = groups.filter((g) => g.imagePath);
+    if (withImages.length > 0) {
+      const entries = await Promise.all(
+        withImages.map(async (g) => [g.id, await getWorkGroupImageUrl(g.imagePath!)] as const)
+      );
+      setWgImageUrls(Object.fromEntries(entries.filter((e): e is [string, string] => Boolean(e[1]))));
+    } else {
+      setWgImageUrls({});
+    }
   }
 
   async function handleCreateGroup() {
@@ -357,8 +376,10 @@ export default function AdminDashboardScreen() {
         group={managingGroup}
         supervisors={supervisors}
         isAdmin={isAdmin}
+        orgId={org?.id ?? null}
+        imageUrl={managingGroup ? wgImageUrls[managingGroup.id] : undefined}
         onClose={() => setManagingGroup(null)}
-        onChanged={load}
+        onChanged={refreshWorkGroups}
       />
     </View>
   );
@@ -372,19 +393,74 @@ function WorkGroupSupervisorModal({
   group,
   supervisors,
   isAdmin,
+  orgId,
+  imageUrl,
   onClose,
   onChanged,
 }: {
   group: WorkGroupDetail | null;
   supervisors: Profile[];
   isAdmin: boolean;
+  orgId: string | null;
+  imageUrl?: string;
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState<string | null>(null);
 
+  // Edit fields — undefined image means "unchanged", null means "explicitly
+  // removed" (falls back to colour), a string is a newly-picked local URI
+  // pending upload on save.
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState<string>(WorkGroupPalette[0]);
+  const [editImageUri, setEditImageUri] = useState<string | null | undefined>(undefined);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  useEffect(() => {
+    if (!group) return;
+    setEditName(group.name);
+    setEditColor(group.color ?? WorkGroupPalette[0]);
+    setEditImageUri(undefined);
+  }, [group?.id]);
+
   if (!group) return null;
+
+  const hasImage = editImageUri === undefined ? Boolean(group.imagePath) : Boolean(editImageUri);
+  const previewUri = editImageUri === undefined ? imageUrl : editImageUri ?? undefined;
+
+  async function pickEditImage() {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1, exif: false });
+    if (result.canceled) return;
+    const compressed = await ImageManipulator.manipulateAsync(
+      result.assets[0].uri,
+      [{ resize: { width: 400 } }],
+      { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    setEditImageUri(compressed.uri);
+  }
+
+  async function handleSaveEdit() {
+    if (!group || !editName.trim() || !orgId) return;
+    setSavingEdit(true);
+    let imagePath: string | null;
+    if (editImageUri === undefined) {
+      imagePath = group.imagePath;
+    } else if (editImageUri === null) {
+      imagePath = null;
+    } else {
+      const fileName = `${orgId}/${Date.now()}.jpg`;
+      imagePath = await uploadWorkGroupImage(editImageUri, fileName);
+    }
+    const { error } = await updateWorkGroup(group.id, editName.trim(), imagePath ? null : editColor, imagePath);
+    setSavingEdit(false);
+    if (error) {
+      Alert.alert('Error', error.message ?? 'Could not update work group');
+    } else {
+      setEditImageUri(undefined);
+      await onChanged();
+    }
+  }
 
   async function toggle(userId: string, active: boolean) {
     if (!isAdmin || !group) return;
@@ -407,13 +483,59 @@ function WorkGroupSupervisorModal({
               <Icon name="close" size="md" color={Colors.textMuted} />
             </TouchableOpacity>
           </View>
-          <Text style={styles.modalHint}>
-            {isAdmin
-              ? 'Snags routed here auto-assign to the supervisor if exactly one is set.'
-              : 'Only an admin can change who supervises this work group.'}
-          </Text>
 
           <ScrollView style={styles.modalScroll}>
+            <Text style={styles.sectionLabel}>DETAILS</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Work group name"
+              placeholderTextColor={Colors.textMuted}
+              value={editName}
+              onChangeText={setEditName}
+            />
+
+            {hasImage ? (
+              <View style={styles.imagePreviewRow}>
+                {previewUri && <Image source={{ uri: previewUri }} style={styles.imagePreview} contentFit="cover" />}
+                <TouchableOpacity onPress={() => setEditImageUri(null)}>
+                  <Text style={styles.removeImageText}>Remove image</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.fieldLabel}>Colour</Text>
+                <View style={styles.paletteRow}>
+                  {WorkGroupPalette.map((c) => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.swatchOption, { backgroundColor: c }, editColor === c && styles.swatchOptionActive]}
+                      onPress={() => setEditColor(c)}
+                    />
+                  ))}
+                </View>
+                <TouchableOpacity onPress={pickEditImage}>
+                  <Text style={styles.uploadImageText}>Or upload an image</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <Button
+              label="Save Changes"
+              onPress={handleSaveEdit}
+              loading={savingEdit}
+              disabled={!editName.trim()}
+              fullWidth
+              style={styles.topGap}
+            />
+
+            <View style={styles.divider} />
+
+            <Text style={styles.sectionLabel}>SUPERVISORS</Text>
+            <Text style={styles.modalHint}>
+              {isAdmin
+                ? 'Snags routed here auto-assign to the supervisor if exactly one is set.'
+                : 'Only an admin can change who supervises this work group.'}
+            </Text>
             {supervisors.map((s) => {
               const active = group.supervisorIds.includes(s.id);
               return (
@@ -537,6 +659,7 @@ const styles = StyleSheet.create({
   modalTitle: { flex: 1, fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
   modalHint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
   modalScroll: { marginTop: Spacing.sm },
+  divider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.md },
   assignRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm,
     paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.border,

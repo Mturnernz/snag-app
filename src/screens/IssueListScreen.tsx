@@ -83,9 +83,11 @@ export default function IssueListScreen() {
     // it decides both the screen title and the public-submission filtering.
     const { data: { user } } = await supabase.auth.getUser();
     let memberOfOrg = false;
+    let activeOrgId: string | null = null;
     if (user) {
       const profile = await getProfile(user.id);
       memberOfOrg = Boolean(profile?.org_id);
+      activeOrgId = profile?.org_id ?? null;
       setRole(profile?.role ?? null);
       setOrgName(profile?.organisation?.name ?? null);
     }
@@ -96,11 +98,13 @@ export default function IssueListScreen() {
       .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission')
       .limit(50);
 
-    if (memberOfOrg) {
+    if (memberOfOrg && activeOrgId) {
       // Members: internal reports by default; the Public chip shows the
-      // public-submissions queue. Public reporters (no org) see all their
-      // own reports — RLS already scopes them.
-      query = query.eq('is_public_submission', filter === 'public');
+      // public-submissions queue. Explicitly scope to the active org — RLS
+      // also allows any snag you personally reported even in a *different*
+      // org (so a cross-org/public reporter can track their own report's
+      // status), which would otherwise leak other-org snags into this list.
+      query = query.eq('org_id', activeOrgId).eq('is_public_submission', filter === 'public');
     }
 
     switch (sort) {

@@ -33,6 +33,7 @@ import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
 import ManageIssuePanel from '../components/ManageIssuePanel';
 import InvestigationPanel from '../components/InvestigationPanel';
+import RcaPanel from '../components/RcaPanel';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Avatar from '../components/Avatar';
@@ -174,13 +175,15 @@ export default function IssueDetailScreen() {
 
   useEffect(() => { fetchInvestigation(); }, [fetchInvestigation]);
 
-  // Owner picker candidates are scoped to the snag's site (its members and
-  // supervisors, plus org admins).
+  // Owner/RCA-assignee candidates, scoped to the snag's site (its members
+  // and supervisors, plus org admins). Fetched for any org member — not just
+  // editors — since RcaPanel needs it to resolve an assignee's name even for
+  // a plain worker viewing (or completing) their own delegated RCA.
   useEffect(() => {
-    if (canEdit && issue?.site_id) {
+    if (isOrgMember && issue?.site_id) {
       getSiteAssignees(issue.site_id).then(setSiteAssignees);
     }
-  }, [canEdit, issue?.site_id]);
+  }, [isOrgMember, issue?.site_id]);
 
   async function fetchIssue() {
     const { data } = await supabase
@@ -515,6 +518,20 @@ export default function IssueDetailScreen() {
               orgId={issue.org_id}
               state={investigation}
               onChanged={() => { fetchInvestigation(); fetchIssue(); }}
+            />
+          )}
+
+          {/* Root cause analysis — delegated once a serious snag is resolved;
+              a supervisor/admin assigns it, the assignee answers 5 Whys, then
+              a supervisor/admin accepts or sends it back. */}
+          {isSerious && isOrgMember && (issue.status === 'resolved' || issue.status === 'rca_pending') && (
+            <RcaPanel
+              issueId={issue.id}
+              status={issue.status}
+              canEdit={canEdit}
+              currentUserId={currentUserId}
+              assignees={siteAssignees}
+              onChanged={fetchIssue}
             />
           )}
 

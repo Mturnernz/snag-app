@@ -534,6 +534,83 @@ export async function resolveSnag(snagId: string, note: string) {
   return supabase.rpc('resolve_snag', { p_snag_id: snagId, p_note: note });
 }
 
+// ─── Root cause analysis (5 Whys) ──────────────────────────────────────────────
+// A supervisor/admin can delegate a formal RCA on a resolved serious snag to
+// any site assignee (moves it to rca_pending, emails the assignee). The
+// assignee answers 5 Whys and submits; a supervisor/admin then accepts
+// (returns the snag to resolved) or rejects (reopens it for edits).
+
+export type RcaStatus = 'assigned' | 'in_progress' | 'submitted' | 'accepted' | 'rejected';
+
+export interface RcaWhyStep {
+  whyIndex: number;
+  whyText: string;
+  answerText: string;
+}
+
+export interface SnagRca {
+  id: string;
+  status: RcaStatus;
+  assignedTo: string;
+  assignedBy: string;
+  rejectionNote: string | null;
+  submittedAt: string | null;
+  acceptedAt: string | null;
+  whys: RcaWhyStep[];
+}
+
+// The most recent RCA round for a snag (a new one can be assigned after an
+// earlier one was accepted, so this is never assumed to be the only row).
+export async function getSnagRca(snagId: string): Promise<SnagRca | null> {
+  const { data: rca } = await supabase
+    .from('snag_rca')
+    .select('id, status, assigned_to, assigned_by, rejection_note, submitted_at, accepted_at')
+    .eq('snag_id', snagId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!rca) return null;
+
+  const { data: whys } = await supabase
+    .from('rca_why_steps')
+    .select('why_index, why_text, answer_text')
+    .eq('rca_id', rca.id)
+    .order('why_index', { ascending: true });
+
+  return {
+    id: rca.id,
+    status: rca.status,
+    assignedTo: rca.assigned_to,
+    assignedBy: rca.assigned_by,
+    rejectionNote: rca.rejection_note,
+    submittedAt: rca.submitted_at,
+    acceptedAt: rca.accepted_at,
+    whys: (whys ?? []).map((w: any) => ({ whyIndex: w.why_index, whyText: w.why_text, answerText: w.answer_text })),
+  };
+}
+
+export async function assignRca(snagId: string, assigneeId: string) {
+  return supabase.rpc('assign_rca', { p_snag_id: snagId, p_assignee_id: assigneeId });
+}
+
+export async function saveRcaWhy(rcaId: string, whyIndex: number, whyText: string, answerText: string) {
+  return supabase.rpc('save_rca_why', {
+    p_rca_id: rcaId, p_why_index: whyIndex, p_why_text: whyText, p_answer_text: answerText,
+  });
+}
+
+export async function submitRca(rcaId: string) {
+  return supabase.rpc('submit_rca', { p_rca_id: rcaId });
+}
+
+export async function acceptRca(rcaId: string) {
+  return supabase.rpc('accept_rca', { p_rca_id: rcaId });
+}
+
+export async function rejectRca(rcaId: string, rejectionNote: string) {
+  return supabase.rpc('reject_rca', { p_rca_id: rcaId, p_rejection_note: rejectionNote });
+}
+
 // ─── Merge (parent/child) ───────────────────────────────────────────────────
 // Creates (or reuses) a parent snag and attaches the rest of the selection as
 // its children — see merge_snags for the disambiguation rules around

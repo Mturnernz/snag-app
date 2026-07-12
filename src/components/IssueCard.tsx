@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -95,6 +95,12 @@ function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable,
   const voteScore = issue.vote_score ?? 0;
   const borderColor = alertBorderColor(issue);
 
+  // TouchableOpacity fires onPress on release even after onLongPress has
+  // already fired for the same gesture — suppress that one auto-fired press
+  // so long-pressing to enter select mode doesn't immediately toggle the
+  // selection straight back off.
+  const suppressNextPress = useRef(false);
+
   return (
     <TouchableOpacity
       style={[
@@ -103,8 +109,17 @@ function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable,
         borderColor && { borderWidth: 2, borderColor },
         selected && styles.cardSelected,
       ]}
-      onPress={onPress}
-      onLongPress={onLongPress}
+      onPress={() => {
+        if (suppressNextPress.current) {
+          suppressNextPress.current = false;
+          return;
+        }
+        onPress();
+      }}
+      onLongPress={() => {
+        suppressNextPress.current = true;
+        onLongPress?.();
+      }}
       activeOpacity={0.85}
     >
       {selectable && (

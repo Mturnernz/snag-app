@@ -362,7 +362,6 @@ export interface WorkGroupDetail {
   id: string;
   name: string;
   color: string | null;
-  imagePath: string | null;
   isDefault: boolean;
   supervisorIds: string[];
   // null = the group applies to every site in the org.
@@ -373,7 +372,7 @@ export interface WorkGroupDetail {
 export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
   const { data: groups } = await supabase
     .from('work_groups')
-    .select('id, name, color, image_path, is_default, site_id, site:sites(name)')
+    .select('id, name, color, is_default, site_id, site:sites(name)')
     .order('is_default', { ascending: true })
     .order('created_at', { ascending: true });
   if (!groups || groups.length === 0) return [];
@@ -388,7 +387,6 @@ export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
     id: g.id,
     name: g.name,
     color: g.color,
-    imagePath: g.image_path,
     isDefault: g.is_default,
     supervisorIds: (sups ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.user_id),
     siteId: g.site_id,
@@ -396,20 +394,17 @@ export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
   }));
 }
 
-export async function createWorkGroup(
-  name: string, color?: string | null, imagePath?: string | null, siteId?: string | null
-) {
+export async function createWorkGroup(name: string, color?: string | null, siteId?: string | null) {
   return supabase.rpc('create_work_group', {
-    p_name: name, p_color: color ?? null, p_image_path: imagePath ?? null, p_site_id: siteId ?? null,
+    p_name: name, p_color: color ?? null, p_site_id: siteId ?? null,
   });
 }
 
 export async function updateWorkGroup(
-  workGroupId: string, name: string, color?: string | null, imagePath?: string | null, siteId?: string | null
+  workGroupId: string, name: string, color?: string | null, siteId?: string | null
 ) {
   return supabase.rpc('update_work_group', {
-    p_work_group_id: workGroupId, p_name: name, p_color: color ?? null, p_image_path: imagePath ?? null,
-    p_site_id: siteId ?? null,
+    p_work_group_id: workGroupId, p_name: name, p_color: color ?? null, p_site_id: siteId ?? null,
   });
 }
 
@@ -421,19 +416,6 @@ export async function removeWorkGroupSupervisor(workGroupId: string, userId: str
   return supabase.rpc('remove_work_group_supervisor', { p_work_group_id: workGroupId, p_user_id: userId });
 }
 
-const WORK_GROUP_IMAGES_BUCKET = 'work-group-images';
-
-export async function uploadWorkGroupImage(localUri: string, fileName: string): Promise<string | null> {
-  return uploadSnagPhoto(localUri, fileName, WORK_GROUP_IMAGES_BUCKET);
-}
-
-export async function getWorkGroupImageUrl(path: string): Promise<string | null> {
-  const { data, error } = await supabase.storage
-    .from(WORK_GROUP_IMAGES_BUCKET)
-    .createSignedUrl(path, 60 * 60);
-  if (error || !data) return null;
-  return data.signedUrl;
-}
 
 export async function renameOrganisation(name: string) {
   return supabase.rpc('rename_organisation', { p_name: name });

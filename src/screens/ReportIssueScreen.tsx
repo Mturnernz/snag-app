@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -25,7 +24,7 @@ import {
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag, getMemberships, setActiveOrg,
-  resolveActiveOrg, Membership, getWorkGroupsWithDetail, getWorkGroupImageUrl, WorkGroupDetail,
+  resolveActiveOrg, Membership, getWorkGroupsWithDetail, WorkGroupDetail,
 } from '../lib/supabase';
 import { useReportTarget } from '../context/ReportTargetContext';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
@@ -64,7 +63,6 @@ export default function ReportIssueScreen() {
   const [showOrgPicker, setShowOrgPicker] = useState(false);
   const [switchingOrg, setSwitchingOrg] = useState(false);
   const [workGroups, setWorkGroups] = useState<WorkGroupDetail[]>([]);
-  const [wgImageUrls, setWgImageUrls] = useState<Record<string, string>>({});
   const [showGroupPicker, setShowGroupPicker] = useState(false);
   const [reportSiteId, setReportSiteId] = useState<string | null>(null);
 
@@ -72,18 +70,9 @@ export default function ReportIssueScreen() {
   // scoped to whichever org is currently active — refetched whenever that
   // changes (focus, or an explicit org switch below).
   async function loadWorkGroups(hasOrg: boolean) {
-    if (!hasOrg) { setWorkGroups([]); setWgImageUrls({}); return; }
+    if (!hasOrg) { setWorkGroups([]); return; }
     const groups = await getWorkGroupsWithDetail();
     setWorkGroups(groups);
-    const withImages = groups.filter((g) => g.imagePath);
-    if (withImages.length > 0) {
-      const entries = await Promise.all(
-        withImages.map(async (g) => [g.id, await getWorkGroupImageUrl(g.imagePath!)] as const)
-      );
-      setWgImageUrls(Object.fromEntries(entries.filter((e): e is [string, string] => Boolean(e[1]))));
-    } else {
-      setWgImageUrls({});
-    }
   }
 
   // Refetched on focus: the active org (which scopes member submissions and
@@ -479,9 +468,6 @@ export default function ReportIssueScreen() {
                     activeOpacity={0.85}
                     disabled={submitting}
                   >
-                    {wg.imagePath && wgImageUrls[wg.id] && (
-                      <Image source={{ uri: wgImageUrls[wg.id] }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-                    )}
                     <View style={styles.groupTileOverlay} />
                     <Text style={styles.groupTileText} numberOfLines={2}>{wg.name}</Text>
                   </TouchableOpacity>

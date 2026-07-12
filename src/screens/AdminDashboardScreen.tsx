@@ -11,9 +11,6 @@ import {
   Alert,
   Modal,
 } from 'react-native';
-import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,7 +19,7 @@ import { Organisation, Profile, SnagStatus, STATUS_LABELS, UserRole, RootStackPa
 import {
   supabase, getOrgStats, OrgStats, getMemberships, setOrganisationActive, Membership,
   getOrgMembers, getOrgSites, createSite, getWorkGroupsWithDetail, createWorkGroup, updateWorkGroup,
-  assignWorkGroupSupervisor, removeWorkGroupSupervisor, uploadWorkGroupImage, getWorkGroupImageUrl, WorkGroupDetail,
+  assignWorkGroupSupervisor, removeWorkGroupSupervisor, WorkGroupDetail,
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../constants/theme';
 import Card from '../components/Card';
@@ -58,12 +55,10 @@ export default function AdminDashboardScreen() {
 
   // Work groups
   const [workGroups, setWorkGroups] = useState<WorkGroupDetail[]>([]);
-  const [wgImageUrls, setWgImageUrls] = useState<Record<string, string>>({});
   const [supervisors, setSupervisors] = useState<Profile[]>([]);
   const [managingGroup, setManagingGroup] = useState<WorkGroupDetail | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupColor, setNewGroupColor] = useState<string>(WorkGroupPalette[0]);
-  const [newGroupImageUri, setNewGroupImageUri] = useState<string | null>(null);
   const [newGroupSiteId, setNewGroupSiteId] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
 
@@ -105,15 +100,6 @@ export default function AdminDashboardScreen() {
       if (data?.org_id) getOrgSites(data.org_id).then(setSites);
       const groups = await getWorkGroupsWithDetail();
       setWorkGroups(groups);
-      const withImages = groups.filter((g) => g.imagePath);
-      if (withImages.length > 0) {
-        const entries = await Promise.all(
-          withImages.map(async (g) => [g.id, await getWorkGroupImageUrl(g.imagePath!)] as const)
-        );
-        setWgImageUrls(Object.fromEntries(entries.filter((e): e is [string, string] => Boolean(e[1]))));
-      } else {
-        setWgImageUrls({});
-      }
       getOrgMembers().then((members) => setSupervisors(members.filter((m) => m.role === 'supervisor')));
     }
 
@@ -147,17 +133,6 @@ export default function AdminDashboardScreen() {
     );
   }
 
-  async function pickGroupImage() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1, exif: false });
-    if (result.canceled) return;
-    const compressed = await ImageManipulator.manipulateAsync(
-      result.assets[0].uri,
-      [{ resize: { width: 400 } }],
-      { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    setNewGroupImageUri(compressed.uri);
-  }
-
   // Called after any change to a work group so both the list and (if open)
   // the "Manage" modal's snapshot stay in sync — mirrors ManageOrganisation-
   // Screen's refreshSites, using the freshly-fetched array directly rather
@@ -166,33 +141,16 @@ export default function AdminDashboardScreen() {
     const groups = await getWorkGroupsWithDetail();
     setWorkGroups(groups);
     setManagingGroup((prev) => (prev ? groups.find((g) => g.id === prev.id) ?? null : null));
-    const withImages = groups.filter((g) => g.imagePath);
-    if (withImages.length > 0) {
-      const entries = await Promise.all(
-        withImages.map(async (g) => [g.id, await getWorkGroupImageUrl(g.imagePath!)] as const)
-      );
-      setWgImageUrls(Object.fromEntries(entries.filter((e): e is [string, string] => Boolean(e[1]))));
-    } else {
-      setWgImageUrls({});
-    }
   }
 
   async function handleCreateGroup() {
     if (!newGroupName.trim() || !org) return;
     setCreatingGroup(true);
-    let imagePath: string | null = null;
-    if (newGroupImageUri) {
-      const fileName = `${org.id}/${Date.now()}.jpg`;
-      imagePath = await uploadWorkGroupImage(newGroupImageUri, fileName);
-    }
-    const { error } = await createWorkGroup(
-      newGroupName.trim(), imagePath ? null : newGroupColor, imagePath, newGroupSiteId || null
-    );
+    const { error } = await createWorkGroup(newGroupName.trim(), newGroupColor, newGroupSiteId || null);
     setCreatingGroup(false);
     if (!error) {
       setNewGroupName('');
       setNewGroupColor(WorkGroupPalette[0]);
-      setNewGroupImageUri(null);
       setNewGroupSiteId('');
       await load();
     } else {
@@ -308,11 +266,7 @@ export default function AdminDashboardScreen() {
 
             {workGroups.filter((g) => !g.isDefault).map((wg) => (
               <View key={wg.id} style={styles.wgRow}>
-                {wg.imagePath && wgImageUrls[wg.id] ? (
-                  <Image source={{ uri: wgImageUrls[wg.id] }} style={styles.wgSwatch} contentFit="cover" />
-                ) : (
-                  <View style={[styles.wgSwatch, { backgroundColor: wg.color ?? Colors.textMuted }]} />
-                )}
+                <View style={[styles.wgSwatch, { backgroundColor: wg.color ?? Colors.textMuted }]} />
                 <View style={styles.wgInfo}>
                   <Text style={styles.wgName}>{wg.name}</Text>
                   <Text style={styles.wgMeta}>
@@ -357,35 +311,21 @@ export default function AdminDashboardScreen() {
                 </View>
               ) : (
                 <TouchableOpacity onPress={() => setShowNewSiteInput(true)}>
-                  <Text style={styles.uploadImageText}>+ New site</Text>
+                  <Text style={styles.linkText}>+ New site</Text>
                 </TouchableOpacity>
               )
             )}
 
-            {newGroupImageUri ? (
-              <View style={styles.imagePreviewRow}>
-                <Image source={{ uri: newGroupImageUri }} style={styles.imagePreview} contentFit="cover" />
-                <TouchableOpacity onPress={() => setNewGroupImageUri(null)}>
-                  <Text style={styles.removeImageText}>Remove image</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <>
-                <Text style={styles.fieldLabel}>Colour</Text>
-                <View style={styles.paletteRow}>
-                  {WorkGroupPalette.map((c) => (
-                    <TouchableOpacity
-                      key={c}
-                      style={[styles.swatchOption, { backgroundColor: c }, newGroupColor === c && styles.swatchOptionActive]}
-                      onPress={() => setNewGroupColor(c)}
-                    />
-                  ))}
-                </View>
-                <TouchableOpacity onPress={pickGroupImage}>
-                  <Text style={styles.uploadImageText}>Or upload an image</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            <Text style={styles.fieldLabel}>Colour</Text>
+            <View style={styles.paletteRow}>
+              {WorkGroupPalette.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.swatchOption, { backgroundColor: c }, newGroupColor === c && styles.swatchOptionActive]}
+                  onPress={() => setNewGroupColor(c)}
+                />
+              ))}
+            </View>
 
             <Button
               label="Add Work Group"
@@ -439,7 +379,6 @@ export default function AdminDashboardScreen() {
         orgId={org?.id ?? null}
         sites={sites}
         onSitesChanged={setSites}
-        imageUrl={managingGroup ? wgImageUrls[managingGroup.id] : undefined}
         onClose={() => setManagingGroup(null)}
         onChanged={refreshWorkGroups}
       />
@@ -458,7 +397,6 @@ function WorkGroupSupervisorModal({
   orgId,
   sites,
   onSitesChanged,
-  imageUrl,
   onClose,
   onChanged,
 }: {
@@ -469,19 +407,14 @@ function WorkGroupSupervisorModal({
   orgId: string | null;
   sites: { id: string; name: string }[];
   onSitesChanged: (sites: { id: string; name: string }[]) => void;
-  imageUrl?: string;
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState<string | null>(null);
 
-  // Edit fields — undefined image means "unchanged", null means "explicitly
-  // removed" (falls back to colour), a string is a newly-picked local URI
-  // pending upload on save.
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState<string>(WorkGroupPalette[0]);
-  const [editImageUri, setEditImageUri] = useState<string | null | undefined>(undefined);
   const [editSiteId, setEditSiteId] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [showNewSiteInput, setShowNewSiteInput] = useState(false);
@@ -492,7 +425,6 @@ function WorkGroupSupervisorModal({
     if (!group) return;
     setEditName(group.name);
     setEditColor(group.color ?? WorkGroupPalette[0]);
-    setEditImageUri(undefined);
     setEditSiteId(group.siteId ?? '');
     setShowNewSiteInput(false);
     setNewSiteName('');
@@ -500,40 +432,14 @@ function WorkGroupSupervisorModal({
 
   if (!group) return null;
 
-  const hasImage = editImageUri === undefined ? Boolean(group.imagePath) : Boolean(editImageUri);
-  const previewUri = editImageUri === undefined ? imageUrl : editImageUri ?? undefined;
-
-  async function pickEditImage() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1, exif: false });
-    if (result.canceled) return;
-    const compressed = await ImageManipulator.manipulateAsync(
-      result.assets[0].uri,
-      [{ resize: { width: 400 } }],
-      { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    setEditImageUri(compressed.uri);
-  }
-
   async function handleSaveEdit() {
     if (!group || !editName.trim() || !orgId) return;
     setSavingEdit(true);
-    let imagePath: string | null;
-    if (editImageUri === undefined) {
-      imagePath = group.imagePath;
-    } else if (editImageUri === null) {
-      imagePath = null;
-    } else {
-      const fileName = `${orgId}/${Date.now()}.jpg`;
-      imagePath = await uploadWorkGroupImage(editImageUri, fileName);
-    }
-    const { error } = await updateWorkGroup(
-      group.id, editName.trim(), imagePath ? null : editColor, imagePath, editSiteId || null
-    );
+    const { error } = await updateWorkGroup(group.id, editName.trim(), editColor, editSiteId || null);
     setSavingEdit(false);
     if (error) {
       Alert.alert('Error', error.message ?? 'Could not update work group');
     } else {
-      setEditImageUri(undefined);
       await onChanged();
     }
   }
@@ -613,35 +519,21 @@ function WorkGroupSupervisorModal({
                 </View>
               ) : (
                 <TouchableOpacity onPress={() => setShowNewSiteInput(true)}>
-                  <Text style={styles.uploadImageText}>+ New site</Text>
+                  <Text style={styles.linkText}>+ New site</Text>
                 </TouchableOpacity>
               )
             )}
 
-            {hasImage ? (
-              <View style={styles.imagePreviewRow}>
-                {previewUri && <Image source={{ uri: previewUri }} style={styles.imagePreview} contentFit="cover" />}
-                <TouchableOpacity onPress={() => setEditImageUri(null)}>
-                  <Text style={styles.removeImageText}>Remove image</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <>
-                <Text style={styles.fieldLabel}>Colour</Text>
-                <View style={styles.paletteRow}>
-                  {WorkGroupPalette.map((c) => (
-                    <TouchableOpacity
-                      key={c}
-                      style={[styles.swatchOption, { backgroundColor: c }, editColor === c && styles.swatchOptionActive]}
-                      onPress={() => setEditColor(c)}
-                    />
-                  ))}
-                </View>
-                <TouchableOpacity onPress={pickEditImage}>
-                  <Text style={styles.uploadImageText}>Or upload an image</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            <Text style={styles.fieldLabel}>Colour</Text>
+            <View style={styles.paletteRow}>
+              {WorkGroupPalette.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.swatchOption, { backgroundColor: c }, editColor === c && styles.swatchOptionActive]}
+                  onPress={() => setEditColor(c)}
+                />
+              ))}
+            </View>
 
             <Button
               label="Save Changes"
@@ -770,10 +662,7 @@ const styles = StyleSheet.create({
   paletteRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   swatchOption: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
   swatchOptionActive: { borderColor: Colors.textPrimary },
-  uploadImageText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.primary, marginTop: Spacing.xs },
-  imagePreviewRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  imagePreview: { width: 60, height: 60, borderRadius: Radius.button, backgroundColor: Colors.background },
-  removeImageText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.danger },
+  linkText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.primary, marginTop: Spacing.xs },
 
   // Work group supervisor modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },

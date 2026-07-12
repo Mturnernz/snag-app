@@ -19,15 +19,20 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
   Snag, SnagStatus, SnagKind, SnagSeverity, STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, UserRole, RootStackParamList,
+  Profile,
 } from '../types';
 import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme';
-import { supabase, getSnagPhotoUrls, getProfile, mergeSnags } from '../lib/supabase';
+import {
+  supabase, getSnagPhotoUrls, getProfile, mergeSnags, getOrgMembers, getWorkGroupsWithDetail, WorkGroupDetail,
+  updateSnagStatus, resolveSnag, assignSnagOwner, assignSnagWorkGroup,
+} from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
+import { useToast } from '../hooks/useToast';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -71,12 +76,14 @@ export default function IssueListScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Merge — long-press a card to enter select mode. selectedIds is ordered:
-  // the first entry is the "anchor" whose content seeds the new parent.
+  // Select mode — long-press a card to enter it. selectedIds is ordered:
+  // the first entry is the "anchor" whose content seeds a new merge parent.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [mergeModalVisible, setMergeModalVisible] = useState(false);
+  const [bulkModalVisible, setBulkModalVisible] = useState(false);
   const canMerge = role === 'officer_admin' || role === 'supervisor';
+  const { showToast } = useToast();
 
   const fetchIssues = useCallback(async () => {
     // Re-check org state every fetch — it changes with the org switcher, and
@@ -95,7 +102,7 @@ export default function IssueListScreen() {
 
     let query = supabase
       .from('snags_with_details')
-      .select('id, reference, status, kind, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission')
+      .select('id, reference, status, kind, lane, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission')
       // Merged children are hidden here — only visible from the parent's own
       // "Merged snags" section. A parent is never itself a child (single-
       // level hierarchy, enforced server-side), so parents always show.
@@ -211,15 +218,27 @@ export default function IssueListScreen() {
 
       {selectMode ? (
         <View style={styles.selectBar}>
-          <TouchableOpacity onPress={exitSelectMode} style={styles.selectBarCancel}>
-            <Text style={styles.selectBarCancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.selectBarCount}>{selectedIds.length} selected</Text>
-          <Button
-            label="Merge Snags"
-            onPress={() => setMergeModalVisible(true)}
-            disabled={selectedIds.length < 2}
-          />
+          <View style={styles.selectBarTop}>
+            <TouchableOpacity onPress={exitSelectMode} style={styles.selectBarCancel}>
+              <Text style={styles.selectBarCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.selectBarCount}>{selectedIds.length} selected</Text>
+          </View>
+          <View style={styles.selectBarActions}>
+            <Button
+              label="Bulk Actions"
+              variant="outline"
+              onPress={() => setBulkModalVisible(true)}
+              disabled={selectedIds.length === 0}
+              style={styles.flex1}
+            />
+            <Button
+              label="Merge Snags"
+              onPress={() => setMergeModalVisible(true)}
+              disabled={selectedIds.length < 2}
+              style={styles.flex1}
+            />
+          </View>
         </View>
       ) : (
         <View style={styles.filterWrap}>
@@ -328,6 +347,18 @@ export default function IssueListScreen() {
         anchorId={selectedIds[0]}
         onCancel={() => setMergeModalVisible(false)}
         onMerged={handleMerged}
+      />
+
+      <BulkActionsModal
+        visible={bulkModalVisible}
+        snags={issues.filter((i) => selectedIds.includes(i.id))}
+        onClose={() => setBulkModalVisible(false)}
+        onApplied={async (message) => {
+          setBulkModalVisible(false);
+          exitSelectMode();
+          await fetchIssues();
+          showToast(message);
+        }}
       />
     </View>
   );
@@ -487,6 +518,252 @@ function MergeModal({
   );
 }
 
+// ── Bulk actions modal ───────────────────────────────────────────────────────
+// Change status / assign to person / assign to work group, applied across the
+// whole selection. Each item goes through the exact same RPC (and gates) as
+// the single-snag equivalents — results are just summarized afterward rather
+// than pre-validated client-side, since the server is the source of truth for
+// eligibility (site scoping, investigation gates, lane rules).
+function BulkActionsModal({
+  visible,
+  snags,
+  onClose,
+  onApplied,
+}: {
+  visible: boolean;
+  snags: Snag[];
+  onClose: () => void;
+  onApplied: (message: string) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [step, setStep] = useState<'menu' | 'status' | 'person' | 'workgroup'>('menu');
+  const [targetStatus, setTargetStatus] = useState<SnagStatus>('flagged');
+  const [note, setNote] = useState('');
+  const [members, setMembers] = useState<Profile[]>([]);
+  const [targetPersonId, setTargetPersonId] = useState<string | null | undefined>(undefined);
+  const [workGroups, setWorkGroups] = useState<WorkGroupDetail[]>([]);
+  const [targetWorkGroupId, setTargetWorkGroupId] = useState<string | null | undefined>(undefined);
+  const [applying, setApplying] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    setStep('menu');
+    setTargetStatus('flagged');
+    setNote('');
+    setTargetPersonId(undefined);
+    setTargetWorkGroupId(undefined);
+    getOrgMembers().then(setMembers);
+    getWorkGroupsWithDetail().then(setWorkGroups);
+  }, [visible]);
+
+  if (!visible) return null;
+
+  function finish(ok: number, errors: string[]) {
+    const message = errors.length === 0
+      ? `Updated ${ok} snag${ok === 1 ? '' : 's'}`
+      : `Updated ${ok}, ${errors.length} failed`;
+    onApplied(message);
+  }
+
+  async function applyStatus() {
+    setApplying(true);
+    let ok = 0;
+    const errors: string[] = [];
+    await Promise.all(snags.map(async (s) => {
+      let err: { message?: string } | null = null;
+      if (targetStatus === 'resolved') {
+        if (s.lane === 'serious') {
+          ({ error: err } = await updateSnagStatus(s.id, 'resolved', note.trim() || null));
+        } else if (note.trim()) {
+          ({ error: err } = await resolveSnag(s.id, note.trim()));
+        } else {
+          err = { message: 'Add a note to resolve niggles' };
+        }
+      } else if (s.lane === 'serious') {
+        ({ error: err } = await updateSnagStatus(s.id, targetStatus));
+      } else {
+        err = { message: 'Niggles can only be marked Resolved' };
+      }
+      if (err) errors.push(`${s.reference}: ${err.message ?? 'failed'}`); else ok++;
+    }));
+    setApplying(false);
+    finish(ok, errors);
+  }
+
+  async function applyPerson() {
+    if (targetPersonId === undefined) return;
+    setApplying(true);
+    let ok = 0;
+    const errors: string[] = [];
+    await Promise.all(snags.map(async (s) => {
+      const { error } = await assignSnagOwner(s.id, targetPersonId);
+      if (error) errors.push(`${s.reference}: ${error.message ?? 'failed'}`); else ok++;
+    }));
+    setApplying(false);
+    finish(ok, errors);
+  }
+
+  async function applyWorkGroup() {
+    if (targetWorkGroupId === undefined) return;
+    setApplying(true);
+    let ok = 0;
+    const errors: string[] = [];
+    await Promise.all(snags.map(async (s) => {
+      const { error } = await assignSnagWorkGroup(s.id, targetWorkGroupId);
+      if (error) errors.push(`${s.reference}: ${error.message ?? 'failed'}`); else ok++;
+    }));
+    setApplying(false);
+    finish(ok, errors);
+  }
+
+  const stepTitle = step === 'menu' ? `Bulk actions (${snags.length})`
+    : step === 'status' ? 'Change status'
+    : step === 'person' ? 'Assign to person'
+    : 'Assign to work group';
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{stepTitle}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={8}>
+              <Icon name="close" size="md" color={Colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          {step === 'menu' && (
+            <ScrollView style={styles.modalScroll}>
+              <TouchableOpacity style={styles.bulkMenuRow} onPress={() => setStep('status')} activeOpacity={0.7}>
+                <Icon name="swap-horizontal-outline" size="md" color={Colors.primary} />
+                <Text style={styles.bulkMenuLabel}>Change status</Text>
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.bulkMenuRow} onPress={() => setStep('person')} activeOpacity={0.7}>
+                <Icon name="person-outline" size="md" color={Colors.primary} />
+                <Text style={styles.bulkMenuLabel}>Assign to person</Text>
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.bulkMenuRow} onPress={() => setStep('workgroup')} activeOpacity={0.7}>
+                <Icon name="people-outline" size="md" color={Colors.primary} />
+                <Text style={styles.bulkMenuLabel}>Assign to work group</Text>
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+              </TouchableOpacity>
+            </ScrollView>
+          )}
+
+          {step === 'status' && (
+            <>
+              <Text style={styles.modalHint}>
+                Serious-lane snags apply directly. Niggles can only be marked Resolved, and need a note.
+              </Text>
+              <Chip
+                options={[
+                  { key: 'flagged' as SnagStatus, label: STATUS_LABELS.flagged },
+                  { key: 'in_progress' as SnagStatus, label: STATUS_LABELS.in_progress },
+                  { key: 'resolved' as SnagStatus, label: STATUS_LABELS.resolved },
+                ]}
+                value={targetStatus}
+                onChange={setTargetStatus}
+                variant="segmented"
+              />
+              {targetStatus === 'resolved' && (
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Resolution note (required for niggles)"
+                  placeholderTextColor={Colors.textMuted}
+                  value={note}
+                  onChangeText={setNote}
+                  multiline
+                />
+              )}
+              <View style={styles.modalActions}>
+                <Button label="Back" variant="outline" onPress={() => setStep('menu')} style={styles.flex1} />
+                <Button label={`Apply to ${snags.length}`} onPress={applyStatus} loading={applying} style={styles.flex1} />
+              </View>
+            </>
+          )}
+
+          {step === 'person' && (
+            <>
+              <ScrollView style={styles.modalScroll}>
+                <TouchableOpacity
+                  style={[styles.pickerRow, targetPersonId === null && styles.pickerRowActive]}
+                  onPress={() => setTargetPersonId(null)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.pickerRowText}>Unassigned</Text>
+                  {targetPersonId === null && <Icon name="checkmark" size="sm" color={Colors.primary} />}
+                </TouchableOpacity>
+                {members.map((m) => (
+                  <TouchableOpacity
+                    key={m.id}
+                    style={[styles.pickerRow, targetPersonId === m.id && styles.pickerRowActive]}
+                    onPress={() => setTargetPersonId(m.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.pickerRowText}>{m.name || m.email}</Text>
+                    {targetPersonId === m.id && <Icon name="checkmark" size="sm" color={Colors.primary} />}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <View style={styles.modalActions}>
+                <Button label="Back" variant="outline" onPress={() => setStep('menu')} style={styles.flex1} />
+                <Button
+                  label={`Apply to ${snags.length}`}
+                  onPress={applyPerson}
+                  loading={applying}
+                  disabled={targetPersonId === undefined}
+                  style={styles.flex1}
+                />
+              </View>
+            </>
+          )}
+
+          {step === 'workgroup' && (
+            <>
+              <ScrollView style={styles.modalScroll}>
+                <TouchableOpacity
+                  style={[styles.pickerRow, targetWorkGroupId === null && styles.pickerRowActive]}
+                  onPress={() => setTargetWorkGroupId(null)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.pickerRowText}>None</Text>
+                  {targetWorkGroupId === null && <Icon name="checkmark" size="sm" color={Colors.primary} />}
+                </TouchableOpacity>
+                {workGroups.map((wg) => (
+                  <TouchableOpacity
+                    key={wg.id}
+                    style={[styles.pickerRow, targetWorkGroupId === wg.id && styles.pickerRowActive]}
+                    onPress={() => setTargetWorkGroupId(wg.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.pickerRowText}>{wg.name}</Text>
+                    {targetWorkGroupId === wg.id && <Icon name="checkmark" size="sm" color={Colors.primary} />}
+                  </TouchableOpacity>
+                ))}
+                {workGroups.length === 0 && (
+                  <Text style={styles.hintMuted}>This organisation has no work groups yet.</Text>
+                )}
+              </ScrollView>
+              <View style={styles.modalActions}>
+                <Button label="Back" variant="outline" onPress={() => setStep('menu')} style={styles.flex1} />
+                <Button
+                  label={`Apply to ${snags.length}`}
+                  onPress={applyWorkGroup}
+                  loading={applying}
+                  disabled={targetWorkGroupId === undefined}
+                  style={styles.flex1}
+                />
+              </View>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -522,20 +799,42 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 
-  // Merge select mode
+  // Select mode
   selectBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
+    gap: Spacing.sm,
     backgroundColor: Colors.surface,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  selectBarTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  selectBarActions: { flexDirection: 'row', gap: Spacing.sm },
   selectBarCancel: { paddingVertical: Spacing.xs },
   selectBarCancelText: { fontSize: Typography.base, color: Colors.primary },
   selectBarCount: { flex: 1, fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
+
+  // Bulk actions modal
+  bulkMenuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  bulkMenuLabel: { flex: 1, fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textPrimary },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.button,
+  },
+  pickerRowActive: { backgroundColor: Colors.primaryLight },
+  pickerRowText: { fontSize: Typography.base, color: Colors.textPrimary },
+  hintMuted: { fontSize: Typography.sm, color: Colors.textMuted, fontStyle: 'italic', paddingVertical: Spacing.sm },
 
   // Merge modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },

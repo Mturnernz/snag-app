@@ -496,6 +496,10 @@ export async function assignSnagOwner(snagId: string, ownerId: string | null) {
   return supabase.rpc('assign_snag_owner', { p_snag_id: snagId, p_owner_id: ownerId });
 }
 
+export async function assignSnagWorkGroup(snagId: string, workGroupId: string | null) {
+  return supabase.rpc('assign_snag_work_group', { p_snag_id: snagId, p_work_group_id: workGroupId });
+}
+
 // People who can own a snag at a given site: the site's members + supervisors,
 // plus the org's admins. Used to scope the owner picker to the snag's site.
 export interface SiteAssignee {

@@ -47,6 +47,8 @@ const STATUS_FILTER_OPTIONS: { key: SnagStatus; label: string }[] = [
   { key: 'rca_pending', label: STATUS_LABELS.rca_pending },
 ];
 
+const PAGE_SIZE = 50;
+
 export default function IssueListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
@@ -71,6 +73,16 @@ export default function IssueListScreen() {
   const [orgName, setOrgName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Pagination — the list loads PAGE_SIZE at a time and appends on scroll.
+  // queryCtxRef snapshots the org scope resolved by the last full fetch so
+  // loadMore can rebuild the identical query without re-resolving the org.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const queryCtxRef = React.useRef<{ memberOfOrg: boolean; activeOrgId: string | null }>({
+    memberOfOrg: false,
+    activeOrgId: null,
+  });
 
   // Select mode — long-press a card to enter it. selectedIds is ordered:
   // the first entry is the "anchor" whose content seeds a new merge parent.
@@ -99,6 +111,57 @@ export default function IssueListScreen() {
     });
   }
 
+  // One page of the list query, identical for the first load and loadMore.
+  const buildSnagQuery = useCallback((memberOfOrg: boolean, activeOrgId: string | null, from: number, to: number) => {
+    let query = supabase
+      .from('snags_with_details')
+      .select('id, reference, status, kind, lane, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission')
+      // Merged children are hidden here — only visible from the parent's own
+      // "Merged snags" section. A parent is never itself a child (single-
+      // level hierarchy, enforced server-side), so parents always show.
+      .is('parent_snag_id', null)
+      .range(from, to);
+
+    if (memberOfOrg && activeOrgId) {
+      // Members: internal reports by default; the Public button shows the
+      // public-submissions queue. Explicitly scope to the active org — RLS
+      // also allows any snag you personally reported even in a *different*
+      // org (so a cross-org/public reporter can track their own report's
+      // status), which would otherwise leak other-org snags into this list.
+      query = query.eq('org_id', activeOrgId).eq('is_public_submission', publicOnly);
+    }
+
+    if (statusFilters.size > 0) {
+      query = query.in('status', Array.from(statusFilters));
+    }
+    if (siteFilters.size > 0) {
+      query = query.in('site_id', Array.from(siteFilters));
+    }
+
+    return query.order('created_at', { ascending: sortMode === 'oldest' });
+  }, [statusFilters, siteFilters, sortMode, publicOnly]);
+
+  const mapRows = (rows: any[]): Snag[] =>
+    rows.map((row: any) => ({
+      ...row,
+      reporter: row.reporter_id ? { id: row.reporter_id, name: row.reporter_name } : undefined,
+      owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : null,
+    }));
+
+  // Injury snags float to the top regardless of the active sort, unless
+  // already resolved. Trending re-ranks everything else by combined
+  // engagement (votes + comments); otherwise the DB order (newest/oldest)
+  // is preserved (Array.sort is stable).
+  const sortSnags = useCallback((arr: Snag[]): Snag[] => {
+    const isPinned = (s: Snag) => s.severity === 'injury' && s.status !== 'resolved';
+    const engagement = (s: Snag) => (s.vote_score ?? 0) + (s.comment_count ?? 0);
+    return [...arr].sort((a, b) => {
+      const pinDiff = Number(isPinned(b)) - Number(isPinned(a));
+      if (pinDiff !== 0) return pinDiff;
+      return sortMode === 'trending' ? engagement(b) - engagement(a) : 0;
+    });
+  }, [sortMode]);
+
   const fetchIssues = useCallback(async () => {
     // Re-check org state every fetch — it changes with the org switcher, and
     // it decides both the screen title and the public-submission filtering.
@@ -118,91 +181,75 @@ export default function IssueListScreen() {
       setIsPublicOrg(orgIsPublic);
     }
     setHasOrg(memberOfOrg);
+    queryCtxRef.current = { memberOfOrg, activeOrgId };
 
-    let query = supabase
-      .from('snags_with_details')
-      .select('id, reference, status, kind, lane, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission')
-      // Merged children are hidden here — only visible from the parent's own
-      // "Merged snags" section. A parent is never itself a child (single-
-      // level hierarchy, enforced server-side), so parents always show.
-      .is('parent_snag_id', null)
-      .limit(50);
+    // The page query, the site-filter options, and the Public-button check
+    // are independent — run them concurrently instead of serially.
+    const [{ data, error }, siteList, publicFlag] = await Promise.all([
+      buildSnagQuery(memberOfOrg, activeOrgId, 0, PAGE_SIZE - 1),
+      (async () => {
+        // Sites available to filter by: every org site for admin/supervisor,
+        // only the worker's own assigned sites otherwise.
+        if (!memberOfOrg || !activeOrgId) return [] as { id: string; name: string }[];
+        const allSites = await getOrgSites(activeOrgId);
+        if (userRole === 'officer_admin' || userRole === 'supervisor') return allSites;
+        const mineIds = new Set(await getMySiteIds());
+        return allSites.filter((s) => mineIds.has(s.id));
+      })(),
+      (async () => {
+        // The Public button only ever shows for orgs that are both public
+        // and actually have a public submission on record.
+        if (!memberOfOrg || !activeOrgId || !orgIsPublic) return false;
+        const { data: pub } = await supabase
+          .from('snags')
+          .select('id')
+          .eq('org_id', activeOrgId)
+          .eq('is_public_submission', true)
+          .limit(1);
+        return Boolean(pub && pub.length > 0);
+      })(),
+    ]);
 
-    if (memberOfOrg && activeOrgId) {
-      // Members: internal reports by default; the Public button shows the
-      // public-submissions queue. Explicitly scope to the active org — RLS
-      // also allows any snag you personally reported even in a *different*
-      // org (so a cross-org/public reporter can track their own report's
-      // status), which would otherwise leak other-org snags into this list.
-      query = query.eq('org_id', activeOrgId).eq('is_public_submission', publicOnly);
-    }
-
-    if (statusFilters.size > 0) {
-      query = query.in('status', Array.from(statusFilters));
-    }
-    if (siteFilters.size > 0) {
-      query = query.in('site_id', Array.from(siteFilters));
-    }
-
-    query = query.order('created_at', { ascending: sortMode === 'oldest' });
-
-    const { data, error } = await query;
+    setSites(siteList);
+    setHasPublicSnags(publicFlag);
 
     if (!error && data) {
-      const mapped = data.map((row: any) => ({
-        ...row,
-        reporter: row.reporter_id ? { id: row.reporter_id, name: row.reporter_name } : undefined,
-        owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : null,
-      }));
-      // Injury snags float to the top regardless of the active sort, unless
-      // already resolved. Trending re-ranks everything else by combined
-      // engagement (votes + comments); otherwise the DB order (newest/oldest)
-      // is preserved (Array.sort is stable).
-      const isPinned = (s: Snag) => s.severity === 'injury' && s.status !== 'resolved';
-      const engagement = (s: Snag) => (s.vote_score ?? 0) + (s.comment_count ?? 0);
-      mapped.sort((a, b) => {
-        const pinDiff = Number(isPinned(b)) - Number(isPinned(a));
-        if (pinDiff !== 0) return pinDiff;
-        return sortMode === 'trending' ? engagement(b) - engagement(a) : 0;
-      });
-      setIssues(mapped);
+      setIssues(sortSnags(mapRows(data)));
+      setHasMore(data.length === PAGE_SIZE);
       const paths = data.map((row: any) => row.photo_path).filter(Boolean);
       getSnagPhotoUrls(paths).then(setPhotoUrls);
-    }
-
-    // Sites available to filter by: every org site for admin/supervisor,
-    // only the worker's own assigned sites otherwise.
-    if (memberOfOrg && activeOrgId) {
-      const allSites = await getOrgSites(activeOrgId);
-      if (userRole === 'officer_admin' || userRole === 'supervisor') {
-        setSites(allSites);
-      } else {
-        const mineIds = new Set(await getMySiteIds());
-        setSites(allSites.filter((s) => mineIds.has(s.id)));
-      }
-    } else {
-      setSites([]);
-    }
-
-    // The Public button only ever shows for orgs that are both public and
-    // actually have a public submission on record.
-    if (memberOfOrg && activeOrgId && orgIsPublic) {
-      const { data: pub } = await supabase
-        .from('snags')
-        .select('id')
-        .eq('org_id', activeOrgId)
-        .eq('is_public_submission', true)
-        .limit(1);
-      setHasPublicSnags(Boolean(pub && pub.length > 0));
-    } else {
-      setHasPublicSnags(false);
     }
 
     // Keep the Snags tab badge in sync — cheap enough to refresh on every
     // load rather than only on app foreground, so merges/status changes
     // made in this session are reflected immediately.
     refreshOpenIssueCount();
-  }, [statusFilters, siteFilters, sortMode, publicOnly, refreshOpenIssueCount]);
+  }, [buildSnagQuery, sortSnags, refreshOpenIssueCount]);
+
+  // Infinite scroll: fetch the next page with the same filters and append.
+  // Offset-based paging can double up a row if something is inserted while
+  // scrolling, so appends are deduped by id; a pull-to-refresh resets.
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || loading || refreshing) return;
+    setLoadingMore(true);
+    const { memberOfOrg, activeOrgId } = queryCtxRef.current;
+    const { data, error } = await buildSnagQuery(
+      memberOfOrg, activeOrgId, issues.length, issues.length + PAGE_SIZE - 1
+    );
+    if (!error && data) {
+      const fresh = mapRows(data);
+      setIssues((prev) => {
+        const seen = new Set(prev.map((s) => s.id));
+        return sortSnags([...prev, ...fresh.filter((s) => !seen.has(s.id))]);
+      });
+      setHasMore(data.length === PAGE_SIZE);
+      const paths = data.map((row: any) => row.photo_path).filter(Boolean);
+      if (paths.length > 0) {
+        getSnagPhotoUrls(paths).then((map) => setPhotoUrls((prev) => ({ ...prev, ...map })));
+      }
+    }
+    setLoadingMore(false);
+  }, [loadingMore, hasMore, loading, refreshing, issues.length, buildSnagQuery, sortSnags]);
 
   useEffect(() => {
     setLoading(true);
@@ -411,6 +458,11 @@ export default function IssueListScreen() {
           initialNumToRender={8}
           maxToRenderPerBatch={5}
           updateCellsBatchingPeriod={50}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator color={Colors.primary} style={styles.footerSpinner} /> : null
+          }
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1047,6 +1099,9 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: Spacing.lg,
+  },
+  footerSpinner: {
+    paddingVertical: Spacing.lg,
   },
   columnWrapper: {
     gap: Spacing.sm,

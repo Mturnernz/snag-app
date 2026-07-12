@@ -429,26 +429,28 @@ export interface OrgStats {
   bySeverity: Record<SnagSeverity, number>;
 }
 
+// Aggregated server-side in one pass (get_org_stats) — previously this
+// selected every snag row in the org and counted on the phone.
 export async function getOrgStats(orgId: string): Promise<OrgStats> {
-  const [membersRes, snagsRes] = await Promise.all([
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('org_id', orgId),
-    supabase.from('snags').select('status, kind, severity').eq('org_id', orgId),
-  ]);
-
-  const totalMembers = membersRes.count ?? 0;
-  const snags = (snagsRes.data ?? []) as { status: SnagStatus; kind: SnagKind; severity: SnagSeverity | null }[];
-
-  const byStatus: Record<SnagStatus, number> = { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 };
-  const byKind: Record<SnagKind, number> = { fixit: 0, improvement: 0, hazard: 0, incident: 0 };
-  const bySeverity: Record<SnagSeverity, number> = { minor: 0, moderate: 0, injury: 0, critical: 0 };
-
-  for (const snag of snags) {
-    byStatus[snag.status]++;
-    byKind[snag.kind]++;
-    if (snag.severity) bySeverity[snag.severity]++;
+  const empty: OrgStats = {
+    totalMembers: 0,
+    totalSnags: 0,
+    byStatus: { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 },
+    byKind: { fixit: 0, improvement: 0, hazard: 0, incident: 0 },
+    bySeverity: { minor: 0, moderate: 0, injury: 0, critical: 0 },
+  };
+  const { data, error } = await supabase.rpc('get_org_stats', { p_org_id: orgId });
+  if (error || !data) {
+    if (error) console.error('getOrgStats error:', error);
+    return empty;
   }
-
-  return { totalMembers, totalSnags: snags.length, byStatus, byKind, bySeverity };
+  return {
+    totalMembers: data.total_members ?? 0,
+    totalSnags: data.total_snags ?? 0,
+    byStatus: { ...empty.byStatus, ...data.by_status },
+    byKind: { ...empty.byKind, ...data.by_kind },
+    bySeverity: { ...empty.bySeverity, ...data.by_severity },
+  };
 }
 
 export interface OrgSnagSummary {

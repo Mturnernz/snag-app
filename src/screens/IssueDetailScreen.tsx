@@ -48,6 +48,7 @@ interface IssueDetail {
   reference: string;
   org_id: string;
   site_id: string;
+  site_name?: string;
   description: string | null;
   status: SnagStatus;
   kind: SnagKind;
@@ -191,7 +192,7 @@ export default function IssueDetailScreen() {
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, is_public_submission, parent_snag_id, child_count')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count')
       .eq('id', issueId)
       .single();
 
@@ -448,8 +449,11 @@ export default function IssueDetailScreen() {
         )}
 
         <View style={[styles.content, isSerious && styles.contentSerious]}>
-          {/* Reference + title */}
-          <Text style={styles.reference}>{issue.reference}</Text>
+          {/* Reference + site */}
+          <View style={styles.referenceRow}>
+            <Text style={styles.reference}>{issue.reference}</Text>
+            {issue.site_name && <Text style={styles.siteText} numberOfLines={1}>{issue.site_name}</Text>}
+          </View>
           <Text style={styles.title}>{issue.description || 'No description'}</Text>
 
           {/* Badges — status before controls: current state shown up front */}
@@ -704,7 +708,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 3,
     borderTopColor: Colors.serious,
   },
+  referenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
   reference: { fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.textMuted, letterSpacing: 0.5 },
+  siteText: { flexShrink: 1, fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary, textAlign: 'right' },
   title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary, lineHeight: 36 },
   badgeRow: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
   meta: { fontSize: Typography.sm, color: Colors.textMuted },

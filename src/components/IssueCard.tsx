@@ -133,25 +133,36 @@ function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable,
       )}
 
       {/* Photo */}
-      {photoUrl ? (
-        <Image
-          source={{ uri: thumbnailUrl(photoUrl) }}
-          style={[styles.photo, compact && styles.photoCompact]}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-          transition={200}
-        />
-      ) : (
-        <View style={[styles.photoPlaceholder, compact && styles.photoCompact]}>
-          <Icon name="camera-outline" size={compact ? IconSize.lg : IconSize.xl} color={Colors.textMuted} />
-          {!compact && <Text style={styles.photoPlaceholderText}>No photo</Text>}
-        </View>
-      )}
+      <View style={styles.photoWrap}>
+        {photoUrl ? (
+          <Image
+            source={{ uri: thumbnailUrl(photoUrl) }}
+            style={[styles.photo, compact && styles.photoCompact]}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+            transition={200}
+          />
+        ) : (
+          <View style={[styles.photoPlaceholder, compact && styles.photoCompact]}>
+            <Icon name="camera-outline" size={compact ? IconSize.lg : IconSize.xl} color={Colors.textMuted} />
+            {!compact && <Text style={styles.photoPlaceholderText}>No photo</Text>}
+          </View>
+        )}
 
-      {/* Status overlay on photo */}
-      <View style={styles.statusOverlay}>
-        <StatusBadge status={issue.status} />
+        {/* Status overlay on photo */}
+        <View style={styles.statusOverlay}>
+          <StatusBadge status={issue.status} />
+        </View>
+
+        {/* Site — bottom-center pill on the photo */}
+        {issue.site_name && (
+          <View style={styles.sitePillRow} pointerEvents="none">
+            <View style={styles.sitePill}>
+              <Text style={styles.sitePillText} numberOfLines={1}>{issue.site_name}</Text>
+            </View>
+          </View>
+        )}
       </View>
 
       {/* Card body */}
@@ -234,6 +245,28 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Spacing.md,
     right: Spacing.md,
+  },
+  photoWrap: {
+    position: 'relative',
+  },
+  sitePillRow: {
+    position: 'absolute',
+    bottom: Spacing.sm,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  sitePill: {
+    maxWidth: '85%',
+    backgroundColor: 'rgba(17, 24, 39, 0.75)',
+    borderRadius: Radius.chip,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+  },
+  sitePillText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
   },
   body: {
     padding: Spacing.md,

@@ -10,6 +10,8 @@ import {
   RefreshControl,
   Alert,
   Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -479,7 +481,7 @@ function WorkGroupSupervisorModal({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.modalSheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle} numberOfLines={1}>{group.name}</Text>
@@ -582,7 +584,7 @@ function WorkGroupSupervisorModal({
 
           <Button label="Done" onPress={onClose} fullWidth style={styles.topGap} />
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -741,7 +741,7 @@ function BulkActionsModal({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.modalSheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>{stepTitle}</Text>
@@ -877,7 +877,7 @@ function BulkActionsModal({
             </>
           )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

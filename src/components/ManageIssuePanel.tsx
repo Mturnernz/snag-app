@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import * as Haptics from 'expo-haptics';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, StyleSheet } from 'react-native';
+import {
+  View, Text, ScrollView, TouchableOpacity, TextInput, Modal, StyleSheet, KeyboardAvoidingView, Platform,
+} from 'react-native';
 
 import {
   SnagStatus, SnagKind, SnagSeverity, SnagLane,
@@ -300,7 +302,7 @@ export default function ManageIssuePanel({
       )}
 
       <Modal visible={resolveModalOpen} transparent animationType="fade" onRequestClose={() => setResolveModalOpen(false)}>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Resolve snag</Text>
             <Text style={styles.modalHint}>
@@ -322,7 +324,7 @@ export default function ManageIssuePanel({
               <Button label="Resolve" onPress={handleResolve} loading={resolving} style={styles.modalButton} />
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <ConfirmDialog

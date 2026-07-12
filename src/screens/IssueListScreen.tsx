@@ -33,6 +33,7 @@ import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 import { useToast } from '../hooks/useToast';
+import { useBadge } from '../context/BadgeContext';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -49,6 +50,7 @@ const STATUS_FILTER_OPTIONS: { key: SnagStatus; label: string }[] = [
 export default function IssueListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  const { refreshOpenIssueCount } = useBadge();
 
   // Filters/sort — five independent controls in the filter bar: Status and
   // Site are multi-select (empty = no filter), Date/Trending share one sort
@@ -195,7 +197,12 @@ export default function IssueListScreen() {
     } else {
       setHasPublicSnags(false);
     }
-  }, [statusFilters, siteFilters, sortMode, publicOnly]);
+
+    // Keep the Snags tab badge in sync — cheap enough to refresh on every
+    // load rather than only on app foreground, so merges/status changes
+    // made in this session are reflected immediately.
+    refreshOpenIssueCount();
+  }, [statusFilters, siteFilters, sortMode, publicOnly, refreshOpenIssueCount]);
 
   useEffect(() => {
     setLoading(true);

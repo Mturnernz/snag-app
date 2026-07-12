@@ -38,6 +38,7 @@ import Card from '../components/Card';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { useBadge } from '../context/BadgeContext';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -103,6 +104,7 @@ export default function IssueDetailScreen() {
   const route = useRoute<Route>();
   const navigation = useNavigation<Nav>();
   const { issueId } = route.params;
+  const { refreshOpenIssueCount } = useBadge();
 
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [parentReference, setParentReference] = useState<string | null>(null);
@@ -226,6 +228,9 @@ export default function IssueDetailScreen() {
         setParentReference(null);
       }
     }
+    // Keep the Snags tab badge in sync — this screen is where most status-
+    // affecting actions (assign, recategorise, resolve, merge) happen.
+    refreshOpenIssueCount();
     setLoadingIssue(false);
   }
 

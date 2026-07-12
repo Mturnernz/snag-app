@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { StyleSheet, AppState } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { RootStackParamList, MainTabParamList, UserRole } from '../types';
 import { Colors, Typography } from '../constants/theme';
-import { supabase } from '../lib/supabase';
 import Icon from '../components/Icon';
 
 import IssueListScreen from '../screens/IssueListScreen';
@@ -21,6 +20,7 @@ import ChooseReportOrgScreen from '../screens/ChooseReportOrgScreen';
 import ManageOrganisationScreen from '../screens/ManageOrganisationScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 import { ReportTargetProvider } from '../context/ReportTargetContext';
+import { BadgeProvider, useBadge } from '../context/BadgeContext';
 
 // ─── Tab bar icons ────────────────────────────────────────────────────────────
 
@@ -48,33 +48,7 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 function MainTabNavigator({ userRole }: { userRole: UserRole }) {
   const isAdminOrManager = userRole === 'officer_admin' || userRole === 'supervisor';
-  const [openIssueCount, setOpenIssueCount] = useState<number>(0);
-
-  const fetchOpenCount = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('org_id')
-      .eq('id', user.id)
-      .single();
-    if (!profile?.org_id) return;
-    const { count } = await supabase
-      .from('snags')
-      .select('id', { count: 'exact', head: true })
-      .eq('org_id', profile.org_id)
-      .eq('status', 'flagged')
-      .is('parent_snag_id', null);
-    setOpenIssueCount(count ?? 0);
-  }, []);
-
-  useEffect(() => {
-    fetchOpenCount();
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') fetchOpenCount();
-    });
-    return () => sub.remove();
-  }, [fetchOpenCount]);
+  const { openIssueCount } = useBadge();
 
   return (
     <Tab.Navigator
@@ -113,6 +87,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator({ userRole }: { userRole: UserRole }) {
   return (
+    <BadgeProvider>
     <IncidentDraftProvider>
       <ReportTargetProvider>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -163,6 +138,7 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
       </Stack.Navigator>
       </ReportTargetProvider>
     </IncidentDraftProvider>
+    </BadgeProvider>
   );
 }
 

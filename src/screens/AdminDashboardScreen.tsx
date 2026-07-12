@@ -21,12 +21,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Organisation, Profile, SnagStatus, STATUS_LABELS, UserRole, RootStackParamList } from '../types';
 import {
   supabase, getOrgStats, OrgStats, getMemberships, setOrganisationActive, Membership,
-  getOrgMembers, getWorkGroupsWithDetail, createWorkGroup, updateWorkGroup, assignWorkGroupSupervisor,
-  removeWorkGroupSupervisor, uploadWorkGroupImage, getWorkGroupImageUrl, WorkGroupDetail,
+  getOrgMembers, getOrgSites, createSite, getWorkGroupsWithDetail, createWorkGroup, updateWorkGroup,
+  assignWorkGroupSupervisor, removeWorkGroupSupervisor, uploadWorkGroupImage, getWorkGroupImageUrl, WorkGroupDetail,
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../constants/theme';
 import Card from '../components/Card';
 import Button from '../components/Button';
+import Chip from '../components/Chip';
 import Icon from '../components/Icon';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 
@@ -48,6 +49,7 @@ export default function AdminDashboardScreen() {
   const [org, setOrg] = useState<Organisation | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [stats, setStats] = useState<OrgStats | null>(null);
   const [ownedOrgs, setOwnedOrgs] = useState<Membership[]>([]);
   const [togglingOrgId, setTogglingOrgId] = useState<string | null>(null);
@@ -62,13 +64,21 @@ export default function AdminDashboardScreen() {
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupColor, setNewGroupColor] = useState<string>(WorkGroupPalette[0]);
   const [newGroupImageUri, setNewGroupImageUri] = useState<string | null>(null);
+  const [newGroupSiteId, setNewGroupSiteId] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
+
+  // Sites — for scoping a work group to one site, or leaving it for all.
+  const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
+  const [showNewSiteInput, setShowNewSiteInput] = useState(false);
+  const [newSiteName, setNewSiteName] = useState('');
+  const [creatingSite, setCreatingSite] = useState(false);
 
   const canManageWorkGroups = role === 'officer_admin' || role === 'supervisor';
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
+    setCurrentUserId(user.id);
 
     const { data } = await supabase
       .from('profiles')
@@ -92,6 +102,7 @@ export default function AdminDashboardScreen() {
     setOwnedOrgs(memberships.filter((m) => m.role === 'officer_admin'));
 
     if (profileRole === 'officer_admin' || profileRole === 'supervisor') {
+      if (data?.org_id) getOrgSites(data.org_id).then(setSites);
       const groups = await getWorkGroupsWithDetail();
       setWorkGroups(groups);
       const withImages = groups.filter((g) => g.imagePath);
@@ -174,15 +185,37 @@ export default function AdminDashboardScreen() {
       const fileName = `${org.id}/${Date.now()}.jpg`;
       imagePath = await uploadWorkGroupImage(newGroupImageUri, fileName);
     }
-    const { error } = await createWorkGroup(newGroupName.trim(), imagePath ? null : newGroupColor, imagePath);
+    const { error } = await createWorkGroup(
+      newGroupName.trim(), imagePath ? null : newGroupColor, imagePath, newGroupSiteId || null
+    );
     setCreatingGroup(false);
     if (!error) {
       setNewGroupName('');
       setNewGroupColor(WorkGroupPalette[0]);
       setNewGroupImageUri(null);
+      setNewGroupSiteId('');
       await load();
     } else {
       Alert.alert('Error', error.message ?? 'Could not create work group');
+    }
+  }
+
+  async function handleCreateSiteInline() {
+    if (!newSiteName.trim()) return;
+    setCreatingSite(true);
+    const { error } = await createSite(newSiteName.trim());
+    setCreatingSite(false);
+    if (error) {
+      Alert.alert('Error', error.message ?? 'Could not create site');
+      return;
+    }
+    setNewSiteName('');
+    setShowNewSiteInput(false);
+    if (org) {
+      const fresh = await getOrgSites(org.id);
+      setSites(fresh);
+      const created = fresh.find((s) => !sites.some((existing) => existing.id === s.id));
+      if (created) setNewGroupSiteId(created.id);
     }
   }
 
@@ -283,7 +316,7 @@ export default function AdminDashboardScreen() {
                 <View style={styles.wgInfo}>
                   <Text style={styles.wgName}>{wg.name}</Text>
                   <Text style={styles.wgMeta}>
-                    {wg.supervisorIds.length} supervisor{wg.supervisorIds.length !== 1 ? 's' : ''}
+                    {wg.siteName ?? 'All sites'} · {wg.supervisorIds.length} supervisor{wg.supervisorIds.length !== 1 ? 's' : ''}
                   </Text>
                 </View>
                 <Button label="Manage" variant="outline" onPress={() => setManagingGroup(wg)} />
@@ -302,6 +335,32 @@ export default function AdminDashboardScreen() {
               value={newGroupName}
               onChangeText={setNewGroupName}
             />
+
+            <Text style={styles.fieldLabel}>Site</Text>
+            <Chip
+              options={[{ key: '', label: 'All sites' }, ...sites.map((s) => ({ key: s.id, label: s.name }))]}
+              value={newGroupSiteId}
+              onChange={setNewGroupSiteId}
+              variant="segmented"
+            />
+            {isAdmin && (
+              showNewSiteInput ? (
+                <View style={styles.rowButtons}>
+                  <TextInput
+                    style={[styles.input, styles.flex1]}
+                    placeholder="New site name"
+                    placeholderTextColor={Colors.textMuted}
+                    value={newSiteName}
+                    onChangeText={setNewSiteName}
+                  />
+                  <Button label="Add" onPress={handleCreateSiteInline} loading={creatingSite} />
+                </View>
+              ) : (
+                <TouchableOpacity onPress={() => setShowNewSiteInput(true)}>
+                  <Text style={styles.uploadImageText}>+ New site</Text>
+                </TouchableOpacity>
+              )
+            )}
 
             {newGroupImageUri ? (
               <View style={styles.imagePreviewRow}>
@@ -376,7 +435,10 @@ export default function AdminDashboardScreen() {
         group={managingGroup}
         supervisors={supervisors}
         isAdmin={isAdmin}
+        currentUserId={currentUserId}
         orgId={org?.id ?? null}
+        sites={sites}
+        onSitesChanged={setSites}
         imageUrl={managingGroup ? wgImageUrls[managingGroup.id] : undefined}
         onClose={() => setManagingGroup(null)}
         onChanged={refreshWorkGroups}
@@ -386,14 +448,16 @@ export default function AdminDashboardScreen() {
 }
 
 // ── Work group supervisor modal ──────────────────────────────────────────────
-// Lists every org supervisor with an assign/unassign toggle. Only an admin
-// can toggle — a supervisor viewing this sees the roster but can't change it,
-// matching "only the owner allocates supervisors".
+// Lists every org supervisor with an assign/unassign toggle. An admin can
+// toggle anyone; a supervisor can only self-assign/self-unassign.
 function WorkGroupSupervisorModal({
   group,
   supervisors,
   isAdmin,
+  currentUserId,
   orgId,
+  sites,
+  onSitesChanged,
   imageUrl,
   onClose,
   onChanged,
@@ -401,7 +465,10 @@ function WorkGroupSupervisorModal({
   group: WorkGroupDetail | null;
   supervisors: Profile[];
   isAdmin: boolean;
+  currentUserId: string | null;
   orgId: string | null;
+  sites: { id: string; name: string }[];
+  onSitesChanged: (sites: { id: string; name: string }[]) => void;
   imageUrl?: string;
   onClose: () => void;
   onChanged: () => Promise<void>;
@@ -415,13 +482,20 @@ function WorkGroupSupervisorModal({
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState<string>(WorkGroupPalette[0]);
   const [editImageUri, setEditImageUri] = useState<string | null | undefined>(undefined);
+  const [editSiteId, setEditSiteId] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [showNewSiteInput, setShowNewSiteInput] = useState(false);
+  const [newSiteName, setNewSiteName] = useState('');
+  const [creatingSite, setCreatingSite] = useState(false);
 
   useEffect(() => {
     if (!group) return;
     setEditName(group.name);
     setEditColor(group.color ?? WorkGroupPalette[0]);
     setEditImageUri(undefined);
+    setEditSiteId(group.siteId ?? '');
+    setShowNewSiteInput(false);
+    setNewSiteName('');
   }, [group?.id]);
 
   if (!group) return null;
@@ -452,7 +526,9 @@ function WorkGroupSupervisorModal({
       const fileName = `${orgId}/${Date.now()}.jpg`;
       imagePath = await uploadWorkGroupImage(editImageUri, fileName);
     }
-    const { error } = await updateWorkGroup(group.id, editName.trim(), imagePath ? null : editColor, imagePath);
+    const { error } = await updateWorkGroup(
+      group.id, editName.trim(), imagePath ? null : editColor, imagePath, editSiteId || null
+    );
     setSavingEdit(false);
     if (error) {
       Alert.alert('Error', error.message ?? 'Could not update work group');
@@ -462,8 +538,30 @@ function WorkGroupSupervisorModal({
     }
   }
 
+  async function handleCreateSiteInline() {
+    if (!newSiteName.trim() || !orgId) return;
+    setCreatingSite(true);
+    const { error } = await createSite(newSiteName.trim());
+    setCreatingSite(false);
+    if (error) {
+      Alert.alert('Error', error.message ?? 'Could not create site');
+      return;
+    }
+    setNewSiteName('');
+    setShowNewSiteInput(false);
+    const fresh = await getOrgSites(orgId);
+    const created = fresh.find((s) => !sites.some((existing) => existing.id === s.id));
+    onSitesChanged(fresh);
+    if (created) setEditSiteId(created.id);
+  }
+
+  // A supervisor can only self-assign/self-unassign; an admin can toggle anyone.
+  function canToggle(userId: string) {
+    return isAdmin || userId === currentUserId;
+  }
+
   async function toggle(userId: string, active: boolean) {
-    if (!isAdmin || !group) return;
+    if (!group || !canToggle(userId)) return;
     setBusy(userId);
     const { error } = active
       ? await removeWorkGroupSupervisor(group.id, userId)
@@ -493,6 +591,32 @@ function WorkGroupSupervisorModal({
               value={editName}
               onChangeText={setEditName}
             />
+
+            <Text style={styles.fieldLabel}>Site</Text>
+            <Chip
+              options={[{ key: '', label: 'All sites' }, ...sites.map((s) => ({ key: s.id, label: s.name }))]}
+              value={editSiteId}
+              onChange={setEditSiteId}
+              variant="segmented"
+            />
+            {isAdmin && (
+              showNewSiteInput ? (
+                <View style={styles.rowButtons}>
+                  <TextInput
+                    style={[styles.input, styles.flex1]}
+                    placeholder="New site name"
+                    placeholderTextColor={Colors.textMuted}
+                    value={newSiteName}
+                    onChangeText={setNewSiteName}
+                  />
+                  <Button label="Add" onPress={handleCreateSiteInline} loading={creatingSite} />
+                </View>
+              ) : (
+                <TouchableOpacity onPress={() => setShowNewSiteInput(true)}>
+                  <Text style={styles.uploadImageText}>+ New site</Text>
+                </TouchableOpacity>
+              )
+            )}
 
             {hasImage ? (
               <View style={styles.imagePreviewRow}>
@@ -534,17 +658,18 @@ function WorkGroupSupervisorModal({
             <Text style={styles.modalHint}>
               {isAdmin
                 ? 'Snags routed here auto-assign to the supervisor if exactly one is set.'
-                : 'Only an admin can change who supervises this work group.'}
+                : 'You can assign or unassign yourself. Only an admin can change other supervisors.'}
             </Text>
             {supervisors.map((s) => {
               const active = group.supervisorIds.includes(s.id);
+              const enabled = canToggle(s.id);
               return (
                 <View key={s.id} style={styles.assignRow}>
                   <Text style={styles.assignName} numberOfLines={1}>{s.name || s.email}</Text>
                   <TouchableOpacity
-                    style={[styles.toggle, active && styles.toggleActive, !isAdmin && styles.toggleDisabled]}
+                    style={[styles.toggle, active && styles.toggleActive, !enabled && styles.toggleDisabled]}
                     onPress={() => toggle(s.id, active)}
-                    disabled={!isAdmin || busy === s.id}
+                    disabled={!enabled || busy === s.id}
                     activeOpacity={0.7}
                   >
                     {busy === s.id ? (
@@ -624,6 +749,8 @@ const styles = StyleSheet.create({
   hintMuted: { fontSize: Typography.sm, color: Colors.textMuted, fontStyle: 'italic' },
   fieldLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary, marginTop: Spacing.xs },
   topGap: { marginTop: Spacing.sm },
+  rowButtons: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  flex1: { flex: 1 },
   input: {
     minHeight: MIN_TOUCH_TARGET,
     backgroundColor: Colors.background,

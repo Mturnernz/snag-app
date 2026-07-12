@@ -120,6 +120,10 @@ export async function getPendingInvites(orgId: string) {
   return data ?? [];
 }
 
+export async function cancelInvite(inviteId: string) {
+  return supabase.rpc('cancel_invite', { p_invite_id: inviteId });
+}
+
 // ─── QR join code ─────────────────────────────────────────────────────────────
 
 export async function regenerateOrgJoinCode() {
@@ -361,12 +365,15 @@ export interface WorkGroupDetail {
   imagePath: string | null;
   isDefault: boolean;
   supervisorIds: string[];
+  // null = the group applies to every site in the org.
+  siteId: string | null;
+  siteName: string | null;
 }
 
 export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
   const { data: groups } = await supabase
     .from('work_groups')
-    .select('id, name, color, image_path, is_default')
+    .select('id, name, color, image_path, is_default, site_id, site:sites(name)')
     .order('is_default', { ascending: true })
     .order('created_at', { ascending: true });
   if (!groups || groups.length === 0) return [];
@@ -384,16 +391,25 @@ export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
     imagePath: g.image_path,
     isDefault: g.is_default,
     supervisorIds: (sups ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.user_id),
+    siteId: g.site_id,
+    siteName: g.site?.name ?? null,
   }));
 }
 
-export async function createWorkGroup(name: string, color?: string | null, imagePath?: string | null) {
-  return supabase.rpc('create_work_group', { p_name: name, p_color: color ?? null, p_image_path: imagePath ?? null });
+export async function createWorkGroup(
+  name: string, color?: string | null, imagePath?: string | null, siteId?: string | null
+) {
+  return supabase.rpc('create_work_group', {
+    p_name: name, p_color: color ?? null, p_image_path: imagePath ?? null, p_site_id: siteId ?? null,
+  });
 }
 
-export async function updateWorkGroup(workGroupId: string, name: string, color?: string | null, imagePath?: string | null) {
+export async function updateWorkGroup(
+  workGroupId: string, name: string, color?: string | null, imagePath?: string | null, siteId?: string | null
+) {
   return supabase.rpc('update_work_group', {
     p_work_group_id: workGroupId, p_name: name, p_color: color ?? null, p_image_path: imagePath ?? null,
+    p_site_id: siteId ?? null,
   });
 }
 

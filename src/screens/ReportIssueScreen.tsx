@@ -66,6 +66,7 @@ export default function ReportIssueScreen() {
   const [workGroups, setWorkGroups] = useState<WorkGroupDetail[]>([]);
   const [wgImageUrls, setWgImageUrls] = useState<Record<string, string>>({});
   const [showGroupPicker, setShowGroupPicker] = useState(false);
+  const [reportSiteId, setReportSiteId] = useState<string | null>(null);
 
   // Work groups only apply to member (not public) submissions, and are
   // scoped to whichever org is currently active — refetched whenever that
@@ -102,6 +103,7 @@ export default function ReportIssueScreen() {
         setMemberships((await getMemberships()).filter((m) => m.org_active));
         const profile = await getProfile(user.id);
         setHasProfileName(Boolean(profile?.name));
+        setReportSiteId(org ? await getDefaultSiteId(org.orgId) : null);
         await loadWorkGroups(Boolean(org));
       })();
     }, [])
@@ -119,6 +121,7 @@ export default function ReportIssueScreen() {
         setOrgId(profile?.org_id ?? null);
         setOrgName(profile?.organisation?.name ?? null);
         setMemberships((await getMemberships()).filter((m) => m.org_active));
+        setReportSiteId(profile?.org_id ? await getDefaultSiteId(profile.org_id) : null);
         await loadWorkGroups(Boolean(profile?.org_id));
       }
     } catch (err: any) {
@@ -134,9 +137,13 @@ export default function ReportIssueScreen() {
   const photoPathPrefix = isPublicSubmission ? userId : orgId;
 
   // The "Submit" default group is always its own bar at the top of the
-  // picker, separate from the custom-group grid below it.
+  // picker, separate from the custom-group grid below it. Custom groups are
+  // further scoped to the reporter's site — a group with no site applies
+  // everywhere, one with a site only shows to reporters at that site.
   const defaultGroup = workGroups.find((wg) => wg.isDefault);
-  const customGroups = workGroups.filter((wg) => !wg.isDefault);
+  const customGroups = workGroups.filter(
+    (wg) => !wg.isDefault && (wg.siteId === null || wg.siteId === reportSiteId)
+  );
 
   // Capture -> [select work group] -> submit. The grid only ever appears for
   // member submissions when the org has defined any work groups; tapping a

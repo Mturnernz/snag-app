@@ -19,6 +19,7 @@ import {
   supabase,
   getOrgMembers,
   getPendingInvites,
+  cancelInvite,
   updateMemberRole,
   removeOrgMember,
   inviteUser,
@@ -47,6 +48,7 @@ import { useToast } from '../hooks/useToast';
 
 const ROLES: UserRole[] = ['worker', 'supervisor', 'officer_admin'];
 const ROLE_OPTIONS = ROLES.map((r) => ({ key: r, label: ROLE_LABELS[r] }));
+const INVITE_PREVIEW_COUNT = 3;
 
 interface PendingInvite {
   id: string;
@@ -84,6 +86,8 @@ export default function ManageOrganisationScreen() {
   const [updatingRole, setUpdatingRole] = useState<string | null>(null);
   const [removingMember, setRemovingMember] = useState<string | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<Profile | null>(null);
+  const [cancellingInvite, setCancellingInvite] = useState<string | null>(null);
+  const [showAllInvites, setShowAllInvites] = useState(false);
 
   // Sites
   const [newSiteName, setNewSiteName] = useState('');
@@ -170,6 +174,18 @@ export default function ManageOrganisationScreen() {
       if (currentUser?.org_id) getPendingInvites(currentUser.org_id).then((i) => setPendingInvites(i as PendingInvite[]));
     } else {
       showToast(error.message ?? 'Could not send invite');
+    }
+  }
+
+  async function handleCancelInvite(invite: PendingInvite) {
+    setCancellingInvite(invite.id);
+    const { error } = await cancelInvite(invite.id);
+    setCancellingInvite(null);
+    if (!error) {
+      setPendingInvites((prev) => prev.filter((i) => i.id !== invite.id));
+      showToast(`Invite to ${invite.email} cancelled`);
+    } else {
+      showToast(error.message ?? 'Could not cancel invite');
     }
   }
 
@@ -458,7 +474,7 @@ export default function ManageOrganisationScreen() {
             );
           })}
 
-          {pendingInvites.map((invite) => (
+          {(showAllInvites ? pendingInvites : pendingInvites.slice(0, INVITE_PREVIEW_COUNT)).map((invite) => (
             <Card key={invite.id} variant="elevated" style={styles.memberCard}>
               <View style={styles.memberTop}>
                 <Avatar name={invite.email} email={invite.email} size={40} />
@@ -471,9 +487,30 @@ export default function ManageOrganisationScreen() {
                   </View>
                   <Text style={styles.memberEmail} numberOfLines={1}>{ROLE_LABELS[invite.role]} invite</Text>
                 </View>
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => handleCancelInvite(invite)}
+                  disabled={cancellingInvite === invite.id}
+                  hitSlop={8}
+                >
+                  {cancellingInvite === invite.id ? (
+                    <ActivityIndicator size="small" color={Colors.danger} />
+                  ) : (
+                    <Icon name="trash-outline" size="md" color={Colors.danger} />
+                  )}
+                </TouchableOpacity>
               </View>
             </Card>
           ))}
+
+          {pendingInvites.length > INVITE_PREVIEW_COUNT && (
+            <TouchableOpacity onPress={() => setShowAllInvites((v) => !v)} style={styles.showMoreRow}>
+              <Text style={styles.showMoreText}>
+                {showAllInvites ? 'Show less' : `Show all ${pendingInvites.length} pending`}
+              </Text>
+              <Icon name={showAllInvites ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.primary} />
+            </TouchableOpacity>
+          )}
 
           {members.length === 0 && pendingInvites.length === 0 && (
             <EmptyState icon="people-outline" title="No team members yet" message="Invite your team above so they can join." />
@@ -501,17 +538,29 @@ export default function ManageOrganisationScreen() {
         {/* Public reports */}
         <Card variant="elevated" style={styles.card}>
           <Text style={styles.sectionLabel}>PUBLIC REPORTS</Text>
+          <TouchableOpacity
+            style={styles.checkboxRow}
+            onPress={() => handleTogglePublicMode(!org?.is_public)}
+            disabled={savingPublicMode || (!org?.is_public && sites.length === 0)}
+            activeOpacity={0.7}
+          >
+            <Icon
+              name={org?.is_public ? 'checkbox' : 'square-outline'}
+              size="md"
+              color={org?.is_public ? Colors.primary : Colors.textMuted}
+            />
+            <Text style={styles.checkboxLabel}>Accept public reports</Text>
+            {savingPublicMode && <ActivityIndicator size="small" color={Colors.primary} />}
+          </TouchableOpacity>
+
           {org?.is_public ? (
-            <>
-              <Text style={styles.hint}>
-                Anyone can find {orgName} in the app and submit a report
-                {sites.find((s) => s.id === org.public_intake_site_id)
-                  ? ` — reports land in ${sites.find((s) => s.id === org.public_intake_site_id)!.name}`
-                  : ''}
-                . They only ever see their own submissions.
-              </Text>
-              <Button label="Stop Accepting Public Reports" variant="outline" onPress={() => handleTogglePublicMode(false)} loading={savingPublicMode} fullWidth />
-            </>
+            <Text style={styles.hint}>
+              Anyone can find {orgName} in the app and submit a report
+              {sites.find((s) => s.id === org.public_intake_site_id)
+                ? ` — reports land in ${sites.find((s) => s.id === org.public_intake_site_id)!.name}`
+                : ''}
+              . They only ever see their own submissions.
+            </Text>
           ) : (
             <>
               <Text style={styles.hint}>
@@ -527,7 +576,6 @@ export default function ManageOrganisationScreen() {
               ) : (
                 <Text style={styles.hintMuted}>Your organisation has no sites yet — add one above first.</Text>
               )}
-              <Button label="Accept Public Reports" onPress={() => handleTogglePublicMode(true)} loading={savingPublicMode} disabled={sites.length === 0} fullWidth />
             </>
           )}
         </Card>
@@ -736,6 +784,14 @@ const styles = StyleSheet.create({
   },
   pendingPill: { backgroundColor: Colors.status.inProgressBg, borderRadius: Radius.chip, paddingHorizontal: 6, paddingVertical: 1 },
   pendingPillText: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.status.inProgress },
+  showMoreRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+  },
+  showMoreText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.primary },
+
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  checkboxLabel: { flex: 1, fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textPrimary },
 
   qrCard: { gap: Spacing.sm, alignItems: 'stretch' },
   qrWrap: { alignItems: 'center', paddingVertical: Spacing.md },

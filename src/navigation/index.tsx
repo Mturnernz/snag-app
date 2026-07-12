@@ -63,7 +63,8 @@ function MainTabNavigator({ userRole }: { userRole: UserRole }) {
       .from('snags')
       .select('id', { count: 'exact', head: true })
       .eq('org_id', profile.org_id)
-      .eq('status', 'flagged');
+      .eq('status', 'flagged')
+      .is('parent_snag_id', null);
     setOpenIssueCount(count ?? 0);
   }, []);
 

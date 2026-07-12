@@ -14,7 +14,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Profile, Organisation, SnagStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { supabase, signOut, getMemberships, getOrgSnagSummary, OrgSnagSummary, Membership } from '../lib/supabase';
-import { getUserTitle } from '../lib/points';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Avatar from '../components/Avatar';
@@ -40,7 +39,6 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [userPoints, setUserPoints] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -83,9 +81,6 @@ export default function ProfileScreen() {
       setProfile(data as unknown as Profile);
       setNameInput(data.name ?? '');
       fetchSnagCounts(user.id);
-      if (data.org_id) {
-        fetchUserPoints(user.id, data.org_id);
-      }
     }
     getMemberships().then((all) => {
       // Deactivated orgs are hidden everywhere except the admin tab.
@@ -98,16 +93,6 @@ export default function ProfileScreen() {
       });
     });
     setLoading(false);
-  }
-
-  async function fetchUserPoints(userId: string, orgId: string) {
-    const { data } = await supabase
-      .from('user_points')
-      .select('points')
-      .eq('user_id', userId)
-      .eq('org_id', orgId)
-      .single();
-    if (data) setUserPoints(data.points ?? 0);
   }
 
   async function fetchSnagCounts(userId: string) {
@@ -240,20 +225,6 @@ export default function ProfileScreen() {
               <Text style={styles.rolePillText}>{roleLabel}</Text>
             </View>
           )}
-
-          {/* Team activity — gamification, kept low-key next to identity info */}
-          <View style={styles.titleRow}>
-            <Text style={styles.userTitle}>{getUserTitle(userPoints)}</Text>
-            <Text style={styles.userPoints}>{userPoints} pts</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.leaderboardBtn}
-            onPress={() => navigation.navigate('Leaderboard')}
-            activeOpacity={0.8}
-          >
-            <Icon name="trophy-outline" size="sm" color={Colors.primary} />
-            <Text style={styles.leaderboardBtnText}>View Leaderboard</Text>
-          </TouchableOpacity>
         </View>
 
         {/* My reporting stats */}
@@ -424,39 +395,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     fontWeight: Typography.medium,
     color: Colors.textSecondary,
-  },
-
-  // Team activity — deliberately muted, secondary to identity
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
-  },
-  userTitle: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textMuted,
-  },
-  userPoints: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-  },
-  leaderboardBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    marginTop: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  leaderboardBtnText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.primary,
   },
 
   // Organisations

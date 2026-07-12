@@ -28,7 +28,6 @@ import {
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
   getSiteAssignees, SiteAssignee, unmergeSnag,
 } from '../lib/supabase';
-import { getUserTitle } from '../lib/points';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
@@ -122,7 +121,6 @@ export default function IssueDetailScreen() {
   const [orgMembers, setOrgMembers] = useState<Profile[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionAt, setMentionAt] = useState(-1);
-  const [authorPoints, setAuthorPoints] = useState<Record<string, number>>({});
   const [investigation, setInvestigation] = useState<InvestigationState | null>(null);
   const [siteAssignees, setSiteAssignees] = useState<SiteAssignee[]>([]);
 
@@ -162,13 +160,6 @@ export default function IssueDetailScreen() {
       fetchIssue();
     }, [issueId])
   );
-
-  useEffect(() => {
-    if (comments.length > 0 && userProfile?.org_id) {
-      const authorIds = [...new Set(comments.map((c) => c.author_id))];
-      fetchAuthorPoints(authorIds, userProfile.org_id);
-    }
-  }, [userProfile?.org_id]);
 
   // Serious-lane investigation state powers the progress panel and the
   // resolve gate. Only fetched for editors of a serious snag.
@@ -254,23 +245,6 @@ export default function IssueDetailScreen() {
 
     if (data) {
       setComments(data as Comment[]);
-      const authorIds = [...new Set(data.map((c: any) => c.author_id))];
-      if (authorIds.length > 0 && userProfile?.org_id) {
-        fetchAuthorPoints(authorIds, userProfile.org_id);
-      }
-    }
-  }
-
-  async function fetchAuthorPoints(authorIds: string[], orgId: string) {
-    const { data } = await supabase
-      .from('user_points')
-      .select('user_id, points')
-      .in('user_id', authorIds)
-      .eq('org_id', orgId);
-    if (data) {
-      const map: Record<string, number> = {};
-      for (const row of data) map[row.user_id] = row.points;
-      setAuthorPoints(map);
     }
   }
 
@@ -601,9 +575,6 @@ export default function IssueDetailScreen() {
                   <View style={styles.commentMeta}>
                     <View style={styles.commentAuthorRow}>
                       <Text style={styles.commentAuthor}>{comment.author?.name ?? 'Unknown'}</Text>
-                      <Text style={styles.commentTitleBadge}>
-                        {getUserTitle(authorPoints[comment.author_id] ?? 0)}
-                      </Text>
                     </View>
                     <Text style={styles.commentTime}>{timeAgo(comment.created_at)}</Text>
                   </View>
@@ -761,7 +732,6 @@ const styles = StyleSheet.create({
   commentMeta: { flex: 1 },
   commentAuthorRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexWrap: 'wrap' },
   commentAuthor: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
-  commentTitleBadge: { fontSize: Typography.xs, color: Colors.textMuted, fontStyle: 'italic' },
   commentTime: { fontSize: Typography.xs, color: Colors.textMuted },
   commentBody: { fontSize: Typography.base, color: Colors.textSecondary, lineHeight: 21 },
 

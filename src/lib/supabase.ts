@@ -644,12 +644,6 @@ export async function getUserVote(snagId: string, userId: string): Promise<VoteV
   return data ? (data.value as VoteValue) : null;
 }
 
-// ─── Gamification helpers ─────────────────────────────────────────────────────
-
-export async function awardPoints(event: string, points: number, snagId?: string | null) {
-  return supabase.rpc('award_points', { p_event: event, p_points: points, p_snag_id: snagId ?? null });
-}
-
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 // snag-photos is a PRIVATE bucket — store the storage path (not a public URL)
 // and resolve a short-lived signed URL whenever a photo needs to be displayed.

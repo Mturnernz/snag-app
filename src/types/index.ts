@@ -169,7 +169,6 @@ export type RootStackParamList = {
   // minimal navigation-call churn even though the underlying entity is a Snag.
   IssueDetail: { issueId: string };
   Reports: undefined;
-  Leaderboard: undefined;
   ReportIncidentDetails: undefined;
   ReportIncidentReview: undefined;
   ScanOrgCode: undefined;

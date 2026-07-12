@@ -14,7 +14,6 @@ import ProfileScreen from '../screens/ProfileScreen';
 import IssueDetailScreen from '../screens/IssueDetailScreen';
 import AdminDashboardScreen from '../screens/AdminDashboardScreen';
 import ReportsScreen from '../screens/ReportsScreen';
-import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ReportIncidentDetailsScreen from '../screens/ReportIncidentDetailsScreen';
 import ReportIncidentReviewScreen from '../screens/ReportIncidentReviewScreen';
 import ScanJoinCodeScreen from '../screens/ScanJoinCodeScreen';
@@ -127,11 +126,6 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
         <Stack.Screen
           name="Reports"
           component={ReportsScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="Leaderboard"
-          component={LeaderboardScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
         <Stack.Screen

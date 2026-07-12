@@ -277,6 +277,14 @@ export async function getOrgSites(orgId: string): Promise<{ id: string; name: st
   return data ?? [];
 }
 
+// The sites a worker is personally assigned to (as opposed to every site in
+// the org, which officer_admin/supervisor see) — used to scope the Snags
+// list's Site filter for non-staff.
+export async function getMySiteIds(): Promise<string[]> {
+  const { data } = await supabase.rpc('my_member_site_ids');
+  return (data ?? []) as string[];
+}
+
 // ─── Site & organisation management (admin) ───────────────────────────────────
 
 export interface SiteDetail {

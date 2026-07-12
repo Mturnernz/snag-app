@@ -4,7 +4,7 @@ import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, StyleSheet 
 
 import {
   SnagStatus, SnagKind, SnagSeverity, SnagLane,
-  STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, ROLE_LABELS,
+  KIND_LABELS, SEVERITY_LABELS, ROLE_LABELS,
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
@@ -19,10 +19,9 @@ import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
 import ConfirmDialog from './ConfirmDialog';
 
-type EditingField = 'status' | 'severity' | 'kind' | 'assignee' | null;
+type EditingField = 'severity' | 'kind' | 'assignee' | null;
 
 interface PendingUpdates {
-  status?: SnagStatus;
   kind?: SnagKind;
   severity?: SnagSeverity | null;
   owner_id?: string | null;
@@ -100,7 +99,6 @@ export default function ManageIssuePanel({
   }
 
   // Staged (displayed) values: pending edit wins over the current issue value.
-  const shownStatus = pendingUpdates.status ?? status;
   const shownKind = pendingUpdates.kind ?? kind;
   const shownSeverity = pendingUpdates.severity !== undefined ? pendingUpdates.severity : severity;
   const shownOwner = pendingUpdates.owner_id !== undefined
@@ -123,9 +121,6 @@ export default function ManageIssuePanel({
 
     const calls: Promise<{ error: any }>[] = [];
 
-    if (pendingUpdates.status !== undefined) {
-      calls.push(updateSnagStatus(issueId, pendingUpdates.status));
-    }
     if (pendingUpdates.kind !== undefined || pendingUpdates.severity !== undefined) {
       calls.push(recategoriseSnag(
         issueId,
@@ -156,38 +151,15 @@ export default function ManageIssuePanel({
     <Card variant="elevated" style={styles.card}>
       <Text style={styles.panelLabel}>MANAGE ISSUE</Text>
 
-      {/* Status — serious snags can toggle flagged/in_progress; niggles have
-          no in-progress transition server-side, so their status is read-only
-          here and only moves via Resolve. rca_pending / resolved are never
-          user-settable. */}
+      {/* Status — read-only here. It moves flagged -> in_progress on its own
+          the moment any triage/investigation action is taken, and to
+          resolved/rca_pending only via the actions below. */}
       <View style={styles.row}>
         <Text style={styles.label}>Status</Text>
-        {isSerious && isOpen ? (
-          <TouchableOpacity onPress={() => toggleField('status')} style={styles.currentChip}>
-            <StatusBadge status={shownStatus} />
-            <Icon name={editingField === 'status' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.currentChip}>
-            <StatusBadge status={shownStatus} />
-          </View>
-        )}
+        <View style={styles.currentChip}>
+          <StatusBadge status={status} />
+        </View>
       </View>
-      {isSerious && isOpen && editingField === 'status' && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-          {(['flagged', 'in_progress'] as SnagStatus[]).map((s) => (
-            <TouchableOpacity
-              key={s}
-              onPress={() => stageUpdate({ status: s })}
-              style={[styles.optionChip, shownStatus === s && styles.optionChipActive]}
-            >
-              <Text style={[styles.optionChipText, shownStatus === s && styles.optionChipTextActive]}>
-                {STATUS_LABELS[s]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
 
       {/* Type (kind) */}
       <View style={styles.row}>

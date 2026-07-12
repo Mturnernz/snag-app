@@ -101,6 +101,10 @@ export default function ManageIssuePanel({
   // Staged (displayed) values: pending edit wins over the current issue value.
   const shownKind = pendingUpdates.kind ?? kind;
   const shownSeverity = pendingUpdates.severity !== undefined ? pendingUpdates.severity : severity;
+  // Reacts to a staged kind change, not just the current lane — so staging
+  // fixit -> hazard immediately reveals the severity picker (required before
+  // save) instead of only showing it for snags that were already serious.
+  const shownIsSerious = shownKind === 'hazard' || shownKind === 'incident';
   const shownOwner = pendingUpdates.owner_id !== undefined
     ? (pendingUpdates.owner_id ? assignees.find((m) => m.id === pendingUpdates.owner_id) ?? null : null)
     : owner;
@@ -185,36 +189,43 @@ export default function ManageIssuePanel({
         </ScrollView>
       )}
 
-      {/* Severity */}
-      <View style={styles.row}>
-        <Text style={styles.label}>Severity</Text>
-        <TouchableOpacity onPress={() => toggleField('severity')} style={styles.currentChip}>
-          {shownSeverity ? <PriorityBadge severity={shownSeverity} /> : <Text style={styles.currentText}>Not assessed</Text>}
-          <Icon name={editingField === 'severity' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
-        </TouchableOpacity>
-      </View>
-      {editingField === 'severity' && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-          <TouchableOpacity
-            onPress={() => stageUpdate({ severity: null })}
-            style={[styles.optionChip, shownSeverity === null && styles.optionChipActive]}
-          >
-            <Text style={[styles.optionChipText, shownSeverity === null && styles.optionChipTextActive]}>
-              Not assessed
-            </Text>
-          </TouchableOpacity>
-          {(Object.keys(SEVERITY_LABELS) as SnagSeverity[]).map((s) => (
-            <TouchableOpacity
-              key={s}
-              onPress={() => stageUpdate({ severity: s })}
-              style={[styles.optionChip, shownSeverity === s && styles.optionChipActive]}
-            >
-              <Text style={[styles.optionChipText, shownSeverity === s && styles.optionChipTextActive]}>
-                {SEVERITY_LABELS[s]}
-              </Text>
+      {/* Severity — serious lane only. The server silently discards severity
+          on niggles (recategorise_snag always nulls it unless kind is hazard/
+          incident), so the editor is hidden here rather than offering an
+          edit that looks like it saved but never persists. */}
+      {shownIsSerious && (
+        <>
+          <View style={styles.row}>
+            <Text style={styles.label}>Severity</Text>
+            <TouchableOpacity onPress={() => toggleField('severity')} style={styles.currentChip}>
+              {shownSeverity ? <PriorityBadge severity={shownSeverity} /> : <Text style={styles.currentText}>Not assessed</Text>}
+              <Icon name={editingField === 'severity' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          </View>
+          {editingField === 'severity' && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+              <TouchableOpacity
+                onPress={() => stageUpdate({ severity: null })}
+                style={[styles.optionChip, shownSeverity === null && styles.optionChipActive]}
+              >
+                <Text style={[styles.optionChipText, shownSeverity === null && styles.optionChipTextActive]}>
+                  Not assessed
+                </Text>
+              </TouchableOpacity>
+              {(Object.keys(SEVERITY_LABELS) as SnagSeverity[]).map((s) => (
+                <TouchableOpacity
+                  key={s}
+                  onPress={() => stageUpdate({ severity: s })}
+                  style={[styles.optionChip, shownSeverity === s && styles.optionChipActive]}
+                >
+                  <Text style={[styles.optionChipText, shownSeverity === s && styles.optionChipTextActive]}>
+                    {SEVERITY_LABELS[s]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </>
       )}
 
       {/* Owner (assignee) */}

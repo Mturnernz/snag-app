@@ -40,6 +40,7 @@ import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useBadge } from '../context/BadgeContext';
+import { useToast } from '../hooks/useToast';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -106,6 +107,7 @@ export default function IssueDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { issueId } = route.params;
   const { refreshOpenIssueCount } = useBadge();
+  const { showToast } = useToast();
 
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [parentReference, setParentReference] = useState<string | null>(null);
@@ -181,7 +183,10 @@ export default function IssueDetailScreen() {
   // a plain worker viewing (or completing) their own delegated RCA.
   useEffect(() => {
     if (isOrgMember && issue?.site_id) {
-      getSiteAssignees(issue.site_id).then(setSiteAssignees);
+      getSiteAssignees(issue.site_id).then(({ data, error }) => {
+        setSiteAssignees(data);
+        if (error) showToast(error.message ?? 'Could not load assignable people');
+      });
     }
   }, [isOrgMember, issue?.site_id]);
 

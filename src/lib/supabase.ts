@@ -520,9 +520,9 @@ export interface SiteAssignee {
   role: UserRole;
 }
 
-export async function getSiteAssignees(siteId: string): Promise<SiteAssignee[]> {
-  const { data } = await supabase.rpc('get_site_assignees', { p_site_id: siteId });
-  return (data ?? []) as SiteAssignee[];
+export async function getSiteAssignees(siteId: string): Promise<{ data: SiteAssignee[]; error: any }> {
+  const { data, error } = await supabase.rpc('get_site_assignees', { p_site_id: siteId });
+  return { data: (data ?? []) as SiteAssignee[], error };
 }
 
 // ─── Resolution & investigation ───────────────────────────────────────────────

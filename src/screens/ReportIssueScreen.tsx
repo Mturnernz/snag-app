@@ -132,6 +132,11 @@ export default function ReportIssueScreen() {
   // the reporter's own user folder (each has a matching storage RLS policy).
   const photoPathPrefix = isPublicSubmission ? userId : orgId;
 
+  // The "Submit" default group is always its own bar at the top of the
+  // picker, separate from the custom-group grid below it.
+  const defaultGroup = workGroups.find((wg) => wg.isDefault);
+  const customGroups = workGroups.filter((wg) => !wg.isDefault);
+
   // Capture -> [select work group] -> submit. The grid only ever appears for
   // member submissions when the org has defined any work groups; tapping a
   // tile submits immediately (no separate confirm step).
@@ -443,23 +448,38 @@ export default function ReportIssueScreen() {
           <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
             <Text style={styles.modalTitle}>Select a work group</Text>
             <Text style={styles.modalHint}>Which team should handle this?</Text>
-            <ScrollView contentContainerStyle={styles.groupGrid}>
-              {workGroups.map((wg) => (
-                <TouchableOpacity
-                  key={wg.id}
-                  style={[styles.groupTile, { backgroundColor: wg.color ?? Colors.textSecondary }]}
-                  onPress={() => doSubmit(wg.id)}
-                  activeOpacity={0.85}
-                  disabled={submitting}
-                >
-                  {wg.imagePath && wgImageUrls[wg.id] && (
-                    <Image source={{ uri: wgImageUrls[wg.id] }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-                  )}
-                  <View style={styles.groupTileOverlay} />
-                  <Text style={styles.groupTileText} numberOfLines={2}>{wg.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+
+            {defaultGroup && (
+              <Button
+                label={defaultGroup.name}
+                onPress={() => doSubmit(defaultGroup.id)}
+                loading={submitting}
+                fullWidth
+                style={styles.submitBar}
+              />
+            )}
+
+            {defaultGroup && customGroups.length > 0 && <Text style={styles.orText}>or</Text>}
+
+            {customGroups.length > 0 && (
+              <ScrollView contentContainerStyle={styles.groupGrid}>
+                {customGroups.map((wg) => (
+                  <TouchableOpacity
+                    key={wg.id}
+                    style={[styles.groupTile, { backgroundColor: wg.color ?? Colors.textSecondary }]}
+                    onPress={() => doSubmit(wg.id)}
+                    activeOpacity={0.85}
+                    disabled={submitting}
+                  >
+                    {wg.imagePath && wgImageUrls[wg.id] && (
+                      <Image source={{ uri: wgImageUrls[wg.id] }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+                    )}
+                    <View style={styles.groupTileOverlay} />
+                    <Text style={styles.groupTileText} numberOfLines={2}>{wg.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -597,6 +617,16 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
   },
 
+  submitBar: {
+    marginTop: Spacing.sm,
+  },
+  orText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.medium,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: Spacing.md,
+  },
   groupGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

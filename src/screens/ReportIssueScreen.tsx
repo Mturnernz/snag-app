@@ -98,7 +98,8 @@ export default function ReportIssueScreen() {
         const org = await resolveActiveOrg();
         setOrgId(org?.orgId ?? null);
         setOrgName(org?.orgName ?? null);
-        setMemberships(await getMemberships());
+        // Deactivated orgs are hidden everywhere except the admin tab.
+        setMemberships((await getMemberships()).filter((m) => m.org_active));
         const profile = await getProfile(user.id);
         setHasProfileName(Boolean(profile?.name));
         await loadWorkGroups(Boolean(org));
@@ -117,7 +118,7 @@ export default function ReportIssueScreen() {
         const profile = await getProfile(user.id);
         setOrgId(profile?.org_id ?? null);
         setOrgName(profile?.organisation?.name ?? null);
-        setMemberships(await getMemberships());
+        setMemberships((await getMemberships()).filter((m) => m.org_active));
         await loadWorkGroups(Boolean(profile?.org_id));
       }
     } catch (err: any) {

@@ -527,6 +527,78 @@ export async function getSiteAssignees(siteId: string): Promise<{ data: SiteAssi
   return { data: (data ?? []) as SiteAssignee[], error };
 }
 
+// ─── Activity trail ────────────────────────────────────────────────────────────
+// Every RPC that mutates a snag writes an audit_log row (actor + action +
+// timestamp). Surfaced in the snag detail screen as system entries alongside
+// comments, so "who changed what, when" doesn't rely on someone leaving a note.
+
+export interface AuditLogEntry {
+  id: string;
+  action: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  created_at: string;
+}
+
+// Human-readable text for the action strings RPCs write against entity='snag'
+// (see e.g. update_snag_status, assign_snag_owner, recategorise_snag,
+// merge_snags). Falls back to the raw action string for anything unmapped —
+// new actions still show up, just less prettily, instead of disappearing.
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  created: 'reported this snag',
+  created_public: 'submitted this as a public report',
+  status_flagged: 'reopened this snag',
+  status_in_progress: 'marked this In Progress',
+  status_resolved: 'resolved this snag',
+  status_rca_pending: 'marked this RCA Pending',
+  status_sorted: 'marked this sorted', // retired status; kept for historical entries
+  owner_assigned: 'assigned an owner',
+  owner_unassigned: 'unassigned the owner',
+  recategorised_to_fixit: 'recategorised this as a Fixit',
+  recategorised_to_improvement: 'recategorised this as an Improvement',
+  recategorised_to_hazard: 'recategorised this as a Hazard',
+  recategorised_to_incident: 'recategorised this as an Incident',
+  merge_created: 'merged snags into this one',
+  merge_children_added: 'merged another snag into this one',
+  merged_into_parent: 'merged this into another snag',
+  work_group_assigned: 'assigned this to a work group',
+  work_group_unassigned: 'removed this from its work group',
+  marked_notifiable: 'marked this as notifiable',
+  unmarked_notifiable: 'removed the notifiable flag',
+  checklist_make_safe: "completed the 'Make Safe' step",
+  checklist_preserve_scene: "completed the 'Preserve Scene' step",
+  checklist_identify_witnesses: "completed the 'Identify Witnesses' step",
+  checklist_capture_evidence: "completed the 'Capture Evidence' step",
+  checklist_find_root_cause: "completed the 'Find Root Cause' step",
+  witness_statement_added: 'added a witness statement',
+  evidence_added: 'added evidence',
+  root_cause_set: 'recorded the root cause',
+  corrective_action_created: 'created a corrective action',
+  rca_assigned: 'assigned the root cause analysis',
+};
+
+export function describeAuditAction(action: string): string {
+  return AUDIT_ACTION_LABELS[action] ?? action.replace(/_/g, ' ');
+}
+
+export async function getSnagAuditLog(snagId: string): Promise<AuditLogEntry[]> {
+  const { data, error } = await supabase
+    .from('audit_log')
+    .select('id, action, actor_id, created_at, actor:profiles!audit_log_actor_id_fkey(name)')
+    .eq('entity', 'snag')
+    .eq('entity_id', snagId)
+    .order('created_at', { ascending: true });
+
+  if (error || !data) return [];
+  return data.map((row: any) => ({
+    id: row.id,
+    action: row.action,
+    actor_id: row.actor_id,
+    actor_name: row.actor?.name ?? null,
+    created_at: row.created_at,
+  }));
+}
+
 // ─── Resolution & investigation ───────────────────────────────────────────────
 // Niggles resolve via resolve_snag (a note is required server-side). Serious
 // snags resolve via update_snag_status('resolved'), which the server gates behind

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   View,
@@ -27,6 +27,7 @@ import {
   supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers,
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
   getSiteAssignees, SiteAssignee, unmergeSnag,
+  getSnagAuditLog, describeAuditAction, AuditLogEntry,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -129,6 +130,11 @@ export default function IssueDetailScreen() {
   const [investigation, setInvestigation] = useState<InvestigationState | null>(null);
   const [siteAssignees, setSiteAssignees] = useState<SiteAssignee[]>([]);
 
+  // System activity trail — audit_log entries for this snag, shown alongside
+  // comments so every status/owner/category change is timestamped and
+  // attributed without relying on someone leaving a manual note.
+  const [activity, setActivity] = useState<AuditLogEntry[]>([]);
+
   // Voting/commenting are internal engagement mechanics — only members of
   // the snag's own organisation get them. A public reporter (or a member
   // viewing their own cross-org report) sees status + details only.
@@ -136,9 +142,23 @@ export default function IssueDetailScreen() {
   const canEdit = isOrgMember && (userProfile?.role === 'officer_admin' || userProfile?.role === 'supervisor');
   const isSerious = issue?.lane === 'serious';
 
+  // Comments and system activity entries merged into one chronological feed.
+  const feedItems = useMemo(() => {
+    type FeedItem =
+      | { type: 'comment'; id: string; created_at: string; comment: Comment }
+      | { type: 'activity'; id: string; created_at: string; entry: AuditLogEntry };
+    const items: FeedItem[] = [
+      ...comments.map((c): FeedItem => ({ type: 'comment', id: c.id, created_at: c.created_at, comment: c })),
+      ...activity.map((a): FeedItem => ({ type: 'activity', id: a.id, created_at: a.created_at, entry: a })),
+    ];
+    items.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return items;
+  }, [comments, activity]);
+
   useEffect(() => {
     fetchIssue();
     fetchComments();
+    fetchActivity();
 
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
@@ -163,6 +183,7 @@ export default function IssueDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchIssue();
+      fetchActivity();
     }, [issueId])
   );
 
@@ -246,7 +267,7 @@ export default function IssueDetailScreen() {
     if (!childToRemove) return;
     const { error } = await unmergeSnag(childToRemove.id);
     setChildToRemove(null);
-    if (!error) fetchIssue();
+    if (!error) { fetchIssue(); fetchActivity(); }
   }
 
   async function fetchComments() {
@@ -259,6 +280,10 @@ export default function IssueDetailScreen() {
     if (data) {
       setComments(data as Comment[]);
     }
+  }
+
+  async function fetchActivity() {
+    setActivity(await getSnagAuditLog(issueId));
   }
 
   async function handleVote(value: VoteValue) {
@@ -475,7 +500,7 @@ export default function IssueDetailScreen() {
               assignees={siteAssignees}
               resolveBlockReason={computeResolveBlockReason(issue.status, investigation)}
               isPublicSubmission={issue.is_public_submission ?? false}
-              onUpdated={() => { fetchIssue(); fetchInvestigation(); }}
+              onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
             />
           )}
 
@@ -522,7 +547,7 @@ export default function IssueDetailScreen() {
               issueId={issue.id}
               orgId={issue.org_id}
               state={investigation}
-              onChanged={() => { fetchInvestigation(); fetchIssue(); }}
+              onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
             />
           )}
 
@@ -536,7 +561,7 @@ export default function IssueDetailScreen() {
               canEdit={canEdit}
               currentUserId={currentUserId}
               assignees={siteAssignees}
-              onChanged={fetchIssue}
+              onChanged={() => { fetchIssue(); fetchActivity(); }}
             />
           )}
 
@@ -587,27 +612,37 @@ export default function IssueDetailScreen() {
 
           {isOrgMember && <View style={styles.divider} />}
 
-          {/* Comments — internal, hidden from public reporters */}
+          {/* Activity — comments plus system entries (status/owner/category
+              changes, investigation steps, merges, ...) in one timestamped,
+              attributed feed. Internal, hidden from public reporters. */}
           {isOrgMember && (
           <>
-          <Text style={styles.commentsHeader}>Comments ({comments.length})</Text>
+          <Text style={styles.commentsHeader}>Activity ({feedItems.length})</Text>
 
-          {comments.length === 0 ? (
-            <Text style={styles.noComments}>No comments yet.</Text>
+          {feedItems.length === 0 ? (
+            <Text style={styles.noComments}>No activity yet.</Text>
           ) : (
-            comments.map((comment) => (
-              <Card key={comment.id} variant="elevated" style={styles.commentBubble}>
+            feedItems.map((item) => item.type === 'comment' ? (
+              <Card key={`comment-${item.id}`} variant="elevated" style={styles.commentBubble}>
                 <View style={styles.commentHeader}>
-                  <Avatar name={comment.author?.name ?? '?'} size={30} />
+                  <Avatar name={item.comment.author?.name ?? '?'} size={30} />
                   <View style={styles.commentMeta}>
                     <View style={styles.commentAuthorRow}>
-                      <Text style={styles.commentAuthor}>{comment.author?.name ?? 'Unknown'}</Text>
+                      <Text style={styles.commentAuthor}>{item.comment.author?.name ?? 'Unknown'}</Text>
                     </View>
-                    <Text style={styles.commentTime}>{timeAgo(comment.created_at)}</Text>
+                    <Text style={styles.commentTime}>{timeAgo(item.comment.created_at)}</Text>
                   </View>
                 </View>
-                {renderCommentBody(comment.body)}
+                {renderCommentBody(item.comment.body)}
               </Card>
+            ) : (
+              <View key={`activity-${item.id}`} style={styles.activityRow}>
+                <Icon name="time-outline" size="sm" color={Colors.textMuted} />
+                <Text style={styles.activityText}>
+                  <Text style={styles.activityActor}>{item.entry.actor_name ?? 'Someone'}</Text>
+                  {' '}{describeAuditAction(item.entry.action)} · {timeAgo(item.entry.created_at)}
+                </Text>
+              </View>
             ))
           )}
           </>
@@ -761,6 +796,9 @@ const styles = StyleSheet.create({
   commentAuthor: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
   commentTime: { fontSize: Typography.xs, color: Colors.textMuted },
   commentBody: { fontSize: Typography.base, color: Colors.textSecondary, lineHeight: 21 },
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, paddingHorizontal: Spacing.xs },
+  activityText: { flex: 1, fontSize: Typography.xs, color: Colors.textMuted },
+  activityActor: { fontWeight: Typography.semibold, color: Colors.textSecondary },
 
   // Comment bar
   commentInputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.sm, paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border },

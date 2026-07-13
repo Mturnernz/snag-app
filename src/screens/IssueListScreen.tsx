@@ -135,7 +135,7 @@ export default function IssueListScreen() {
   const buildSnagQuery = useCallback((memberOfOrg: boolean, activeOrgId: string | null, from: number, to: number) => {
     let query = supabase
       .from('snags_with_details')
-      .select('id, reference, status, kind, lane, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission')
+      .select('id, reference, status, kind, lane, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission, child_count')
       // Merged children are hidden here — only visible from the parent's own
       // "Merged snags" section. A parent is never itself a child (single-
       // level hierarchy, enforced server-side), so parents always show.

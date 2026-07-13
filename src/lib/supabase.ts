@@ -379,6 +379,7 @@ export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
   const { data: groups } = await supabase
     .from('work_groups')
     .select('id, name, color, is_default, site_id, site:sites(name)')
+    .is('deleted_at', null)
     .order('is_default', { ascending: true })
     .order('created_at', { ascending: true });
   if (!groups || groups.length === 0) return [];
@@ -420,6 +421,12 @@ export async function assignWorkGroupSupervisor(workGroupId: string, userId: str
 
 export async function removeWorkGroupSupervisor(workGroupId: string, userId: string) {
   return supabase.rpc('remove_work_group_supervisor', { p_work_group_id: workGroupId, p_user_id: userId });
+}
+
+// Soft-deletes the group. Open (non-resolved) snags assigned to it are
+// unassigned server-side; resolved snags keep the historical link.
+export async function deleteWorkGroup(workGroupId: string) {
+  return supabase.rpc('delete_work_group', { p_work_group_id: workGroupId });
 }
 
 

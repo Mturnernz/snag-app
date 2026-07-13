@@ -21,7 +21,7 @@ import { Organisation, Profile, SnagStatus, STATUS_LABELS, UserRole, RootStackPa
 import {
   supabase, getOrgStats, OrgStats, getMemberships, setOrganisationActive, Membership,
   getOrgMembers, getOrgSites, createSite, getWorkGroupsWithDetail, createWorkGroup, updateWorkGroup,
-  assignWorkGroupSupervisor, removeWorkGroupSupervisor, WorkGroupDetail,
+  assignWorkGroupSupervisor, removeWorkGroupSupervisor, deleteWorkGroup, WorkGroupDetail,
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../constants/theme';
 import Card from '../components/Card';
@@ -422,6 +422,7 @@ function WorkGroupSupervisorModal({
   const [showNewSiteInput, setShowNewSiteInput] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
   const [creatingSite, setCreatingSite] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!group) return;
@@ -466,6 +467,32 @@ function WorkGroupSupervisorModal({
   // A supervisor can only self-assign/self-unassign; an admin can toggle anyone.
   function canToggle(userId: string) {
     return isAdmin || userId === currentUserId;
+  }
+
+  function handleDelete() {
+    if (!group) return;
+    Alert.alert(
+      'Delete work group?',
+      `"${group.name}" will be deleted. Any open snags assigned to it go back to Unassigned — resolved snags keep their history.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            const { error } = await deleteWorkGroup(group.id);
+            setDeleting(false);
+            if (error) {
+              Alert.alert('Error', error.message ?? 'Could not delete work group');
+            } else {
+              onClose();
+              await onChanged();
+            }
+          },
+        },
+      ]
+    );
   }
 
   async function toggle(userId: string, active: boolean) {
@@ -579,6 +606,21 @@ function WorkGroupSupervisorModal({
             })}
             {supervisors.length === 0 && (
               <Text style={styles.hintMuted}>No supervisors in this organisation yet.</Text>
+            )}
+
+            {isAdmin && !group.isDefault && (
+              <>
+                <View style={styles.divider} />
+                <Button
+                  label="Delete Work Group"
+                  variant="dangerOutline"
+                  icon="trash-outline"
+                  onPress={handleDelete}
+                  loading={deleting}
+                  fullWidth
+                  style={styles.topGap}
+                />
+              </>
             )}
           </ScrollView>
 

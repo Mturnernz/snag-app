@@ -58,11 +58,17 @@ export async function getCurrentUser() {
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, org_id, name, email, role, created_at, organisation:organisations!profiles_org_id_fkey(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
+    .select('id, org_id, name, email, role, created_at, has_seen_onboarding, organisation:organisations!profiles_org_id_fkey(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
     .eq('id', userId)
     .maybeSingle();
   if (error) console.error('getProfile error:', error);
   return data as unknown as Profile | null;
+}
+
+// First-time worker onboarding gate — see OnboardingWelcomeScreen /
+// OnboardingCarouselScreen and the pre-NavigationContainer gate in App.tsx.
+export async function markOnboardingSeen() {
+  return supabase.rpc('mark_onboarding_seen');
 }
 
 export async function updateProfile(userId: string, updates: Partial<Pick<Profile, 'name'>>) {

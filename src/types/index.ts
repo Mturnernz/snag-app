@@ -44,6 +44,7 @@ export interface Profile {
   role: UserRole;
   created_at: string;
   removed_at?: string | null;
+  has_seen_onboarding?: boolean;
   organisation?: Organisation;
 }
 
@@ -175,6 +176,7 @@ export type RootStackParamList = {
   ChooseReportOrg: undefined;
   ManageOrganisation: undefined;
   Mentions: undefined;
+  OnboardingCarousel: undefined;
 };
 
 export type MainTabParamList = {

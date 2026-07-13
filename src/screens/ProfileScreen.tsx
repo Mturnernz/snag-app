@@ -272,6 +272,18 @@ export default function ProfileScreen() {
           </Card>
         </TouchableOpacity>
 
+        {/* Replay tutorial — all roles, not just workers. Opens the overview
+            carousel as a modal; doesn't touch has_seen_onboarding. */}
+        <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('OnboardingCarousel')}>
+          <Card variant="elevated" style={styles.mentionsCard}>
+            <View style={styles.mentionsRow}>
+              <Icon name="school-outline" size="md" color={Colors.primary} />
+              <Text style={styles.mentionsTitle}>Replay tutorial</Text>
+              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+            </View>
+          </Card>
+        </TouchableOpacity>
+
         {/* Organisations — a read-only summary of every org you belong to.
             Switch which one is active from the header above, or scan a QR
             to join a new one. */}

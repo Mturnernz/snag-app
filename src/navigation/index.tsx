@@ -19,6 +19,7 @@ import ScanJoinCodeScreen from '../screens/ScanJoinCodeScreen';
 import ChooseReportOrgScreen from '../screens/ChooseReportOrgScreen';
 import ManageOrganisationScreen from '../screens/ManageOrganisationScreen';
 import MentionsScreen from '../screens/MentionsScreen';
+import OnboardingCarouselScreen from '../screens/OnboardingCarouselScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 import { ReportTargetProvider } from '../context/ReportTargetContext';
 import { BadgeProvider, useBadge } from '../context/BadgeContext';
@@ -47,13 +48,13 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-function MainTabNavigator({ userRole }: { userRole: UserRole }) {
+function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserRole; initialTab?: keyof MainTabParamList }) {
   const isAdminOrManager = userRole === 'officer_admin' || userRole === 'supervisor';
   const { openIssueCount, mentionCount } = useBadge();
 
   return (
     <Tab.Navigator
-      initialRouteName="Report"
+      initialRouteName={initialTab}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: styles.tabBar,
@@ -92,14 +93,14 @@ function MainTabNavigator({ userRole }: { userRole: UserRole }) {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export default function RootNavigator({ userRole }: { userRole: UserRole }) {
+export default function RootNavigator({ userRole, initialTab }: { userRole: UserRole; initialTab?: keyof MainTabParamList }) {
   return (
     <BadgeProvider>
     <IncidentDraftProvider>
       <ReportTargetProvider>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main">
-          {() => <MainTabNavigator userRole={userRole} />}
+          {() => <MainTabNavigator userRole={userRole} initialTab={initialTab} />}
         </Stack.Screen>
         <Stack.Screen
           name="IssueDetail"
@@ -147,6 +148,14 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
           component={MentionsScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
+        <Stack.Screen
+          name="OnboardingCarousel"
+          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+        >
+          {({ navigation }) => (
+            <OnboardingCarouselScreen onFinish={() => navigation.goBack()} />
+          )}
+        </Stack.Screen>
       </Stack.Navigator>
       </ReportTargetProvider>
     </IncidentDraftProvider>

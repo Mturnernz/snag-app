@@ -80,7 +80,7 @@ export default function ProfileScreen() {
     if (data) {
       setProfile(data as unknown as Profile);
       setNameInput(data.name ?? '');
-      fetchSnagCounts(user.id);
+      fetchSnagCounts(user.id, data.org_id);
     }
     getMemberships().then((all) => {
       // Deactivated orgs are hidden everywhere except the admin tab.
@@ -95,11 +95,14 @@ export default function ProfileScreen() {
     setLoading(false);
   }
 
-  async function fetchSnagCounts(userId: string) {
+  async function fetchSnagCounts(userId: string, orgId: string | null | undefined) {
+    if (!orgId) return;
+
     const { data } = await supabase
       .from('snags')
       .select('status')
-      .eq('reporter_id', userId);
+      .eq('reporter_id', userId)
+      .eq('org_id', orgId);
 
     if (!data) return;
 

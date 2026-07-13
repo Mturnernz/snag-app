@@ -21,9 +21,15 @@ interface Props {
    *  in the flow (the sign-up stepper), join immediately instead of asking
    *  for it again on the preview step. */
   initialName?: string;
+  /** Skip the camera entirely and open straight into manual code entry —
+   *  used when the caller offered an explicit "Enter Company Code" choice
+   *  rather than defaulting to the camera. */
+  startInManualEntry?: boolean;
 }
 
-export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, initialCode, initialName }: Props) {
+export default function ScanJoinCodeScreen({
+  onComplete, onBack, onCodeScanned, initialCode, initialName, startInManualEntry,
+}: Props) {
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -33,7 +39,7 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
   const [name, setName] = useState('');
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [manualEntry, setManualEntry] = useState(false);
+  const [manualEntry, setManualEntry] = useState(Boolean(startInManualEntry));
   const [manualCode, setManualCode] = useState('');
   const [manualSubmitting, setManualSubmitting] = useState(false);
 
@@ -218,7 +224,16 @@ export default function ScanJoinCodeScreen({ onComplete, onBack, onCodeScanned, 
           {error && <Text style={styles.errorText}>{error}</Text>}
 
           <Button label="Continue" onPress={handleManualSubmit} loading={manualSubmitting} disabled={!manualCode.trim()} fullWidth />
-          <TouchableOpacity onPress={() => { setManualEntry(false); setManualCode(''); setError(null); }} style={styles.backRow}>
+          <TouchableOpacity
+            onPress={() => {
+              // Reached directly (not via the camera's "Or enter your code"
+              // link) — there's no camera state to fall back to, so back
+              // means back to the caller's own choice step.
+              if (startInManualEntry) { onBack(); return; }
+              setManualEntry(false); setManualCode(''); setError(null);
+            }}
+            style={styles.backRow}
+          >
             <Icon name="arrow-back" size="sm" color={Colors.primary} />
             <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>

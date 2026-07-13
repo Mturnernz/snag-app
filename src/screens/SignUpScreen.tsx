@@ -10,6 +10,7 @@ import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../consta
 import Button from '../components/Button';
 import Icon from '../components/Icon';
 import ScanJoinCodeScreen from './ScanJoinCodeScreen';
+import JoinMethodScreen from './JoinMethodScreen';
 
 interface Props {
   /** Called after the account is created; returns to the sign-in screen with a
@@ -18,29 +19,42 @@ interface Props {
   onBack: () => void;
 }
 
-type Step = 'name' | 'code' | 'account';
+type Step = 'name' | 'choice' | 'code' | 'account';
 
-// A 3-step stepper — name, then the company join code (scan or type), then
-// email/password — that replaces the old "scan first, name later" flow. The
-// resolved code+name are persisted as a pending-join intent BEFORE signing
-// up (mirrors CreateOrgAccountScreen's ordering) so that if email
-// confirmation is off, App.tsx already sees it on the immediate session.
+// A 4-step stepper — name, then how to find the org (type or scan a code),
+// then resolving that code, then email/password — that replaces the old
+// "scan first, name later" flow. The resolved code+name are persisted as a
+// pending-join intent BEFORE signing up (mirrors CreateOrgAccountScreen's
+// ordering) so that if email confirmation is off, App.tsx already sees it
+// on the immediate session.
 export default function SignUpScreen({ onDone, onBack }: Props) {
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
+  const [manualEntry, setManualEntry] = useState(false);
   const [code, setCode] = useState<{ code: string; orgName: string } | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  if (step === 'choice') {
+    return (
+      <JoinMethodScreen
+        onSelectManual={() => { setManualEntry(true); setStep('code'); }}
+        onSelectScan={() => { setManualEntry(false); setStep('code'); }}
+        onBack={() => setStep('name')}
+      />
+    );
+  }
+
   if (step === 'code') {
     return (
       <ScanJoinCodeScreen
+        startInManualEntry={manualEntry}
         onCodeScanned={(org) => { setCode({ code: org.code, orgName: org.orgName }); setStep('account'); }}
         onComplete={() => {}}
-        onBack={() => setStep('name')}
+        onBack={() => setStep('choice')}
       />
     );
   }
@@ -128,10 +142,10 @@ export default function SignUpScreen({ onDone, onBack }: Props) {
             value={name}
             onChangeText={setName}
             returnKeyType="next"
-            onSubmitEditing={() => name.trim() && setStep('code')}
+            onSubmitEditing={() => name.trim() && setStep('choice')}
             autoFocus
           />
-          <Button label="Continue" onPress={() => setStep('code')} disabled={!name.trim()} fullWidth />
+          <Button label="Continue" onPress={() => setStep('choice')} disabled={!name.trim()} fullWidth />
         </View>
 
         <TouchableOpacity onPress={onBack} style={styles.backRow}>

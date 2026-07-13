@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   Snag, SnagStatus, SnagKind, SnagSeverity, STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, UserRole, RootStackParamList,
@@ -47,6 +48,20 @@ const STATUS_FILTER_OPTIONS: { key: SnagStatus; label: string }[] = [
   { key: 'rca_pending', label: STATUS_LABELS.rca_pending },
 ];
 
+// Resolved snags are noise once you're triaging what's still open, so they're
+// hidden unless someone explicitly checks the Resolved box in the Status
+// filter — this is that default, and what a cleared/first-run filter resets to.
+const DEFAULT_STATUS_FILTERS: Set<SnagStatus> = new Set(['flagged', 'in_progress', 'rca_pending']);
+
+function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
+
+// Per-user, persisted across app opens (see the load/save effects below).
+const STATUS_FILTER_STORAGE_PREFIX = 'snag.statusFilters.';
+
 const PAGE_SIZE = 50;
 
 export default function IssueListScreen() {
@@ -57,8 +72,13 @@ export default function IssueListScreen() {
   // Filters/sort — five independent controls in the filter bar: Status and
   // Site are multi-select (empty = no filter), Date/Trending share one sort
   // mode, Public is a plain toggle only shown when relevant.
-  const [statusFilters, setStatusFilters] = useState<Set<SnagStatus>>(new Set());
+  const [statusFilters, setStatusFilters] = useState<Set<SnagStatus>>(new Set(DEFAULT_STATUS_FILTERS));
   const [siteFilters, setSiteFilters] = useState<Set<string>>(new Set());
+  // Set once the persisted-preference load effect below resolves the signed-in
+  // user; guards the save effect against writing before we know who "this
+  // user" is (and from overwriting one user's saved filter with another's on
+  // a shared device).
+  const userIdRef = React.useRef<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [publicOnly, setPublicOnly] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<DropdownKey>(null);
@@ -93,7 +113,7 @@ export default function IssueListScreen() {
   const canMerge = role === 'officer_admin' || role === 'supervisor';
   const { showToast } = useToast();
 
-  const hasActiveFilters = statusFilters.size > 0 || siteFilters.size > 0 || publicOnly;
+  const hasActiveFilters = !setsEqual(statusFilters, DEFAULT_STATUS_FILTERS) || siteFilters.size > 0 || publicOnly;
 
   function toggleStatusFilter(s: SnagStatus) {
     setStatusFilters((prev) => {
@@ -251,6 +271,33 @@ export default function IssueListScreen() {
     setLoadingMore(false);
   }, [loadingMore, hasMore, loading, refreshing, issues.length, buildSnagQuery, sortSnags]);
 
+  // Load this user's saved Status filter (if any) once on mount, overriding
+  // the default. Runs before the first fetchIssues below normally resolves
+  // (both start on mount), and fetchIssues re-runs automatically if this
+  // changes statusFilters, since it depends on buildSnagQuery which does.
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      userIdRef.current = user.id;
+      const raw = await AsyncStorage.getItem(STATUS_FILTER_STORAGE_PREFIX + user.id);
+      if (!raw) return;
+      try {
+        const saved: SnagStatus[] = JSON.parse(raw);
+        setStatusFilters(new Set(saved));
+      } catch {
+        // Ignore malformed storage — keep the default.
+      }
+    });
+  }, []);
+
+  // Persist on every change so it's remembered next time this user opens the
+  // app. Guarded on userIdRef so this can't fire (and overwrite the saved
+  // preference with the default) before the load effect above has resolved.
+  useEffect(() => {
+    if (!userIdRef.current) return;
+    AsyncStorage.setItem(STATUS_FILTER_STORAGE_PREFIX + userIdRef.current, JSON.stringify(Array.from(statusFilters)));
+  }, [statusFilters]);
+
   useEffect(() => {
     setLoading(true);
     fetchIssues().finally(() => setLoading(false));
@@ -336,7 +383,7 @@ export default function IssueListScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterBarRow}>
             <FilterBarButton
               label="Status"
-              active={statusFilters.size > 0}
+              active={!setsEqual(statusFilters, DEFAULT_STATUS_FILTERS)}
               onPress={() => setOpenDropdown('status')}
             />
             <FilterBarButton

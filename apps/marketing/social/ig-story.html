@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="_base.css">
+<style>
+  body {
+    width: 1080px; height: 1920px;
+    background: linear-gradient(175deg, var(--navy-950) 0%, var(--navy-900) 50%, #1e3a8a 100%);
+    color: var(--white);
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 120px 88px 140px;
+  }
+  .logo { font-size: 56px; }
+  h1 { font-size: 110px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; }
+  h1 .accent { color: var(--brand-500); }
+  .sub { margin-top: 40px; font-size: 42px; line-height: 1.4; color: rgba(255,255,255,0.7); font-weight: 500; }
+  .card {
+    margin-top: 72px; background: rgba(255,255,255,0.07);
+    border: 2px solid rgba(255,255,255,0.15); border-radius: 28px; padding: 48px;
+  }
+  .card .row { display: flex; align-items: center; gap: 24px; font-size: 38px; font-weight: 600; }
+  .card .row + .row { margin-top: 32px; }
+  .dot { width: 22px; height: 22px; border-radius: 999px; flex-shrink: 0; }
+  .cta {
+    align-self: center; background: var(--brand-600); color: var(--white);
+    font-size: 40px; font-weight: 800; padding: 32px 72px; border-radius: 18px;
+  }
+</style>
+</head>
+<body>
+  <div class="mark logo">
+    <svg viewBox="0 0 32 32"><rect x="2" y="6" width="28" height="22" rx="6" fill="#2563EB"/><rect x="11" y="2" width="10" height="6" rx="2" fill="#2563EB"/><circle cx="16" cy="17" r="6.5" fill="#0F172A"/><circle cx="16" cy="17" r="3" fill="#2563EB"/></svg>
+    SNAG
+  </div>
+  <div>
+    <h1>Your site.<br>Every snag.<br><span class="accent">Sorted.</span></h1>
+    <p class="sub">Hazards, incidents and everyday niggles — reported in ten seconds, tracked to done.</p>
+    <div class="card">
+      <div class="row"><span class="dot" style="background:#3b82f6"></span> Flagged — fire door left open</div>
+      <div class="row"><span class="dot" style="background:#d97706"></span> In progress — guard rail, bay 4</div>
+      <div class="row"><span class="dot" style="background:#16a34a"></span> Resolved — leaking tap, smoko room</div>
+    </div>
+  </div>
+  <div class="cta">Get early access ↗</div>
+</body>
+</html>

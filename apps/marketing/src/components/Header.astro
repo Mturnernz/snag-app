@@ -1,0 +1,72 @@
+---
+import Wordmark from './Wordmark.astro';
+
+interface Props {
+  brand?: 'snag' | 'docunation';
+}
+const { brand = 'snag' } = Astro.props;
+
+const nav = [
+  { href: '/features', label: 'Features' },
+  { href: '/pricing', label: 'Pricing' },
+  { href: '/blog', label: 'Resources' },
+  { href: '/docunation', label: 'Docunation' },
+];
+const path = Astro.url.pathname.replace(/\/$/, '') || '/';
+---
+
+<header class="sticky top-0 z-40 border-b border-line bg-white/90 backdrop-blur">
+  <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
+    <a href="/" aria-label="SNAG home"><Wordmark brand={brand} /></a>
+
+    <nav class="hidden items-center gap-7 md:flex" aria-label="Main">
+      {nav.map((item) => (
+        <a
+          href={item.href}
+          class:list={[
+            'text-sm font-medium transition-colors hover:text-brand-600',
+            path === item.href ? 'text-brand-600' : 'text-ink-2',
+          ]}
+        >{item.label}</a>
+      ))}
+      <a
+        href="/contact"
+        class="rounded-(--radius-btn) bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
+      >Get early access</a>
+    </nav>
+
+    <button
+      id="nav-toggle"
+      class="flex h-10 w-10 items-center justify-center rounded-(--radius-btn) text-ink-2 md:hidden"
+      aria-label="Open menu"
+      aria-expanded="false"
+      aria-controls="mobile-nav"
+    >
+      <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16" />
+      </svg>
+    </button>
+  </div>
+
+  <nav id="mobile-nav" class="hidden border-t border-line bg-white px-5 py-4 md:hidden" aria-label="Mobile">
+    <ul class="flex flex-col gap-1">
+      {nav.map((item) => (
+        <li>
+          <a href={item.href} class="block rounded-(--radius-btn) px-3 py-2.5 text-sm font-medium text-ink hover:bg-canvas">{item.label}</a>
+        </li>
+      ))}
+      <li class="pt-2">
+        <a href="/contact" class="block rounded-(--radius-btn) bg-brand-600 px-4 py-2.5 text-center text-sm font-semibold text-white">Get early access</a>
+      </li>
+    </ul>
+  </nav>
+</header>
+
+<script>
+  const toggle = document.getElementById('nav-toggle');
+  const menu = document.getElementById('mobile-nav');
+  toggle?.addEventListener('click', () => {
+    const open = menu?.classList.toggle('hidden') === false;
+    toggle.setAttribute('aria-expanded', String(open));
+  });
+</script>

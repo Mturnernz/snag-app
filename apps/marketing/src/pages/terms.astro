@@ -1,0 +1,63 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { SITE } from '../config';
+const updated = 'July 2026';
+---
+
+<BaseLayout title="Terms of Service — SNAG" description="The terms that govern use of the SNAG application and website.">
+  <section class="mx-auto max-w-3xl px-5 py-16">
+    <h1 class="text-3xl font-extrabold tracking-tight text-ink">Terms of Service</h1>
+    <p class="mt-2 text-sm text-ink-3">Last updated {updated} · <em>Draft — pending legal review</em></p>
+
+    <div class="mt-8 space-y-6 text-[15px] leading-relaxed text-ink-2">
+      <h2 class="text-lg font-bold text-ink">1. The service</h2>
+      <p>
+        SNAG is an issue and health &amp; safety reporting tool provided by
+        {SITE.company}. During early access the service is provided as-is and
+        features may change as we develop the product with our first customers.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">2. Your account and content</h2>
+      <p>
+        You are responsible for the accuracy of the information you submit and
+        for keeping your login secure. Content reported into an organisation
+        belongs to that organisation. You must have the right to share any
+        photos or information you upload.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">3. Acceptable use</h2>
+      <p>
+        Don't use SNAG to harass, defame, or submit knowingly false reports;
+        don't attempt to access another organisation's data; don't interfere
+        with the operation of the service.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">4. Not a substitute for compliance</h2>
+      <p>
+        SNAG supports your health &amp; safety processes but does not replace
+        your legal obligations under the Health and Safety at Work Act 2015
+        (NZ), the model WHS laws (AU), or any other applicable law — including
+        obligations to notify regulators of notifiable events.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">5. Liability</h2>
+      <p>
+        To the maximum extent permitted by law, {SITE.company}'s liability in
+        connection with the service is limited to the amount you have paid for
+        it in the preceding 12 months. Nothing in these terms limits rights
+        you have under the Consumer Guarantees Act 1993 (NZ) or Australian
+        Consumer Law that cannot be excluded.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">6. Changes</h2>
+      <p>
+        We may update these terms; we'll give reasonable notice of material
+        changes. Continued use after changes take effect constitutes
+        acceptance.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">Contact</h2>
+      <p>{SITE.company} · {SITE.contactEmail}</p>
+    </div>
+  </section>
+</BaseLayout>

@@ -1,0 +1,46 @@
+---
+import Wordmark from './Wordmark.astro';
+import { SITE } from '../config';
+const year = new Date().getFullYear();
+---
+
+<footer class="bg-navy-950 text-white">
+  <div class="mx-auto grid max-w-6xl gap-10 px-5 py-14 md:grid-cols-4">
+    <div class="md:col-span-2">
+      <Wordmark brand="snag" onDark class="text-2xl" />
+      <p class="mt-4 max-w-sm text-sm leading-relaxed text-white/60">
+        Health &amp; safety and issue reporting for New Zealand and Australian
+        workplaces. Spot it. Snag it. Sorted.
+      </p>
+      <p class="mt-6 text-sm text-white/60">
+        A <a href="/docunation" class="font-semibold text-white hover:text-brand-500"><Wordmark brand="docunation" class="text-sm" onDark /></a> product
+      </p>
+    </div>
+
+    <nav aria-label="Product">
+      <h3 class="text-xs font-bold tracking-widest text-white/40 uppercase">Product</h3>
+      <ul class="mt-4 space-y-2.5 text-sm">
+        <li><a class="text-white/70 hover:text-white" href="/features">Features</a></li>
+        <li><a class="text-white/70 hover:text-white" href="/pricing">Pricing</a></li>
+        <li><a class="text-white/70 hover:text-white" href="/blog">Resources</a></li>
+        <li><a class="text-white/70 hover:text-white" href="/contact">Contact</a></li>
+      </ul>
+    </nav>
+
+    <nav aria-label="Company">
+      <h3 class="text-xs font-bold tracking-widest text-white/40 uppercase">Company</h3>
+      <ul class="mt-4 space-y-2.5 text-sm">
+        <li><a class="text-white/70 hover:text-white" href="/docunation">About Docunation</a></li>
+        <li><a class="text-white/70 hover:text-white" href="/privacy">Privacy policy</a></li>
+        <li><a class="text-white/70 hover:text-white" href="/terms">Terms of service</a></li>
+      </ul>
+    </nav>
+  </div>
+
+  <div class="border-t border-white/10">
+    <div class="mx-auto flex max-w-6xl flex-col gap-2 px-5 py-5 text-xs text-white/40 md:flex-row md:items-center md:justify-between">
+      <p>© {year} {SITE.company}. All rights reserved.</p>
+      <p>Made for NZ &amp; AU workplaces.</p>
+    </div>
+  </div>
+</footer>

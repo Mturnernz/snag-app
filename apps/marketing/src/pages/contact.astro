@@ -1,0 +1,69 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Get early access — SNAG"
+  description="Get early access to SNAG for your NZ or AU team, or talk to us about rollout, pricing and Docunation services."
+>
+  <section class="bg-gradient-to-b from-brand-50 to-white">
+    <div class="mx-auto max-w-6xl px-5 py-16 text-center">
+      <h1 class="text-4xl font-extrabold tracking-tight text-ink sm:text-5xl">Let's get you sorted</h1>
+      <p class="mx-auto mt-4 max-w-xl text-lg text-ink-2">
+        Tell us a little about your team and we'll set you up with early access —
+        usually within a day.
+      </p>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-xl px-5 pb-24">
+    {/* Netlify Forms: the data-netlify attribute wires this up at deploy time
+        with no backend. Submissions appear in the Netlify dashboard and can
+        be forwarded to email there. */}
+    <form
+      name="early-access"
+      method="POST"
+      data-netlify="true"
+      netlify-honeypot="bot-field"
+      action="/thanks"
+      class="space-y-5 rounded-(--radius-card) border border-line bg-white p-8 shadow-sm"
+    >
+      <input type="hidden" name="form-name" value="early-access" />
+      <p class="hidden"><label>Don't fill this out: <input name="bot-field" /></label></p>
+
+      <div>
+        <label for="name" class="block text-sm font-semibold text-ink">Your name</label>
+        <input id="name" name="name" type="text" required class="mt-1.5 w-full rounded-(--radius-btn) border border-line bg-canvas px-4 py-2.5 text-sm text-ink focus:border-brand-600 focus:outline-none" />
+      </div>
+      <div>
+        <label for="company" class="block text-sm font-semibold text-ink">Company</label>
+        <input id="company" name="company" type="text" required class="mt-1.5 w-full rounded-(--radius-btn) border border-line bg-canvas px-4 py-2.5 text-sm text-ink focus:border-brand-600 focus:outline-none" />
+      </div>
+      <div>
+        <label for="email" class="block text-sm font-semibold text-ink">Work email</label>
+        <input id="email" name="email" type="email" required class="mt-1.5 w-full rounded-(--radius-btn) border border-line bg-canvas px-4 py-2.5 text-sm text-ink focus:border-brand-600 focus:outline-none" />
+      </div>
+      <div>
+        <label for="teamsize" class="block text-sm font-semibold text-ink">Team size</label>
+        <select id="teamsize" name="teamsize" class="mt-1.5 w-full rounded-(--radius-btn) border border-line bg-canvas px-4 py-2.5 text-sm text-ink focus:border-brand-600 focus:outline-none">
+          <option>1–10</option>
+          <option>11–50</option>
+          <option>51–200</option>
+          <option>200+</option>
+        </select>
+      </div>
+      <div>
+        <label for="message" class="block text-sm font-semibold text-ink">What are you hoping SNAG will sort?</label>
+        <textarea id="message" name="message" rows="4" class="mt-1.5 w-full rounded-(--radius-btn) border border-line bg-canvas px-4 py-2.5 text-sm text-ink focus:border-brand-600 focus:outline-none"></textarea>
+      </div>
+
+      <button type="submit" class="w-full rounded-(--radius-btn) bg-brand-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-700">
+        Request early access
+      </button>
+      <p class="text-center text-xs text-ink-3">
+        We'll only use your details to get in touch about SNAG. See our
+        <a href="/privacy" class="underline hover:text-ink-2">privacy policy</a>.
+      </p>
+    </form>
+  </section>
+</BaseLayout>

@@ -1,0 +1,28 @@
+---
+/** Typographic wordmarks built from the brand tokens — replace with real
+ *  logo SVGs when they exist. The SNAG mark pairs a camera-shutter glyph
+ *  with the name; Docunation is a clean master-brand wordmark. */
+interface Props {
+  brand?: 'snag' | 'docunation';
+  /** Tailwind text-size class applied to the name */
+  class?: string;
+  onDark?: boolean;
+}
+const { brand = 'snag', class: className = 'text-xl', onDark = false } = Astro.props;
+---
+
+{brand === 'snag' ? (
+  <span class:list={['inline-flex items-center gap-2 font-extrabold tracking-tight', className]}>
+    <svg viewBox="0 0 32 32" class="h-[1.15em] w-[1.15em]" aria-hidden="true">
+      <rect x="2" y="6" width="28" height="22" rx="6" class="fill-brand-600" />
+      <circle cx="16" cy="17" r="6.5" class={onDark ? 'fill-navy-900' : 'fill-white'} />
+      <circle cx="16" cy="17" r="3" class="fill-brand-600" />
+      <rect x="11" y="2" width="10" height="6" rx="2" class="fill-brand-600" />
+    </svg>
+    <span class={onDark ? 'text-white' : 'text-ink'}>SNAG</span>
+  </span>
+) : (
+  <span class:list={['inline-flex items-baseline font-extrabold tracking-tight', className]}>
+    <span class={onDark ? 'text-white' : 'text-navy-900'}>Docu</span><span class="text-brand-600">nation</span>
+  </span>
+)}

@@ -1,0 +1,66 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { SITE } from '../config';
+const updated = 'July 2026';
+---
+
+<BaseLayout title="Privacy Policy — SNAG" description="How SNAG and Docunation collect, use and protect your information.">
+  <section class="mx-auto max-w-3xl px-5 py-16">
+    <h1 class="text-3xl font-extrabold tracking-tight text-ink">Privacy Policy</h1>
+    <p class="mt-2 text-sm text-ink-3">Last updated {updated} · <em>Draft — pending legal review</em></p>
+
+    <div class="prose-custom mt-8 space-y-6 text-[15px] leading-relaxed text-ink-2">
+      <p>
+        This policy explains how {SITE.company} ("we", "us") handles personal
+        information collected through the SNAG mobile application and this
+        website, in accordance with the New Zealand Privacy Act 2020 and the
+        Australian Privacy Act 1988.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">What we collect</h2>
+      <p>
+        <strong>Account information:</strong> your name, email address, and the
+        organisation(s) you belong to. <strong>Report content:</strong> photos,
+        descriptions, comments, and investigation records your team creates in
+        SNAG. <strong>Website enquiries:</strong> details you submit through our
+        contact form. <strong>Usage data:</strong> privacy-respecting, aggregate
+        analytics about how the website is used (no cross-site tracking).
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">How we use it</h2>
+      <p>
+        To operate the service (routing reports to the right people in your
+        organisation, sending notification emails you'd expect, keeping audit
+        trails your organisation relies on), to respond to enquiries, and to
+        improve the product. We do not sell personal information.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">Who can see report data</h2>
+      <p>
+        Report content belongs to the organisation it was reported into and is
+        visible only to that organisation's members, according to their role
+        and site access. Public submissions are visible to the receiving
+        organisation and to the person who submitted them.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">Storage and security</h2>
+      <p>
+        Data is stored with our cloud infrastructure provider in the
+        Asia-Pacific region, protected by row-level access controls,
+        encrypted in transit, with photos held in private, permission-scoped
+        storage.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">Your rights</h2>
+      <p>
+        You may request access to, correction of, or deletion of your personal
+        information at any time by contacting us at {SITE.contactEmail}. If you
+        are in New Zealand you may complain to the Office of the Privacy
+        Commissioner; in Australia, to the OAIC.
+      </p>
+
+      <h2 class="text-lg font-bold text-ink">Contact</h2>
+      <p>{SITE.company} · {SITE.contactEmail}</p>
+    </div>
+  </section>
+</BaseLayout>

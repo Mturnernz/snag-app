@@ -1,0 +1,86 @@
+---
+/** CSS device mockup with a stylised recreation of the SNAG list screen,
+ *  built from the real app's design tokens. Swap the inner markup for a
+ *  real screenshot <img> when store-ready captures exist. */
+---
+
+<div class="relative mx-auto w-[290px] select-none" aria-hidden="true">
+  <div class="rounded-[42px] border-[10px] border-navy-900 bg-navy-900 shadow-2xl">
+    <div class="overflow-hidden rounded-[32px] bg-canvas">
+      {/* status bar + header */}
+      <div class="bg-white px-4 pt-3 pb-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-[15px] font-extrabold text-ink">Snags</span>
+          <span class="text-[9px] font-semibold text-ink-2">Officer Admin</span>
+          <span class="text-[11px] font-bold text-brand-600">Acme</span>
+        </div>
+        {/* filter bar */}
+        <div class="mt-2.5 flex gap-1.5">
+          <span class="rounded-full border border-brand-600 bg-brand-100 px-2.5 py-1 text-[9px] font-semibold text-brand-600">Status ▾</span>
+          <span class="rounded-full border border-line px-2.5 py-1 text-[9px] font-medium text-ink-2">Date ▾</span>
+          <span class="rounded-full border border-line px-2.5 py-1 text-[9px] font-medium text-ink-2">Site ▾</span>
+          <span class="rounded-full border border-line px-2.5 py-1 text-[9px] font-medium text-ink-2">Trending</span>
+        </div>
+      </div>
+
+      {/* snag cards */}
+      <div class="grid grid-cols-2 gap-2 p-2.5">
+        <div class="overflow-hidden rounded-xl bg-white shadow-sm">
+          <div class="relative flex h-16 items-end justify-center bg-gradient-to-br from-brand-100 to-brand-50 pb-1">
+            <span class="absolute top-1 right-1 rounded bg-brand-100 px-1.5 py-0.5 text-[7px] font-bold text-brand-600">Flagged</span>
+            <span class="rounded bg-navy-800 px-1.5 py-0.5 text-[7px] font-semibold text-white">Hendo</span>
+          </div>
+          <div class="space-y-1 p-2">
+            <p class="text-[9px] font-bold text-ink">Fire door left open</p>
+            <span class="inline-block rounded bg-serious-bg px-1.5 py-0.5 text-[7px] font-bold text-serious-600">Incident</span>
+            <p class="text-[7px] text-ink-3">just now</p>
+          </div>
+        </div>
+        <div class="overflow-hidden rounded-xl bg-white shadow-sm">
+          <div class="relative flex h-16 items-end justify-center bg-gradient-to-br from-amber-100 to-orange-50 pb-1">
+            <span class="absolute top-1 right-1 rounded bg-amber-100 px-1.5 py-0.5 text-[7px] font-bold text-amber">In Progress</span>
+            <span class="rounded bg-navy-800 px-1.5 py-0.5 text-[7px] font-semibold text-white">Depot</span>
+          </div>
+          <div class="space-y-1 p-2">
+            <p class="text-[9px] font-bold text-ink">Forklift seat torn</p>
+            <span class="inline-block rounded bg-canvas px-1.5 py-0.5 text-[7px] font-bold text-ink-2">Fixit</span>
+            <p class="text-[7px] text-ink-3">2h ago</p>
+          </div>
+        </div>
+        <div class="overflow-hidden rounded-xl bg-white shadow-sm">
+          <div class="relative flex h-16 items-end justify-center bg-gradient-to-br from-slate-200 to-slate-100 pb-1">
+            <span class="absolute top-1 right-1 rounded bg-green-100 px-1.5 py-0.5 text-[7px] font-bold text-success">Resolved</span>
+            <span class="rounded bg-navy-800 px-1.5 py-0.5 text-[7px] font-semibold text-white">Hendo</span>
+          </div>
+          <div class="space-y-1 p-2">
+            <p class="text-[9px] font-bold text-ink">Leaking tap, smoko room</p>
+            <span class="inline-block rounded bg-canvas px-1.5 py-0.5 text-[7px] font-bold text-ink-2">Fixit</span>
+            <p class="text-[7px] text-ink-3">1d ago</p>
+          </div>
+        </div>
+        <div class="overflow-hidden rounded-xl bg-white shadow-sm">
+          <div class="relative flex h-16 items-end justify-center bg-gradient-to-br from-blue-100 to-cyan-50 pb-1">
+            <span class="absolute top-1 right-1 rounded bg-brand-100 px-1.5 py-0.5 text-[7px] font-bold text-brand-600">Flagged</span>
+            <span class="rounded bg-navy-800 px-1.5 py-0.5 text-[7px] font-semibold text-white">Depot</span>
+          </div>
+          <div class="space-y-1 p-2">
+            <p class="text-[9px] font-bold text-ink">Guard rail loose, bay 4</p>
+            <span class="inline-block rounded bg-serious-bg px-1.5 py-0.5 text-[7px] font-bold text-serious-600">Hazard</span>
+            <p class="text-[7px] text-ink-3">3d ago</p>
+          </div>
+        </div>
+      </div>
+
+      {/* tab bar */}
+      <div class="flex items-center justify-around border-t border-line bg-white px-2 py-2.5">
+        <span class="text-[8px] font-medium text-ink-3">Report</span>
+        <span class="relative text-[8px] font-bold text-brand-600">
+          Snags
+          <span class="absolute -top-1.5 -right-3 flex h-3 w-3 items-center justify-center rounded-full bg-serious-600 text-[6px] font-bold text-white">2</span>
+        </span>
+        <span class="text-[8px] font-medium text-ink-3">Profile</span>
+        <span class="text-[8px] font-medium text-ink-3">Admin</span>
+      </div>
+    </div>
+  </div>
+</div>

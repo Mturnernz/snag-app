@@ -1,0 +1,96 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Wordmark from '../components/Wordmark.astro';
+import FeatureCard from '../components/FeatureCard.astro';
+import { SITE } from '../config';
+
+const services = [
+  {
+    icon: 'doc',
+    title: 'Handover documentation',
+    body: 'When a key person leaves, their knowledge usually leaves too. We capture how the job is actually done — before it walks out the door — into documents your next hire can run with on day one.',
+  },
+  {
+    icon: 'route',
+    title: 'Process mapping',
+    body: 'We sit with your team, map how work really flows (not how the old manual says it does), and hand you clear, visual process maps your whole business can follow.',
+  },
+  {
+    icon: 'people',
+    title: 'On-call support',
+    body: 'A phone-a-friend for your operations. When a process breaks, a system misbehaves, or a one-off question needs a straight answer, we are on call.',
+  },
+  {
+    icon: 'shield',
+    title: 'Process maintenance & management',
+    body: 'Documents rot. We build and own your process library — reviewing, updating and versioning it as your business changes, so it is always true.',
+  },
+  {
+    icon: 'chart',
+    title: 'Low-cost MVP app development',
+    body: 'Got a process a spreadsheet can no longer hold? We build small, sharp apps that do one job well — the same way we built SNAG — at a price a small business can actually say yes to.',
+  },
+] as const;
+---
+
+<BaseLayout
+  title="Docunation — Process documentation, mapping and small business tooling (NZ & AU)"
+  description={SITE.companyDescription}
+  brand="docunation"
+>
+  {/* Hero — master brand navy */}
+  <section class="bg-navy-950">
+    <div class="mx-auto max-w-6xl px-5 py-20 text-center lg:py-28">
+      <Wordmark brand="docunation" onDark class="text-4xl sm:text-5xl" />
+      <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/70">
+        Small businesses run on knowledge that lives in people's heads.
+        Docunation gets it out — into documents, maps and tools your whole
+        team can use — and keeps it alive as you grow.
+      </p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href="/contact" class="rounded-(--radius-btn) bg-brand-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-500">Talk to us</a>
+        <a href="#services" class="rounded-(--radius-btn) border border-white/25 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10">What we do</a>
+      </div>
+    </div>
+  </section>
+
+  {/* Services */}
+  <section id="services" class="mx-auto max-w-6xl px-5 py-20">
+    <div class="mx-auto max-w-2xl text-center">
+      <p class="text-xs font-bold tracking-widest text-brand-600 uppercase">What we do</p>
+      <h2 class="mt-3 text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
+        Your processes, owned properly
+      </h2>
+    </div>
+    <div class="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {services.map((s) => (
+        <FeatureCard icon={s.icon} title={s.title} body={s.body} />
+      ))}
+      <div class="flex flex-col justify-between rounded-(--radius-card) bg-navy-900 p-6 text-white">
+        <div>
+          <p class="text-xs font-bold tracking-widest text-brand-500 uppercase">Flagship product</p>
+          <h3 class="mt-3 text-xl font-extrabold">SNAG</h3>
+          <p class="mt-2 text-sm leading-relaxed text-white/70">
+            Our own product, built the Docunation way: health &amp; safety and
+            issue reporting your crew will actually use.
+          </p>
+        </div>
+        <a href="/" class="mt-6 inline-block rounded-(--radius-btn) bg-brand-600 px-5 py-2.5 text-center text-sm font-semibold text-white transition-colors hover:bg-brand-500">Explore SNAG →</a>
+      </div>
+    </div>
+  </section>
+
+  {/* Why */}
+  <section class="border-y border-line bg-canvas">
+    <div class="mx-auto max-w-3xl px-5 py-16 text-center">
+      <h2 class="text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">Why "Docunation"?</h2>
+      <p class="mt-4 text-lg leading-relaxed text-ink-2">
+        Because a business where the knowledge is written down, mapped out and
+        kept current isn't just tidier — it's sellable, scalable and a lot less
+        stressful to own. We're building a nation of documented businesses,
+        one process at a time.
+      </p>
+      <a href="/contact" class="mt-8 inline-block rounded-(--radius-btn) bg-brand-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-700">Start a conversation</a>
+    </div>
+  </section>
+</BaseLayout>

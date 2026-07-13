@@ -1,0 +1,22 @@
+{
+  "name": "docunation-marketing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "social": "node social/render.mjs"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.2.1",
+    "@fontsource-variable/inter": "^5.1.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "astro": "^5.1.1",
+    "tailwindcss": "^4.0.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.61.1"
+  }
+}

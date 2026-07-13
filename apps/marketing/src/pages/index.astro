@@ -1,0 +1,144 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PhoneFrame from '../components/PhoneFrame.astro';
+import FeatureCard from '../components/FeatureCard.astro';
+import SectionHeading from '../components/SectionHeading.astro';
+import CtaBand from '../components/CtaBand.astro';
+import { SITE } from '../config';
+
+const softwareSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: SITE.name,
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'iOS, Android',
+  description: SITE.description,
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'NZD', description: 'Early access' },
+};
+
+const steps = [
+  {
+    n: '1',
+    title: 'Spot it',
+    body: 'A worker sees a problem — a hazard, a broken fitting, a near miss. They open SNAG, snap a photo, and describe it in a sentence. Ten seconds, done.',
+  },
+  {
+    n: '2',
+    title: 'Snag it',
+    body: 'The report lands with the right people instantly. Supervisors triage, assign an owner or work group, and merge duplicates — nothing slips through a paper form or a group chat.',
+  },
+  {
+    n: '3',
+    title: 'Sorted',
+    body: 'Everyday fixes get resolved with a note. Serious incidents get a guided investigation — checklist, witness statements, evidence, root cause — before they can be closed.',
+  },
+];
+---
+
+<BaseLayout
+  title="SNAG — Health & Safety and Issue Reporting Software for NZ & AU Workplaces"
+  schema={[softwareSchema]}
+>
+  {/* Hero */}
+  <section class="relative overflow-hidden bg-gradient-to-b from-brand-50 to-white">
+    <div class="mx-auto grid max-w-6xl items-center gap-12 px-5 pt-16 pb-20 lg:grid-cols-2 lg:pt-24">
+      <div>
+        <p class="inline-flex items-center gap-2 rounded-full border border-brand-100 bg-white px-3 py-1 text-xs font-semibold text-brand-600">
+          Built for New Zealand &amp; Australian workplaces
+        </p>
+        <h1 class="mt-5 text-4xl leading-tight font-extrabold tracking-tight text-ink sm:text-5xl">
+          Spot it. Snag it. <span class="text-brand-600">Sorted.</span>
+        </h1>
+        <p class="mt-5 max-w-lg text-lg leading-relaxed text-ink-2">
+          SNAG is the fastest way for your crew to report hazards, incidents and
+          everyday niggles — and for you to prove every one of them got sorted.
+          Photo in, audit trail out.
+        </p>
+        <div class="mt-8 flex flex-wrap gap-3">
+          <a href="/contact" class="rounded-(--radius-btn) bg-brand-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-700">Get early access</a>
+          <a href="/features" class="rounded-(--radius-btn) border border-line bg-white px-6 py-3 text-sm font-semibold text-ink transition-colors hover:border-brand-600 hover:text-brand-600">Explore features</a>
+        </div>
+        <p class="mt-6 text-sm text-ink-3">
+          Supports your obligations under NZ's HSWA 2015 and Australia's WHS Act.
+        </p>
+      </div>
+      <PhoneFrame />
+    </div>
+  </section>
+
+  {/* Problem */}
+  <section class="border-y border-line bg-canvas">
+    <div class="mx-auto max-w-6xl px-5 py-16">
+      <SectionHeading
+        eyebrow="The problem"
+        title="Issues get spotted every day. Most never get written down."
+        lead="Paper forms live in the site office. Group chats scroll away. The niggle a worker mentioned at smoko becomes next month's incident. When WorkSafe asks what you knew and when — you want a record, not a memory."
+      />
+    </div>
+  </section>
+
+  {/* How it works */}
+  <section class="mx-auto max-w-6xl px-5 py-20">
+    <SectionHeading
+      eyebrow="How it works"
+      title="From spotted to sorted in three steps"
+    />
+    <div class="mt-12 grid gap-8 md:grid-cols-3">
+      {steps.map((s) => (
+        <div class="relative rounded-(--radius-card) border border-line bg-white p-6">
+          <span class="flex h-10 w-10 items-center justify-center rounded-full bg-brand-600 text-base font-extrabold text-white">{s.n}</span>
+          <h3 class="mt-4 text-lg font-bold text-ink">{s.title}</h3>
+          <p class="mt-2 text-sm leading-relaxed text-ink-2">{s.body}</p>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  {/* Two lanes */}
+  <section class="bg-canvas">
+    <div class="mx-auto max-w-6xl px-5 py-20">
+      <SectionHeading
+        eyebrow="Two lanes, one habit"
+        title="Small stuff stays fast. Serious stuff gets serious."
+        lead="Every report takes the same ten seconds. What happens next depends on what it is — so easy fixes don't drown in paperwork, and incidents can't be closed with a shrug."
+      />
+      <div class="mt-12 grid gap-6 lg:grid-cols-2">
+        <div class="rounded-(--radius-card) border border-line bg-white p-8">
+          <p class="text-xs font-bold tracking-widest text-brand-600 uppercase">The niggle lane</p>
+          <h3 class="mt-2 text-xl font-bold text-ink">Fixits &amp; improvements</h3>
+          <ul class="mt-5 space-y-3 text-sm leading-relaxed text-ink-2">
+            <li class="flex gap-2.5"><span class="mt-0.5 text-brand-600">✓</span> Photo + one line, routed to the right work group automatically</li>
+            <li class="flex gap-2.5"><span class="mt-0.5 text-brand-600">✓</span> Auto-assigned when a site has an obvious owner</li>
+            <li class="flex gap-2.5"><span class="mt-0.5 text-brand-600">✓</span> Team votes surface what's bugging everyone</li>
+            <li class="flex gap-2.5"><span class="mt-0.5 text-brand-600">✓</span> Resolved with a note — reporter gets told automatically</li>
+          </ul>
+        </div>
+        <div class="rounded-(--radius-card) border-2 border-serious-600/20 bg-white p-8">
+          <p class="text-xs font-bold tracking-widest text-serious-600 uppercase">The serious lane</p>
+          <h3 class="mt-2 text-xl font-bold text-ink">Hazards &amp; incidents</h3>
+          <ul class="mt-5 space-y-3 text-sm leading-relaxed text-ink-2">
+            <li class="flex gap-2.5"><span class="mt-0.5 text-serious-600">✓</span> Severity assessment with injury reports pinned to the top</li>
+            <li class="flex gap-2.5"><span class="mt-0.5 text-serious-600">✓</span> Guided first-response checklist, witness statements &amp; evidence</li>
+            <li class="flex gap-2.5"><span class="mt-0.5 text-serious-600">✓</span> Delegated 5-Whys root cause analysis with review &amp; sign-off</li>
+            <li class="flex gap-2.5"><span class="mt-0.5 text-serious-600">✓</span> Can't be closed until the investigation is complete — by design</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {/* Feature grid */}
+  <section class="mx-auto max-w-6xl px-5 py-20">
+    <SectionHeading eyebrow="Built in" title="Everything a distributed team needs" />
+    <div class="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <FeatureCard icon="camera" title="Ten-second reporting" body="Photo-first capture with up to five images per report. If your crew can send a text, they can file a snag." />
+      <FeatureCard icon="merge" title="Triage that scales" body="Merge duplicate reports into one parent, bulk-assign status, people or work groups, and keep the queue honest." />
+      <FeatureCard icon="people" title="Work groups" body="Route reports to Vehicles, Kitchen, Facilities — whatever teams you run — scoped per site, with supervisor self-service." />
+      <FeatureCard icon="sites" title="Multi-site, multi-org" body="Workers see their sites; supervisors see theirs; admins see everything. Run multiple organisations from one account." />
+      <FeatureCard icon="shield" title="Investigations & RCA" body="Serious events walk your team through checklist, witnesses, evidence and a delegated 5-Whys — with a full audit log." tone="serious" />
+      <FeatureCard icon="globe" title="Public reporting" body="Optionally let visitors and contractors report into your organisation without an account — triaged like everything else." />
+    </div>
+  </section>
+
+  <CtaBand />
+</BaseLayout>

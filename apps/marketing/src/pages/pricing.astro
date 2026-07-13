@@ -1,0 +1,115 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import CtaBand from '../components/CtaBand.astro';
+
+// Placeholder tiers — final pricing TBC. Keep the structure, swap the numbers.
+const tiers = [
+  {
+    name: 'Starter',
+    price: 'Free',
+    per: 'during early access',
+    blurb: 'For a single site getting the reporting habit started.',
+    features: ['1 site', 'Up to 10 team members', 'Photo reporting & triage', 'Niggle lane (fixits & improvements)', 'Email notifications'],
+    cta: 'Get early access',
+    featured: false,
+  },
+  {
+    name: 'Team',
+    price: '$TBC',
+    per: 'per site / month',
+    blurb: 'For businesses that need the full H&S toolkit.',
+    features: ['Unlimited sites & members', 'Serious lane: investigations & RCA', 'Work groups & bulk actions', 'Public reporting', 'Priority support'],
+    cta: 'Talk to us',
+    featured: true,
+  },
+  {
+    name: 'Partner',
+    price: 'Custom',
+    per: 'with Docunation services',
+    blurb: 'SNAG plus hands-on help: process mapping, documentation and rollout done with you.',
+    features: ['Everything in Team', 'Guided rollout & training', 'Process documentation services', 'On-call support', 'Custom tooling via Docunation'],
+    cta: 'Talk to us',
+    featured: false,
+  },
+];
+---
+
+<BaseLayout
+  title="Pricing — SNAG"
+  description="Simple pricing for NZ and AU teams. Free during early access, with team plans and Docunation service partnerships for businesses that want rollout done with them."
+>
+  <section class="bg-gradient-to-b from-brand-50 to-white">
+    <div class="mx-auto max-w-6xl px-5 py-16 text-center">
+      <h1 class="text-4xl font-extrabold tracking-tight text-ink sm:text-5xl">Simple, per-site pricing</h1>
+      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-2">
+        Early access is free while we grow with our first NZ and AU teams.
+        Final pricing is being locked down with them — join and help shape it.
+      </p>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-6xl px-5 pb-20">
+    <div class="grid gap-6 lg:grid-cols-3">
+      {tiers.map((tier) => (
+        <div class:list={[
+          'flex flex-col rounded-(--radius-card) border bg-white p-8',
+          tier.featured ? 'border-brand-600 shadow-lg ring-1 ring-brand-600' : 'border-line shadow-sm',
+        ]}>
+          {tier.featured && (
+            <span class="mb-3 self-start rounded-full bg-brand-100 px-3 py-1 text-xs font-bold text-brand-600">Most popular</span>
+          )}
+          <h2 class="text-lg font-bold text-ink">{tier.name}</h2>
+          <p class="mt-3 text-4xl font-extrabold tracking-tight text-ink">{tier.price}</p>
+          <p class="text-sm text-ink-3">{tier.per}</p>
+          <p class="mt-3 text-sm leading-relaxed text-ink-2">{tier.blurb}</p>
+          <ul class="mt-6 flex-1 space-y-2.5 text-sm text-ink-2">
+            {tier.features.map((f) => (
+              <li class="flex gap-2.5"><span class="mt-0.5 text-brand-600">✓</span>{f}</li>
+            ))}
+          </ul>
+          <a
+            href="/contact"
+            class:list={[
+              'mt-8 rounded-(--radius-btn) px-5 py-3 text-center text-sm font-semibold transition-colors',
+              tier.featured
+                ? 'bg-brand-600 text-white hover:bg-brand-700'
+                : 'border border-line text-ink hover:border-brand-600 hover:text-brand-600',
+            ]}
+          >{tier.cta}</a>
+        </div>
+      ))}
+    </div>
+
+    <div class="mx-auto mt-16 max-w-2xl">
+      <h2 class="text-center text-2xl font-extrabold tracking-tight text-ink">Common questions</h2>
+      <dl class="mt-8 space-y-6">
+        <div class="rounded-(--radius-card) border border-line bg-white p-6">
+          <dt class="font-bold text-ink">Does SNAG make us HSWA / WHS compliant?</dt>
+          <dd class="mt-2 text-sm leading-relaxed text-ink-2">
+            No software makes you compliant on its own — but SNAG gives you the two
+            things regulators consistently look for: evidence that workers can raise
+            issues easily, and a documented trail showing what you did about them.
+          </dd>
+        </div>
+        <div class="rounded-(--radius-card) border border-line bg-white p-6">
+          <dt class="font-bold text-ink">Where is our data stored?</dt>
+          <dd class="mt-2 text-sm leading-relaxed text-ink-2">
+            In an isolated, access-controlled cloud database (hosted in the
+            Asia-Pacific region), with every organisation's data fully separated
+            and photos in private, permission-scoped storage.
+          </dd>
+        </div>
+        <div class="rounded-(--radius-card) border border-line bg-white p-6">
+          <dt class="font-bold text-ink">Can you help us roll it out?</dt>
+          <dd class="mt-2 text-sm leading-relaxed text-ink-2">
+            Yes — that's the Partner tier. Through <a href="/docunation" class="font-semibold text-brand-600 hover:underline">Docunation</a>,
+            we'll map your current process, set up your sites and work groups, and
+            train your supervisors so the habit sticks.
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <CtaBand />
+</BaseLayout>

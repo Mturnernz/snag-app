@@ -1,0 +1,40 @@
+/* Shared styles for social templates — same tokens as the site/app. */
+@font-face {
+  font-family: 'Inter Variable';
+  src: url('../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 100 900;
+}
+
+:root {
+  --brand-50: #eff6ff;
+  --brand-100: #dbeafe;
+  --brand-500: #3b82f6;
+  --brand-600: #2563eb;
+  --navy-900: #0f172a;
+  --navy-950: #020617;
+  --serious-600: #dc2626;
+  --ink: #111827;
+  --ink-2: #6b7280;
+  --white: #ffffff;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter Variable', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.mark svg { height: 1.1em; width: 1.1em; }
+
+.docunation-mark { font-weight: 800; letter-spacing: -0.02em; }
+.docunation-mark .accent { color: var(--brand-500); }

@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="_base.css">
+<style>
+  body {
+    width: 1200px; height: 627px;
+    background: var(--white);
+    display: flex;
+  }
+  .left {
+    flex: 1.2; padding: 72px; display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .logo { font-size: 40px; color: var(--ink); }
+  h1 { font-size: 62px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: var(--ink); }
+  h1 .accent { color: var(--brand-600); }
+  .sub { margin-top: 20px; font-size: 26px; color: var(--ink-2); line-height: 1.4; }
+  .cta { align-self: flex-start; background: var(--brand-600); color: var(--white); font-size: 24px; font-weight: 700; padding: 18px 36px; border-radius: 10px; }
+  .right {
+    flex: 1; background: linear-gradient(160deg, var(--brand-600), #1d4ed8);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .stat { text-align: center; color: var(--white); padding: 40px; }
+  .stat .big { font-size: 120px; font-weight: 800; letter-spacing: -0.04em; }
+  .stat .label { font-size: 28px; font-weight: 600; opacity: 0.85; margin-top: 8px; line-height: 1.35; }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="mark logo">
+      <svg viewBox="0 0 32 32"><rect x="2" y="6" width="28" height="22" rx="6" fill="#2563EB"/><rect x="11" y="2" width="10" height="6" rx="2" fill="#2563EB"/><circle cx="16" cy="17" r="6.5" fill="#fff"/><circle cx="16" cy="17" r="3" fill="#2563EB"/></svg>
+      SNAG
+    </div>
+    <div>
+      <h1>The hazard your team saw <span class="accent">last month</span> is this month's incident.</h1>
+      <p class="sub">Give your crew a ten-second way to report it — and prove it got sorted.</p>
+    </div>
+    <div class="cta">Get early access</div>
+  </div>
+  <div class="right">
+    <div class="stat">
+      <div class="big">10s</div>
+      <div class="label">photo to filed report,<br>routed to the right person</div>
+    </div>
+  </div>
+</body>
+</html>

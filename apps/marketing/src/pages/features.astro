@@ -1,0 +1,90 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import SectionHeading from '../components/SectionHeading.astro';
+import CtaBand from '../components/CtaBand.astro';
+
+const sections = [
+  {
+    eyebrow: 'Capture',
+    title: 'Reporting your crew will actually use',
+    tone: 'brand',
+    items: [
+      ['Photo-first, ten seconds flat', 'Open the app, snap up to five photos, add a sentence. Reports are routed by site and work group automatically — no forms, no dropdown mazes.'],
+      ['Four report types', 'Fixit, improvement, hazard, incident. Workers pick what it feels like; supervisors can recategorise later without losing anything.'],
+      ['Votes and comments', 'The whole team can upvote what matters and add context with @mentions, so the loudest problem is the one that is actually most common.'],
+      ['Public reporting (optional)', 'Let contractors, visitors or customers report into your organisation without an account. Block bad actors with one tap.'],
+    ],
+  },
+  {
+    eyebrow: 'Triage',
+    title: 'A queue that stays honest',
+    tone: 'brand',
+    items: [
+      ['Status that moves itself', 'The moment anyone acts on a report — assigns it, recategorises it, starts an investigation — it moves to In Progress automatically. No manual shepherding.'],
+      ['Merge duplicates', 'Five reports about the same leak become one parent snag with the full history kept. Resolve the parent, and every reporter gets closure.'],
+      ['Bulk actions', 'Multi-select to change status, assign a person, or route to a work group across many snags at once.'],
+      ['Smart auto-assignment', 'When a site or work group has exactly one obvious owner, new reports assign themselves.'],
+    ],
+  },
+  {
+    eyebrow: 'Investigate',
+    title: 'Serious events, taken seriously',
+    tone: 'serious',
+    items: [
+      ['Guided first response', 'A five-step checklist makes sure the scene is safe, people are looked after, and nothing is missed in the first hour.'],
+      ['Witness statements & evidence', 'Capture statements and photo evidence on the spot, timestamped and attributed.'],
+      ['Delegated 5-Whys RCA', 'Assign the root cause analysis to anyone on site. They complete it in-app; a supervisor reviews and accepts or sends it back with notes.'],
+      ['A resolve gate, not a suggestion', 'A serious snag cannot be closed until the checklist, witness statement, evidence and root cause exist. Your audit trail writes itself.'],
+    ],
+  },
+  {
+    eyebrow: 'Organise',
+    title: 'Fits how your business actually runs',
+    tone: 'brand',
+    items: [
+      ['Sites', 'Scope everything by site. Workers see their sites, supervisors oversee theirs, and reports land where the right people are.'],
+      ['Work groups', 'Route reports to the team that owns them — Vehicles, Kitchen, Facilities — scoped to one site or all of them.'],
+      ['Multi-organisation', 'Belong to more than one organisation and switch in two taps. Each org is fully isolated with its own team, sites and reports.'],
+      ['Roles that map to reality', 'Workers report, supervisors triage and investigate, officer admins run the organisation. QR-code joining gets a new starter reporting in under a minute.'],
+    ],
+  },
+];
+---
+
+<BaseLayout
+  title="Features — SNAG Health & Safety Reporting Software"
+  description="Photo-first incident reporting, automatic triage, merge and bulk actions, guided investigations with 5-Whys RCA, work groups, multi-site and multi-org — everything in SNAG."
+>
+  <section class="bg-gradient-to-b from-brand-50 to-white">
+    <div class="mx-auto max-w-6xl px-5 py-16 text-center">
+      <h1 class="text-4xl font-extrabold tracking-tight text-ink sm:text-5xl">Everything in SNAG</h1>
+      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-2">
+        One habit for your whole crew — from a torn seat cover to a notifiable
+        incident — with the paperwork handled for you.
+      </p>
+    </div>
+  </section>
+
+  {sections.map((section, i) => (
+    <section class:list={[i % 2 === 1 ? 'bg-canvas border-y border-line' : '']}>
+      <div class="mx-auto max-w-6xl px-5 py-16">
+        <SectionHeading
+          eyebrow={section.eyebrow}
+          title={section.title}
+          align="left"
+          tone={section.tone as 'brand' | 'serious'}
+        />
+        <div class="mt-10 grid gap-x-10 gap-y-8 md:grid-cols-2">
+          {section.items.map(([title, body]) => (
+            <div class="border-l-2 border-line pl-5">
+              <h3 class="text-base font-bold text-ink">{title}</h3>
+              <p class="mt-1.5 text-sm leading-relaxed text-ink-2">{body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  ))}
+
+  <CtaBand title="See it on your own site" body="Early access is open for NZ and AU teams. Tell us about your setup and we'll get you running." />
+</BaseLayout>

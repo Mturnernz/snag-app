@@ -18,6 +18,7 @@ import ReportIncidentReviewScreen from '../screens/ReportIncidentReviewScreen';
 import ScanJoinCodeScreen from '../screens/ScanJoinCodeScreen';
 import ChooseReportOrgScreen from '../screens/ChooseReportOrgScreen';
 import ManageOrganisationScreen from '../screens/ManageOrganisationScreen';
+import MentionsScreen from '../screens/MentionsScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 import { ReportTargetProvider } from '../context/ReportTargetContext';
 import { BadgeProvider, useBadge } from '../context/BadgeContext';
@@ -48,7 +49,7 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 function MainTabNavigator({ userRole }: { userRole: UserRole }) {
   const isAdminOrManager = userRole === 'officer_admin' || userRole === 'supervisor';
-  const { openIssueCount } = useBadge();
+  const { openIssueCount, mentionCount } = useBadge();
 
   return (
     <Tab.Navigator
@@ -73,7 +74,13 @@ function MainTabNavigator({ userRole }: { userRole: UserRole }) {
           tabBarBadge: openIssueCount > 0 ? openIssueCount : undefined,
         }}
       />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          tabBarBadge: mentionCount > 0 ? mentionCount : undefined,
+        }}
+      />
       {isAdminOrManager && (
         <Tab.Screen name="Admin" component={AdminDashboardScreen} />
       )}
@@ -133,6 +140,11 @@ export default function RootNavigator({ userRole }: { userRole: UserRole }) {
         <Stack.Screen
           name="ManageOrganisation"
           component={ManageOrganisationScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Mentions"
+          component={MentionsScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
       </Stack.Navigator>

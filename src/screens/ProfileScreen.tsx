@@ -21,6 +21,7 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
+import { useBadge } from '../context/BadgeContext';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -38,6 +39,7 @@ const STATUS_COLORS: Record<SnagStatus, { text: string; bg: string }> = {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  const { mentionCount } = useBadge();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
@@ -255,6 +257,21 @@ export default function ProfileScreen() {
           </Card>
         )}
 
+        <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('Mentions')}>
+          <Card variant="elevated" style={styles.mentionsCard}>
+            <View style={styles.mentionsRow}>
+              <Icon name="at-outline" size="md" color={Colors.primary} />
+              <Text style={styles.mentionsTitle}>Mentions</Text>
+              {mentionCount > 0 && (
+                <View style={styles.mentionsBadge}>
+                  <Text style={styles.mentionsBadgeText}>{mentionCount}</Text>
+                </View>
+              )}
+              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+            </View>
+          </Card>
+        </TouchableOpacity>
+
         {/* Organisations — a read-only summary of every org you belong to.
             Switch which one is active from the header above, or scan a QR
             to join a new one. */}
@@ -450,6 +467,33 @@ const styles = StyleSheet.create({
   // Snag stats
   statsCard: {
     gap: Spacing.md,
+  },
+  mentionsCard: {
+    paddingVertical: Spacing.md,
+  },
+  mentionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  mentionsTitle: {
+    flex: 1,
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  mentionsBadge: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.chip,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    minWidth: 22,
+    alignItems: 'center',
+  },
+  mentionsBadgeText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
   },
   statsHeader: {
     flexDirection: 'row',

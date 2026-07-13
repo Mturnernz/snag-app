@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { AppState } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { supabase, getUnseenMentionCount } from '../lib/supabase';
 
 interface BadgeContextValue {
   /** Flagged, unmerged snags in the active org — shown on the Snags tab. */
@@ -9,12 +9,18 @@ interface BadgeContextValue {
    *  or out of "flagged" (status changes, merges) instead of waiting for
    *  the app to background/foreground. */
   refreshOpenIssueCount: () => void;
+  /** Unseen @mentions of me in the active org — shown on the Profile tab. */
+  mentionCount: number;
+  /** Re-fetch the count. Call after sending a comment (someone else might
+   *  mention themselves back) or after viewing/clearing mentions. */
+  refreshMentionCount: () => void;
 }
 
 const BadgeContext = createContext<BadgeContextValue | null>(null);
 
 export function BadgeProvider({ children }: { children: React.ReactNode }) {
   const [openIssueCount, setOpenIssueCount] = useState(0);
+  const [mentionCount, setMentionCount] = useState(0);
 
   const refreshOpenIssueCount = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -34,16 +40,24 @@ export function BadgeProvider({ children }: { children: React.ReactNode }) {
     setOpenIssueCount(count ?? 0);
   }, []);
 
+  const refreshMentionCount = useCallback(async () => {
+    setMentionCount(await getUnseenMentionCount());
+  }, []);
+
   useEffect(() => {
     refreshOpenIssueCount();
+    refreshMentionCount();
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') refreshOpenIssueCount();
+      if (state === 'active') {
+        refreshOpenIssueCount();
+        refreshMentionCount();
+      }
     });
     return () => sub.remove();
-  }, [refreshOpenIssueCount]);
+  }, [refreshOpenIssueCount, refreshMentionCount]);
 
   return (
-    <BadgeContext.Provider value={{ openIssueCount, refreshOpenIssueCount }}>
+    <BadgeContext.Provider value={{ openIssueCount, refreshOpenIssueCount, mentionCount, refreshMentionCount }}>
       {children}
     </BadgeContext.Provider>
   );

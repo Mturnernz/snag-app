@@ -353,11 +353,32 @@ export default function IssueDetailScreen() {
     setMentionAt(-1);
   }
 
+  // @mentions are plain "@Name" text (see insertMention) rather than a
+  // token tied to an ID, so resolve the final comment text back to org
+  // member IDs at send time. Longest name first, masking each match before
+  // checking the next — otherwise "@Jane Doe" would also register a
+  // spurious mention of a separate member named "Jane".
+  function extractMentionedUserIds(text: string): string[] {
+    const ids = new Set<string>();
+    let working = text;
+    const byNameLength = [...orgMembers].sort((a, b) => b.name.length - a.name.length);
+    for (const member of byNameLength) {
+      if (!member.name) continue;
+      const token = '@' + member.name;
+      if (working.includes(token)) {
+        ids.add(member.id);
+        working = working.split(token).join(' '.repeat(token.length));
+      }
+    }
+    return Array.from(ids);
+  }
+
   async function sendComment() {
     if (!commentText.trim() || !currentUserId) return;
     setSendingComment(true);
 
-    const { error } = await addComment(issueId, commentText.trim());
+    const trimmed = commentText.trim();
+    const { error } = await addComment(issueId, trimmed, extractMentionedUserIds(trimmed));
 
     if (!error) {
       setCommentText('');

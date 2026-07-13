@@ -768,9 +768,56 @@ export async function markSnagSeen(snagId: string) {
 
 // ─── Comment helpers ──────────────────────────────────────────────────────────
 
-export async function addComment(snagId: string, body: string) {
-  const { data, error } = await supabase.rpc('add_comment', { p_snag_id: snagId, p_body: body });
+export async function addComment(snagId: string, body: string, mentionedUserIds: string[] = []) {
+  const { data, error } = await supabase.rpc('add_comment', {
+    p_snag_id: snagId,
+    p_body: body,
+    p_mentioned_user_ids: mentionedUserIds,
+  });
   return { commentId: data as string | null, error };
+}
+
+// ─── Mentions ─────────────────────────────────────────────────────────────────
+// "Comments that tag me" — @mentions are resolved to real profile IDs
+// client-side (see addComment) and recorded in comment_mentions, so they can
+// be surfaced here instead of requiring someone to read every thread.
+
+export interface MentionEntry {
+  mentionId: string;
+  commentId: string;
+  commentBody: string;
+  commentCreatedAt: string;
+  snagId: string;
+  snagReference: string;
+  authorId: string;
+  authorName: string;
+  seenAt: string | null;
+}
+
+export async function getMyMentions(): Promise<MentionEntry[]> {
+  const { data, error } = await supabase.rpc('get_my_mentions');
+  if (error || !data) return [];
+  return (data as any[]).map((row) => ({
+    mentionId: row.mention_id,
+    commentId: row.comment_id,
+    commentBody: row.comment_body,
+    commentCreatedAt: row.comment_created_at,
+    snagId: row.snag_id,
+    snagReference: row.snag_reference,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    seenAt: row.seen_at,
+  }));
+}
+
+export async function getUnseenMentionCount(): Promise<number> {
+  const { data, error } = await supabase.rpc('get_unseen_mention_count');
+  if (error || data == null) return 0;
+  return data as number;
+}
+
+export async function markAllMentionsSeen() {
+  return supabase.rpc('mark_all_mentions_seen');
 }
 
 // ─── Vote helpers ─────────────────────────────────────────────────────────────

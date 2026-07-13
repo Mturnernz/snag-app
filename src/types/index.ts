@@ -174,6 +174,7 @@ export type RootStackParamList = {
   ScanOrgCode: undefined;
   ChooseReportOrg: undefined;
   ManageOrganisation: undefined;
+  Mentions: undefined;
 };
 
 export type MainTabParamList = {

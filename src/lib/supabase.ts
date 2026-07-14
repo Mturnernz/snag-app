@@ -309,6 +309,21 @@ export async function getMySupervisedWorkGroupIds(): Promise<string[]> {
   return (data ?? []).map((r: any) => r.work_group_id);
 }
 
+// Snags the current user has been @mentioned on in this org — powers the
+// Snags list's "Mentioned" scope option. comment_mentions carries its own
+// org_id, so this stays scoped to the active org the same way get_my_mentions
+// (the RPC behind the separate Mentions inbox) does.
+export async function getMyMentionedSnagIds(orgId: string): Promise<string[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data } = await supabase
+    .from('comment_mentions')
+    .select('snag_id')
+    .eq('mentioned_user_id', user.id)
+    .eq('org_id', orgId);
+  return [...new Set((data ?? []).map((r: any) => r.snag_id as string))];
+}
+
 // ─── Site & organisation management (admin) ───────────────────────────────────
 
 export interface SiteDetail {

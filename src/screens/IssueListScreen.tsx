@@ -26,7 +26,7 @@ import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme'
 import {
   supabase, getSnagPhotoUrls, getProfile, mergeSnags, getOrgMembers, getWorkGroupsWithDetail, WorkGroupDetail,
   updateSnagStatus, resolveSnag, assignSnagOwner, assignSnagWorkGroup, getOrgSites, getMySiteIds,
-  getMySupervisedWorkGroupIds,
+  getMySupervisedWorkGroupIds, getMyMentionedSnagIds,
 } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
@@ -46,15 +46,22 @@ type ScopeFilter =
   | 'assigned_to_me'
   | 'all_in_my_sites'
   | 'raised_by_me'
+  | 'mentioned'
   | 'unassigned_in_my_sites'
   | 'unassigned_in_my_work_groups';
 
 const DEFAULT_SCOPE_FILTER: ScopeFilter = 'assigned_to_me';
 
+// Available to every role — being @mentioned isn't role-specific. RLS grants
+// visibility into any snag/comment thread you're mentioned on regardless of
+// your normal site/org access (see the comment_mentions carve-outs on the
+// snags/comments SELECT policies), so this can surface snags you otherwise
+// couldn't see at all.
 const SCOPE_FILTER_OPTIONS_BASE: { key: ScopeFilter; label: string; shortLabel: string }[] = [
   { key: 'assigned_to_me', label: 'Assigned to me', shortLabel: 'Mine' },
   { key: 'all_in_my_sites', label: 'All in my sites', shortLabel: 'My Sites' },
   { key: 'raised_by_me', label: 'Raised by me', shortLabel: 'Raised by Me' },
+  { key: 'mentioned', label: 'Mentioned', shortLabel: 'Mentioned' },
 ];
 
 // Supervisor/officer_admin only — RLS already restricts each role to its own
@@ -133,11 +140,13 @@ export default function IssueListScreen() {
     activeOrgId: string | null;
     currentUserId: string | null;
     myWorkGroupIds: string[];
+    myMentionedSnagIds: string[];
   }>({
     memberOfOrg: false,
     activeOrgId: null,
     currentUserId: null,
     myWorkGroupIds: [],
+    myMentionedSnagIds: [],
   });
 
   // Select mode — long-press a card to enter it. selectedIds is ordered:
@@ -174,7 +183,8 @@ export default function IssueListScreen() {
 
   // One page of the list query, identical for the first load and loadMore.
   const buildSnagQuery = useCallback((
-    memberOfOrg: boolean, activeOrgId: string | null, currentUserId: string | null, myWorkGroupIds: string[],
+    memberOfOrg: boolean, activeOrgId: string | null, currentUserId: string | null,
+    myWorkGroupIds: string[], myMentionedSnagIds: string[],
     from: number, to: number
   ) => {
     let query = supabase
@@ -213,6 +223,15 @@ export default function IssueListScreen() {
         query = query.eq('owner_id', currentUserId);
       } else if (scopeFilter === 'raised_by_me' && currentUserId) {
         query = query.eq('reporter_id', currentUserId);
+      } else if (scopeFilter === 'mentioned') {
+        // myMentionedSnagIds is already scoped to the active org (see
+        // getMyMentionedSnagIds), so this doesn't conflict with the org_id
+        // filter above even though the underlying RLS carve-out that makes
+        // these snags visible at all works across orgs/sites.
+        query = query.in(
+          'id',
+          myMentionedSnagIds.length > 0 ? myMentionedSnagIds : ['00000000-0000-0000-0000-000000000000']
+        );
       } else if (scopeFilter === 'unassigned_in_my_sites') {
         query = query.is('owner_id', null);
       } else if (scopeFilter === 'unassigned_in_my_work_groups') {
@@ -271,12 +290,12 @@ export default function IssueListScreen() {
     setHasOrg(memberOfOrg);
     const currentUserId = user?.id ?? null;
 
-    // The site-filter options, the Public-button check, and (for
-    // supervisor/officer_admin) the "work groups I own" list are all
-    // independent of each other and of the page query itself — run them
-    // concurrently, then run the page query once everything it might need
-    // (myWorkGroupIds, for the work-group scope option) is known.
-    const [siteList, publicFlag, myWorkGroupIds] = await Promise.all([
+    // The site-filter options, the Public-button check, (for
+    // supervisor/officer_admin) the "work groups I own" list, and the
+    // "mentioned" snag ids are all independent of each other and of the page
+    // query itself — run them concurrently, then run the page query once
+    // everything it might need is known.
+    const [siteList, publicFlag, myWorkGroupIds, myMentionedSnagIds] = await Promise.all([
       (async () => {
         // Sites available to filter by: every org site for admin/supervisor,
         // only the worker's own assigned sites otherwise.
@@ -310,11 +329,18 @@ export default function IssueListScreen() {
         if (userRole === 'supervisor') return getMySupervisedWorkGroupIds();
         return [] as string[];
       })(),
+      (async () => {
+        // "Mentioned" scope option — available to every role.
+        if (!memberOfOrg || !activeOrgId) return [] as string[];
+        return getMyMentionedSnagIds(activeOrgId);
+      })(),
     ]);
 
-    queryCtxRef.current = { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds };
+    queryCtxRef.current = { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds };
 
-    const { data, error } = await buildSnagQuery(memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, 0, PAGE_SIZE - 1);
+    const { data, error } = await buildSnagQuery(
+      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds, 0, PAGE_SIZE - 1
+    );
 
     setSites(siteList);
     setHasPublicSnags(publicFlag);
@@ -338,9 +364,10 @@ export default function IssueListScreen() {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || loading || refreshing) return;
     setLoadingMore(true);
-    const { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds } = queryCtxRef.current;
+    const { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds } = queryCtxRef.current;
     const { data, error } = await buildSnagQuery(
-      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, issues.length, issues.length + PAGE_SIZE - 1
+      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds,
+      issues.length, issues.length + PAGE_SIZE - 1
     );
     if (!error && data) {
       const fresh = mapRows(data);

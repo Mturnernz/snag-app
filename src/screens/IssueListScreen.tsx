@@ -26,6 +26,7 @@ import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme'
 import {
   supabase, getSnagPhotoUrls, getProfile, mergeSnags, getOrgMembers, getWorkGroupsWithDetail, WorkGroupDetail,
   updateSnagStatus, resolveSnag, assignSnagOwner, assignSnagWorkGroup, getOrgSites, getMySiteIds,
+  getMySupervisedWorkGroupIds,
 } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
@@ -39,7 +40,34 @@ import { useBadge } from '../context/BadgeContext';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 type SortMode = 'newest' | 'oldest' | 'trending';
-type DropdownKey = 'status' | 'date' | 'site' | null;
+type DropdownKey = 'status' | 'date' | 'site' | 'scope' | null;
+
+type ScopeFilter =
+  | 'assigned_to_me'
+  | 'all_in_my_sites'
+  | 'raised_by_me'
+  | 'unassigned_in_my_sites'
+  | 'unassigned_in_my_work_groups';
+
+const DEFAULT_SCOPE_FILTER: ScopeFilter = 'assigned_to_me';
+
+const SCOPE_FILTER_OPTIONS_BASE: { key: ScopeFilter; label: string; shortLabel: string }[] = [
+  { key: 'assigned_to_me', label: 'Assigned to me', shortLabel: 'Mine' },
+  { key: 'all_in_my_sites', label: 'All in my sites', shortLabel: 'My Sites' },
+  { key: 'raised_by_me', label: 'Raised by me', shortLabel: 'Raised by Me' },
+];
+
+// Supervisor/officer_admin only — RLS already restricts each role to its own
+// visible sites (see can_view_site), so "in my sites" needs no explicit site
+// list here; only the work-group option needs a separate fetch (see
+// getMySupervisedWorkGroupIds / getWorkGroupsWithDetail in fetchIssues).
+const SCOPE_FILTER_OPTIONS_STAFF_EXTRA: { key: ScopeFilter; label: string; shortLabel: string }[] = [
+  { key: 'unassigned_in_my_sites', label: 'Unassigned in my sites', shortLabel: 'Unassigned · Sites' },
+  { key: 'unassigned_in_my_work_groups', label: 'Unassigned in my work groups', shortLabel: 'Unassigned · Groups' },
+];
+
+// Per-user, persisted across app opens (see the load/save effects below).
+const SCOPE_FILTER_STORAGE_PREFIX = 'snag.scopeFilter.';
 
 const STATUS_FILTER_OPTIONS: { key: SnagStatus; label: string }[] = [
   { key: 'flagged', label: STATUS_LABELS.flagged },
@@ -74,6 +102,7 @@ export default function IssueListScreen() {
   // mode, Public is a plain toggle only shown when relevant.
   const [statusFilters, setStatusFilters] = useState<Set<SnagStatus>>(new Set(DEFAULT_STATUS_FILTERS));
   const [siteFilters, setSiteFilters] = useState<Set<string>>(new Set());
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>(DEFAULT_SCOPE_FILTER);
   // Set once the persisted-preference load effect below resolves the signed-in
   // user; guards the save effect against writing before we know who "this
   // user" is (and from overwriting one user's saved filter with another's on
@@ -99,9 +128,16 @@ export default function IssueListScreen() {
   // loadMore can rebuild the identical query without re-resolving the org.
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const queryCtxRef = React.useRef<{ memberOfOrg: boolean; activeOrgId: string | null }>({
+  const queryCtxRef = React.useRef<{
+    memberOfOrg: boolean;
+    activeOrgId: string | null;
+    currentUserId: string | null;
+    myWorkGroupIds: string[];
+  }>({
     memberOfOrg: false,
     activeOrgId: null,
+    currentUserId: null,
+    myWorkGroupIds: [],
   });
 
   // Select mode — long-press a card to enter it. selectedIds is ordered:
@@ -113,7 +149,12 @@ export default function IssueListScreen() {
   const canMerge = role === 'officer_admin' || role === 'supervisor';
   const { showToast } = useToast();
 
-  const hasActiveFilters = !setsEqual(statusFilters, DEFAULT_STATUS_FILTERS) || siteFilters.size > 0 || publicOnly;
+  const hasActiveFilters = !setsEqual(statusFilters, DEFAULT_STATUS_FILTERS) || siteFilters.size > 0 || publicOnly
+    || scopeFilter !== DEFAULT_SCOPE_FILTER;
+
+  const scopeOptions = role === 'officer_admin' || role === 'supervisor'
+    ? [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA]
+    : SCOPE_FILTER_OPTIONS_BASE;
 
   function toggleStatusFilter(s: SnagStatus) {
     setStatusFilters((prev) => {
@@ -132,10 +173,13 @@ export default function IssueListScreen() {
   }
 
   // One page of the list query, identical for the first load and loadMore.
-  const buildSnagQuery = useCallback((memberOfOrg: boolean, activeOrgId: string | null, from: number, to: number) => {
+  const buildSnagQuery = useCallback((
+    memberOfOrg: boolean, activeOrgId: string | null, currentUserId: string | null, myWorkGroupIds: string[],
+    from: number, to: number
+  ) => {
     let query = supabase
       .from('snags_with_details')
-      .select('id, reference, status, kind, lane, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission, child_count')
+      .select('id, reference, status, kind, lane, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission, child_count, work_group_id')
       // Merged children are hidden here — only visible from the parent's own
       // "Merged snags" section. A parent is never itself a child (single-
       // level hierarchy, enforced server-side), so parents always show.
@@ -158,8 +202,32 @@ export default function IssueListScreen() {
       query = query.in('site_id', Array.from(siteFilters));
     }
 
+    // Scope — org members only (the filter bar's Scope button is hidden for
+    // non-members/public reporters, so this must never silently apply to
+    // them just because scopeFilter still holds its default value).
+    // "all_in_my_sites" needs no clause of its own: RLS already restricts
+    // every role to the sites it can see (can_view_site), so the unfiltered
+    // query already is "everything in my sites."
+    if (memberOfOrg) {
+      if (scopeFilter === 'assigned_to_me' && currentUserId) {
+        query = query.eq('owner_id', currentUserId);
+      } else if (scopeFilter === 'raised_by_me' && currentUserId) {
+        query = query.eq('reporter_id', currentUserId);
+      } else if (scopeFilter === 'unassigned_in_my_sites') {
+        query = query.is('owner_id', null);
+      } else if (scopeFilter === 'unassigned_in_my_work_groups') {
+        // .in() with an empty array is unreliable across PostgREST versions —
+        // fall back to an impossible id so "I own zero work groups" cleanly
+        // yields zero rows instead of erroring or matching everything.
+        query = query.is('owner_id', null).in(
+          'work_group_id',
+          myWorkGroupIds.length > 0 ? myWorkGroupIds : ['00000000-0000-0000-0000-000000000000']
+        );
+      }
+    }
+
     return query.order('created_at', { ascending: sortMode === 'oldest' });
-  }, [statusFilters, siteFilters, sortMode, publicOnly]);
+  }, [statusFilters, siteFilters, sortMode, publicOnly, scopeFilter]);
 
   const mapRows = (rows: any[]): Snag[] =>
     rows.map((row: any) => ({
@@ -201,12 +269,14 @@ export default function IssueListScreen() {
       setIsPublicOrg(orgIsPublic);
     }
     setHasOrg(memberOfOrg);
-    queryCtxRef.current = { memberOfOrg, activeOrgId };
+    const currentUserId = user?.id ?? null;
 
-    // The page query, the site-filter options, and the Public-button check
-    // are independent — run them concurrently instead of serially.
-    const [{ data, error }, siteList, publicFlag] = await Promise.all([
-      buildSnagQuery(memberOfOrg, activeOrgId, 0, PAGE_SIZE - 1),
+    // The site-filter options, the Public-button check, and (for
+    // supervisor/officer_admin) the "work groups I own" list are all
+    // independent of each other and of the page query itself — run them
+    // concurrently, then run the page query once everything it might need
+    // (myWorkGroupIds, for the work-group scope option) is known.
+    const [siteList, publicFlag, myWorkGroupIds] = await Promise.all([
       (async () => {
         // Sites available to filter by: every org site for admin/supervisor,
         // only the worker's own assigned sites otherwise.
@@ -228,7 +298,23 @@ export default function IssueListScreen() {
           .limit(1);
         return Boolean(pub && pub.length > 0);
       })(),
+      (async () => {
+        // "Unassigned in my work groups" scope option — officer_admin has no
+        // personal rows in work_group_supervisors (see supabase.ts), so "my
+        // work groups" means every org work group for that role.
+        if (!memberOfOrg || !activeOrgId) return [] as string[];
+        if (userRole === 'officer_admin') {
+          const groups = await getWorkGroupsWithDetail();
+          return groups.map((g) => g.id);
+        }
+        if (userRole === 'supervisor') return getMySupervisedWorkGroupIds();
+        return [] as string[];
+      })(),
     ]);
+
+    queryCtxRef.current = { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds };
+
+    const { data, error } = await buildSnagQuery(memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, 0, PAGE_SIZE - 1);
 
     setSites(siteList);
     setHasPublicSnags(publicFlag);
@@ -252,9 +338,9 @@ export default function IssueListScreen() {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || loading || refreshing) return;
     setLoadingMore(true);
-    const { memberOfOrg, activeOrgId } = queryCtxRef.current;
+    const { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds } = queryCtxRef.current;
     const { data, error } = await buildSnagQuery(
-      memberOfOrg, activeOrgId, issues.length, issues.length + PAGE_SIZE - 1
+      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, issues.length, issues.length + PAGE_SIZE - 1
     );
     if (!error && data) {
       const fresh = mapRows(data);
@@ -271,21 +357,28 @@ export default function IssueListScreen() {
     setLoadingMore(false);
   }, [loadingMore, hasMore, loading, refreshing, issues.length, buildSnagQuery, sortSnags]);
 
-  // Load this user's saved Status filter (if any) once on mount, overriding
-  // the default. Runs before the first fetchIssues below normally resolves
-  // (both start on mount), and fetchIssues re-runs automatically if this
-  // changes statusFilters, since it depends on buildSnagQuery which does.
+  // Load this user's saved Status/Scope filters (if any) once on mount,
+  // overriding the defaults. Runs before the first fetchIssues below
+  // normally resolves (both start on mount), and fetchIssues re-runs
+  // automatically if this changes either, since both feed buildSnagQuery.
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
       userIdRef.current = user.id;
-      const raw = await AsyncStorage.getItem(STATUS_FILTER_STORAGE_PREFIX + user.id);
-      if (!raw) return;
-      try {
-        const saved: SnagStatus[] = JSON.parse(raw);
-        setStatusFilters(new Set(saved));
-      } catch {
-        // Ignore malformed storage — keep the default.
+      const [statusRaw, scopeRaw] = await Promise.all([
+        AsyncStorage.getItem(STATUS_FILTER_STORAGE_PREFIX + user.id),
+        AsyncStorage.getItem(SCOPE_FILTER_STORAGE_PREFIX + user.id),
+      ]);
+      if (statusRaw) {
+        try {
+          const saved: SnagStatus[] = JSON.parse(statusRaw);
+          setStatusFilters(new Set(saved));
+        } catch {
+          // Ignore malformed storage — keep the default.
+        }
+      }
+      if (scopeRaw && [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA].some((o) => o.key === scopeRaw)) {
+        setScopeFilter(scopeRaw as ScopeFilter);
       }
     });
   }, []);
@@ -297,6 +390,11 @@ export default function IssueListScreen() {
     if (!userIdRef.current) return;
     AsyncStorage.setItem(STATUS_FILTER_STORAGE_PREFIX + userIdRef.current, JSON.stringify(Array.from(statusFilters)));
   }, [statusFilters]);
+
+  useEffect(() => {
+    if (!userIdRef.current) return;
+    AsyncStorage.setItem(SCOPE_FILTER_STORAGE_PREFIX + userIdRef.current, scopeFilter);
+  }, [scopeFilter]);
 
   useEffect(() => {
     setLoading(true);
@@ -381,6 +479,13 @@ export default function IssueListScreen() {
       ) : (
         <View style={styles.filterWrap}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterBarRow}>
+            {hasOrg && (
+              <FilterBarButton
+                label={scopeOptions.find((o) => o.key === scopeFilter)?.shortLabel ?? 'Mine'}
+                active={scopeFilter !== DEFAULT_SCOPE_FILTER}
+                onPress={() => setOpenDropdown('scope')}
+              />
+            )}
             <FilterBarButton
               label="Status"
               active={!setsEqual(statusFilters, DEFAULT_STATUS_FILTERS)}
@@ -419,6 +524,24 @@ export default function IssueListScreen() {
       <Modal visible={openDropdown !== null} transparent animationType="fade" onRequestClose={() => setOpenDropdown(null)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setOpenDropdown(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.sortSheet}>
+            {openDropdown === 'scope' && (
+              <>
+                <Text style={styles.sortSheetTitle}>Show</Text>
+                {scopeOptions.map((opt) => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={styles.sortOption}
+                    onPress={() => { setScopeFilter(opt.key); setOpenDropdown(null); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.sortOptionText, scopeFilter === opt.key && styles.sortOptionTextActive]}>
+                      {opt.label}
+                    </Text>
+                    {scopeFilter === opt.key && <Icon name="checkmark" size="sm" color={Colors.primary} />}
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
             {openDropdown === 'status' && (
               <>
                 <Text style={styles.sortSheetTitle}>Status</Text>

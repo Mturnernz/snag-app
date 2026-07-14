@@ -295,6 +295,20 @@ export async function getMySiteIds(): Promise<string[]> {
   return (data ?? []) as string[];
 }
 
+// Work groups the current user supervises — used to scope the Snags list's
+// "Unassigned in my work groups" option for supervisors. RLS on
+// work_group_supervisors already scopes reads to the active org, so a plain
+// eq('user_id', ...) is sufficient (no RPC needed).
+export async function getMySupervisedWorkGroupIds(): Promise<string[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data } = await supabase
+    .from('work_group_supervisors')
+    .select('work_group_id')
+    .eq('user_id', user.id);
+  return (data ?? []).map((r: any) => r.work_group_id);
+}
+
 // ─── Site & organisation management (admin) ───────────────────────────────────
 
 export interface SiteDetail {

@@ -670,11 +670,11 @@ export default function IssueListScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="build-outline"
-              title={hasActiveFilters ? 'No matching snags' : 'No snags yet'}
+              title={hasActiveFilters ? 'Nothing matches those filters' : 'All quiet here'}
               message={
                 hasActiveFilters
-                  ? 'Try adjusting your filters or report a new issue.'
-                  : 'Be the first to report an issue in your workplace.'
+                  ? 'Try widening your filters, or report something new.'
+                  : 'Nothing reported yet — spot something? Let us know.'
               }
               actionLabel={!hasActiveFilters ? 'Report a Snag' : undefined}
               onAction={

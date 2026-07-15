@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,6 +18,34 @@ import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+// Serious-lane acknowledgment — a slow fade/settle rather than the niggle
+// lane's pulse. Composed, not celebratory: this is a formal H&S record.
+function SeriousSuccessBlock({ reference, onDone }: { reference: string | null; onDone: () => void }) {
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(12);
+
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 500 });
+    translateY.value = withTiming(0, { duration: 500 });
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  return (
+    <Animated.View style={[styles.successContainer, animatedStyle]}>
+      <Icon name="shield-checkmark-outline" size="xxl" color={Colors.serious} />
+      <Text style={styles.successTitle}>This has been logged</Text>
+      <Text style={styles.successMessage}>
+        {reference ? `${reference} is now` : 'This is now'} a formal record, and the right people have been notified.
+      </Text>
+      <Button label="Done" variant="serious" onPress={onDone} fullWidth />
+    </Animated.View>
+  );
+}
 
 export default function ReportIncidentReviewScreen() {
   const insets = useSafeAreaInsets();
@@ -37,6 +67,9 @@ export default function ReportIncidentReviewScreen() {
     }
     setReference(ref ?? null);
     setSubmitted(true);
+    // Same acknowledgment haptic as the niggle lane, but no visual pulse —
+    // the fade/settle below carries the "composed, not celebratory" tone.
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }
 
   function handleDone() {
@@ -48,14 +81,7 @@ export default function ReportIncidentReviewScreen() {
     return (
       <View style={styles.container}>
         <ScreenHeader title="Report a Serious Incident" tone="serious" onBack={handleDone} />
-        <View style={styles.successContainer}>
-          <Icon name="shield-checkmark-outline" size="xxl" color={Colors.serious} />
-          <Text style={styles.successTitle}>Incident report submitted</Text>
-          <Text style={styles.successMessage}>
-            {reference ? `${reference} has` : 'This has'} been logged as a formal record and your team has been notified.
-          </Text>
-          <Button label="Done" variant="serious" onPress={handleDone} fullWidth />
-        </View>
+        <SeriousSuccessBlock reference={reference} onDone={handleDone} />
       </View>
     );
   }

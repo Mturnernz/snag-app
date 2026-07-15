@@ -20,6 +20,7 @@ import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
 import ConfirmDialog from './ConfirmDialog';
+import ResolvedCheckmark from './ResolvedCheckmark';
 
 type EditingField = 'severity' | 'kind' | 'assignee' | null;
 
@@ -68,6 +69,8 @@ export default function ManageIssuePanel({
   const [resolveModalOpen, setResolveModalOpen] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const [resolving, setResolving] = useState(false);
+  // Transient "nice, sorted" beat — niggle lane only, cleared after it plays.
+  const [justResolved, setJustResolved] = useState(false);
 
   const resolveBlocked = isSerious && resolveBlockReason !== null;
 
@@ -85,7 +88,13 @@ export default function ManageIssuePanel({
       setResolveModalOpen(false);
       setResolveNote('');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showToast('Snag resolved');
+      if (isSerious) {
+        showToast('Resolved');
+      } else {
+        showToast('Nice, sorted!');
+        setJustResolved(true);
+        setTimeout(() => setJustResolved(false), 1200);
+      }
       onUpdated();
     } else {
       showToast(error.message ?? 'Could not resolve snag');
@@ -289,6 +298,8 @@ export default function ManageIssuePanel({
           )}
         </View>
       )}
+
+      {justResolved && <ResolvedCheckmark />}
 
       {isPublicSubmission && (
         <Button

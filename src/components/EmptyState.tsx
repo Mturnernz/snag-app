@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Colors, Spacing, Typography, IconSize } from '../constants/theme';
 import Icon from './Icon';
 import Button from './Button';
@@ -13,8 +14,21 @@ interface Props {
 }
 
 export default function EmptyState({ icon, title, message, actionLabel, onAction }: Props) {
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(8);
+
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 300 });
+    translateY.value = withTiming(0, { duration: 300 });
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, animatedStyle]}>
       <View style={styles.iconCircle}>
         <Icon name={icon} size={IconSize.xl} color={Colors.textMuted} />
       </View>
@@ -23,7 +37,7 @@ export default function EmptyState({ icon, title, message, actionLabel, onAction
       {actionLabel && onAction ? (
         <Button label={actionLabel} onPress={onAction} style={styles.action} />
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 

@@ -7,10 +7,19 @@ import {
   ViewStyle,
   StyleProp,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET, Shadow } from '../constants/theme';
 import Icon from './Icon';
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerOutline' | 'serious' | 'seriousOutline';
+
+// Only the two filled CTA variants get the press-scale + haptic treatment —
+// outline/ghost/secondary/danger read as secondary actions, not the primary
+// "this responds to you" moment the warmth pass is after.
+const CTA_VARIANTS = new Set<Variant>(['primary', 'serious']);
 
 interface Props {
   label: string;
@@ -46,19 +55,50 @@ export default function Button({
 }: Props) {
   const cfg = VARIANT_STYLES[variant];
   const isDisabled = disabled || loading;
+  const isCta = CTA_VARIANTS.has(variant);
+
+  // CTA variants (primary/serious) get a spring scale down; every variant
+  // keeps the old opacity dip so non-CTA buttons don't lose press feedback.
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(1);
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+  }));
+
+  function handlePressIn() {
+    if (isDisabled) return;
+    opacity.value = withSpring(0.85, { damping: 16, stiffness: 300 });
+    if (isCta) scale.value = withSpring(0.96, { damping: 16, stiffness: 300 });
+  }
+
+  function handlePressOut() {
+    if (isDisabled) return;
+    opacity.value = withSpring(1, { damping: 16, stiffness: 300 });
+    if (isCta) scale.value = withSpring(1, { damping: 16, stiffness: 300 });
+  }
+
+  function handlePress() {
+    if (isCta && !isDisabled) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    onPress();
+  }
 
   return (
-    <Pressable
-      onPress={onPress}
+    <AnimatedPressable
+      onPress={handlePress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
       disabled={isDisabled}
-      style={({ pressed }) => [
+      style={[
+        animatedStyle,
         styles.base,
         { backgroundColor: cfg.bg },
         cfg.border ? { borderWidth: 1, borderColor: cfg.border } : null,
         cfg.shadow && !isDisabled ? Shadow.sm : null,
         fullWidth ? styles.fullWidth : null,
         isDisabled ? styles.disabled : null,
-        pressed && !isDisabled ? styles.pressed : null,
         style,
       ]}
     >
@@ -70,7 +110,7 @@ export default function Button({
           <Text style={[styles.label, { color: cfg.text }]}>{label}</Text>
         </>
       )}
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
@@ -93,8 +133,5 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.5,
-  },
-  pressed: {
-    opacity: 0.85,
   },
 });

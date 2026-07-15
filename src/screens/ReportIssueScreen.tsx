@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   View,
@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSequence, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -38,6 +39,29 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 const KIND_OPTIONS = (Object.keys(KIND_LABELS) as SnagKind[])
   .filter((k) => k === 'fixit' || k === 'improvement') // hazard/incident belong to the serious lane
   .map((k) => ({ key: k, label: KIND_LABELS[k] }));
+
+// "Heartbeat" confirmation pulse — niggle lane only. A brief 1.0 -> 1.03 -> 1.0
+// scale on mount, paired with the Success haptic already fired in doSubmit.
+function HeartbeatIcon() {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.value = withSequence(
+      withSpring(1.03, { damping: 8, stiffness: 200 }),
+      withSpring(1, { damping: 8, stiffness: 200 })
+    );
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={[styles.successIconWrap, animatedStyle]}>
+      <Icon name="checkmark" size={IconSize.xl} color={Colors.white} />
+    </Animated.View>
+  );
+}
 
 export default function ReportIssueScreen() {
   const insets = useSafeAreaInsets();
@@ -226,13 +250,10 @@ export default function ReportIssueScreen() {
           <Text style={styles.headerTitle}>Report a Snag</Text>
         </View>
         <View style={styles.successContainer}>
-          <View style={styles.successIconWrap}>
-            <Icon name="checkmark" size={IconSize.xl} color={Colors.white} />
-          </View>
-          <Text style={styles.successTitle}>Snag reported!</Text>
+          <HeartbeatIcon />
+          <Text style={styles.successTitle}>Got it, thanks for flagging this.</Text>
           <Text style={styles.successMessage}>
-            {reference ?? 'Your snag'} has been submitted
-            {submittedTo ? ` to ${submittedTo}` : ''} and the team will be notified.
+            {reference ?? 'Your snag'} is on its way{submittedTo ? ` to ${submittedTo}` : ''} — the team will take a look.
           </Text>
           <Button label="Report Another Snag" onPress={resetForm} fullWidth />
         </View>

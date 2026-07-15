@@ -2,6 +2,7 @@ import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { File } from 'expo-file-system';
 import {
   Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
   ChecklistStep, WitnessStatement, EvidenceItem,
@@ -898,12 +899,15 @@ export async function uploadSnagPhoto(
   bucket: string = SNAG_PHOTOS_BUCKET,
 ): Promise<{ path: string | null; error: any }> {
   try {
-    const response = await fetch(localUri);
-    const blob = await response.blob();
+    // fetch(localUri).blob() produces a Blob the storage-js upload can't
+    // reliably read on React Native, which the API rejects outright (400)
+    // before it ever reaches the bucket's RLS check — read the file as an
+    // ArrayBuffer instead.
+    const arrayBuffer = await new File(localUri).arrayBuffer();
 
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, blob, {
+      .upload(fileName, arrayBuffer, {
         contentType: 'image/jpeg',
         upsert: false,
       });

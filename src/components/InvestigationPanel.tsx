@@ -41,7 +41,7 @@ export default function InvestigationPanel({ issueId, orgId, state, onChanged }:
 
   const evidencePickerRef = useRef<PhotoPickerHandle>(null);
   const [evidenceCaption, setEvidenceCaption] = useState('');
-  const [evidenceUploading, setEvidenceUploading] = useState(false);
+  const [evidenceBlocked, setEvidenceBlocked] = useState(false);
   const [addingEvidence, setAddingEvidence] = useState(false);
 
   const [rootCause, setRootCauseText] = useState(state.rootCause ?? '');
@@ -80,6 +80,10 @@ export default function InvestigationPanel({ issueId, orgId, state, onChanged }:
   }
 
   async function handleAddEvidence() {
+    if (evidenceBlocked) {
+      showToast('A photo is still uploading or failed to upload — retry or remove it first');
+      return;
+    }
     const paths = (await evidencePickerRef.current?.getPhotoUrls()) ?? [];
     if (paths.length === 0 && !evidenceCaption.trim()) {
       showToast('Add a photo or a caption for the evidence');
@@ -194,14 +198,14 @@ export default function InvestigationPanel({ issueId, orgId, state, onChanged }:
         ref={evidencePickerRef}
         pathPrefix={orgId}
         bucket="snag-evidence"
-        onUploadingChange={setEvidenceUploading}
+        onBlockingChange={setEvidenceBlocked}
       />
       <Button
         label="Add evidence"
         variant="outline"
         onPress={handleAddEvidence}
         loading={addingEvidence}
-        disabled={evidenceUploading}
+        disabled={evidenceBlocked}
         fullWidth
       />
 

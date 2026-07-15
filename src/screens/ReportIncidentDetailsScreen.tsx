@@ -35,7 +35,7 @@ export default function ReportIncidentDetailsScreen() {
   const [description, setDescription] = useState(draft.description);
   const [kind, setKind] = useState<SnagKind>(draft.kind);
   const [severity, setSeverity] = useState<SnagSeverity>(draft.severity);
-  const [isPhotoUploading, setIsPhotoUploading] = useState(false);
+  const [photosBlocked, setPhotosBlocked] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
@@ -60,6 +60,10 @@ export default function ReportIncidentDetailsScreen() {
   function handleNext() {
     if (!description.trim()) {
       Alert.alert('Description required', 'Please describe what happened.');
+      return;
+    }
+    if (photosBlocked) {
+      Alert.alert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before continuing.');
       return;
     }
 
@@ -139,7 +143,7 @@ export default function ReportIncidentDetailsScreen() {
             ref={photoPickerRef}
             pathPrefix={orgId}
             initialUris={draft.photoUris}
-            onUploadingChange={setIsPhotoUploading}
+            onBlockingChange={setPhotosBlocked}
             onPhotosChange={setPhotoCount}
           />
         </View>
@@ -153,7 +157,7 @@ export default function ReportIncidentDetailsScreen() {
           label="Next: Review"
           variant="serious"
           onPress={handleNext}
-          disabled={isPhotoUploading}
+          disabled={photosBlocked}
           fullWidth
         />
       </ScrollView>

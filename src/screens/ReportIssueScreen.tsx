@@ -46,7 +46,7 @@ export default function ReportIssueScreen() {
   const { target, clearTarget } = useReportTarget();
   const { setDraft } = useIncidentDraft();
 
-  const [isPhotoUploading, setIsPhotoUploading] = useState(false);
+  const [photosBlocked, setPhotosBlocked] = useState(false);
   const [description, setDescription] = useState('');
   const [kind, setKind] = useState<SnagKind>('fixit');
   const [isHazard, setIsHazard] = useState(false);
@@ -150,6 +150,14 @@ export default function ReportIssueScreen() {
   }
 
   async function doSubmit(workGroupId: string | null) {
+    // Guards the work-group-picker modal's tile taps too, not just the main
+    // Submit button's disabled state — a failed/still-uploading photo must
+    // never be silently left out of what gets submitted.
+    if (photosBlocked) {
+      setShowGroupPicker(false);
+      Alert.alert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before submitting.');
+      return;
+    }
     setShowGroupPicker(false);
     setSubmitting(true);
     try {
@@ -306,7 +314,7 @@ export default function ReportIssueScreen() {
           </TouchableOpacity>
         )}
 
-        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} onUploadingChange={setIsPhotoUploading} />
+        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} onBlockingChange={setPhotosBlocked} />
 
         {/* Description — the only required field on the fast path */}
         <View style={styles.fieldGroup}>
@@ -374,7 +382,7 @@ export default function ReportIssueScreen() {
           label="Submit Report"
           onPress={handleSubmit}
           loading={submitting}
-          disabled={isPhotoUploading}
+          disabled={photosBlocked}
           fullWidth
         />
 

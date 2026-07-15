@@ -889,27 +889,35 @@ export async function getUserVote(snagId: string, userId: string): Promise<VoteV
 const SNAG_PHOTOS_BUCKET = 'snag-photos';
 const SNAG_EVIDENCE_BUCKET = 'snag-evidence';
 
+// Returns { path, error } rather than throwing or swallowing failures —
+// callers (PhotoPicker) need to distinguish "no photo" from "upload failed"
+// so a failure can be shown and retried instead of silently dropped.
 export async function uploadSnagPhoto(
   localUri: string,
   fileName: string,
   bucket: string = SNAG_PHOTOS_BUCKET,
-): Promise<string | null> {
-  const response = await fetch(localUri);
-  const blob = await response.blob();
+): Promise<{ path: string | null; error: any }> {
+  try {
+    const response = await fetch(localUri);
+    const blob = await response.blob();
 
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .upload(fileName, blob, {
-      contentType: 'image/jpeg',
-      upsert: false,
-    });
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .upload(fileName, blob, {
+        contentType: 'image/jpeg',
+        upsert: false,
+      });
 
-  if (error || !data) {
-    console.error('Photo upload error:', error);
-    return null;
+    if (error || !data) {
+      console.error('Photo upload error:', error);
+      return { path: null, error: error ?? new Error('Upload failed') };
+    }
+
+    return { path: data.path, error: null };
+  } catch (err) {
+    console.error('Photo upload error:', err);
+    return { path: null, error: err };
   }
-
-  return data.path;
 }
 
 export async function getSnagPhotoUrl(path: string): Promise<string | null> {

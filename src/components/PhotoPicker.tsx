@@ -10,15 +10,21 @@ import Icon from './Icon';
 const MAX_PHOTOS = 5;
 const THUMB_SIZE = 92;
 
+type PhotoStatus = 'uploading' | 'success' | 'failed';
+
 interface PhotoItem {
   id: string;
   uri: string;
-  uploadTask: Promise<string | null>;
-  isUploading: boolean;
+  fileName: string;
+  path: string | null;
+  status: PhotoStatus;
 }
 
 export interface PhotoPickerHandle {
-  /** Resolves the uploaded photo paths, awaiting any in-flight uploads. Skips any that failed to upload. */
+  /** The uploaded photo paths. Only ever called once nothing is uploading or
+   *  failed (the caller's Submit is disabled until then via
+   *  onBlockingChange), so every remaining photo here has already
+   *  succeeded. */
   getPhotoUrls: () => Promise<string[]>;
   /** Raw local URIs of the current picks, independent of upload state — used
    *  to carry photos over to another PhotoPicker instance (e.g. switching
@@ -38,11 +44,15 @@ interface Props {
   /** Local URIs to pre-load on mount (once pathPrefix is known), e.g. photos
    *  carried over from another report flow. Only seeded once. */
   initialUris?: string[];
-  onUploadingChange?: (uploading: boolean) => void;
+  /** True while any photo is uploading OR sits in a failed state needing the
+   *  user's attention (retry or remove) — callers should disable Submit
+   *  while this is true, so a failed upload can never be silently excluded
+   *  from what gets submitted. */
+  onBlockingChange?: (blocking: boolean) => void;
   onPhotosChange?: (count: number) => void;
 }
 
-const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, initialUris, onUploadingChange, onPhotosChange }, ref) => {
+const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, initialUris, onBlockingChange, onPhotosChange }, ref) => {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const seededRef = useRef(false);
 
@@ -50,33 +60,34 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     onPhotosChange?.(photos.length);
   }, [photos.length, onPhotosChange]);
 
-  function setUploading(id: string, isUploading: boolean) {
-    setPhotos((prev) => {
-      const next = prev.map((p) => (p.id === id ? { ...p, isUploading } : p));
-      onUploadingChange?.(next.some((p) => p.isUploading));
-      return next;
-    });
+  useEffect(() => {
+    onBlockingChange?.(photos.some((p) => p.status === 'uploading' || p.status === 'failed'));
+  }, [photos, onBlockingChange]);
+
+  async function runUpload(id: string, uri: string, fileName: string) {
+    setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'uploading', path: null } : p)));
+    const compressed = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 1200 } }],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    const { path, error } = await uploadSnagPhoto(compressed.uri, fileName, bucket);
+    setPhotos((prev) => prev.map((p) => (
+      p.id === id ? { ...p, status: error || !path ? 'failed' : 'success', path } : p
+    )));
   }
 
-  async function addPhoto(uri: string) {
+  function addPhoto(uri: string) {
     if (!pathPrefix) return;
     const id = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
     const fileName = `${pathPrefix}/${id}.jpg`;
+    setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'uploading' }]);
+    runUpload(id, uri, fileName);
+  }
 
-    const task = (async () => {
-      const compressed = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 1200 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-      );
-      return uploadSnagPhoto(compressed.uri, fileName, bucket);
-    })().finally(() => setUploading(id, false));
-
-    setPhotos((prev) => {
-      const next = [...prev, { id, uri, uploadTask: task, isUploading: true }];
-      onUploadingChange?.(true);
-      return next;
-    });
+  function retryPhoto(id: string) {
+    const photo = photos.find((p) => p.id === id);
+    if (photo) runUpload(photo.id, photo.uri, photo.fileName);
   }
 
   // Seed with photos carried over from another PhotoPicker instance, once
@@ -129,18 +140,14 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   }
 
   function removePhoto(id: string) {
-    setPhotos((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      onUploadingChange?.(next.some((p) => p.isUploading));
-      return next;
-    });
+    setPhotos((prev) => prev.filter((p) => p.id !== id));
   }
 
+  const hasFailed = photos.some((p) => p.status === 'failed');
+
   useImperativeHandle(ref, () => ({
-    getPhotoUrls: async () => {
-      const paths = await Promise.all(photos.map((p) => p.uploadTask));
-      return paths.filter((p): p is string => Boolean(p));
-    },
+    getPhotoUrls: async () =>
+      photos.filter((p): p is PhotoItem & { path: string } => p.status === 'success' && Boolean(p.path)).map((p) => p.path),
     getLocalUris: () => photos.map((p) => p.uri),
     reset: () => setPhotos([]),
   }));
@@ -163,26 +170,37 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   }
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
-      {photos.map((photo) => (
-        <View key={photo.id} style={styles.thumbWrap}>
-          <Image source={{ uri: photo.uri }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" />
-          {photo.isUploading && (
-            <View style={styles.uploadingOverlay}>
-              <ActivityIndicator color={Colors.white} size="small" />
-            </View>
-          )}
-          <TouchableOpacity style={styles.removeButton} onPress={() => removePhoto(photo.id)} hitSlop={8}>
-            <Icon name="close" size="sm" color={Colors.white} />
+    <View style={styles.wrap}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
+        {photos.map((photo) => (
+          <View key={photo.id} style={[styles.thumbWrap, photo.status === 'failed' && styles.thumbWrapFailed]}>
+            <Image source={{ uri: photo.uri }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" />
+            {photo.status === 'uploading' && (
+              <View style={styles.uploadingOverlay}>
+                <ActivityIndicator color={Colors.white} size="small" />
+              </View>
+            )}
+            {photo.status === 'failed' && (
+              <TouchableOpacity style={styles.failedOverlay} onPress={() => retryPhoto(photo.id)} activeOpacity={0.8}>
+                <Icon name="refresh" size="md" color={Colors.white} />
+                <Text style={styles.failedText}>Retry</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.removeButton} onPress={() => removePhoto(photo.id)} hitSlop={8}>
+              <Icon name="close" size="sm" color={Colors.white} />
+            </TouchableOpacity>
+          </View>
+        ))}
+        {photos.length < MAX_PHOTOS && (
+          <TouchableOpacity style={styles.addTile} onPress={offerSource} activeOpacity={0.7}>
+            <Icon name="add" size="lg" color={Colors.textSecondary} />
           </TouchableOpacity>
-        </View>
-      ))}
-      {photos.length < MAX_PHOTOS && (
-        <TouchableOpacity style={styles.addTile} onPress={offerSource} activeOpacity={0.7}>
-          <Icon name="add" size="lg" color={Colors.textSecondary} />
-        </TouchableOpacity>
+        )}
+      </ScrollView>
+      {hasFailed && (
+        <Text style={styles.failedHint}>Couldn't upload a photo — tap it to retry, or remove it.</Text>
       )}
-    </ScrollView>
+    </View>
   );
 });
 
@@ -226,6 +244,9 @@ const styles = StyleSheet.create({
     fontWeight: Typography.medium,
     color: Colors.textPrimary,
   },
+  wrap: {
+    gap: Spacing.xs,
+  },
   thumbRow: {
     gap: Spacing.sm,
   },
@@ -237,6 +258,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  thumbWrapFailed: {
+    borderWidth: 2,
+    borderColor: Colors.danger,
   },
   thumb: {
     width: '100%',
@@ -251,6 +276,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  failedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(220, 38, 38, 0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  failedText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
+  },
+  failedHint: {
+    fontSize: Typography.xs,
+    color: Colors.danger,
   },
   removeButton: {
     position: 'absolute',

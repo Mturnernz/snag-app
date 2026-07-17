@@ -11,6 +11,7 @@ import { Colors, Radius, Spacing, Typography, Shadow, IconSize, CardAlertBorder 
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
+import RelevanceBadge from './RelevanceBadge';
 import Icon from './Icon';
 
 interface Props {
@@ -150,11 +151,17 @@ function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable,
           </View>
         )}
 
-        {/* Merge-parent indicator — hidden in select mode, which claims this
-            same corner for its checkmark overlay. */}
-        {!selectable && Boolean(issue.child_count) && (
-          <View style={styles.mergeOverlay}>
-            <Icon name="albums-outline" size="sm" color={Colors.white} />
+        {/* Top-left stack: merge-parent indicator + relevance tag — both
+            hidden in select mode, which claims this corner for its
+            checkmark overlay instead. */}
+        {!selectable && (Boolean(issue.child_count) || issue.relevance_reason) && (
+          <View style={styles.topLeftStack} pointerEvents="none">
+            {Boolean(issue.child_count) && (
+              <View style={styles.mergeOverlay}>
+                <Icon name="albums-outline" size="sm" color={Colors.white} />
+              </View>
+            )}
+            {issue.relevance_reason && <RelevanceBadge reason={issue.relevance_reason} />}
           </View>
         )}
 
@@ -254,10 +261,14 @@ const styles = StyleSheet.create({
     top: Spacing.md,
     right: Spacing.md,
   },
-  mergeOverlay: {
+  topLeftStack: {
     position: 'absolute',
     top: Spacing.md,
     left: Spacing.md,
+    alignItems: 'flex-start',
+    gap: Spacing.xs,
+  },
+  mergeOverlay: {
     backgroundColor: 'rgba(17, 24, 39, 0.75)',
     borderRadius: Radius.chip,
     padding: Spacing.xs,

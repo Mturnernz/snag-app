@@ -706,6 +706,21 @@ export async function getSnagRca(snagId: string): Promise<SnagRca | null> {
   };
 }
 
+// Snags with an active RCA assignment for the current user — powers the
+// Snags list's "Relevant to me" default scope and its "RCA Pending" reason
+// tag. "Active" means still on the assignee's plate (assigned or
+// in_progress); submitted/accepted/rejected rounds no longer need them here.
+export async function getMyActiveRcaSnagIds(): Promise<string[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data } = await supabase
+    .from('snag_rca')
+    .select('snag_id')
+    .eq('assigned_to', user.id)
+    .in('status', ['assigned', 'in_progress']);
+  return (data ?? []).map((r: any) => r.snag_id as string);
+}
+
 export async function assignRca(snagId: string, assigneeId: string) {
   return supabase.rpc('assign_rca', { p_snag_id: snagId, p_assignee_id: assigneeId });
 }

@@ -11,6 +11,11 @@ export type ChecklistStep =
   | 'identify_witnesses'
   | 'find_root_cause';
 export type UserRole = 'worker' | 'supervisor' | 'officer_admin';
+// Why a snag surfaced in the signed-in member's default "Relevant to me"
+// feed — computed client-side (IssueListScreen), not a real DB column.
+// Ordered most to least actionable; a snag matching more than one reason
+// shows only the first that applies.
+export type SnagRelevanceReason = 'rca_pending' | 'assigned' | 'tagged' | 'reported';
 export type InviteStatus = 'pending' | 'accepted' | 'revoked';
 export type VoteValue = 1 | -1;
 
@@ -98,6 +103,9 @@ export interface Snag {
   merged_by?: string | null;
   merged_at?: string | null;
   child_count?: number;
+  // Computed client-side (IssueListScreen) — why this snag appears in the
+  // "Relevant to me" feed. See SnagRelevanceReason.
+  relevance_reason?: SnagRelevanceReason | null;
   // Joined relations (populated when read via the frontend's own queries)
   reporter?: Pick<Profile, 'id' | 'name'>;
   owner?: Pick<Profile, 'id' | 'name'> | null;
@@ -213,6 +221,13 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   worker: 'Worker',
   supervisor: 'Supervisor',
   officer_admin: 'Officer Admin',
+};
+
+export const RELEVANCE_REASON_LABELS: Record<SnagRelevanceReason, string> = {
+  rca_pending: 'RCA Pending',
+  assigned: 'Assigned',
+  tagged: 'Tagged',
+  reported: 'Reported',
 };
 
 // Ordered to match the server's checklist_step enum — the first-response steps

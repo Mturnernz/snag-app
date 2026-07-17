@@ -50,6 +50,20 @@ export const Colors = {
     otherBg: '#EDE9FE',
   },
 
+  // Relevance reasons — why a snag surfaced in a member's default "Relevant
+  // to me" feed (IssueListScreen). Distinct from status/category colours
+  // since they answer "why is this here" rather than describing the snag.
+  relevance: {
+    rcaPending: '#DC2626',
+    rcaPendingBg: '#FEE2E2',
+    assigned: '#2563EB',
+    assignedBg: '#DBEAFE',
+    tagged: '#7C3AED',
+    taggedBg: '#EDE9FE',
+    reported: '#6B7280',
+    reportedBg: '#F3F4F6',
+  },
+
   // Success — save confirmations, positive vote state, "copied" feedback
   success: '#16A34A',
   successBg: '#F0FDF4',

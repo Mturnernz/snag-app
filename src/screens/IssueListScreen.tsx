@@ -19,14 +19,14 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  Snag, SnagStatus, SnagKind, SnagSeverity, STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, UserRole, RootStackParamList,
-  Profile,
+  Snag, SnagStatus, SnagKind, SnagSeverity, SnagRelevanceReason, STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
+  UserRole, RootStackParamList, Profile,
 } from '../types';
 import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme';
 import {
   supabase, getSnagPhotoUrls, getProfile, mergeSnags, getOrgMembers, getWorkGroupsWithDetail, WorkGroupDetail,
   updateSnagStatus, resolveSnag, assignSnagOwner, assignSnagWorkGroup, getOrgSites, getMySiteIds,
-  getMySupervisedWorkGroupIds, getMyMentionedSnagIds,
+  getMySupervisedWorkGroupIds, getMyMentionedSnagIds, getMyActiveRcaSnagIds,
 } from '../lib/supabase';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
@@ -43,6 +43,7 @@ type SortMode = 'newest' | 'oldest' | 'trending';
 type DropdownKey = 'status' | 'date' | 'site' | 'scope' | null;
 
 type ScopeFilter =
+  | 'relevant'
   | 'assigned_to_me'
   | 'all_in_my_sites'
   | 'raised_by_me'
@@ -50,7 +51,12 @@ type ScopeFilter =
   | 'unassigned_in_my_sites'
   | 'unassigned_in_my_work_groups';
 
-const DEFAULT_SCOPE_FILTER: ScopeFilter = 'assigned_to_me';
+// "Relevant to me" — the union of every reason a snag might need this
+// member's attention (assigned to them, raised by them, they're @mentioned
+// on it, or they have an active RCA assignment on it). Replaces the old
+// "Assigned to me" default, which missed snags you reported or were tagged
+// on. See buildSnagQuery's 'relevant' branch and IssueCard's relevance tag.
+const DEFAULT_SCOPE_FILTER: ScopeFilter = 'relevant';
 
 // Available to every role — being @mentioned isn't role-specific. RLS grants
 // visibility into any snag/comment thread you're mentioned on regardless of
@@ -58,6 +64,7 @@ const DEFAULT_SCOPE_FILTER: ScopeFilter = 'assigned_to_me';
 // snags/comments SELECT policies), so this can surface snags you otherwise
 // couldn't see at all.
 const SCOPE_FILTER_OPTIONS_BASE: { key: ScopeFilter; label: string; shortLabel: string }[] = [
+  { key: 'relevant', label: 'Relevant to me', shortLabel: 'Relevant' },
   { key: 'assigned_to_me', label: 'Assigned to me', shortLabel: 'Mine' },
   { key: 'all_in_my_sites', label: 'All in my sites', shortLabel: 'My Sites' },
   { key: 'raised_by_me', label: 'Raised by me', shortLabel: 'Raised by Me' },
@@ -141,12 +148,14 @@ export default function IssueListScreen() {
     currentUserId: string | null;
     myWorkGroupIds: string[];
     myMentionedSnagIds: string[];
+    myRcaSnagIds: string[];
   }>({
     memberOfOrg: false,
     activeOrgId: null,
     currentUserId: null,
     myWorkGroupIds: [],
     myMentionedSnagIds: [],
+    myRcaSnagIds: [],
   });
 
   // Select mode — long-press a card to enter it. selectedIds is ordered:
@@ -184,7 +193,7 @@ export default function IssueListScreen() {
   // One page of the list query, identical for the first load and loadMore.
   const buildSnagQuery = useCallback((
     memberOfOrg: boolean, activeOrgId: string | null, currentUserId: string | null,
-    myWorkGroupIds: string[], myMentionedSnagIds: string[],
+    myWorkGroupIds: string[], myMentionedSnagIds: string[], myRcaSnagIds: string[],
     from: number, to: number
   ) => {
     let query = supabase
@@ -219,7 +228,17 @@ export default function IssueListScreen() {
     // every role to the sites it can see (can_view_site), so the unfiltered
     // query already is "everything in my sites."
     if (memberOfOrg) {
-      if (scopeFilter === 'assigned_to_me' && currentUserId) {
+      if (scopeFilter === 'relevant' && currentUserId) {
+        // Union of every reason a snag needs this member's attention:
+        // they own it, they raised it, they're @mentioned on it, or they
+        // have an active RCA assignment on it. The two id-based reasons
+        // share a single id.in.(...) clause since .or() only ANDs distinct
+        // clauses together, not merges same-column ones.
+        const relevantIds = [...new Set([...myMentionedSnagIds, ...myRcaSnagIds])];
+        const orParts = [`owner_id.eq.${currentUserId}`, `reporter_id.eq.${currentUserId}`];
+        if (relevantIds.length > 0) orParts.push(`id.in.(${relevantIds.join(',')})`);
+        query = query.or(orParts.join(','));
+      } else if (scopeFilter === 'assigned_to_me' && currentUserId) {
         query = query.eq('owner_id', currentUserId);
       } else if (scopeFilter === 'raised_by_me' && currentUserId) {
         query = query.eq('reporter_id', currentUserId);
@@ -248,12 +267,30 @@ export default function IssueListScreen() {
     return query.order('created_at', { ascending: sortMode === 'oldest' });
   }, [statusFilters, siteFilters, sortMode, publicOnly, scopeFilter]);
 
-  const mapRows = (rows: any[]): Snag[] =>
-    rows.map((row: any) => ({
+  // Most to least actionable — a snag matching several reasons only shows
+  // the first that applies (see IssueCard's relevance tag).
+  function relevanceReason(
+    row: any, currentUserId: string | null, mentionedIds: Set<string>, rcaIds: Set<string>
+  ): SnagRelevanceReason | null {
+    if (rcaIds.has(row.id)) return 'rca_pending';
+    if (currentUserId && row.owner_id === currentUserId) return 'assigned';
+    if (mentionedIds.has(row.id)) return 'tagged';
+    if (currentUserId && row.reporter_id === currentUserId) return 'reported';
+    return null;
+  }
+
+  const mapRows = (
+    rows: any[], currentUserId: string | null, myMentionedSnagIds: string[], myRcaSnagIds: string[]
+  ): Snag[] => {
+    const mentionedIds = new Set(myMentionedSnagIds);
+    const rcaIds = new Set(myRcaSnagIds);
+    return rows.map((row: any) => ({
       ...row,
       reporter: row.reporter_id ? { id: row.reporter_id, name: row.reporter_name } : undefined,
       owner: row.owner_id ? { id: row.owner_id, name: row.owner_name } : null,
+      relevance_reason: relevanceReason(row, currentUserId, mentionedIds, rcaIds),
     }));
+  };
 
   // Injury snags float to the top regardless of the active sort, unless
   // already resolved. Trending re-ranks everything else by combined
@@ -295,7 +332,7 @@ export default function IssueListScreen() {
     // "mentioned" snag ids are all independent of each other and of the page
     // query itself — run them concurrently, then run the page query once
     // everything it might need is known.
-    const [siteList, publicFlag, myWorkGroupIds, myMentionedSnagIds] = await Promise.all([
+    const [siteList, publicFlag, myWorkGroupIds, myMentionedSnagIds, myRcaSnagIds] = await Promise.all([
       (async () => {
         // Sites available to filter by: every org site for admin/supervisor,
         // only the worker's own assigned sites otherwise.
@@ -334,19 +371,28 @@ export default function IssueListScreen() {
         if (!memberOfOrg || !activeOrgId) return [] as string[];
         return getMyMentionedSnagIds(activeOrgId);
       })(),
+      (async () => {
+        // "RCA Pending" relevance reason / part of the "Relevant to me"
+        // union — available to every role (RCA can be delegated to any
+        // site assignee, not just supervisors/admins).
+        if (!memberOfOrg || !activeOrgId) return [] as string[];
+        return getMyActiveRcaSnagIds();
+      })(),
     ]);
 
-    queryCtxRef.current = { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds };
+    queryCtxRef.current = {
+      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds, myRcaSnagIds,
+    };
 
     const { data, error } = await buildSnagQuery(
-      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds, 0, PAGE_SIZE - 1
+      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds, myRcaSnagIds, 0, PAGE_SIZE - 1
     );
 
     setSites(siteList);
     setHasPublicSnags(publicFlag);
 
     if (!error && data) {
-      setIssues(sortSnags(mapRows(data)));
+      setIssues(sortSnags(mapRows(data, currentUserId, myMentionedSnagIds, myRcaSnagIds)));
       setHasMore(data.length === PAGE_SIZE);
       const paths = data.map((row: any) => row.photo_path).filter(Boolean);
       getSnagPhotoUrls(paths).then(setPhotoUrls);
@@ -364,13 +410,13 @@ export default function IssueListScreen() {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || loading || refreshing) return;
     setLoadingMore(true);
-    const { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds } = queryCtxRef.current;
+    const { memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds, myRcaSnagIds } = queryCtxRef.current;
     const { data, error } = await buildSnagQuery(
-      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds,
+      memberOfOrg, activeOrgId, currentUserId, myWorkGroupIds, myMentionedSnagIds, myRcaSnagIds,
       issues.length, issues.length + PAGE_SIZE - 1
     );
     if (!error && data) {
-      const fresh = mapRows(data);
+      const fresh = mapRows(data, currentUserId, myMentionedSnagIds, myRcaSnagIds);
       setIssues((prev) => {
         const seen = new Set(prev.map((s) => s.id));
         return sortSnags([...prev, ...fresh.filter((s) => !seen.has(s.id))]);

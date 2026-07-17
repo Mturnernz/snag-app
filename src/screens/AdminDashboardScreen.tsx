@@ -17,39 +17,42 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Organisation, Profile, SnagStatus, STATUS_LABELS, UserRole, RootStackParamList } from '../types';
+import { Organisation, Profile, UserRole, RootStackParamList } from '../types';
 import {
-  supabase, getOrgStats, OrgStats, getMemberships, setOrganisationActive, Membership,
+  supabase, getSiteBreakdown, SiteBreakdown, getMemberships, setOrganisationActive, Membership,
   getOrgMembers, getOrgSites, createSite, getWorkGroupsWithDetail, createWorkGroup, updateWorkGroup,
   assignWorkGroupSupervisor, removeWorkGroupSupervisor, deleteWorkGroup, WorkGroupDetail,
+  getUnassignedSnags, UnassignedSnag, getSiteAssignees, SiteAssignee, assignSnagOwner,
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../constants/theme';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Chip from '../components/Chip';
 import Icon from '../components/Icon';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
+import OwnerPicker from '../components/OwnerPicker';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-// The three snag states worth surfacing at a glance on the dashboard.
-const HEADLINE_STATUSES: SnagStatus[] = ['flagged', 'in_progress', 'resolved'];
-const STATUS_COLOR: Record<SnagStatus, string> = {
-  flagged: Colors.status.flagged,
-  in_progress: Colors.status.inProgress,
-  resolved: Colors.status.resolved,
-  rca_pending: Colors.status.rcaPending,
-};
 
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
+  const { isWide } = useBreakpoint();
 
   const [org, setOrg] = useState<Organisation | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [stats, setStats] = useState<OrgStats | null>(null);
+  const [siteBreakdown, setSiteBreakdown] = useState<SiteBreakdown[]>([]);
+  // One-click assign — tapping a site's "Unassigned" count expands its
+  // unassigned snags right there, each with an OwnerPicker that assigns
+  // immediately (no staged-edit step, unlike ManageIssuePanel's own use of
+  // the same picker).
+  const [expandedSiteId, setExpandedSiteId] = useState<string | null>(null);
+  const [unassignedBySite, setUnassignedBySite] = useState<Record<string, UnassignedSnag[]>>({});
+  const [siteAssigneesCache, setSiteAssigneesCache] = useState<Record<string, SiteAssignee[]>>({});
+  const [assigningSnagId, setAssigningSnagId] = useState<string | null>(null);
   const [ownedOrgs, setOwnedOrgs] = useState<Membership[]>([]);
   const [togglingOrgId, setTogglingOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +93,9 @@ export default function AdminDashboardScreen() {
       setRole(profile.role);
       profileRole = profile.role;
       setIsAdmin(profile.role === 'officer_admin');
-      if (profile.org_id) setStats(await getOrgStats(profile.org_id));
+      // This screen is only reachable via the Admin tab, already gated to
+      // supervisor/officer_admin — no extra role check needed here.
+      if (profile.org_id) setSiteBreakdown(await getSiteBreakdown(profile.org_id));
     }
 
     // Every org this user administers, active or not — the only place
@@ -107,6 +112,35 @@ export default function AdminDashboardScreen() {
 
     setLoading(false);
   }, []);
+
+  async function toggleUnassignedExpand(siteId: string) {
+    if (expandedSiteId === siteId) { setExpandedSiteId(null); return; }
+    setExpandedSiteId(siteId);
+    if (!unassignedBySite[siteId]) {
+      const snags = await getUnassignedSnags(siteId);
+      setUnassignedBySite((prev) => ({ ...prev, [siteId]: snags }));
+    }
+    if (!siteAssigneesCache[siteId]) {
+      const { data } = await getSiteAssignees(siteId);
+      setSiteAssigneesCache((prev) => ({ ...prev, [siteId]: data }));
+    }
+  }
+
+  async function handleQuickAssign(siteId: string, snagId: string, ownerId: string) {
+    setAssigningSnagId(snagId);
+    const { error } = await assignSnagOwner(snagId, ownerId);
+    setAssigningSnagId(null);
+    if (error) {
+      Alert.alert('Error', error.message ?? 'Could not assign this snag');
+      return;
+    }
+    setUnassignedBySite((prev) => ({ ...prev, [siteId]: prev[siteId].filter((s) => s.id !== snagId) }));
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase.from('profiles').select('org_id').eq('id', user.id).single();
+      if (profile?.org_id) setSiteBreakdown(await getSiteBreakdown(profile.org_id));
+    }
+  }
 
   function handleToggleActive(m: Membership) {
     const deactivating = m.org_active;
@@ -205,29 +239,75 @@ export default function AdminDashboardScreen() {
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
-        {/* Snapshot */}
-        <View style={styles.statRow}>
-          <Card variant="elevated" style={styles.statTile}>
-            <Text style={styles.statValue}>{stats?.totalSnags ?? 0}</Text>
-            <Text style={styles.statLabel}>Total snags</Text>
-          </Card>
-          <Card variant="elevated" style={styles.statTile}>
-            <Text style={styles.statValue}>{stats?.totalMembers ?? 0}</Text>
-            <Text style={styles.statLabel}>Members</Text>
-          </Card>
-        </View>
-
+        {/* Outstanding work — open investigations, unassigned reports, and
+            overdue corrective actions, by site. The full org-wide status/
+            type/severity breakdown still lives on Reports; this is the
+            site-scoped complement, not a replacement. */}
         <Card variant="elevated" style={styles.breakdownCard}>
-          <Text style={styles.sectionLabel}>BY STATUS</Text>
-          {HEADLINE_STATUSES.map((s) => (
-            <View key={s} style={styles.breakdownRow}>
-              <View style={styles.breakdownLeft}>
-                <View style={[styles.statusDot, { backgroundColor: STATUS_COLOR[s] }]} />
-                <Text style={styles.breakdownLabel}>{STATUS_LABELS[s]}</Text>
+          <Text style={styles.sectionLabel}>OUTSTANDING WORK</Text>
+          {siteBreakdown.length === 0 && (
+            <Text style={styles.hintMuted}>No sites yet.</Text>
+          )}
+          {isWide ? (
+            <View style={styles.siteTable}>
+              <View style={styles.siteTableHeaderRow}>
+                <Text style={[styles.siteTableHeaderCell, styles.siteNameCol]}>Site</Text>
+                <Text style={styles.siteTableHeaderCell}>Open investigations</Text>
+                <Text style={styles.siteTableHeaderCell}>Unassigned</Text>
+                <Text style={styles.siteTableHeaderCell}>Overdue actions</Text>
               </View>
-              <Text style={styles.breakdownValue}>{stats?.byStatus[s] ?? 0}</Text>
+              {siteBreakdown.map((s) => (
+                <React.Fragment key={s.siteId}>
+                  <View style={styles.siteTableRow}>
+                    <Text style={[styles.siteTableCell, styles.siteNameCol, styles.siteNameCellText]} numberOfLines={1}>
+                      {s.siteName}
+                    </Text>
+                    <SiteCountCell value={s.openInvestigations} />
+                    <SiteCountCell
+                      value={s.unassigned}
+                      onPress={s.unassigned > 0 ? () => toggleUnassignedExpand(s.siteId) : undefined}
+                    />
+                    <SiteCountCell value={s.overdueActions} alert />
+                  </View>
+                  {expandedSiteId === s.siteId && (
+                    <UnassignedQuickAssign
+                      siteId={s.siteId}
+                      snags={unassignedBySite[s.siteId] ?? []}
+                      assignees={siteAssigneesCache[s.siteId] ?? []}
+                      assigningSnagId={assigningSnagId}
+                      onAssign={handleQuickAssign}
+                    />
+                  )}
+                </React.Fragment>
+              ))}
             </View>
-          ))}
+          ) : (
+            siteBreakdown.map((s) => (
+              <React.Fragment key={s.siteId}>
+                <View style={styles.siteCardMobile}>
+                  <Text style={styles.siteNameCellText}>{s.siteName}</Text>
+                  <View style={styles.siteStatRow}>
+                    <SiteStat label="Open investigations" value={s.openInvestigations} />
+                    <SiteStat
+                      label="Unassigned"
+                      value={s.unassigned}
+                      onPress={s.unassigned > 0 ? () => toggleUnassignedExpand(s.siteId) : undefined}
+                    />
+                    <SiteStat label="Overdue actions" value={s.overdueActions} alert />
+                  </View>
+                  {expandedSiteId === s.siteId && (
+                    <UnassignedQuickAssign
+                      siteId={s.siteId}
+                      snags={unassignedBySite[s.siteId] ?? []}
+                      assignees={siteAssigneesCache[s.siteId] ?? []}
+                      assigningSnagId={assigningSnagId}
+                      onAssign={handleQuickAssign}
+                    />
+                  )}
+                </View>
+              </React.Fragment>
+            ))
+          )}
         </Card>
 
         {/* Actions */}
@@ -631,24 +711,103 @@ function WorkGroupSupervisorModal({
   );
 }
 
+function SiteCountCell({ value, alert, onPress }: { value: number; alert?: boolean; onPress?: () => void }) {
+  const Wrapper = onPress ? TouchableOpacity : View;
+  return (
+    <Wrapper style={styles.siteTableCell} onPress={onPress} activeOpacity={0.7}>
+      <Text style={[styles.siteCountText, alert && value > 0 && styles.siteCountTextAlert, onPress && styles.siteCountTextTappable]}>
+        {value}
+      </Text>
+    </Wrapper>
+  );
+}
+
+function SiteStat({ label, value, alert, onPress }: { label: string; value: number; alert?: boolean; onPress?: () => void }) {
+  const Wrapper = onPress ? TouchableOpacity : View;
+  return (
+    <Wrapper style={styles.siteStat} onPress={onPress} activeOpacity={0.7}>
+      <Text style={[styles.siteCountText, alert && value > 0 && styles.siteCountTextAlert, onPress && styles.siteCountTextTappable]}>
+        {value}
+      </Text>
+      <Text style={styles.siteStatLabel}>{label}</Text>
+    </Wrapper>
+  );
+}
+
+// One-click assign — the list of a site's unassigned snags, each with an
+// inline OwnerPicker that assigns immediately on tap (no staged-edit step).
+function UnassignedQuickAssign({
+  siteId, snags, assignees, assigningSnagId, onAssign,
+}: {
+  siteId: string;
+  snags: UnassignedSnag[];
+  assignees: SiteAssignee[];
+  assigningSnagId: string | null;
+  onAssign: (siteId: string, snagId: string, ownerId: string) => void;
+}) {
+  if (snags.length === 0) {
+    return <Text style={styles.hintMuted}>Nothing unassigned here right now.</Text>;
+  }
+  return (
+    <View style={styles.quickAssignBlock}>
+      {snags.map((snag) => (
+        <View key={snag.id} style={styles.quickAssignRow}>
+          <Text style={styles.quickAssignDescription} numberOfLines={1}>
+            {snag.reference} · {snag.description || 'No description'}
+          </Text>
+          {assigningSnagId === snag.id ? (
+            <ActivityIndicator size="small" color={Colors.primary} />
+          ) : (
+            <OwnerPicker
+              assignees={assignees}
+              currentOwnerId={null}
+              allowUnassign={false}
+              onSelect={(ownerId) => { if (ownerId) onAssign(siteId, snag.id, ownerId); }}
+            />
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
 
   scroll: { padding: Spacing.lg, gap: Spacing.lg },
 
-  statRow: { flexDirection: 'row', gap: Spacing.md },
-  statTile: { flex: 1, alignItems: 'center', gap: Spacing.xs, paddingVertical: Spacing.lg },
-  statValue: { fontSize: Typography.xxxl, fontWeight: Typography.bold, color: Colors.textPrimary },
-  statLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
-
   breakdownCard: { gap: Spacing.sm },
   sectionLabel: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.textMuted, letterSpacing: 0.8 },
-  breakdownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Spacing.xs },
-  breakdownLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  statusDot: { width: 10, height: 10, borderRadius: 5 },
-  breakdownLabel: { fontSize: Typography.base, color: Colors.textPrimary },
-  breakdownValue: { fontSize: Typography.base, fontWeight: Typography.bold, color: Colors.textPrimary },
+
+  // Outstanding-work site breakdown — table layout on wide (web/tablet)
+  // viewports, stacked cards on phone width. First responsive layout in
+  // the app; see useBreakpoint.
+  siteTable: { gap: 2 },
+  siteTableHeaderRow: { flexDirection: 'row', paddingBottom: Spacing.xs, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  siteTableHeaderCell: { flex: 1, fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.textMuted, textAlign: 'center' },
+  siteTableRow: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  siteTableCell: { flex: 1, alignItems: 'center' },
+  siteNameCol: { flex: 1.4, textAlign: 'left' },
+  siteNameCellText: { fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textPrimary },
+
+  siteCardMobile: {
+    gap: Spacing.sm, paddingVertical: Spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  siteStatRow: { flexDirection: 'row', gap: Spacing.lg },
+  siteStat: { alignItems: 'flex-start', gap: 2 },
+  siteStatLabel: { fontSize: Typography.xs, color: Colors.textMuted },
+  siteCountText: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
+  siteCountTextAlert: { color: Colors.danger },
+  siteCountTextTappable: { color: Colors.primary, textDecorationLine: 'underline' },
+
+  quickAssignBlock: { gap: Spacing.sm, paddingVertical: Spacing.sm, paddingLeft: Spacing.sm },
+  quickAssignRow: { gap: Spacing.xs },
+  quickAssignDescription: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textPrimary },
 
   noteRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start', paddingHorizontal: Spacing.xs },
   noteText: { flex: 1, fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 18 },

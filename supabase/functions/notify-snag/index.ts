@@ -20,7 +20,8 @@ type Event =
   | "niggle_escalated"
   | "rca_assigned"
   | "rca_submitted"
-  | "rca_rejected";
+  | "rca_rejected"
+  | "overdue_actions_digest";
 
 async function sendEmail(to: string[], subject: string, text: string) {
   if (!RESEND_API_KEY || to.length === 0) {
@@ -53,17 +54,69 @@ async function emailOf(profileId: string | null): Promise<string | null> {
   return data?.email ?? null;
 }
 
+// One digest email per org, to every supervisor/officer_admin there, listing
+// every corrective action that's overdue and not yet done-and-verified —
+// same definition as the resolve gate and the dashboard's "Overdue actions"
+// count, so the digest never disagrees with what the app itself shows.
+async function sendOverdueActionsDigest(orgId: string) {
+  const { data: actions } = await supabase
+    .from("corrective_actions")
+    .select("description, due_date, status, verified_by, snags!inner(reference, org_id)")
+    .eq("snags.org_id", orgId)
+    .lt("due_date", new Date().toISOString().slice(0, 10));
+
+  const overdue = (actions ?? []).filter(
+    (a: { status: string; verified_by: string | null }) => !(a.status === "done" && a.verified_by)
+  );
+  if (overdue.length === 0) return;
+
+  const { data: recipients } = await supabase
+    .from("profiles")
+    .select("email")
+    .eq("org_id", orgId)
+    .in("role", ["supervisor", "officer_admin"]);
+  const emails = (recipients ?? [])
+    .map((p: { email: string | null }) => p.email)
+    .filter((e): e is string => Boolean(e));
+  if (emails.length === 0) return;
+
+  const lines = overdue
+    .map(
+      (a: { description: string; due_date: string; snags: { reference: string } }) =>
+        `- ${a.snags.reference}: ${a.description} (was due ${a.due_date})`
+    )
+    .join("\n");
+
+  await sendEmail(
+    emails,
+    `${overdue.length} overdue corrective action${overdue.length === 1 ? "" : "s"}`,
+    `The following corrective action${
+      overdue.length === 1 ? " is" : "s are"
+    } overdue:\n\n${lines}\n\nReview them here: ${APP_URL}`
+  );
+}
+
 Deno.serve(async (req: Request) => {
   if (!INTERNAL_SECRET || req.headers.get("x-snag-internal-secret") !== INTERNAL_SECRET) {
     return new Response("Forbidden", { status: 403 });
   }
 
-  const { event, snag_id, rca_id } = (await req.json()) as {
+  const { event, snag_id, rca_id, org_id } = (await req.json()) as {
     event: Event;
-    snag_id: string;
+    snag_id?: string;
     rca_id?: string;
+    org_id?: string;
   };
 
+  // Org-scoped digest — no single snag_id, so this branches before the
+  // generic per-snag lookup every other event relies on.
+  if (event === "overdue_actions_digest") {
+    if (!org_id) return new Response("ok");
+    await sendOverdueActionsDigest(org_id);
+    return new Response("ok");
+  }
+
+  if (!snag_id) return new Response("ok");
   const { data: snag } = await supabase.from("snags").select("*").eq("id", snag_id).maybeSingle();
   if (!snag) return new Response("ok");
 

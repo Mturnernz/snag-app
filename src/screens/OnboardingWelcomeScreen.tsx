@@ -22,7 +22,10 @@ export default function OnboardingWelcomeScreen({ onReport, onShowMe }: Props) {
     <View style={[styles.container, { paddingTop: insets.top + Spacing.xxxl, paddingBottom: insets.bottom + Spacing.xl }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Welcome to Snag</Text>
-        <Text style={styles.subtitle}>Report issues, hazards, and incidents at your site in seconds.</Text>
+        <Text style={styles.subtitle}>
+          Report issues, hazards, and incidents at your site in seconds — less time on paperwork, more time on
+          the job.
+        </Text>
       </View>
 
       <View style={styles.cards}>

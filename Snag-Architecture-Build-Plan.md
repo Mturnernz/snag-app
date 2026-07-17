@@ -1,50 +1,70 @@
 # Snag — Architecture & Build Plan (Snagv1)
 
 Read `MVP-SPEC.md` first for product intent and the golden rules. This
-document covers how the Snagv1 system is put together and the milestone
-order for the current phase (rebuild the web app in-repo, then P2).
+document covers how the Snagv1 system is put together and current
+development priorities.
+
+## Architecture decision (2026-07): the mobile app is the live product
+
+**Updated 2026-07 — this supersedes the "rebuild `apps/web`" plan below and
+the "leave it alone" note that used to apply to the mobile app.**
+
+Earlier revisions of this document treated the Expo mobile app at the repo
+root as a legacy prototype to leave alone, with the intent to rebuild
+Snagv1's real frontend as a separate `apps/web` (Vite/React) console. That
+plan was never executed — `apps/web` does not exist in this repo, and no
+evidence of it being built elsewhere has surfaced. Meanwhile, the mobile
+app kept being actively developed against this same live backend
+(`wpkdpukpllxuyqqlxkxf`) and is demonstrably in real use (confirmed via
+Storage/API logs while diagnosing a production bug).
+
+**Going forward: the mobile app (`App.tsx`, `src/`) is Snagv1's live
+product.** There is no separate web console, planned or in progress. A
+prior strategic-alignment audit (`SNAG_STRATEGY_AUDIT.md`) found this
+architecture ambiguity was itself contributing to effort drifting away from
+the product's differentiation thesis (investigation depth) — resolving it
+in writing here removes that ambiguity for future planning.
+
+A desktop-usable supervisor view, if built, will be a responsive layout of
+this same mobile/Expo codebase (Expo already supports a web build target —
+see `expo start --web` — though no responsive-layout system exists yet),
+not a separate app or framework. `apps/web` should not be resurrected
+without a new, explicit decision superseding this one.
 
 ## History (why the repo looks like this)
 
 Snagv1 was originally built June 2026 through milestones M1–M5 directly
 against the Supabase project — migrations and edge functions were applied/
-deployed remotely, but the **web frontend source was never committed** and
-was lost when its build environment was reclaimed; only the deployed site
-at snagv1.netlify.app survived. On 2026-07-03 the full applied migration
-history and both edge function sources were recovered from the live project
-into this repo (`supabase/migrations/*.sql` marked SNAPSHOT, and
-`supabase/functions/*/index.ts`). From now on **this repo is the source of
-truth**: new migrations are authored here and applied via MCP; edge
-functions are edited here and redeployed via MCP.
-
-The Expo mobile app at the repo root is an earlier prototype against a
-different, now-inactive Supabase project ("Snag"). Leave it alone.
+deployed remotely, but an early **web frontend source was never committed**
+and was lost when its build environment was reclaimed; only the deployed
+site at snagv1.netlify.app survived from that period. On 2026-07-03 the
+full applied migration history and both edge function sources were
+recovered from the live project into this repo (`supabase/migrations/*.sql`
+marked SNAPSHOT, and `supabase/functions/*/index.ts`). This repo is the
+source of truth for the backend: new migrations are authored here and
+applied via MCP; edge functions are edited here and redeployed via MCP. The
+mobile app (`src/`) is the source of truth for the client — see the
+architecture decision above.
 
 ## System layout
 
 ```
 snag-app/
-├── App.tsx, src/, …                 # LEGACY mobile prototype (inactive backend)
-├── apps/
-│   └── web/                         # Snagv1 web app (Vite + React + TS) — being rebuilt
-│       ├── netlify.toml             # Netlify site: base dir = apps/web
-│       └── src/
-│           ├── App.tsx              # Routes + auth guards
-│           ├── lib/supabase.ts      # Client for the Snagv1 project
-│           ├── lib/errors.ts        # friendlyError — no DB text reaches users
-│           ├── lib/database.types.ts# Generated via MCP — never hand-edit
-│           ├── hooks/               # useSession, useSnag, useMembers, useRca, useDebriefs
-│           └── pages/               # SnagListPage, SnagDetailPage, RcaPage, DebriefListPage, DebriefPage, LoginPage, InvitePage
+├── App.tsx, src/, …                 # THE LIVE PRODUCT — Expo/React Native mobile app
 ├── supabase/
 │   ├── migrations/                  # Recovered history (SNAPSHOT) + new migrations
 │   ├── functions/
 │   │   ├── notify-snag/             # Resend emails (internal-secret protected)
 │   │   ├── export-investigation/    # Investigation-file PDF (pdf-lib)
-│   │   └── award-points/            # LEGACY — belongs to the old mobile project
-│   └── schema.sql                   # LEGACY — old mobile project's schema
+│   │   └── award-points/            # LEGACY — belongs to an earlier, unrelated prototype
+│   └── schema.sql                   # LEGACY — an earlier, unrelated prototype's schema
 ├── MVP-SPEC.md
 └── Snag-Architecture-Build-Plan.md  # this file
 ```
+
+`netlify.toml` at the repo root still points at `npx expo export --platform
+web`, i.e. it deploys the mobile app's web export, not a separate app —
+consistent with the architecture decision above, not a leftover.
 
 ## Backend (Supabase project `wpkdpukpllxuyqqlxkxf`, ap-southeast-2)
 
@@ -66,46 +86,61 @@ snag-app/
   Secrets: `SNAG_INTERNAL_SECRET`, `RESEND_API_KEY`, `SNAG_FROM_ADDRESS`,
   `SNAG_APP_URL`.
 
-## Current-phase milestones (one commit/PR each)
+## Milestone history and current status (against the mobile app)
 
-- **W0 — Recovery + docs** (this commit): snapshot migrations + edge
-  sources into the repo; these docs.
-- **W1 — Web app core**: scaffold `apps/web` against Snagv1; generated
-  types; login + `/invite/:token` acceptance; snag list (lane filters);
-  SnagDetail `/snags/:id` (+ `/snag/:id` redirect for old email links):
-  progress strip, first-response checklist, recategorise + notifiable,
-  witness statements, evidence upload, root cause, corrective actions,
-  resolve/confirm (niggles) / mark sorted (serious), export button.
-- **W2 — RCA + debriefs**: `/snags/:id/rca` (assign → 5 Whys with chaining
-  pre-fill → submit → accept/send-back), `/snags/:id/debriefs` +
-  `/snags/:id/debriefs/:debriefId` (hot 3-prompt findings, attendees from
-  profiles, lessons, complete), summary cards on SnagDetail.
-- **W3 — Notifications + UX pass**: notify-snag handles `rca_assigned` /
-  `rca_submitted` / `rca_rejected` deep-linking `/snags/{id}/rca`; links
-  move to `/snags/{id}`; P2.2 UX sweep (one primary action, progressive
-  disclosure, confirms, friendly errors, inviting empty states).
-- **W4 — Defensibility**: export includes RCA + debriefs; migrations for
-  `cancelled` rca_status + `reassign_rca` / `cancel_rca` (cancel returns
-  the snag `rca_pending` → `sorted`); supervisor UI.
-- **W5 — Worksheet round-trip**: `worksheet` (AcroForm PDF) +
-  `worksheet-import` (evidence-first, parse, review-before-commit client
-  flow) edge functions.
-- **W6 — Debrief quality**: lesson → corrective action shortcut; soft
-  warning completing a formal debrief without an accepted RCA.
+The W1–W6 milestones below were originally scoped for the never-built
+`apps/web`. Re-mapped against what's actually shipped on mobile as of this
+revision:
+
+- **W0 — Recovery + docs**: done — migrations/edge sources recovered into
+  this repo; this doc.
+- **W1 — Investigation core**: **mostly done on mobile.** Snag list (lane/
+  status/site/scope filters), snag detail with progress strip, first-
+  response checklist, recategorise, witness statements, evidence upload,
+  root cause, and resolve (niggles via `resolve_snag`, serious via
+  `update_snag_status`) are all shipped (`IssueListScreen.tsx`,
+  `IssueDetailScreen.tsx`, `InvestigationPanel.tsx`, `ManageIssuePanel.tsx`).
+  **Not done**: corrective-action creation/completion has no mobile UI yet
+  (the RPCs exist; see the Pre-Launch Development Proposal's Phase 1).
+  Export button: `export-investigation` exists server-side, not yet
+  triggered from mobile.
+- **W2 — RCA + debriefs**: RCA assign → 5 Whys → submit → accept/reject is
+  shipped on mobile (`RcaPanel.tsx`). **Debriefs are explicitly deferred**
+  (full server table/RPC surface exists, zero mobile UI planned until pilot
+  feedback identifies a specific need — see the Pre-Launch Development
+  Proposal, Section 6).
+- **W3 — Notifications + UX pass**: the underlying event dispatch
+  (`dispatch_snag_notification` / `dispatch_rca_notification` →
+  `notify-snag` → Resend) is live and already fires on RCA
+  assign/submit/reject; there is no mobile deep-linking work to do (no
+  routing scheme to link into). General UX polish is ongoing as normal
+  product work, not tracked as a discrete milestone.
+- **W4 — Defensibility**: `reassign_rca` / `cancel_rca` are deployed,
+  audited, and notification-integrated server-side, but have **no mobile
+  UI** — this is a tracked near-term gap (see the Pre-Launch Development
+  Proposal, Phase 0). Export including RCA is not yet built.
+- **W5 — Worksheet round-trip**: not started, not currently scoped.
+- **W6 — Debrief quality**: not started; depends on W2's debrief UI, which
+  is deferred.
+
+Current development priorities live in `SnagPreLaunchDevelopmentProposalRev2`
+(Phase 0/1 work: RCA reassign/cancel UI, corrective-action completion,
+supervisor dashboard) rather than in a renumbered milestone list here.
 
 ## Deployment
 
-- **Web**: Netlify site (snagv1) should be linked to this repo with base
-  directory `apps/web` (build `npm run build`, publish `dist`), deploy
-  previews on, env `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`.
+- **Mobile/web export**: `netlify.toml` builds `npx expo export --platform
+  web` from the repo root and publishes `dist` — this deploys the mobile
+  app's web build, not a separate app. Native builds go through EAS
+  (`eas.json`).
 - **Edge functions**: edit under `supabase/functions/`, deploy via MCP
   `deploy_edge_function`, same slug.
 - **Migrations**: author under `supabase/migrations/`, apply via MCP
   `apply_migration` with the identical content, then regenerate types and
   run advisors.
 
-## Verification, every milestone
+## Verification, every change
 
-`npm run typecheck` + `npm run build` in `apps/web`; advisors after any
-migration; click through the deploy preview; PR lists manual steps.
-Definition-of-done proofs per milestone are listed in the plan/PRs.
+`npx tsc --noEmit` in the repo root; advisors (`get_advisors`) after any
+migration; exercise the change in a running instance (`expo start`, or
+`expo start --web` for the web export) before considering it done.

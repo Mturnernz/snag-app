@@ -34,6 +34,7 @@ import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
 import ManageIssuePanel from '../components/ManageIssuePanel';
 import InvestigationPanel from '../components/InvestigationPanel';
+import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -568,6 +569,21 @@ export default function IssueDetailScreen() {
               issueId={issue.id}
               orgId={issue.org_id}
               state={investigation}
+              onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
+            />
+          )}
+
+          {/* Corrective actions — visible to any org member on the snag's own
+              org (not just editors), since an owner who isn't a supervisor
+              still needs to see and complete their own assigned action;
+              creating and verifying stay canEdit-gated inside the panel. */}
+          {isSerious && isOrgMember && (
+            <CorrectiveActionsPanel
+              issueId={issue.id}
+              orgId={issue.org_id}
+              canEdit={canEdit}
+              currentUserId={currentUserId}
+              assignees={siteAssignees}
               onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
             />
           )}

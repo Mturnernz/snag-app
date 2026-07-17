@@ -25,7 +25,7 @@ const SLIDES: Slide[] = [
   {
     icon: 'git-compare-outline',
     title: 'Niggle vs Serious Incident',
-    body: 'Everyday niggles — like broken gear — and serious incidents — like injuries or hazards — are tracked in separate lanes, so pick the right one when you report.',
+    body: 'Everyday niggles — like broken gear — and serious incidents — like injuries or hazards — are tracked in separate lanes, so nothing gets lost in a group chat and nobody’s chasing paperwork to find out what happened.',
   },
   {
     icon: 'camera-outline',

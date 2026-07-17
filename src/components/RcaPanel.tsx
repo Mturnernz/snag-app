@@ -4,7 +4,8 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, StyleSheet,
 import { SnagStatus, ROLE_LABELS } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import {
-  getSnagRca, assignRca, saveRcaWhy, submitRca, acceptRca, rejectRca, SnagRca, SiteAssignee,
+  getSnagRca, assignRca, saveRcaWhy, submitRca, acceptRca, rejectRca, reassignRca, cancelRca,
+  SnagRca, SiteAssignee,
 } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
 import Card from './Card';
@@ -57,6 +58,14 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
   const [rejecting, setRejecting] = useState(false);
+
+  // Recovery actions — an assignee who's left or gone quiet shouldn't be
+  // able to strand a case at rca_pending forever.
+  const [showReassignPicker, setShowReassignPicker] = useState(false);
+  const [reassigneeId, setReassigneeId] = useState<string | null>(null);
+  const [reassigning, setReassigning] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const fetchRca = useCallback(async () => {
     const data = await getSnagRca(issueId);
@@ -163,6 +172,37 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
     }
   }
 
+  async function handleReassign() {
+    if (!rca || !reassigneeId) return;
+    setReassigning(true);
+    const { error } = await reassignRca(rca.id, reassigneeId);
+    setReassigning(false);
+    if (!error) {
+      setShowReassignPicker(false);
+      setReassigneeId(null);
+      showToast('RCA reassigned');
+      onChanged();
+      fetchRca();
+    } else {
+      showToast(error.message ?? 'Could not reassign RCA');
+    }
+  }
+
+  async function handleCancel() {
+    if (!rca) return;
+    setCancelling(true);
+    const { error } = await cancelRca(rca.id);
+    setCancelling(false);
+    if (!error) {
+      setCancelConfirmOpen(false);
+      showToast('RCA cancelled — snag back to resolved');
+      onChanged();
+      fetchRca();
+    } else {
+      showToast(error.message ?? 'Could not cancel RCA');
+    }
+  }
+
   if (!loaded) return null;
 
   // ── Resolved: assign a (new) RCA, or show the last completed one ──────────
@@ -241,9 +281,68 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
     const isAssignee = currentUserId === rca.assignedTo;
     const canEditWhys = isAssignee || canEdit;
 
+    const canReassign = canEdit && rca.status !== 'submitted';
+
     return (
       <Card variant="elevated" style={styles.card}>
         <Text style={styles.panelLabel}>ROOT CAUSE ANALYSIS</Text>
+
+        {/* Recovery actions — supervisor/admin only. Handles the case where
+            the assignee has left or gone quiet, so the snag doesn't get
+            stuck at rca_pending forever. */}
+        {canEdit && !showReassignPicker && (
+          <View style={styles.rowButtons}>
+            {canReassign && (
+              <Button
+                label="Reassign"
+                variant="outline"
+                icon="swap-horizontal-outline"
+                onPress={() => setShowReassignPicker(true)}
+                style={styles.flex1}
+              />
+            )}
+            <Button
+              label="Cancel RCA"
+              variant="dangerOutline"
+              onPress={() => setCancelConfirmOpen(true)}
+              style={styles.flex1}
+            />
+          </View>
+        )}
+
+        {showReassignPicker && (
+          <>
+            <Text style={styles.hint}>Hand this RCA to someone else.</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+              {assignees.map((a) => (
+                <TouchableOpacity
+                  key={a.id}
+                  onPress={() => setReassigneeId(a.id)}
+                  style={[styles.optionChip, reassigneeId === a.id && styles.optionChipActive]}
+                >
+                  <Text style={[styles.optionChipText, reassigneeId === a.id && styles.optionChipTextActive]}>
+                    {a.name} · {ROLE_LABELS[a.role]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <View style={styles.rowButtons}>
+              <Button
+                label="Cancel"
+                variant="outline"
+                onPress={() => { setShowReassignPicker(false); setReassigneeId(null); }}
+                style={styles.flex1}
+              />
+              <Button
+                label="Reassign"
+                onPress={handleReassign}
+                loading={reassigning}
+                disabled={!reassigneeId}
+                style={styles.flex1}
+              />
+            </View>
+          </>
+        )}
 
         {rca.status === 'submitted' ? (
           <>
@@ -337,6 +436,28 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
                   onPress={handleReject}
                   loading={rejecting}
                   disabled={!rejectNote.trim()}
+                  style={styles.flex1}
+                />
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        <Modal visible={cancelConfirmOpen} transparent animationType="fade" onRequestClose={() => setCancelConfirmOpen(false)}>
+          <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Cancel this RCA?</Text>
+              <Text style={styles.hint}>
+                The snag goes back to Resolved with no completed root-cause analysis on record. You can assign a
+                new RCA at any time.
+              </Text>
+              <View style={styles.rowButtons}>
+                <Button label="Keep it" variant="outline" onPress={() => setCancelConfirmOpen(false)} style={styles.flex1} />
+                <Button
+                  label="Cancel RCA"
+                  variant="dangerOutline"
+                  onPress={handleCancel}
+                  loading={cancelling}
                   style={styles.flex1}
                 />
               </View>

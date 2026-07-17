@@ -4,10 +4,14 @@ Snag's promise: **report in 30 seconds, everyone knows, sorted — with a
 defensible record for serious events.**
 
 The live product is the **Snagv1** system: the Supabase project
-`wpkdpukpllxuyqqlxkxf` (backend, source of truth) plus the web app in
-`apps/web`, deployed at **snagv1.netlify.app**. The Expo mobile app at the
-repo root is an earlier prototype against a now-inactive Supabase project;
-it is NOT part of Snagv1.
+`wpkdpukpllxuyqqlxkxf` (backend, source of truth) plus the Expo/React
+Native mobile app at the repo root (`App.tsx`, `src/`), which is the live
+client. `netlify.toml`'s web build (`snagv1.netlify.app`) is this same
+mobile app exported for web via `expo export --platform web`, not a
+separate app. See `Snag-Architecture-Build-Plan.md`'s "Architecture
+decision" section — an earlier plan called for a separate `apps/web`
+console; it was never built, and the mobile app is the confirmed live
+product going forward.
 
 ## Golden rules (apply to ALL work on this system)
 
@@ -94,6 +98,9 @@ It must contain the complete record — including RCA and debriefs (P2 gap).
 
 ## Out of scope
 
-Overdue-action digest emails, attendee acknowledgement flows, offline-first
-capture, QR reporting, critical-risk registers, renaming work, and the
-legacy mobile prototype at the repo root.
+Attendee acknowledgement flows, offline-first capture, QR reporting,
+critical-risk registers, and renaming work.
+
+Overdue-action digest emails were out of scope as of the original MVP but
+are now in active development — see the Pre-Launch Development Proposal,
+Phase 1.

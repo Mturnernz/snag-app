@@ -6,7 +6,7 @@ import {
 
 import {
   SnagStatus, SnagKind, SnagSeverity, SnagLane,
-  KIND_LABELS, SEVERITY_LABELS, ROLE_LABELS,
+  KIND_LABELS, SEVERITY_LABELS,
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
@@ -21,6 +21,7 @@ import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
 import ConfirmDialog from './ConfirmDialog';
 import ResolvedCheckmark from './ResolvedCheckmark';
+import OwnerPicker from './OwnerPicker';
 
 type EditingField = 'severity' | 'kind' | 'assignee' | null;
 
@@ -250,27 +251,11 @@ export default function ManageIssuePanel({
         </TouchableOpacity>
       </View>
       {editingField === 'assignee' && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-          <TouchableOpacity
-            onPress={() => stageUpdate({ owner_id: null })}
-            style={[styles.optionChip, !shownOwner && styles.optionChipActive]}
-          >
-            <Text style={[styles.optionChipText, !shownOwner && styles.optionChipTextActive]}>
-              Unassigned
-            </Text>
-          </TouchableOpacity>
-          {assignees.map((member) => (
-            <TouchableOpacity
-              key={member.id}
-              onPress={() => stageUpdate({ owner_id: member.id })}
-              style={[styles.optionChip, shownOwner?.id === member.id && styles.optionChipActive]}
-            >
-              <Text style={[styles.optionChipText, shownOwner?.id === member.id && styles.optionChipTextActive]}>
-                {member.name} · {ROLE_LABELS[member.role]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <OwnerPicker
+          assignees={assignees}
+          currentOwnerId={shownOwner?.id ?? null}
+          onSelect={(id) => stageUpdate({ owner_id: id })}
+        />
       )}
 
       {hasPendingChanges && (

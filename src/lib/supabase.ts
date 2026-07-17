@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 import { File } from 'expo-file-system';
 import {
   Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
-  ChecklistStep, WitnessStatement, EvidenceItem,
+  ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction,
 } from '../types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -496,6 +496,31 @@ export async function getOrgStats(orgId: string): Promise<OrgStats> {
   };
 }
 
+export interface SiteBreakdown {
+  siteId: string;
+  siteName: string;
+  openInvestigations: number;
+  unassigned: number;
+  overdueActions: number;
+}
+
+// Per-site counts for the supervisor "outstanding work" dashboard —
+// get_org_stats is org-wide only, this is the site-grouped sibling.
+export async function getSiteBreakdown(orgId: string): Promise<SiteBreakdown[]> {
+  const { data, error } = await supabase.rpc('get_site_breakdown', { p_org_id: orgId });
+  if (error || !data) {
+    if (error) console.error('getSiteBreakdown error:', error);
+    return [];
+  }
+  return (data as any[]).map((row) => ({
+    siteId: row.site_id,
+    siteName: row.site_name,
+    openInvestigations: row.open_investigations ?? 0,
+    unassigned: row.unassigned ?? 0,
+    overdueActions: row.overdue_actions ?? 0,
+  }));
+}
+
 export interface OrgSnagSummary {
   total: number;
   flagged: number;
@@ -568,6 +593,28 @@ export interface SiteAssignee {
 export async function getSiteAssignees(siteId: string): Promise<{ data: SiteAssignee[]; error: any }> {
   const { data, error } = await supabase.rpc('get_site_assignees', { p_site_id: siteId });
   return { data: (data ?? []) as SiteAssignee[], error };
+}
+
+export interface UnassignedSnag {
+  id: string;
+  reference: string;
+  description: string | null;
+  kind: SnagKind;
+}
+
+// Backing the dashboard's one-click assign — the same shape of query as
+// IssueListScreen's "Unassigned in my sites" scope filter, scoped to one
+// site instead of the whole org.
+export async function getUnassignedSnags(siteId: string): Promise<UnassignedSnag[]> {
+  const { data } = await supabase
+    .from('snags_with_details')
+    .select('id, reference, description, kind')
+    .eq('site_id', siteId)
+    .is('owner_id', null)
+    .in('status', ['flagged', 'in_progress'])
+    .is('parent_snag_id', null)
+    .order('created_at', { ascending: true });
+  return (data ?? []) as UnassignedSnag[];
 }
 
 // ─── Activity trail ────────────────────────────────────────────────────────────
@@ -743,6 +790,17 @@ export async function rejectRca(rcaId: string, rejectionNote: string) {
   return supabase.rpc('reject_rca', { p_rca_id: rcaId, p_rejection_note: rejectionNote });
 }
 
+// Recovery for an RCA an assignee can't finish — e.g. they've left or gone
+// quiet. Both are supervisor/admin actions; reassign hands the unfinished
+// RCA to someone else, cancel abandons it and returns the snag to resolved.
+export async function reassignRca(rcaId: string, newAssigneeId: string) {
+  return supabase.rpc('reassign_rca', { p_rca_id: rcaId, p_new_assignee_id: newAssigneeId });
+}
+
+export async function cancelRca(rcaId: string) {
+  return supabase.rpc('cancel_rca', { p_rca_id: rcaId });
+}
+
 // ─── Merge (parent/child) ───────────────────────────────────────────────────
 // Creates (or reuses) a parent snag and attaches the rest of the selection as
 // its children — see merge_snags for the disambiguation rules around
@@ -806,9 +864,12 @@ export async function getInvestigationState(snagId: string): Promise<Investigati
   const [stepsRes, witnessRes, evidenceRes, investigationRes, actionsRes] = await Promise.all([
     supabase.from('checklist_completions').select('step').eq('snag_id', snagId),
     supabase.from('witness_statements').select('*').eq('snag_id', snagId).order('taken_at', { ascending: true }),
-    supabase.from('evidence_items').select('*').eq('snag_id', snagId).order('sort_index', { ascending: true }),
+    supabase.from('evidence_items').select('*').eq('snag_id', snagId).is('corrective_action_id', null).order('sort_index', { ascending: true }),
     supabase.from('investigations').select('root_cause_text').eq('snag_id', snagId).maybeSingle(),
-    supabase.from('corrective_actions').select('id', { count: 'exact', head: true }).eq('snag_id', snagId).eq('status', 'open'),
+    // "Blocking" mirrors update_snag_status's resolve gate: done-but-unverified
+    // still counts, so this pill can't show 0 while resolve is still blocked.
+    supabase.from('corrective_actions').select('id', { count: 'exact', head: true })
+      .eq('snag_id', snagId).or('status.neq.done,verified_by.is.null'),
   ]);
 
   return {
@@ -818,6 +879,74 @@ export async function getInvestigationState(snagId: string): Promise<Investigati
     rootCause: (investigationRes.data as any)?.root_cause_text ?? null,
     openCorrectiveActions: actionsRes.count ?? 0,
   };
+}
+
+// ─── Corrective actions (CAPA) ────────────────────────────────────────────────
+// create_corrective_action/complete_corrective_action are supervisor/admin-or-
+// owner actions on a serious snag; verify_corrective_action is deliberately
+// restricted to a supervisor/admin excluding the action's own owner — closure
+// requires independent sign-off, not a second tap by whoever completed it.
+
+export async function getCorrectiveActions(snagId: string): Promise<CorrectiveAction[]> {
+  const { data, error } = await supabase
+    .from('corrective_actions')
+    .select(`
+      id, snag_id, description, owner_id, due_date, status, created_at, completed_at, verified_by, verified_at,
+      owner:profiles!corrective_actions_owner_id_fkey(name),
+      verifier:profiles!corrective_actions_verified_by_fkey(name)
+    `)
+    .eq('snag_id', snagId)
+    .order('due_date', { ascending: true });
+  if (error || !data) return [];
+  return (data as any[]).map((row) => ({
+    id: row.id,
+    snag_id: row.snag_id,
+    description: row.description,
+    owner_id: row.owner_id,
+    owner_name: row.owner?.name,
+    due_date: row.due_date,
+    status: row.status,
+    created_at: row.created_at,
+    completed_at: row.completed_at,
+    verified_by: row.verified_by,
+    verifier_name: row.verifier?.name,
+    verified_at: row.verified_at,
+  }));
+}
+
+export async function createCorrectiveAction(
+  snagId: string, description: string, ownerId: string, dueDate: string
+) {
+  const { data, error } = await supabase.rpc('create_corrective_action', {
+    p_snag_id: snagId, p_description: description, p_owner_id: ownerId, p_due_date: dueDate,
+  });
+  return { id: data as string | null, error };
+}
+
+export async function completeCorrectiveAction(actionId: string) {
+  return supabase.rpc('complete_corrective_action', { p_action_id: actionId });
+}
+
+export async function verifyCorrectiveAction(actionId: string) {
+  return supabase.rpc('verify_corrective_action', { p_action_id: actionId });
+}
+
+export async function addCorrectiveActionEvidence(actionId: string, mediaPath: string, caption?: string | null) {
+  return supabase.rpc('add_corrective_action_evidence', {
+    p_action_id: actionId, p_media_path: mediaPath, p_caption: caption ?? null,
+  });
+}
+
+// Completion-evidence photos for one corrective action, resolved to
+// signed-URL rows for display — mirrors getEvidencePhotoUrl's bucket/RLS.
+export async function getCorrectiveActionEvidence(actionId: string): Promise<EvidenceItem[]> {
+  const { data, error } = await supabase
+    .from('evidence_items')
+    .select('*')
+    .eq('corrective_action_id', actionId)
+    .order('sort_index', { ascending: true });
+  if (error || !data) return [];
+  return data as EvidenceItem[];
 }
 
 export async function markSnagSeen(snagId: string) {

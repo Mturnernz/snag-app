@@ -163,11 +163,31 @@ export interface WitnessStatement {
 export interface EvidenceItem {
   id: string;
   snag_id: string;
+  corrective_action_id?: string | null;
   uploaded_by: string;
   media_path: string;
   caption: string | null;
   captured_at: string;
   sort_index: number;
+}
+
+export type CorrectiveActionStatus = 'open' | 'done';
+
+// "Closed" for the purposes of the resolve gate means done AND verified —
+// see update_snag_status. A done-but-unverified action still blocks resolve.
+export interface CorrectiveAction {
+  id: string;
+  snag_id: string;
+  description: string;
+  owner_id: string;
+  owner_name?: string;
+  due_date: string;
+  status: CorrectiveActionStatus;
+  created_at: string;
+  completed_at: string | null;
+  verified_by: string | null;
+  verifier_name?: string;
+  verified_at: string | null;
 }
 
 // ─── Navigation param lists ──────────────────────────────────────────────────

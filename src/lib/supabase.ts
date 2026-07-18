@@ -275,6 +275,49 @@ export async function setOrgPublicMode(enabled: boolean, intakeSiteId?: string |
   });
 }
 
+export interface PublicIntakeSite {
+  orgId: string;
+  orgName: string;
+  siteId: string;
+  siteName: string;
+}
+
+// Resolves a QR code's token to the org/site it reports into — callable
+// with no session at all (the RPC is anon-executable), so a scan can show
+// "Reporting at <site>" before signing the reporter in anonymously.
+export async function getSiteByPublicToken(token: string): Promise<PublicIntakeSite | null> {
+  const { data, error } = await supabase.rpc('get_site_by_public_token', { p_token: token }).maybeSingle();
+  const row = data as { org_id: string; org_name: string; site_id: string; site_name: string } | null;
+  if (error || !row) return null;
+  return { orgId: row.org_id, orgName: row.org_name, siteId: row.site_id, siteName: row.site_name };
+}
+
+export async function createPublicSnagByToken(params: {
+  token: string;
+  description: string;
+  photoPaths: string[];
+  isHazard: boolean;
+  reporterName?: string | null;
+}) {
+  const { data, error } = await supabase.rpc('create_public_snag_by_token', {
+    p_token: params.token,
+    p_description: params.description,
+    p_photo_paths: params.photoPaths,
+    p_is_hazard: params.isHazard,
+    p_reporter_name: params.reporterName ?? null,
+  }).single();
+  return { data: data as { id: string; reference: string } | null, error };
+}
+
+// Used only for the QR-scan report flow — a real account-free session so
+// create_public_snag_by_token's auth.uid() check is satisfied without ever
+// showing AuthScreen. Requires "Allow anonymous sign-ins" to be enabled in
+// the Supabase project's Auth settings (a dashboard-only toggle, not
+// something a migration can set).
+export async function signInAnonymouslyForReport() {
+  return supabase.auth.signInAnonymously();
+}
+
 export async function blockPublicReporter(snagId: string) {
   return supabase.rpc('block_public_reporter', { p_snag_id: snagId });
 }
@@ -334,6 +377,7 @@ export interface SiteDetail {
   memberIds: string[];
   supervisorIds: string[];
   defaultOwnerId: string | null;
+  publicReportToken: string | null;
 }
 
 // Sites for the active org, each with its member/supervisor/default-owner ids.
@@ -341,7 +385,7 @@ export interface SiteDetail {
 export async function getSitesWithDetail(): Promise<SiteDetail[]> {
   const { data: sites } = await supabase
     .from('sites')
-    .select('id, name, location')
+    .select('id, name, location, public_report_token')
     .order('created_at', { ascending: true });
   if (!sites || sites.length === 0) return [];
 
@@ -362,11 +406,26 @@ export async function getSitesWithDetail(): Promise<SiteDetail[]> {
     memberIds: members.filter((m: any) => m.site_id === s.id).map((m: any) => m.user_id),
     supervisorIds: sups.filter((m: any) => m.site_id === s.id).map((m: any) => m.user_id),
     defaultOwnerId: owners.find((o: any) => o.site_id === s.id)?.owner_id ?? null,
+    publicReportToken: s.public_report_token,
   }));
 }
 
 export async function createSite(name: string, location?: string | null) {
   return supabase.rpc('create_site', { p_name: name, p_location: location ?? null });
+}
+
+// Toggles a site's QR public-reporting token on/off, returning the new
+// token (or null when disabling). Calling again while already enabled
+// rotates it, invalidating any previously printed/shared QR code.
+export async function setSitePublicIntake(
+  siteId: string,
+  enabled: boolean
+): Promise<{ token: string | null; error: any }> {
+  const { data, error } = await supabase.rpc('set_site_public_intake', {
+    p_site_id: siteId,
+    p_enabled: enabled,
+  });
+  return { token: error ? null : (data as string | null), error };
 }
 
 export async function addSiteMember(siteId: string, userId: string) {
@@ -951,6 +1010,20 @@ export async function getCorrectiveActionEvidence(actionId: string): Promise<Evi
 
 export async function markSnagSeen(snagId: string) {
   return supabase.rpc('mark_snag_seen', { p_snag_id: snagId });
+}
+
+// Builds the investigation-file PDF via the export-investigation edge
+// function and returns a 1-hour signed URL to it. The function re-checks
+// supervisor/officer_admin + serious-lane itself, so a failed check surfaces
+// here as `error` rather than a thrown exception.
+export async function exportInvestigation(
+  snagId: string
+): Promise<{ signedUrl: string | null; error: any }> {
+  const { data, error } = await supabase.functions.invoke('export-investigation', {
+    body: { snag_id: snagId },
+  });
+  if (error) return { signedUrl: null, error };
+  return { signedUrl: data?.signedUrl ?? null, error: null };
 }
 
 // ─── Comment helpers ──────────────────────────────────────────────────────────

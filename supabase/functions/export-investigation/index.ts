@@ -110,6 +110,10 @@ Deno.serve(async (req: Request) => {
     return members.find((m) => m.id === id)?.name || "Someone";
   }
 
+  // Needed early — evidence images are embedded while the PDF is being
+  // built, not just at upload time at the end.
+  const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -138,6 +142,33 @@ Deno.serve(async (req: Request) => {
       ensureSpace();
       page.drawText(line, { x: left, y, size, font, color: rgb(0, 0, 0) });
       y -= lineHeight;
+    }
+  }
+
+  // Evidence photos are always uploaded as JPEG (the app re-encodes on
+  // capture — see uploadSnagPhoto), so embedJpg covers the real cases; a
+  // photo that still fails to embed just falls back to caption-only text
+  // above it rather than losing the record.
+  const EVIDENCE_MAX_WIDTH = 200;
+  async function drawEvidenceImage(mediaPath: string) {
+    try {
+      const { data: blob, error: downloadError } = await serviceClient.storage
+        .from("snag-evidence")
+        .download(mediaPath);
+      if (downloadError || !blob) return;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const image = await pdf.embedJpg(bytes);
+      const scale = Math.min(1, EVIDENCE_MAX_WIDTH / image.width);
+      const w = image.width * scale;
+      const h = image.height * scale;
+      if (y - h < 50) {
+        page = pdf.addPage([595, 842]);
+        y = 800;
+      }
+      page.drawImage(image, { x: left, y: y - h, width: w, height: h });
+      y -= h + 8;
+    } catch {
+      // Not embeddable — leave the caption text as the record.
     }
   }
 
@@ -183,6 +214,7 @@ Deno.serve(async (req: Request) => {
   } else {
     for (const e of evidence) {
       paragraph(`- ${e.caption || e.media_path}`);
+      if (e.media_path) await drawEvidenceImage(e.media_path);
     }
   }
 
@@ -248,7 +280,15 @@ Deno.serve(async (req: Request) => {
     paragraph("None recorded.");
   } else {
     for (const a of actions) {
-      paragraph(`- ${a.description} — ${memberName(a.owner_id)} — due ${a.due_date} — ${a.status}`);
+      // Matches the resolve-gate/dashboard definition: "done" alone isn't
+      // closed, it also needs independent verification.
+      const statusLabel =
+        a.status === "done" && a.verified_by
+          ? `Done — verified by ${memberName(a.verified_by)} ${new Date(a.verified_at).toLocaleDateString()}`
+          : a.status === "done"
+          ? "Done — awaiting verification"
+          : "Open";
+      paragraph(`- ${a.description} — ${memberName(a.owner_id)} — due ${a.due_date} — ${statusLabel}`);
     }
   }
 
@@ -260,7 +300,6 @@ Deno.serve(async (req: Request) => {
   const bytes = await pdf.save();
 
   const filePath = `${profile.org_id}/${snag_id}/${Date.now()}.pdf`;
-  const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const { error: uploadError } = await serviceClient.storage
     .from("investigation-files")
     .upload(filePath, bytes, { contentType: "application/pdf" });

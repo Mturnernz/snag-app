@@ -13,6 +13,7 @@ import {
   Dimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,7 +28,7 @@ import {
   supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers,
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
   getSiteAssignees, SiteAssignee, unmergeSnag,
-  getSnagAuditLog, describeAuditAction, AuditLogEntry,
+  getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -38,6 +39,7 @@ import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
+import Button from '../components/Button';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -130,6 +132,7 @@ export default function IssueDetailScreen() {
   const [mentionAt, setMentionAt] = useState(-1);
   const [investigation, setInvestigation] = useState<InvestigationState | null>(null);
   const [siteAssignees, setSiteAssignees] = useState<SiteAssignee[]>([]);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   // System activity trail — audit_log entries for this snag, shown alongside
   // comments so every status/owner/category change is timestamped and
@@ -198,6 +201,18 @@ export default function IssueDetailScreen() {
   }, [canManageInvestigation, issueId]);
 
   useEffect(() => { fetchInvestigation(); }, [fetchInvestigation]);
+
+  async function handleExportInvestigation() {
+    if (exportingPdf) return;
+    setExportingPdf(true);
+    const { signedUrl, error } = await exportInvestigation(issueId);
+    setExportingPdf(false);
+    if (error || !signedUrl) {
+      showToast(error?.message ?? 'Could not export the investigation file');
+      return;
+    }
+    Linking.openURL(signedUrl);
+  }
 
   // Owner/RCA-assignee candidates, scoped to the snag's site (its members
   // and supervisors, plus org admins). Fetched for any org member — not just
@@ -599,6 +614,20 @@ export default function IssueDetailScreen() {
               currentUserId={currentUserId}
               assignees={siteAssignees}
               onChanged={() => { fetchIssue(); fetchActivity(); }}
+            />
+          )}
+
+          {/* Export investigation — same gate as the edge function itself
+              (supervisor/officer_admin on a serious snag), so this never
+              appears for someone who'd just get a 403. */}
+          {canManageInvestigation && (
+            <Button
+              label="Export investigation (PDF)"
+              variant="outline"
+              icon="document-text-outline"
+              onPress={handleExportInvestigation}
+              loading={exportingPdf}
+              fullWidth
             />
           )}
 

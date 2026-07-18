@@ -33,8 +33,14 @@ import {
   assignSiteSupervisor,
   removeSiteSupervisor,
   setSiteDefaultOwner,
+  setSitePublicIntake,
   SiteDetail,
 } from '../lib/supabase';
+
+// Matches the edge functions' SNAG_APP_URL default — the QR always encodes
+// the web export's URL (works with or without the native app installed);
+// see PublicQrReportScreen.tsx / App.tsx for the landing side of this link.
+const APP_URL = 'https://snagv1.netlify.app';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -93,6 +99,8 @@ export default function ManageOrganisationScreen() {
   const [newSiteName, setNewSiteName] = useState('');
   const [creatingSite, setCreatingSite] = useState(false);
   const [assignSite, setAssignSite] = useState<SiteDetail | null>(null);
+  const [qrSite, setQrSite] = useState<SiteDetail | null>(null);
+  const [togglingQr, setTogglingQr] = useState(false);
 
   // QR
   const [regeneratingCode, setRegeneratingCode] = useState(false);
@@ -237,6 +245,28 @@ export default function ManageOrganisationScreen() {
     const fresh = await getSitesWithDetail();
     setSites(fresh);
     setAssignSite((prev) => (prev ? fresh.find((s) => s.id === prev.id) ?? null : null));
+  }
+
+  // ── Per-site public QR ──────────────────────────────────────────────────
+  async function handleToggleSiteQr(enable: boolean) {
+    if (!qrSite) return;
+    setTogglingQr(true);
+    const { error } = await setSitePublicIntake(qrSite.id, enable);
+    setTogglingQr(false);
+    if (error) {
+      showToast(error.message ?? 'Could not update the site QR code');
+      return;
+    }
+    const fresh = await getSitesWithDetail();
+    setSites(fresh);
+    setQrSite(fresh.find((s) => s.id === qrSite.id) ?? null);
+    showToast(enable ? 'Public QR enabled — old codes for this site (if any) no longer work' : 'Public QR disabled');
+  }
+
+  async function handleCopySiteQrLink() {
+    if (!qrSite?.publicReportToken) return;
+    await Clipboard.setStringAsync(`${APP_URL}/?report=${qrSite.publicReportToken}`);
+    showToast('Link copied');
   }
 
   // ── QR ───────────────────────────────────────────────────────────────────
@@ -395,12 +425,21 @@ export default function ManageOrganisationScreen() {
                   </Text>
                 </View>
               </View>
-              <Button
-                label="Assign People"
-                variant="outline"
-                onPress={() => setAssignSite(site)}
-                fullWidth
-              />
+              <View style={styles.rowButtons}>
+                <Button
+                  label="Assign People"
+                  variant="outline"
+                  onPress={() => setAssignSite(site)}
+                  style={styles.flex1}
+                />
+                <Button
+                  label="Public QR"
+                  variant={site.publicReportToken ? 'secondary' : 'outline'}
+                  icon="qr-code-outline"
+                  onPress={() => setQrSite(site)}
+                  style={styles.flex1}
+                />
+              </View>
             </Card>
           ))}
 
@@ -590,6 +629,17 @@ export default function ManageOrganisationScreen() {
         showToast={showToast}
       />
 
+      {/* Per-site public QR modal */}
+      <SiteQrModal
+        site={qrSite}
+        orgIsPublic={!!org?.is_public}
+        busy={togglingQr}
+        onEnable={() => handleToggleSiteQr(true)}
+        onDisable={() => handleToggleSiteQr(false)}
+        onCopyLink={handleCopySiteQrLink}
+        onClose={() => setQrSite(null)}
+      />
+
       <ConfirmDialog
         visible={!!memberToRemove}
         title="Remove this member?"
@@ -698,6 +748,81 @@ function SiteAssignmentModal({
           </ScrollView>
 
           <Button label="Done" onPress={onClose} fullWidth style={styles.topGap} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// One QR code per site, scoped by an opaque token (sites.public_report_token)
+// rather than the org-wide "public reports" picker flow above — scanning it
+// skips straight to a report form pre-targeted at this site, no browsing, no
+// account (paired with anonymous auth on the landing side — see App.tsx).
+function SiteQrModal({
+  site,
+  orgIsPublic,
+  busy,
+  onEnable,
+  onDisable,
+  onCopyLink,
+  onClose,
+}: {
+  site: SiteDetail | null;
+  orgIsPublic: boolean;
+  busy: boolean;
+  onEnable: () => void;
+  onDisable: () => void;
+  onCopyLink: () => void;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  if (!site) return null;
+
+  const link = site.publicReportToken ? `${APP_URL}/?report=${site.publicReportToken}` : null;
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle} numberOfLines={1}>{site.name} — Public QR</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={8}>
+              <Icon name="close" size="md" color={Colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          {!orgIsPublic ? (
+            <Text style={styles.modalHint}>
+              Turn on "Accept public reports" below first — a site's QR code only works while the
+              organisation is accepting public reports.
+            </Text>
+          ) : link ? (
+            <>
+              <Text style={styles.modalHint}>
+                Anyone who scans this lands straight on a report form for {site.name} — no account
+                needed. Regenerate it to invalidate anything already printed or shared.
+              </Text>
+              <View style={styles.qrWrap}>
+                <QRCode value={link} size={180} />
+              </View>
+              <TouchableOpacity style={styles.codeRow} onPress={onCopyLink} activeOpacity={0.7}>
+                <Text style={styles.codeText} numberOfLines={1}>{link}</Text>
+                <Icon name="copy-outline" size="md" color={Colors.primary} />
+              </TouchableOpacity>
+              <Button label="Regenerate" variant="outline" onPress={onEnable} loading={busy} fullWidth />
+              <Button label="Disable Public QR" variant="dangerOutline" onPress={onDisable} loading={busy} fullWidth style={styles.topGap} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.modalHint}>
+                Generate a QR code that lets anyone report straight into {site.name} with no
+                account — good for a poster at the site entrance.
+              </Text>
+              <Button label="Enable Public QR" onPress={onEnable} loading={busy} fullWidth />
+            </>
+          )}
+
+          <Button label="Done" onPress={onClose} variant="ghost" fullWidth style={styles.topGap} />
         </View>
       </View>
     </Modal>

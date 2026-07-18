@@ -36,6 +36,7 @@ import Icon from '../components/Icon';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 import { useToast } from '../hooks/useToast';
 import { useBadge } from '../context/BadgeContext';
+import { useOfflineQueue } from '../context/OfflineQueueContext';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -110,6 +111,7 @@ export default function IssueListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { refreshOpenIssueCount } = useBadge();
+  const { pendingCount, syncing, retryNow } = useOfflineQueue();
 
   // Filters/sort — five independent controls in the filter bar: Status and
   // Site are multi-select (empty = no filter), Date/Trending share one sort
@@ -524,6 +526,21 @@ export default function IssueListScreen() {
         orgName={orgName}
         onSwitched={fetchIssues}
       />
+
+      {pendingCount > 0 && (
+        <TouchableOpacity
+          style={styles.syncBanner}
+          onPress={retryNow}
+          disabled={syncing}
+          activeOpacity={0.7}
+        >
+          <Icon name="cloud-upload-outline" size="sm" color={Colors.primary} />
+          <Text style={styles.syncBannerText}>
+            {pendingCount} report{pendingCount === 1 ? '' : 's'} waiting to sync
+          </Text>
+          <Text style={styles.syncBannerAction}>{syncing ? 'Syncing…' : 'Retry now'}</Text>
+        </TouchableOpacity>
+      )}
 
       {selectMode ? (
         <View style={styles.selectBar}>
@@ -1188,6 +1205,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  syncBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+  },
+  syncBannerText: {
+    flex: 1,
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
+  },
+  syncBannerAction: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
   },
   filterWrap: {
     backgroundColor: Colors.surface,

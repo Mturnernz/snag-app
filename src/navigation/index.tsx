@@ -23,6 +23,7 @@ import OnboardingCarouselScreen from '../screens/OnboardingCarouselScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 import { ReportTargetProvider } from '../context/ReportTargetContext';
 import { BadgeProvider, useBadge } from '../context/BadgeContext';
+import { OfflineQueueProvider } from '../context/OfflineQueueContext';
 
 // ─── Tab bar icons ────────────────────────────────────────────────────────────
 
@@ -96,6 +97,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export default function RootNavigator({ userRole, initialTab }: { userRole: UserRole; initialTab?: keyof MainTabParamList }) {
   return (
     <BadgeProvider>
+    <OfflineQueueProvider>
     <IncidentDraftProvider>
       <ReportTargetProvider>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -159,6 +161,7 @@ export default function RootNavigator({ userRole, initialTab }: { userRole: User
       </Stack.Navigator>
       </ReportTargetProvider>
     </IncidentDraftProvider>
+    </OfflineQueueProvider>
     </BadgeProvider>
   );
 }

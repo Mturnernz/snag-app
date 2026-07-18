@@ -41,6 +41,12 @@ interface Props {
   /** Storage bucket to upload into. Defaults to snag-photos; the investigation
    *  evidence picker passes 'snag-evidence'. */
   bucket?: string;
+  /** True while offline — skip the eager upload and just stage the local
+   *  URI (status 'success', no path yet) so a picked photo doesn't sit
+   *  permanently 'failed' with no connectivity to retry against. The
+   *  offline queue re-reads these via getLocalUris() and uploads them
+   *  itself once connectivity returns. */
+  deferUpload?: boolean;
   /** Local URIs to pre-load on mount (once pathPrefix is known), e.g. photos
    *  carried over from another report flow. Only seeded once. */
   initialUris?: string[];
@@ -52,7 +58,7 @@ interface Props {
   onPhotosChange?: (count: number) => void;
 }
 
-const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, initialUris, onBlockingChange, onPhotosChange }, ref) => {
+const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, deferUpload, initialUris, onBlockingChange, onPhotosChange }, ref) => {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const seededRef = useRef(false);
 
@@ -81,6 +87,13 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     if (!pathPrefix) return;
     const id = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
     const fileName = `${pathPrefix}/${id}.jpg`;
+    if (deferUpload) {
+      // Offline — stage it as already "done" from this component's point of
+      // view (no spinner, doesn't block submit). The real upload happens
+      // later, out of band, when the offline queue drains.
+      setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'success' }]);
+      return;
+    }
     setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'uploading' }]);
     runUpload(id, uri, fileName);
   }

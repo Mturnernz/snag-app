@@ -1,13 +1,13 @@
 import 'react-native-url-polyfill/auto';
-import React, { useEffect, useState } from 'react';
-import { Platform, View, ActivityIndicator } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, View, ActivityIndicator, Linking } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiveOrg, getMemberships, Membership, markOnboardingSeen } from './src/lib/supabase';
+import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiveOrg, getMemberships, Membership, markOnboardingSeen, signInAnonymouslyForReport } from './src/lib/supabase';
 import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
@@ -17,9 +17,24 @@ import AdminSetupScreen from './src/screens/AdminSetupScreen';
 import OrgInactiveScreen from './src/screens/OrgInactiveScreen';
 import OnboardingWelcomeScreen from './src/screens/OnboardingWelcomeScreen';
 import OnboardingCarouselScreen from './src/screens/OnboardingCarouselScreen';
+import PublicQrReportScreen from './src/screens/PublicQrReportScreen';
 import { ToastProvider } from './src/hooks/useToast';
 
 const PUBLIC_REPORTER_KEY = 'snag.publicReporterMode';
+
+// A scanned site QR code opens `<web-or-app-url>/?report=<token>` — resolved
+// once on boot, before any session/org gate below. Read from the initial URL
+// only (not live URL-change listening): this is a one-shot landing, not a
+// persistent route.
+async function getQrReportToken(): Promise<string | null> {
+  const url = Platform.OS === 'web' ? window.location.href : await Linking.getInitialURL();
+  if (!url) return null;
+  try {
+    return new URL(url).searchParams.get('report');
+  } catch {
+    return null;
+  }
+}
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -42,6 +57,43 @@ export default function App() {
   // never applicable), so the app falls through to the normal entry point.
   const [onboardingStep, setOnboardingStep] = useState<'welcome' | 'carousel' | null>(null);
   const [initialTab, setInitialTab] = useState<'Report' | 'Issues'>('Report');
+
+  // QR public-report landing — resolved once on boot. A ref mirrors the
+  // state so the auth-listener closure below (registered once, empty deps)
+  // always reads the latest value instead of the null it captured on the
+  // first render.
+  const [qrToken, setQrTokenState] = useState<string | null>(null);
+  const [qrTokenChecked, setQrTokenChecked] = useState(false);
+  const [anonSignInAttempted, setAnonSignInAttempted] = useState(false);
+  const qrTokenRef = useRef<string | null>(null);
+  function setQrToken(token: string | null) {
+    qrTokenRef.current = token;
+    setQrTokenState(token);
+  }
+
+  useEffect(() => {
+    getQrReportToken().then((token) => {
+      setQrToken(token);
+      setQrTokenChecked(true);
+    });
+  }, []);
+
+  // Once the token is known and the initial session has resolved to "signed
+  // out", sign in anonymously so create_public_snag_by_token's auth.uid()
+  // check is satisfied without ever showing AuthScreen. Requires "Allow
+  // anonymous sign-ins" enabled in the Supabase project's Auth settings; if
+  // that's off (or the call otherwise fails), fall back to the normal
+  // signed-out flow rather than leaving the QR path stuck on a spinner.
+  useEffect(() => {
+    if (!qrTokenChecked || !qrToken || anonSignInAttempted || loading || session) return;
+    setAnonSignInAttempted(true);
+    signInAnonymouslyForReport().then(({ error }) => {
+      if (error) {
+        console.error('Anonymous sign-in for QR report failed', error);
+        setQrToken(null);
+      }
+    });
+  }, [qrTokenChecked, qrToken, loading, session, anonSignInAttempted]);
 
   useEffect(() => {
     if (profile?.role === 'worker' && profile.has_seen_onboarding === false) {
@@ -149,6 +201,11 @@ export default function App() {
         setProfile(null);
         setInactiveMemberships(null);
         setLoading(false);
+      } else if (qrTokenRef.current) {
+        // QR public-report path — PublicQrReportScreen is rendered
+        // standalone below, never through the normal profile/org
+        // resolution an anonymous reporter has none of.
+        setLoading(false);
       } else if (session && event !== 'TOKEN_REFRESHED') {
         await loadUserState(session.user.id);
       } else {
@@ -164,6 +221,27 @@ export default function App() {
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB' }}>
         <ActivityIndicator size="large" color="#2563EB" />
       </View>
+    );
+  }
+
+  // QR public-report landing — bypasses every gate below (auth, org setup,
+  // onboarding); the anonymous session is still being established until
+  // `session` is set.
+  if (qrToken) {
+    if (!session) {
+      return (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB' }}>
+          <ActivityIndicator size="large" color="#2563EB" />
+        </View>
+      );
+    }
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="dark" backgroundColor="#FFFFFF" />
+        <ToastProvider>
+          <PublicQrReportScreen token={qrToken} userId={session.user.id} />
+        </ToastProvider>
+      </SafeAreaProvider>
     );
   }
 

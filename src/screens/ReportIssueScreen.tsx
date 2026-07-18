@@ -29,6 +29,7 @@ import {
 } from '../lib/supabase';
 import { useReportTarget } from '../context/ReportTargetContext';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
+import { useOfflineQueue } from '../context/OfflineQueueContext';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
@@ -69,6 +70,7 @@ export default function ReportIssueScreen() {
   const photoPickerRef = useRef<PhotoPickerHandle>(null);
   const { target, clearTarget } = useReportTarget();
   const { setDraft } = useIncidentDraft();
+  const { isOffline, enqueue } = useOfflineQueue();
 
   const [photosBlocked, setPhotosBlocked] = useState(false);
   const [description, setDescription] = useState('');
@@ -78,6 +80,7 @@ export default function ReportIssueScreen() {
   const [hasProfileName, setHasProfileName] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [queuedOffline, setQueuedOffline] = useState(false);
   const [submittedTo, setSubmittedTo] = useState<string | null>(null);
   const [reference, setReference] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -185,8 +188,48 @@ export default function ReportIssueScreen() {
     setShowGroupPicker(false);
     setSubmitting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // getSession() reads the locally persisted session and never hits the
+      // network (unlike getUser(), which re-verifies against the server) —
+      // required for the offline branch below to work at all, and just as
+      // correct for the online path since nothing here needs server-side
+      // re-verification.
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const user = authSession?.user;
       if (!user) throw new Error('Not authenticated');
+
+      if (isOffline) {
+        const localUris = photoPickerRef.current?.getLocalUris() ?? [];
+        if (isPublicSubmission && target) {
+          await enqueue({
+            type: 'public',
+            photoUris: localUris,
+            photoPathPrefix: user.id,
+            params: {
+              orgId: target.orgId,
+              description: description.trim(),
+              isHazard,
+              reporterName: reporterName.trim() || null,
+            },
+          });
+          setSubmittedTo(target.orgName);
+        } else {
+          if (!orgId || !reportSiteId) {
+            throw new Error("Can't save this report yet — reconnect once so your site loads, then you can report offline.");
+          }
+          await enqueue({
+            type: 'member',
+            photoUris: localUris,
+            photoPathPrefix: orgId,
+            params: { kind, description: description.trim(), severity: null, siteId: reportSiteId, workGroupId },
+          });
+          setSubmittedTo(orgName);
+        }
+        setReference(null);
+        setQueuedOffline(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setSubmitted(true);
+        return;
+      }
 
       const photoPaths = await photoPickerRef.current?.getPhotoUrls() ?? [];
 
@@ -238,6 +281,7 @@ export default function ReportIssueScreen() {
     setReporterName('');
     photoPickerRef.current?.reset();
     setSubmitted(false);
+    setQueuedOffline(false);
     setSubmittedTo(null);
     setReference(null);
     clearTarget();
@@ -251,9 +295,13 @@ export default function ReportIssueScreen() {
         </View>
         <View style={styles.successContainer}>
           <HeartbeatIcon />
-          <Text style={styles.successTitle}>Got it, thanks for flagging this.</Text>
+          <Text style={styles.successTitle}>
+            {queuedOffline ? 'Saved — no signal right now' : 'Got it, thanks for flagging this.'}
+          </Text>
           <Text style={styles.successMessage}>
-            {reference ?? 'Your snag'} is on its way{submittedTo ? ` to ${submittedTo}` : ''} — the team will take a look.
+            {queuedOffline
+              ? `Your report is saved on this device and will send automatically${submittedTo ? ` to ${submittedTo}` : ''} as soon as you're back online.`
+              : `${reference ?? 'Your snag'} is on its way${submittedTo ? ` to ${submittedTo}` : ''} — the team will take a look.`}
           </Text>
           <Button label="Report Another Snag" onPress={resetForm} fullWidth />
         </View>
@@ -335,7 +383,7 @@ export default function ReportIssueScreen() {
           </TouchableOpacity>
         )}
 
-        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} onBlockingChange={setPhotosBlocked} />
+        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} />
 
         {/* Description — the only required field on the fast path */}
         <View style={styles.fieldGroup}>
@@ -395,6 +443,13 @@ export default function ReportIssueScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>Type</Text>
             <Chip options={KIND_OPTIONS} value={kind} onChange={setKind} variant="segmented" />
+          </View>
+        )}
+
+        {isOffline && (
+          <View style={styles.offlineHint}>
+            <Icon name="cloud-offline-outline" size="sm" color={Colors.textSecondary} />
+            <Text style={styles.offlineHintText}>No connection — this will save on your device and send automatically once you're back online.</Text>
           </View>
         )}
 
@@ -734,6 +789,21 @@ const styles = StyleSheet.create({
   hazardHint: {
     fontSize: Typography.xs,
     color: Colors.textMuted,
+  },
+  offlineHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.sm,
+  },
+  offlineHintText: {
+    flex: 1,
+    fontSize: Typography.xs,
+    color: Colors.textSecondary,
   },
 
   // Success confirmation

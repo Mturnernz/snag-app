@@ -91,6 +91,9 @@ export interface Snag {
   is_notifiable: boolean;
   notifiable_marked_by: string | null;
   notifiable_marked_at: string | null;
+  notifying_org_id: string | null;
+  notifying_pcbu_note: string | null;
+  notifying_org_name?: string | null;
   is_public_submission?: boolean;
   resolved_by: string | null;
   resolved_at: string | null;

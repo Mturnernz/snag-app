@@ -28,8 +28,9 @@ interface Props {
 }
 
 // Minimal serious-lane investigation surface: enough to clear the resolve gate
-// (checklist + witness + evidence + root cause) without leaving the app. Full
-// RCA (5 Whys), corrective actions and debriefs stay on the web app.
+// (checklist + witness + evidence + root cause) without leaving the app. The
+// delegated RCA (5 Whys), corrective actions, and debriefs are separate
+// panels on IssueDetailScreen (RcaPanel, CorrectiveActionsPanel, DebriefPanel).
 export default function InvestigationPanel({ issueId, orgId, state, onChanged }: Props) {
   const { showToast } = useToast();
 

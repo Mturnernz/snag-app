@@ -38,6 +38,7 @@ import InvestigationPanel from '../components/InvestigationPanel';
 import NotifiableEventPanel from '../components/NotifiableEventPanel';
 import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
+import DebriefPanel from '../components/DebriefPanel';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -65,6 +66,9 @@ interface IssueDetail {
   is_notifiable: boolean;
   notifiable_marked_by: string | null;
   notifiable_marked_at: string | null;
+  notifying_org_id: string | null;
+  notifying_pcbu_note: string | null;
+  notifying_org_name?: string | null;
   created_at: string;
   reporter?: { id: string; name: string };
   owner?: { id: string; name: string } | null;
@@ -234,7 +238,7 @@ export default function IssueDetailScreen() {
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count, is_notifiable, notifiable_marked_by, notifiable_marked_at')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count, is_notifiable, notifiable_marked_by, notifiable_marked_at, notifying_org_id, notifying_pcbu_note, notifying_org_name')
       .eq('id', issueId)
       .single();
 
@@ -589,6 +593,9 @@ export default function IssueDetailScreen() {
               issueId={issue.id}
               isNotifiable={issue.is_notifiable}
               notifiableMarkedAt={issue.notifiable_marked_at}
+              notifyingOrgId={issue.notifying_org_id}
+              notifyingOrgName={issue.notifying_org_name}
+              notifyingPcbuNote={issue.notifying_pcbu_note}
               canEdit={canEdit}
               onChanged={() => { fetchIssue(); fetchActivity(); }}
             />
@@ -630,6 +637,18 @@ export default function IssueDetailScreen() {
               currentUserId={currentUserId}
               assignees={siteAssignees}
               onChanged={() => { fetchIssue(); fetchActivity(); }}
+            />
+          )}
+
+          {/* Debriefs — the record-keeping half of the investigate-then-
+              change loop; RCA/corrective actions already cover the other
+              two steps. Any number of debriefs, any status, in-app. */}
+          {isSerious && isOrgMember && (
+            <DebriefPanel
+              issueId={issue.id}
+              canEdit={canEdit}
+              orgMembers={orgMembers}
+              onChanged={() => { fetchActivity(); }}
             />
           )}
 

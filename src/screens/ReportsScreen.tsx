@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { supabase, getOrgStats, OrgStats } from '../lib/supabase';
+import { supabase, getOrgStats, OrgStats, exportGovernanceReport } from '../lib/supabase';
 import {
   STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
-  SnagStatus, SnagKind, SnagSeverity,
+  SnagStatus, SnagKind, SnagSeverity, UserRole,
 } from '../types';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
+import Button from '../components/Button';
+import { useToast } from '../hooks/useToast';
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -73,9 +75,12 @@ function severityColor(s: SnagSeverity): string {
 
 export default function ReportsScreen() {
   const insets = useSafeAreaInsets();
+  const { showToast } = useToast();
   const [stats, setStats] = useState<OrgStats | null>(null);
   const [orgName, setOrgName] = useState('');
+  const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     load();
@@ -87,15 +92,28 @@ export default function ReportsScreen() {
 
     const { data } = await supabase
       .from('profiles')
-      .select('org_id, organisation:organisations!profiles_org_id_fkey(name)')
+      .select('org_id, role, organisation:organisations!profiles_org_id_fkey(name)')
       .eq('id', user.id)
       .single();
 
     if (data?.org_id) {
       setOrgName((data.organisation as any)?.name ?? '');
+      setRole(data.role);
       setStats(await getOrgStats(data.org_id));
     }
     setLoading(false);
+  }
+
+  async function handleExportGovernanceReport() {
+    if (exportingPdf) return;
+    setExportingPdf(true);
+    const { signedUrl, error } = await exportGovernanceReport();
+    setExportingPdf(false);
+    if (error || !signedUrl) {
+      showToast(error?.message ?? 'Could not export the governance report');
+      return;
+    }
+    Linking.openURL(signedUrl);
   }
 
   if (loading) {
@@ -118,6 +136,20 @@ export default function ReportsScreen() {
       {orgName ? <Text style={styles.headerSub}>{orgName}</Text> : null}
 
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}>
+
+        {/* Governance due-diligence export — admin only, same gate as the
+            edge function itself, so this never appears for someone who'd
+            just get a 403. */}
+        {role === 'officer_admin' && (
+          <Button
+            label="Export governance report (PDF)"
+            variant="outline"
+            icon="document-text-outline"
+            onPress={handleExportGovernanceReport}
+            loading={exportingPdf}
+            fullWidth
+          />
+        )}
 
         {/* Summary row */}
         <View style={styles.summaryRow}>

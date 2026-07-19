@@ -1031,6 +1031,95 @@ export async function exportInvestigation(
   return { signedUrl: data?.signedUrl ?? null, error: null };
 }
 
+// Builds the quarterly governance-report PDF via the export-governance-report
+// edge function and returns a 1-hour signed URL to it. Defaults to the
+// trailing 90 days when no period is given. The function re-checks
+// officer_admin itself, so a failed check surfaces here as `error`.
+export async function exportGovernanceReport(
+  periodStart?: string,
+  periodEnd?: string
+): Promise<{ signedUrl: string | null; error: any }> {
+  const { data, error } = await supabase.functions.invoke('export-governance-report', {
+    body: { period_start: periodStart, period_end: periodEnd },
+  });
+  if (error) return { signedUrl: null, error };
+  return { signedUrl: data?.signedUrl ?? null, error: null };
+}
+
+// ─── Multi-PCBU notification nomination ────────────────────────────────────────
+export async function nominateNotifyingPcbu(snagId: string, orgId: string | null, note: string | null) {
+  return supabase.rpc('nominate_notifying_pcbu', { p_snag_id: snagId, p_org_id: orgId, p_note: note });
+}
+
+// ─── Debriefs ───────────────────────────────────────────────────────────────────
+export async function startDebrief(snagId: string, format: 'hot' | 'formal') {
+  return supabase.rpc('start_debrief', { p_snag_id: snagId, p_format: format });
+}
+
+export async function addDebriefFinding(debriefId: string, findingText: string) {
+  return supabase.rpc('add_debrief_finding', { p_debrief_id: debriefId, p_finding_text: findingText });
+}
+
+export async function addDebriefAttendee(debriefId: string, profileId: string) {
+  return supabase.rpc('add_debrief_attendee', { p_debrief_id: debriefId, p_profile_id: profileId });
+}
+
+export async function addDebriefLesson(debriefId: string, lessonText: string) {
+  return supabase.rpc('add_debrief_lesson', { p_debrief_id: debriefId, p_lesson_text: lessonText });
+}
+
+export async function completeDebrief(debriefId: string) {
+  return supabase.rpc('complete_debrief', { p_debrief_id: debriefId });
+}
+
+export interface DebriefFinding {
+  id: string;
+  finding_text: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface DebriefLesson {
+  id: string;
+  lesson_text: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface SnagDebrief {
+  id: string;
+  format: 'hot' | 'formal';
+  status: 'in_progress' | 'completed';
+  startedBy: string;
+  startedAt: string;
+  completedAt: string | null;
+  findings: DebriefFinding[];
+  attendeeIds: string[];
+  lessons: DebriefLesson[];
+}
+
+// Reads every debrief on a snag (any number allowed, any status), newest
+// first — mirrors getSnagRca's read-and-shape pattern.
+export async function getSnagDebriefs(snagId: string): Promise<SnagDebrief[]> {
+  const { data } = await supabase
+    .from('snag_debriefs')
+    .select('id, format, status, started_by, started_at, completed_at, debrief_findings(id, finding_text, created_by, created_at), debrief_attendees(profile_id), debrief_lessons(id, lesson_text, created_by, created_at)')
+    .eq('snag_id', snagId)
+    .order('started_at', { ascending: false });
+
+  return (data ?? []).map((d: any) => ({
+    id: d.id,
+    format: d.format,
+    status: d.status,
+    startedBy: d.started_by,
+    startedAt: d.started_at,
+    completedAt: d.completed_at,
+    findings: d.debrief_findings ?? [],
+    attendeeIds: (d.debrief_attendees ?? []).map((a: any) => a.profile_id),
+    lessons: d.debrief_lessons ?? [],
+  }));
+}
+
 // ─── Comment helpers ──────────────────────────────────────────────────────────
 
 export async function addComment(snagId: string, body: string, mentionedUserIds: string[] = []) {

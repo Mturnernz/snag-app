@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 
-import { setNotifiableFlag } from '../lib/supabase';
+import { setNotifiableFlag, nominateNotifyingPcbu, getMemberships, Membership } from '../lib/supabase';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { useToast } from '../hooks/useToast';
 import Card from './Card';
@@ -12,6 +12,11 @@ interface Props {
   issueId: string;
   isNotifiable: boolean;
   notifiableMarkedAt: string | null;
+  /** Multi-PCBU notification nomination — who's taken on telling WorkSafe,
+   *  when more than one PCBU is involved (e.g. a contractor on this site). */
+  notifyingOrgId: string | null;
+  notifyingOrgName?: string | null;
+  notifyingPcbuNote: string | null;
   /** Supervisor/admin gate — same as InvestigationPanel's canManageInvestigation. */
   canEdit: boolean;
   onChanged: () => void;
@@ -34,12 +39,32 @@ const NOTIFIABLE_CRITERIA = [
 
 type Decision = 'yes' | 'no' | null;
 
-export default function NotifiableEventPanel({ issueId, isNotifiable, notifiableMarkedAt, canEdit, onChanged }: Props) {
+export default function NotifiableEventPanel({
+  issueId, isNotifiable, notifiableMarkedAt,
+  notifyingOrgId, notifyingOrgName, notifyingPcbuNote, canEdit, onChanged,
+}: Props) {
   const { showToast } = useToast();
   const [busy, setBusy] = useState<Decision>(null);
   const [showUnsureNote, setShowUnsureNote] = useState(false);
 
+  // Other organisations the current user personally belongs to — a
+  // realistic quick-pick when the same person works across the customer's
+  // org and a contractor's, since site_members has no per-row org context
+  // to derive this automatically. A free-text fallback covers everyone else.
+  const [otherOrgs, setOtherOrgs] = useState<Membership[]>([]);
+  const [showNominateForm, setShowNominateForm] = useState(false);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [pcbuNote, setPcbuNote] = useState('');
+  const [nominating, setNominating] = useState(false);
+
   const decided = isNotifiable || notifiableMarkedAt !== null;
+  const hasNomination = Boolean(notifyingOrgId || notifyingPcbuNote);
+
+  useEffect(() => {
+    if (isNotifiable && canEdit) {
+      getMemberships().then((all) => setOtherOrgs(all.filter((m) => !m.is_active)));
+    }
+  }, [isNotifiable, canEdit]);
 
   async function handleDecision(value: boolean) {
     setBusy(value ? 'yes' : 'no');
@@ -47,6 +72,24 @@ export default function NotifiableEventPanel({ issueId, isNotifiable, notifiable
     setBusy(null);
     if (error) showToast(error.message ?? 'Could not save this decision');
     else onChanged();
+  }
+
+  async function handleNominate() {
+    if (!selectedOrgId && !pcbuNote.trim()) {
+      showToast('Pick an organisation or enter a name');
+      return;
+    }
+    setNominating(true);
+    const { error } = await nominateNotifyingPcbu(issueId, selectedOrgId, selectedOrgId ? null : pcbuNote.trim());
+    setNominating(false);
+    if (error) {
+      showToast(error.message ?? 'Could not save the notifying PCBU');
+    } else {
+      setShowNominateForm(false);
+      setSelectedOrgId(null);
+      setPcbuNote('');
+      onChanged();
+    }
   }
 
   return (
@@ -79,6 +122,70 @@ export default function NotifiableEventPanel({ issueId, isNotifiable, notifiable
               loading={busy === 'no'}
               fullWidth
             />
+          )}
+
+          {/* Multi-PCBU notification nomination — only one notification is
+              needed per event even with multiple PCBUs involved, but all
+              remain responsible for making sure it happens. */}
+          <View style={styles.divider} />
+          {hasNomination ? (
+            <View style={styles.nominationBlock}>
+              <Text style={styles.nominationLabel}>Notifying PCBU</Text>
+              <Text style={styles.decidedMeta}>{notifyingOrgName || notifyingPcbuNote}</Text>
+              {canEdit && (
+                <Button
+                  label="Change"
+                  variant="ghost"
+                  onPress={() => setShowNominateForm(true)}
+                />
+              )}
+            </View>
+          ) : (
+            <View style={styles.nominationBlock}>
+              <Text style={styles.nominationLabel}>Who's notifying WorkSafe?</Text>
+              <Text style={styles.decidedMeta}>
+                If a contractor or another business is involved, record who's taking this on —
+                only one notification is needed, but everyone stays responsible for it happening.
+              </Text>
+              {canEdit && !showNominateForm && (
+                <Button label="Record notifying PCBU" variant="outline" onPress={() => setShowNominateForm(true)} fullWidth />
+              )}
+            </View>
+          )}
+          {canEdit && showNominateForm && (
+            <View style={styles.nominateForm}>
+              {otherOrgs.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+                  {otherOrgs.map((m) => (
+                    <TouchableOpacity
+                      key={m.org_id}
+                      onPress={() => setSelectedOrgId(m.org_id)}
+                      style={[styles.optionChip, selectedOrgId === m.org_id && styles.optionChipActive]}
+                    >
+                      <Text style={[styles.optionChipText, selectedOrgId === m.org_id && styles.optionChipTextActive]}>
+                        {m.org_name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              <TextInput
+                style={styles.input}
+                placeholder="Or type the PCBU's name"
+                placeholderTextColor={Colors.textMuted}
+                value={pcbuNote}
+                onChangeText={(t) => { setPcbuNote(t); setSelectedOrgId(null); }}
+              />
+              <View style={styles.decisionRow}>
+                <Button
+                  label="Cancel"
+                  variant="outline"
+                  onPress={() => { setShowNominateForm(false); setSelectedOrgId(null); setPcbuNote(''); }}
+                  style={styles.decisionButton}
+                />
+                <Button label="Save" onPress={handleNominate} loading={nominating} style={styles.decisionButton} />
+              </View>
+            </View>
           )}
         </View>
       ) : notifiableMarkedAt !== null ? (
@@ -218,5 +325,41 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.serious,
     lineHeight: 19,
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: Spacing.xs,
+  },
+  nominationBlock: { gap: Spacing.xs },
+  nominationLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  nominateForm: { gap: Spacing.sm, marginTop: Spacing.xs },
+  optionRow: { gap: Spacing.sm, paddingVertical: Spacing.xs },
+  optionChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.chip,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  optionChipActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
+  optionChipText: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium },
+  optionChipTextActive: { color: Colors.primary },
+  input: {
+    minHeight: 44,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.input,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
   },
 });

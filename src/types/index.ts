@@ -89,6 +89,8 @@ export interface Snag {
   resolution_note: string | null;
   retained_until: string;
   is_notifiable: boolean;
+  notifiable_marked_by: string | null;
+  notifiable_marked_at: string | null;
   is_public_submission?: boolean;
   resolved_by: string | null;
   resolved_at: string | null;

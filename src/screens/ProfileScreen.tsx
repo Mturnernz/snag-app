@@ -320,6 +320,24 @@ export default function ProfileScreen() {
           />
         </Card>
 
+        {/* Retention policy — general guidance, not legal advice. Serious/
+            notifiable records are kept in full for defensibility; ordinary
+            niggle detail is minimised after a few years rather than kept
+            forever. See the compliance proposal for the underlying policy. */}
+        <Card variant="elevated" style={styles.retentionCard}>
+          <View style={styles.retentionHeader}>
+            <Icon name="shield-checkmark-outline" size="sm" color={Colors.textMuted} />
+            <Text style={styles.retentionTitle}>Data & retention</Text>
+          </View>
+          <Text style={styles.retentionText}>
+            Health & safety records (hazards, incidents, and anything flagged notifiable) are
+            kept in full — this is what NZ's Health and Safety at Work Act requires. Ordinary,
+            resolved everyday snags have their description and photos minimised after a few
+            years to limit how long personal detail is kept, in line with the Privacy Act. This
+            is general guidance, not legal advice.
+          </Text>
+        </Card>
+
         <Button
           label="Sign Out"
           variant="dangerOutline"
@@ -544,4 +562,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
+  // Retention policy note
+  retentionCard: {
+    gap: Spacing.xs,
+  },
+  retentionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  retentionTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  retentionText: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    lineHeight: 19,
+  },
 });

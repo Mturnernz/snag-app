@@ -35,6 +35,7 @@ import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
 import ManageIssuePanel from '../components/ManageIssuePanel';
 import InvestigationPanel from '../components/InvestigationPanel';
+import NotifiableEventPanel from '../components/NotifiableEventPanel';
 import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
 import ScreenHeader from '../components/ScreenHeader';
@@ -61,6 +62,9 @@ interface IssueDetail {
   lane: SnagLane;
   severity: SnagSeverity | null;
   is_public_submission?: boolean;
+  is_notifiable: boolean;
+  notifiable_marked_by: string | null;
+  notifiable_marked_at: string | null;
   created_at: string;
   reporter?: { id: string; name: string };
   owner?: { id: string; name: string } | null;
@@ -230,7 +234,7 @@ export default function IssueDetailScreen() {
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count, is_notifiable, notifiable_marked_by, notifiable_marked_at')
       .eq('id', issueId)
       .single();
 
@@ -576,6 +580,18 @@ export default function IssueDetailScreen() {
                 </View>
               ))}
             </Card>
+          )}
+
+          {/* Notifiable-event decision — ahead of the investigation checklist,
+              since "preserve the scene" below is how the decision gets acted on. */}
+          {canManageInvestigation && (
+            <NotifiableEventPanel
+              issueId={issue.id}
+              isNotifiable={issue.is_notifiable}
+              notifiableMarkedAt={issue.notifiable_marked_at}
+              canEdit={canEdit}
+              onChanged={() => { fetchIssue(); fetchActivity(); }}
+            />
           )}
 
           {/* Serious-lane investigation — clear the resolve gate in-app */}

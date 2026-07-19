@@ -909,6 +909,11 @@ export async function setRootCause(snagId: string, rootCauseText: string) {
   return supabase.rpc('set_root_cause', { p_snag_id: snagId, p_root_cause_text: rootCauseText });
 }
 
+// ─── Notifiable-event decision support ─────────────────────────────────────────
+export async function setNotifiableFlag(snagId: string, value: boolean) {
+  return supabase.rpc('set_notifiable_flag', { p_snag_id: snagId, p_value: value });
+}
+
 export interface InvestigationState {
   completedSteps: ChecklistStep[];
   witnesses: WitnessStatement[];

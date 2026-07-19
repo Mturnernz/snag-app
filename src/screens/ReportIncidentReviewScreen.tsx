@@ -40,7 +40,7 @@ function SeriousSuccessBlock({ reference, onDone }: { reference: string | null; 
       <Icon name="shield-checkmark-outline" size="xxl" color={Colors.serious} />
       <Text style={styles.successTitle}>This has been logged</Text>
       <Text style={styles.successMessage}>
-        {reference ? `${reference} is now` : 'This is now'} a formal record, and the right people have been notified.
+        {reference ? `${reference} is now` : 'This is now'} a formal record, and your organisation's health & safety team has been notified.
       </Text>
       <Button label="Done" variant="serious" onPress={onDone} fullWidth />
     </Animated.View>

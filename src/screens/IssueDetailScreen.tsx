@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   View,
@@ -39,6 +39,8 @@ import NotifiableEventPanel from '../components/NotifiableEventPanel';
 import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
 import DebriefPanel from '../components/DebriefPanel';
+import StepCard, { StepStatus } from '../components/StepCard';
+import ProgressStrip from '../components/ProgressStrip';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -209,6 +211,69 @@ export default function IssueDetailScreen() {
   }, [canManageInvestigation, issueId]);
 
   useEffect(() => { fetchInvestigation(); }, [fetchInvestigation]);
+
+  // ── Guided serious-incident steps ─────────────────────────────────────────
+  // "Progress strip first, then this user's next step expanded, everything
+  // else collapsed" — MVP-SPEC's own UX north star, applied here for the
+  // first time. Steps toggle independently (not a strict accordion); the
+  // seeding effect below only sets the *initial* expanded step once per
+  // snag, so it never fights a manual toggle afterward.
+  type StepKey = 'notifiable' | 'investigation' | 'correctiveActions' | 'rca' | 'debrief';
+  const [stepExpanded, setStepExpanded] = useState<Record<StepKey, boolean>>({
+    notifiable: false, investigation: false, correctiveActions: false, rca: false, debrief: false,
+  });
+  const toggleStep = useCallback((key: string) => {
+    setStepExpanded((prev) => ({ ...prev, [key]: !prev[key as StepKey] }));
+  }, []);
+  const seededStepsFor = useRef<string | null>(null);
+
+  // RcaPanel/DebriefPanel/CorrectiveActionsPanel self-fetch, so they report
+  // their own coarse status up for the StepCard header — accurate for every
+  // org member, not just editors (who are the only ones the parent's own
+  // `investigation` state covers).
+  const [correctiveActionsStatus, setCorrectiveActionsStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'pending', summary: '' });
+  const [rcaStatus, setRcaStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'pending', summary: '' });
+  const [debriefStatus, setDebriefStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'optional', summary: '' });
+  const handleCorrectiveActionsStatusChange = useCallback((status: StepStatus, summary: string) => setCorrectiveActionsStatus({ status, summary }), []);
+  const handleRcaStatusChange = useCallback((status: StepStatus, summary: string) => setRcaStatus({ status, summary }), []);
+  const handleDebriefStatusChange = useCallback((status: StepStatus, summary: string) => setDebriefStatus({ status, summary }), []);
+
+  const notifiableDecided = Boolean(issue?.is_notifiable || issue?.notifiable_marked_at);
+  const notifiableStatus: StepStatus = notifiableDecided ? 'done' : 'pending';
+  const notifiableSummary = issue?.is_notifiable
+    ? 'Flagged as notifiable'
+    : issue?.notifiable_marked_at
+    ? 'Not notifiable'
+    : 'Needs a decision';
+
+  const investigationComplete = Boolean(
+    investigation && investigation.completedSteps.length >= 5 && investigation.witnesses.length > 0 &&
+    investigation.evidence.length > 0 && investigation.rootCause?.trim()
+  );
+  const investigationStatus: StepStatus = !investigation ? 'pending' : investigationComplete ? 'done' : 'in_progress';
+  const investigationSummary = !investigation
+    ? 'Not started'
+    : investigationComplete
+    ? 'Complete'
+    : `Checklist ${investigation.completedSteps.length}/5`;
+
+  // Seed the initial expanded step once per snag — editors only, since
+  // that's who Notifiable/Investigation are even shown to, and who the
+  // resolve-gate ordering is really guiding. Waits for `investigation` to
+  // resolve (it's null only until the first fetch completes).
+  useEffect(() => {
+    if (!issue || !canManageInvestigation || !investigation) return;
+    if (seededStepsFor.current === issue.id) return;
+    seededStepsFor.current = issue.id;
+
+    let current: StepKey | null = null;
+    if (!notifiableDecided) current = 'notifiable';
+    else if (!investigationComplete) current = 'investigation';
+    else if (investigation.openCorrectiveActions > 0) current = 'correctiveActions';
+    else if (issue.status === 'rca_pending') current = 'rca';
+
+    if (current) setStepExpanded((prev) => ({ ...prev, [current as StepKey]: true }));
+  }, [issue, investigation, canManageInvestigation, notifiableDecided, investigationComplete]);
 
   async function handleExportInvestigation() {
     if (exportingPdf) return;
@@ -586,29 +651,62 @@ export default function IssueDetailScreen() {
             </Card>
           )}
 
+          {/* Progress strip first, then this user's next step expanded,
+              everything else collapsed — MVP-SPEC's own UX north star. */}
+          {isSerious && isOrgMember && (
+            <ProgressStrip
+              items={[
+                ...(canManageInvestigation ? [{ key: 'notifiable', label: 'Notifiable', status: notifiableStatus }] : []),
+                ...(canManageInvestigation ? [{ key: 'investigation', label: 'Investigation', status: investigationStatus }] : []),
+                { key: 'correctiveActions', label: 'Corrective Actions', status: correctiveActionsStatus.status },
+                ...((issue.status === 'resolved' || issue.status === 'rca_pending')
+                  ? [{ key: 'rca', label: 'Root Cause', status: rcaStatus.status }]
+                  : []),
+                { key: 'debrief', label: 'Debrief', status: debriefStatus.status },
+              ]}
+              onPress={toggleStep}
+            />
+          )}
+
           {/* Notifiable-event decision — ahead of the investigation checklist,
               since "preserve the scene" below is how the decision gets acted on. */}
           {canManageInvestigation && (
-            <NotifiableEventPanel
-              issueId={issue.id}
-              isNotifiable={issue.is_notifiable}
-              notifiableMarkedAt={issue.notifiable_marked_at}
-              notifyingOrgId={issue.notifying_org_id}
-              notifyingOrgName={issue.notifying_org_name}
-              notifyingPcbuNote={issue.notifying_pcbu_note}
-              canEdit={canEdit}
-              onChanged={() => { fetchIssue(); fetchActivity(); }}
-            />
+            <StepCard
+              title="Notifiable Event"
+              status={notifiableStatus}
+              summary={notifiableSummary}
+              expanded={stepExpanded.notifiable}
+              onToggle={() => toggleStep('notifiable')}
+            >
+              <NotifiableEventPanel
+                issueId={issue.id}
+                isNotifiable={issue.is_notifiable}
+                notifiableMarkedAt={issue.notifiable_marked_at}
+                notifyingOrgId={issue.notifying_org_id}
+                notifyingOrgName={issue.notifying_org_name}
+                notifyingPcbuNote={issue.notifying_pcbu_note}
+                canEdit={canEdit}
+                onChanged={() => { fetchIssue(); fetchActivity(); }}
+              />
+            </StepCard>
           )}
 
           {/* Serious-lane investigation — clear the resolve gate in-app */}
           {canManageInvestigation && investigation && (
-            <InvestigationPanel
-              issueId={issue.id}
-              orgId={issue.org_id}
-              state={investigation}
-              onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
-            />
+            <StepCard
+              title="Investigation"
+              status={investigationStatus}
+              summary={investigationSummary}
+              expanded={stepExpanded.investigation}
+              onToggle={() => toggleStep('investigation')}
+            >
+              <InvestigationPanel
+                issueId={issue.id}
+                orgId={issue.org_id}
+                state={investigation}
+                onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
+              />
+            </StepCard>
           )}
 
           {/* Corrective actions — visible to any org member on the snag's own
@@ -616,40 +714,67 @@ export default function IssueDetailScreen() {
               still needs to see and complete their own assigned action;
               creating and verifying stay canEdit-gated inside the panel. */}
           {isSerious && isOrgMember && (
-            <CorrectiveActionsPanel
-              issueId={issue.id}
-              orgId={issue.org_id}
-              canEdit={canEdit}
-              currentUserId={currentUserId}
-              assignees={siteAssignees}
-              onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
-            />
+            <StepCard
+              title="Corrective Actions"
+              status={correctiveActionsStatus.status}
+              summary={correctiveActionsStatus.summary}
+              expanded={stepExpanded.correctiveActions}
+              onToggle={() => toggleStep('correctiveActions')}
+            >
+              <CorrectiveActionsPanel
+                issueId={issue.id}
+                orgId={issue.org_id}
+                canEdit={canEdit}
+                currentUserId={currentUserId}
+                assignees={siteAssignees}
+                onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
+                onStatusChange={handleCorrectiveActionsStatusChange}
+              />
+            </StepCard>
           )}
 
           {/* Root cause analysis — delegated once a serious snag is resolved;
               a supervisor/admin assigns it, the assignee answers 5 Whys, then
               a supervisor/admin accepts or sends it back. */}
           {isSerious && isOrgMember && (issue.status === 'resolved' || issue.status === 'rca_pending') && (
-            <RcaPanel
-              issueId={issue.id}
-              status={issue.status}
-              canEdit={canEdit}
-              currentUserId={currentUserId}
-              assignees={siteAssignees}
-              onChanged={() => { fetchIssue(); fetchActivity(); }}
-            />
+            <StepCard
+              title="Root Cause Analysis"
+              status={rcaStatus.status}
+              summary={rcaStatus.summary}
+              expanded={stepExpanded.rca}
+              onToggle={() => toggleStep('rca')}
+            >
+              <RcaPanel
+                issueId={issue.id}
+                status={issue.status}
+                canEdit={canEdit}
+                currentUserId={currentUserId}
+                assignees={siteAssignees}
+                onChanged={() => { fetchIssue(); fetchActivity(); }}
+                onStatusChange={handleRcaStatusChange}
+              />
+            </StepCard>
           )}
 
           {/* Debriefs — the record-keeping half of the investigate-then-
               change loop; RCA/corrective actions already cover the other
               two steps. Any number of debriefs, any status, in-app. */}
           {isSerious && isOrgMember && (
-            <DebriefPanel
-              issueId={issue.id}
-              canEdit={canEdit}
-              orgMembers={orgMembers}
-              onChanged={() => { fetchActivity(); }}
-            />
+            <StepCard
+              title="Debrief"
+              status={debriefStatus.status}
+              summary={debriefStatus.summary}
+              expanded={stepExpanded.debrief}
+              onToggle={() => toggleStep('debrief')}
+            >
+              <DebriefPanel
+                issueId={issue.id}
+                canEdit={canEdit}
+                orgMembers={orgMembers}
+                onChanged={() => { fetchActivity(); }}
+                onStatusChange={handleDebriefStatusChange}
+              />
+            </StepCard>
           )}
 
           {/* Export investigation — same gate as the edge function itself

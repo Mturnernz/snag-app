@@ -8,9 +8,9 @@ import {
   SnagRca, SiteAssignee,
 } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
-import Card from './Card';
 import Button from './Button';
 import Icon from './Icon';
+import { StepStatus } from './StepCard';
 
 const WHY_INDICES = [1, 2, 3, 4, 5];
 
@@ -39,9 +39,13 @@ interface Props {
   /** Called after any action that could change the snag's own status
    *  (assign, accept) so the parent re-fetches the issue. */
   onChanged: () => void;
+  /** Reports a coarse status/summary up whenever the RCA state is (re)fetched,
+   *  so the parent's StepCard header can reflect it without duplicating the
+   *  getSnagRca fetch itself — same idea as onChanged, just for display. */
+  onStatusChange?: (status: StepStatus, summary: string) => void;
 }
 
-export default function RcaPanel({ issueId, status, canEdit, currentUserId, assignees, onChanged }: Props) {
+export default function RcaPanel({ issueId, status, canEdit, currentUserId, assignees, onChanged, onStatusChange }: Props) {
   const { showToast } = useToast();
 
   const [rca, setRca] = useState<SnagRca | null>(null);
@@ -76,7 +80,24 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
     }
     setWhyDrafts(drafts);
     setLoaded(true);
-  }, [issueId]);
+
+    if (status === 'resolved') {
+      if (data?.status === 'accepted') {
+        onStatusChange?.('done', `Completed by ${assignees.find((a) => a.id === data.assignedTo)?.name ?? 'Unknown'}`);
+      } else {
+        onStatusChange?.('pending', 'Not started');
+      }
+    } else if (status === 'rca_pending') {
+      const assigneeName = data ? assignees.find((a) => a.id === data.assignedTo)?.name ?? 'Unknown' : 'Unknown';
+      if (data?.status === 'submitted') onStatusChange?.('in_progress', 'Submitted — awaiting review');
+      else if (data?.status === 'rejected') onStatusChange?.('in_progress', 'Sent back — needs another look');
+      else onStatusChange?.('in_progress', `Assigned to ${assigneeName}`);
+    }
+    // onStatusChange deliberately excluded — the parent passes a stable,
+    // useCallback-memoized handler, and excluding it here avoids re-fetching
+    // RCA state if that identity were ever to change for an unrelated reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issueId, status, assignees]);
 
   useEffect(() => { fetchRca(); }, [fetchRca, status]);
 
@@ -211,9 +232,7 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
     if (!canEdit && !hasAccepted) return null;
 
     return (
-      <Card variant="elevated" style={styles.card}>
-        <Text style={styles.panelLabel}>ROOT CAUSE ANALYSIS</Text>
-
+      <>
         {hasAccepted && rca && (
           <View style={styles.completedBlock}>
             <Text style={styles.completedText}>
@@ -272,7 +291,7 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
             </View>
           </>
         )}
-      </Card>
+      </>
     );
   }
 
@@ -284,9 +303,7 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
     const canReassign = canEdit && rca.status !== 'submitted';
 
     return (
-      <Card variant="elevated" style={styles.card}>
-        <Text style={styles.panelLabel}>ROOT CAUSE ANALYSIS</Text>
-
+      <>
         {/* Recovery actions — supervisor/admin only. Handles the case where
             the assignee has left or gone quiet, so the snag doesn't get
             stuck at rca_pending forever. */}
@@ -464,7 +481,7 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
             </View>
           </KeyboardAvoidingView>
         </Modal>
-      </Card>
+      </>
     );
   }
 
@@ -472,13 +489,6 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
 }
 
 const styles = StyleSheet.create({
-  card: { gap: Spacing.sm, marginTop: Spacing.sm },
-  panelLabel: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    color: Colors.textMuted,
-    letterSpacing: 0.8,
-  },
   hint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
 
   rowButtons: { flexDirection: 'row', gap: Spacing.sm },

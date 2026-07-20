@@ -4,7 +4,6 @@ import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet } from 
 import { setNotifiableFlag, nominateNotifyingPcbu, getMemberships, Membership } from '../lib/supabase';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { useToast } from '../hooks/useToast';
-import Card from './Card';
 import Button from './Button';
 import Icon from './Icon';
 
@@ -93,9 +92,7 @@ export default function NotifiableEventPanel({
   }
 
   return (
-    <Card variant="elevated" style={styles.card}>
-      <Text style={styles.panelLabel}>NOTIFIABLE EVENT</Text>
-
+    <>
       {isNotifiable ? (
         <View style={styles.decidedBlock}>
           <View style={styles.decidedRow}>
@@ -257,19 +254,11 @@ export default function NotifiableEventPanel({
           )}
         </View>
       )}
-    </Card>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { gap: Spacing.sm, marginTop: Spacing.sm },
-  panelLabel: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    color: Colors.textMuted,
-    letterSpacing: 0.8,
-  },
-
   intro: {
     fontSize: Typography.sm,
     color: Colors.textSecondary,

@@ -8,8 +8,8 @@ import {
   completeDebrief, SnagDebrief,
 } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
-import Card from './Card';
 import Button from './Button';
+import { StepStatus } from './StepCard';
 
 interface Props {
   issueId: string;
@@ -20,9 +20,12 @@ interface Props {
    *  @mention composer, no new query needed. */
   orgMembers: Profile[];
   onChanged: () => void;
+  /** Reports a coarse status/summary up whenever debriefs are (re)fetched —
+   *  same idea as RcaPanel's onStatusChange. */
+  onStatusChange?: (status: StepStatus, summary: string) => void;
 }
 
-export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged }: Props) {
+export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged, onStatusChange }: Props) {
   const { showToast } = useToast();
   const [debriefs, setDebriefs] = useState<SnagDebrief[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -36,8 +39,19 @@ export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged }
   const [attendeePickerFor, setAttendeePickerFor] = useState<string | null>(null);
 
   const fetchDebriefs = useCallback(async () => {
-    setDebriefs(await getSnagDebriefs(issueId));
+    const data = await getSnagDebriefs(issueId);
+    setDebriefs(data);
     setLoaded(true);
+
+    if (data.length === 0) {
+      onStatusChange?.('optional', 'None yet — optional');
+    } else if (data.some((d) => d.status === 'in_progress')) {
+      onStatusChange?.('in_progress', 'In progress');
+    } else {
+      onStatusChange?.('done', `${data.length} completed`);
+    }
+    // onStatusChange deliberately excluded — see RcaPanel for the same note.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issueId]);
 
   useEffect(() => { fetchDebriefs(); }, [fetchDebriefs]);
@@ -94,9 +108,7 @@ export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged }
   if (!canEdit && debriefs.length === 0) return null;
 
   return (
-    <Card variant="elevated" style={styles.card}>
-      <Text style={styles.panelLabel}>DEBRIEFS</Text>
-
+    <>
       {canEdit && (
         <View style={styles.startRow}>
           <Button
@@ -209,18 +221,11 @@ export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged }
           );
         })
       )}
-    </Card>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { gap: Spacing.sm, marginTop: Spacing.sm },
-  panelLabel: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    color: Colors.textMuted,
-    letterSpacing: 0.8,
-  },
   hint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
 
   startRow: { flexDirection: 'row', gap: Spacing.sm },

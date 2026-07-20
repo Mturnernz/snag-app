@@ -8,10 +8,10 @@ import {
   addCorrectiveActionEvidence, getCorrectiveActionEvidence, getEvidencePhotoUrl, SiteAssignee,
 } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
-import Card from './Card';
 import Button from './Button';
 import Icon from './Icon';
 import PhotoPicker, { PhotoPickerHandle } from './PhotoPicker';
+import { StepStatus } from './StepCard';
 
 interface Props {
   issueId: string;
@@ -27,6 +27,11 @@ interface Props {
   /** Called after any change so the parent can refetch investigation state
    *  (the resolve gate reads the same "done and verified" definition). */
   onChanged: () => void;
+  /** Reports a coarse status/summary up whenever actions are (re)fetched —
+   *  this panel self-fetches independently of the parent's investigation
+   *  state (which is editor-only), so every org member gets an accurate
+   *  StepCard summary, not just editors. Same idea as RcaPanel's. */
+  onStatusChange?: (status: StepStatus, summary: string) => void;
 }
 
 // YYYY-MM-DD only — no native date-picker dependency in this project yet;
@@ -38,7 +43,7 @@ function isOverdue(action: CorrectiveAction): boolean {
   return action.status === 'open' && action.due_date < new Date().toISOString().slice(0, 10);
 }
 
-export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, currentUserId, assignees, onChanged }: Props) {
+export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, currentUserId, assignees, onChanged, onStatusChange }: Props) {
   const { showToast } = useToast();
 
   const [actions, setActions] = useState<CorrectiveAction[]>([]);
@@ -59,8 +64,16 @@ export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, curren
   const [addingEvidence, setAddingEvidence] = useState(false);
 
   const fetchActions = useCallback(async () => {
-    setActions(await getCorrectiveActions(issueId));
+    const data = await getCorrectiveActions(issueId);
+    setActions(data);
     setLoaded(true);
+
+    const openCount = data.filter((a) => !(a.status === 'done' && a.verified_by)).length;
+    if (data.length === 0) onStatusChange?.('pending', 'None yet');
+    else if (openCount > 0) onStatusChange?.('in_progress', `${openCount} open`);
+    else onStatusChange?.('done', 'All verified');
+    // onStatusChange deliberately excluded — see RcaPanel for the same note.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issueId]);
 
   useEffect(() => { fetchActions(); }, [fetchActions]);
@@ -141,9 +154,7 @@ export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, curren
   if (!loaded) return null;
 
   return (
-    <Card variant="elevated" style={styles.card}>
-      <Text style={styles.panelLabel}>CORRECTIVE ACTIONS</Text>
-
+    <>
       {actions.length === 0 && !showCreateForm && (
         <Text style={styles.hint}>No corrective actions yet.</Text>
       )}
@@ -268,7 +279,7 @@ export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, curren
           </View>
         </View>
       )}
-    </Card>
+    </>
   );
 }
 
@@ -300,8 +311,6 @@ function EvidenceRow({ item }: { item: EvidenceItem }) {
 }
 
 const styles = StyleSheet.create({
-  card: { gap: Spacing.sm, marginTop: Spacing.sm },
-  panelLabel: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.textMuted, letterSpacing: 0.8 },
   hint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
   sectionTitle: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary, marginTop: Spacing.sm },
 

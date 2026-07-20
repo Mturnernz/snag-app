@@ -13,7 +13,6 @@ import {
 } from '../lib/supabase';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useToast } from '../hooks/useToast';
-import Card from './Card';
 import Button from './Button';
 import Icon from './Icon';
 import PhotoPicker, { PhotoPickerHandle } from './PhotoPicker';
@@ -119,9 +118,7 @@ export default function InvestigationPanel({ issueId, orgId, state, onChanged }:
   const hasRootCause = Boolean(state.rootCause && state.rootCause.trim());
 
   return (
-    <Card variant="elevated" style={styles.card}>
-      <Text style={styles.panelLabel}>INVESTIGATION</Text>
-
+    <>
       {/* Progress against the five resolve conditions */}
       <View style={styles.progressRow}>
         <ProgressPill label="Checklist" value={`${checklistDone}/5`} done={checklistDone >= 5} />
@@ -222,7 +219,7 @@ export default function InvestigationPanel({ issueId, orgId, state, onChanged }:
         textAlignVertical="top"
       />
       <Button label="Save root cause" variant="outline" onPress={handleSaveRootCause} loading={savingRootCause} fullWidth />
-    </Card>
+    </>
   );
 }
 
@@ -258,14 +255,6 @@ function EvidenceRow({ item }: { item: EvidenceItem }) {
 }
 
 const styles = StyleSheet.create({
-  card: { gap: Spacing.sm, marginTop: Spacing.sm },
-  panelLabel: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    color: Colors.textMuted,
-    letterSpacing: 0.8,
-  },
-
   progressRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
   pill: {
     flexDirection: 'row',

@@ -1,8 +1,11 @@
 # SNAG `apps/web` — Plan (Marketing + Supervisor Portal)
 
-Status: **draft for review — no code written yet.** Merges the Supabase-side investigation
-(`SNAG_WEB_APP_SUPABASE_FINDINGS.md`, pulled 2026-07-23 from the live `Snagv1` project) with a
-repo-side investigation done in Claude Code. Covers all of Step 1, then the Step 2 plan.
+Status: **built and deployed — all §10 open decisions resolved.** Started as a merge of the
+Supabase-side investigation (`SNAG_WEB_APP_SUPABASE_FINDINGS.md`, pulled 2026-07-23 from the live
+`Snagv1` project) with a repo-side investigation done in Claude Code (Step 1 + Step 2 plan below).
+The monorepo conversion, `apps/web` scaffold, and all four open decisions have since been
+implemented, merged to `main`, and deployed as two separate Netlify sites. What's left is scoped
+explicitly at the end of §10, not left ambiguous.
 
 ---
 
@@ -181,13 +184,10 @@ sits outside both since it's the on-ramp between them.
 
 **Genuine gaps — new read-only additions:**
 
-1. **Date-range / trend RPC** — `get_org_stats`/`get_site_breakdown` are snapshot-only. If the
-   reporting screen needs a period comparison (e.g. "this quarter vs last," a monthly trend
-   chart), that needs a new RPC, e.g. `get_org_snag_trend(p_org_id, p_start_date, p_end_date)`
-   bucketed by week/month. **Open question for whoever reviews this plan:** does the reporting
-   screen need trend/comparison, or is the current snapshot (which `ReportsScreen.tsx` already
-   renders) enough for v1? Recommend deferring this RPC until the reporting UI is scoped, rather
-   than building it speculatively.
+1. **Date-range / trend RPC — ✅ resolved (decision D3), built.** `get_org_stats`/`get_site_breakdown`
+   were snapshot-only; `get_org_snag_trend(p_org_id, p_start_date, p_end_date, p_bucket)` was added
+   (`supabase/migrations/20260722210000_org_snag_trend_rpc.sql`, applied to Snagv1) — counts by
+   status, bucketed by week or month. Wired into the reports page as a 90-day weekly trend chart.
 2. **CSV/raw-data export** — for a "wide table, one row per snag" export, `snags_with_details`
    may already be sufficient to join client-side; a flattened view
    (snag + site + org + RCA/debrief status in one row) is optional and only worth adding if the
@@ -210,21 +210,21 @@ Reuse the existing five private, org-folder-scoped buckets exactly as-is — sam
 
 `snag-photos`, `snag-evidence`, `investigation-files`, `governance-reports`, `work-group-images`.
 
-**Open question:** the brief's "upload documents" is ambiguous between two different things:
+**✅ Resolved (decision D2): general org document library, built.** The brief's "upload documents"
+was ambiguous between snag-scoped evidence (already covered by `snag-evidence`/`investigation-files`,
+no new work needed) and a general org-wide library (H&S policies, compliance certificates, induction
+packs — not tied to any single snag). Chose the latter. Added:
 
-- **Snag/investigation-scoped documents** (extra evidence, investigation attachments) → already
-  covered, use `snag-evidence` / `investigation-files` with the existing `add_evidence_item` /
-  `record_investigation_export` RPCs. No new bucket or migration.
-- **A general org document library** (H&S policies, compliance certificates, induction packs —
-  not tied to any single snag) → **does not exist today.** This would need a new bucket
-  (e.g. `org-documents`, same `{org_id}/...` policy pattern) plus a metadata table
-  (`org_documents`: id, org_id, uploaded_by, file_path, title, category, created_at) with RLS
-  scoped to `org_id = current_org_id()`, and a small set of RPCs/policies for
-  upload-record/list/delete.
-
-Recommend resolving this with whoever owns the portal requirements before scoping the
-`documents/` route in Section 2 — the folder structure above stays valid either way, but the
-second interpretation needs a migration (see Section 6) and the first doesn't.
+- A sixth bucket, `org-documents`, same `{org_id}/...` policy pattern as the existing five —
+  select open to any org member, insert/delete restricted to `supervisor`/`officer_admin`.
+- `org_documents` table (id, org_id, uploaded_by, file_path, title, category, created_at), RLS
+  scoped to `org_id = current_org_id()` for reads.
+- `create_org_document(p_file_path, p_title, p_category)` / `delete_org_document(p_document_id)`
+  RPCs (role-gated, audit-logged) — writes go through these, not direct table access, per the
+  repo's "RPC-only writes" convention.
+- All in `supabase/migrations/20260722200000_org_documents.sql`, applied to Snagv1.
+- `apps/web/src/app/(portal)/documents/` now a real page: upload (file + title + category),
+  list, delete — no longer a stub.
 
 ---
 
@@ -256,13 +256,13 @@ second interpretation needs a migration (see Section 6) and the first doesn't.
 - **Existing root `netlify.toml`** (RN-web export) needs its build command/publish path updated
   for the `apps/mobile` move regardless (`cd apps/mobile && npx expo export --platform web`,
   `publish = "apps/mobile/dist"`), independent of whether `apps/web` ships.
-- **Open decision, not a build detail:** two web surfaces will exist briefly — the existing
-  RN-web Netlify site (which already renders `AdminDashboardScreen`/`ReportsScreen` on wide
-  viewports) and the new Next.js portal. Recommend: once `apps/web`'s portal reaches parity with
-  what `AdminDashboardScreen`/`ReportsScreen` already do on web, stop pointing the RN-web Netlify
-  site at a public domain for supervisor use (keep it, if at all, as an internal/QA build) so
-  there's one supervisor-facing web surface, not two. This is a product/rollout call, not
-  something to decide inside this plan — flagging it so it doesn't get missed.
+- **✅ Resolved (decision D4): leave the RN-web Netlify site running for now.** Two web surfaces
+  exist side by side — the RN-web export (`AdminDashboardScreen`/`ReportsScreen` on wide
+  viewports) and the new `apps/web` portal. Deliberately not consolidated yet: `apps/web` is
+  currently read-heavy (dashboard/snags/reports/documents) and doesn't yet support the mutation
+  actions (assign, resolve, recategorise, etc.) supervisors rely on today, so pulling the RN-web
+  site off the public domain now would be a regression, not a cleanup. Revisit once `apps/web`
+  reaches real feature parity, not before.
 - `.github/workflows/eas-build.yml` (mobile EAS builds) needs its working directory updated for
   the `apps/mobile` move; unaffected otherwise.
 
@@ -272,19 +272,20 @@ second interpretation needs a migration (see Section 6) and the first doesn't.
 
 Per the repo's convention (standalone, snake_case, timestamped, one concern per file):
 
-1. **Deferred, not built now** — `<timestamp>_org_snag_trend_rpc.sql` (`get_org_snag_trend`) —
-   only once the reporting UI confirms it needs period/trend data (Section 4, gap 1).
-2. **Deferred, conditional** — `<timestamp>_org_documents_table.sql` +
-   `<timestamp>_org_documents_storage_policy.sql` — only if "upload documents" means a general
-   document library, not snag-scoped evidence (Section 5). Two migrations (table+RLS, then
-   storage policy) to match the existing split style (e.g. `rca_status_enum` before
-   `rca_tables_and_rpcs`).
+1. **✅ Applied** — `20260722200000_org_documents.sql` — `org_documents` table + RLS, the
+   `org-documents` bucket + policies, `create_org_document`/`delete_org_document` RPCs (decision
+   D2). One migration rather than the table/bucket split originally floated here, matching the
+   actual precedent (`20260719140000_governance_export.sql` does table+bucket+policy+RPC in one
+   file too — the RCA enum split was for a Postgres-specific reason, not a general rule).
+2. **✅ Applied** — `20260722210000_org_snag_trend_rpc.sql` — `get_org_snag_trend` (decision D3).
 3. **Nothing needed** for org sign-up, snag list/detail, dashboard snapshot, or the existing
    export pattern — all reuse existing RPCs/views/policies as documented in Sections 3–6.
 
-No migrations are proposed as part of this plan itself — both above are scoped but intentionally
-not written until the open questions they depend on are answered, per the brief's "do not start
-implementation until reviewed."
+Both migrations above were applied directly to the live Snagv1 project (`wpkdpukpllxuyqqlxkxf`)
+via the Supabase MCP; `mcp__Supabase__get_advisors` was checked afterward and only surfaced the
+same generic, already-present-elsewhere advisories (e.g. the anonymous-sign-in warning every
+`current_org_id()`-scoped table gets, since anon sign-in is enabled project-wide for QR public
+reporting) — nothing new.
 
 ---
 
@@ -296,14 +297,21 @@ auth system. No code written yet — this document only.
 
 ---
 
-## 10. Open decisions requiring sign-off before implementation starts
+## 10. Open decisions — all resolved
 
-1. **Approve the monorepo conversion** (Section 1) — moving the current root app to
-   `apps/mobile/`, introducing `packages/shared-types` and `packages/supabase-queries`, adding
-   npm workspaces. This is the prerequisite everything else sits on top of.
-2. **What "upload documents" means** (Section 5) — snag-scoped evidence (no new migration) vs. a
-   general org document library (needs a new bucket + table + policies).
-3. **Whether reporting needs trend/date-range data** (Section 4) — determines whether
-   `get_org_snag_trend` gets built now or deferred.
-4. **Fate of the existing RN-web Netlify deployment** once the portal reaches parity
-   (Section 7) — product/rollout decision, not a blocker for starting the build.
+1. **✅ Approved and built** — the monorepo conversion (Section 1): `apps/mobile/`,
+   `packages/shared-types`, `packages/supabase-queries`, npm workspaces. Shipped in two PRs
+   (#16 monorepo conversion, #17 `apps/web` scaffold), both merged to `main` and deployed.
+2. **✅ Decided: general org document library** (Section 5) — built, migration applied, real
+   upload/list/delete UI shipped (not the stub).
+3. **✅ Decided: build the trend RPC now** (Section 4) — `get_org_snag_trend` built, migration
+   applied, wired into the reports page as a 90-day weekly chart.
+4. **✅ Decided: leave the RN-web Netlify deployment running** (Section 7) — `apps/web` doesn't
+   have mutation actions (assign/resolve/recategorise/etc.) yet, so the old site stays live until
+   `apps/web` reaches real parity, not just read parity. Revisit then, not now.
+
+**What's genuinely still not built**, not because it's undecided but because it's out of this
+pass's scope: mutation actions on the portal's snag detail page (assign, resolve, recategorise,
+merge, RCA/debrief/CAPA actions — the detail page is read-only), CSV/raw-data export (Section 4,
+gap 2 — optional, `snags_with_details` likely sufficient), and the RN-web deprecation itself
+(blocked on the previous point).

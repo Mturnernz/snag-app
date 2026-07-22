@@ -1,0 +1,24 @@
+.pointGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-xl);
+  margin-bottom: var(--space-2xl);
+}
+
+.point {
+  display: flex;
+  gap: var(--space-md);
+  align-items: flex-start;
+}
+
+.point h3 {
+  font-size: var(--text-base);
+  margin-bottom: 4px;
+}
+
+.point p {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}

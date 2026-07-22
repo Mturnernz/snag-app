@@ -4,50 +4,59 @@ This file tells Claude Code everything it needs to know to work effectively on t
 
 ## What is SNAG?
 
-A React Native / Expo mobile app for workplace issue reporting. Workers photograph and report
+A React Native / Expo mobile app for workplace issue reporting, plus (as of the `apps/web`
+initiative) a Next.js marketing site and supervisor portal. Workers photograph and report
 problems (broken equipment, health & safety hazards, niggles). Managers can triage, assign,
-and resolve issues. Built on Supabase for auth, database, and file storage.
+and resolve issues. Both clients are built on the same Supabase project for auth, database,
+and file storage.
 
 ## Tech Stack
 
 | Layer | Choice |
 |---|---|
-| Mobile framework | Expo SDK 52 (React Native 0.76) |
+| Mobile framework | Expo SDK 52 (React Native 0.76), `apps/mobile` |
+| Web framework | Next.js (App Router), `apps/web` — see `SNAG_WEB_APP_PLAN.md` |
 | Language | TypeScript (strict mode) |
-| Navigation | React Navigation v6 — bottom tabs + native stack |
-| Backend | Supabase (Auth, Postgres, Storage) |
+| Navigation (mobile) | React Navigation v6 — bottom tabs + native stack |
+| Backend | Supabase (Auth, Postgres, Storage) — one project, shared by both apps |
 | State | React hooks (no external state library yet) |
+| Monorepo | npm workspaces (`apps/*`, `packages/*`) |
 
 ## Project Structure
 
+This is an **npm-workspaces monorepo** — run `npm install` once at the repo root, not inside
+individual apps/packages. See `SNAG_WEB_APP_PLAN.md` for the full rationale (the repo used to be
+a single flat Expo app; it was converted to make room for `apps/web`).
+
 ```
 snag/
-├── App.tsx                        # Entry point — NavigationContainer + SafeAreaProvider
-├── src/
-│   ├── constants/
-│   │   └── theme.ts               # ALL design tokens — colours, spacing, typography, radii
-│   ├── lib/
-│   │   └── supabase.ts            # Supabase client, auth helpers, storage upload
-│   ├── types/
-│   │   └── index.ts               # Shared TypeScript types, enums, display label maps
-│   ├── navigation/
-│   │   └── index.tsx              # RootNavigator (Stack) + MainTabNavigator (Bottom Tabs)
-│   ├── screens/
-│   │   ├── IssueListScreen.tsx    # Tab 1 — scrollable list with filter chips
-│   │   ├── ReportIssueScreen.tsx  # Tab 2 — photo + form to submit a new issue
-│   │   ├── IssueDetailScreen.tsx  # Pushed screen — full detail + comments
-│   │   └── ProfileScreen.tsx      # Tab 3 — user info, invite code, sign out
-│   └── components/
-│       ├── IssueCard.tsx          # List card: photo, title, badges, meta
-│       ├── StatusBadge.tsx        # Coloured pill: flagged / in_progress / resolved / rca_pending
-│       ├── PriorityBadge.tsx      # Coloured pill: severity (minor/moderate/injury/critical)
-│       └── CategoryBadge.tsx      # Coloured pill: fixit / improvement / hazard / incident
+├── package.json                   # workspace root: "workspaces": ["apps/*", "packages/*"]
+├── apps/
+│   ├── mobile/                    # the Expo app — was the repo root before the monorepo conversion
+│   │   ├── App.tsx                # Entry point — NavigationContainer + SafeAreaProvider
+│   │   ├── metro.config.js        # monorepo-aware resolver (watchFolders + nodeModulesPaths)
+│   │   ├── src/
+│   │   │   ├── constants/theme.ts # ALL design tokens — colours, spacing, typography, radii
+│   │   │   ├── lib/supabase.ts    # Supabase client, auth helpers, storage upload
+│   │   │   ├── types/index.ts     # re-exports @snag/shared-types (see packages/ below)
+│   │   │   ├── navigation/index.tsx
+│   │   │   ├── screens/           # IssueListScreen, ReportIssueScreen, IssueDetailScreen, ProfileScreen, ...
+│   │   │   └── components/        # IssueCard, StatusBadge, PriorityBadge, CategoryBadge, ...
+│   │   └── .env.example           # Copy to apps/mobile/.env — EXPO_PUBLIC_SUPABASE_* vars
+│   └── web/                       # Next.js app (marketing + supervisor portal) — not yet built
+├── packages/
+│   └── shared-types/              # @snag/shared-types — the canonical TS types (moved from
+│                                   # apps/mobile/src/types/index.ts); apps/mobile re-exports it
 ├── supabase/
 │   ├── migrations/                # Real Snagv1 schema history (source of truth — see below)
 │   ├── functions/                 # Deployed edge functions (notify-snag, export-investigation, ...)
 │   └── schema.sql                 # Stale prototype scaffold — do not run against Snagv1
-└── .env.example                   # Copy to .env — add your Supabase URL + anon key
+└── SNAG_WEB_APP_PLAN.md           # apps/web initiation plan — read before touching apps/web
 ```
+
+**Working on the mobile app?** Everything under "Common Tasks" below still applies — just
+resolve paths relative to `apps/mobile/`, e.g. `src/screens/NewScreen.tsx` means
+`apps/mobile/src/screens/NewScreen.tsx`.
 
 ## Design System (DO NOT deviate from these)
 
@@ -68,9 +77,11 @@ All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or 
 
 ## Environment Setup
 
-1. Copy `.env.example` → `.env`
+1. Copy `apps/mobile/.env.example` → `apps/mobile/.env`
 2. Fill in `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`
    (Settings → API in your Supabase project dashboard)
+3. `apps/web` will need its own `.env` (`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   same project) once it exists — see `SNAG_WEB_APP_PLAN.md`.
 
 ## Database
 
@@ -88,7 +99,7 @@ investigation/RCA/debrief tables (`checklist_completions`, `witness_statements`,
 
 Key view: `snags_with_details` — snags joined with reporter/owner/site names and
 comment/evidence/vote/checklist counts. Always query this view for the issue list and detail
-screens (mirrored in the mobile app's `src/types/index.ts`).
+screens (mirrored in `packages/shared-types/src/index.ts`, shared by both apps).
 
 `snag_status` is `flagged | in_progress | resolved | rca_pending` — `resolved` is the single
 terminal status for both the niggle lane (fixit/improvement) and the serious lane
@@ -128,8 +139,8 @@ git push -u origin main
 ## Running the App
 
 ```bash
-npm install
-npx expo start
+npm install          # from the repo root — installs every workspace (apps + packages)
+npm run mobile        # shortcut for: npm run start --workspace=apps/mobile
 ```
 
 Scan the QR code with the Expo Go app (iOS/Android) to run on your device.
@@ -137,29 +148,26 @@ For a simulator: press `i` for iOS Simulator or `a` for Android emulator.
 
 ## Common Tasks for Claude Code
 
-### Add a new screen
-1. Create `src/screens/NewScreen.tsx`
-2. Add the route to `src/types/index.ts` (in the appropriate param list)
-3. Register it in `src/navigation/index.tsx`
+### Add a new mobile screen
+1. Create `apps/mobile/src/screens/NewScreen.tsx`
+2. Add the route to `packages/shared-types/src/index.ts` (in the appropriate param list) —
+   `apps/mobile/src/types/index.ts` just re-exports this package, don't add types there directly
+3. Register it in `apps/mobile/src/navigation/index.tsx`
 
 ### Add a new Supabase table
 1. Write a new timestamped file in `supabase/migrations/` (don't edit past migrations)
 2. Apply it to the Snagv1 project (`wpkdpukpllxuyqqlxkxf`) via the Supabase MCP `apply_migration`/
    `execute_sql` tools, or paste it into Supabase → SQL Editor
-3. Add the TypeScript type to `src/types/index.ts`
+3. Add the TypeScript type to `packages/shared-types/src/index.ts` — shared by both apps
 
-### Modify the design
-- Change tokens in `src/constants/theme.ts` only — never inline values
-- All badge components are in `src/components/` and centralise their colour logic
+### Modify the mobile design
+- Change tokens in `apps/mobile/src/constants/theme.ts` only — never inline values
+- All badge components are in `apps/mobile/src/components/` and centralise their colour logic
 
-### Add real auth screens
-The app currently assumes the user is already authenticated. To add login/signup:
-1. Create `src/screens/AuthScreen.tsx` with email + password form
-2. Use `signInWithEmail` / `signUpWithEmail` from `src/lib/supabase.ts`
-3. Wrap the navigator in App.tsx with an auth state listener:
-   ```tsx
-   supabase.auth.onAuthStateChange((event, session) => { ... })
-   ```
+### Working on `apps/web`
+Read `SNAG_WEB_APP_PLAN.md` first — it covers folder structure, auth strategy, which RPCs/views
+to reuse vs. what's a genuine gap, storage, and deployment. Several points in it are flagged as
+open decisions requiring sign-off before building on top of them.
 
 ## Code Style
 

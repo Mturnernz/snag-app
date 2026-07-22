@@ -505,3 +505,230 @@ export async function getOrgSnagTrend(
     rcaPending: row.rca_pending ?? 0,
   }));
 }
+
+// ─── Snag mutations ─────────────────────────────────────────────────────────
+// Write-side counterparts to the read functions above, added when apps/web's
+// portal grew mutation actions on the snag detail page (not just read-only
+// review). Same client-param pattern; ported as-is from
+// apps/mobile/src/lib/supabase.ts, which now re-exports these bound to its
+// own client instead of redefining them.
+
+export async function updateSnagStatus(client: SupabaseClient, snagId: string, status: SnagStatus, note?: string | null) {
+  return client.rpc('update_snag_status', { p_snag_id: snagId, p_status: status, p_note: note ?? null });
+}
+
+// Niggles resolve via resolve_snag (a note is required server-side). Serious
+// snags resolve via updateSnagStatus('resolved'), which the server gates
+// behind a completed investigation.
+export async function resolveSnag(client: SupabaseClient, snagId: string, note: string) {
+  return client.rpc('resolve_snag', { p_snag_id: snagId, p_note: note });
+}
+
+export async function recategoriseSnag(client: SupabaseClient, snagId: string, kind: SnagKind, severity: SnagSeverity | null) {
+  return client.rpc('recategorise_snag', { p_snag_id: snagId, p_kind: kind, p_severity: severity });
+}
+
+export async function assignSnagOwner(client: SupabaseClient, snagId: string, ownerId: string | null) {
+  return client.rpc('assign_snag_owner', { p_snag_id: snagId, p_owner_id: ownerId });
+}
+
+export async function assignSnagWorkGroup(client: SupabaseClient, snagId: string, workGroupId: string | null) {
+  return client.rpc('assign_snag_work_group', { p_snag_id: snagId, p_work_group_id: workGroupId });
+}
+
+// Creates (or reuses) a parent snag and attaches the rest of the selection as
+// its children — see merge_snags for the disambiguation rules around
+// kind/severity/site when the selection doesn't already agree.
+export async function mergeSnags(client: SupabaseClient, params: {
+  snagIds: string[];
+  description?: string | null;
+  kind?: SnagKind | null;
+  severity?: SnagSeverity | null;
+  siteId?: string | null;
+}) {
+  const { data, error } = await client.rpc('merge_snags', {
+    p_snag_ids: params.snagIds,
+    p_description: params.description ?? null,
+    p_kind: params.kind ?? null,
+    p_severity: params.severity ?? null,
+    p_site_id: params.siteId ?? null,
+  }).single();
+  return { data: data as { id: string; reference: string } | null, error };
+}
+
+export async function unmergeSnag(client: SupabaseClient, snagId: string) {
+  return client.rpc('unmerge_snag', { p_snag_id: snagId });
+}
+
+export async function setNotifiableFlag(client: SupabaseClient, snagId: string, value: boolean) {
+  return client.rpc('set_notifiable_flag', { p_snag_id: snagId, p_value: value });
+}
+
+export async function nominateNotifyingPcbu(client: SupabaseClient, snagId: string, orgId: string | null, note: string | null) {
+  return client.rpc('nominate_notifying_pcbu', { p_snag_id: snagId, p_org_id: orgId, p_note: note });
+}
+
+export async function addComment(client: SupabaseClient, snagId: string, body: string, mentionedUserIds: string[] = []) {
+  const { data, error } = await client.rpc('add_comment', {
+    p_snag_id: snagId,
+    p_body: body,
+    p_mentioned_user_ids: mentionedUserIds,
+  });
+  return { commentId: data as string | null, error };
+}
+
+// ─── Investigation mutations (serious lane) ────────────────────────────────
+
+export async function completeChecklistStep(client: SupabaseClient, snagId: string, step: ChecklistStep) {
+  return client.rpc('complete_checklist_step', { p_snag_id: snagId, p_step: step });
+}
+
+export async function addWitnessStatement(client: SupabaseClient, snagId: string, witnessName: string, statementText: string) {
+  return client.rpc('add_witness_statement', {
+    p_snag_id: snagId,
+    p_witness_name: witnessName,
+    p_statement_text: statementText,
+  });
+}
+
+export async function addEvidenceItem(client: SupabaseClient, snagId: string, mediaPath: string, caption?: string | null) {
+  return client.rpc('add_evidence_item', {
+    p_snag_id: snagId,
+    p_media_path: mediaPath,
+    p_caption: caption ?? null,
+  });
+}
+
+export async function setRootCause(client: SupabaseClient, snagId: string, rootCauseText: string) {
+  return client.rpc('set_root_cause', { p_snag_id: snagId, p_root_cause_text: rootCauseText });
+}
+
+const SNAG_EVIDENCE_BUCKET = 'snag-evidence';
+
+// Mirrors uploadOrgDocumentFile's shape — {org_id}/... path convention,
+// matching apps/mobile's PhotoPicker (which builds fileName as
+// `${pathPrefix}/${id}.jpg` with pathPrefix = org_id).
+export async function uploadSnagEvidenceFile(
+  client: SupabaseClient,
+  orgId: string,
+  fileName: string,
+  file: File | Blob,
+): Promise<{ path: string | null; error: any }> {
+  const path = `${orgId}/${Date.now()}-${fileName}`;
+  const { data, error } = await client.storage.from(SNAG_EVIDENCE_BUCKET).upload(path, file, { upsert: false });
+  if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
+  return { path: data.path, error: null };
+}
+
+export async function getEvidencePhotoUrl(client: SupabaseClient, path: string): Promise<string | null> {
+  const { data, error } = await client.storage.from(SNAG_EVIDENCE_BUCKET).createSignedUrl(path, 60 * 60);
+  if (error || !data) return null;
+  return data.signedUrl;
+}
+
+// ─── RCA mutations ──────────────────────────────────────────────────────────
+
+export async function assignRca(client: SupabaseClient, snagId: string, assigneeId: string) {
+  return client.rpc('assign_rca', { p_snag_id: snagId, p_assignee_id: assigneeId });
+}
+
+export async function saveRcaWhy(client: SupabaseClient, rcaId: string, whyIndex: number, whyText: string, answerText: string) {
+  return client.rpc('save_rca_why', {
+    p_rca_id: rcaId, p_why_index: whyIndex, p_why_text: whyText, p_answer_text: answerText,
+  });
+}
+
+export async function submitRca(client: SupabaseClient, rcaId: string) {
+  return client.rpc('submit_rca', { p_rca_id: rcaId });
+}
+
+export async function acceptRca(client: SupabaseClient, rcaId: string) {
+  return client.rpc('accept_rca', { p_rca_id: rcaId });
+}
+
+export async function rejectRca(client: SupabaseClient, rcaId: string, rejectionNote: string) {
+  return client.rpc('reject_rca', { p_rca_id: rcaId, p_rejection_note: rejectionNote });
+}
+
+// Recovery for an RCA an assignee can't finish — e.g. they've left or gone
+// quiet. Both are supervisor/admin actions; reassign hands the unfinished
+// RCA to someone else, cancel abandons it and returns the snag to resolved.
+export async function reassignRca(client: SupabaseClient, rcaId: string, newAssigneeId: string) {
+  return client.rpc('reassign_rca', { p_rca_id: rcaId, p_new_assignee_id: newAssigneeId });
+}
+
+export async function cancelRca(client: SupabaseClient, rcaId: string) {
+  return client.rpc('cancel_rca', { p_rca_id: rcaId });
+}
+
+// ─── Debrief mutations ──────────────────────────────────────────────────────
+
+export async function startDebrief(client: SupabaseClient, snagId: string, format: 'hot' | 'formal') {
+  return client.rpc('start_debrief', { p_snag_id: snagId, p_format: format });
+}
+
+export async function addDebriefFinding(client: SupabaseClient, debriefId: string, findingText: string) {
+  return client.rpc('add_debrief_finding', { p_debrief_id: debriefId, p_finding_text: findingText });
+}
+
+export async function addDebriefAttendee(client: SupabaseClient, debriefId: string, profileId: string) {
+  return client.rpc('add_debrief_attendee', { p_debrief_id: debriefId, p_profile_id: profileId });
+}
+
+export async function addDebriefLesson(client: SupabaseClient, debriefId: string, lessonText: string) {
+  return client.rpc('add_debrief_lesson', { p_debrief_id: debriefId, p_lesson_text: lessonText });
+}
+
+export async function completeDebrief(client: SupabaseClient, debriefId: string) {
+  return client.rpc('complete_debrief', { p_debrief_id: debriefId });
+}
+
+// ─── Corrective actions (CAPA) mutations ───────────────────────────────────
+
+export async function createCorrectiveAction(
+  client: SupabaseClient, snagId: string, description: string, ownerId: string, dueDate: string
+) {
+  const { data, error } = await client.rpc('create_corrective_action', {
+    p_snag_id: snagId, p_description: description, p_owner_id: ownerId, p_due_date: dueDate,
+  });
+  return { id: data as string | null, error };
+}
+
+export async function completeCorrectiveAction(client: SupabaseClient, actionId: string) {
+  return client.rpc('complete_corrective_action', { p_action_id: actionId });
+}
+
+export async function verifyCorrectiveAction(client: SupabaseClient, actionId: string) {
+  return client.rpc('verify_corrective_action', { p_action_id: actionId });
+}
+
+export async function addCorrectiveActionEvidence(client: SupabaseClient, actionId: string, mediaPath: string, caption?: string | null) {
+  return client.rpc('add_corrective_action_evidence', {
+    p_action_id: actionId, p_media_path: mediaPath, p_caption: caption ?? null,
+  });
+}
+
+// Completion-evidence photos for one corrective action, resolved to
+// signed-URL rows for display — mirrors getEvidencePhotoUrl's bucket/RLS.
+export async function getCorrectiveActionEvidence(client: SupabaseClient, actionId: string): Promise<EvidenceItem[]> {
+  const { data, error } = await client
+    .from('evidence_items')
+    .select('*')
+    .eq('corrective_action_id', actionId)
+    .order('sort_index', { ascending: true });
+  if (error || !data) return [];
+  return data as EvidenceItem[];
+}
+
+// Logs a governance-artefact export (officer_admin only, server-side
+// checked) — the established "generate file, upload it, then log it"
+// pattern (SNAG_WEB_APP_PLAN.md §4). The PDF export goes through the
+// export-governance-report edge function, which calls this internally;
+// the CSV export has no edge function, so apps/web calls it directly after
+// uploading the CSV to the governance-reports bucket itself.
+export async function recordGovernanceExport(client: SupabaseClient, filePath: string, periodStart: string, periodEnd: string) {
+  const { data, error } = await client.rpc('record_governance_export', {
+    p_file_path: filePath, p_period_start: periodStart, p_period_end: periodEnd,
+  });
+  return { id: data as string | null, error };
+}

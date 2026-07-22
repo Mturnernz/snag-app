@@ -306,12 +306,24 @@ auth system. No code written yet — this document only.
    upload/list/delete UI shipped (not the stub).
 3. **✅ Decided: build the trend RPC now** (Section 4) — `get_org_snag_trend` built, migration
    applied, wired into the reports page as a 90-day weekly chart.
-4. **✅ Decided: leave the RN-web Netlify deployment running** (Section 7) — `apps/web` doesn't
-   have mutation actions (assign/resolve/recategorise/etc.) yet, so the old site stays live until
-   `apps/web` reaches real parity, not just read parity. Revisit then, not now.
+4. **Decided at the time: leave the RN-web Netlify deployment running** (Section 7) — was
+   blocked on `apps/web` not having mutation actions. That gap is now largely closed (see below),
+   so this is worth revisiting, but flipping the public domain over is a product/rollout call for
+   whoever owns that decision, not something to do unilaterally as a follow-on to a code change.
 
-**What's genuinely still not built**, not because it's undecided but because it's out of this
-pass's scope: mutation actions on the portal's snag detail page (assign, resolve, recategorise,
-merge, RCA/debrief/CAPA actions — the detail page is read-only), CSV/raw-data export (Section 4,
-gap 2 — optional, `snags_with_details` likely sufficient), and the RN-web deprecation itself
-(blocked on the previous point).
+**Mutation actions were added after the decisions above were first resolved** — the snag detail
+page (`apps/web/(portal)/snags/[id]/`) now supports: status changes (flag/in-progress/resolve,
+niggle via `resolve_snag`, serious via the server-side investigation gate on `update_snag_status`),
+owner assignment, recategorise, comments, notifiable-event toggle, merge (checkbox multi-select on
+the snags list) and unmerge; the full investigation flow (checklist, witness statements, evidence
+upload, root cause); the full RCA flow (assign, 5-whys, submit, accept/reject, reassign/cancel);
+the full debrief flow (start, findings, lessons, attendees, complete); and CAPA (create, complete,
+verify). CSV/raw-data export (Section 4, gap 2) was also built —
+`apps/web/(portal)/reports/export-csv/` flattens `snags_with_details` client-side (no new view
+needed, confirming the plan's guess) and logs the export via `record_governance_export`, same
+pattern as the PDF.
+
+**Genuinely still not ported from mobile**, flagged rather than silently missing: work group
+assignment on a snag, multi-PCBU notifying-org nomination, @mentions in comments, and voting.
+None of these block the D4 revisit above — they're secondary to the core
+triage/investigate/resolve loop — but they mean "parity" is close, not absolute.

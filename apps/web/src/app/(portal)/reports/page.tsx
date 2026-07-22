@@ -98,7 +98,10 @@ export default async function ReportsPage({
       {exportError && <p className="error-text" style={{ marginBottom: 12 }}>{exportError}</p>}
 
       {isOfficerAdmin ? (
-        <a href="/reports/export" className="btn-primary">Download governance report (last 90 days)</a>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <a href="/reports/export" className="btn-primary">Download governance report (PDF, last 90 days)</a>
+          <a href="/reports/export-csv" className="btn-secondary">Export raw data (CSV, last 90 days)</a>
+        </div>
       ) : (
         <p style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>
           Governance report export is available to officer admins.

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, type SnagStatus } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
+import { mergeSelectedAction } from './actions';
 
 const STATUS_FILTERS: (SnagStatus | 'all')[] = ['all', 'flagged', 'in_progress', 'rca_pending', 'resolved'];
 
@@ -15,10 +16,10 @@ const STATUS_COLORS: Record<SnagStatus, { fg: string; bg: string }> = {
 export default async function SnagsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ site?: string; status?: string }>;
+  searchParams: Promise<{ site?: string; status?: string; error?: string }>;
 }) {
   const { activeMembership } = await requireSupervisorOrAdmin();
-  const { site, status } = await searchParams;
+  const { site, status, error: mergeError } = await searchParams;
   const supabase = await createClient();
 
   // Direct RLS-scoped select against snags_with_details — same view and
@@ -68,46 +69,51 @@ export default async function SnagsPage({
       </div>
 
       {error && <p className="error-text">Couldn't load snags: {error.message}</p>}
+      {mergeError && <p className="error-text" style={{ marginBottom: 12 }}>{mergeError}</p>}
 
       {snags && snags.length === 0 && (
         <p style={{ color: 'var(--color-text-muted)' }}>No snags match this filter.</p>
       )}
 
       {snags && snags.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {snags.map((snag) => (
-            <Link
-              key={snag.id}
-              href={`/snags/${snag.id}`}
-              className="card"
-              style={{ display: 'flex', justifyContent: 'space-between', gap: 16, textDecoration: 'none', color: 'inherit' }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <p style={{ margin: '0 0 4px', fontWeight: 600 }}>
-                  {snag.reference} · {snag.site_name}
-                </p>
-                <p style={{ margin: 0, color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {snag.description ?? '(no description)'}
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, fontSize: 13 }}>
-                <span style={{ color: 'var(--color-text-muted)' }}>{KIND_LABELS[snag.kind as keyof typeof KIND_LABELS]}</span>
-                {snag.severity && <span style={{ color: 'var(--color-text-muted)' }}>{SEVERITY_LABELS[snag.severity as keyof typeof SEVERITY_LABELS]}</span>}
-                <span
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 20,
-                    background: STATUS_COLORS[snag.status as SnagStatus].bg,
-                    color: STATUS_COLORS[snag.status as SnagStatus].fg,
-                    fontWeight: 600,
-                  }}
+        <form action={mergeSelectedAction}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            {snags.map((snag) => (
+              <div key={snag.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <input type="checkbox" name="snagIds" value={snag.id} aria-label={`Select ${snag.reference} to merge`} />
+                <Link
+                  href={`/snags/${snag.id}`}
+                  style={{ display: 'flex', flex: 1, justifyContent: 'space-between', gap: 16, textDecoration: 'none', color: 'inherit', minWidth: 0 }}
                 >
-                  {STATUS_LABELS[snag.status as SnagStatus]}
-                </span>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ margin: '0 0 4px', fontWeight: 600 }}>
+                      {snag.reference} · {snag.site_name}
+                    </p>
+                    <p style={{ margin: 0, color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {snag.description ?? '(no description)'}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, fontSize: 13 }}>
+                    <span style={{ color: 'var(--color-text-muted)' }}>{KIND_LABELS[snag.kind as keyof typeof KIND_LABELS]}</span>
+                    {snag.severity && <span style={{ color: 'var(--color-text-muted)' }}>{SEVERITY_LABELS[snag.severity as keyof typeof SEVERITY_LABELS]}</span>}
+                    <span
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 20,
+                        background: STATUS_COLORS[snag.status as SnagStatus].bg,
+                        color: STATUS_COLORS[snag.status as SnagStatus].fg,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {STATUS_LABELS[snag.status as SnagStatus]}
+                    </span>
+                  </div>
+                </Link>
               </div>
-            </Link>
-          ))}
-        </div>
+            ))}
+          </div>
+          <button type="submit" className="btn-secondary">Merge selected</button>
+        </form>
       )}
     </div>
   );

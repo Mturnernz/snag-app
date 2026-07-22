@@ -540,21 +540,17 @@ export async function createSnag(params: {
   return { data: data as { id: string; reference: string } | null, error };
 }
 
-export async function updateSnagStatus(snagId: string, status: SnagStatus, note?: string | null) {
-  return supabase.rpc('update_snag_status', { p_snag_id: snagId, p_status: status, p_note: note ?? null });
-}
+export const updateSnagStatus = (snagId: string, status: SnagStatus, note?: string | null) =>
+  queries.updateSnagStatus(supabase, snagId, status, note);
 
-export async function recategoriseSnag(snagId: string, kind: SnagKind, severity: SnagSeverity | null) {
-  return supabase.rpc('recategorise_snag', { p_snag_id: snagId, p_kind: kind, p_severity: severity });
-}
+export const recategoriseSnag = (snagId: string, kind: SnagKind, severity: SnagSeverity | null) =>
+  queries.recategoriseSnag(supabase, snagId, kind, severity);
 
-export async function assignSnagOwner(snagId: string, ownerId: string | null) {
-  return supabase.rpc('assign_snag_owner', { p_snag_id: snagId, p_owner_id: ownerId });
-}
+export const assignSnagOwner = (snagId: string, ownerId: string | null) =>
+  queries.assignSnagOwner(supabase, snagId, ownerId);
 
-export async function assignSnagWorkGroup(snagId: string, workGroupId: string | null) {
-  return supabase.rpc('assign_snag_work_group', { p_snag_id: snagId, p_work_group_id: workGroupId });
-}
+export const assignSnagWorkGroup = (snagId: string, workGroupId: string | null) =>
+  queries.assignSnagWorkGroup(supabase, snagId, workGroupId);
 
 export type SiteAssignee = queries.SiteAssignee;
 
@@ -598,9 +594,7 @@ export const getSnagAuditLog = (snagId: string) => queries.getSnagAuditLog(supab
 // snags resolve via update_snag_status('resolved'), which the server gates behind
 // a completed investigation (see getInvestigationState / update_snag_status).
 
-export async function resolveSnag(snagId: string, note: string) {
-  return supabase.rpc('resolve_snag', { p_snag_id: snagId, p_note: note });
-}
+export const resolveSnag = (snagId: string, note: string) => queries.resolveSnag(supabase, snagId, note);
 
 // ─── Root cause analysis (5 Whys) ──────────────────────────────────────────────
 // A supervisor/admin can delegate a formal RCA on a resolved serious snag to
@@ -631,92 +625,53 @@ export async function getMyActiveRcaSnagIds(): Promise<string[]> {
   return (data ?? []).map((r: any) => r.snag_id as string);
 }
 
-export async function assignRca(snagId: string, assigneeId: string) {
-  return supabase.rpc('assign_rca', { p_snag_id: snagId, p_assignee_id: assigneeId });
-}
+export const assignRca = (snagId: string, assigneeId: string) => queries.assignRca(supabase, snagId, assigneeId);
 
-export async function saveRcaWhy(rcaId: string, whyIndex: number, whyText: string, answerText: string) {
-  return supabase.rpc('save_rca_why', {
-    p_rca_id: rcaId, p_why_index: whyIndex, p_why_text: whyText, p_answer_text: answerText,
-  });
-}
+export const saveRcaWhy = (rcaId: string, whyIndex: number, whyText: string, answerText: string) =>
+  queries.saveRcaWhy(supabase, rcaId, whyIndex, whyText, answerText);
 
-export async function submitRca(rcaId: string) {
-  return supabase.rpc('submit_rca', { p_rca_id: rcaId });
-}
+export const submitRca = (rcaId: string) => queries.submitRca(supabase, rcaId);
 
-export async function acceptRca(rcaId: string) {
-  return supabase.rpc('accept_rca', { p_rca_id: rcaId });
-}
+export const acceptRca = (rcaId: string) => queries.acceptRca(supabase, rcaId);
 
-export async function rejectRca(rcaId: string, rejectionNote: string) {
-  return supabase.rpc('reject_rca', { p_rca_id: rcaId, p_rejection_note: rejectionNote });
-}
+export const rejectRca = (rcaId: string, rejectionNote: string) => queries.rejectRca(supabase, rcaId, rejectionNote);
 
 // Recovery for an RCA an assignee can't finish — e.g. they've left or gone
 // quiet. Both are supervisor/admin actions; reassign hands the unfinished
 // RCA to someone else, cancel abandons it and returns the snag to resolved.
-export async function reassignRca(rcaId: string, newAssigneeId: string) {
-  return supabase.rpc('reassign_rca', { p_rca_id: rcaId, p_new_assignee_id: newAssigneeId });
-}
+export const reassignRca = (rcaId: string, newAssigneeId: string) => queries.reassignRca(supabase, rcaId, newAssigneeId);
 
-export async function cancelRca(rcaId: string) {
-  return supabase.rpc('cancel_rca', { p_rca_id: rcaId });
-}
+export const cancelRca = (rcaId: string) => queries.cancelRca(supabase, rcaId);
 
 // ─── Merge (parent/child) ───────────────────────────────────────────────────
 // Creates (or reuses) a parent snag and attaches the rest of the selection as
 // its children — see merge_snags for the disambiguation rules around
 // kind/severity/site when the selection doesn't already agree.
-export async function mergeSnags(params: {
+export const mergeSnags = (params: {
   snagIds: string[];
   description?: string | null;
   kind?: SnagKind | null;
   severity?: SnagSeverity | null;
   siteId?: string | null;
-}) {
-  const { data, error } = await supabase.rpc('merge_snags', {
-    p_snag_ids: params.snagIds,
-    p_description: params.description ?? null,
-    p_kind: params.kind ?? null,
-    p_severity: params.severity ?? null,
-    p_site_id: params.siteId ?? null,
-  }).single();
-  return { data: data as { id: string; reference: string } | null, error };
-}
+}) => queries.mergeSnags(supabase, params);
 
-export async function unmergeSnag(snagId: string) {
-  return supabase.rpc('unmerge_snag', { p_snag_id: snagId });
-}
+export const unmergeSnag = (snagId: string) => queries.unmergeSnag(supabase, snagId);
 
-export async function completeChecklistStep(snagId: string, step: ChecklistStep) {
-  return supabase.rpc('complete_checklist_step', { p_snag_id: snagId, p_step: step });
-}
+export const completeChecklistStep = (snagId: string, step: ChecklistStep) =>
+  queries.completeChecklistStep(supabase, snagId, step);
 
-export async function addWitnessStatement(snagId: string, witnessName: string, statementText: string) {
-  return supabase.rpc('add_witness_statement', {
-    p_snag_id: snagId,
-    p_witness_name: witnessName,
-    p_statement_text: statementText,
-  });
-}
+export const addWitnessStatement = (snagId: string, witnessName: string, statementText: string) =>
+  queries.addWitnessStatement(supabase, snagId, witnessName, statementText);
 
-export async function addEvidenceItem(snagId: string, mediaPath: string, caption?: string | null) {
-  return supabase.rpc('add_evidence_item', {
-    p_snag_id: snagId,
-    p_media_path: mediaPath,
-    p_caption: caption ?? null,
-  });
-}
+export const addEvidenceItem = (snagId: string, mediaPath: string, caption?: string | null) =>
+  queries.addEvidenceItem(supabase, snagId, mediaPath, caption);
 
-export async function setRootCause(snagId: string, rootCauseText: string) {
-  return supabase.rpc('set_root_cause', { p_snag_id: snagId, p_root_cause_text: rootCauseText });
-}
+export const setRootCause = (snagId: string, rootCauseText: string) =>
+  queries.setRootCause(supabase, snagId, rootCauseText);
 
 // ─── Notifiable-event decision support ─────────────────────────────────────────
-export async function setNotifiableFlag(snagId: string, value: boolean) {
-  return supabase.rpc('set_notifiable_flag', { p_snag_id: snagId, p_value: value });
-}
+export const setNotifiableFlag = (snagId: string, value: boolean) =>
+  queries.setNotifiableFlag(supabase, snagId, value);
 
 export type InvestigationState = queries.InvestigationState;
 
@@ -732,40 +687,19 @@ export const getInvestigationState = (snagId: string) => queries.getInvestigatio
 
 export const getCorrectiveActions = (snagId: string) => queries.getCorrectiveActions(supabase, snagId);
 
-export async function createCorrectiveAction(
-  snagId: string, description: string, ownerId: string, dueDate: string
-) {
-  const { data, error } = await supabase.rpc('create_corrective_action', {
-    p_snag_id: snagId, p_description: description, p_owner_id: ownerId, p_due_date: dueDate,
-  });
-  return { id: data as string | null, error };
-}
+export const createCorrectiveAction = (snagId: string, description: string, ownerId: string, dueDate: string) =>
+  queries.createCorrectiveAction(supabase, snagId, description, ownerId, dueDate);
 
-export async function completeCorrectiveAction(actionId: string) {
-  return supabase.rpc('complete_corrective_action', { p_action_id: actionId });
-}
+export const completeCorrectiveAction = (actionId: string) => queries.completeCorrectiveAction(supabase, actionId);
 
-export async function verifyCorrectiveAction(actionId: string) {
-  return supabase.rpc('verify_corrective_action', { p_action_id: actionId });
-}
+export const verifyCorrectiveAction = (actionId: string) => queries.verifyCorrectiveAction(supabase, actionId);
 
-export async function addCorrectiveActionEvidence(actionId: string, mediaPath: string, caption?: string | null) {
-  return supabase.rpc('add_corrective_action_evidence', {
-    p_action_id: actionId, p_media_path: mediaPath, p_caption: caption ?? null,
-  });
-}
+export const addCorrectiveActionEvidence = (actionId: string, mediaPath: string, caption?: string | null) =>
+  queries.addCorrectiveActionEvidence(supabase, actionId, mediaPath, caption);
 
 // Completion-evidence photos for one corrective action, resolved to
 // signed-URL rows for display — mirrors getEvidencePhotoUrl's bucket/RLS.
-export async function getCorrectiveActionEvidence(actionId: string): Promise<EvidenceItem[]> {
-  const { data, error } = await supabase
-    .from('evidence_items')
-    .select('*')
-    .eq('corrective_action_id', actionId)
-    .order('sort_index', { ascending: true });
-  if (error || !data) return [];
-  return data as EvidenceItem[];
-}
+export const getCorrectiveActionEvidence = (actionId: string) => queries.getCorrectiveActionEvidence(supabase, actionId);
 
 export async function markSnagSeen(snagId: string) {
   return supabase.rpc('mark_snag_seen', { p_snag_id: snagId });
@@ -785,30 +719,22 @@ export const exportGovernanceReport = (periodStart?: string, periodEnd?: string)
   queries.exportGovernanceReport(supabase, periodStart, periodEnd);
 
 // ─── Multi-PCBU notification nomination ────────────────────────────────────────
-export async function nominateNotifyingPcbu(snagId: string, orgId: string | null, note: string | null) {
-  return supabase.rpc('nominate_notifying_pcbu', { p_snag_id: snagId, p_org_id: orgId, p_note: note });
-}
+export const nominateNotifyingPcbu = (snagId: string, orgId: string | null, note: string | null) =>
+  queries.nominateNotifyingPcbu(supabase, snagId, orgId, note);
 
 // ─── Debriefs ───────────────────────────────────────────────────────────────────
-export async function startDebrief(snagId: string, format: 'hot' | 'formal') {
-  return supabase.rpc('start_debrief', { p_snag_id: snagId, p_format: format });
-}
+export const startDebrief = (snagId: string, format: 'hot' | 'formal') => queries.startDebrief(supabase, snagId, format);
 
-export async function addDebriefFinding(debriefId: string, findingText: string) {
-  return supabase.rpc('add_debrief_finding', { p_debrief_id: debriefId, p_finding_text: findingText });
-}
+export const addDebriefFinding = (debriefId: string, findingText: string) =>
+  queries.addDebriefFinding(supabase, debriefId, findingText);
 
-export async function addDebriefAttendee(debriefId: string, profileId: string) {
-  return supabase.rpc('add_debrief_attendee', { p_debrief_id: debriefId, p_profile_id: profileId });
-}
+export const addDebriefAttendee = (debriefId: string, profileId: string) =>
+  queries.addDebriefAttendee(supabase, debriefId, profileId);
 
-export async function addDebriefLesson(debriefId: string, lessonText: string) {
-  return supabase.rpc('add_debrief_lesson', { p_debrief_id: debriefId, p_lesson_text: lessonText });
-}
+export const addDebriefLesson = (debriefId: string, lessonText: string) =>
+  queries.addDebriefLesson(supabase, debriefId, lessonText);
 
-export async function completeDebrief(debriefId: string) {
-  return supabase.rpc('complete_debrief', { p_debrief_id: debriefId });
-}
+export const completeDebrief = (debriefId: string) => queries.completeDebrief(supabase, debriefId);
 
 export type DebriefFinding = queries.DebriefFinding;
 export type DebriefLesson = queries.DebriefLesson;
@@ -820,14 +746,8 @@ export const getSnagDebriefs = (snagId: string) => queries.getSnagDebriefs(supab
 
 // ─── Comment helpers ──────────────────────────────────────────────────────────
 
-export async function addComment(snagId: string, body: string, mentionedUserIds: string[] = []) {
-  const { data, error } = await supabase.rpc('add_comment', {
-    p_snag_id: snagId,
-    p_body: body,
-    p_mentioned_user_ids: mentionedUserIds,
-  });
-  return { commentId: data as string | null, error };
-}
+export const addComment = (snagId: string, body: string, mentionedUserIds: string[] = []) =>
+  queries.addComment(supabase, snagId, body, mentionedUserIds);
 
 // ─── Mentions ─────────────────────────────────────────────────────────────────
 // "Comments that tag me" — @mentions are resolved to real profile IDs

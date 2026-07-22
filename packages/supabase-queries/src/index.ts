@@ -1,0 +1,406 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { UserRole, SnagStatus, SnagKind, SnagSeverity, ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction } from '@snag/shared-types';
+
+// Platform-agnostic Supabase RPC/query wrappers, shared between apps/mobile
+// and apps/web — see SNAG_WEB_APP_PLAN.md §1. Each function takes the
+// caller's own SupabaseClient rather than closing over a singleton, since
+// the two apps construct their clients differently (AsyncStorage vs.
+// @supabase/ssr cookies). Everything here is a direct port of the matching
+// function that used to live in apps/mobile/src/lib/supabase.ts — mobile
+// now re-exports these bound to its own client instead of redefining them.
+
+// ─── Multi-org membership ──────────────────────────────────────────────────
+
+export interface Membership {
+  org_id: string;
+  org_name: string;
+  role: UserRole;
+  /** This is the user's current active-org pick — NOT whether the org itself
+   *  is enabled. See org_active for that. */
+  is_active: boolean;
+  /** Whether the organisation itself is active (not deactivated by its
+   *  officer_admin). Deactivated orgs are excluded from pickers/switchers
+   *  everywhere except the admin tab's own management list. */
+  org_active: boolean;
+}
+
+export async function getMemberships(client: SupabaseClient): Promise<Membership[]> {
+  const { data } = await client.rpc('get_my_memberships');
+  return (data ?? []) as Membership[];
+}
+
+export async function setActiveOrg(client: SupabaseClient, orgId: string) {
+  return client.rpc('set_active_org', { p_org_id: orgId });
+}
+
+export async function createOrganisationAndOwner(client: SupabaseClient, orgName: string, ownerName: string) {
+  const { data, error } = await client.rpc('create_organisation_and_owner', {
+    p_org_name: orgName,
+    p_name: ownerName,
+  });
+  return { orgId: data as string | null, error };
+}
+
+// ─── Org members ───────────────────────────────────────────────────────────
+
+// Member lists come from org_memberships (via RPC), not profiles.org_id —
+// that column mirrors each user's *active* org, which for multi-org members
+// may be a different organisation right now.
+export async function getOrgMembers(client: SupabaseClient) {
+  const { data } = await client.rpc('get_org_members');
+  return data ?? [];
+}
+
+// ─── Org/site snapshot stats ───────────────────────────────────────────────
+
+export interface OrgStats {
+  totalMembers: number;
+  totalSnags: number;
+  byStatus: Record<SnagStatus, number>;
+  byKind: Record<SnagKind, number>;
+  bySeverity: Record<SnagSeverity, number>;
+}
+
+// Aggregated server-side in one pass (get_org_stats) rather than selecting
+// every snag row in the org and counting client-side.
+export async function getOrgStats(client: SupabaseClient, orgId: string): Promise<OrgStats> {
+  const empty: OrgStats = {
+    totalMembers: 0,
+    totalSnags: 0,
+    byStatus: { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 },
+    byKind: { fixit: 0, improvement: 0, hazard: 0, incident: 0 },
+    bySeverity: { minor: 0, moderate: 0, injury: 0, critical: 0 },
+  };
+  const { data, error } = await client.rpc('get_org_stats', { p_org_id: orgId });
+  if (error || !data) {
+    if (error) console.error('getOrgStats error:', error);
+    return empty;
+  }
+  return {
+    totalMembers: data.total_members ?? 0,
+    totalSnags: data.total_snags ?? 0,
+    byStatus: { ...empty.byStatus, ...data.by_status },
+    byKind: { ...empty.byKind, ...data.by_kind },
+    bySeverity: { ...empty.bySeverity, ...data.by_severity },
+  };
+}
+
+export interface SiteBreakdown {
+  siteId: string;
+  siteName: string;
+  openInvestigations: number;
+  unassigned: number;
+  overdueActions: number;
+}
+
+// Per-site counts for the supervisor "outstanding work" dashboard —
+// get_org_stats is org-wide only, this is the site-grouped sibling.
+export async function getSiteBreakdown(client: SupabaseClient, orgId: string): Promise<SiteBreakdown[]> {
+  const { data, error } = await client.rpc('get_site_breakdown', { p_org_id: orgId });
+  if (error || !data) {
+    if (error) console.error('getSiteBreakdown error:', error);
+    return [];
+  }
+  return (data as any[]).map((row) => ({
+    siteId: row.site_id,
+    siteName: row.site_name,
+    openInvestigations: row.open_investigations ?? 0,
+    unassigned: row.unassigned ?? 0,
+    overdueActions: row.overdue_actions ?? 0,
+  }));
+}
+
+export interface OrgSnagSummary {
+  total: number;
+  flagged: number;
+  in_progress: number;
+  resolved: number;
+  rca_pending: number;
+}
+
+// snags' RLS only exposes the active org's rows, so this RPC is needed to
+// summarise a non-active org you belong to — it re-checks real membership
+// itself rather than relying on RLS.
+export async function getOrgSnagSummary(client: SupabaseClient, orgId: string): Promise<OrgSnagSummary | null> {
+  const { data, error } = await client.rpc('get_org_snag_summary', { p_org_id: orgId }).maybeSingle();
+  if (error) {
+    console.error('getOrgSnagSummary error:', error);
+    return null;
+  }
+  return data as OrgSnagSummary | null;
+}
+
+// ─── Assignment ─────────────────────────────────────────────────────────────
+
+// People who can own a snag at a given site: the site's members + supervisors,
+// plus the org's admins. Used to scope the owner picker to the snag's site.
+export interface SiteAssignee {
+  id: string;
+  name: string;
+  role: UserRole;
+}
+
+export async function getSiteAssignees(client: SupabaseClient, siteId: string): Promise<{ data: SiteAssignee[]; error: any }> {
+  const { data, error } = await client.rpc('get_site_assignees', { p_site_id: siteId });
+  return { data: (data ?? []) as SiteAssignee[], error };
+}
+
+// ─── Root cause analysis (5 Whys) ──────────────────────────────────────────
+
+export type RcaStatus = 'assigned' | 'in_progress' | 'submitted' | 'accepted' | 'rejected';
+
+export interface RcaWhyStep {
+  whyIndex: number;
+  whyText: string;
+  answerText: string;
+}
+
+export interface SnagRca {
+  id: string;
+  status: RcaStatus;
+  assignedTo: string;
+  assignedBy: string;
+  rejectionNote: string | null;
+  submittedAt: string | null;
+  acceptedAt: string | null;
+  whys: RcaWhyStep[];
+}
+
+// The most recent RCA round for a snag (a new one can be assigned after an
+// earlier one was accepted, so this is never assumed to be the only row).
+export async function getSnagRca(client: SupabaseClient, snagId: string): Promise<SnagRca | null> {
+  const { data: rca } = await client
+    .from('snag_rca')
+    .select('id, status, assigned_to, assigned_by, rejection_note, submitted_at, accepted_at')
+    .eq('snag_id', snagId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!rca) return null;
+
+  const { data: whys } = await client
+    .from('rca_why_steps')
+    .select('why_index, why_text, answer_text')
+    .eq('rca_id', rca.id)
+    .order('why_index', { ascending: true });
+
+  return {
+    id: rca.id,
+    status: rca.status,
+    assignedTo: rca.assigned_to,
+    assignedBy: rca.assigned_by,
+    rejectionNote: rca.rejection_note,
+    submittedAt: rca.submitted_at,
+    acceptedAt: rca.accepted_at,
+    whys: (whys ?? []).map((w: any) => ({ whyIndex: w.why_index, whyText: w.why_text, answerText: w.answer_text })),
+  };
+}
+
+// ─── Debriefs ───────────────────────────────────────────────────────────────
+
+export interface DebriefFinding {
+  id: string;
+  finding_text: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface DebriefLesson {
+  id: string;
+  lesson_text: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface SnagDebrief {
+  id: string;
+  format: 'hot' | 'formal';
+  status: 'in_progress' | 'completed';
+  startedBy: string;
+  startedAt: string;
+  completedAt: string | null;
+  findings: DebriefFinding[];
+  attendeeIds: string[];
+  lessons: DebriefLesson[];
+}
+
+// Reads every debrief on a snag (any number allowed, any status), newest first.
+export async function getSnagDebriefs(client: SupabaseClient, snagId: string): Promise<SnagDebrief[]> {
+  const { data } = await client
+    .from('snag_debriefs')
+    .select('id, format, status, started_by, started_at, completed_at, debrief_findings(id, finding_text, created_by, created_at), debrief_attendees(profile_id), debrief_lessons(id, lesson_text, created_by, created_at)')
+    .eq('snag_id', snagId)
+    .order('started_at', { ascending: false });
+
+  return (data ?? []).map((d: any) => ({
+    id: d.id,
+    format: d.format,
+    status: d.status,
+    startedBy: d.started_by,
+    startedAt: d.started_at,
+    completedAt: d.completed_at,
+    findings: d.debrief_findings ?? [],
+    attendeeIds: (d.debrief_attendees ?? []).map((a: any) => a.profile_id),
+    lessons: d.debrief_lessons ?? [],
+  }));
+}
+
+// ─── Investigation (serious lane) ──────────────────────────────────────────
+
+export interface InvestigationState {
+  completedSteps: ChecklistStep[];
+  witnesses: WitnessStatement[];
+  evidence: EvidenceItem[];
+  rootCause: string | null;
+  openCorrectiveActions: number;
+}
+
+// Reads the five investigation tables for a serious snag — all org-scoped by
+// RLS. Drives the live progress display and the serious-lane resolve gate.
+export async function getInvestigationState(client: SupabaseClient, snagId: string): Promise<InvestigationState> {
+  const [stepsRes, witnessRes, evidenceRes, investigationRes, actionsRes] = await Promise.all([
+    client.from('checklist_completions').select('step').eq('snag_id', snagId),
+    client.from('witness_statements').select('*').eq('snag_id', snagId).order('taken_at', { ascending: true }),
+    client.from('evidence_items').select('*').eq('snag_id', snagId).is('corrective_action_id', null).order('sort_index', { ascending: true }),
+    client.from('investigations').select('root_cause_text').eq('snag_id', snagId).maybeSingle(),
+    // "Blocking" mirrors update_snag_status's resolve gate: done-but-unverified
+    // still counts, so this pill can't show 0 while resolve is still blocked.
+    client.from('corrective_actions').select('id', { count: 'exact', head: true })
+      .eq('snag_id', snagId).or('status.neq.done,verified_by.is.null'),
+  ]);
+
+  return {
+    completedSteps: (stepsRes.data ?? []).map((r: any) => r.step as ChecklistStep),
+    witnesses: (witnessRes.data ?? []) as WitnessStatement[],
+    evidence: (evidenceRes.data ?? []) as EvidenceItem[],
+    rootCause: (investigationRes.data as any)?.root_cause_text ?? null,
+    openCorrectiveActions: actionsRes.count ?? 0,
+  };
+}
+
+// ─── Corrective actions (CAPA) ─────────────────────────────────────────────
+
+export async function getCorrectiveActions(client: SupabaseClient, snagId: string): Promise<CorrectiveAction[]> {
+  const { data, error } = await client
+    .from('corrective_actions')
+    .select(`
+      id, snag_id, description, owner_id, due_date, status, created_at, completed_at, verified_by, verified_at,
+      owner:profiles!corrective_actions_owner_id_fkey(name),
+      verifier:profiles!corrective_actions_verified_by_fkey(name)
+    `)
+    .eq('snag_id', snagId)
+    .order('due_date', { ascending: true });
+  if (error || !data) return [];
+  return (data as any[]).map((row) => ({
+    id: row.id,
+    snag_id: row.snag_id,
+    description: row.description,
+    owner_id: row.owner_id,
+    owner_name: row.owner?.name,
+    due_date: row.due_date,
+    status: row.status,
+    created_at: row.created_at,
+    completed_at: row.completed_at,
+    verified_by: row.verified_by,
+    verifier_name: row.verifier?.name,
+    verified_at: row.verified_at,
+  }));
+}
+
+// ─── Activity trail ─────────────────────────────────────────────────────────
+
+export interface AuditLogEntry {
+  id: string;
+  action: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  created_at: string;
+}
+
+// Human-readable text for the action strings RPCs write against entity='snag'.
+// Falls back to the raw action string for anything unmapped — new actions
+// still show up, just less prettily, instead of disappearing.
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  created: 'reported this snag',
+  created_public: 'submitted this as a public report',
+  status_flagged: 'reopened this snag',
+  status_in_progress: 'marked this In Progress',
+  status_resolved: 'resolved this snag',
+  status_rca_pending: 'marked this RCA Pending',
+  status_sorted: 'marked this sorted', // retired status; kept for historical entries
+  owner_assigned: 'assigned an owner',
+  owner_unassigned: 'unassigned the owner',
+  recategorised_to_fixit: 'recategorised this as a Fixit',
+  recategorised_to_improvement: 'recategorised this as an Improvement',
+  recategorised_to_hazard: 'recategorised this as a Hazard',
+  recategorised_to_incident: 'recategorised this as an Incident',
+  merge_created: 'merged snags into this one',
+  merge_children_added: 'merged another snag into this one',
+  merged_into_parent: 'merged this into another snag',
+  work_group_assigned: 'assigned this to a work group',
+  work_group_unassigned: 'removed this from its work group',
+  marked_notifiable: 'marked this as notifiable',
+  unmarked_notifiable: 'removed the notifiable flag',
+  checklist_make_safe: "completed the 'Make Safe' step",
+  checklist_preserve_scene: "completed the 'Preserve Scene' step",
+  checklist_identify_witnesses: "completed the 'Identify Witnesses' step",
+  checklist_capture_evidence: "completed the 'Capture Evidence' step",
+  checklist_find_root_cause: "completed the 'Find Root Cause' step",
+  witness_statement_added: 'added a witness statement',
+  evidence_added: 'added evidence',
+  root_cause_set: 'recorded the root cause',
+  corrective_action_created: 'created a corrective action',
+  rca_assigned: 'assigned the root cause analysis',
+};
+
+export function describeAuditAction(action: string): string {
+  return AUDIT_ACTION_LABELS[action] ?? action.replace(/_/g, ' ');
+}
+
+export async function getSnagAuditLog(client: SupabaseClient, snagId: string): Promise<AuditLogEntry[]> {
+  const { data, error } = await client
+    .from('audit_log')
+    .select('id, action, actor_id, created_at, actor:profiles!audit_log_actor_id_fkey(name)')
+    .eq('entity', 'snag')
+    .eq('entity_id', snagId)
+    .order('created_at', { ascending: true });
+
+  if (error || !data) return [];
+  return data.map((row: any) => ({
+    id: row.id,
+    action: row.action,
+    actor_id: row.actor_id,
+    actor_name: row.actor?.name ?? null,
+    created_at: row.created_at,
+  }));
+}
+
+// ─── Reports / exports ──────────────────────────────────────────────────────
+// Builds a report PDF via the matching edge function and returns a 1-hour
+// signed URL to it. The edge function re-checks the caller's role itself, so
+// a failed permission check surfaces here as `error` rather than a thrown
+// exception — same contract on both apps.
+
+export async function exportInvestigation(
+  client: SupabaseClient,
+  snagId: string
+): Promise<{ signedUrl: string | null; error: any }> {
+  const { data, error } = await client.functions.invoke('export-investigation', {
+    body: { snag_id: snagId },
+  });
+  if (error) return { signedUrl: null, error };
+  return { signedUrl: data?.signedUrl ?? null, error: null };
+}
+
+// Defaults to the trailing 90 days when no period is given.
+export async function exportGovernanceReport(
+  client: SupabaseClient,
+  periodStart?: string,
+  periodEnd?: string
+): Promise<{ signedUrl: string | null; error: any }> {
+  const { data, error } = await client.functions.invoke('export-governance-report', {
+    body: { period_start: periodStart, period_end: periodEnd },
+  });
+  if (error) return { signedUrl: null, error };
+  return { signedUrl: data?.signedUrl ?? null, error: null };
+}

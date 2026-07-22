@@ -20,5 +20,10 @@ web-build/
 # Expo
 .expo-shared/
 
+# Next.js (apps/web)
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
 # Local Netlify folder
 .netlify

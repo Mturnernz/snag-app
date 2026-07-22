@@ -1,0 +1,12 @@
+# This is a SEPARATE Netlify site from apps/mobile's — its "Base directory"
+# must be set to apps/web in the Netlify dashboard. Uses Netlify's built-in
+# Next.js runtime (auto-detected from next.config.js / package.json), so no
+# explicit [build] command/publish is needed beyond the base directory.
+#
+# Required env vars (Site settings → Environment variables), same Supabase
+# project as apps/mobile:
+#   NEXT_PUBLIC_SUPABASE_URL
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+[build.environment]
+  NODE_VERSION = "22"

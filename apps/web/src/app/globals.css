@@ -1,0 +1,115 @@
+/* Mirrors apps/mobile/src/constants/theme.ts's Colors — keep both in sync by
+   hand; there's no shared design-token package yet (see SNAG_WEB_APP_PLAN.md). */
+:root {
+  --color-background: #F9FAFB;
+  --color-surface: #FFFFFF;
+  --color-border: #E5E7EB;
+
+  --color-primary: #2563EB;
+  --color-primary-light: #DBEAFE;
+
+  --color-text-primary: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+
+  --color-status-flagged: #3B82F6;
+  --color-status-flagged-bg: #EFF6FF;
+  --color-status-in-progress: #F59E0B;
+  --color-status-in-progress-bg: #FFFBEB;
+  --color-status-resolved: #10B981;
+  --color-status-resolved-bg: #ECFDF5;
+  --color-status-rca-pending: #DC2626;
+  --color-status-rca-pending-bg: #FEE2E2;
+
+  --color-danger: #EF4444;
+  --color-success: #16A34A;
+
+  --radius-card: 12px;
+  --radius-button: 8px;
+  --radius-chip: 4px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: 24px;
+}
+
+.btn-primary {
+  display: inline-block;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-button);
+  padding: 12px 20px;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn-secondary {
+  display: inline-block;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  padding: 12px 20px;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.field label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 6px;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  font-size: 15px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.field {
+  margin-bottom: 16px;
+}
+
+.error-text {
+  color: var(--color-danger);
+  font-size: 14px;
+  margin-top: 8px;
+}

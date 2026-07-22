@@ -43,10 +43,22 @@ snag/
 │   │   │   ├── screens/           # IssueListScreen, ReportIssueScreen, IssueDetailScreen, ProfileScreen, ...
 │   │   │   └── components/        # IssueCard, StatusBadge, PriorityBadge, CategoryBadge, ...
 │   │   └── .env.example           # Copy to apps/mobile/.env — EXPO_PUBLIC_SUPABASE_* vars
-│   └── web/                       # Next.js app (marketing + supervisor portal) — not yet built
+│   └── web/                       # Next.js app — marketing site + supervisor portal
+│       ├── middleware.ts          # refreshes the Supabase session cookie on every request
+│       ├── src/app/
+│       │   ├── (marketing)/       # public: landing, pricing, sign-up
+│       │   ├── login/             # shared login — the on-ramp into the portal
+│       │   └── (portal)/          # auth-gated: dashboard, snags, reports, documents (stub)
+│       ├── src/lib/supabase/      # client.ts (browser), server.ts (RSC/actions), middleware.ts
+│       ├── src/lib/auth.ts        # requireSupervisorOrAdmin() — role gate for (portal) routes
+│       └── .env.example           # Copy to apps/web/.env.local — NEXT_PUBLIC_SUPABASE_* vars
 ├── packages/
-│   └── shared-types/              # @snag/shared-types — the canonical TS types (moved from
-│                                   # apps/mobile/src/types/index.ts); apps/mobile re-exports it
+│   ├── shared-types/               # @snag/shared-types — the canonical TS types (moved from
+│   │                                # apps/mobile/src/types/index.ts); apps/mobile re-exports it
+│   └── supabase-queries/           # @snag/supabase-queries — RPC/query wrappers shared by both
+│                                    # apps, each taking its own SupabaseClient (see the package's
+│                                    # own header comment). apps/mobile re-exports these bound to
+│                                    # its client; apps/web calls them directly.
 ├── supabase/
 │   ├── migrations/                # Real Snagv1 schema history (source of truth — see below)
 │   ├── functions/                 # Deployed edge functions (notify-snag, export-investigation, ...)
@@ -80,8 +92,8 @@ All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or 
 1. Copy `apps/mobile/.env.example` → `apps/mobile/.env`
 2. Fill in `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`
    (Settings → API in your Supabase project dashboard)
-3. `apps/web` will need its own `.env` (`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   same project) once it exists — see `SNAG_WEB_APP_PLAN.md`.
+3. Copy `apps/web/.env.example` → `apps/web/.env.local` and fill in
+   `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` — same project as mobile.
 
 ## Database
 
@@ -166,8 +178,18 @@ For a simulator: press `i` for iOS Simulator or `a` for Android emulator.
 
 ### Working on `apps/web`
 Read `SNAG_WEB_APP_PLAN.md` first — it covers folder structure, auth strategy, which RPCs/views
-to reuse vs. what's a genuine gap, storage, and deployment. Several points in it are flagged as
-open decisions requiring sign-off before building on top of them.
+to reuse vs. what's a genuine gap, storage, and deployment, and its §10 tracks open decisions.
+The scaffold (marketing site, login, portal with dashboard/snags/reports) is built; `documents/`
+is a deliberate stub pending decision D2 (snag-scoped evidence vs. a general document library).
+New read-only query functions belong in `packages/supabase-queries` (each takes a `SupabaseClient`
+param so both apps can call it with their own client) rather than being written inline in a page
+unless it's a one-off simple `select`.
+
+### Add a new portal page
+1. Create `apps/web/src/app/(portal)/new-route/page.tsx` — it's inside the `(portal)` route group,
+   so `(portal)/layout.tsx` already enforces the supervisor/officer_admin gate for you
+2. Reuse `requireSupervisorOrAdmin()` from `src/lib/auth.ts` if the page needs the caller's role/org
+3. Add a link to it in `(portal)/layout.tsx`'s `NAV_LINKS`
 
 ## Code Style
 

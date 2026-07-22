@@ -404,3 +404,104 @@ export async function exportGovernanceReport(
   if (error) return { signedUrl: null, error };
   return { signedUrl: data?.signedUrl ?? null, error: null };
 }
+
+// ─── Org document library ──────────────────────────────────────────────────
+// Added for SNAG_WEB_APP_PLAN.md decision D2 — a general org-wide document
+// library, distinct from snag-scoped evidence. Migration:
+// supabase/migrations/20260722200000_org_documents.sql. Read access is any
+// org member; upload/delete are supervisor/officer_admin only, enforced by
+// the create_org_document/delete_org_document RPCs and mirrored in the
+// org-documents storage bucket's own policies.
+
+export interface OrgDocument {
+  id: string;
+  file_path: string;
+  title: string;
+  category: string | null;
+  uploaded_by: string;
+  uploader_name?: string;
+  created_at: string;
+}
+
+export async function getOrgDocuments(client: SupabaseClient, orgId: string): Promise<OrgDocument[]> {
+  const { data, error } = await client
+    .from('org_documents')
+    .select('id, file_path, title, category, uploaded_by, created_at, uploader:profiles!org_documents_uploaded_by_fkey(name)')
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: false });
+  if (error || !data) return [];
+  return (data as any[]).map((row) => ({
+    id: row.id,
+    file_path: row.file_path,
+    title: row.title,
+    category: row.category,
+    uploaded_by: row.uploaded_by,
+    uploader_name: row.uploader?.name,
+    created_at: row.created_at,
+  }));
+}
+
+export async function createOrgDocument(client: SupabaseClient, filePath: string, title: string, category?: string | null) {
+  const { data, error } = await client.rpc('create_org_document', {
+    p_file_path: filePath, p_title: title, p_category: category ?? null,
+  });
+  return { id: data as string | null, error };
+}
+
+export async function deleteOrgDocument(client: SupabaseClient, documentId: string) {
+  return client.rpc('delete_org_document', { p_document_id: documentId });
+}
+
+const ORG_DOCUMENTS_BUCKET = 'org-documents';
+
+export async function uploadOrgDocumentFile(
+  client: SupabaseClient,
+  orgId: string,
+  fileName: string,
+  file: File | Blob,
+): Promise<{ path: string | null; error: any }> {
+  const path = `${orgId}/${Date.now()}-${fileName}`;
+  const { data, error } = await client.storage.from(ORG_DOCUMENTS_BUCKET).upload(path, file, { upsert: false });
+  if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
+  return { path: data.path, error: null };
+}
+
+export async function getOrgDocumentUrl(client: SupabaseClient, path: string): Promise<string | null> {
+  const { data, error } = await client.storage.from(ORG_DOCUMENTS_BUCKET).createSignedUrl(path, 60 * 60);
+  if (error || !data) return null;
+  return data.signedUrl;
+}
+
+// ─── Snag trend (reporting) ────────────────────────────────────────────────
+// Added for SNAG_WEB_APP_PLAN.md decision D3. Migration:
+// supabase/migrations/20260722210000_org_snag_trend_rpc.sql.
+
+export interface SnagTrendPoint {
+  period: string;
+  total: number;
+  flagged: number;
+  inProgress: number;
+  resolved: number;
+  rcaPending: number;
+}
+
+export async function getOrgSnagTrend(
+  client: SupabaseClient,
+  orgId: string,
+  startDate: string,
+  endDate: string,
+  bucket: 'week' | 'month' = 'week',
+): Promise<SnagTrendPoint[]> {
+  const { data, error } = await client.rpc('get_org_snag_trend', {
+    p_org_id: orgId, p_start_date: startDate, p_end_date: endDate, p_bucket: bucket,
+  });
+  if (error || !data) return [];
+  return (data as any[]).map((row) => ({
+    period: row.period,
+    total: row.total ?? 0,
+    flagged: row.flagged ?? 0,
+    inProgress: row.in_progress ?? 0,
+    resolved: row.resolved ?? 0,
+    rcaPending: row.rca_pending ?? 0,
+  }));
+}

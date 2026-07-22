@@ -1,0 +1,14 @@
+# This site's "Base directory" must be set to apps/mobile in the Netlify
+# dashboard (repo root now hosts an npm-workspaces monorepo — see
+# SNAG_WEB_APP_PLAN.md §1) so paths below resolve relative to this folder.
+[build]
+  command = "npx expo export --platform web"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

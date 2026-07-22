@@ -29,6 +29,7 @@ jobs:
         run: npm install -g eas-cli
 
       - name: Build on EAS
+        working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas build --platform android --profile ${{ github.event.inputs.profile }} --non-interactive

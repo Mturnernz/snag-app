@@ -2,16 +2,20 @@ import { getOrgStats, getOrgSnagTrend } from '@snag/supabase-queries';
 import { STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, type SnagStatus, type SnagKind, type SnagSeverity } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
+import { Card, PageHeader, EmptyState } from '@/components/Card';
+import { LinkButton } from '@/components/Button';
+import Icon from '@/components/Icon';
+import styles from './page.module.css';
 
 function Bar({ label, count, total }: { label: string; count: number; total: number }) {
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-      <span style={{ width: 110, fontSize: 14, flexShrink: 0 }}>{label}</span>
-      <div style={{ flex: 1, height: 8, background: 'var(--color-border)', borderRadius: 4, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: 'var(--color-primary)' }} />
+    <div className={styles.bar}>
+      <span className={styles.barLabel}>{label}</span>
+      <div className={styles.barTrack}>
+        <div className={styles.barFill} style={{ width: `${pct}%` }} />
       </div>
-      <span style={{ width: 32, textAlign: 'right', fontSize: 14, flexShrink: 0 }}>{count}</span>
+      <span className={styles.barValue}>{count}</span>
     </div>
   );
 }
@@ -21,22 +25,17 @@ const WEEKDAY_MONTH: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeri
 function TrendChart({ points }: { points: { period: string; total: number }[] }) {
   const max = Math.max(1, ...points.map((p) => p.total));
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 120 }}>
+    <div className={styles.trend}>
       {points.map((p) => (
-        <div key={p.period} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontVariantNumeric: 'tabular-nums' }}>{p.total || ''}</span>
+        <div key={p.period} className={styles.trendCol}>
+          <span className={styles.trendCount}>{p.total || ''}</span>
           <div
+            className={styles.trendBar}
+            data-has-value={p.total > 0}
             title={`${new Date(p.period).toLocaleDateString(undefined, WEEKDAY_MONTH)}: ${p.total}`}
-            style={{
-              width: '100%',
-              height: `${Math.max(2, (p.total / max) * 88)}px`,
-              background: p.total > 0 ? 'var(--color-primary)' : 'var(--color-border)',
-              borderRadius: 3,
-            }}
+            style={{ height: `${Math.max(2, (p.total / max) * 88)}px` }}
           />
-          <span style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-            {new Date(p.period).toLocaleDateString(undefined, WEEKDAY_MONTH)}
-          </span>
+          <span className={styles.trendLabel}>{new Date(p.period).toLocaleDateString(undefined, WEEKDAY_MONTH)}</span>
         </div>
       ))}
     </div>
@@ -61,49 +60,44 @@ export default async function ReportsPage({
 
   return (
     <div style={{ maxWidth: 640 }}>
-      <h1 style={{ marginBottom: 4 }}>Reports</h1>
-      <p style={{ color: 'var(--color-text-secondary)', marginBottom: 32 }}>{activeMembership.org_name}</p>
+      <PageHeader title="Reports" subtitle={activeMembership.org_name} />
 
-      <section className="card" style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 4 }}>Trend — last 90 days</h2>
-        <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 20 }}>Snags reported per week</p>
-        {trend.length === 0 ? (
-          <p style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>No snags in this period.</p>
-        ) : (
-          <TrendChart points={trend} />
-        )}
-      </section>
+      <Card elevated className={styles.section} style={{ marginBottom: 'var(--space-xl)' }}>
+        <p className={styles.sectionTitle}>Trend — last 90 days</p>
+        <p className={styles.sectionSubtitle}>Snags reported per week</p>
+        {trend.length === 0 ? <EmptyState>No snags in this period.</EmptyState> : <TrendChart points={trend} />}
+      </Card>
 
-      <section className="card" style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 16 }}>By status</h2>
+      <Card elevated style={{ marginBottom: 'var(--space-xl)' }}>
+        <p className={styles.sectionTitle} style={{ marginBottom: 'var(--space-lg)' }}>By status</p>
         {(Object.keys(stats.byStatus) as SnagStatus[]).map((s) => (
           <Bar key={s} label={STATUS_LABELS[s]} count={stats.byStatus[s]} total={stats.totalSnags} />
         ))}
-      </section>
+      </Card>
 
-      <section className="card" style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 16 }}>By kind</h2>
+      <Card elevated style={{ marginBottom: 'var(--space-xl)' }}>
+        <p className={styles.sectionTitle} style={{ marginBottom: 'var(--space-lg)' }}>By kind</p>
         {(Object.keys(stats.byKind) as SnagKind[]).map((k) => (
           <Bar key={k} label={KIND_LABELS[k]} count={stats.byKind[k]} total={stats.totalSnags} />
         ))}
-      </section>
+      </Card>
 
-      <section className="card" style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 16 }}>By severity</h2>
+      <Card elevated style={{ marginBottom: 'var(--space-xl)' }}>
+        <p className={styles.sectionTitle} style={{ marginBottom: 'var(--space-lg)' }}>By severity</p>
         {(Object.keys(stats.bySeverity) as SnagSeverity[]).map((sv) => (
           <Bar key={sv} label={SEVERITY_LABELS[sv]} count={stats.bySeverity[sv]} total={stats.totalSnags} />
         ))}
-      </section>
+      </Card>
 
-      {exportError && <p className="error-text" style={{ marginBottom: 12 }}>{exportError}</p>}
+      {exportError && <p className="error-text" style={{ marginBottom: 'var(--space-md)' }}>{exportError}</p>}
 
       {isOfficerAdmin ? (
-        <div style={{ display: 'flex', gap: 12 }}>
-          <a href="/reports/export" className="btn-primary">Download governance report (PDF, last 90 days)</a>
-          <a href="/reports/export-csv" className="btn-secondary">Export raw data (CSV, last 90 days)</a>
+        <div className={styles.exportRow}>
+          <LinkButton href="/reports/export" variant="primary"><Icon name="Download" size="sm" /> Governance report (PDF)</LinkButton>
+          <LinkButton href="/reports/export-csv" variant="secondary"><Icon name="Download" size="sm" /> Raw data (CSV)</LinkButton>
         </div>
       ) : (
-        <p style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>
+        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
           Governance report export is available to officer admins.
         </p>
       )}

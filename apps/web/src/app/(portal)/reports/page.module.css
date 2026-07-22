@@ -1,0 +1,96 @@
+.section {
+  margin-bottom: var(--space-xl);
+}
+
+.sectionTitle {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  margin: 0 0 4px;
+}
+
+.sectionSubtitle {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-xl);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.barLabel {
+  width: 120px;
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+
+.barTrack {
+  flex: 1;
+  height: 8px;
+  background: var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 4px;
+}
+
+.barValue {
+  width: 32px;
+  text-align: right;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono-family);
+  flex-shrink: 0;
+}
+
+.trend {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 130px;
+}
+
+.trendCol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.trendCount {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono-family);
+  font-variant-numeric: tabular-nums;
+}
+
+.trendBar {
+  width: 100%;
+  border-radius: 3px;
+  background: var(--color-border);
+}
+
+.trendBar[data-has-value='true'] {
+  background: var(--color-primary);
+}
+
+.trendLabel {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.exportRow {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}

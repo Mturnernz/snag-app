@@ -1,17 +1,14 @@
 import Link from 'next/link';
-import { STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, type SnagStatus } from '@snag/shared-types';
+import { STATUS_LABELS, type SnagStatus, type SnagKind, type SnagSeverity } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
+import { PageHeader, EmptyState } from '@/components/Card';
+import { Button } from '@/components/Button';
+import { StatusBadge, KindBadge, SeverityBadge } from '@/components/Badge';
 import { mergeSelectedAction } from './actions';
+import styles from './page.module.css';
 
 const STATUS_FILTERS: (SnagStatus | 'all')[] = ['all', 'flagged', 'in_progress', 'rca_pending', 'resolved'];
-
-const STATUS_COLORS: Record<SnagStatus, { fg: string; bg: string }> = {
-  flagged: { fg: 'var(--color-status-flagged)', bg: 'var(--color-status-flagged-bg)' },
-  in_progress: { fg: 'var(--color-status-in-progress)', bg: 'var(--color-status-in-progress-bg)' },
-  resolved: { fg: 'var(--color-status-resolved)', bg: 'var(--color-status-resolved-bg)' },
-  rca_pending: { fg: 'var(--color-status-rca-pending)', bg: 'var(--color-status-rca-pending-bg)' },
-};
 
 export default async function SnagsPage({
   searchParams,
@@ -40,79 +37,48 @@ export default async function SnagsPage({
 
   return (
     <div>
-      <h1 style={{ marginBottom: 4 }}>Snags</h1>
-      <p style={{ color: 'var(--color-text-secondary)', marginBottom: 24 }}>{activeMembership.org_name}</p>
+      <PageHeader title="Snags" subtitle={activeMembership.org_name} />
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+      <div className={styles.filters}>
         {STATUS_FILTERS.map((s) => {
           const active = (status ?? 'all') === s;
           const href = s === 'all' ? '/snags' + (site ? `?site=${site}` : '') : `/snags?status=${s}` + (site ? `&site=${site}` : '');
           return (
-            <Link
-              key={s}
-              href={href}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 20,
-                fontSize: 14,
-                fontWeight: 500,
-                textDecoration: 'none',
-                border: '1px solid var(--color-border)',
-                background: active ? 'var(--color-primary)' : 'var(--color-surface)',
-                color: active ? '#fff' : 'var(--color-text-primary)',
-              }}
-            >
+            <Link key={s} href={href} className={styles.filterChip} data-active={active}>
               {s === 'all' ? 'All' : STATUS_LABELS[s]}
             </Link>
           );
         })}
       </div>
 
-      {error && <p className="error-text">Couldn't load snags: {error.message}</p>}
-      {mergeError && <p className="error-text" style={{ marginBottom: 12 }}>{mergeError}</p>}
+      {error && <p className="error-text">Couldn&apos;t load snags: {error.message}</p>}
+      {mergeError && <p className="error-text" style={{ marginBottom: 'var(--space-md)' }}>{mergeError}</p>}
 
-      {snags && snags.length === 0 && (
-        <p style={{ color: 'var(--color-text-muted)' }}>No snags match this filter.</p>
-      )}
+      {snags && snags.length === 0 && <EmptyState>No snags match this filter.</EmptyState>}
 
       {snags && snags.length > 0 && (
         <form action={mergeSelectedAction}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          <div className={styles.list}>
             {snags.map((snag) => (
-              <div key={snag.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <input type="checkbox" name="snagIds" value={snag.id} aria-label={`Select ${snag.reference} to merge`} />
-                <Link
-                  href={`/snags/${snag.id}`}
-                  style={{ display: 'flex', flex: 1, justifyContent: 'space-between', gap: 16, textDecoration: 'none', color: 'inherit', minWidth: 0 }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ margin: '0 0 4px', fontWeight: 600 }}>
-                      {snag.reference} · {snag.site_name}
+              <div key={snag.id} className={styles.row}>
+                <input type="checkbox" name="snagIds" value={snag.id} className={styles.rowCheckbox} aria-label={`Select ${snag.reference} to merge`} />
+                <Link href={`/snags/${snag.id}`} className={styles.rowLink}>
+                  <div className={styles.rowMain}>
+                    <p className={styles.rowTitle}>
+                      <span className={styles.rowRef}>{snag.reference}</span> · {snag.site_name}
                     </p>
-                    <p style={{ margin: 0, color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {snag.description ?? '(no description)'}
-                    </p>
+                    <p className={styles.rowDesc}>{snag.description ?? '(no description)'}</p>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, fontSize: 13 }}>
-                    <span style={{ color: 'var(--color-text-muted)' }}>{KIND_LABELS[snag.kind as keyof typeof KIND_LABELS]}</span>
-                    {snag.severity && <span style={{ color: 'var(--color-text-muted)' }}>{SEVERITY_LABELS[snag.severity as keyof typeof SEVERITY_LABELS]}</span>}
-                    <span
-                      style={{
-                        padding: '4px 10px',
-                        borderRadius: 20,
-                        background: STATUS_COLORS[snag.status as SnagStatus].bg,
-                        color: STATUS_COLORS[snag.status as SnagStatus].fg,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {STATUS_LABELS[snag.status as SnagStatus]}
-                    </span>
+                  <div className={styles.rowBadges}>
+                    <KindBadge kind={snag.kind as SnagKind} />
+                    {snag.severity && <SeverityBadge severity={snag.severity as SnagSeverity} />}
+                    <StatusBadge status={snag.status as SnagStatus} />
                   </div>
                 </Link>
               </div>
             ))}
           </div>
-          <button type="submit" className="btn-secondary">Merge selected</button>
+          <Button type="submit" variant="secondary">Merge selected</Button>
         </form>
       )}
     </div>

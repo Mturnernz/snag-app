@@ -70,7 +70,7 @@ snag/
 resolve paths relative to `apps/mobile/`, e.g. `src/screens/NewScreen.tsx` means
 `apps/mobile/src/screens/NewScreen.tsx`.
 
-## Design System (DO NOT deviate from these)
+## Design System — apps/mobile (DO NOT deviate from these)
 
 All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or shadow values inline — always reference a token, including for one-off "success"/"copied" states (`Colors.success`/`successBg`) and the health & safety / incident-lane identity colour (`Colors.serious`/`seriousBg`).
 
@@ -86,6 +86,17 @@ All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or 
 - **Minimum touch target**: 48px (use `MIN_TOUCH_TARGET` constant)
 - **Font**: System (San Francisco on iOS) — no custom typeface
 - **Light mode only** — no dark mode handling needed
+
+## Design System — apps/web (DO NOT deviate from these)
+
+All tokens are CSS custom properties in `src/app/globals.css`. Light values mirror `apps/mobile/src/constants/theme.ts` exactly (same brand, both clients) — dark values are a deliberately designed second theme (mobile has none to inherit from), applied via `prefers-color-scheme`. Never hardcode a colour, spacing, or radius inline — always reference a `var(--...)` token or a component that already does.
+
+- **Fonts**: IBM Plex Sans (400/600/700) + IBM Plex Mono (400/500), self-hosted via `next/font/local` (`src/lib/fonts.ts`, files in `src/fonts/`) — shared identity with `SNAG_WEB_APP_PLAN.md`'s own artifact, not a generic default. Mono is for data: snag references, counts, dates in tables.
+- **Components**: `src/components/` — `Badge` (`StatusBadge`/`KindBadge`/`SeverityBadge`/`NotifiableBadge`), `Button`/`LinkButton` (primary/secondary/ghost/danger), `Card`/`StatTile`/`StatGrid`/`PageHeader`/`EmptyState`, `Icon` (lucide-react, named icons only — see `Icon.tsx`'s `IconName` type for what's available without adding new imports), `PortalNav` (the responsive sidebar). Reuse these; don't reintroduce inline `style={{}}` pill/card markup.
+- **Icons**: `lucide-react` via the shared `Icon` component, outline style — never emoji/unicode glyphs. Sizes from the same `sm`/`md`/`lg`/`xl`/`xxl` scale as mobile's `IconSize`.
+- **Both themes required**: every page must work in light and dark — test with `prefers-color-scheme` before shipping a new page, don't just eyeball light mode.
+- **Responsive**: the portal sidebar collapses to a drawer under 900px (`PortalNav`/`PortalNav.module.css`) — new portal pages should assume narrow viewports, not just desktop.
+- **CSS Modules, not Tailwind**: this app hand-rolls its design system via CSS custom properties + CSS Modules (`*.module.css` next to each component/page). No CSS framework is installed — don't add one without discussing it first.
 
 ## Environment Setup
 

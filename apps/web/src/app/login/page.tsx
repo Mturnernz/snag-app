@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Button } from '@/components/Button';
 import { loginAction } from './actions';
 
 export default async function LoginPage({
@@ -11,8 +12,11 @@ export default async function LoginPage({
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div className="container" style={{ maxWidth: 400 }}>
-        <h1 style={{ marginBottom: 8 }}>Log in</h1>
-        <p style={{ color: 'var(--color-text-secondary)', marginBottom: 32 }}>
+        <Link href="/" style={{ fontWeight: 700, fontSize: 'var(--text-lg)', textDecoration: 'none', color: 'var(--color-text-primary)', display: 'block', marginBottom: 'var(--space-2xl)' }}>
+          SNAG
+        </Link>
+        <h1 style={{ fontSize: 'var(--text-2xl)', marginBottom: 'var(--space-sm)' }}>Log in</h1>
+        <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2xl)' }}>
           Same account as the SNAG mobile app.
         </p>
 
@@ -28,13 +32,13 @@ export default async function LoginPage({
 
           {error && <p className="error-text">{error}</p>}
 
-          <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: 8 }}>
+          <Button type="submit" variant="primary" style={{ width: '100%', marginTop: 8 }}>
             Log in
-          </button>
+          </Button>
         </form>
 
-        <p style={{ marginTop: 24, fontSize: 14, color: 'var(--color-text-secondary)' }}>
-          No account yet? <Link href="/sign-up" style={{ color: 'var(--color-primary)' }}>Create an organisation</Link>
+        <p style={{ marginTop: 'var(--space-2xl)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+          No account yet? <Link href="/sign-up" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Create an organisation</Link>
         </p>
       </div>
     </div>

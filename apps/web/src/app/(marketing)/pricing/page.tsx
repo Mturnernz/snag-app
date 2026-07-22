@@ -1,22 +1,23 @@
-import Link from 'next/link';
+import { Card } from '@/components/Card';
+import { LinkButton } from '@/components/Button';
 
 export default function PricingPage() {
   return (
-    <section className="container" style={{ padding: '64px 32px', maxWidth: 640 }}>
-      <h1 style={{ marginBottom: 12 }}>Pricing</h1>
-      <p style={{ color: 'var(--color-text-secondary)', marginBottom: 32 }}>
+    <section className="container" style={{ padding: 'var(--space-5xl) 0', maxWidth: 640 }}>
+      <h1 style={{ fontSize: 'var(--text-3xl)', marginBottom: 'var(--space-md)' }}>Pricing</h1>
+      <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2xl)', fontSize: 'var(--text-lg)' }}>
         SNAG is in early access. Every organisation that signs up today gets the full platform —
-        unlimited reports, investigations, and the supervisor portal — at no cost while we're
+        unlimited reports, investigations, and the supervisor portal — at no cost while we&apos;re
         onboarding early customers.
       </p>
-      <div className="card">
-        <h3 style={{ margin: '0 0 8px' }}>Early access</h3>
-        <p style={{ color: 'var(--color-text-secondary)', marginBottom: 20 }}>
-          Full platform access. We'll talk with you directly about pricing before anything changes
-          for your organisation.
+      <Card elevated>
+        <h3 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-sm)' }}>Early access</h3>
+        <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xl)' }}>
+          Full platform access. We&apos;ll talk with you directly about pricing before anything
+          changes for your organisation.
         </p>
-        <Link href="/sign-up" className="btn-primary">Create your organisation</Link>
-      </div>
+        <LinkButton href="/sign-up" variant="primary">Create your organisation</LinkButton>
+      </Card>
     </section>
   );
 }

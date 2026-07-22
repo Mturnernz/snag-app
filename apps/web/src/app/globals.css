@@ -1,12 +1,66 @@
-/* Mirrors apps/mobile/src/constants/theme.ts's Colors — keep both in sync by
-   hand; there's no shared design-token package yet (see SNAG_WEB_APP_PLAN.md). */
+/* Design tokens. Light values mirror apps/mobile/src/constants/theme.ts
+   exactly (same brand across both clients) — see that file's header comment
+   before changing any light value here without changing it there too. Dark
+   values are a deliberate design (mobile is light-only, so there was no
+   dark system to inherit), not a mechanical inversion. */
+
 :root {
+  --font-sans-family: var(--font-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono-family: var(--font-mono), ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* Spacing — matches theme.ts's Spacing scale (xs..xxxl) plus two larger
+     steps for web-only layout (page gutters, section rhythm). */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+  --space-4xl: 48px;
+  --space-5xl: 64px;
+
+  /* Radius — matches theme.ts's Radius scale exactly. */
+  --radius-card: 12px;
+  --radius-button: 8px;
+  --radius-chip: 4px;
+  --radius-input: 8px;
+
+  /* Type scale — a step up from theme.ts's mobile scale (15px base) since
+     web body copy sits further from the eye; weights match 1:1. */
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 19px;
+  --text-xl: 23px;
+  --text-2xl: 29px;
+  --text-3xl: 36px;
+  --text-4xl: 48px;
+
+  --weight-regular: 400;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 2px 6px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.12);
+
+  --focus-ring: 0 0 0 3px var(--color-primary-light);
+}
+
+/* ---------- Light (default) ---------- */
+:root,
+:root[data-theme='light'] {
   --color-background: #F9FAFB;
   --color-surface: #FFFFFF;
+  --color-surface-raised: #FFFFFF;
   --color-border: #E5E7EB;
+  --color-border-strong: #D1D5DB;
 
   --color-primary: #2563EB;
+  --color-primary-hover: #1D4ED8;
   --color-primary-light: #DBEAFE;
+  --color-on-primary: #FFFFFF;
 
   --color-text-primary: #111827;
   --color-text-secondary: #6B7280;
@@ -21,12 +75,113 @@
   --color-status-rca-pending: #DC2626;
   --color-status-rca-pending-bg: #FEE2E2;
 
-  --color-danger: #EF4444;
   --color-success: #16A34A;
+  --color-success-bg: #F0FDF4;
+  --color-success-border: #BBF7D0;
 
-  --radius-card: 12px;
-  --radius-button: 8px;
-  --radius-chip: 4px;
+  --color-serious: #DC2626;
+  --color-serious-bg: #FEE2E2;
+  --color-danger: #EF4444;
+  --color-danger-bg: #FEF2F2;
+
+  --color-category-niggle: #6B7280;
+  --color-category-niggle-bg: #F3F4F6;
+  --color-category-broken-equipment: #B45309;
+  --color-category-broken-equipment-bg: #FEF3C7;
+  --color-category-health-safety: #DC2626;
+  --color-category-health-safety-bg: #FEE2E2;
+  --color-category-other: #7C3AED;
+  --color-category-other-bg: #EDE9FE;
+
+  color-scheme: light;
+}
+
+/* ---------- Dark ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-background: #0A0E16;
+    --color-surface: #121826;
+    --color-surface-raised: #19212F;
+    --color-border: #262E3D;
+    --color-border-strong: #333D4F;
+
+    --color-primary: #5B8DEF;
+    --color-primary-hover: #7CA5F2;
+    --color-primary-light: #16233D;
+    --color-on-primary: #08101F;
+
+    --color-text-primary: #F3F4F6;
+    --color-text-secondary: #A0AAB8;
+    --color-text-muted: #6B7688;
+
+    --color-status-flagged: #60A5FA;
+    --color-status-flagged-bg: #14233D;
+    --color-status-in-progress: #FBBF24;
+    --color-status-in-progress-bg: #2E2410;
+    --color-status-resolved: #34D399;
+    --color-status-resolved-bg: #0F2A20;
+    --color-status-rca-pending: #F87171;
+    --color-status-rca-pending-bg: #3B1319;
+
+    --color-success: #4ADE80;
+    --color-success-bg: #10291B;
+    --color-success-border: #1E4430;
+
+    --color-serious: #F87171;
+    --color-serious-bg: #3B1319;
+    --color-danger: #F87171;
+    --color-danger-bg: #351417;
+
+    --color-category-niggle: #9CA6B8;
+    --color-category-niggle-bg: #1B212C;
+    --color-category-broken-equipment: #F0B429;
+    --color-category-broken-equipment-bg: #2E2410;
+    --color-category-health-safety: #F87171;
+    --color-category-health-safety-bg: #3B1319;
+    --color-category-other: #A78BFA;
+    --color-category-other-bg: #241B3D;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --color-background: #0A0E16;
+  --color-surface: #121826;
+  --color-surface-raised: #19212F;
+  --color-border: #262E3D;
+  --color-border-strong: #333D4F;
+  --color-primary: #5B8DEF;
+  --color-primary-hover: #7CA5F2;
+  --color-primary-light: #16233D;
+  --color-on-primary: #08101F;
+  --color-text-primary: #F3F4F6;
+  --color-text-secondary: #A0AAB8;
+  --color-text-muted: #6B7688;
+  --color-status-flagged: #60A5FA;
+  --color-status-flagged-bg: #14233D;
+  --color-status-in-progress: #FBBF24;
+  --color-status-in-progress-bg: #2E2410;
+  --color-status-resolved: #34D399;
+  --color-status-resolved-bg: #0F2A20;
+  --color-status-rca-pending: #F87171;
+  --color-status-rca-pending-bg: #3B1319;
+  --color-success: #4ADE80;
+  --color-success-bg: #10291B;
+  --color-success-border: #1E4430;
+  --color-serious: #F87171;
+  --color-serious-bg: #3B1319;
+  --color-danger: #F87171;
+  --color-danger-bg: #351417;
+  --color-category-niggle: #9CA6B8;
+  --color-category-niggle-bg: #1B212C;
+  --color-category-broken-equipment: #F0B429;
+  --color-category-broken-equipment-bg: #2E2410;
+  --color-category-health-safety: #F87171;
+  --color-category-health-safety-bg: #3B1319;
+  --color-category-other: #A78BFA;
+  --color-category-other-bg: #241B3D;
+  color-scheme: dark;
 }
 
 * {
@@ -39,58 +194,62 @@ body {
   margin: 0;
   background: var(--color-background);
   color: var(--color-text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans-family);
+  font-size: var(--text-base);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-sans-family);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  margin: 0;
+  text-wrap: balance;
+}
+
+code, pre, .mono {
+  font-family: var(--font-mono-family);
 }
 
 a {
   color: inherit;
 }
 
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-button);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
 .container {
-  max-width: 1080px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 0 32px;
+  padding: 0 var(--space-2xl);
 }
 
-.card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-card);
-  padding: 24px;
-}
-
-.btn-primary {
-  display: inline-block;
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-button);
-  padding: 12px 20px;
-  font-weight: 600;
-  font-size: 15px;
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.btn-secondary {
-  display: inline-block;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-button);
-  padding: 12px 20px;
-  font-weight: 600;
-  font-size: 15px;
-  cursor: pointer;
-  text-decoration: none;
+.field {
+  margin-bottom: var(--space-lg);
 }
 
 .field label {
   display: block;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   color: var(--color-text-primary);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-xs);
 }
 
 .field input,
@@ -98,18 +257,21 @@ a {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-button);
-  font-size: 15px;
+  border-radius: var(--radius-input);
+  font-size: var(--text-base);
+  font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
 }
 
-.field {
-  margin-bottom: 16px;
-}
-
 .error-text {
   color: var(--color-danger);
-  font-size: 14px;
-  margin-top: 8px;
+  font-size: var(--text-sm);
+  margin-top: var(--space-sm);
+}
+
+@media (max-width: 640px) {
+  .container {
+    padding: 0 var(--space-lg);
+  }
 }

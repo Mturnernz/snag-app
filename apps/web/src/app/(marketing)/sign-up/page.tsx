@@ -1,3 +1,4 @@
+import { Button } from '@/components/Button';
 import { signUpAction } from './actions';
 
 export default async function SignUpPage({
@@ -8,10 +9,10 @@ export default async function SignUpPage({
   const { error } = await searchParams;
 
   return (
-    <section className="container" style={{ padding: '64px 32px', maxWidth: 440 }}>
-      <h1 style={{ marginBottom: 8 }}>Create your organisation</h1>
-      <p style={{ color: 'var(--color-text-secondary)', marginBottom: 32 }}>
-        You'll be the first officer admin — you can invite supervisors and workers once you're in.
+    <section className="container" style={{ padding: 'var(--space-5xl) 0', maxWidth: 440 }}>
+      <h1 style={{ fontSize: 'var(--text-3xl)', marginBottom: 'var(--space-sm)' }}>Create your organisation</h1>
+      <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2xl)' }}>
+        You&apos;ll be the first officer admin — you can invite supervisors and workers once you&apos;re in.
       </p>
 
       <form action={signUpAction}>
@@ -34,9 +35,9 @@ export default async function SignUpPage({
 
         {error && <p className="error-text">{error}</p>}
 
-        <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: 8 }}>
+        <Button type="submit" variant="primary" style={{ width: '100%', marginTop: 8 }}>
           Create organisation
-        </button>
+        </Button>
       </form>
     </section>
   );

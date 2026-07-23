@@ -208,6 +208,8 @@ export type RootStackParamList = {
   ScanOrgCode: undefined;
   ChooseReportOrg: undefined;
   ManageOrganisation: undefined;
+  ManageSites: undefined;
+  ManageWorkGroups: undefined;
   Mentions: undefined;
   OnboardingCarousel: undefined;
 };
@@ -243,9 +245,9 @@ export const KIND_LABELS: Record<SnagKind, string> = {
 };
 
 export const ROLE_LABELS: Record<UserRole, string> = {
-  worker: 'Worker',
-  supervisor: 'Supervisor',
-  officer_admin: 'Officer Admin',
+  worker: 'Crew',
+  supervisor: 'Site Lead',
+  officer_admin: 'Manager',
 };
 
 export const RELEVANCE_REASON_LABELS: Record<SnagRelevanceReason, string> = {

@@ -18,6 +18,8 @@ import ReportIncidentReviewScreen from '../screens/ReportIncidentReviewScreen';
 import ScanJoinCodeScreen from '../screens/ScanJoinCodeScreen';
 import ChooseReportOrgScreen from '../screens/ChooseReportOrgScreen';
 import ManageOrganisationScreen from '../screens/ManageOrganisationScreen';
+import ManageSitesScreen from '../screens/ManageSitesScreen';
+import ManageWorkGroupsScreen from '../screens/ManageWorkGroupsScreen';
 import MentionsScreen from '../screens/MentionsScreen';
 import OnboardingCarouselScreen from '../screens/OnboardingCarouselScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
@@ -84,7 +86,7 @@ function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserR
         }}
       />
       {isAdminOrManager && (
-        <Tab.Screen name="Admin" component={AdminDashboardScreen} />
+        <Tab.Screen name="Admin" component={AdminDashboardScreen} options={{ tabBarLabel: 'Manager' }} />
       )}
     </Tab.Navigator>
   );
@@ -143,6 +145,16 @@ export default function RootNavigator({ userRole, initialTab }: { userRole: User
         <Stack.Screen
           name="ManageOrganisation"
           component={ManageOrganisationScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="ManageSites"
+          component={ManageSitesScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="ManageWorkGroups"
+          component={ManageWorkGroupsScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
         <Stack.Screen

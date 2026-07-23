@@ -39,9 +39,9 @@ export default function AdminSetupScreen({ profile, onDone }: Props) {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.appName}>Snag</Text>
-      <Text style={styles.heading}>Welcome, Admin!</Text>
+      <Text style={styles.heading}>Welcome, Manager!</Text>
       <Text style={styles.subheading}>
-        <Text style={styles.bold}>{orgName}</Text> is ready. Set your name to get started — you can invite your team from the Admin tab.
+        <Text style={styles.bold}>{orgName}</Text> is ready. Set your name to get started — you can invite your team from the Manager tab.
       </Text>
 
       <Card variant="elevated" elevation="md">

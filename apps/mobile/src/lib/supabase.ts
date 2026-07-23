@@ -439,25 +439,25 @@ export interface WorkGroupDetail {
   color: string | null;
   isDefault: boolean;
   supervisorIds: string[];
-  // null = the group applies to every site in the org.
-  siteId: string | null;
-  siteName: string | null;
+  // Empty = the group applies to every site in the org.
+  siteIds: string[];
+  siteNames: string[];
 }
 
 export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
   const { data: groups } = await supabase
     .from('work_groups')
-    .select('id, name, color, is_default, site_id, site:sites(name)')
+    .select('id, name, color, is_default')
     .is('deleted_at', null)
     .order('is_default', { ascending: true })
     .order('created_at', { ascending: true });
   if (!groups || groups.length === 0) return [];
 
   const ids = groups.map((g) => g.id);
-  const { data: sups } = await supabase
-    .from('work_group_supervisors')
-    .select('work_group_id, user_id')
-    .in('work_group_id', ids);
+  const [{ data: sups }, { data: groupSites }] = await Promise.all([
+    supabase.from('work_group_supervisors').select('work_group_id, user_id').in('work_group_id', ids),
+    supabase.from('work_group_sites').select('work_group_id, site_id, site:sites(name)').in('work_group_id', ids),
+  ]);
 
   return groups.map((g: any) => ({
     id: g.id,
@@ -465,22 +465,22 @@ export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
     color: g.color,
     isDefault: g.is_default,
     supervisorIds: (sups ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.user_id),
-    siteId: g.site_id,
-    siteName: g.site?.name ?? null,
+    siteIds: (groupSites ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.site_id),
+    siteNames: (groupSites ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.site?.name).filter(Boolean),
   }));
 }
 
-export async function createWorkGroup(name: string, color?: string | null, siteId?: string | null) {
+export async function createWorkGroup(name: string, color?: string | null, siteIds?: string[]) {
   return supabase.rpc('create_work_group', {
-    p_name: name, p_color: color ?? null, p_site_id: siteId ?? null,
+    p_name: name, p_color: color ?? null, p_site_ids: siteIds ?? [],
   });
 }
 
 export async function updateWorkGroup(
-  workGroupId: string, name: string, color?: string | null, siteId?: string | null
+  workGroupId: string, name: string, color?: string | null, siteIds?: string[]
 ) {
   return supabase.rpc('update_work_group', {
-    p_work_group_id: workGroupId, p_name: name, p_color: color ?? null, p_site_id: siteId ?? null,
+    p_work_group_id: workGroupId, p_name: name, p_color: color ?? null, p_site_ids: siteIds ?? [],
   });
 }
 

@@ -20,6 +20,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   SnagKind,
   KIND_LABELS,
+  ROLE_LABELS,
   RootStackParamList,
 } from '../types';
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -34,6 +35,7 @@ import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
+import ScreenEntrance from '../components/ScreenEntrance';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -154,11 +156,11 @@ export default function ReportIssueScreen() {
 
   // The "Submit" default group is always its own bar at the top of the
   // picker, separate from the custom-group grid below it. Custom groups are
-  // further scoped to the reporter's site — a group with no site applies
-  // everywhere, one with a site only shows to reporters at that site.
+  // further scoped to the reporter's site — a group with no sites applies
+  // everywhere, one with sites only shows to reporters at one of those sites.
   const defaultGroup = workGroups.find((wg) => wg.isDefault);
   const customGroups = workGroups.filter(
-    (wg) => !wg.isDefault && (wg.siteId === null || wg.siteId === reportSiteId)
+    (wg) => !wg.isDefault && (wg.siteIds.length === 0 || (!!reportSiteId && wg.siteIds.includes(reportSiteId)))
   );
 
   // Capture -> [select work group] -> submit. The grid only ever appears for
@@ -333,7 +335,7 @@ export default function ReportIssueScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <ScreenEntrance style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Report a Snag</Text>
       </View>
@@ -504,7 +506,7 @@ export default function ReportIssueScreen() {
               >
                 <View style={styles.orgOptionText}>
                   <Text style={styles.orgOptionName}>{m.org_name}</Text>
-                  <Text style={styles.orgOptionRole}>{m.role.replace('_', ' ')}</Text>
+                  <Text style={styles.orgOptionRole}>{ROLE_LABELS[m.role]}</Text>
                 </View>
                 {m.is_active && <Icon name="checkmark" size="md" color={Colors.primary} />}
               </TouchableOpacity>
@@ -514,7 +516,7 @@ export default function ReportIssueScreen() {
       </Modal>
 
       {/* Work group picker — capture -> select work group -> submit. Tapping
-          a tile submits immediately, including the "Submit" default tile. */}
+          a chip submits immediately; the "Submit" default gets its own bar. */}
       <Modal
         visible={showGroupPicker}
         transparent
@@ -543,25 +545,17 @@ export default function ReportIssueScreen() {
             {defaultGroup && customGroups.length > 0 && <Text style={styles.orText}>or</Text>}
 
             {customGroups.length > 0 && (
-              <ScrollView contentContainerStyle={styles.groupGrid}>
-                {customGroups.map((wg) => (
-                  <TouchableOpacity
-                    key={wg.id}
-                    style={[styles.groupTile, { backgroundColor: wg.color ?? Colors.textSecondary }]}
-                    onPress={() => doSubmit(wg.id)}
-                    activeOpacity={0.85}
-                    disabled={submitting}
-                  >
-                    <View style={styles.groupTileOverlay} />
-                    <Text style={styles.groupTileText} numberOfLines={2}>{wg.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <Chip
+                options={customGroups.map((wg) => ({ key: wg.id, label: wg.name }))}
+                value=""
+                onChange={(id) => { if (!submitting) doSubmit(id); }}
+                variant="chip"
+              />
             )}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
-    </View>
+    </ScreenEntrance>
   );
 }
 
@@ -705,33 +699,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: Spacing.md,
   },
-  groupGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-    paddingTop: Spacing.sm,
-  },
-  groupTile: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    aspectRatio: 1.3,
-    borderRadius: Radius.card,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.md,
-  },
-  groupTileOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-  },
-  groupTileText: {
-    fontSize: Typography.base,
-    fontWeight: Typography.bold,
-    color: Colors.white,
-    textAlign: 'center',
-  },
-
   fieldGroup: {
     gap: Spacing.sm,
   },

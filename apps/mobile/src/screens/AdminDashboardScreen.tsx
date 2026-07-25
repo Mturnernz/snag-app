@@ -18,7 +18,7 @@ import {
   supabase, getSiteBreakdown, SiteBreakdown, getMemberships, setOrganisationActive, Membership,
   getUnassignedSnags, UnassignedSnag, getSiteAssignees, SiteAssignee, assignSnagOwner,
 } from '../lib/supabase';
-import { Colors, Spacing, Typography, Radius } from '../constants/theme';
+import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -49,6 +49,10 @@ export default function AdminDashboardScreen() {
   const [togglingOrgId, setTogglingOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Distinguished from "no sites yet" — get_site_breakdown raises when the org
+  // it's asked about isn't the caller's active org, and that used to surface as
+  // an empty card on an org with three sites. See PRODUCT_REVIEW.md §3.4.
+  const [breakdownError, setBreakdownError] = useState(false);
 
   const canManageWorkGroups = role === 'officer_admin' || role === 'supervisor';
 
@@ -67,15 +71,25 @@ export default function AdminDashboardScreen() {
       setOrg((profile.organisation as Organisation | undefined) ?? null);
       setRole(profile.role);
       setIsAdmin(profile.role === 'officer_admin');
-      // This screen is only reachable via the Admin tab, already gated to
-      // supervisor/officer_admin — no extra role check needed here.
-      if (profile.org_id) setSiteBreakdown(await getSiteBreakdown(profile.org_id));
     }
 
     // Every org this user administers, active or not — the only place
     // deactivated orgs remain visible/manageable.
     const memberships = await getMemberships();
     setOwnedOrgs(memberships.filter((m) => m.role === 'officer_admin'));
+
+    // Drive the breakdown off the ACTIVE membership rather than
+    // profiles.org_id. That column only mirrors the active org, while the RPC
+    // compares against user_active_org — any drift between the two threw an
+    // error the old code swallowed into an empty state.
+    // This screen is only reachable via the Admin tab, already gated to
+    // supervisor/officer_admin — no extra role check needed here.
+    const activeOrgId = memberships.find((m) => m.is_active && m.org_active)?.org_id ?? null;
+    if (activeOrgId) {
+      const { data: rows, error } = await getSiteBreakdown(activeOrgId);
+      setSiteBreakdown(rows);
+      setBreakdownError(Boolean(error));
+    }
 
     setLoading(false);
   }, []);
@@ -102,10 +116,11 @@ export default function AdminDashboardScreen() {
       return;
     }
     setUnassignedBySite((prev) => ({ ...prev, [siteId]: prev[siteId].filter((s) => s.id !== snagId) }));
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: profile } = await supabase.from('profiles').select('org_id').eq('id', user.id).single();
-      if (profile?.org_id) setSiteBreakdown(await getSiteBreakdown(profile.org_id));
+    const memberships = await getMemberships();
+    const activeOrgId = memberships.find((m) => m.is_active && m.org_active)?.org_id ?? null;
+    if (activeOrgId) {
+      const { data: rows, error } = await getSiteBreakdown(activeOrgId);
+      if (!error) setSiteBreakdown(rows);
     }
   }
 
@@ -168,15 +183,22 @@ export default function AdminDashboardScreen() {
             site-scoped complement, not a replacement. */}
         <Card variant="elevated" style={styles.breakdownCard}>
           <Text style={styles.sectionLabel}>OUTSTANDING WORK</Text>
-          {siteBreakdown.length === 0 && (
+          {breakdownError ? (
+            <View style={styles.errorRow}>
+              <Icon name="alert-circle-outline" size="sm" color={Colors.danger} />
+              <Text style={styles.errorText}>
+                Couldn&apos;t load outstanding work. Pull down to try again.
+              </Text>
+            </View>
+          ) : siteBreakdown.length === 0 ? (
             <Text style={styles.hintMuted}>No sites yet.</Text>
-          )}
-          {isWide ? (
+          ) : isWide ? (
             <View style={styles.siteTable}>
               <View style={styles.siteTableHeaderRow}>
                 <Text style={[styles.siteTableHeaderCell, styles.siteNameCol]}>Site</Text>
                 <Text style={styles.siteTableHeaderCell}>Open investigations</Text>
                 <Text style={styles.siteTableHeaderCell}>Unassigned</Text>
+                <Text style={styles.siteTableHeaderCell}>RCA outstanding</Text>
                 <Text style={styles.siteTableHeaderCell}>Overdue actions</Text>
               </View>
               {siteBreakdown.map((s) => (
@@ -190,6 +212,7 @@ export default function AdminDashboardScreen() {
                       value={s.unassigned}
                       onPress={s.unassigned > 0 ? () => toggleUnassignedExpand(s.siteId) : undefined}
                     />
+                    <SiteCountCell value={s.rcaOutstanding} alert />
                     <SiteCountCell value={s.overdueActions} alert />
                   </View>
                   {expandedSiteId === s.siteId && (
@@ -216,6 +239,7 @@ export default function AdminDashboardScreen() {
                       value={s.unassigned}
                       onPress={s.unassigned > 0 ? () => toggleUnassignedExpand(s.siteId) : undefined}
                     />
+                    <SiteStat label="RCA outstanding" value={s.rcaOutstanding} alert />
                     <SiteStat label="Overdue actions" value={s.overdueActions} alert />
                   </View>
                   {expandedSiteId === s.siteId && (
@@ -313,10 +337,17 @@ export default function AdminDashboardScreen() {
   );
 }
 
+// Tappable variants get a MIN_TOUCH_TARGET-high hit area — the number alone is
+// well under the 48px the design system mandates.
 function SiteCountCell({ value, alert, onPress }: { value: number; alert?: boolean; onPress?: () => void }) {
   const Wrapper = onPress ? TouchableOpacity : View;
   return (
-    <Wrapper style={styles.siteTableCell} onPress={onPress} activeOpacity={0.7}>
+    <Wrapper
+      style={[styles.siteTableCell, onPress && styles.tappableCell]}
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityRole={onPress ? 'button' : undefined}
+    >
       <Text style={[styles.siteCountText, alert && value > 0 && styles.siteCountTextAlert, onPress && styles.siteCountTextTappable]}>
         {value}
       </Text>
@@ -327,7 +358,12 @@ function SiteCountCell({ value, alert, onPress }: { value: number; alert?: boole
 function SiteStat({ label, value, alert, onPress }: { label: string; value: number; alert?: boolean; onPress?: () => void }) {
   const Wrapper = onPress ? TouchableOpacity : View;
   return (
-    <Wrapper style={styles.siteStat} onPress={onPress} activeOpacity={0.7}>
+    <Wrapper
+      style={[styles.siteStat, onPress && styles.tappableStat]}
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityRole={onPress ? 'button' : undefined}
+    >
       <Text style={[styles.siteCountText, alert && value > 0 && styles.siteCountTextAlert, onPress && styles.siteCountTextTappable]}>
         {value}
       </Text>
@@ -392,7 +428,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.sm,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  siteTableCell: { flex: 1, alignItems: 'center' },
+  siteTableCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   siteNameCol: { flex: 1.4, textAlign: 'left' },
   siteNameCellText: { fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textPrimary },
 
@@ -400,9 +436,13 @@ const styles = StyleSheet.create({
     gap: Spacing.sm, paddingVertical: Spacing.sm,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  siteStatRow: { flexDirection: 'row', gap: Spacing.lg },
+  // Wraps because there are four stats now — on a narrow phone they'd
+  // otherwise squeeze or clip.
+  siteStatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.lg, rowGap: Spacing.md },
   siteStat: { alignItems: 'flex-start', gap: 2 },
   siteStatLabel: { fontSize: Typography.xs, color: Colors.textMuted },
+  tappableCell: { minHeight: MIN_TOUCH_TARGET },
+  tappableStat: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   siteCountText: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
   siteCountTextAlert: { color: Colors.danger },
   siteCountTextTappable: { color: Colors.primary, textDecorationLine: 'underline' },
@@ -441,4 +481,7 @@ const styles = StyleSheet.create({
   statusPillTextInactive: { color: Colors.priority.medium },
 
   hintMuted: { fontSize: Typography.sm, color: Colors.textMuted, fontStyle: 'italic' },
+
+  errorRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start' },
+  errorText: { flex: 1, fontSize: Typography.sm, color: Colors.danger, lineHeight: 18 },
 });

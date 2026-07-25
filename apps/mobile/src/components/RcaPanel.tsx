@@ -5,7 +5,7 @@ import { SnagStatus, ROLE_LABELS } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import {
   getSnagRca, assignRca, saveRcaWhy, submitRca, acceptRca, rejectRca, reassignRca, cancelRca,
-  SnagRca, SiteAssignee,
+  waiveRca, unwaiveRca, SnagRca, SiteAssignee,
 } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
 import Button from './Button';
@@ -36,6 +36,11 @@ interface Props {
   /** Candidate pool for delegation — same site-scoped list ManageIssuePanel
    *  uses for the owner picker. */
   assignees: SiteAssignee[];
+  /** Waiver state from the snag row — "no formal RCA needed here", recorded so
+   *  the snag stops counting as outstanding analysis on the Admin dashboard.
+   *  Null/undefined means not waived. */
+  rcaWaivedAt?: string | null;
+  rcaWaivedReason?: string | null;
   /** Called after any action that could change the snag's own status
    *  (assign, accept) so the parent re-fetches the issue. */
   onChanged: () => void;
@@ -45,7 +50,9 @@ interface Props {
   onStatusChange?: (status: StepStatus, summary: string) => void;
 }
 
-export default function RcaPanel({ issueId, status, canEdit, currentUserId, assignees, onChanged, onStatusChange }: Props) {
+export default function RcaPanel({
+  issueId, status, canEdit, currentUserId, assignees, rcaWaivedAt, rcaWaivedReason, onChanged, onStatusChange,
+}: Props) {
   const { showToast } = useToast();
 
   const [rca, setRca] = useState<SnagRca | null>(null);
@@ -71,6 +78,14 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
+  // "No RCA needed" — the disposition that lets a resolved serious snag leave
+  // the Admin dashboard's RCA-outstanding count without a formal 5-Whys.
+  const [waiveModalOpen, setWaiveModalOpen] = useState(false);
+  const [waiveReason, setWaiveReason] = useState('');
+  const [waiving, setWaiving] = useState(false);
+  const [unwaiving, setUnwaiving] = useState(false);
+  const isWaived = Boolean(rcaWaivedAt);
+
   const fetchRca = useCallback(async () => {
     const data = await getSnagRca(issueId);
     setRca(data);
@@ -84,6 +99,15 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
     if (status === 'resolved') {
       if (data?.status === 'accepted') {
         onStatusChange?.('done', `Completed by ${assignees.find((a) => a.id === data.assignedTo)?.name ?? 'Unknown'}`);
+      } else if (rcaWaivedAt) {
+        // A recorded "not required" decision is a finished step, not a pending
+        // one — this is what stops the Root Cause chip sitting amber forever on
+        // every resolved serious snag (PRODUCT_REVIEW.md §3.1/§6.2).
+        onStatusChange?.('done', 'Not required');
+      } else if (data?.status === 'cancelled') {
+        // Previously fell through to "Not started", hiding the fact that an
+        // analysis had been assigned and abandoned (PRODUCT_REVIEW.md §3.3).
+        onStatusChange?.('pending', 'Cancelled — not restarted');
       } else {
         onStatusChange?.('pending', 'Not started');
       }
@@ -97,7 +121,7 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
     // useCallback-memoized handler, and excluding it here avoids re-fetching
     // RCA state if that identity were ever to change for an unrelated reason.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [issueId, status, assignees]);
+  }, [issueId, status, assignees, rcaWaivedAt]);
 
   useEffect(() => { fetchRca(); }, [fetchRca, status]);
 
@@ -224,15 +248,78 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
     }
   }
 
+  async function handleWaive() {
+    if (!waiveReason.trim()) return;
+    setWaiving(true);
+    const { error } = await waiveRca(issueId, waiveReason.trim());
+    setWaiving(false);
+    if (!error) {
+      setWaiveModalOpen(false);
+      setWaiveReason('');
+      showToast('Recorded — no RCA needed');
+      onChanged();
+    } else {
+      showToast(error.message ?? 'Could not record that');
+    }
+  }
+
+  async function handleUnwaive() {
+    setUnwaiving(true);
+    const { error } = await unwaiveRca(issueId);
+    setUnwaiving(false);
+    if (!error) {
+      showToast('RCA is outstanding again');
+      onChanged();
+    } else {
+      showToast(error.message ?? 'Could not undo that');
+    }
+  }
+
   if (!loaded) return null;
 
   // ── Resolved: assign a (new) RCA, or show the last completed one ──────────
   if (status === 'resolved') {
     const hasAccepted = rca?.status === 'accepted';
-    if (!canEdit && !hasAccepted) return null;
+    const wasCancelled = rca?.status === 'cancelled';
+    if (!canEdit && !hasAccepted && !isWaived) return null;
 
     return (
       <>
+        {/* A recorded "not required" decision, with who made it and why —
+            otherwise the reason for skipping a formal analysis lives nowhere. */}
+        {isWaived && (
+          <View style={styles.waivedBlock}>
+            <View style={styles.waivedHeaderRow}>
+              <Icon name="checkmark-circle-outline" size="sm" color={Colors.success} />
+              <Text style={styles.waivedTitle}>
+                No RCA required
+                {rcaWaivedAt ? ` · ${new Date(rcaWaivedAt).toLocaleDateString()}` : ''}
+              </Text>
+            </View>
+            {rcaWaivedReason ? <Text style={styles.waivedReason}>{rcaWaivedReason}</Text> : null}
+            {canEdit && (
+              <Button
+                label="Mark RCA as needed"
+                variant="outline"
+                onPress={handleUnwaive}
+                loading={unwaiving}
+                fullWidth
+              />
+            )}
+          </View>
+        )}
+
+        {/* An abandoned round used to be invisible here — the panel showed
+            "Assign RCA" as though nothing had ever happened. */}
+        {wasCancelled && !isWaived && rca && (
+          <View style={styles.cancelledBanner}>
+            <Icon name="close-circle-outline" size="sm" color={Colors.textSecondary} />
+            <Text style={styles.cancelledText}>
+              A previous RCA assigned to {nameOf(rca.assignedTo)} was cancelled without being completed.
+            </Text>
+          </View>
+        )}
+
         {hasAccepted && rca && (
           <View style={styles.completedBlock}>
             <Text style={styles.completedText}>
@@ -249,13 +336,26 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
         )}
 
         {canEdit && !showAssignPicker && (
-          <Button
-            label={hasAccepted ? 'Assign New RCA' : 'Assign RCA'}
-            variant="outline"
-            icon="git-branch-outline"
-            onPress={() => setShowAssignPicker(true)}
-            fullWidth
-          />
+          <>
+            <Button
+              label={hasAccepted ? 'Assign New RCA' : 'Assign RCA'}
+              variant="outline"
+              icon="git-branch-outline"
+              onPress={() => setShowAssignPicker(true)}
+              fullWidth
+            />
+            {/* The escape hatch that makes the dashboard count meaningful: not
+                every resolved serious snag warrants a formal 5-Whys, and
+                without a way to say so the count never reaches zero. */}
+            {!hasAccepted && !isWaived && (
+              <Button
+                label="No RCA needed"
+                variant="outline"
+                onPress={() => setWaiveModalOpen(true)}
+                fullWidth
+              />
+            )}
+          </>
         )}
 
         {canEdit && showAssignPicker && (
@@ -291,6 +391,42 @@ export default function RcaPanel({ issueId, status, canEdit, currentUserId, assi
             </View>
           </>
         )}
+
+        <Modal visible={waiveModalOpen} transparent animationType="fade" onRequestClose={() => setWaiveModalOpen(false)}>
+          <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>No RCA needed?</Text>
+              <Text style={styles.hint}>
+                This stays on the record as your decision, with your name against it. The snag drops off the
+                dashboard&apos;s RCA-outstanding count. You can reverse it at any time.
+              </Text>
+              <TextInput
+                style={styles.noteInput}
+                placeholder="Why doesn't this need a formal analysis?"
+                placeholderTextColor={Colors.textMuted}
+                value={waiveReason}
+                onChangeText={setWaiveReason}
+                multiline
+                textAlignVertical="top"
+              />
+              <View style={styles.rowButtons}>
+                <Button
+                  label="Cancel"
+                  variant="outline"
+                  onPress={() => { setWaiveModalOpen(false); setWaiveReason(''); }}
+                  style={styles.flex1}
+                />
+                <Button
+                  label="Record"
+                  onPress={handleWaive}
+                  loading={waiving}
+                  disabled={!waiveReason.trim()}
+                  style={styles.flex1}
+                />
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </>
     );
   }
@@ -509,6 +645,26 @@ const styles = StyleSheet.create({
 
   completedBlock: { gap: Spacing.sm },
   completedText: { fontSize: Typography.sm, color: Colors.textSecondary },
+
+  waivedBlock: {
+    gap: Spacing.sm,
+    backgroundColor: Colors.successBg,
+    borderRadius: Radius.button,
+    padding: Spacing.sm,
+  },
+  waivedHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  waivedTitle: { flex: 1, fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.success },
+  waivedReason: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
+
+  cancelledBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.button,
+    padding: Spacing.sm,
+  },
+  cancelledText: { flex: 1, fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
 
   whyReadRow: {
     backgroundColor: Colors.background,

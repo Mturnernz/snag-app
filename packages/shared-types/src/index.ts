@@ -48,7 +48,6 @@ export interface Profile {
   email: string;
   role: UserRole;
   created_at: string;
-  removed_at?: string | null;
   has_seen_onboarding?: boolean;
   organisation?: Organisation;
 }
@@ -102,6 +101,14 @@ export interface Snag {
   escalated_by: string | null;
   escalated_at: string | null;
   approver_id: string | null;
+  // Root-cause analysis is post-resolution work (assign_rca requires
+  // status = 'resolved'), so "resolved with no RCA" is an open obligation, not
+  // a finished snag. A waiver is how a supervisor records that no formal
+  // 5-Whys is needed — without it, every resolved serious snag would count as
+  // outstanding forever. Cleared by assign_rca and on reopen.
+  rca_waived_by?: string | null;
+  rca_waived_at?: string | null;
+  rca_waived_reason?: string | null;
   // Merge (parent/child) — a status change on a parent cascades to every
   // child; a child otherwise behaves like an ordinary snag.
   parent_snag_id?: string | null;
@@ -144,14 +151,6 @@ export interface Vote {
   user_id: string;
   value: VoteValue;
   created_at: string;
-}
-
-export interface UserPoints {
-  id: string;
-  user_id: string;
-  org_id: string;
-  points: number;
-  updated_at: string;
 }
 
 // ─── Investigation (serious lane) ────────────────────────────────────────────

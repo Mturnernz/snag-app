@@ -21,17 +21,31 @@ function csvEscape(value: unknown): string {
 // wide enough to flatten client-side into one row per snag, so no new view
 // or RPC was needed, just this CSV builder. Same generate-upload-record
 // pattern as the PDF exports, minus the edge function (nothing to render).
-export async function GET(request: Request) {
+//
+// POST, not GET: this writes a CSV to the governance-reports bucket and inserts
+// a governance_reports audit row. As a GET behind a prefetching next/link, a
+// viewport impression could have triggered it (PRODUCT_REVIEW.md §6.3).
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export async function POST(request: Request) {
   const { activeMembership } = await requireSupervisorOrAdmin();
   if (activeMembership.role !== 'officer_admin') {
-    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent('CSV export is available to officer admins.'), request.url));
+    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent('CSV export is available to officer admins.'), request.url), 303);
   }
 
   const supabase = await createClient();
   const { searchParams } = new URL(request.url);
   const now = new Date();
-  const periodEnd = searchParams.get('end') ?? now.toISOString().slice(0, 10);
-  const periodStart = searchParams.get('start') ?? new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const defaultEnd = now.toISOString().slice(0, 10);
+  const defaultStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  // Validate before these reach PostgREST filters. Not injectable (PostgREST
+  // parameterises), but a malformed date used to surface a raw Postgres error
+  // string to the user (PRODUCT_REVIEW.md §3.10).
+  const endParam = searchParams.get('end');
+  const startParam = searchParams.get('start');
+  const periodEnd = endParam && ISO_DATE.test(endParam) ? endParam : defaultEnd;
+  const periodStart = startParam && ISO_DATE.test(startParam) ? startParam : defaultStart;
 
   const { data: snags, error: queryError } = await supabase
     .from('snags_with_details')
@@ -42,7 +56,7 @@ export async function GET(request: Request) {
     .order('created_at', { ascending: false });
 
   if (queryError) {
-    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent(queryError.message), request.url));
+    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent(queryError.message), request.url), 303);
   }
 
   const rows = [
@@ -57,12 +71,12 @@ export async function GET(request: Request) {
     .upload(path, new Blob([csv], { type: 'text/csv' }), { contentType: 'text/csv', upsert: false });
 
   if (uploadError) {
-    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent(`Upload failed: ${uploadError.message}`), request.url));
+    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent(`Upload failed: ${uploadError.message}`), request.url), 303);
   }
 
   const { error: recordError } = await recordGovernanceExport(supabase, path, periodStart, periodEnd);
   if (recordError) {
-    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent(recordError.message), request.url));
+    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent(recordError.message), request.url), 303);
   }
 
   const { data: signedUrlData, error: signError } = await supabase.storage
@@ -70,8 +84,9 @@ export async function GET(request: Request) {
     .createSignedUrl(path, 60 * 60);
 
   if (signError || !signedUrlData) {
-    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent('Export saved but the download link could not be created.'), request.url));
+    return NextResponse.redirect(new URL('/reports?error=' + encodeURIComponent('Export saved but the download link could not be created.'), request.url), 303);
   }
 
-  return NextResponse.redirect(signedUrlData.signedUrl);
+  // 303 so the browser follows with a GET rather than replaying the POST.
+  return NextResponse.redirect(signedUrlData.signedUrl, 303);
 }

@@ -3,7 +3,7 @@ import { STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, type SnagStatus, type Snag
 import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { Card, PageHeader, EmptyState } from '@/components/Card';
-import { LinkButton } from '@/components/Button';
+import { Button } from '@/components/Button';
 import Icon from '@/components/Icon';
 import styles from './page.module.css';
 
@@ -52,7 +52,7 @@ export default async function ReportsPage({
   const supabase = await createClient();
   const now = new Date();
   const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-  const [stats, trend] = await Promise.all([
+  const [{ data: stats, error: statsError }, trend] = await Promise.all([
     getOrgStats(supabase, activeMembership.org_id),
     getOrgSnagTrend(supabase, activeMembership.org_id, ninetyDaysAgo.toISOString().slice(0, 10), now.toISOString().slice(0, 10), 'week'),
   ]);
@@ -61,6 +61,14 @@ export default async function ReportsPage({
   return (
     <div style={{ maxWidth: 640 }}>
       <PageHeader title="Reports" subtitle={activeMembership.org_name} />
+
+      {/* Breakdowns below are all derived from stats — if the RPC failed, say so
+          rather than drawing 0% bars that look like real findings. */}
+      {statsError && (
+        <p className="error-text" style={{ marginBottom: 'var(--space-lg)' }}>
+          Couldn&apos;t load report figures: {statsError.message ?? 'unknown error'}
+        </p>
+      )}
 
       <Card elevated className={styles.section} style={{ marginBottom: 'var(--space-xl)' }}>
         <p className={styles.sectionTitle}>Trend — last 90 days</p>
@@ -91,10 +99,18 @@ export default async function ReportsPage({
 
       {exportError && <p className="error-text" style={{ marginBottom: 'var(--space-md)' }}>{exportError}</p>}
 
+      {/* POST forms, not links: both endpoints write a file to storage and
+          insert an audit row, and next/link prefetches links in the viewport —
+          so as GETs, scrolling this page could have fired an export
+          (PRODUCT_REVIEW.md §6.3). */}
       {isOfficerAdmin ? (
         <div className={styles.exportRow}>
-          <LinkButton href="/reports/export" variant="primary"><Icon name="Download" size="sm" /> Governance report (PDF)</LinkButton>
-          <LinkButton href="/reports/export-csv" variant="secondary"><Icon name="Download" size="sm" /> Raw data (CSV)</LinkButton>
+          <form action="/reports/export" method="post">
+            <Button type="submit" variant="primary"><Icon name="Download" size="sm" /> Governance report (PDF)</Button>
+          </form>
+          <form action="/reports/export-csv" method="post">
+            <Button type="submit" variant="secondary"><Icon name="Download" size="sm" /> Raw data (CSV)</Button>
+          </form>
         </div>
       ) : (
         <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>

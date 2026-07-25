@@ -68,10 +68,13 @@ export default async function DocumentsPage({
                   </p>
                 </div>
               </div>
+              {/* filePath is deliberately not posted — the action reads it from
+                  the row so a tampered path can't target another object. */}
               <form action={deleteDocumentAction}>
                 <input type="hidden" name="documentId" value={doc.id} />
-                <input type="hidden" name="filePath" value={doc.file_path} />
-                <Button type="submit" variant="ghost" size="sm"><Icon name="Trash2" size="sm" /></Button>
+                <Button type="submit" variant="ghost" size="sm" aria-label={`Delete ${doc.title}`}>
+                  <Icon name="Trash2" size="sm" />
+                </Button>
               </form>
             </Card>
           ))}

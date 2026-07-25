@@ -14,6 +14,8 @@ The problems are concentrated in one place: **the workflow model has a post-reso
 
 Alongside that, there is a confirmed data-integrity bug in `update_snag_status` (resolved snags are not stamped with who resolved them or when), a scattering of dead code from retired features, and a handful of defence-in-depth hardening items.
 
+> **Implementation status:** most of this review has since been actioned — see [§8](#8-implementation-status) for what shipped, what changed shape once the data was examined more closely, and the two manual steps left.
+
 **Headline counts**
 
 | Category | Critical | High | Medium | Low |
@@ -233,7 +235,9 @@ The 7-arg single-photo form is a compatibility shim (`20260708120000_create_snag
 
 The supporting columns are on `snags` and typed in `shared-types` (`escalated_by`, `escalated_at`, `approver_id`). Niggle escalation in particular is a designed feature (`20260621220415_niggle_escalate.sql`) — a worker flagging that a fixit is actually a hazard — that users currently cannot invoke.
 
-**Decision needed:** wire escalation into `ManageIssuePanel` (it is a natural companion to the existing recategorise action), or drop the RPC and columns. Leaving it half-built is the worst of the three.
+**Decision needed:** wire escalation up, or drop the RPC and columns. Leaving it half-built is the worst of the three.
+
+> **Correction (during implementation).** This section originally suggested `ManageIssuePanel`. That is wrong: `escalate_snag` checks `reporter_id <> auth.uid()` and raises, so it is a **reporter** action, not a supervisor one — `ManageIssuePanel` is `canEdit`-gated and the button would have been visible only to people the RPC refuses. It belongs on the reporter's own view of their open niggle, which is where it was actually wired.
 
 ---
 
@@ -290,7 +294,9 @@ Effectively invisible to all client roles. The abuse-control path still works be
 
 **4.6 🔵 Leaked-password protection is disabled.** One dashboard toggle; enables HaveIBeenPwned checks on signup.
 
-**4.7 🔵 Two deployed edge functions have no caller.** `worksheet` and `worksheet-import` are ACTIVE on the project with `verify_jwt: true`, and are referenced by zero lines of app code. **[verified]** Undeploy them — live endpoints nobody owns are how attack surface accumulates.
+**4.7 🔵 Two deployed edge functions have no caller.** `worksheet` and `worksheet-import` are ACTIVE on the project with `verify_jwt: true`, and are referenced by zero lines of app code. **[verified]**
+
+> **Correction (during implementation).** This originally said "undeploy them" and §5 listed them for deletion. Reading them changed the assessment: they are a **complete, deliberately designed feature** — a fillable AcroForm PDF for completing an RCA or formal debrief on paper, plus an importer that stores the scanned sheet as evidence and parses the typed fields back for review. 347 lines, both auth-gated, both checking role server-side. That is an *unwired feature*, not dead code, and it is materially different from `award-points` (which calls an RPC that does not exist and reads a dropped table). They were left in place. The real decision is product: build the client entry point, or undeploy — but deleting the source would have thrown away working work on the strength of a grep.
 
 ---
 
@@ -300,7 +306,8 @@ Effectively invisible to all client roles. The abuse-control path still works be
 |---|---|---|
 | **`award-points` edge function** | Calls `increment_user_points`, which **does not exist** in the database. Not deployed. The `user_points` table was dropped by `20260712050000_drop_orphaned_leaderboard_objects.sql`. **[verified]** | Delete the directory |
 | **`UserPoints` interface** | `shared-types/src/index.ts:149-155` — types a dropped table | Delete |
-| **`work-group-images` bucket** | Exists with **zero policies and zero objects**; the feature was removed by `20260712070000_remove_work_group_image_upload.sql` **[verified]** | Drop the bucket |
+| **`work-group-images` bucket** | Exists with **zero policies and zero objects**; the feature was removed by `20260712070000_remove_work_group_image_upload.sql` **[verified]** | Drop the bucket — **manual step**, Supabase refuses `delete from storage.buckets` via SQL |
+| **`worksheet` / `worksheet-import`** | Deployed, no caller — but a complete unwired feature, not dead code. See the correction in §4.7 | **Keep.** Product decision, not a cleanup |
 | **`supabase/schema.sql` + 9 root `migration_*.sql` files** | Prototype scaffold for the dead `hduecjwnrucbinopnzwb` project. `CLAUDE.md` already warns "do not run against Snagv1" | Move to `supabase/_legacy/` or delete — a warning comment is weaker than not shipping the file |
 | **`status_sorted` audit label** | `supabase-queries/src/index.ts:330` — status retired Jul 7 | Keep. Historical `audit_log` rows still carry it (5 exist **[verified]**) and would render as raw text without it. The comment already explains this |
 | **`Profile.removed_at`** | Marked deprecated in `lib/supabase.ts:56-59` but still in the type and still optional | Remove from the type |
@@ -385,6 +392,62 @@ Covered mechanically in §3.4; the UX symptom is that a failure and a genuinely 
 13. Paginate the snags list (§3.9)
 14. Tests for the resolve gate and the RCA state machine (§6.7)
 15. Extract hooks from the two large screens (§6.7)
+
+---
+
+## 8. Implementation status
+
+Everything in §7's "Now", "Next" and "Hardening" tiers was implemented, plus the escalation decision from §3.8. Four migrations were applied to Snagv1; both apps typecheck clean and `next build` succeeds.
+
+### What shipped
+
+| § | Change | Where |
+|---|---|---|
+| 3.1 | `rca_waived_by/at/reason` on `snags`, `waive_rca` / `unwaive_rca` RPCs, `assign_rca` clears a waiver, partial index | `20260724120000_rca_waiver_and_outstanding.sql` |
+| 3.1 | `rca_outstanding` added to `get_site_breakdown`; waiver columns exposed on `snags_with_details` | same |
+| 3.1 | Refined `rca_outstanding` predicate after a live-data check — see "what changed shape" | `20260724120400_rca_outstanding_merge_fix.sql` |
+| 3.2 | `update_snag_status` stamps `resolved_by` / `resolved_at`; waiver resets on reopen; historical rows backfilled from `audit_log` | `20260724120100_resolve_stamp_and_waiver_reset.sql` |
+| 3.3 | `'cancelled'` added to `RcaStatus`, `isRcaClosed()` helper, cancelled rounds surfaced in `RcaPanel` | `packages/supabase-queries`, `RcaPanel.tsx` |
+| 3.4 | `getOrgStats` / `getSiteBreakdown` return `{ data, error }`; both dashboards show a real error state; mobile drives the breakdown off the **active membership** instead of `profiles.org_id` | packages + `AdminDashboardScreen`, `ReportsScreen`, web `dashboard`/`reports` |
+| 3.5 | `deleteDocumentAction` checks the RPC error before touching storage and reads `file_path` from the row; the hidden field is gone | `documents/actions.ts`, `documents/page.tsx` |
+| 3.6 | `p_org_id is null` guard added to `get_org_stats` and `get_site_breakdown` | `20260724120200_rpc_guard_hardening.sql` |
+| 3.8 | `escalate_snag` wired to the **reporter's** view of an open niggle, with an "already flagged" confirmation state | `IssueDetailScreen.tsx` |
+| 3.10 | CSV export validates `start`/`end` against `^\d{4}-\d{2}-\d{2}$` and falls back to the 90-day default | `export-csv/route.ts` |
+| 4.1 | `revoke execute` from `public, anon` on the nine RPCs; **default privileges in `public` now revoke execute from `PUBLIC`**, so new RPCs fail closed unless they opt in | `20260724120200_rpc_guard_hardening.sql` |
+| 4.3 | Legacy `auth.uid()`-based `snag-photos` INSERT policy dropped | `20260724120300_storage_cleanup.sql` |
+| 5 | `award-points` deleted (called a nonexistent RPC), `UserPoints` type removed, deprecated `Profile.removed_at` removed | repo |
+| 6.1 | Fourth "RCA outstanding" column on both dashboards, danger-coloured when non-zero, linking through to the resolved list on web | `AdminDashboardScreen.tsx`, web `dashboard/page.tsx` |
+| 6.2 | A waived snag reports its Root Cause step as **done / "Not required"**, so the chip can finally reach done | `RcaPanel.tsx` |
+| 6.3 | Both export routes converted to `POST` with `303` redirects; the Reports page uses forms, not prefetching links | `reports/page.tsx`, both route handlers |
+| 6.4 | `requireSupervisorOrAdmin()` + an explicit `officer_admin` check added to `/reports/export` | `export/route.ts` |
+| 6.7 | Tappable dashboard counts get `MIN_TOUCH_TARGET` hit areas and `accessibilityRole="button"`; the mobile stat row wraps now that there are four | `AdminDashboardScreen.tsx` |
+
+### What changed shape once the data was checked
+
+**The `rca_outstanding` predicate was wrong on the first pass.** The initial version excluded merge children from all snag counts, to match every drill-down list (`getUnassignedSnags`, the web snags page) which filter to `parent_snag_id is null`. Running it dropped the count from 10 to 5 — so I checked which five, and **all four `critical` snags were among the excluded**. SNAG-00003, -00004 and -00006 are `lane = 'serious'`, `severity = 'critical'`, and all three are merged into **SNAG-00016, which is `lane = 'niggle'`**. Excluding children would have hidden three critical incidents behind a parent the `lane = 'serious'` filter can never count — a worse blind spot than the one being fixed.
+
+The rule is now: a serious snag counts unless a **serious** parent stands in for it. SNAG-00018/-00022 stay excluded because their parent SNAG-00024 *is* serious and is itself counted. Hendo's `rca_outstanding` reads **8** — five standalone plus the three critical children.
+
+Two follow-ups fall out of that, both raised rather than fixed: `merge_snags` permitted a serious child under a niggle parent at all, and SNAG-00016 carries `severity = 'critical'` while sitting in the niggle lane. Both look like gaps in `enforce_snag_merge_invariants`.
+
+**The §3.2 backfill recovered 2 of 3 rows.** Serious snags missing `resolved_at` went 3 → 1. The remaining one (and one niggle) has no `status_resolved` entry in `audit_log` — it was resolved by the `sorted → resolved` data migration, not by a user — so there is no honest timestamp to recover. Left null deliberately; inventing one would be worse than an visible gap.
+
+### Two manual steps left
+
+1. **Delete the `work-group-images` bucket** (§5). Supabase rejects `delete from storage.buckets` in SQL: *"Direct deletion from storage tables is not allowed. Use the Storage API instead."* Do it from the dashboard (Storage → work-group-images → Delete bucket). Zero objects, so nothing to migrate.
+2. **Two dashboard toggles** (§4.5, §4.6): move `pg_net` out of `public`, and enable leaked-password protection.
+
+### Not done, and why
+
+- **§3.7** (`create_snag` compat overload) — dropping it strands any old app build still in the field. Deliberately deferred; it needs a "no clients older than X" call that isn't mine to make.
+- **§3.9** (snags pagination), **§6.5** (`CLAUDE.md` documents drift), **§6.7** (splitting the two 1,000+ line screens, adding tests) — backlog items from §7, untouched.
+- **§4.2** (anonymous sign-ins) — working as designed; the mitigation was the §4.1 grant work, now done.
+- **§4.4** (`public_report_blocks` RLS-with-no-policies) — left as-is; it is correct, just undocumented.
+- **§4.7 / §5** (`worksheet` functions) — see the correction in §4.7. Not dead code.
+
+### Verification performed
+
+`tsc --noEmit` clean on `apps/mobile` and `apps/web`; `next build` succeeds (16 routes). All four migrations applied to Snagv1 and their effects confirmed by query: the backfill counts, and `rca_outstanding = 8` for Hendo. **No runtime testing** — neither app was launched, and there is still no test suite (§6.7), so the new waiver UI, the escalate button and the POST export flows are typechecked but not exercised.
 
 ---
 

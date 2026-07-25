@@ -37,15 +37,42 @@ export async function uploadDocumentAction(formData: FormData) {
 }
 
 export async function deleteDocumentAction(formData: FormData) {
-  await requireSupervisorOrAdmin();
+  const { activeMembership } = await requireSupervisorOrAdmin();
   const supabase = await createClient();
 
   const documentId = String(formData.get('documentId') ?? '');
-  const filePath = String(formData.get('filePath') ?? '');
-  if (!documentId || !filePath) redirect('/documents');
+  if (!documentId) redirect('/documents');
 
-  await deleteOrgDocument(supabase, documentId);
-  await supabase.storage.from(BUCKET).remove([filePath]);
+  // Read file_path from the row rather than trusting the hidden form field it
+  // used to come from — the path was client-supplied and never cross-checked
+  // against documentId (PRODUCT_REVIEW.md §3.5). RLS scopes this select to the
+  // caller's org, so a foreign id simply finds nothing.
+  const { data: doc } = await supabase
+    .from('org_documents')
+    .select('file_path')
+    .eq('id', documentId)
+    .eq('org_id', activeMembership.org_id)
+    .maybeSingle();
+
+  if (!doc) {
+    redirect('/documents?error=' + encodeURIComponent('That document no longer exists.'));
+  }
+
+  // Check the RPC before touching storage. The old order deleted the object
+  // regardless, so a rejected RPC left a metadata row pointing at nothing.
+  const { error: deleteError } = await deleteOrgDocument(supabase, documentId);
+  if (deleteError) {
+    redirect('/documents?error=' + encodeURIComponent(`Could not delete: ${deleteError.message}`));
+  }
+
+  const { error: storageError } = await supabase.storage.from(BUCKET).remove([doc.file_path]);
+  if (storageError) {
+    // The row is gone, so the document is no longer listed or reachable; the
+    // object is orphaned. Surface it rather than reporting a clean delete.
+    redirect('/documents?error=' + encodeURIComponent(
+      'Document removed, but its file could not be deleted from storage. Please report this.'
+    ));
+  }
 
   redirect('/documents');
 }

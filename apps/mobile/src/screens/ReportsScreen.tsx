@@ -99,7 +99,11 @@ export default function ReportsScreen() {
     if (data?.org_id) {
       setOrgName((data.organisation as any)?.name ?? '');
       setRole(data.role);
-      setStats(await getOrgStats(data.org_id));
+      const { data: orgStats, error } = await getOrgStats(data.org_id);
+      // Don't render zeros as though they were real counts — get_org_stats
+      // raises rather than returning an empty result when something is wrong.
+      if (error) showToast(error.message ?? 'Could not load report figures');
+      else setStats(orgStats);
     }
     setLoading(false);
   }

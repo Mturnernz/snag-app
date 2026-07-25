@@ -61,27 +61,38 @@ export interface OrgStats {
   bySeverity: Record<SnagSeverity, number>;
 }
 
+export const EMPTY_ORG_STATS: OrgStats = {
+  totalMembers: 0,
+  totalSnags: 0,
+  byStatus: { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 },
+  byKind: { fixit: 0, improvement: 0, hazard: 0, incident: 0 },
+  bySeverity: { minor: 0, moderate: 0, injury: 0, critical: 0 },
+};
+
 // Aggregated server-side in one pass (get_org_stats) rather than selecting
 // every snag row in the org and counting client-side.
-export async function getOrgStats(client: SupabaseClient, orgId: string): Promise<OrgStats> {
-  const empty: OrgStats = {
-    totalMembers: 0,
-    totalSnags: 0,
-    byStatus: { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 },
-    byKind: { fixit: 0, improvement: 0, hazard: 0, incident: 0 },
-    bySeverity: { minor: 0, moderate: 0, injury: 0, critical: 0 },
-  };
+//
+// Returns { data, error } rather than swallowing failures into zeros. The RPC
+// throws hard when p_org_id isn't the caller's active org, and a screen that
+// can't tell "no snags" from "the call failed" renders a confidently wrong
+// dashboard — see PRODUCT_REVIEW.md §3.4.
+export async function getOrgStats(
+  client: SupabaseClient,
+  orgId: string
+): Promise<{ data: OrgStats; error: any }> {
   const { data, error } = await client.rpc('get_org_stats', { p_org_id: orgId });
   if (error || !data) {
-    if (error) console.error('getOrgStats error:', error);
-    return empty;
+    return { data: EMPTY_ORG_STATS, error: error ?? new Error('No stats returned') };
   }
   return {
-    totalMembers: data.total_members ?? 0,
-    totalSnags: data.total_snags ?? 0,
-    byStatus: { ...empty.byStatus, ...data.by_status },
-    byKind: { ...empty.byKind, ...data.by_kind },
-    bySeverity: { ...empty.bySeverity, ...data.by_severity },
+    data: {
+      totalMembers: data.total_members ?? 0,
+      totalSnags: data.total_snags ?? 0,
+      byStatus: { ...EMPTY_ORG_STATS.byStatus, ...data.by_status },
+      byKind: { ...EMPTY_ORG_STATS.byKind, ...data.by_kind },
+      bySeverity: { ...EMPTY_ORG_STATS.bySeverity, ...data.by_severity },
+    },
+    error: null,
   };
 }
 
@@ -91,23 +102,33 @@ export interface SiteBreakdown {
   openInvestigations: number;
   unassigned: number;
   overdueActions: number;
+  /** Serious snags resolved (or mid-RCA) with no accepted analysis and no
+   *  waiver. RCA is post-resolution work by design, so this is the only
+   *  column that catches it — see PRODUCT_REVIEW.md §3.1. */
+  rcaOutstanding: number;
 }
 
 // Per-site counts for the supervisor "outstanding work" dashboard —
 // get_org_stats is org-wide only, this is the site-grouped sibling.
-export async function getSiteBreakdown(client: SupabaseClient, orgId: string): Promise<SiteBreakdown[]> {
+// Same { data, error } contract as getOrgStats, and for the same reason: this
+// RPC raising was being rendered as "No sites yet."
+export async function getSiteBreakdown(
+  client: SupabaseClient,
+  orgId: string
+): Promise<{ data: SiteBreakdown[]; error: any }> {
   const { data, error } = await client.rpc('get_site_breakdown', { p_org_id: orgId });
-  if (error || !data) {
-    if (error) console.error('getSiteBreakdown error:', error);
-    return [];
-  }
-  return (data as any[]).map((row) => ({
-    siteId: row.site_id,
-    siteName: row.site_name,
-    openInvestigations: row.open_investigations ?? 0,
-    unassigned: row.unassigned ?? 0,
-    overdueActions: row.overdue_actions ?? 0,
-  }));
+  if (error || !data) return { data: [], error: error ?? null };
+  return {
+    data: (data as any[]).map((row) => ({
+      siteId: row.site_id,
+      siteName: row.site_name,
+      openInvestigations: row.open_investigations ?? 0,
+      unassigned: row.unassigned ?? 0,
+      overdueActions: row.overdue_actions ?? 0,
+      rcaOutstanding: row.rca_outstanding ?? 0,
+    })),
+    error: null,
+  };
 }
 
 export interface OrgSnagSummary {
@@ -147,7 +168,17 @@ export async function getSiteAssignees(client: SupabaseClient, siteId: string): 
 
 // ─── Root cause analysis (5 Whys) ──────────────────────────────────────────
 
-export type RcaStatus = 'assigned' | 'in_progress' | 'submitted' | 'accepted' | 'rejected';
+// Mirrors the rca_status Postgres enum exactly. 'cancelled' was added by
+// 20260703000100_rca_cancelled_enum.sql — omitting it here meant TypeScript
+// believed a state that occurs in production was impossible, so RcaPanel had no
+// branch for it and cancelled rounds rendered as "Not started" with the
+// abandoned analysis invisible (PRODUCT_REVIEW.md §3.3).
+export type RcaStatus = 'assigned' | 'in_progress' | 'submitted' | 'accepted' | 'rejected' | 'cancelled';
+
+/** An RCA round that is over: no further action is possible on it. */
+export function isRcaClosed(status: RcaStatus): boolean {
+  return status === 'accepted' || status === 'cancelled';
+}
 
 export interface RcaWhyStep {
   whyIndex: number;
@@ -659,6 +690,27 @@ export async function reassignRca(client: SupabaseClient, rcaId: string, newAssi
 
 export async function cancelRca(client: SupabaseClient, rcaId: string) {
   return client.rpc('cancel_rca', { p_rca_id: rcaId });
+}
+
+// "No formal 5-Whys needed here" as an explicit, attributed decision. Without
+// it, every serious snag ever resolved counts as outstanding analysis forever
+// and the dashboard column becomes noise — see PRODUCT_REVIEW.md §3.1.
+// Supervisor/admin only, resolved snags only, and refused while an RCA is in
+// flight (cancel it first, so the abandonment is on the record).
+export async function waiveRca(client: SupabaseClient, snagId: string, reason: string) {
+  return client.rpc('waive_rca', { p_snag_id: snagId, p_reason: reason });
+}
+
+export async function unwaiveRca(client: SupabaseClient, snagId: string) {
+  return client.rpc('unwaive_rca', { p_snag_id: snagId });
+}
+
+// ─── Escalation (niggle lane) ──────────────────────────────────────────────
+// Reporter-only, by design: escalate_snag checks `reporter_id = auth.uid()`,
+// so this is the person who raised a fixit/improvement saying "this is
+// actually unsafe" — not a supervisor action. Open niggles only, once each.
+export async function escalateSnag(client: SupabaseClient, snagId: string) {
+  return client.rpc('escalate_snag', { p_snag_id: snagId });
 }
 
 // ─── Debrief mutations ──────────────────────────────────────────────────────

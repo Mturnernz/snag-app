@@ -14,6 +14,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   Linking,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,7 +29,7 @@ import {
   supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers,
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
   getSiteAssignees, SiteAssignee, unmergeSnag,
-  getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation,
+  getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation, escalateSnag,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -71,6 +72,9 @@ interface IssueDetail {
   notifying_org_id: string | null;
   notifying_pcbu_note: string | null;
   notifying_org_name?: string | null;
+  rca_waived_at?: string | null;
+  rca_waived_reason?: string | null;
+  escalated_at?: string | null;
   created_at: string;
   reporter?: { id: string; name: string };
   owner?: { id: string; name: string } | null;
@@ -143,6 +147,7 @@ export default function IssueDetailScreen() {
   const [investigation, setInvestigation] = useState<InvestigationState | null>(null);
   const [siteAssignees, setSiteAssignees] = useState<SiteAssignee[]>([]);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [escalating, setEscalating] = useState(false);
 
   // System activity trail — audit_log entries for this snag, shown alongside
   // comments so every status/owner/category change is timestamped and
@@ -204,6 +209,18 @@ export default function IssueDetailScreen() {
   // Serious-lane investigation state powers the progress panel and the
   // resolve gate. Only fetched for editors of a serious snag.
   const canManageInvestigation = isSerious && canEdit;
+
+  // Escalation is reporter-only, enforced server-side (escalate_snag checks
+  // reporter_id = auth.uid()) — it's the person who raised a fixit/improvement
+  // saying "this is actually unsafe", not a supervisor action. Open niggles
+  // only, and only once. Previously the RPC had no caller at all, so this was
+  // unreachable from either app (PRODUCT_REVIEW.md §3.8).
+  const canEscalate = Boolean(
+    issue && !isSerious && isOrgMember &&
+    currentUserId === issue.reporter?.id &&
+    (issue.status === 'flagged' || issue.status === 'in_progress') &&
+    !issue.escalated_at
+  );
 
   const fetchInvestigation = useCallback(async () => {
     if (!canManageInvestigation) { setInvestigation(null); return; }
@@ -275,6 +292,31 @@ export default function IssueDetailScreen() {
     if (current) setStepExpanded((prev) => ({ ...prev, [current as StepKey]: true }));
   }, [issue, investigation, canManageInvestigation, notifiableDecided, investigationComplete]);
 
+  function handleEscalate() {
+    Alert.alert(
+      'Flag this as a safety issue?',
+      "This tells the supervisors for this site that what you reported is a hazard, not just a niggle. You can only do this once.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Flag it',
+          onPress: async () => {
+            setEscalating(true);
+            const { error } = await escalateSnag(issueId);
+            setEscalating(false);
+            if (error) {
+              showToast(error.message ?? 'Could not flag this');
+              return;
+            }
+            showToast('Flagged — a supervisor has been notified');
+            fetchIssue();
+            fetchActivity();
+          },
+        },
+      ]
+    );
+  }
+
   async function handleExportInvestigation() {
     if (exportingPdf) return;
     setExportingPdf(true);
@@ -303,7 +345,7 @@ export default function IssueDetailScreen() {
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count, is_notifiable, notifiable_marked_by, notifiable_marked_at, notifying_org_id, notifying_pcbu_note, notifying_org_name')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count, is_notifiable, notifiable_marked_by, notifiable_marked_at, notifying_org_id, notifying_pcbu_note, notifying_org_name, rca_waived_at, rca_waived_reason, escalated_at')
       .eq('id', issueId)
       .single();
 
@@ -596,6 +638,30 @@ export default function IssueDetailScreen() {
             <Text style={styles.unassigned}>Unassigned</Text>
           )}
 
+          {/* Reporter's escalation path — "I reported this as a niggle, but it's
+              actually a safety problem". Server-enforced reporter-only. */}
+          {canEscalate && (
+            <Button
+              label="This is a safety issue"
+              variant="outline"
+              icon="warning-outline"
+              onPress={handleEscalate}
+              loading={escalating}
+              fullWidth
+            />
+          )}
+
+          {/* Already escalated — confirms to the reporter that it landed,
+              rather than silently removing the button. */}
+          {!isSerious && issue.escalated_at && (
+            <View style={styles.escalatedRow}>
+              <Icon name="warning-outline" size="sm" color={Colors.serious} />
+              <Text style={styles.escalatedText}>
+                Flagged as a safety issue · {timeAgo(issue.escalated_at)}
+              </Text>
+            </View>
+          )}
+
           {/* Manage — inline for supervisors/admins, boxed between the
               assignee line and the vote bar (replaces the old header
               button that pushed a separate ManageIssue screen). */}
@@ -750,6 +816,8 @@ export default function IssueDetailScreen() {
                 canEdit={canEdit}
                 currentUserId={currentUserId}
                 assignees={siteAssignees}
+                rcaWaivedAt={issue.rca_waived_at}
+                rcaWaivedReason={issue.rca_waived_reason}
                 onChanged={() => { fetchIssue(); fetchActivity(); }}
                 onStatusChange={handleRcaStatusChange}
               />
@@ -976,6 +1044,12 @@ const styles = StyleSheet.create({
   assigneeText: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.medium },
   unassigned: { fontSize: Typography.sm, color: Colors.textMuted, fontStyle: 'italic' },
   description: { fontSize: Typography.base, color: Colors.textSecondary, lineHeight: 22 },
+
+  escalatedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.seriousBg, borderRadius: Radius.button, padding: Spacing.sm,
+  },
+  escalatedText: { flex: 1, fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.serious },
 
   // Voting
   voteBar: {

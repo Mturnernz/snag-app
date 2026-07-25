@@ -643,6 +643,19 @@ export const reassignRca = (rcaId: string, newAssigneeId: string) => queries.rea
 
 export const cancelRca = (rcaId: string) => queries.cancelRca(supabase, rcaId);
 
+export const isRcaClosed = queries.isRcaClosed;
+
+// Records that no formal RCA is needed on a resolved serious snag, so it stops
+// counting as outstanding analysis work on the Admin dashboard.
+export const waiveRca = (snagId: string, reason: string) => queries.waiveRca(supabase, snagId, reason);
+
+export const unwaiveRca = (snagId: string) => queries.unwaiveRca(supabase, snagId);
+
+// ─── Escalation (niggle lane) ──────────────────────────────────────────────
+// Reporter-only — the person who raised a fixit/improvement flagging that it's
+// actually a safety issue. Server-enforced (escalate_snag checks reporter_id).
+export const escalateSnag = (snagId: string) => queries.escalateSnag(supabase, snagId);
+
 // ─── Merge (parent/child) ───────────────────────────────────────────────────
 // Creates (or reuses) a parent snag and attaches the rest of the selection as
 // its children — see merge_snags for the disambiguation rules around

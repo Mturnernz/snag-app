@@ -75,25 +75,27 @@ The anon key is safe as a repository secret but is not actually a secret: it is
 shipped to every browser and is only as strong as the RLS policies behind it.
 Never put the service-role key in CI.
 
-## Tier 3 and test data
+## Test data: the SNAG QA org
 
-Tier 3 has to create snags, complete checklists, and resolve them — it cannot run
-against an org whose records anyone relies on, and the schema is append-only by
-design (`snags` rows can't be deleted, five-year retention enforced in the
-database). So write-path tests need a **disposable organisation**, not cleanup
-after the fact.
+Write-path tests have to create snags, complete checklists, and resolve them, and
+the schema is append-only by design — `snags` rows can't be deleted and five-year
+retention is enforced in the database. So test data needs a **disposable
+organisation**, not cleanup after the fact.
 
-Options, cheapest first:
+Snagv1 therefore has a dedicated **`SNAG QA`** organisation. RLS scopes every
+query by `org_id`, so it is invisible to the real orgs, and anything tests write
+there stays there harmlessly. It holds two accounts:
 
-1. **A dedicated test org inside Snagv1.** RLS scopes every query by `org_id`, so
-   a `SNAG QA` org is invisible to real orgs. No new infrastructure. Its rows
-   live forever, which is fine for an org nobody reports on.
-2. **A staging Supabase project.** Full isolation, but the migrations in
-   `supabase/migrations/` are marked "SNAPSHOT — do NOT re-apply", so standing up
-   a second schema is real work.
-3. **A Supabase branch.** Cleanest isolation, but it is a paid feature.
+| Role | Purpose |
+|---|---|
+| `officer_admin` — *QA Admin* | portal access, exports, the admin-only paths |
+| `worker` — *QA Worker* | proves the portal role gate actually refuses non-supervisors |
 
-Until one of those exists, keep the suite at Tiers 1–2.
+Passwords live in `apps/web/.env.local` (gitignored) and belong in GitHub Actions
+secrets for CI. `supabase/seed/qa-accounts.sql` recreates the whole thing from
+scratch and is idempotent.
+
+Point tests at any *other* org only if you are happy for them to write there.
 
 ## Mobile
 
@@ -102,6 +104,30 @@ Until one of those exists, keep the suite at Tiers 1–2.
 Playwright setup usable for smoke coverage, but web rendering does not exercise
 the native camera, image-picker, haptics, or clipboard paths — the parts most
 worth testing. Device testing is manual via Expo Go for now.
+
+## Network access
+
+The app talks to Supabase over the public internet, so **whatever runs the tests
+needs egress to `*.supabase.co`**. This is easy to get wrong silently, because the
+app treats "Supabase unreachable" and "not logged in" identically:
+
+- `requireSupervisorOrAdmin()` only checks `if (!user)`. A failed `getUser()` call
+  returns `user: null`, so an outage redirects to `/login` exactly like an
+  anonymous visit.
+- `loginAction` maps *every* `signInWithPassword` error to "Incorrect email or
+  password.", including a network failure.
+
+The practical consequence for testing: the auth-gate specs pass whether the gate
+works or the network is simply down. Before trusting a green run, confirm egress:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  "$NEXT_PUBLIC_SUPABASE_URL/auth/v1/health" -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY"
+```
+
+A `200` means the gate specs are meaningful. Anything else (or a `CONNECT tunnel
+failed`) means they are passing vacuously, and the Tier 2 specs will fail to log
+in no matter how correct the app is.
 
 ## Known gaps
 

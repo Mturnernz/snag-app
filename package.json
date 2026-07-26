@@ -6,6 +6,9 @@
     "packages/*"
   ],
   "scripts": {
-    "mobile": "npm run start --workspace=apps/mobile"
+    "mobile": "npm run start --workspace=apps/mobile",
+    "web": "npm run dev --workspace=apps/web",
+    "typecheck": "npm run typecheck --workspace=apps/web && tsc --noEmit -p apps/mobile",
+    "test:e2e": "npm run test:e2e --workspace=apps/web"
   }
 }

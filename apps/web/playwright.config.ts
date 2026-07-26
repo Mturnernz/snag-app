@@ -1,4 +1,9 @@
+import { loadEnvConfig } from '@next/env';
 import { defineConfig, devices } from '@playwright/test';
+
+// Next loads .env.local for the app, but not for this process — without this the
+// E2E_* credentials sit in .env.local and the authenticated specs silently skip.
+loadEnvConfig(process.cwd(), true, { info: () => {}, error: console.error });
 
 // Some sandboxes ship a pre-installed Chromium that doesn't match the build
 // `npx playwright install` would fetch. Point PLAYWRIGHT_CHROMIUM_PATH at it

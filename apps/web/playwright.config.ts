@@ -51,5 +51,15 @@ export default defineConfig({
     timeout: 120_000,
     stdout: 'ignore',
     stderr: 'pipe',
+    // Replaces process.env rather than merging, so spread it or the command
+    // loses PATH and never starts.
+    env: {
+      ...(process.env as Record<string, string>),
+      // Node's built-in fetch ignores HTTPS_PROXY, so behind a proxy the server
+      // silently fails to reach Supabase — and the app reports that as
+      // "Incorrect email or password.", which looks like a test-data problem
+      // rather than a network one. Needs Node >= 22.21; harmless without a proxy.
+      NODE_USE_ENV_PROXY: '1',
+    },
   },
 });

@@ -38,6 +38,18 @@ test.describe('portal (supervisor/admin)', () => {
     expect(errors).toEqual([]);
   });
 
+  test('dashboard shows no query-failure banners', async ({ page }) => {
+    // The dashboard renders per-section error text instead of throwing, so a
+    // broken query degrades quietly and every other assertion still passes.
+    // Regression guard: get_site_breakdown once raised 'column reference
+    // "site_id" is ambiguous' for every org, and the page just showed a red line.
+    const body = await page.locator('main').innerText();
+
+    expect(body, 'dashboard rendered a query-failure message').not.toMatch(
+      /Couldn'?t load|could not load|unknown error|is ambiguous/i
+    );
+  });
+
   test('snags list renders and a row opens its detail page', async ({ page }) => {
     await page.goto('/snags');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
@@ -85,6 +97,13 @@ test.describe('portal (supervisor/admin)', () => {
   });
 
   test('signing out revokes portal access', async ({ page }) => {
+    // Under 900px the sidebar is a closed drawer, so Sign out isn't reachable
+    // until it's opened (PortalNav's "Open menu" button).
+    const menuButton = page.getByRole('button', { name: /open menu/i });
+    if (await menuButton.isVisible().catch(() => false)) {
+      await menuButton.click();
+    }
+
     await page.getByRole('button', { name: /sign out|log out/i }).first().click();
     await page.waitForURL(/\/(login)?$/);
 

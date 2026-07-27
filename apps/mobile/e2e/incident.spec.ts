@@ -95,7 +95,13 @@ test.describe('serious incident detail', () => {
     await openFirstSeriousSnag(page);
 
     await page.getByText('Evidence', { exact: true }).first().click();
-    await page.getByText('Add evidence', { exact: true }).first().click();
+
+    // .last(), not .first(): when the gate's outstanding condition happens to
+    // be evidence, the Next-step card offers an "Add evidence" CTA too, and it
+    // renders above the card. That CTA only opens the card — clicking it here
+    // left the sheet closed and the failure looked like a missing sheet rather
+    // than a mis-aimed click. The panel's own button is always the later one.
+    await page.getByText('Add evidence', { exact: true }).last().click();
 
     // The sheet must show both fields at once — the whole reason capture moved
     // out of the inline stack. The caption input was stranded below the fold

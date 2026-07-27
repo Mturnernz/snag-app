@@ -11,11 +11,42 @@
 | 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused | `E2E_EMAIL`/`E2E_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/report.spec.ts` — worker signs in, report screen shows both lanes and the right org, tab bar, snags list | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/incident.spec.ts` — the serious-incident screen: next step above the fold, no empty photo block, Resolve stated as blocked, every collapsed card reports its state, the evidence sheet is usable, WorkSafe criteria stay behind their disclosure, composer starts collapsed | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
-| 3 | not yet written — report → triage → investigate → resolve | test-org account | **yes** |
+| 3 | `apps/mobile/e2e/write-path.spec.ts` — reports a serious incident, then satisfies each resolve-gate condition in turn (notifiable decision → checklist → witness → evidence → root cause) and resolves it, asserting the gate blocks until the last one is met | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes** |
 
 Tier 0 runs anywhere and takes seconds. Tier 1 needs only a served bundle. Tier 2
 is read-only, so it is safe against an environment with real data. Tier 3 mutates
 and needs the disposable org described below.
+
+### Running Tier 3
+
+It is opt-in and skips by default, so `npm test` never writes even on a machine
+that has credentials:
+
+```bash
+E2E_WRITE_PATH=1 npx playwright test --tsconfig tsconfig.e2e.json e2e/write-path.spec.ts
+```
+
+Three fences, because `snags` rows cannot be deleted:
+
+1. **Opt-in.** Without `E2E_WRITE_PATH=1` the spec skips.
+2. **Org-checked at runtime.** Before its first write the spec reads the org the
+   Report tab says it is reporting into and fails loudly unless it matches
+   `E2E_WRITE_ORG` (default `SNAG QA`). A mistyped `E2E_EMAIL` should not
+   quietly file test incidents into a customer's org.
+3. **Disposable org.** Every run leaves a permanent snag. That is fine in
+   `SNAG QA` and nowhere else — including partial runs, since a spec that fails
+   halfway still leaves the snag it got as far as creating.
+
+It is deliberately not in CI for the same reason: a per-PR write path would
+accumulate records in a shared org on every push.
+
+Its assertions are worth stating, since the point is the gate rather than the
+clicking: Resolve is shown blocked with a count that decreases as conditions are
+met; the notifiable decision is named first, matching `update_snag_status`'s own
+ordering; Manage states the same blocking reason the Next-step card does; and
+the card only flips to `Ready to resolve` once every condition is satisfied.
+Evidence is captured caption-only — `expo-image-picker` has no web
+implementation, and `add_evidence_item` accepts an empty media path.
 
 ## Running
 
@@ -210,4 +241,7 @@ when upgrading.
 - Native mobile paths are untested: `expo-camera` (QR scan),
   `expo-image-picker`/`-manipulator` (`PhotoPicker`), `expo-file-system`. These
   need a device via Expo Go.
-- No Tier 3 write-path coverage yet. The `SNAG QA` org exists for it.
+- Tier 3 covers the serious lane only. The niggle lane's own path (report →
+  assign → `resolve_snag`) and the RCA/debrief flows are still uncovered.
+- The web portal's snag detail page is a separate implementation from the
+  mobile screen and has no coverage beyond "the page renders".

@@ -125,6 +125,7 @@ interface GateCondition {
 function computeGate(
   status: SnagStatus | undefined,
   inv: InvestigationState | null,
+  notifiableDecided: boolean,
 ): GateCondition[] {
   if (status === 'rca_pending') {
     return [{
@@ -149,6 +150,16 @@ function computeGate(
 
   const done = inv.completedSteps.length;
   return [
+    {
+      // First, matching the server: the most time-critical thing on a serious
+      // snag, and the one with a statutory clock attached.
+      unmet: !notifiableDecided,
+      title: 'Decide if this is notifiable',
+      detail: "Does it meet WorkSafe's threshold? A notifiable event has to be reported as soon as possible, and the site preserved.",
+      cta: 'Make the call',
+      stepKey: 'notifiable',
+      blockReason: 'Decide if this is a notifiable event',
+    },
     {
       unmet: done < 5,
       title: 'Finish the first-response checklist',
@@ -196,8 +207,9 @@ function computeGate(
 function computeResolveBlockReason(
   status: SnagStatus | undefined,
   inv: InvestigationState | null,
+  notifiableDecided: boolean,
 ): string | null {
-  return computeGate(status, inv).find((c) => c.unmet)?.blockReason ?? null;
+  return computeGate(status, inv, notifiableDecided).find((c) => c.unmet)?.blockReason ?? null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -429,24 +441,18 @@ export default function IssueDetailScreen() {
   // the seeding effect below already treats it as step one. `remaining`
   // counts only real gate conditions, so the locked Resolve row stays
   // truthful about what's actually blocking closure.
-  const gate = computeGate(issue?.status, investigation);
+  const gate = computeGate(issue?.status, investigation, notifiableDecided);
   const gateRemaining = gate.filter((c) => c.unmet).length;
-  const nextStep: NextStep | null = !notifiableDecided
+  const firstUnmet = gate.find((c) => c.unmet);
+  const nextStep: NextStep | null = firstUnmet
     ? {
-        title: 'Decide if this is notifiable',
-        detail: "Does it meet WorkSafe's threshold? This one can't wait — a notifiable event carries a duty to preserve the site.",
-        cta: 'Make the call',
+        title: firstUnmet.title,
+        detail: firstUnmet.detail,
+        cta: firstUnmet.cta,
         remaining: gateRemaining,
       }
-    : gateRemaining > 0
-    ? (() => {
-        const c = gate.find((x) => x.unmet)!;
-        return { title: c.title, detail: c.detail, cta: c.cta, remaining: gateRemaining };
-      })()
     : null;
-  const nextStepKey: StepKey = !notifiableDecided
-    ? 'notifiable'
-    : gate.find((c) => c.unmet)?.stepKey ?? 'checklist';
+  const nextStepKey: StepKey = firstUnmet?.stepKey ?? 'checklist';
 
   // StepCard only mounts its children while expanded, so a panel that reports
   // its own summary upward can't do so until it has been opened once — every
@@ -921,7 +927,7 @@ export default function IssueDetailScreen() {
                   severity={issue.severity}
                   owner={issue.owner ?? null}
                   assignees={siteAssignees}
-                  resolveBlockReason={computeResolveBlockReason(issue.status, investigation)}
+                  resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided)}
                   isPublicSubmission={issue.is_public_submission ?? false}
                   onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
                 />
@@ -938,7 +944,7 @@ export default function IssueDetailScreen() {
               severity={issue.severity}
               owner={issue.owner ?? null}
               assignees={siteAssignees}
-              resolveBlockReason={computeResolveBlockReason(issue.status, investigation)}
+              resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided)}
               isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
             />

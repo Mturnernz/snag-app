@@ -112,7 +112,7 @@ Point tests at any *other* org only if you are happy for them to write there.
 
 ## Mobile
 
-`apps/mobile` has no automated tests yet, but it is testable: the app bundles and
+`apps/mobile` has Jest units (see Tier 0) plus browser specs: the app bundles and
 runs under `react-native-web`, so the same Playwright setup drives it.
 
 ```bash
@@ -202,10 +202,6 @@ when upgrading.
 
 ## Known gaps
 
-- No favicon: there is no `public/` directory and no `src/app/icon.*`, so every
-  page load 404s on the browser's implicit `/favicon.ico` request. The Tier 1
-  specs filter that one un-attributable console line; adding an icon lets the
-  filter go.
 - No tests for `packages/supabase-queries`. Its functions each take a
   `SupabaseClient`, so they are straightforward to test against a stub — the
   cheapest coverage still on the table.

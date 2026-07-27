@@ -14,21 +14,17 @@ const PUBLIC_ROUTES = [
 // Next.js dev overlays produce console noise that isn't a product defect; fail
 // only on things a user would actually hit.
 //
-// The bare "Failed to load resource: ... 404" line is filtered because the app
-// currently ships no favicon (no `public/` dir, no `src/app/icon.*`), so the
-// browser's implicit /favicon.ico request 404s on every page. That request is
-// implicit, so it never surfaces as a Playwright `response` event — which is
-// exactly why failures are asserted on attributable network responses below
-// rather than on this un-attributable console string. Add a favicon and this
-// filter can go.
+// The blanket "Failed to load resource: ... 404" filter that used to live here
+// is gone: it existed because the app shipped no favicon, so the browser's
+// implicit /favicon.ico request 404'd on every page and surfaced as an
+// un-attributable console line. src/app/icon.svg fixed the cause, so the specs
+// can hold every 404 against the page again.
 const IGNORED_CONSOLE = [
   /Download the React DevTools/i,
   /\[Fast Refresh\]/i,
-  /favicon/i,
-  /^Failed to load resource: the server responded with a status of 404/i,
 ];
 
-const IGNORED_REQUESTS = [/favicon/i];
+const IGNORED_REQUESTS: RegExp[] = [];
 
 function collectPageErrors(page: Page) {
   const errors: string[] = [];

@@ -99,11 +99,52 @@ Point tests at any *other* org only if you are happy for them to write there.
 
 ## Mobile
 
-`apps/mobile` has no automated tests. Its React Native code can render under
-`react-native-web` (`npm run web --workspace=apps/mobile`), which makes the same
-Playwright setup usable for smoke coverage, but web rendering does not exercise
-the native camera, image-picker, haptics, or clipboard paths — the parts most
-worth testing. Device testing is manual via Expo Go for now.
+`apps/mobile` has no automated tests yet, but it is testable: the app bundles and
+runs under `react-native-web`, so the same Playwright setup drives it.
+
+```bash
+npm run web --workspace=apps/mobile     # Metro + react-native-web on :8081
+```
+
+Verified working this way, logged in as a real account: the auth screen, sign-in,
+onboarding, and the full report-a-snag screen (photo picker, type toggle, serious
+-incident lane, tab bar) — with no JS errors.
+
+Only 10 of the ~55 files under `src/` touch a native module, and 6 of those are
+`expo-haptics`, which no-ops harmlessly on web. The genuine gaps are
+`expo-camera` (QR scan), `expo-image-picker`/`expo-image-manipulator`
+(`PhotoPicker`), and `expo-file-system`. Those still need a device via Expo Go.
+
+Note that rendering under react-native-web is real coverage but not equivalent
+coverage: layout, styling, navigation, and data flow transfer well; native
+modules and platform-specific behaviour do not.
+
+`ScanJoinCodeScreen` pulls `jsQR` from `cdn.jsdelivr.net` at runtime, so QR
+scanning needs that domain reachable.
+
+### Behind a TLS-terminating proxy (sandboxed agent sessions)
+
+The web app calls Supabase **server-side**, so Node handles the proxy and
+everything works with `NODE_USE_ENV_PROXY=1` (already set by
+`playwright.config.ts`). The mobile app calls Supabase **from the browser**, and
+Chromium may not be able to negotiate TLS through such a proxy at all —
+`ERR_CONNECTION_RESET` on every HTTPS host, including ones that are definitely
+allowlisted. Installing the proxy CA into `~/.pki/nssdb` does not fix it.
+
+`apps/mobile/scripts/supabase-relay.mjs` works around that without weakening any
+certificate checking: the browser talks plain HTTP to localhost, and Node makes
+the real, fully-verified TLS hop to Supabase.
+
+```bash
+NODE_USE_ENV_PROXY=1 node scripts/supabase-relay.mjs   # listens on :8090
+# then point the app at it — Metro inlines EXPO_PUBLIC_* at bundle time, and
+# .env takes precedence over shell vars, so edit .env rather than exporting:
+#   EXPO_PUBLIC_SUPABASE_URL=http://localhost:8090
+npx expo start --web --clear
+```
+
+Restore the real URL in `.env` afterwards. This is local test scaffolding only —
+never a deployment path, and unnecessary on a normal machine with direct egress.
 
 ## Network access
 

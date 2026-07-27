@@ -35,7 +35,10 @@ import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
 import ManageIssuePanel from '../components/ManageIssuePanel';
-import InvestigationPanel from '../components/InvestigationPanel';
+import ChecklistPanel from '../components/ChecklistPanel';
+import WitnessesPanel from '../components/WitnessesPanel';
+import EvidencePanel from '../components/EvidencePanel';
+import RootCausePanel from '../components/RootCausePanel';
 import NotifiableEventPanel from '../components/NotifiableEventPanel';
 import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
@@ -92,7 +95,15 @@ interface MergedChild {
   status: SnagStatus;
 }
 
-type StepKey = 'notifiable' | 'investigation' | 'correctiveActions' | 'rca' | 'debrief';
+type StepKey =
+  | 'notifiable'
+  | 'checklist'
+  | 'witnesses'
+  | 'evidence'
+  | 'rootCause'
+  | 'correctiveActions'
+  | 'rca'
+  | 'debrief';
 
 /** A resolve-gate condition, in the same order update_snag_status checks them. */
 interface GateCondition {
@@ -130,7 +141,7 @@ function computeGate(
       title: 'Loading investigation…',
       detail: 'Fetching what has been recorded so far.',
       cta: 'Open investigation',
-      stepKey: 'investigation',
+      stepKey: 'checklist',
       blockReason: 'Loading investigation…',
     }];
   }
@@ -142,7 +153,7 @@ function computeGate(
       title: 'Finish the first-response checklist',
       detail: `${done} of 5 steps done — make safe, preserve the scene, capture evidence, identify witnesses, find the cause.`,
       cta: 'Open the checklist',
-      stepKey: 'investigation',
+      stepKey: 'checklist',
       blockReason: `Finish the checklist (${done}/5)`,
     },
     {
@@ -150,7 +161,7 @@ function computeGate(
       title: 'Add a witness statement',
       detail: 'Record what someone who was there saw, in their words.',
       cta: 'Add a witness',
-      stepKey: 'investigation',
+      stepKey: 'witnesses',
       blockReason: 'Add a witness statement',
     },
     {
@@ -158,7 +169,7 @@ function computeGate(
       title: 'Capture evidence',
       detail: 'Photos of the scene, the equipment, and anything that explains how this happened.',
       cta: 'Add evidence',
-      stepKey: 'investigation',
+      stepKey: 'evidence',
       blockReason: 'Add evidence',
     },
     {
@@ -166,7 +177,7 @@ function computeGate(
       title: 'Record the root cause',
       detail: 'What actually caused this — not what went wrong, but why it could.',
       cta: 'Record root cause',
-      stepKey: 'investigation',
+      stepKey: 'rootCause',
       blockReason: 'Record a root cause',
     },
     {
@@ -216,6 +227,8 @@ export default function IssueDetailScreen() {
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   /** Manage is a disclosure on the serious lane — see the render for why. */
   const [manageOpen, setManageOpen] = useState(false);
+  /** The comment bar is a one-line prompt until tapped. */
+  const [composerOpen, setComposerOpen] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingIssue, setLoadingIssue] = useState(true);
   const [commentText, setCommentText] = useState('');
@@ -322,11 +335,18 @@ export default function IssueDetailScreen() {
   // effect below only sets the *initial* expanded step once per snag, so it
   // never fights a manual toggle afterward.
   const [stepExpanded, setStepExpanded] = useState<Record<StepKey, boolean>>({
-    notifiable: false, investigation: false, correctiveActions: false, rca: false, debrief: false,
+    notifiable: false, checklist: false, witnesses: false, evidence: false,
+    rootCause: false, correctiveActions: false, rca: false, debrief: false,
   });
   const toggleStep = useCallback((key: string) => {
     setStepExpanded((prev) => ({ ...prev, [key]: !prev[key as StepKey] }));
   }, []);
+  /** Every investigation card changes the same three things: the gate state,
+   *  the snag row (status can flip), and the activity log. */
+  const onInvestigationChanged = useCallback(() => {
+    fetchInvestigation(); fetchIssue(); fetchActivity();
+  }, [fetchInvestigation, fetchIssue, fetchActivity]);
+
   /** Open a step outright rather than toggle it — what NextStepCard needs, so
    *  its CTA can't close the very thing it just pointed you at. */
   const openStep = useCallback((key: StepKey) => {
@@ -352,16 +372,31 @@ export default function IssueDetailScreen() {
     ? 'Not notifiable'
     : 'Needs a decision';
 
-  const investigationComplete = Boolean(
-    investigation && investigation.completedSteps.length >= 5 && investigation.witnesses.length > 0 &&
-    investigation.evidence.length > 0 && investigation.rootCause?.trim()
-  );
-  const investigationStatus: StepStatus = !investigation ? 'pending' : investigationComplete ? 'done' : 'in_progress';
-  const investigationSummary = !investigation
-    ? 'Not started'
-    : investigationComplete
-    ? 'Complete'
-    : `Checklist ${investigation.completedSteps.length}/5`;
+  // One status/summary per investigation card. Each collapsed card has to say
+  // where it stands on its own — that's what makes the stack readable without
+  // opening anything, and it's why the horizontal strip wasn't needed.
+  const checklistDone = investigation?.completedSteps.length ?? 0;
+  const checklistStatus: StepStatus =
+    checklistDone >= 5 ? 'done' : checklistDone > 0 ? 'in_progress' : 'pending';
+  const checklistSummary = `${checklistDone} of 5 done`;
+
+  const witnessCount = investigation?.witnesses.length ?? 0;
+  const witnessStatus: StepStatus = witnessCount > 0 ? 'done' : 'pending';
+  const witnessSummary = witnessCount === 0
+    ? 'None recorded'
+    : witnessCount === 1
+    ? `1 statement · ${investigation?.witnesses[0]?.witness_name ?? ''}`.trim()
+    : `${witnessCount} statements`;
+
+  const evidenceCount = investigation?.evidence.length ?? 0;
+  const evidenceStatus: StepStatus = evidenceCount > 0 ? 'done' : 'pending';
+  const evidenceSummary = evidenceCount === 0
+    ? 'None captured'
+    : `${evidenceCount} item${evidenceCount === 1 ? '' : 's'}`;
+
+  const hasRootCause = Boolean(investigation?.rootCause?.trim());
+  const rootCauseStatus: StepStatus = hasRootCause ? 'done' : 'pending';
+  const rootCauseSummary = hasRootCause ? 'Recorded' : 'Not recorded';
 
   // What NextStepCard points at. The notifiable decision comes first even
   // though it isn't a resolve-gate condition — it's the most time-critical
@@ -386,7 +421,7 @@ export default function IssueDetailScreen() {
     : null;
   const nextStepKey: StepKey = !notifiableDecided
     ? 'notifiable'
-    : gate.find((c) => c.unmet)?.stepKey ?? 'investigation';
+    : gate.find((c) => c.unmet)?.stepKey ?? 'checklist';
 
   // StepCard only mounts its children while expanded, so a panel that reports
   // its own summary upward can't do so until it has been opened once — every
@@ -633,6 +668,7 @@ export default function IssueDetailScreen() {
       setCommentText('');
       setMentionQuery(null);
       setMentionAt(-1);
+      setComposerOpen(false);
       fetchComments();
     }
     setSendingComment(false);
@@ -918,22 +954,70 @@ export default function IssueDetailScreen() {
             </StepCard>
           )}
 
-          {/* Serious-lane investigation — clear the resolve gate in-app */}
+          {/* Serious-lane investigation — four resolve-gate conditions, one
+              card each. They used to share a single "Investigation" drawer
+              that opened onto a checklist plus three simultaneous add-forms;
+              split, each card carries its own summary while collapsed and
+              only one task is ever on screen. */}
           {canManageInvestigation && investigation && (
-            <StepCard
-              title="Investigation"
-              status={investigationStatus}
-              summary={investigationSummary}
-              expanded={stepExpanded.investigation}
-              onToggle={() => toggleStep('investigation')}
-            >
-              <InvestigationPanel
-                issueId={issue.id}
-                orgId={issue.org_id}
-                state={investigation}
-                onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
-              />
-            </StepCard>
+            <>
+              <StepCard
+                title="Make safe & preserve scene"
+                status={checklistStatus}
+                summary={checklistSummary}
+                expanded={stepExpanded.checklist}
+                onToggle={() => toggleStep('checklist')}
+              >
+                <ChecklistPanel
+                  issueId={issue.id}
+                  state={investigation}
+                  onChanged={onInvestigationChanged}
+                />
+              </StepCard>
+
+              <StepCard
+                title="Witnesses"
+                status={witnessStatus}
+                summary={witnessSummary}
+                expanded={stepExpanded.witnesses}
+                onToggle={() => toggleStep('witnesses')}
+              >
+                <WitnessesPanel
+                  issueId={issue.id}
+                  state={investigation}
+                  onChanged={onInvestigationChanged}
+                />
+              </StepCard>
+
+              <StepCard
+                title="Evidence"
+                status={evidenceStatus}
+                summary={evidenceSummary}
+                expanded={stepExpanded.evidence}
+                onToggle={() => toggleStep('evidence')}
+              >
+                <EvidencePanel
+                  issueId={issue.id}
+                  orgId={issue.org_id}
+                  state={investigation}
+                  onChanged={onInvestigationChanged}
+                />
+              </StepCard>
+
+              <StepCard
+                title="Root cause"
+                status={rootCauseStatus}
+                summary={rootCauseSummary}
+                expanded={stepExpanded.rootCause}
+                onToggle={() => toggleStep('rootCause')}
+              >
+                <RootCausePanel
+                  issueId={issue.id}
+                  state={investigation}
+                  onChanged={onInvestigationChanged}
+                />
+              </StepCard>
+            </>
           )}
 
           {/* Corrective actions — visible to any org member on the snag's own
@@ -1127,8 +1211,23 @@ export default function IssueDetailScreen() {
         </ScrollView>
       )}
 
-      {/* Sticky comment input — org members only */}
-      {isOrgMember && (
+      {/* Sticky comment input — org members only.
+          Collapsed to a single row until tapped. This bar is fixed chrome, so
+          its height is subtracted from the viewport on every screen of scroll,
+          not just once; halving it gives back more usable space than trimming
+          the same number of pixels anywhere in the document would. */}
+      {isOrgMember && !composerOpen && (
+        <TouchableOpacity
+          style={[styles.commentPrompt, { paddingBottom: insets.bottom + 8 }]}
+          onPress={() => setComposerOpen(true)}
+          activeOpacity={0.7}
+        >
+          <Icon name="chatbubble-outline" size="sm" color={Colors.textMuted} />
+          <Text style={styles.commentPromptText}>Add a comment</Text>
+        </TouchableOpacity>
+      )}
+
+      {isOrgMember && composerOpen && (
       <View style={[styles.commentInputBar, { paddingBottom: insets.bottom + 8 }]}>
         <TextInput
           style={styles.commentInput}
@@ -1138,6 +1237,10 @@ export default function IssueDetailScreen() {
           onChangeText={handleCommentChange}
           multiline
           maxLength={500}
+          autoFocus
+          // Collapse again only when nothing is part-written, so a stray tap
+          // outside can't discard a comment someone was mid-way through.
+          onBlur={() => { if (!commentText.trim()) setComposerOpen(false); }}
         />
         <TouchableOpacity
           style={[styles.sendButton, (!commentText.trim() || sendingComment) && styles.sendButtonDisabled]}
@@ -1277,6 +1380,17 @@ const styles = StyleSheet.create({
   activityActor: { fontWeight: Typography.semibold, color: Colors.textSecondary },
 
   // Comment bar
+  commentPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  commentPromptText: { flex: 1, fontSize: Typography.sm, color: Colors.textMuted },
   commentInputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.sm, paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border },
   commentInput: { flex: 1, minHeight: 48, maxHeight: 100, backgroundColor: Colors.background, borderRadius: Radius.input, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, fontSize: Typography.base, color: Colors.textPrimary },
   sendButton: { width: 48, height: 48, borderRadius: Radius.button, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },

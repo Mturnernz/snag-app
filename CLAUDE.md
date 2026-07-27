@@ -221,6 +221,12 @@ Choosing a client per *event* cannot work — `serious_created` is one email to 
 whole site's members, whose roles are mixed, and RCAs are usually assigned to
 workers, whom the portal refuses outright.
 
+**Deploy the portal before the function.** The links only resolve once a
+portal build containing `/go/snag/[id]` is live, and they are only ever
+followed from an inbox — so a mismatch is invisible to the app, to CI, and to
+anyone not reading their email. `SNAG_PORTAL_URL` is a Supabase function
+secret, so re-pointing it later needs no redeploy.
+
 A signed-out supervisor is sent to `/login?next=<portal path>` so the snag
 survives the login round trip. `next` is validated by `src/lib/nextPath.ts` —
 same-origin paths only, or it's an open redirect on a domain people trust.

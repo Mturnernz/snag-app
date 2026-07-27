@@ -1,6 +1,15 @@
 // notify-snag: email notifications via Resend, called from DB triggers/RPCs
 // (dispatch_snag_notification / dispatch_rca_notification) with an internal
 // secret header. Source of truth is this file — redeploy via Supabase MCP.
+//
+// DEPLOY ORDER MATTERS. Every link below points at /go/snag/<id> on the
+// portal. Deploying this function before a portal build containing that route
+// is live sends every notification to a 404 — and because these links are only
+// ever followed from someone's inbox, nothing in the app or CI will tell you.
+// Check the route answers on the target host first:
+//   curl -o /dev/null -w '%{http_code}\n' "$SNAG_PORTAL_URL/go/snag/<any-uuid>"
+// Expect 200 (the handoff) or 307 (a signed-in supervisor being passed
+// through). A 404 means the portal hasn't caught up — deploy that first.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -9,10 +18,17 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const INTERNAL_SECRET = Deno.env.get("SNAG_INTERNAL_SECRET");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const FROM_ADDRESS = Deno.env.get("SNAG_FROM_ADDRESS") ?? "Snag <onboarding@resend.dev>";
-// The supervisor portal. Every link this function sends now points at its
-// /go/snag/<id> handoff rather than at a client directly — see the comment on
-// `go()` below. The app's own URL moved with that decision: /go is what knows
-// where to send someone, so NEXT_PUBLIC_SNAG_APP_URL lives in apps/web now.
+// The portal (apps/web — it hosts the marketing site and the supervisor
+// portal in one Next.js app). Every link this function sends points at its
+// /go/snag/<id> handoff rather than at a client directly — see `go()` below.
+// The app's own URL moved with that decision: /go is what knows where to send
+// someone, so NEXT_PUBLIC_SNAG_APP_URL lives in apps/web now.
+//
+// PROVISIONAL DEFAULT. snag-app-website.netlify.app is a branch deploy, not a
+// production domain — there isn't one yet (snag.app is parked and for sale).
+// It is here because every link in this file is otherwise dead, and because
+// SNAG_PORTAL_URL is a function secret: point it at the real domain in
+// Supabase → Edge Functions → Secrets and this needs no redeploy.
 const PORTAL_URL = Deno.env.get("SNAG_PORTAL_URL") ?? "https://snag-app-website.netlify.app";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);

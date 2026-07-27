@@ -4,17 +4,50 @@
 
 | Tier | What it covers | Credentials | Writes data? |
 |---|---|---|---|
-| 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens. Jest, no browser, no network | none | no |
+| 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens, and the shared serious-lane resolve gate (its ordering pinned against `update_snag_status`). Jest, no browser, no network | none | no |
 | 1 | `apps/web/e2e/public.spec.ts` — every public route, both themes, three viewports, no horizontal overflow, no failed subresources | none | no |
 | 1 | `apps/web/e2e/auth-gate.spec.ts` — portal routes redirect anonymously; export routes reject GET and refuse anonymous POST | none | no |
 | 1 | `apps/mobile/e2e/auth.spec.ts` — auth screen renders, password masked, bad credentials rejected, both join paths reachable | none | no |
-| 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused | `E2E_EMAIL`/`E2E_PASSWORD` | no |
+| 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused, plus the snag detail page: sections start collapsed and the next step opens the one it names, the notifiable question offers both answers, Resolve is stated as blocked, every counted evidence item renders, the 5 Whys are asked one at a time | `E2E_EMAIL`/`E2E_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/report.spec.ts` — worker signs in, report screen shows both lanes and the right org, tab bar, snags list | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD` | no |
-| 3 | not yet written — report → triage → investigate → resolve | test-org account | **yes** |
+| 2 | `apps/mobile/e2e/deep-link.spec.ts` — `/snags/:id` opens that snag from a cold load, `?step=` expands one section and leaves the rest collapsed, an unknown step is ignored, and navigating writes the URL back | `E2E_EMAIL`/`E2E_PASSWORD` | no |
+| 2 | `apps/mobile/e2e/incident.spec.ts` — the serious-incident screen: next step above the fold, no empty photo block, Resolve stated as blocked, every collapsed card reports its state, the evidence sheet is usable, WorkSafe criteria stay behind their disclosure, composer starts collapsed | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
+| 3 | `apps/mobile/e2e/write-path.spec.ts` — reports a serious incident, then satisfies each resolve-gate condition in turn (notifiable decision → checklist → witness → evidence → root cause) and resolves it, asserting the gate blocks until the last one is met | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes** |
 
 Tier 0 runs anywhere and takes seconds. Tier 1 needs only a served bundle. Tier 2
 is read-only, so it is safe against an environment with real data. Tier 3 mutates
 and needs the disposable org described below.
+
+### Running Tier 3
+
+It is opt-in and skips by default, so `npm test` never writes even on a machine
+that has credentials:
+
+```bash
+E2E_WRITE_PATH=1 npx playwright test --tsconfig tsconfig.e2e.json e2e/write-path.spec.ts
+```
+
+Three fences, because `snags` rows cannot be deleted:
+
+1. **Opt-in.** Without `E2E_WRITE_PATH=1` the spec skips.
+2. **Org-checked at runtime.** Before its first write the spec reads the org the
+   Report tab says it is reporting into and fails loudly unless it matches
+   `E2E_WRITE_ORG` (default `SNAG QA`). A mistyped `E2E_EMAIL` should not
+   quietly file test incidents into a customer's org.
+3. **Disposable org.** Every run leaves a permanent snag. That is fine in
+   `SNAG QA` and nowhere else — including partial runs, since a spec that fails
+   halfway still leaves the snag it got as far as creating.
+
+It is deliberately not in CI for the same reason: a per-PR write path would
+accumulate records in a shared org on every push.
+
+Its assertions are worth stating, since the point is the gate rather than the
+clicking: Resolve is shown blocked with a count that decreases as conditions are
+met; the notifiable decision is named first, matching `update_snag_status`'s own
+ordering; Manage states the same blocking reason the Next-step card does; and
+the card only flips to `Ready to resolve` once every condition is satisfied.
+Evidence is captured caption-only — `expo-image-picker` has no web
+implementation, and `add_evidence_item` accepts an empty media path.
 
 ## Running
 
@@ -66,6 +99,22 @@ E2E_WORKER_PASSWORD=…
 Specs that lack their credentials skip rather than fail, so a partial setup
 still gives a green, honest run.
 
+### One sign-in per run
+
+`e2e/auth.setup.ts` is a setup project that logs in once and saves the session
+to `e2e/.auth/` (gitignored); the portal specs reuse it via `storageState`.
+
+This matters more than it looks. Logging in per test was ~40 sign-ins a run
+across the three browser projects, which Supabase Auth rate-limits — and the
+failure is invisible, because `loginAction` maps *every* `signInWithPassword`
+error to "Incorrect email or password." The symptom was a spec partway through
+the run finding itself back on `/login` for no reason anything on the page
+could explain. It also cut the suite from 9.2 to 3.8 minutes.
+
+One consequence worth knowing: any spec that signs out needs its own session,
+because `signOut` ends the session it is called on. The sign-out spec logs in
+separately for exactly that reason.
+
 ### Sandboxes with a pre-installed Chromium
 
 If the machine ships a Chromium that doesn't match the build Playwright wants,
@@ -111,7 +160,7 @@ Point tests at any *other* org only if you are happy for them to write there.
 
 ## Mobile
 
-`apps/mobile` has no automated tests yet, but it is testable: the app bundles and
+`apps/mobile` has Jest units (see Tier 0) plus browser specs: the app bundles and
 runs under `react-native-web`, so the same Playwright setup drives it.
 
 ```bash
@@ -201,16 +250,20 @@ when upgrading.
 
 ## Known gaps
 
-- No favicon: there is no `public/` directory and no `src/app/icon.*`, so every
-  page load 404s on the browser's implicit `/favicon.ico` request. The Tier 1
-  specs filter that one un-attributable console line; adding an icon lets the
-  filter go.
-- No tests for `packages/supabase-queries`. Its functions each take a
-  `SupabaseClient`, so they are straightforward to test against a stub — the
-  cheapest coverage still on the table.
+- `packages/supabase-queries` is only partly covered: `seriousResolveGate` has
+  unit tests (`apps/mobile/src/lib/resolveGate.test.ts` — it runs in the mobile
+  Jest project because that is where a runner already exists), but the query
+  wrappers themselves don't. They each take a `SupabaseClient`, so they are
+  straightforward to test against a stub — the cheapest coverage still on the
+  table.
 - No accessibility audit. `@axe-core/playwright` would slot into the Tier 1
   specs directly.
 - Native mobile paths are untested: `expo-camera` (QR scan),
   `expo-image-picker`/`-manipulator` (`PhotoPicker`), `expo-file-system`. These
   need a device via Expo Go.
-- No Tier 3 write-path coverage yet. The `SNAG QA` org exists for it.
+- Tier 3 covers the serious lane only. The niggle lane's own path (report →
+  assign → `resolve_snag`) and the RCA/debrief flows are still uncovered.
+- The web portal's snag detail page is a separate implementation from the
+  mobile screen. It now has three read-only specs (the notifiable question, the
+  stated resolve gate, evidence rendering), but its RCA, debrief, and corrective
+  -action sections are still uncovered.

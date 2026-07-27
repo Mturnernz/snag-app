@@ -1,0 +1,99 @@
+.section {
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: var(--space-md);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  cursor: pointer;
+  /* The default triangle would sit beside our own chevron. */
+  list-style: none;
+}
+
+.head::-webkit-details-marker {
+  display: none;
+}
+
+.head:hover {
+  background: var(--color-background);
+}
+
+.head:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-button);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+/* Done sections drop the accent — a finished step shouldn't keep drawing the
+   eye as strongly as one with work left in it. */
+.section[data-state='done'] .icon {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.section[data-state='optional'] .icon {
+  background: var(--color-background);
+  color: var(--color-text-muted);
+}
+
+.headText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.summary {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  display: flex;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: transform 150ms ease;
+}
+
+.section[open] .chevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
+
+.body {
+  padding: 0 var(--space-lg) var(--space-lg);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-lg);
+}

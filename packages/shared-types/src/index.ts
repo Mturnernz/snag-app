@@ -196,11 +196,36 @@ export interface CorrectiveAction {
 
 // ─── Navigation param lists ──────────────────────────────────────────────────
 
+/**
+ * The collapsible sections of a serious snag, in the order they're worked.
+ *
+ * Shared rather than local to the screen because it is also a deep-link
+ * target: a notification about an RCA has to be able to say *which* part of
+ * the snag it is about, and apps/web's portal accepts the same values as its
+ * `?step=` query param. One vocabulary, both clients.
+ */
+export type SnagStepKey =
+  | 'notifiable'
+  | 'checklist'
+  | 'witnesses'
+  | 'evidence'
+  | 'rootCause'
+  | 'correctiveActions'
+  | 'rca'
+  | 'debrief';
+
+export const SNAG_STEP_KEYS: SnagStepKey[] = [
+  'notifiable', 'checklist', 'witnesses', 'evidence',
+  'rootCause', 'correctiveActions', 'rca', 'debrief',
+];
+
 export type RootStackParamList = {
   Main: undefined;
   // `issueId` here refers to a snags.id — the param name is kept for
   // minimal navigation-call churn even though the underlying entity is a Snag.
-  IssueDetail: { issueId: string };
+  // `step` opens one section on arrival, so a link can point at the work
+  // rather than at the snag it happens to live on.
+  IssueDetail: { issueId: string; step?: SnagStepKey };
   Reports: undefined;
   ReportIncidentDetails: undefined;
   ReportIncidentReview: undefined;

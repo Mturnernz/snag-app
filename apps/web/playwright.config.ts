@@ -36,10 +36,15 @@ export default defineConfig({
   },
 
   projects: [
-    { name: 'chromium-light', use: { ...devices['Desktop Chrome'], colorScheme: 'light' } },
-    { name: 'chromium-dark', use: { ...devices['Desktop Chrome'], colorScheme: 'dark' } },
+    // Signs in once and saves the session the authenticated specs reuse. See
+    // e2e/auth.setup.ts — logging in per test rate-limited Supabase Auth, and
+    // the app reports that as "Incorrect email or password."
+    { name: 'setup', testMatch: /.*\.setup\.ts/ },
+
+    { name: 'chromium-light', testIgnore: /.*\.setup\.ts/, use: { ...devices['Desktop Chrome'], colorScheme: 'light' }, dependencies: ['setup'] },
+    { name: 'chromium-dark', testIgnore: /.*\.setup\.ts/, use: { ...devices['Desktop Chrome'], colorScheme: 'dark' }, dependencies: ['setup'] },
     // The portal sidebar collapses to a drawer under 900px — worth its own run.
-    { name: 'mobile-viewport', use: { ...devices['Pixel 7'] } },
+    { name: 'mobile-viewport', testIgnore: /.*\.setup\.ts/, use: { ...devices['Pixel 7'] }, dependencies: ['setup'] },
   ],
 
   // Reuse an already-running `next dev` when there is one, so an interactive

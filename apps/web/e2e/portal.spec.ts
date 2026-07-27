@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { SUPERVISOR_STATE } from './auth-state';
 
 // Authenticated, READ-ONLY portal coverage. These specs log in and look; they
 // never create, resolve, or delete a snag, so they are safe to point at an
@@ -22,12 +23,13 @@ async function login(page: import('@playwright/test').Page, email: string, passw
 test.describe('portal (supervisor/admin)', () => {
   test.skip(!EMAIL || !PASSWORD, 'set E2E_EMAIL and E2E_PASSWORD to run authenticated specs');
 
+  // The session comes from the setup project rather than a per-test login —
+  // see e2e/auth.setup.ts for why.
+  test.use({ storageState: SUPERVISOR_STATE });
+
   test.beforeEach(async ({ page }) => {
-    await login(page, EMAIL!, PASSWORD!);
-    // Signing in is a server action plus a Supabase round-trip, so it needs more
-    // than the default expect timeout on a loaded machine — otherwise the whole
-    // authenticated suite flakes on timing rather than on behaviour.
-    await expect(page, 'login should land on the dashboard').toHaveURL(/\/dashboard/, {
+    await page.goto('/dashboard');
+    await expect(page, 'the stored session should still be good').toHaveURL(/\/dashboard/, {
       timeout: 45_000,
     });
   });
@@ -66,8 +68,137 @@ test.describe('portal (supervisor/admin)', () => {
     }
 
     await firstLink.click();
-    await expect(page).toHaveURL(/\/snags\/[0-9a-f-]{36}/);
+    // Longer than the default: this is usually the first request to
+    // /snags/[id] in a run, and the dev server compiles the route on demand.
+    // At 10s it failed on the compile rather than on the navigation.
+    await expect(page).toHaveURL(/\/snags\/[0-9a-f-]{36}/, { timeout: 45_000 });
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  });
+
+  // The snag detail page had no coverage beyond "the row opens it". These
+  // assert the properties the restructure actually claims, and all of them are
+  // state-aware: which snags an org has is not something a read-only spec gets
+  // to choose, so each looks for its subject and annotates out if the org has
+  // nothing in that state.
+  test.describe('snag detail', () => {
+    // These walk the snag list looking for a subject, so each one is several
+    // page loads rather than one — and against a dev server the first visit to
+    // a route pays for compiling it. The default 30s budget was failing on
+    // that rather than on anything the page does.
+    test.describe.configure({ timeout: 120_000 });
+
+    /** Every snag link on /snags, newest first. */
+    async function snagHrefs(page: import('@playwright/test').Page): Promise<string[]> {
+      await page.goto('/snags');
+      return page.locator('main a[href^="/snags/"]').evaluateAll(
+        (els) => els.map((e) => (e as HTMLAnchorElement).getAttribute('href')!)
+      );
+    }
+
+    /** Opens each snag until one matches, and leaves the page on it. */
+    async function findSnag(
+      page: import('@playwright/test').Page,
+      matches: (body: string) => boolean,
+      what: string,
+      step?: string,
+    ): Promise<string | null> {
+      for (const href of (await snagHrefs(page)).slice(0, 8)) {
+        await page.goto(step ? `${href}?step=${step}` : href);
+        const body = await page.locator('main').innerText();
+        if (matches(body)) return href;
+      }
+      test.info().annotations.push({ type: 'note', description: `no snag with ${what} visible to this account` });
+      return null;
+    }
+
+    test('sections start collapsed and the next step opens the one it names', async ({ page }) => {
+      // The restructure's central claim. Before it, every section was expanded
+      // at once and a serious snag was one column of about a dozen forms.
+      const href = await findSnag(page, (b) => /Resolve — blocked/.test(b), 'an open resolve gate');
+      if (!href) return;
+
+      const open = page.locator('details[open]');
+      expect(await open.count(), 'nothing should be expanded before you ask for it').toBe(0);
+
+      // The CTA is a link carrying ?step=…, so following it must expand
+      // exactly one section — the one the card named.
+      await page.locator('main a[href*="?step="]').first().click();
+      await expect(page.locator('details[open]')).toHaveCount(1);
+    });
+
+    test('an undecided serious snag asks the notifiable question both ways', async ({ page }) => {
+      // The portal used to offer one button, "Mark notifiable". Recording "no"
+      // — which update_snag_status requires before resolving — meant flagging
+      // a notifiable event and retracting it.
+      const href = await findSnag(
+        page,
+        (b) => /Notifiable: undecided/.test(b),
+        'an undecided notifiable decision',
+        'notifiable',
+      );
+      if (!href) return;
+
+      await expect(page.getByText('Does this need reporting to WorkSafe?')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Yes — notifiable' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'No', exact: true })).toBeVisible();
+    });
+
+    test('Resolve is stated as blocked rather than offered', async ({ page }) => {
+      // Same property the mobile screen asserts: while the gate is closed the
+      // page names what is outstanding instead of offering an action the
+      // server will refuse with a raw Postgres exception.
+      const href = await findSnag(page, (b) => /Resolve — blocked/.test(b), 'a blocked resolve gate');
+      if (!href) return;
+
+      const body = await page.locator('main').innerText();
+      expect(body, 'the locked row should count what is left').toMatch(
+        /Resolve — blocked, \d+ steps? remaining/
+      );
+      await expect(page.getByRole('button', { name: /^Resolve( this snag)?$/ })).toBeHidden();
+
+      // And Manage must agree rather than contradict it.
+      await page.goto(`${href}?step=manage`);
+      await expect(page.getByText(/Resolve is blocked — /)).toBeVisible();
+    });
+
+    test('every counted evidence item renders', async ({ page }) => {
+      // Mobile's evidence sheet accepts a caption with no photo, and
+      // add_evidence_item stores an empty media path for it. The portal
+      // rendered thumbnails only, so those items vanished while the section
+      // header above them still counted them.
+      const href = await findSnag(
+        page,
+        (b) => /Evidence\s+\d+ items?/.test(b),
+        'any evidence recorded',
+        'evidence',
+      );
+      if (!href) return;
+
+      const header = await page.locator('#evidence summary').innerText();
+      const count = Number(header.match(/(\d+) items?/)![1]);
+      expect(count).toBeGreaterThan(0);
+      expect(
+        await page.locator('[data-evidence-item]').count(),
+        `the header counts ${count} evidence item(s); every one of them must render`
+      ).toBe(count);
+    });
+
+    test('the 5 Whys are asked one at a time', async ({ page }) => {
+      // Ten inputs at once misrepresented the method: why #2 is asked *of the
+      // answer to* #1, and a form showing all five invites five parallel
+      // guesses at the same question.
+      const href = await findSnag(
+        page,
+        (b) => /Why \d of 5 · asked of:/.test(b),
+        'an analysis in progress',
+        'rca',
+      );
+      if (!href) return;
+
+      // Exactly one why is offered, and it states what it is asked of.
+      await expect(page.getByText(/Why \d of 5 · asked of:/)).toHaveCount(1);
+      await expect(page.locator('#rca input[name="whyIndex"]')).toHaveCount(1);
+    });
   });
 
   test('reports page loads and does not auto-fire an export', async ({ page }) => {
@@ -102,6 +233,12 @@ test.describe('portal (supervisor/admin)', () => {
   });
 
   test('signing out revokes portal access', async ({ page }) => {
+    // Its own session, deliberately: signOut revokes the token server-side,
+    // and doing that to the shared one would log every later spec out.
+    await page.context().clearCookies();
+    await login(page, EMAIL!, PASSWORD!);
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 45_000 });
+
     // Under 900px the sidebar is a closed drawer, so Sign out isn't reachable
     // until it's opened (PortalNav's "Open menu" button).
     const menuButton = page.getByRole('button', { name: /open menu/i });

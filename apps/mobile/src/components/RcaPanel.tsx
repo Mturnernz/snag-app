@@ -4,24 +4,14 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, StyleSheet,
 import { SnagStatus, ROLE_LABELS } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import {
-  getSnagRca, assignRca, saveRcaWhy, submitRca, acceptRca, rejectRca, reassignRca, cancelRca,
+  getSnagRca, assignRca, submitRca, acceptRca, rejectRca, reassignRca, cancelRca,
   waiveRca, unwaiveRca, SnagRca, SiteAssignee,
 } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
 import Button from './Button';
 import Icon from './Icon';
+import WhyChain, { WHY_INDICES } from './WhyChain';
 import { StepStatus } from './StepCard';
-
-const WHY_INDICES = [1, 2, 3, 4, 5];
-
-interface WhyDraft {
-  why: string;
-  answer: string;
-}
-
-function emptyDrafts(): Record<number, WhyDraft> {
-  return Object.fromEntries(WHY_INDICES.map((i) => [i, { why: '', answer: '' }]));
-}
 
 interface Props {
   issueId: string;
@@ -29,6 +19,10 @@ interface Props {
    *  (an RCA is currently in flight) — the caller only renders this panel
    *  for a resolved or rca_pending serious snag. */
   status: SnagStatus;
+  /** The problem statement why #1 is asked of — the snag's own description.
+   *  The 5 Whys starts from what happened, not from the cause already on
+   *  record, so this is deliberately the description and not root_cause_text. */
+  problem: string;
   /** Supervisor/admin of this site — can assign, and accept/reject a
    *  submitted RCA. */
   canEdit: boolean;
@@ -51,19 +45,18 @@ interface Props {
 }
 
 export default function RcaPanel({
-  issueId, status, canEdit, currentUserId, assignees, rcaWaivedAt, rcaWaivedReason, onChanged, onStatusChange,
+  issueId, status, problem, canEdit, currentUserId, assignees, rcaWaivedAt, rcaWaivedReason,
+  onChanged, onStatusChange,
 }: Props) {
   const { showToast } = useToast();
 
   const [rca, setRca] = useState<SnagRca | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [whyDrafts, setWhyDrafts] = useState<Record<number, WhyDraft>>(emptyDrafts());
 
   const [showAssignPicker, setShowAssignPicker] = useState(false);
   const [assigneeId, setAssigneeId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
 
-  const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
@@ -89,11 +82,6 @@ export default function RcaPanel({
   const fetchRca = useCallback(async () => {
     const data = await getSnagRca(issueId);
     setRca(data);
-    const drafts = emptyDrafts();
-    for (const w of data?.whys ?? []) {
-      drafts[w.whyIndex] = { why: w.whyText, answer: w.answerText };
-    }
-    setWhyDrafts(drafts);
     setLoaded(true);
 
     if (status === 'resolved') {
@@ -145,37 +133,17 @@ export default function RcaPanel({
     }
   }
 
-  async function handleSaveDraft() {
-    if (!rca) return;
-    setSaving(true);
-    const calls = WHY_INDICES
-      .filter((i) => whyDrafts[i].why.trim() && whyDrafts[i].answer.trim())
-      .map((i) => saveRcaWhy(rca.id, i, whyDrafts[i].why.trim(), whyDrafts[i].answer.trim()));
-    const results = await Promise.all(calls);
-    setSaving(false);
-    const error = results.find((r) => r.error)?.error;
-    if (!error) {
-      showToast('Draft saved');
-      fetchRca();
-    } else {
-      showToast(error.message ?? 'Could not save draft');
-    }
-  }
-
-  const allWhysFilled = WHY_INDICES.every((i) => whyDrafts[i].why.trim() && whyDrafts[i].answer.trim());
+  // Read from what's actually saved, not from local drafts: WhyChain persists
+  // each step as it's answered, so the server is the only state that matters
+  // and submit no longer has to re-save five rows first.
+  const allWhysFilled = WHY_INDICES.every((i) => {
+    const w = rca?.whys.find((x) => x.whyIndex === i);
+    return Boolean(w?.whyText.trim() && w?.answerText.trim());
+  });
 
   async function handleSubmit() {
     if (!rca || !allWhysFilled) return;
     setSubmitting(true);
-    const saveResults = await Promise.all(
-      WHY_INDICES.map((i) => saveRcaWhy(rca.id, i, whyDrafts[i].why.trim(), whyDrafts[i].answer.trim()))
-    );
-    const saveError = saveResults.find((r) => r.error)?.error;
-    if (saveError) {
-      setSubmitting(false);
-      showToast(saveError.message ?? 'Could not save your answers');
-      return;
-    }
     const { error } = await submitRca(rca.id);
     setSubmitting(false);
     if (!error) {
@@ -326,12 +294,13 @@ export default function RcaPanel({
               Completed by {nameOf(rca.assignedTo)}
               {rca.acceptedAt ? ` · accepted ${new Date(rca.acceptedAt).toLocaleDateString()}` : ''}
             </Text>
-            {rca.whys.map((w) => (
-              <View key={w.whyIndex} style={styles.whyReadRow}>
-                <Text style={styles.whyReadQuestion}>{w.whyIndex}. {w.whyText}</Text>
-                <Text style={styles.whyReadAnswer}>{w.answerText}</Text>
-              </View>
-            ))}
+            <WhyChain
+              rcaId={rca.id}
+              whys={rca.whys}
+              problem={problem}
+              canEdit={false}
+              onSaved={fetchRca}
+            />
           </View>
         )}
 
@@ -504,12 +473,13 @@ export default function RcaPanel({
                 ? `Submitted by ${nameOf(rca.assignedTo)} — review the 5 Whys below.`
                 : 'Submitted — waiting for review.'}
             </Text>
-            {rca.whys.map((w) => (
-              <View key={w.whyIndex} style={styles.whyReadRow}>
-                <Text style={styles.whyReadQuestion}>{w.whyIndex}. {w.whyText}</Text>
-                <Text style={styles.whyReadAnswer}>{w.answerText}</Text>
-              </View>
-            ))}
+            <WhyChain
+              rcaId={rca.id}
+              whys={rca.whys}
+              problem={problem}
+              canEdit={false}
+              onSaved={fetchRca}
+            />
             {canEdit && (
               <View style={styles.rowButtons}>
                 <Button
@@ -530,38 +500,23 @@ export default function RcaPanel({
                 <Text style={styles.rejectionText}>{rca.rejectionNote}</Text>
               </View>
             )}
-            <Text style={styles.hint}>Answer all five whys, then submit for review.</Text>
-            {WHY_INDICES.map((i) => (
-              <View key={i} style={styles.whyEditBlock}>
-                <Text style={styles.whyLabel}>Why {i}</Text>
-                <TextInput
-                  style={styles.whyInput}
-                  placeholder="What's the question?"
-                  placeholderTextColor={Colors.textMuted}
-                  value={whyDrafts[i].why}
-                  onChangeText={(t) => setWhyDrafts((prev) => ({ ...prev, [i]: { ...prev[i], why: t } }))}
-                />
-                <TextInput
-                  style={[styles.whyInput, styles.answerInput]}
-                  placeholder="Answer"
-                  placeholderTextColor={Colors.textMuted}
-                  value={whyDrafts[i].answer}
-                  onChangeText={(t) => setWhyDrafts((prev) => ({ ...prev, [i]: { ...prev[i], answer: t } }))}
-                  multiline
-                  textAlignVertical="top"
-                />
-              </View>
-            ))}
-            <View style={styles.rowButtons}>
-              <Button label="Save Draft" variant="outline" onPress={handleSaveDraft} loading={saving} style={styles.flex1} />
-              <Button
-                label="Submit"
-                onPress={handleSubmit}
-                loading={submitting}
-                disabled={!allWhysFilled}
-                style={styles.flex1}
-              />
-            </View>
+            <Text style={styles.hint}>
+              Work down the chain — each why is asked of the answer above it.
+            </Text>
+            <WhyChain
+              rcaId={rca.id}
+              whys={rca.whys}
+              problem={problem}
+              canEdit
+              onSaved={fetchRca}
+            />
+            <Button
+              label="Submit for review"
+              onPress={handleSubmit}
+              loading={submitting}
+              disabled={!allWhysFilled}
+              fullWidth
+            />
           </>
         ) : (
           <Text style={styles.hint}>Waiting on {nameOf(rca.assignedTo)} to complete this.</Text>
@@ -666,29 +621,7 @@ const styles = StyleSheet.create({
   },
   cancelledText: { flex: 1, fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
 
-  whyReadRow: {
-    backgroundColor: Colors.background,
-    borderRadius: Radius.button,
-    padding: Spacing.sm,
-    gap: 2,
-  },
-  whyReadQuestion: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
-  whyReadAnswer: { fontSize: Typography.sm, color: Colors.textSecondary },
 
-  whyEditBlock: { gap: Spacing.xs },
-  whyLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
-  whyInput: {
-    minHeight: 44,
-    backgroundColor: Colors.background,
-    borderRadius: Radius.input,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    fontSize: Typography.base,
-    color: Colors.textPrimary,
-  },
-  answerInput: { minHeight: 64 },
 
   rejectionBanner: {
     flexDirection: 'row',

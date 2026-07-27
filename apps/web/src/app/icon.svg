@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="SNAG">
+  <!--
+    Derived from the existing SNAG wordmark rather than inventing a logo:
+    the initial, set in the same weight the wordmark uses, on the brand blue
+    (#2563EB — Colors.primary, shared by both apps). Four letters are
+    illegible at 16px, so the mark carries one.
+
+    App Router picks this up automatically as the favicon. Before it existed
+    there was no public/ directory and no icon convention file at all, so the
+    browser's implicit /favicon.ico request 404'd on every page load.
+  -->
+  <rect width="32" height="32" rx="7" fill="#2563EB"/>
+  <text
+    x="16" y="16"
+    fill="#FFFFFF"
+    font-family="'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+    font-size="21"
+    font-weight="700"
+    letter-spacing="-0.5"
+    text-anchor="middle"
+    dominant-baseline="central"
+  >S</text>
+</svg>

@@ -23,25 +23,31 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
   SnagStatus, SnagKind, SnagLane, SnagSeverity, Comment, Profile, RootStackParamList, VoteValue,
+  SnagStepKey, SNAG_STEP_KEYS,
 } from '../types';
-import { Colors, Radius, Spacing, Typography, IconSize } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   supabase, upsertVote, deleteVote, getUserVote, getProfile, getOrgMembers,
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
   getSiteAssignees, SiteAssignee, unmergeSnag,
   getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation, escalateSnag,
+  getSnagRca, SnagRca, RcaStatus, getSnagDebriefs, SnagDebrief,
+  seriousResolveGate, ResolveGateCondition,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import CategoryBadge from '../components/CategoryBadge';
 import ManageIssuePanel from '../components/ManageIssuePanel';
-import InvestigationPanel from '../components/InvestigationPanel';
+import ChecklistPanel from '../components/ChecklistPanel';
+import WitnessesPanel from '../components/WitnessesPanel';
+import EvidencePanel from '../components/EvidencePanel';
+import RootCausePanel from '../components/RootCausePanel';
 import NotifiableEventPanel from '../components/NotifiableEventPanel';
 import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
 import DebriefPanel from '../components/DebriefPanel';
 import StepCard, { StepStatus } from '../components/StepCard';
-import ProgressStrip from '../components/ProgressStrip';
+import NextStepCard, { NextStep } from '../components/NextStepCard';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -92,20 +98,135 @@ interface MergedChild {
   status: SnagStatus;
 }
 
-// Mirrors the serious-lane resolve gate in update_snag_status: the first
-// unmet condition (in server order) is the reason Resolve is blocked.
+// Shared with apps/web and with the deep-link route param — see SnagStepKey.
+type StepKey = SnagStepKey;
+
+/** A resolve-gate condition, in the same order update_snag_status checks them. */
+interface GateCondition {
+  unmet: boolean;
+  /** Imperative — what to do, not what's missing. */
+  title: string;
+  detail: string;
+  cta: string;
+  stepKey: StepKey;
+  /** The terser phrasing ManageIssuePanel shows under its Resolve button. */
+  blockReason: string;
+}
+
+/**
+ * How each shared gate condition is presented here: the imperative title and
+ * detail the Next-step card needs, and which card its CTA opens. The condition
+ * itself — whether it's unmet, and what order it's checked in — comes from
+ * seriousResolveGate, shared with apps/web so the two can't drift.
+ */
+const GATE_COPY: Record<ResolveGateCondition['key'], Omit<GateCondition, 'unmet' | 'blockReason'>> = {
+  notifiable: {
+    title: 'Decide if this is notifiable',
+    detail: "Does it meet WorkSafe's threshold? A notifiable event has to be reported as soon as possible, and the site preserved.",
+    cta: 'Make the call',
+    stepKey: 'notifiable',
+  },
+  checklist: {
+    title: 'Finish the first-response checklist',
+    detail: 'Make safe, preserve the scene, capture evidence, identify witnesses, find the cause.',
+    cta: 'Open the checklist',
+    stepKey: 'checklist',
+  },
+  witnesses: {
+    title: 'Add a witness statement',
+    detail: 'Record what someone who was there saw, in their words.',
+    cta: 'Add a witness',
+    stepKey: 'witnesses',
+  },
+  evidence: {
+    title: 'Capture evidence',
+    detail: 'Photos of the scene, the equipment, and anything that explains how this happened.',
+    cta: 'Add evidence',
+    stepKey: 'evidence',
+  },
+  rootCause: {
+    title: 'Record the root cause',
+    detail: 'What actually caused this — not what went wrong, but why it could.',
+    cta: 'Record root cause',
+    stepKey: 'rootCause',
+  },
+  correctiveActions: {
+    title: 'Close the corrective actions',
+    detail: 'Each one needs completing and verifying before this can close.',
+    cta: 'Open corrective actions',
+    stepKey: 'correctiveActions',
+  },
+};
+
+// Two states sit outside the shared gate. An open RCA is refused by
+// update_snag_status above its resolved block rather than inside it, so it
+// isn't one of the gate's conditions; and "not loaded yet" isn't a state the
+// server has an opinion about at all.
+function computeGate(
+  status: SnagStatus | undefined,
+  inv: InvestigationState | null,
+  notifiableDecided: boolean,
+  rcaStatus?: RcaStatus,
+  rcaWithName?: string | null,
+): GateCondition[] {
+  if (status === 'rca_pending') {
+    // Submitted and waiting on you, versus out with someone else, ask
+    // different things of the reader — and only one of them is an action they
+    // can take right now. Saying "submitted" for an assigned analysis sent a
+    // supervisor looking for a review that didn't exist yet.
+    const submitted = rcaStatus === 'submitted';
+    return [{
+      unmet: true,
+      title: submitted ? 'Review the 5 Whys' : 'Waiting on the 5 Whys analysis',
+      detail: submitted
+        ? 'The analysis has been submitted and is waiting on you to accept it or send it back.'
+        : rcaWithName
+        ? `It's with ${rcaWithName}. This can't close until the analysis is submitted and accepted.`
+        : "This can't close until the analysis is submitted and accepted.",
+      cta: 'Open the analysis',
+      stepKey: 'rca',
+      blockReason: submitted
+        ? 'The analysis is waiting on your review'
+        : 'An analysis is in progress — accept or reject it first',
+    }];
+  }
+  if (!inv) {
+    return [{
+      unmet: true,
+      title: 'Loading investigation…',
+      detail: 'Fetching what has been recorded so far.',
+      cta: 'Open investigation',
+      stepKey: 'checklist',
+      blockReason: 'Loading investigation…',
+    }];
+  }
+
+  const done = inv.completedSteps.length;
+  return seriousResolveGate(inv, notifiableDecided).map((c) => {
+    const copy = GATE_COPY[c.key];
+    return {
+      ...copy,
+      unmet: c.unmet,
+      blockReason: c.reason,
+      // Two conditions read better with the count the card already knows.
+      detail:
+        c.key === 'checklist' ? `${done} of 5 steps done — ${copy.detail.toLowerCase()}`
+        : c.key === 'correctiveActions' ? `${inv.openCorrectiveActions} still open — each needs completing and verifying.`
+        : copy.detail,
+    };
+  });
+}
+
+/** The first unmet gate condition — the reason Resolve is blocked, or null. */
 function computeResolveBlockReason(
   status: SnagStatus | undefined,
   inv: InvestigationState | null,
+  notifiableDecided: boolean,
+  rcaStatus?: RcaStatus,
+  rcaWithName?: string | null,
 ): string | null {
-  if (status === 'rca_pending') return 'RCA in progress — accept or reject it first';
-  if (!inv) return 'Loading investigation…';
-  if (inv.completedSteps.length < 5) return `Finish the checklist (${inv.completedSteps.length}/5)`;
-  if (inv.witnesses.length === 0) return 'Add a witness statement';
-  if (inv.evidence.length === 0) return 'Add evidence';
-  if (!inv.rootCause || !inv.rootCause.trim()) return 'Record a root cause';
-  if (inv.openCorrectiveActions > 0) return 'Close corrective actions';
-  return null;
+  return computeGate(status, inv, notifiableDecided, rcaStatus, rcaWithName)
+    .find((c) => c.unmet)?.blockReason ?? null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -133,6 +254,11 @@ export default function IssueDetailScreen() {
   const [childToRemove, setChildToRemove] = useState<MergedChild | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  /** Manage is a disclosure on the serious lane — see the render for why. */
+  const [manageOpen, setManageOpen] = useState(false);
+  /** The comment bar is a one-line prompt until tapped. */
+  const [composerOpen, setComposerOpen] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingIssue, setLoadingIssue] = useState(true);
   const [commentText, setCommentText] = useState('');
@@ -229,25 +355,81 @@ export default function IssueDetailScreen() {
 
   useEffect(() => { fetchInvestigation(); }, [fetchInvestigation]);
 
+  // Seeds the RCA and debrief card summaries. Serious lane only, and run in
+  // parallel with the investigation fetch — two small reads on a screen that
+  // already makes several.
+  const fetchRcaAndDebriefs = useCallback(async () => {
+    if (!isSerious || !isOrgMember) { setRcaState(null); setDebriefs(null); return; }
+    const [rca, briefs] = await Promise.all([
+      getSnagRca(issueId),
+      getSnagDebriefs(issueId),
+    ]);
+    setRcaState(rca);
+    setDebriefs(briefs);
+  }, [isSerious, isOrgMember, issueId]);
+
+  useEffect(() => { fetchRcaAndDebriefs(); }, [fetchRcaAndDebriefs]);
+
   // ── Guided serious-incident steps ─────────────────────────────────────────
-  // "Progress strip first, then this user's next step expanded, everything
-  // else collapsed" — MVP-SPEC's own UX north star, applied here for the
-  // first time. Steps toggle independently (not a strict accordion); the
-  // seeding effect below only sets the *initial* expanded step once per
-  // snag, so it never fights a manual toggle afterward.
-  type StepKey = 'notifiable' | 'investigation' | 'correctiveActions' | 'rca' | 'debrief';
+  // NextStepCard names the one thing to do now; below it the collapsed
+  // StepCard headers act as the progress list, each carrying its own summary.
+  // (That replaced a horizontal ProgressStrip, which could only fit ~2.5 of
+  // five phases at phone width and clipped the rest mid-word.)
+  //
+  // Steps toggle independently rather than as a strict accordion; the seeding
+  // effect below only sets the *initial* expanded step once per snag, so it
+  // never fights a manual toggle afterward.
   const [stepExpanded, setStepExpanded] = useState<Record<StepKey, boolean>>({
-    notifiable: false, investigation: false, correctiveActions: false, rca: false, debrief: false,
+    notifiable: false, checklist: false, witnesses: false, evidence: false,
+    rootCause: false, correctiveActions: false, rca: false, debrief: false,
   });
   const toggleStep = useCallback((key: string) => {
     setStepExpanded((prev) => ({ ...prev, [key]: !prev[key as StepKey] }));
   }, []);
-  const seededStepsFor = useRef<string | null>(null);
+  /** Every investigation card changes the same three things: the gate state,
+   *  the snag row (status can flip), and the activity log. */
+  const onInvestigationChanged = useCallback(() => {
+    fetchInvestigation(); fetchIssue(); fetchActivity();
+  }, [fetchInvestigation, fetchIssue, fetchActivity]);
+
+  /** Open a step outright rather than toggle it — what NextStepCard needs, so
+   *  its CTA can't close the very thing it just pointed you at. */
+  const openStep = useCallback((key: StepKey) => {
+    setStepExpanded((prev) => ({ ...prev, [key]: true }));
+  }, []);
+
+  // A link can point at one section of the snag rather than at the snag. The
+  // RCA is the case that forced it: an assignee's notification is about the
+  // analysis, not about the incident it hangs off, and landing them on a
+  // screen where that card is collapsed like every other one makes them hunt
+  // for the thing they were just told to do.
+  //
+  // Applied once per arrival, not on every render — after that the section is
+  // the reader's to open and close.
+  const deepLinkStep = route.params.step;
+  const appliedStepRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Validated, because on web this comes straight off a URL anyone can
+    // type. An unknown key would otherwise sit in stepExpanded forever.
+    if (!deepLinkStep || !SNAG_STEP_KEYS.includes(deepLinkStep)) return;
+    if (appliedStepRef.current === deepLinkStep) return;
+    appliedStepRef.current = deepLinkStep;
+    openStep(deepLinkStep);
+  }, [deepLinkStep, openStep]);
 
   // RcaPanel/DebriefPanel/CorrectiveActionsPanel self-fetch, so they report
   // their own coarse status up for the StepCard header — accurate for every
   // org member, not just editors (who are the only ones the parent's own
   // `investigation` state covers).
+  // RCA and debrief state, read by the parent rather than only by the panels.
+  // StepCard doesn't mount its children while collapsed, so a panel that
+  // fetches its own data can't report a summary until it has been opened at
+  // least once — which left those two cards blank in the very state the
+  // progress list exists to describe. The panels still self-report once open
+  // (fresher, and the only source for a non-editor); this just seeds it.
+  const [rcaState, setRcaState] = useState<SnagRca | null>(null);
+  const [debriefs, setDebriefs] = useState<SnagDebrief[] | null>(null);
+
   const [correctiveActionsStatus, setCorrectiveActionsStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'pending', summary: '' });
   const [rcaStatus, setRcaStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'pending', summary: '' });
   const [debriefStatus, setDebriefStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'optional', summary: '' });
@@ -263,34 +445,109 @@ export default function IssueDetailScreen() {
     ? 'Not notifiable'
     : 'Needs a decision';
 
-  const investigationComplete = Boolean(
-    investigation && investigation.completedSteps.length >= 5 && investigation.witnesses.length > 0 &&
-    investigation.evidence.length > 0 && investigation.rootCause?.trim()
-  );
-  const investigationStatus: StepStatus = !investigation ? 'pending' : investigationComplete ? 'done' : 'in_progress';
-  const investigationSummary = !investigation
-    ? 'Not started'
-    : investigationComplete
-    ? 'Complete'
-    : `Checklist ${investigation.completedSteps.length}/5`;
+  // One status/summary per investigation card. Each collapsed card has to say
+  // where it stands on its own — that's what makes the stack readable without
+  // opening anything, and it's why the horizontal strip wasn't needed.
+  const checklistDone = investigation?.completedSteps.length ?? 0;
+  const checklistStatus: StepStatus =
+    checklistDone >= 5 ? 'done' : checklistDone > 0 ? 'in_progress' : 'pending';
+  const checklistSummary = `${checklistDone} of 5 done`;
 
-  // Seed the initial expanded step once per snag — editors only, since
-  // that's who Notifiable/Investigation are even shown to, and who the
-  // resolve-gate ordering is really guiding. Waits for `investigation` to
-  // resolve (it's null only until the first fetch completes).
-  useEffect(() => {
-    if (!issue || !canManageInvestigation || !investigation) return;
-    if (seededStepsFor.current === issue.id) return;
-    seededStepsFor.current = issue.id;
+  const witnessCount = investigation?.witnesses.length ?? 0;
+  const witnessStatus: StepStatus = witnessCount > 0 ? 'done' : 'pending';
+  const witnessSummary = witnessCount === 0
+    ? 'None recorded'
+    : witnessCount === 1
+    ? `1 statement · ${investigation?.witnesses[0]?.witness_name ?? ''}`.trim()
+    : `${witnessCount} statements`;
 
-    let current: StepKey | null = null;
-    if (!notifiableDecided) current = 'notifiable';
-    else if (!investigationComplete) current = 'investigation';
-    else if (investigation.openCorrectiveActions > 0) current = 'correctiveActions';
-    else if (issue.status === 'rca_pending') current = 'rca';
+  const evidenceCount = investigation?.evidence.length ?? 0;
+  const evidenceStatus: StepStatus = evidenceCount > 0 ? 'done' : 'pending';
+  const evidenceSummary = evidenceCount === 0
+    ? 'None captured'
+    : `${evidenceCount} item${evidenceCount === 1 ? '' : 's'}`;
 
-    if (current) setStepExpanded((prev) => ({ ...prev, [current as StepKey]: true }));
-  }, [issue, investigation, canManageInvestigation, notifiableDecided, investigationComplete]);
+  const hasRootCause = Boolean(investigation?.rootCause?.trim());
+  const rootCauseStatus: StepStatus = hasRootCause ? 'done' : 'pending';
+  const rootCauseSummary = hasRootCause ? 'Recorded' : 'Not recorded';
+
+  // What NextStepCard points at. The notifiable decision comes first even
+  // though it isn't a resolve-gate condition — it's the most time-critical
+  // thing on a serious snag (it can carry a duty to preserve the site), and
+  // the seeding effect below already treats it as step one. `remaining`
+  // counts only real gate conditions, so the locked Resolve row stays
+  // truthful about what's actually blocking closure.
+  const rcaWithName = rcaState ? orgMembers.find((m) => m.id === rcaState.assignedTo)?.name ?? null : null;
+  const gate = computeGate(issue?.status, investigation, notifiableDecided, rcaState?.status, rcaWithName);
+  const gateRemaining = gate.filter((c) => c.unmet).length;
+  const firstUnmet = gate.find((c) => c.unmet);
+  const nextStep: NextStep | null = firstUnmet
+    ? {
+        title: firstUnmet.title,
+        detail: firstUnmet.detail,
+        cta: firstUnmet.cta,
+        remaining: gateRemaining,
+      }
+    : null;
+  const nextStepKey: StepKey = firstUnmet?.stepKey ?? 'checklist';
+
+  // StepCard only mounts its children while expanded, so a panel that reports
+  // its own summary upward can't do so until it has been opened once — every
+  // collapsed card sat blank, which is precisely what the progress list needs
+  // them not to do. Corrective actions can be answered from investigation
+  // state the parent already holds, so prefer that and fall back to the
+  // panel's own report (the only source a non-editor has, since they get no
+  // investigation state).
+  const correctiveActionsSummary =
+    correctiveActionsStatus.summary ||
+    (investigation
+      ? investigation.openCorrectiveActions > 0
+        ? `${investigation.openCorrectiveActions} open`
+        : 'None open'
+      : '');
+
+  // Same pattern for the RCA and debrief cards: the panel's own report wins
+  // once it has mounted, and these keep the collapsed card honest until then.
+  // Kept deliberately in step with what RcaPanel/DebriefPanel report, so the
+  // summary doesn't visibly change wording the first time a card is opened.
+  const rcaSeedSummary = (() => {
+    if (issue?.rca_waived_at) return 'Waived';
+    if (!rcaState) return issue?.status === 'resolved' ? 'Not assigned' : '';
+    // Who owes it is the useful part while it's out for analysis — "In
+    // progress" tells a supervisor nothing they can act on. orgMembers is
+    // already loaded for the @mention composer, so this costs no query.
+    const withName = orgMembers.find((m) => m.id === rcaState.assignedTo)?.name;
+    switch (rcaState.status) {
+      case 'submitted': return 'Submitted — awaiting review';
+      case 'rejected': return 'Sent back — needs another look';
+      case 'accepted': return 'Accepted';
+      case 'cancelled': return 'Cancelled';
+      default: return withName ? `With ${withName}` : 'In progress';
+    }
+  })();
+  const rcaSummary = rcaStatus.summary || rcaSeedSummary;
+
+  const debriefSeedSummary = !debriefs
+    ? ''
+    : debriefs.length === 0
+    ? 'None yet — optional'
+    : debriefs.some((d) => d.status === 'in_progress')
+    ? 'In progress'
+    : `${debriefs.length} completed`;
+  const debriefSummary = debriefStatus.summary || debriefSeedSummary;
+
+  const debriefSeedStatus: StepStatus = !debriefs || debriefs.length === 0
+    ? 'optional'
+    : debriefs.some((d) => d.status === 'in_progress')
+    ? 'in_progress'
+    : 'done';
+
+  // No step is auto-expanded any more. NextStepCard names the current step and
+  // its CTA opens it, so seeding one open as well showed the same question
+  // twice — once as "Decide if this is notifiable / Make the call", and again
+  // in an already-open card directly below it. The card and the seeding served
+  // the same audience (canManageInvestigation) and the same purpose, so the
+  // card wins and everything below it starts collapsed.
 
   function handleEscalate() {
     Alert.alert(
@@ -515,6 +772,7 @@ export default function IssueDetailScreen() {
       setCommentText('');
       setMentionQuery(null);
       setMentionAt(-1);
+      setComposerOpen(false);
       fetchComments();
     }
     setSendingComment(false);
@@ -606,11 +864,11 @@ export default function IssueDetailScreen() {
               </View>
             )}
           </View>
-        ) : (
-          <View style={styles.heroPlaceholder}>
-            <Icon name="camera-outline" size={IconSize.xxl} color={Colors.textMuted} />
-          </View>
-        )}
+        ) : null}
+        {/* No placeholder when there are no photos. It used to render a 200px
+            camera icon — 58% of the first viewport on a snag that has no
+            photo, pushing every actionable thing below the fold to advertise
+            an absence the user already knows about. */}
 
         <View style={[styles.content, isSerious && styles.contentSerious]}>
           {/* Reference + site */}
@@ -618,7 +876,20 @@ export default function IssueDetailScreen() {
             <Text style={styles.reference}>{issue.reference}</Text>
             {issue.site_name && <Text style={styles.siteText} numberOfLines={1}>{issue.site_name}</Text>}
           </View>
-          <Text style={styles.title}>{issue.description || 'No description'}</Text>
+
+          {/* The description is a sentence of body copy, so it's set as body
+              copy. It used to be a 28px/36 headline, which on a typical report
+              ran five lines and pushed the workflow off-screen on its own.
+              Clamped to three lines with a tap to expand. */}
+          <TouchableOpacity
+            onPress={() => setDescriptionExpanded((v) => !v)}
+            activeOpacity={0.7}
+            disabled={!issue.description}
+          >
+            <Text style={styles.title} numberOfLines={descriptionExpanded ? undefined : 3}>
+              {issue.description || 'No description'}
+            </Text>
+          </TouchableOpacity>
 
           {/* Badges — status before controls: current state shown up front */}
           <View style={styles.badgeRow}>
@@ -665,7 +936,43 @@ export default function IssueDetailScreen() {
           {/* Manage — inline for supervisors/admins, boxed between the
               assignee line and the vote bar (replaces the old header
               button that pushed a separate ManageIssue screen). */}
-          {canEdit && (
+          {/* Behind a disclosure on the serious lane: Type/Severity/Owner are
+              settings, and settings shouldn't sit between the reader and the
+              investigation. Niggles keep it inline — there's no workflow below
+              it there for it to get in the way of. */}
+          {canEdit && isSerious && (
+            <>
+              <TouchableOpacity
+                style={styles.manageToggle}
+                onPress={() => setManageOpen((v) => !v)}
+                activeOpacity={0.7}
+              >
+                <Icon name="options-outline" size="sm" color={Colors.textSecondary} />
+                <Text style={styles.manageToggleText}>Manage</Text>
+                <Icon
+                  name={manageOpen ? 'chevron-up' : 'chevron-down'}
+                  size="sm"
+                  color={Colors.textMuted}
+                />
+              </TouchableOpacity>
+              {manageOpen && (
+                <ManageIssuePanel
+                  issueId={issue.id}
+                  status={issue.status}
+                  lane={issue.lane}
+                  kind={issue.kind}
+                  severity={issue.severity}
+                  owner={issue.owner ?? null}
+                  assignees={siteAssignees}
+                  resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
+                  isPublicSubmission={issue.is_public_submission ?? false}
+                  onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
+                />
+              )}
+            </>
+          )}
+
+          {canEdit && !isSerious && (
             <ManageIssuePanel
               issueId={issue.id}
               status={issue.status}
@@ -674,7 +981,7 @@ export default function IssueDetailScreen() {
               severity={issue.severity}
               owner={issue.owner ?? null}
               assignees={siteAssignees}
-              resolveBlockReason={computeResolveBlockReason(issue.status, investigation)}
+              resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
               isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
             />
@@ -717,20 +1024,14 @@ export default function IssueDetailScreen() {
             </Card>
           )}
 
-          {/* Progress strip first, then this user's next step expanded,
-              everything else collapsed — MVP-SPEC's own UX north star. */}
-          {isSerious && isOrgMember && (
-            <ProgressStrip
-              items={[
-                ...(canManageInvestigation ? [{ key: 'notifiable', label: 'Notifiable', status: notifiableStatus }] : []),
-                ...(canManageInvestigation ? [{ key: 'investigation', label: 'Investigation', status: investigationStatus }] : []),
-                { key: 'correctiveActions', label: 'Corrective Actions', status: correctiveActionsStatus.status },
-                ...((issue.status === 'resolved' || issue.status === 'rca_pending')
-                  ? [{ key: 'rca', label: 'Root Cause', status: rcaStatus.status }]
-                  : []),
-                { key: 'debrief', label: 'Debrief', status: debriefStatus.status },
-              ]}
-              onPress={toggleStep}
+          {/* One answer to "what do I do now", above the fold. The collapsed
+              StepCards below are the progress list — each carries its own
+              summary, so nothing needs a separate strip to advertise it. */}
+          {canManageInvestigation && (
+            <NextStepCard
+              step={nextStep}
+              onGo={() => openStep(nextStepKey)}
+              onGoToResolve={() => setManageOpen(true)}
             />
           )}
 
@@ -757,22 +1058,70 @@ export default function IssueDetailScreen() {
             </StepCard>
           )}
 
-          {/* Serious-lane investigation — clear the resolve gate in-app */}
+          {/* Serious-lane investigation — four resolve-gate conditions, one
+              card each. They used to share a single "Investigation" drawer
+              that opened onto a checklist plus three simultaneous add-forms;
+              split, each card carries its own summary while collapsed and
+              only one task is ever on screen. */}
           {canManageInvestigation && investigation && (
-            <StepCard
-              title="Investigation"
-              status={investigationStatus}
-              summary={investigationSummary}
-              expanded={stepExpanded.investigation}
-              onToggle={() => toggleStep('investigation')}
-            >
-              <InvestigationPanel
-                issueId={issue.id}
-                orgId={issue.org_id}
-                state={investigation}
-                onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}
-              />
-            </StepCard>
+            <>
+              <StepCard
+                title="Make safe & preserve scene"
+                status={checklistStatus}
+                summary={checklistSummary}
+                expanded={stepExpanded.checklist}
+                onToggle={() => toggleStep('checklist')}
+              >
+                <ChecklistPanel
+                  issueId={issue.id}
+                  state={investigation}
+                  onChanged={onInvestigationChanged}
+                />
+              </StepCard>
+
+              <StepCard
+                title="Witnesses"
+                status={witnessStatus}
+                summary={witnessSummary}
+                expanded={stepExpanded.witnesses}
+                onToggle={() => toggleStep('witnesses')}
+              >
+                <WitnessesPanel
+                  issueId={issue.id}
+                  state={investigation}
+                  onChanged={onInvestigationChanged}
+                />
+              </StepCard>
+
+              <StepCard
+                title="Evidence"
+                status={evidenceStatus}
+                summary={evidenceSummary}
+                expanded={stepExpanded.evidence}
+                onToggle={() => toggleStep('evidence')}
+              >
+                <EvidencePanel
+                  issueId={issue.id}
+                  orgId={issue.org_id}
+                  state={investigation}
+                  onChanged={onInvestigationChanged}
+                />
+              </StepCard>
+
+              <StepCard
+                title="Root cause"
+                status={rootCauseStatus}
+                summary={rootCauseSummary}
+                expanded={stepExpanded.rootCause}
+                onToggle={() => toggleStep('rootCause')}
+              >
+                <RootCausePanel
+                  issueId={issue.id}
+                  state={investigation}
+                  onChanged={onInvestigationChanged}
+                />
+              </StepCard>
+            </>
           )}
 
           {/* Corrective actions — visible to any org member on the snag's own
@@ -783,7 +1132,7 @@ export default function IssueDetailScreen() {
             <StepCard
               title="Corrective Actions"
               status={correctiveActionsStatus.status}
-              summary={correctiveActionsStatus.summary}
+              summary={correctiveActionsSummary}
               expanded={stepExpanded.correctiveActions}
               onToggle={() => toggleStep('correctiveActions')}
             >
@@ -804,21 +1153,22 @@ export default function IssueDetailScreen() {
               a supervisor/admin accepts or sends it back. */}
           {isSerious && isOrgMember && (issue.status === 'resolved' || issue.status === 'rca_pending') && (
             <StepCard
-              title="Root Cause Analysis"
+              title="5 Whys analysis"
               status={rcaStatus.status}
-              summary={rcaStatus.summary}
+              summary={rcaSummary}
               expanded={stepExpanded.rca}
               onToggle={() => toggleStep('rca')}
             >
               <RcaPanel
                 issueId={issue.id}
                 status={issue.status}
+                problem={issue.description ?? 'the incident'}
                 canEdit={canEdit}
                 currentUserId={currentUserId}
                 assignees={siteAssignees}
                 rcaWaivedAt={issue.rca_waived_at}
                 rcaWaivedReason={issue.rca_waived_reason}
-                onChanged={() => { fetchIssue(); fetchActivity(); }}
+                onChanged={() => { fetchIssue(); fetchActivity(); fetchRcaAndDebriefs(); }}
                 onStatusChange={handleRcaStatusChange}
               />
             </StepCard>
@@ -830,8 +1180,8 @@ export default function IssueDetailScreen() {
           {isSerious && isOrgMember && (
             <StepCard
               title="Debrief"
-              status={debriefStatus.status}
-              summary={debriefStatus.summary}
+              status={debriefStatus.summary ? debriefStatus.status : debriefSeedStatus}
+              summary={debriefSummary}
               expanded={stepExpanded.debrief}
               onToggle={() => toggleStep('debrief')}
             >
@@ -839,7 +1189,7 @@ export default function IssueDetailScreen() {
                 issueId={issue.id}
                 canEdit={canEdit}
                 orgMembers={orgMembers}
-                onChanged={() => { fetchActivity(); }}
+                onChanged={() => { fetchActivity(); fetchRcaAndDebriefs(); }}
                 onStatusChange={handleDebriefStatusChange}
               />
             </StepCard>
@@ -966,8 +1316,23 @@ export default function IssueDetailScreen() {
         </ScrollView>
       )}
 
-      {/* Sticky comment input — org members only */}
-      {isOrgMember && (
+      {/* Sticky comment input — org members only.
+          Collapsed to a single row until tapped. This bar is fixed chrome, so
+          its height is subtracted from the viewport on every screen of scroll,
+          not just once; halving it gives back more usable space than trimming
+          the same number of pixels anywhere in the document would. */}
+      {isOrgMember && !composerOpen && (
+        <TouchableOpacity
+          style={[styles.commentPrompt, { paddingBottom: insets.bottom + 8 }]}
+          onPress={() => setComposerOpen(true)}
+          activeOpacity={0.7}
+        >
+          <Icon name="chatbubble-outline" size="sm" color={Colors.textMuted} />
+          <Text style={styles.commentPromptText}>Add a comment</Text>
+        </TouchableOpacity>
+      )}
+
+      {isOrgMember && composerOpen && (
       <View style={[styles.commentInputBar, { paddingBottom: insets.bottom + 8 }]}>
         <TextInput
           style={styles.commentInput}
@@ -977,6 +1342,10 @@ export default function IssueDetailScreen() {
           onChangeText={handleCommentChange}
           multiline
           maxLength={500}
+          autoFocus
+          // Collapse again only when nothing is part-written, so a stray tap
+          // outside can't discard a comment someone was mid-way through.
+          onBlur={() => { if (!commentText.trim()) setComposerOpen(false); }}
         />
         <TouchableOpacity
           style={[styles.sendButton, (!commentText.trim() || sendingComment) && styles.sendButtonDisabled]}
@@ -1011,7 +1380,6 @@ const styles = StyleSheet.create({
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
   scroll: { flex: 1 },
   heroPhoto: { width: '100%', height: 280, backgroundColor: Colors.background },
-  heroPlaceholder: { width: '100%', height: 200, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, alignItems: 'center', justifyContent: 'center' },
   photoDots: {
     position: 'absolute',
     bottom: Spacing.sm,
@@ -1038,7 +1406,23 @@ const styles = StyleSheet.create({
   referenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
   reference: { fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.textMuted, letterSpacing: 0.5 },
   siteText: { flexShrink: 1, fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary, textAlign: 'right' },
-  title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary, lineHeight: 36 },
+  // Body copy, not a headline — see the render comment. lg/24 keeps it the most
+  // prominent text on the screen without spending five lines to say so.
+  title: { fontSize: Typography.lg, fontWeight: Typography.semibold, color: Colors.textPrimary, lineHeight: 24 },
+  manageToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  manageToggleText: {
+    flex: 1,
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textSecondary,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
   badgeRow: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
   meta: { fontSize: Typography.sm, color: Colors.textMuted },
   assigneeText: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.medium },
@@ -1101,6 +1485,17 @@ const styles = StyleSheet.create({
   activityActor: { fontWeight: Typography.semibold, color: Colors.textSecondary },
 
   // Comment bar
+  commentPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  commentPromptText: { flex: 1, fontSize: Typography.sm, color: Colors.textMuted },
   commentInputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.sm, paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border },
   commentInput: { flex: 1, minHeight: 48, maxHeight: 100, backgroundColor: Colors.background, borderRadius: Radius.input, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, fontSize: Typography.base, color: Colors.textPrimary },
   sendButton: { width: 48, height: 48, borderRadius: Radius.button, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },

@@ -11,6 +11,7 @@ import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiv
 import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
+import { linking } from './src/navigation/linking';
 import AuthScreen from './src/screens/AuthScreen';
 import OrgSetupScreen from './src/screens/OrgSetupScreen';
 import AdminSetupScreen from './src/screens/AdminSetupScreen';
@@ -347,7 +348,7 @@ export default function App() {
   // Fully set up — show the app
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
+      <NavigationContainer linking={linking}>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
         <ToastProvider>
           {/* Public reporters may have no profile row yet — worker-level UI,

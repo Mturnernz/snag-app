@@ -43,7 +43,11 @@ export async function signUpWithEmail(email: string, password: string) {
 }
 
 export async function signOut() {
-  return supabase.auth.signOut();
+  // Local scope, not the supabase-js default of 'global'. Global revokes every
+  // refresh token the user has, so signing out on this phone also signed them
+  // out of the supervisor portal in their browser. Signing out of a device
+  // means this device.
+  return supabase.auth.signOut({ scope: 'local' });
 }
 
 export async function getCurrentUser() {
@@ -691,6 +695,11 @@ export type InvestigationState = queries.InvestigationState;
 // Reads the five investigation tables for a serious snag — all org-scoped by RLS.
 // Drives the live progress display and the serious-lane resolve gate.
 export const getInvestigationState = (snagId: string) => queries.getInvestigationState(supabase, snagId);
+
+// The gate itself is pure and shared with apps/web, so the two clients can't
+// disagree about what's outstanding or what order to do it in.
+export type ResolveGateCondition = queries.ResolveGateCondition;
+export const seriousResolveGate = queries.seriousResolveGate;
 
 // ─── Corrective actions (CAPA) ────────────────────────────────────────────────
 // create_corrective_action/complete_corrective_action are supervisor/admin-or-

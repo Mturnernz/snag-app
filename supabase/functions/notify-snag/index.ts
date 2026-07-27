@@ -120,8 +120,17 @@ Deno.serve(async (req: Request) => {
   const { data: snag } = await supabase.from("snags").select("*").eq("id", snag_id).maybeSingle();
   if (!snag) return new Response("ok");
 
+  // Both clients route `/snags/:id` and both accept `?step=`, so one link
+  // works whichever SNAG_APP_URL points at: the Expo web build resolves it
+  // through its linking config (and `snag://` deep-links the installed app),
+  // and apps/web's portal opens the matching section.
+  //
+  // `rcaLink` used to be `/snags/<id>/rca` — a path neither client has ever
+  // had a route for. It didn't 404 loudly, either: the web build is
+  // `output: "single"`, so it served the app shell and dropped the reader on
+  // the Report tab with no sign anything had gone wrong.
   const link = `${APP_URL}/snags/${snag_id}`;
-  const rcaLink = `${APP_URL}/snags/${snag_id}/rca`;
+  const rcaLink = `${APP_URL}/snags/${snag_id}?step=rca`;
 
   if (event === "serious_created") {
     const { data: members } = await supabase

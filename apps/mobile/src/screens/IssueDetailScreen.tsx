@@ -30,6 +30,7 @@ import {
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
   getSiteAssignees, SiteAssignee, unmergeSnag,
   getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation, escalateSnag,
+  getSnagRca, SnagRca, getSnagDebriefs, SnagDebrief,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -128,9 +129,9 @@ function computeGate(
   if (status === 'rca_pending') {
     return [{
       unmet: true,
-      title: 'Review the root cause analysis',
-      detail: 'An RCA has been submitted and is waiting on you to accept or send it back.',
-      cta: 'Open root cause analysis',
+      title: 'Review the 5 Whys',
+      detail: 'The analysis has been submitted and is waiting on you to accept it or send it back.',
+      cta: 'Open the analysis',
       stepKey: 'rca',
       blockReason: 'RCA in progress — accept or reject it first',
     }];
@@ -325,6 +326,21 @@ export default function IssueDetailScreen() {
 
   useEffect(() => { fetchInvestigation(); }, [fetchInvestigation]);
 
+  // Seeds the RCA and debrief card summaries. Serious lane only, and run in
+  // parallel with the investigation fetch — two small reads on a screen that
+  // already makes several.
+  const fetchRcaAndDebriefs = useCallback(async () => {
+    if (!isSerious || !isOrgMember) { setRcaState(null); setDebriefs(null); return; }
+    const [rca, briefs] = await Promise.all([
+      getSnagRca(issueId),
+      getSnagDebriefs(issueId),
+    ]);
+    setRcaState(rca);
+    setDebriefs(briefs);
+  }, [isSerious, isOrgMember, issueId]);
+
+  useEffect(() => { fetchRcaAndDebriefs(); }, [fetchRcaAndDebriefs]);
+
   // ── Guided serious-incident steps ─────────────────────────────────────────
   // NextStepCard names the one thing to do now; below it the collapsed
   // StepCard headers act as the progress list, each carrying its own summary.
@@ -357,6 +373,15 @@ export default function IssueDetailScreen() {
   // their own coarse status up for the StepCard header — accurate for every
   // org member, not just editors (who are the only ones the parent's own
   // `investigation` state covers).
+  // RCA and debrief state, read by the parent rather than only by the panels.
+  // StepCard doesn't mount its children while collapsed, so a panel that
+  // fetches its own data can't report a summary until it has been opened at
+  // least once — which left those two cards blank in the very state the
+  // progress list exists to describe. The panels still self-report once open
+  // (fresher, and the only source for a non-editor); this just seeds it.
+  const [rcaState, setRcaState] = useState<SnagRca | null>(null);
+  const [debriefs, setDebriefs] = useState<SnagDebrief[] | null>(null);
+
   const [correctiveActionsStatus, setCorrectiveActionsStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'pending', summary: '' });
   const [rcaStatus, setRcaStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'pending', summary: '' });
   const [debriefStatus, setDebriefStatus] = useState<{ status: StepStatus; summary: string }>({ status: 'optional', summary: '' });
@@ -437,6 +462,42 @@ export default function IssueDetailScreen() {
         ? `${investigation.openCorrectiveActions} open`
         : 'None open'
       : '');
+
+  // Same pattern for the RCA and debrief cards: the panel's own report wins
+  // once it has mounted, and these keep the collapsed card honest until then.
+  // Kept deliberately in step with what RcaPanel/DebriefPanel report, so the
+  // summary doesn't visibly change wording the first time a card is opened.
+  const rcaSeedSummary = (() => {
+    if (issue?.rca_waived_at) return 'Waived';
+    if (!rcaState) return issue?.status === 'resolved' ? 'Not assigned' : '';
+    // Who owes it is the useful part while it's out for analysis — "In
+    // progress" tells a supervisor nothing they can act on. orgMembers is
+    // already loaded for the @mention composer, so this costs no query.
+    const withName = orgMembers.find((m) => m.id === rcaState.assignedTo)?.name;
+    switch (rcaState.status) {
+      case 'submitted': return 'Submitted — awaiting review';
+      case 'rejected': return 'Sent back — needs another look';
+      case 'accepted': return 'Accepted';
+      case 'cancelled': return 'Cancelled';
+      default: return withName ? `With ${withName}` : 'In progress';
+    }
+  })();
+  const rcaSummary = rcaStatus.summary || rcaSeedSummary;
+
+  const debriefSeedSummary = !debriefs
+    ? ''
+    : debriefs.length === 0
+    ? 'None yet — optional'
+    : debriefs.some((d) => d.status === 'in_progress')
+    ? 'In progress'
+    : `${debriefs.length} completed`;
+  const debriefSummary = debriefStatus.summary || debriefSeedSummary;
+
+  const debriefSeedStatus: StepStatus = !debriefs || debriefs.length === 0
+    ? 'optional'
+    : debriefs.some((d) => d.status === 'in_progress')
+    ? 'in_progress'
+    : 'done';
 
   // No step is auto-expanded any more. NextStepCard names the current step and
   // its CTA opens it, so seeding one open as well showed the same question
@@ -1049,9 +1110,9 @@ export default function IssueDetailScreen() {
               a supervisor/admin accepts or sends it back. */}
           {isSerious && isOrgMember && (issue.status === 'resolved' || issue.status === 'rca_pending') && (
             <StepCard
-              title="Root Cause Analysis"
+              title="5 Whys analysis"
               status={rcaStatus.status}
-              summary={rcaStatus.summary}
+              summary={rcaSummary}
               expanded={stepExpanded.rca}
               onToggle={() => toggleStep('rca')}
             >
@@ -1063,7 +1124,7 @@ export default function IssueDetailScreen() {
                 assignees={siteAssignees}
                 rcaWaivedAt={issue.rca_waived_at}
                 rcaWaivedReason={issue.rca_waived_reason}
-                onChanged={() => { fetchIssue(); fetchActivity(); }}
+                onChanged={() => { fetchIssue(); fetchActivity(); fetchRcaAndDebriefs(); }}
                 onStatusChange={handleRcaStatusChange}
               />
             </StepCard>
@@ -1075,8 +1136,8 @@ export default function IssueDetailScreen() {
           {isSerious && isOrgMember && (
             <StepCard
               title="Debrief"
-              status={debriefStatus.status}
-              summary={debriefStatus.summary}
+              status={debriefStatus.summary ? debriefStatus.status : debriefSeedStatus}
+              summary={debriefSummary}
               expanded={stepExpanded.debrief}
               onToggle={() => toggleStep('debrief')}
             >
@@ -1084,7 +1145,7 @@ export default function IssueDetailScreen() {
                 issueId={issue.id}
                 canEdit={canEdit}
                 orgMembers={orgMembers}
-                onChanged={() => { fetchActivity(); }}
+                onChanged={() => { fetchActivity(); fetchRcaAndDebriefs(); }}
                 onStatusChange={handleDebriefStatusChange}
               />
             </StepCard>

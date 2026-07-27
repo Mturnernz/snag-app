@@ -23,6 +23,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
   SnagStatus, SnagKind, SnagLane, SnagSeverity, Comment, Profile, RootStackParamList, VoteValue,
+  SnagStepKey, SNAG_STEP_KEYS,
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
@@ -97,15 +98,8 @@ interface MergedChild {
   status: SnagStatus;
 }
 
-type StepKey =
-  | 'notifiable'
-  | 'checklist'
-  | 'witnesses'
-  | 'evidence'
-  | 'rootCause'
-  | 'correctiveActions'
-  | 'rca'
-  | 'debrief';
+// Shared with apps/web and with the deep-link route param — see SnagStepKey.
+type StepKey = SnagStepKey;
 
 /** A resolve-gate condition, in the same order update_snag_status checks them. */
 interface GateCondition {
@@ -403,6 +397,25 @@ export default function IssueDetailScreen() {
   const openStep = useCallback((key: StepKey) => {
     setStepExpanded((prev) => ({ ...prev, [key]: true }));
   }, []);
+
+  // A link can point at one section of the snag rather than at the snag. The
+  // RCA is the case that forced it: an assignee's notification is about the
+  // analysis, not about the incident it hangs off, and landing them on a
+  // screen where that card is collapsed like every other one makes them hunt
+  // for the thing they were just told to do.
+  //
+  // Applied once per arrival, not on every render — after that the section is
+  // the reader's to open and close.
+  const deepLinkStep = route.params.step;
+  const appliedStepRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Validated, because on web this comes straight off a URL anyone can
+    // type. An unknown key would otherwise sit in stepExpanded forever.
+    if (!deepLinkStep || !SNAG_STEP_KEYS.includes(deepLinkStep)) return;
+    if (appliedStepRef.current === deepLinkStep) return;
+    appliedStepRef.current = deepLinkStep;
+    openStep(deepLinkStep);
+  }, [deepLinkStep, openStep]);
 
   // RcaPanel/DebriefPanel/CorrectiveActionsPanel self-fetch, so they report
   // their own coarse status up for the StepCard header — accurate for every

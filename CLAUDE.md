@@ -208,3 +208,26 @@ unless it's a one-off simple `select`.
 - All styles via `StyleSheet.create()` at the bottom of each file
 - TypeScript strict mode — no `any` except for Supabase row shapes
 - Import order: React → React Native → Expo → third-party → local (types, lib, components)
+
+## Deep links
+
+Both clients route **`/snags/:id`**, and both accept **`?step=`** naming one
+section of a serious snag (`notifiable`, `checklist`, `witnesses`, `evidence`,
+`rootCause`, `correctiveActions`, `rca`, `debrief` — `SnagStepKey` in
+`packages/shared-types`). One link therefore works whichever client
+`SNAG_APP_URL` points at, which is what `supabase/functions/notify-snag` relies
+on when it mails someone about an RCA.
+
+- Mobile: `apps/mobile/src/navigation/linking.ts`, wired into
+  `NavigationContainer`. Native uses the `snag://` scheme from `app.json`.
+  `IssueDetail` takes an optional `step` param and opens that card on arrival.
+- Web: `(portal)/snags/[id]/page.tsx` reads `?step=` and passes `defaultOpen`
+  to the matching `StepSection`.
+
+Two things to keep in mind when changing this. The web build is
+`output: "single"`, so a path with no route still serves the app shell and
+returns 200 — a broken link fails silently rather than 404ing (which is how
+`/snags/:id/rca` survived in the notification emails for as long as it did).
+And `/` is deliberately unmapped in the mobile linking config: an unmatched URL
+leaves the tab navigator on its `initialRouteName`, which is what carries the
+post-onboarding tab.

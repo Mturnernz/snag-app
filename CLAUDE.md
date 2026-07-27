@@ -108,12 +108,15 @@ All tokens are CSS custom properties in `src/app/globals.css`. Light values mirr
 
 ## Database
 
-The app's live backend is the **Snagv1** Supabase project (`wpkdpukpllxuyqqlxkxf`), not the
-`schema.sql` scaffold below. `supabase/schema.sql` and `supabase/migration_*.sql` are leftovers
-from an earlier, now-inactive prototype project and do not reflect what's deployed — don't run them
-against Snagv1. The real schema history lives in `supabase/migrations/` (recovered from Snagv1's
-`schema_migrations`, timestamped, "SNAPSHOT — do NOT re-apply") and in `MVP-SPEC.md` /
+The app's live backend is the **Snagv1** Supabase project (`wpkdpukpllxuyqqlxkxf`). The real
+schema history lives in `supabase/migrations/` (recovered from Snagv1's `schema_migrations`,
+timestamped, "SNAPSHOT — do NOT re-apply") and in `MVP-SPEC.md` /
 `Snag-Architecture-Build-Plan.md` at the repo root.
+
+`supabase/schema.sql` and `supabase/migration_*.sql` used to sit alongside them: leftovers from an
+earlier, now-inactive prototype whose only property was being catastrophic if anyone ran them
+against Snagv1. They were deleted rather than re-labelled — a warning comment doesn't help someone
+who pipes the file into psql, and git still has them if they're ever wanted.
 
 Key tables: `organisations`, `profiles`, `sites`, `snags`, `comments`, `votes`, plus the
 investigation/RCA/debrief tables (`checklist_completions`, `witness_statements`,

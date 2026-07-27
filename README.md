@@ -1,8 +1,13 @@
 # SNAG
 
-A workplace issue-reporting platform: an Expo/React Native mobile app (`apps/mobile`) and — in
-progress — a Next.js marketing site and supervisor portal (`apps/web`), both built on the same
-Supabase project. This is an npm-workspaces monorepo.
+A workplace issue-reporting platform, in two parts on one Supabase project:
+
+- **`apps/mobile`** — an Expo / React Native app. Where snags are reported and worked on.
+- **`apps/web`** — a Next.js marketing site and supervisor portal. Where snags are managed
+  and reviewed. It does not report; that's the app's job.
+
+This is an npm-workspaces monorepo — run `npm install` once at the root, never inside a
+workspace.
 
 ## Quick Start (mobile app)
 
@@ -18,9 +23,33 @@ cp apps/mobile/.env.example apps/mobile/.env
 npm run mobile
 ```
 
-The database is a live Supabase project, not something you set up locally — see `CLAUDE.md`'s
-"Database" section before touching `supabase/schema.sql` or the `migration_*.sql` files at the
-repo root (both are stale prototype leftovers, not the real schema).
+## The portal
 
-See `CLAUDE.md` for the full developer guide, including how to connect Claude Code and Supabase MCP.
-See `SNAG_WEB_APP_PLAN.md` for the `apps/web` initiation plan.
+```bash
+cp apps/web/.env.example apps/web/.env.local   # same Supabase project as mobile
+npm run web                                     # http://localhost:3000
+```
+
+## Tests
+
+```bash
+npm run typecheck
+npm test          # units, then web e2e, then mobile e2e
+```
+
+See `TESTING.md` for the tiers, what each needs, and the write-path suite's safety fences.
+
+## Database
+
+The database is a **live Supabase project** (Snagv1), not something you stand up locally. The
+real schema history is `supabase/migrations/` — snapshots, not to be re-applied. Read
+`CLAUDE.md`'s "Database" section before changing anything.
+
+## Where to read next
+
+| Document | What it covers |
+|---|---|
+| `CLAUDE.md` | Developer guide: structure, design systems, deep links, common tasks |
+| `TESTING.md` | Test tiers, running them, the QA org, network caveats |
+| `PRODUCTION_READINESS.md` | What's production-ready, what isn't, and the decisions still open |
+| `SNAG_WEB_APP_PLAN.md` | How `apps/web` came to exist |

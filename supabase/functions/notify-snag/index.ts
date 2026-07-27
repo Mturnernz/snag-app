@@ -24,12 +24,13 @@ const FROM_ADDRESS = Deno.env.get("SNAG_FROM_ADDRESS") ?? "Snag <onboarding@rese
 // The app's own URL moved with that decision: /go is what knows where to send
 // someone, so NEXT_PUBLIC_SNAG_APP_URL lives in apps/web now.
 //
-// PROVISIONAL DEFAULT. snag-app-website.netlify.app is a branch deploy, not a
-// production domain — there isn't one yet (snag.app is parked and for sale).
-// It is here because every link in this file is otherwise dead, and because
-// SNAG_PORTAL_URL is a function secret: point it at the real domain in
-// Supabase → Edge Functions → Secrets and this needs no redeploy.
-const PORTAL_URL = Deno.env.get("SNAG_PORTAL_URL") ?? "https://snag-app-website.netlify.app";
+// www.snaghq.co.nz is the chosen production domain. Until its DNS points at
+// the Netlify site, /go/snag/<id> will not answer there — so this default is
+// aspirational, and deploying against it before the domain is live sends every
+// notification to a dead host. SNAG_PORTAL_URL is a function secret, so it can
+// be pointed anywhere without a redeploy; check the route first:
+//   curl -o /dev/null -w '%{http_code}\n' "$SNAG_PORTAL_URL/go/snag/<any-uuid>"
+const PORTAL_URL = Deno.env.get("SNAG_PORTAL_URL") ?? "https://www.snaghq.co.nz";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 

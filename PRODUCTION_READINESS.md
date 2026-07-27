@@ -187,51 +187,56 @@ redeploy the function.
 
 ## 7. Decisions I need from you
 
-### D1 — The portal's production domain ⚠️ blocks §6
+### D1 — Production domain — ✅ decided: `www.snaghq.co.nz`
 
-You own `www.snaghq.co.nz`. DNS resolves to `27.124.125.171`, which is not Netlify;
-port 80 returns 403 and HTTPS doesn't complete a handshake, so it isn't serving the
-portal today. `snag-app-website.netlify.app` is a branch deploy. `snag.app` is parked
-and for sale.
+The in-code default for `SNAG_PORTAL_URL` now points there. **It is aspirational
+until you do two things**, and deploying before them sends every notification to a
+dead host:
 
-| Option | Trade-off |
-|---|---|
-| **A. Point `www.snaghq.co.nz` at the Netlify site** *(recommended)* | A domain you own, in every notification email. Costs a DNS change. |
-| B. Promote the Netlify site to production, use its `.netlify.app` name | Works today, zero cost. Looks provisional in mail to customers. |
-| C. Buy `snag.app` | Best brand fit; it's parked with a broker, so price is unknown and it blocks everything else. |
+1. Netlify → the `apps/web` site → Domain management → add `www.snaghq.co.nz`, then
+   repoint DNS. It currently resolves to `27.124.125.171`, which is not Netlify.
+2. Confirm the handoff answers there, then set the secret and redeploy:
+   ```
+   curl -o /dev/null -w '%{http_code}\n' https://www.snaghq.co.nz/go/snag/<any-uuid>
+   ```
+   200 (the chooser) or 307 (a signed-in supervisor) means go. **404 means the
+   portal build hasn't caught up — deploy that first.**
 
-*(One caveat: this sandbox filters egress, so I can't completely rule out that my
-reading of `snaghq.co.nz` is a local artefact. If it works from your machine, trust that.)*
+### D2 — Leaked-password protection — ✅ decided: on
 
-### D2 — Leaked-password protection
+Supabase → Authentication → Policies → enable "Leaked password protection". There is
+no API for this in the MCP tooling, so it is a dashboard action. Checks new passwords
+against HaveIBeenPwned at sign-up and change.
 
-Currently **off**. Supabase can check new passwords against HaveIBeenPwned.
+### D3 — Notification routing — ✅ decided: the `/go` handoff
 
-| Option | Trade-off |
-|---|---|
-| **A. Turn it on** *(recommended)* | Auth → Policies, one toggle. Blocks known-breached passwords at sign-up and change. For an app holding injury records under a statutory duty, this is close to free. |
-| B. Leave off | One less thing between a worker and an account. Weak justification given the data. |
+Built, tested, and waiting on D1. See §4.5 and §6.
 
-### D3 — Who receives notification traffic
+### D4 — The document library — ✅ resolved, and I was wrong about it
 
-Answered in principle by §4.5, but confirm the shape:
+**I reported this as a stub. It isn't.** `(portal)/documents` is a complete org-wide
+document register: upload, listing with uploader and date, signed-URL download and
+delete, backed by the `org-documents` bucket and the `org_documents` table, with RLS
+and two storage policies in place. I took "stub" from `CLAUDE.md` instead of reading
+the code.
 
-| Option | Trade-off |
-|---|---|
-| **A. The `/go` handoff** *(built, recommended)* | One URL, right for every recipient, survives role changes and forwarded mail. Needs D1. |
-| B. Per-event routing | No new route, but can't be correct for `serious_created`'s mixed audience without splitting sends. |
-| C. Everything to the app | Simplest. Supervisors get a phone-shaped layout on a desktop for management work. |
+You chose "build a document library" on that false premise. Nothing needed building.
+What it needed was checking — so I drove the full round trip against the live project:
+upload, listed, downloaded the actual bytes, deleted, and confirmed the org was left
+as I found it.
 
-### D4 — The `documents/` stub
+One scare worth recording: the download returned **403 from the browser**, which looked
+like a broken signed URL. It wasn't — this sandbox's proxy stops Chromium negotiating
+TLS to Supabase at all. `curl` fetched the same URL with a 200 and the right content.
+The spec now fetches with Node's `fetch` for exactly that reason.
 
-`(portal)/documents` is a deliberate stub pending a decision recorded in
-`SNAG_WEB_APP_PLAN.md` §10. It is currently in the sidebar and goes nowhere useful.
+The register had **zero rows** against a live project. Nothing was broken; nobody had
+looked. `apps/web/e2e/documents.spec.ts` now covers the round trip so it can't rot
+again quietly.
 
-| Option | Trade-off |
-|---|---|
-| **A. Hide it until built** *(recommended)* | A nav item that leads nowhere reads as broken to a customer. One-line change. |
-| B. Build snag-scoped evidence browsing | Reuses `snag-evidence`, RLS already correct. Moderate. |
-| C. Build a general document library | Bigger: policies, SWMS, inductions. Its own upload/versioning story. |
+**Still yours to decide:** whether to *also* build snag-scoped evidence browsing —
+seeing evidence across snags rather than one at a time. That is a genuinely separate
+feature and remains unbuilt.
 
 ### D5 — Native deep links need a device
 

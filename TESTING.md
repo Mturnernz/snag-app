@@ -14,6 +14,7 @@
 | 2 | `apps/mobile/e2e/report.spec.ts` — worker signs in, report screen shows both lanes and the right org, tab bar, snags list | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/deep-link.spec.ts` — `/snags/:id` opens that snag from a cold load, `?step=` expands one section and leaves the rest collapsed, an unknown step is ignored, and navigating writes the URL back | `E2E_EMAIL`/`E2E_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/incident.spec.ts` — the serious-incident screen: next step above the fold, no empty photo block, Resolve stated as blocked, every collapsed card reports its state, the evidence sheet is usable, WorkSafe criteria stay behind their disclosure, composer starts collapsed | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
+| 3 | `apps/web/e2e/documents.spec.ts` — the org document register end to end: upload, listing, signed-URL download of the actual bytes, then delete. Cleans up after itself (unlike snags, documents can be removed) | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes, self-cleaning** |
 | 3 | `apps/mobile/e2e/write-path.spec.ts` — reports a serious incident, then satisfies each resolve-gate condition in turn (notifiable decision → checklist → witness → evidence → root cause) and resolves it, asserting the gate blocks until the last one is met | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes** |
 
 Tier 0 runs anywhere and takes seconds. Tier 1 needs only a served bundle. Tier 2

@@ -196,8 +196,11 @@ For a simulator: press `i` for iOS Simulator or `a` for Android emulator.
 ### Working on `apps/web`
 Read `SNAG_WEB_APP_PLAN.md` first — it covers folder structure, auth strategy, which RPCs/views
 to reuse vs. what's a genuine gap, storage, and deployment, and its §10 tracks open decisions.
-The scaffold (marketing site, login, portal with dashboard/snags/reports) is built; `documents/`
-is a deliberate stub pending decision D2 (snag-scoped evidence vs. a general document library).
+The scaffold (marketing site, login, portal with dashboard/snags/reports/documents) is built.
+`documents/` is a working org-wide document register — upload, list, signed-URL download, delete,
+backed by the `org-documents` bucket and the `org_documents` table. It was described here as a
+stub long after it was finished, which is how it reached production with zero rows in it; the
+round trip is now covered by `apps/web/e2e/documents.spec.ts`.
 New read-only query functions belong in `packages/supabase-queries` (each takes a `SupabaseClient`
 param so both apps can call it with their own client) rather than being written inline in a page
 unless it's a one-off simple `select`.

@@ -1125,6 +1125,7 @@ export default function IssueDetailScreen() {
               <RcaPanel
                 issueId={issue.id}
                 status={issue.status}
+                problem={issue.description ?? 'the incident'}
                 canEdit={canEdit}
                 currentUserId={currentUserId}
                 assignees={siteAssignees}

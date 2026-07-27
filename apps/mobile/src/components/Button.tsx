@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   Pressable,
   Text,
@@ -13,6 +13,9 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET, Shadow } from '.
 import Icon from './Icon';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+const DISABLED_OPACITY = 0.5;
+const PRESSED_OPACITY = 0.85;
 
 type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerOutline' | 'serious' | 'seriousOutline';
 
@@ -59,8 +62,18 @@ export default function Button({
 
   // CTA variants (primary/serious) get a spring scale down; every variant
   // keeps the old opacity dip so non-CTA buttons don't lose press feedback.
+  //
+  // The disabled dimming lives in this shared value rather than in a static
+  // style. Reanimated writes the animated style straight onto the view, so a
+  // later `styles.disabled` entry in the style array was silently overwritten
+  // by opacity: 1 — every disabled button in the app rendered at full strength
+  // with pointer events off, looking completely actionable and doing nothing.
   const scale = useSharedValue(1);
-  const opacity = useSharedValue(1);
+  const opacity = useSharedValue(isDisabled ? DISABLED_OPACITY : 1);
+
+  useEffect(() => {
+    opacity.value = withSpring(isDisabled ? DISABLED_OPACITY : 1, { damping: 16, stiffness: 300 });
+  }, [isDisabled, opacity]);
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ scale: scale.value }],
@@ -68,7 +81,7 @@ export default function Button({
 
   function handlePressIn() {
     if (isDisabled) return;
-    opacity.value = withSpring(0.85, { damping: 16, stiffness: 300 });
+    opacity.value = withSpring(PRESSED_OPACITY, { damping: 16, stiffness: 300 });
     if (isCta) scale.value = withSpring(0.96, { damping: 16, stiffness: 300 });
   }
 
@@ -98,7 +111,6 @@ export default function Button({
         cfg.border ? { borderWidth: 1, borderColor: cfg.border } : null,
         cfg.shadow && !isDisabled ? Shadow.sm : null,
         fullWidth ? styles.fullWidth : null,
-        isDisabled ? styles.disabled : null,
         style,
       ]}
     >
@@ -130,8 +142,5 @@ const styles = StyleSheet.create({
   label: {
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
-  },
-  disabled: {
-    opacity: 0.5,
   },
 });

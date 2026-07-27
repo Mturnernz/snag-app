@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 
 import { setNotifiableFlag, nominateNotifyingPcbu, getMemberships, Membership } from '../lib/supabase';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useToast } from '../hooks/useToast';
 import Button from './Button';
 import Icon from './Icon';
@@ -45,6 +45,7 @@ export default function NotifiableEventPanel({
   const { showToast } = useToast();
   const [busy, setBusy] = useState<Decision>(null);
   const [showUnsureNote, setShowUnsureNote] = useState(false);
+  const [showCriteria, setShowCriteria] = useState(false);
 
   // Other organisations the current user personally belongs to — a
   // realistic quick-pick when the same person works across the customer's
@@ -202,21 +203,44 @@ export default function NotifiableEventPanel({
         </View>
       ) : (
         <View style={styles.decisionBlock}>
-          <Text style={styles.intro}>
-            Does this meet WorkSafe's threshold for a notifiable event? A death, a notifiable
-            injury or illness, or a notifiable incident must be reported to WorkSafe as soon as
-            possible.
-          </Text>
-          {NOTIFIABLE_CRITERIA.map((c) => (
-            <View key={c} style={styles.criterionRow}>
-              <Icon name="ellipse" size="sm" color={Colors.textMuted} />
-              <Text style={styles.criterionText}>{c}</Text>
+          <Text style={styles.question}>Does this need reporting to WorkSafe?</Text>
+
+          {/* The seven criteria are reference material, not part of the
+              decision. Rendered inline they were ~450px of statute standing
+              between the supervisor and the three buttons that actually
+              answer the question — so they sit behind a disclosure, open
+              only when someone needs to check. */}
+          <TouchableOpacity
+            style={styles.criteriaToggle}
+            onPress={() => setShowCriteria((v) => !v)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.criteriaToggleText}>What counts as notifiable?</Text>
+            <Icon
+              name={showCriteria ? 'chevron-up' : 'chevron-down'}
+              size="sm"
+              color={Colors.primary}
+            />
+          </TouchableOpacity>
+
+          {showCriteria && (
+            <View style={styles.criteriaBox}>
+              <Text style={styles.intro}>
+                A death, a notifiable injury or illness, or a notifiable incident must be
+                reported as soon as possible. That includes:
+              </Text>
+              {NOTIFIABLE_CRITERIA.map((c) => (
+                <View key={c} style={styles.criterionRow}>
+                  <Icon name="ellipse" size="sm" color={Colors.textMuted} />
+                  <Text style={styles.criterionText}>{c}</Text>
+                </View>
+              ))}
+              <Text style={styles.disclaimer}>
+                General guidance only, not legal advice — if in doubt, treat it as notifiable and
+                confirm with WorkSafe or your own adviser.
+              </Text>
             </View>
-          ))}
-          <Text style={styles.disclaimer}>
-            General guidance only, not legal advice — if in doubt, treat it as notifiable and
-            confirm with WorkSafe or your own adviser.
-          </Text>
+          )}
 
           {canEdit ? (
             <>
@@ -259,10 +283,35 @@ export default function NotifiableEventPanel({
 }
 
 const styles = StyleSheet.create({
+  question: {
+    fontSize: Typography.lg,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+    lineHeight: 24,
+  },
   intro: {
     fontSize: Typography.sm,
     color: Colors.textSecondary,
     lineHeight: 20,
+  },
+
+  criteriaToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  criteriaToggleText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
+  },
+  criteriaBox: {
+    backgroundColor: Colors.background,
+    borderRadius: Radius.button,
+    padding: Spacing.sm,
+    gap: 2,
   },
 
   criterionRow: {

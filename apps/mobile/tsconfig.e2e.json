@@ -1,0 +1,24 @@
+{
+  // Standalone tsconfig for the Playwright specs and playwright.config.ts.
+  //
+  // The app's tsconfig.json extends "expo/tsconfig.base", which Playwright's
+  // own tsconfig loader cannot resolve (it does not do node-module resolution
+  // for "extends"). The specs are plain Node/DOM TypeScript and need none of
+  // Expo's React Native settings, so they get their own config, passed
+  // explicitly via `playwright test --tsconfig`.
+  //
+  // Type-checking of the app itself still runs against tsconfig.json.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["e2e/**/*.ts", "playwright.config.ts"]
+}

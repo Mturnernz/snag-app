@@ -4,20 +4,32 @@
 
 | Tier | What it covers | Credentials | Writes data? |
 |---|---|---|---|
+| 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens. Jest, no browser, no network | none | no |
 | 1 | `apps/web/e2e/public.spec.ts` — every public route, both themes, three viewports, no horizontal overflow, no failed subresources | none | no |
 | 1 | `apps/web/e2e/auth-gate.spec.ts` — portal routes redirect anonymously; export routes reject GET and refuse anonymous POST | none | no |
-| 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, sidebar navigation, sign-out revokes access, worker role is refused | `E2E_EMAIL`/`E2E_PASSWORD` | no |
+| 1 | `apps/mobile/e2e/auth.spec.ts` — auth screen renders, password masked, bad credentials rejected, both join paths reachable | none | no |
+| 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused | `E2E_EMAIL`/`E2E_PASSWORD` | no |
+| 2 | `apps/mobile/e2e/report.spec.ts` — worker signs in, report screen shows both lanes and the right org, tab bar, snags list | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD` | no |
 | 3 | not yet written — report → triage → investigate → resolve | test-org account | **yes** |
 
-Tier 1 runs anywhere. Tier 2 is read-only, so it is safe against an environment
-with real data. Tier 3 mutates and needs a disposable org — see below.
+Tier 0 runs anywhere and takes seconds. Tier 1 needs only a served bundle. Tier 2
+is read-only, so it is safe against an environment with real data. Tier 3 mutates
+and needs the disposable org described below.
 
 ## Running
 
 ```bash
-npm install                 # repo root — installs every workspace
-npm run typecheck           # apps/web + apps/mobile
-npm run test:e2e            # Tier 1 (+ Tier 2 if credentials are set)
+npm install            # repo root — installs every workspace
+npm run typecheck      # apps/web + apps/mobile
+npm test               # everything: Tier 0, then web e2e, then mobile e2e
+```
+
+Or individually:
+
+```bash
+npm run test:mobile      # Tier 0 — Jest units
+npm run test:e2e         # web Playwright (Tier 1 + 2)
+npm run test:e2e:mobile  # mobile Playwright (Tier 1 + 2)
 ```
 
 `playwright.config.ts` starts `next dev` itself and reuses an already-running

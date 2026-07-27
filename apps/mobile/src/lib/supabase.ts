@@ -43,7 +43,11 @@ export async function signUpWithEmail(email: string, password: string) {
 }
 
 export async function signOut() {
-  return supabase.auth.signOut();
+  // Local scope, not the supabase-js default of 'global'. Global revokes every
+  // refresh token the user has, so signing out on this phone also signed them
+  // out of the supervisor portal in their browser. Signing out of a device
+  // means this device.
+  return supabase.auth.signOut({ scope: 'local' });
 }
 
 export async function getCurrentUser() {

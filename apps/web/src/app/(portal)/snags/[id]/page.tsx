@@ -2,8 +2,8 @@ import { notFound } from 'next/navigation';
 import {
   getSnagRca, getSnagDebriefs, getInvestigationState, getCorrectiveActions,
   getSnagAuditLog, describeAuditAction, getSiteAssignees, getOrgMembers, getEvidencePhotoUrl,
-  resolveBlockReason,
-  type SiteAssignee,
+  seriousResolveGate,
+  type SiteAssignee, type ResolveGateKey, type SnagRca,
 } from '@snag/supabase-queries';
 import {
   STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, CHECKLIST_STEP_LABELS, CHECKLIST_STEPS,
@@ -14,7 +14,9 @@ import { createClient } from '@/lib/supabase/server';
 import { Card, EmptyState } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Badge, StatusBadge, KindBadge, SeverityBadge, NotifiableBadge } from '@/components/Badge';
-import Icon, { type IconName } from '@/components/Icon';
+import Icon from '@/components/Icon';
+import StepSection from '@/components/StepSection';
+import NextStep, { ReadyToResolve } from '@/components/NextStep';
 import {
   changeStatusAction, resolveNiggleAction, assignOwnerAction, recategoriseAction,
   addCommentAction, setNotifiableDecisionAction, unmergeAction,
@@ -23,7 +25,7 @@ import {
   completeChecklistStepAction, addWitnessStatementAction, addEvidenceAction, setRootCauseAction,
 } from './investigation-actions';
 import {
-  assignRcaAction, saveRcaWhysAction, submitRcaAction, acceptRcaAction, rejectRcaAction,
+  assignRcaAction, saveRcaWhyAction, submitRcaAction, acceptRcaAction, rejectRcaAction,
   reassignRcaAction, cancelRcaAction,
 } from './rca-actions';
 import {
@@ -37,15 +39,61 @@ import styles from './page.module.css';
 
 const KIND_OPTIONS: SnagKind[] = ['fixit', 'improvement', 'hazard', 'incident'];
 const SEVERITY_OPTIONS: SnagSeverity[] = ['minor', 'moderate', 'injury', 'critical'];
+const WHY_INDICES = [1, 2, 3, 4, 5];
+
+/**
+ * How each shared gate condition is presented, and which section its CTA
+ * opens. The conditions themselves — and the order they're checked in — come
+ * from seriousResolveGate, shared with apps/mobile so the two clients can't
+ * tell people to do things in different orders.
+ */
+const GATE_COPY: Record<ResolveGateKey, { title: string; detail: string; cta: string; section: string }> = {
+  notifiable: {
+    title: 'Decide if this is notifiable',
+    detail: "Does it meet WorkSafe's threshold? A notifiable event has to be reported as soon as possible, and the site preserved.",
+    cta: 'Make the call',
+    section: 'notifiable',
+  },
+  checklist: {
+    title: 'Finish the first-response checklist',
+    detail: 'Make safe, preserve the scene, capture evidence, identify witnesses, find the cause.',
+    cta: 'Open the checklist',
+    section: 'checklist',
+  },
+  witnesses: {
+    title: 'Add a witness statement',
+    detail: 'Record what someone who was there saw, in their words.',
+    cta: 'Add a witness',
+    section: 'witnesses',
+  },
+  evidence: {
+    title: 'Capture evidence',
+    detail: 'Photos of the scene, the equipment, and anything that explains how this happened.',
+    cta: 'Add evidence',
+    section: 'evidence',
+  },
+  rootCause: {
+    title: 'Record the root cause',
+    detail: 'What actually caused this — not what went wrong, but why it could.',
+    cta: 'Record root cause',
+    section: 'rootCause',
+  },
+  correctiveActions: {
+    title: 'Close the corrective actions',
+    detail: 'Each one needs completing and verifying before this can close.',
+    cta: 'Open corrective actions',
+    section: 'correctiveActions',
+  },
+};
 
 export default async function SnagDetailPage({
   params, searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; step?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error, step } = await searchParams;
   await requireSupervisorOrAdmin();
   const supabase = await createClient();
 
@@ -59,6 +107,7 @@ export default async function SnagDetailPage({
 
   const isSerious = snag.lane === 'serious';
   const isNiggle = !isSerious;
+  const isResolved = snag.status === 'resolved';
 
   const [comments, rca, debriefs, investigation, actions, auditLog, assignees, members] = await Promise.all([
     supabase.from('comments').select('id, body, created_at, author:profiles(id, name)').eq('snag_id', id).order('created_at', { ascending: true }),
@@ -79,15 +128,40 @@ export default async function SnagDetailPage({
   const activeDebrief = debriefs.find((d) => d.status === 'in_progress');
   const completedDebriefs = debriefs.filter((d) => d.status !== 'in_progress');
   const remainingChecklist = CHECKLIST_STEPS.filter((s) => !investigation?.completedSteps.includes(s));
+  const commentList = comments.data ?? [];
 
   // Decided is not the same as notifiable: `notifiable_marked_at` is stamped by
   // either answer, and only an answered snag can be resolved.
   const notifiableDecided = snag.is_notifiable === true || snag.notifiable_marked_at !== null;
-  const blockReason = investigation ? resolveBlockReason(investigation, notifiableDecided) : null;
+
+  const gate = investigation ? seriousResolveGate(investigation, notifiableDecided) : [];
+  const firstUnmet = gate.find((c) => c.unmet);
+  const remaining = gate.filter((c) => c.unmet).length;
+
+  // update_snag_status refuses `resolved` outright while an RCA is open —
+  // "This snag has an RCA in progress — accept or reject it first" — and that
+  // check sits above the resolved block, so it isn't one of the gate's
+  // conditions. Without it here the page offered Resolve on an rca_pending
+  // snag and the server threw.
+  const rcaOpen = snag.status === 'rca_pending';
+  const rcaBlock = rcaOpen ? rcaNextStep(rca, siteAssignees) : null;
+
+  // The Next-step card's CTA links back here with ?step=…, which is what opens
+  // the section it points at. Everything else starts closed: the whole point of
+  // the restructure is that the collapsed headers are the progress list.
+  // A failed action lands on ?error=… — open Manage so the message has context.
+  const openSection = step ?? (error ? 'manage' : undefined);
+  const isOpen = (name: string) => openSection === name;
+
+  const checklistDone = investigation?.completedSteps.length ?? 0;
+  const evidenceCount = investigation?.evidence.length ?? 0;
+  const witnessCount = investigation?.witnesses.length ?? 0;
+  const hasRootCause = Boolean(investigation?.rootCause?.trim());
+  const openActions = investigation?.openCorrectiveActions ?? 0;
 
   return (
-    <div style={{ maxWidth: 760 }}>
-      <div className={styles.header}>
+    <div className={styles.page}>
+      <header className={styles.header}>
         <p className={styles.site}>{snag.site_name}</p>
         <h1 className={styles.reference}>{snag.reference}</h1>
         <div className={styles.badgeRow}>
@@ -107,12 +181,406 @@ export default async function SnagDetailPage({
           {snag.child_count ? ` · ${snag.child_count} snag(s) merged into this one` : ''}
         </p>
         {error && <p className="error-text">{error}</p>}
-      </div>
+      </header>
 
-      <Section icon="SquareCheckBig" title="Actions">
+      {/* One answer to "what do I do now", above everything else. */}
+      {isSerious && !isResolved && investigation && (
+        rcaBlock ? (
+          <NextStep
+            title={rcaBlock.title}
+            detail={rcaBlock.detail}
+            cta="Open the analysis"
+            href={`/snags/${snag.id}?step=rca#rca`}
+            remaining={1}
+          />
+        ) : firstUnmet ? (
+          <NextStep
+            title={GATE_COPY[firstUnmet.key].title}
+            detail={
+              firstUnmet.key === 'checklist'
+                ? `${checklistDone} of 5 steps done — ${GATE_COPY.checklist.detail.toLowerCase()}`
+                : firstUnmet.key === 'correctiveActions'
+                ? `${openActions} still open — each needs completing and verifying.`
+                : GATE_COPY[firstUnmet.key].detail
+            }
+            cta={GATE_COPY[firstUnmet.key].cta}
+            href={`/snags/${snag.id}?step=${GATE_COPY[firstUnmet.key].section}#${GATE_COPY[firstUnmet.key].section}`}
+            remaining={remaining}
+          />
+        ) : (
+          <ReadyToResolve>
+            <StatusButton snagId={snag.id} status="resolved" label="Resolve this snag" variant="primary" />
+          </ReadyToResolve>
+        )
+      )}
+
+      {/* ── The serious lane's investigation: one section per gate condition,
+             in the order the server checks them. ── */}
+      {isSerious && investigation && (
+        <>
+          <StepSection
+            id="notifiable"
+            icon="ShieldAlert"
+            title="Notifiable Event"
+            state={notifiableDecided ? 'done' : 'pending'}
+            summary={snag.is_notifiable ? 'Flagged as notifiable' : snag.notifiable_marked_at ? 'Not notifiable' : 'Needs a decision'}
+            defaultOpen={isOpen('notifiable')}
+          >
+            {/* A question with two answers, not a one-way toggle. As a toggle
+                the only control on an undecided snag read "Mark notifiable",
+                so recording "no" — which update_snag_status requires before
+                this can be resolved — meant claiming a notifiable event and
+                retracting it, leaving a marked_notifiable entry in the audit
+                log for something that never happened. */}
+            <p className={styles.question}>Does this need reporting to WorkSafe?</p>
+            {notifiableDecided ? (
+              <>
+                <p className={styles.decision}>
+                  {snag.is_notifiable
+                    ? 'Flagged as notifiable — it has to be reported as soon as possible, and the site preserved.'
+                    : 'Reviewed and recorded as not notifiable.'}
+                </p>
+                <NotifiableButton
+                  snagId={snag.id}
+                  value={!snag.is_notifiable}
+                  label={snag.is_notifiable ? "This isn't notifiable after all" : 'Actually, this is notifiable'}
+                />
+              </>
+            ) : (
+              <>
+                <p className={styles.decision}>
+                  Undecided. This has to be answered either way before the snag can be resolved.
+                </p>
+                <div className={styles.actionRow}>
+                  <NotifiableButton snagId={snag.id} value label="Yes — notifiable" variant="danger" />
+                  <NotifiableButton snagId={snag.id} value={false} label="No" />
+                </div>
+              </>
+            )}
+          </StepSection>
+
+          <StepSection
+            id="checklist"
+            icon="ListChecks"
+            title="Make safe & preserve scene"
+            state={checklistDone === 5 ? 'done' : checklistDone > 0 ? 'in_progress' : 'pending'}
+            summary={`${checklistDone} of 5 done`}
+            defaultOpen={isOpen('checklist')}
+          >
+            <ul className={styles.checklist}>
+              {CHECKLIST_STEPS.map((s) => {
+                const done = investigation.completedSteps.includes(s);
+                return (
+                  <li key={s} className={styles.checklistItem} data-done={done}>
+                    <Icon name={done ? 'CircleCheckBig' : 'Circle'} size="sm" color={done ? 'var(--color-success)' : 'var(--color-border-strong)'} />
+                    {CHECKLIST_STEP_LABELS[s]}
+                  </li>
+                );
+              })}
+            </ul>
+
+            {remainingChecklist.length > 0 && (
+              <div className={styles.actionRow}>
+                {remainingChecklist.map((s) => (
+                  <form key={s} action={completeChecklistStepAction}>
+                    <input type="hidden" name="snagId" value={snag.id} />
+                    <input type="hidden" name="step" value={s} />
+                    <Button type="submit" variant="secondary" size="sm">Mark &quot;{CHECKLIST_STEP_LABELS[s]}&quot; done</Button>
+                  </form>
+                ))}
+              </div>
+            )}
+          </StepSection>
+
+          <StepSection
+            id="witnesses"
+            icon="Users"
+            title="Witnesses"
+            state={witnessCount > 0 ? 'done' : 'pending'}
+            summary={
+              witnessCount === 0 ? 'None recorded'
+              : witnessCount === 1 ? `1 statement · ${investigation.witnesses[0].witness_name}`
+              : `${witnessCount} statements`
+            }
+            defaultOpen={isOpen('witnesses')}
+          >
+            <div className={styles.itemList}>
+              {investigation.witnesses.map((w) => (
+                <div key={w.id} className={styles.record}>
+                  <p className={styles.recordName}>{w.witness_name}</p>
+                  <p className={styles.recordBody}>{w.statement_text}</p>
+                </div>
+              ))}
+            </div>
+            <Card as="form" action={addWitnessStatementAction} padding="sm">
+              <input type="hidden" name="snagId" value={snag.id} />
+              <div className="field">
+                <label htmlFor="witnessName">Who saw it?</label>
+                <input id="witnessName" name="witnessName" type="text" required placeholder="Their name" />
+              </div>
+              <div className="field">
+                <label htmlFor="statementText">What did they see?</label>
+                <input
+                  id="statementText"
+                  name="statementText"
+                  type="text"
+                  required
+                  placeholder="In their own words — not your summary of it"
+                />
+              </div>
+              <Button type="submit" variant="secondary" size="sm">Add witness statement</Button>
+            </Card>
+          </StepSection>
+
+          <StepSection
+            id="evidence"
+            icon="Camera"
+            title="Evidence"
+            state={evidenceCount > 0 ? 'done' : 'pending'}
+            summary={evidenceCount === 0 ? 'None captured' : `${evidenceCount} item${evidenceCount === 1 ? '' : 's'}`}
+            defaultOpen={isOpen('evidence')}
+          >
+            <div className={styles.evidenceGrid}>
+              {investigation.evidence.map((e, i) => (
+                evidenceUrls[i] ? (
+                  <a key={e.id} data-evidence-item href={evidenceUrls[i]!} target="_blank" rel="noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={evidenceUrls[i]!} alt={e.caption ?? 'Evidence'} className={styles.evidenceThumb} />
+                  </a>
+                ) : (
+                  // Caption-only evidence is a first-class record — the mobile
+                  // sheet accepts one, and add_evidence_item stores an empty
+                  // media path for it. Rendering only thumbnails dropped those
+                  // items silently, so the count said 1 and the grid was empty.
+                  <p key={e.id} data-evidence-item className={styles.evidenceNote}>
+                    {e.caption || 'Evidence (no caption)'}
+                  </p>
+                )
+              ))}
+            </div>
+            <Card as="form" action={addEvidenceAction} padding="sm">
+              <input type="hidden" name="snagId" value={snag.id} />
+              <div className="field">
+                <label htmlFor="evidenceFile">Photo</label>
+                <input id="evidenceFile" name="file" type="file" required />
+              </div>
+              <div className="field">
+                <label htmlFor="caption">What does this show?</label>
+                <input id="caption" name="caption" type="text" placeholder="e.g. Walkway markings worn away at the dock corner" />
+              </div>
+              <Button type="submit" variant="secondary" size="sm">Add evidence</Button>
+            </Card>
+          </StepSection>
+
+          <StepSection
+            id="rootCause"
+            icon="Search"
+            title="Root cause"
+            state={hasRootCause ? 'done' : 'pending'}
+            summary={hasRootCause ? 'Recorded' : 'Not recorded'}
+            defaultOpen={isOpen('rootCause')}
+          >
+            {/* Editable after the first save. set_root_cause upserts, and an
+                investigation's understanding of the cause is exactly the thing
+                that changes as evidence comes in. */}
+            <Card as="form" action={setRootCauseAction} padding="sm">
+              <input type="hidden" name="snagId" value={snag.id} />
+              <div className="field">
+                <label htmlFor="rootCauseText">What actually caused this?</label>
+                <input
+                  id="rootCauseText"
+                  name="rootCauseText"
+                  type="text"
+                  required
+                  defaultValue={investigation.rootCause ?? ''}
+                  placeholder="e.g. No physical separation between forklift routes and the pedestrian walkway"
+                />
+              </div>
+              <Button type="submit" variant="secondary" size="sm">
+                {hasRootCause ? 'Update root cause' : 'Save root cause'}
+              </Button>
+            </Card>
+          </StepSection>
+
+          <StepSection
+            id="correctiveActions"
+            icon="ClipboardCheck"
+            title="Corrective actions"
+            state={actions.length === 0 ? 'pending' : openActions > 0 ? 'in_progress' : 'done'}
+            summary={openActions > 0 ? `${openActions} open` : actions.length > 0 ? 'All closed' : 'None yet'}
+            defaultOpen={isOpen('correctiveActions')}
+          >
+            <div className={styles.itemList}>
+              {actions.map((action) => (
+                <Card key={action.id} padding="sm">
+                  <p className={styles.recordName}>{action.description}</p>
+                  <p className={styles.recordMeta}>
+                    {action.owner_name ?? 'unassigned'} · due {formatDate(action.due_date)} ·{' '}
+                    {action.verified_at ? 'verified' : action.status}
+                  </p>
+                  <div className={styles.actionRow}>
+                    {action.status !== 'done' && (
+                      <form action={completeCorrectiveActionAction}>
+                        <input type="hidden" name="snagId" value={snag.id} />
+                        <input type="hidden" name="actionId" value={action.id} />
+                        <Button type="submit" variant="secondary" size="sm">Mark complete</Button>
+                      </form>
+                    )}
+                    {action.status === 'done' && !action.verified_at && (
+                      <form action={verifyCorrectiveActionAction}>
+                        <input type="hidden" name="snagId" value={snag.id} />
+                        <input type="hidden" name="actionId" value={action.id} />
+                        <Button type="submit" variant="secondary" size="sm">Verify</Button>
+                      </form>
+                    )}
+                  </div>
+                </Card>
+              ))}
+            </div>
+
+            <Card as="form" action={createCorrectiveActionAction} padding="sm">
+              <input type="hidden" name="snagId" value={snag.id} />
+              <div className="field">
+                <label htmlFor="description">What needs doing?</label>
+                <input id="description" name="description" type="text" required />
+              </div>
+              <div className="field">
+                <label htmlFor="capaOwnerId">Owner</label>
+                <select id="capaOwnerId" name="ownerId" required defaultValue="">
+                  <option value="" disabled>Choose someone</option>
+                  {siteAssignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="dueDate">Due date</label>
+                <input id="dueDate" name="dueDate" type="date" required />
+              </div>
+              <Button type="submit" variant="secondary" size="sm">Create corrective action</Button>
+            </Card>
+          </StepSection>
+
+          <StepSection
+            id="rca"
+            icon="GitBranch"
+            title="5 Whys analysis"
+            state={rca?.status === 'accepted' ? 'done' : rca ? 'in_progress' : 'optional'}
+            summary={rcaSummary(rca, isResolved, siteAssignees)}
+            defaultOpen={isOpen('rca')}
+          >
+            <RcaBody
+              rca={rca}
+              snagId={snag.id}
+              problem={snag.description ?? 'the incident'}
+              isResolved={isResolved}
+              assignees={siteAssignees}
+            />
+          </StepSection>
+
+          <StepSection
+            id="debrief"
+            icon="Users"
+            title="Debrief"
+            state={activeDebrief ? 'in_progress' : completedDebriefs.length > 0 ? 'done' : 'optional'}
+            summary={
+              activeDebrief ? 'In progress'
+              : completedDebriefs.length > 0 ? `${completedDebriefs.length} completed`
+              : 'None yet — optional'
+            }
+            defaultOpen={isOpen('debrief')}
+          >
+            {activeDebrief ? (
+              <Card>
+                <p className={styles.recordName}>
+                  {activeDebrief.format === 'hot' ? 'Hot debrief' : 'Formal debrief'} — in progress
+                </p>
+
+                <p className={styles.subheading}>Findings</p>
+                <div className={styles.itemList}>
+                  {activeDebrief.findings.map((f) => <p key={f.id} className={styles.bullet}>{f.finding_text}</p>)}
+                </div>
+                <form action={addDebriefFindingAction} className={styles.inlineForm}>
+                  <input type="hidden" name="snagId" value={snag.id} />
+                  <input type="hidden" name="debriefId" value={activeDebrief.id} />
+                  <input name="findingText" type="text" placeholder="Add a finding" required />
+                  <Button type="submit" variant="secondary" size="sm">Add</Button>
+                </form>
+
+                <p className={styles.subheading}>Lessons learned</p>
+                <div className={styles.itemList}>
+                  {activeDebrief.lessons.map((l) => <p key={l.id} className={styles.bullet}>{l.lesson_text}</p>)}
+                </div>
+                <form action={addDebriefLessonAction} className={styles.inlineForm}>
+                  <input type="hidden" name="snagId" value={snag.id} />
+                  <input type="hidden" name="debriefId" value={activeDebrief.id} />
+                  <input name="lessonText" type="text" placeholder="Add a lesson learned" required />
+                  <Button type="submit" variant="secondary" size="sm">Add</Button>
+                </form>
+
+                <p className={styles.subheading}>Who was there ({activeDebrief.attendeeIds.length})</p>
+                <form action={addDebriefAttendeeAction} className={styles.inlineForm}>
+                  <input type="hidden" name="snagId" value={snag.id} />
+                  <input type="hidden" name="debriefId" value={activeDebrief.id} />
+                  <select name="profileId" required defaultValue="">
+                    <option value="" disabled>Add attendee</option>
+                    {members.filter((m) => !activeDebrief.attendeeIds.includes(m.id)).map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  <Button type="submit" variant="secondary" size="sm">Add</Button>
+                </form>
+
+                <form action={completeDebriefAction}>
+                  <input type="hidden" name="snagId" value={snag.id} />
+                  <input type="hidden" name="debriefId" value={activeDebrief.id} />
+                  <Button type="submit" variant="primary">Complete debrief</Button>
+                </form>
+              </Card>
+            ) : (
+              <Card as="form" action={startDebriefAction} padding="sm">
+                <div className="field">
+                  <input type="hidden" name="snagId" value={snag.id} />
+                  <label htmlFor="format">Format</label>
+                  <select id="format" name="format" defaultValue="hot">
+                    <option value="hot">Hot debrief</option>
+                    <option value="formal">Formal debrief</option>
+                  </select>
+                </div>
+                <Button type="submit" variant="secondary" size="sm">Start debrief</Button>
+              </Card>
+            )}
+
+            {completedDebriefs.length > 0 && (
+              <div className={styles.itemList}>
+                {completedDebriefs.map((d) => (
+                  <Card key={d.id} padding="sm">
+                    <p className={styles.recordName}>
+                      {d.format === 'hot' ? 'Hot debrief' : 'Formal debrief'} · completed
+                    </p>
+                    {d.findings.map((f) => <p key={f.id} className={styles.bullet}>{f.finding_text}</p>)}
+                    {/* Lessons were collected and then never shown back. They
+                        are the part of a debrief with a life beyond the snag. */}
+                    {d.lessons.map((l) => <p key={l.id} className={styles.bulletLesson}>{l.lesson_text}</p>)}
+                  </Card>
+                ))}
+              </div>
+            )}
+          </StepSection>
+        </>
+      )}
+
+      {/* ── Settings and the terminal action. Behind a disclosure on both
+             lanes: these are settings, and settings shouldn't sit between the
+             reader and the work. ── */}
+      <StepSection
+        id="manage"
+        icon="Settings2"
+        title="Manage"
+        summary={`${STATUS_LABELS[snag.status as SnagStatus]} · ${snag.owner_name ?? 'unassigned'}`}
+        defaultOpen={isOpen('manage')}
+      >
         <div className={styles.actionRow}>
           {snag.status !== 'flagged' && <StatusButton snagId={snag.id} status="flagged" label="Re-flag" />}
-          {snag.status !== 'in_progress' && snag.status !== 'resolved' && (
+          {snag.status !== 'in_progress' && !isResolved && (
             <StatusButton snagId={snag.id} status="in_progress" label="Mark In Progress" />
           )}
           {snag.parent_snag_id && (
@@ -123,42 +591,8 @@ export default async function SnagDetailPage({
           )}
         </div>
 
-        {/* The notifiable decision, as a question with two answers rather than
-            a one-way toggle. As a toggle the only control on an undecided snag
-            read "Mark notifiable", so recording "no" — which update_snag_status
-            requires before this can be resolved — meant claiming a notifiable
-            event first and retracting it, leaving a marked_notifiable entry in
-            the audit log that never happened. */}
-        {isSerious && (
-          <Card style={{ marginBottom: 'var(--space-lg)' }}>
-            <p className={styles.subheading}>Does this need reporting to WorkSafe?</p>
-            {notifiableDecided ? (
-              <>
-                <p className={styles.decision}>
-                  {snag.is_notifiable
-                    ? 'Flagged as notifiable — it has to be reported as soon as possible, and the site preserved.'
-                    : 'Reviewed and recorded as not notifiable.'}
-                </p>
-                <NotifiableButton snagId={snag.id} value={!snag.is_notifiable} label={
-                  snag.is_notifiable ? "This isn't notifiable after all" : 'Actually, this is notifiable'
-                } />
-              </>
-            ) : (
-              <>
-                <p className={styles.decision}>
-                  Undecided. This has to be answered either way before the snag can be resolved.
-                </p>
-                <div className={styles.actionRow} style={{ marginBottom: 0 }}>
-                  <NotifiableButton snagId={snag.id} value={true} label="Yes — notifiable" variant="danger" />
-                  <NotifiableButton snagId={snag.id} value={false} label="No" />
-                </div>
-              </>
-            )}
-          </Card>
-        )}
-
-        {snag.status !== 'resolved' && isNiggle && (
-          <Card as="form" action={resolveNiggleAction} style={{ marginBottom: 'var(--space-lg)' }}>
+        {!isResolved && isNiggle && (
+          <Card as="form" action={resolveNiggleAction}>
             <input type="hidden" name="snagId" value={snag.id} />
             <div className="field">
               <label htmlFor="note">Resolution note</label>
@@ -167,20 +601,18 @@ export default async function SnagDetailPage({
             <Button type="submit" variant="primary">Resolve</Button>
           </Card>
         )}
-        {snag.status !== 'resolved' && isSerious && (
-          <div style={{ marginBottom: 'var(--space-lg)' }}>
-            {blockReason ? (
-              // Named, not annotated. This used to be a live button labelled
-              // "Resolve (requires completed investigation)", so the only way to
-              // find out what was missing was to press it and read the raw
-              // Postgres exception the server raised.
-              <p className={styles.blocked}>
-                <Icon name="Lock" size="sm" /> Resolve is blocked — {blockReason.toLowerCase()}
-              </p>
-            ) : (
-              <StatusButton snagId={snag.id} status="resolved" label="Resolve" />
-            )}
-          </div>
+        {!isResolved && isSerious && (rcaBlock || firstUnmet) && (
+          // Named, not annotated. This used to be a live button labelled
+          // "Resolve (requires completed investigation)", so the only way to
+          // find out what was missing was to press it and read the raw
+          // Postgres exception the server raised.
+          <p className={styles.blocked}>
+            <Icon name="Lock" size="sm" />
+            Resolve is blocked — {rcaBlock ? rcaBlock.reason : firstUnmet!.reason.toLowerCase()}
+          </p>
+        )}
+        {!isResolved && isSerious && !rcaBlock && !firstUnmet && investigation && (
+          <StatusButton snagId={snag.id} status="resolved" label="Resolve" variant="primary" />
         )}
 
         <div className={styles.formGrid}>
@@ -214,371 +646,21 @@ export default async function SnagDetailPage({
             <Button type="submit" variant="secondary" size="sm">Save</Button>
           </Card>
         </div>
-      </Section>
+      </StepSection>
 
-      {isSerious && investigation && (
-        <Section icon="Microscope" title="Investigation">
-          <ul className={styles.checklist}>
-            {CHECKLIST_STEPS.map((step) => {
-              const done = investigation.completedSteps.includes(step);
-              return (
-                <li key={step} className={styles.checklistItem} data-done={done}>
-                  <Icon name={done ? 'CircleCheckBig' : 'Circle'} size="sm" color={done ? 'var(--color-success)' : 'var(--color-border-strong)'} />
-                  {CHECKLIST_STEP_LABELS[step]}
-                </li>
-              );
-            })}
-          </ul>
-
-          {remainingChecklist.length > 0 && (
-            <div className={styles.actionRow}>
-              {remainingChecklist.map((step) => (
-                <form key={step} action={completeChecklistStepAction}>
-                  <input type="hidden" name="snagId" value={snag.id} />
-                  <input type="hidden" name="step" value={step} />
-                  <Button type="submit" variant="secondary" size="sm">Mark &quot;{CHECKLIST_STEP_LABELS[step]}&quot; done</Button>
-                </form>
-              ))}
-            </div>
-          )}
-
-          <p className={styles.subheading}>Witness statements ({investigation.witnesses.length})</p>
-          <div className={styles.itemList}>
-            {investigation.witnesses.map((w) => (
-              <p key={w.id} style={{ margin: 0, fontSize: 'var(--text-sm)' }}><strong>{w.witness_name}:</strong> {w.statement_text}</p>
-            ))}
-          </div>
-          <Card as="form" action={addWitnessStatementAction} padding="sm" style={{ marginBottom: 'var(--space-xl)' }}>
-            <div className="field">
-              <input type="hidden" name="snagId" value={snag.id} />
-              <label htmlFor="witnessName">Witness name</label>
-              <input id="witnessName" name="witnessName" type="text" required />
-            </div>
-            <div className="field">
-              <label htmlFor="statementText">Statement</label>
-              <input id="statementText" name="statementText" type="text" required />
-            </div>
-            <Button type="submit" variant="secondary" size="sm">Add witness statement</Button>
-          </Card>
-
-          <p className={styles.subheading}>Evidence ({investigation.evidence.length})</p>
-          <div className={styles.evidenceGrid}>
-            {investigation.evidence.map((e, i) => (
-              evidenceUrls[i] ? (
-                <a key={e.id} data-evidence-item href={evidenceUrls[i]!} target="_blank" rel="noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={evidenceUrls[i]!} alt={e.caption ?? 'Evidence'} className={styles.evidenceThumb} />
-                </a>
-              ) : (
-                // Caption-only evidence is a first-class record — the mobile
-                // sheet accepts one, and add_evidence_item stores an empty
-                // media path for it. Rendering only thumbnails dropped those
-                // items silently, so the count said 1 and the grid was empty.
-                <p key={e.id} data-evidence-item className={styles.evidenceNote}>
-                  {e.caption || 'Evidence (no caption)'}
-                </p>
-              )
-            ))}
-          </div>
-          <Card as="form" action={addEvidenceAction} padding="sm" style={{ marginBottom: 'var(--space-xl)' }}>
-            <input type="hidden" name="snagId" value={snag.id} />
-            <div className="field">
-              <label htmlFor="evidenceFile">File</label>
-              <input id="evidenceFile" name="file" type="file" required />
-            </div>
-            <div className="field">
-              <label htmlFor="caption">Caption (optional)</label>
-              <input id="caption" name="caption" type="text" />
-            </div>
-            <Button type="submit" variant="secondary" size="sm">Add evidence</Button>
-          </Card>
-
-          <p className={styles.subheading}>Root cause</p>
-          {/* Editable after the first save. set_root_cause upserts, and an
-              investigation's understanding of the cause is exactly the thing
-              that changes as evidence comes in. */}
-          <Card as="form" action={setRootCauseAction} padding="sm">
-            <input type="hidden" name="snagId" value={snag.id} />
-            <div className="field">
-              <label htmlFor="rootCauseText">What caused this?</label>
-              <input
-                id="rootCauseText"
-                name="rootCauseText"
-                type="text"
-                required
-                defaultValue={investigation.rootCause ?? ''}
-              />
-            </div>
-            <Button type="submit" variant="secondary" size="sm">
-              {investigation.rootCause ? 'Update root cause' : 'Save root cause'}
-            </Button>
-          </Card>
-        </Section>
-      )}
-
-      {isSerious && (
-        <Section icon="GitBranch" title="Root cause analysis">
-          {!rca && snag.status === 'resolved' && (
-            <Card as="form" action={assignRcaAction} padding="sm">
-              <input type="hidden" name="snagId" value={snag.id} />
-              <div className="field">
-                <label htmlFor="assigneeId">Assign RCA to</label>
-                <select id="assigneeId" name="assigneeId" required defaultValue="">
-                  <option value="" disabled>Choose someone</option>
-                  {siteAssignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-              </div>
-              <Button type="submit" variant="secondary" size="sm">Assign RCA</Button>
-            </Card>
-          )}
-          {!rca && snag.status !== 'resolved' && (
-            <EmptyState>An RCA can be assigned once this snag is resolved.</EmptyState>
-          )}
-
-          {rca && (
-            <>
-              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-md)' }}>Status: {rca.status}</p>
-              {rca.rejectionNote && <p className="error-text" style={{ marginBottom: 'var(--space-md)' }}>Rejected: {rca.rejectionNote}</p>}
-
-              {(rca.status === 'assigned' || rca.status === 'in_progress' || rca.status === 'rejected') && (
-                <Card as="form" action={saveRcaWhysAction} padding="sm" style={{ marginBottom: 'var(--space-lg)' }}>
-                  <input type="hidden" name="snagId" value={snag.id} />
-                  <input type="hidden" name="rcaId" value={rca.id} />
-                  {[1, 2, 3, 4, 5].map((i) => {
-                    const existing = rca.whys.find((w) => w.whyIndex === i);
-                    return (
-                      <div key={i} style={{ marginBottom: 'var(--space-md)' }}>
-                        <div className="field">
-                          <label htmlFor={`why${i}`}>Why {i}</label>
-                          <input id={`why${i}`} name={`why${i}`} type="text" defaultValue={existing?.whyText} />
-                        </div>
-                        <div className="field">
-                          <label htmlFor={`answer${i}`}>Answer</label>
-                          <input id={`answer${i}`} name={`answer${i}`} type="text" defaultValue={existing?.answerText} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <Button type="submit" variant="secondary" size="sm">Save whys</Button>
-                </Card>
-              )}
-
-              {(rca.status === 'assigned' || rca.status === 'in_progress' || rca.status === 'rejected') && (
-                <form action={submitRcaAction} style={{ marginBottom: 'var(--space-lg)' }}>
-                  <input type="hidden" name="snagId" value={snag.id} />
-                  <input type="hidden" name="rcaId" value={rca.id} />
-                  <Button type="submit" variant="primary">Submit RCA</Button>
-                </form>
-              )}
-
-              {rca.status === 'submitted' && (
-                <>
-                  <ol className={styles.rcaWhys}>
-                    {rca.whys.map((w) => (
-                      <li key={w.whyIndex}>
-                        <span className={styles.rcaWhyQuestion}>{w.whyText}</span><br />
-                        <span className={styles.rcaWhyAnswer}>{w.answerText}</span>
-                      </li>
-                    ))}
-                  </ol>
-                  <div className={styles.actionRow}>
-                    <form action={acceptRcaAction}>
-                      <input type="hidden" name="snagId" value={snag.id} />
-                      <input type="hidden" name="rcaId" value={rca.id} />
-                      <Button type="submit" variant="primary">Accept</Button>
-                    </form>
-                    <details className={styles.disclosure}>
-                      <summary><Button as="span" variant="secondary">Reject</Button></summary>
-                      <form action={rejectRcaAction} style={{ marginTop: 'var(--space-sm)' }}>
-                        <input type="hidden" name="snagId" value={snag.id} />
-                        <input type="hidden" name="rcaId" value={rca.id} />
-                        <div className="field">
-                          <label htmlFor="rejectionNote">Rejection note</label>
-                          <input id="rejectionNote" name="rejectionNote" type="text" required />
-                        </div>
-                        <Button type="submit" variant="secondary" size="sm">Confirm reject</Button>
-                      </form>
-                    </details>
-                  </div>
-                </>
-              )}
-
-              {rca.status === 'accepted' && (
-                <ol className={styles.rcaWhys}>
-                  {rca.whys.map((w) => (
-                    <li key={w.whyIndex}>
-                      <span className={styles.rcaWhyQuestion}>{w.whyText}</span><br />
-                      <span className={styles.rcaWhyAnswer}>{w.answerText}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-
-              {(rca.status === 'assigned' || rca.status === 'in_progress') && (
-                <div className={styles.actionRow}>
-                  <details className={styles.disclosure}>
-                    <summary><Button as="span" variant="secondary">Reassign</Button></summary>
-                    <form action={reassignRcaAction} style={{ marginTop: 'var(--space-sm)' }}>
-                      <input type="hidden" name="snagId" value={snag.id} />
-                      <input type="hidden" name="rcaId" value={rca.id} />
-                      <div className="field">
-                        <label htmlFor="newAssigneeId">New assignee</label>
-                        <select id="newAssigneeId" name="newAssigneeId" required defaultValue="">
-                          <option value="" disabled>Choose someone</option>
-                          {siteAssignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                        </select>
-                      </div>
-                      <Button type="submit" variant="secondary" size="sm">Confirm reassign</Button>
-                    </form>
-                  </details>
-                  <form action={cancelRcaAction}>
-                    <input type="hidden" name="snagId" value={snag.id} />
-                    <input type="hidden" name="rcaId" value={rca.id} />
-                    <Button type="submit" variant="secondary">Cancel RCA</Button>
-                  </form>
-                </div>
-              )}
-            </>
-          )}
-        </Section>
-      )}
-
-      {isSerious && (
-        <Section icon="Users" title="Debrief">
-          {activeDebrief ? (
-            <Card style={{ marginBottom: 'var(--space-lg)' }}>
-              <p style={{ margin: '0 0 var(--space-md)', fontWeight: 600 }}>
-                {activeDebrief.format === 'hot' ? 'Hot debrief' : 'Formal debrief'} — in progress
-              </p>
-
-              <div className={styles.itemList}>
-                {activeDebrief.findings.map((f) => <p key={f.id} style={{ margin: 0, fontSize: 'var(--text-sm)' }}>• {f.finding_text}</p>)}
-              </div>
-              <form action={addDebriefFindingAction} className={styles.inlineForm}>
-                <input type="hidden" name="snagId" value={snag.id} />
-                <input type="hidden" name="debriefId" value={activeDebrief.id} />
-                <input name="findingText" type="text" placeholder="Add a finding" required />
-                <Button type="submit" variant="secondary" size="sm">Add</Button>
-              </form>
-
-              <div className={styles.itemList}>
-                {activeDebrief.lessons.map((l) => <p key={l.id} style={{ margin: 0, fontSize: 'var(--text-sm)' }}>• {l.lesson_text}</p>)}
-              </div>
-              <form action={addDebriefLessonAction} className={styles.inlineForm}>
-                <input type="hidden" name="snagId" value={snag.id} />
-                <input type="hidden" name="debriefId" value={activeDebrief.id} />
-                <input name="lessonText" type="text" placeholder="Add a lesson learned" required />
-                <Button type="submit" variant="secondary" size="sm">Add</Button>
-              </form>
-
-              <form action={addDebriefAttendeeAction} className={styles.inlineForm}>
-                <input type="hidden" name="snagId" value={snag.id} />
-                <input type="hidden" name="debriefId" value={activeDebrief.id} />
-                <select name="profileId" required defaultValue="">
-                  <option value="" disabled>Add attendee</option>
-                  {members.filter((m) => !activeDebrief.attendeeIds.includes(m.id)).map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
-                <Button type="submit" variant="secondary" size="sm">Add</Button>
-              </form>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-lg)' }}>
-                {activeDebrief.attendeeIds.length} attendee(s)
-              </p>
-
-              <form action={completeDebriefAction}>
-                <input type="hidden" name="snagId" value={snag.id} />
-                <input type="hidden" name="debriefId" value={activeDebrief.id} />
-                <Button type="submit" variant="primary">Complete debrief</Button>
-              </form>
-            </Card>
-          ) : (
-            <Card as="form" action={startDebriefAction} padding="sm" style={{ marginBottom: 'var(--space-lg)' }}>
-              <input type="hidden" name="snagId" value={snag.id} />
-              <div className="field">
-                <label htmlFor="format">Format</label>
-                <select id="format" name="format" defaultValue="hot">
-                  <option value="hot">Hot debrief</option>
-                  <option value="formal">Formal debrief</option>
-                </select>
-              </div>
-              <Button type="submit" variant="secondary" size="sm">Start debrief</Button>
-            </Card>
-          )}
-
-          {completedDebriefs.length > 0 && (
-            <div className={styles.itemList}>
-              {completedDebriefs.map((d) => (
-                <Card key={d.id} padding="sm">
-                  <p style={{ margin: '0 0 var(--space-sm)', fontWeight: 600 }}>
-                    {d.format === 'hot' ? 'Hot debrief' : 'Formal debrief'} · completed
-                  </p>
-                  {d.findings.map((f) => <p key={f.id} style={{ margin: '0 0 4px', fontSize: 'var(--text-sm)' }}>• {f.finding_text}</p>)}
-                </Card>
-              ))}
-            </div>
-          )}
-        </Section>
-      )}
-
-      {isSerious && (
-        <Section icon="ClipboardCheck" title="Corrective actions">
-          <div className={styles.itemList}>
-            {actions.map((action) => (
-              <Card key={action.id} padding="sm">
-                <p style={{ margin: '0 0 4px', fontWeight: 600 }}>{action.description}</p>
-                <p style={{ margin: '0 0 var(--space-sm)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  {action.owner_name ?? 'unassigned'} · due {action.due_date} · {action.verified_at ? 'verified' : action.status}
-                </p>
-                <div className={styles.actionRow} style={{ marginBottom: 0 }}>
-                  {action.status !== 'done' && (
-                    <form action={completeCorrectiveActionAction}>
-                      <input type="hidden" name="snagId" value={snag.id} />
-                      <input type="hidden" name="actionId" value={action.id} />
-                      <Button type="submit" variant="secondary" size="sm">Mark complete</Button>
-                    </form>
-                  )}
-                  {action.status === 'done' && !action.verified_at && (
-                    <form action={verifyCorrectiveActionAction}>
-                      <input type="hidden" name="snagId" value={snag.id} />
-                      <input type="hidden" name="actionId" value={action.id} />
-                      <Button type="submit" variant="secondary" size="sm">Verify</Button>
-                    </form>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
-
-          <Card as="form" action={createCorrectiveActionAction} padding="sm">
-            <input type="hidden" name="snagId" value={snag.id} />
-            <div className="field">
-              <label htmlFor="description">Description</label>
-              <input id="description" name="description" type="text" required />
-            </div>
-            <div className="field">
-              <label htmlFor="capaOwnerId">Owner</label>
-              <select id="capaOwnerId" name="ownerId" required defaultValue="">
-                <option value="" disabled>Choose someone</option>
-                {siteAssignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="dueDate">Due date</label>
-              <input id="dueDate" name="dueDate" type="date" required />
-            </div>
-            <Button type="submit" variant="secondary" size="sm">Create corrective action</Button>
-          </Card>
-        </Section>
-      )}
-
-      <Section icon="MessageSquare" title="Comments">
-        {(!comments.data || comments.data.length === 0) && <EmptyState>No comments yet.</EmptyState>}
+      <StepSection
+        id="comments"
+        icon="MessageSquare"
+        title="Comments"
+        summary={commentList.length === 0 ? 'None yet' : `${commentList.length}`}
+        defaultOpen={isOpen('comments')}
+      >
+        {commentList.length === 0 && <EmptyState>No comments yet.</EmptyState>}
         <div className={styles.itemList}>
-          {(comments.data ?? []).map((c: any) => (
-            <div key={c.id} className={styles.commentItem}>
-              <p className={styles.commentAuthor}>{c.author?.name ?? 'Unknown'}</p>
-              <p className={styles.commentBody}>{c.body}</p>
+          {commentList.map((c: any) => (
+            <div key={c.id} className={styles.record}>
+              <p className={styles.recordName}>{c.author?.name ?? 'Unknown'}</p>
+              <p className={styles.recordBody}>{c.body}</p>
             </div>
           ))}
         </div>
@@ -587,9 +669,15 @@ export default async function SnagDetailPage({
           <input name="body" type="text" placeholder="Add a comment" required />
           <Button type="submit" variant="secondary" size="sm">Post</Button>
         </form>
-      </Section>
+      </StepSection>
 
-      <Section icon="History" title="Activity">
+      <StepSection
+        id="activity"
+        icon="History"
+        title="Activity"
+        summary={`${auditLog.length} event${auditLog.length === 1 ? '' : 's'}`}
+        defaultOpen={isOpen('activity')}
+      >
         <div className={styles.timeline}>
           {auditLog.map((entry) => (
             <p key={entry.id} className={styles.timelineEntry}>
@@ -597,17 +685,203 @@ export default async function SnagDetailPage({
             </p>
           ))}
         </div>
-      </Section>
+      </StepSection>
     </div>
   );
 }
 
-function StatusButton({ snagId, status, label }: { snagId: string; status: SnagStatus; label: string }) {
+/**
+ * What an open RCA blocks on, phrased for where it actually is. "Submitted and
+ * waiting on you" and "out with someone else" call for different things from
+ * the reader, and only one of them is an action they can take now.
+ */
+function rcaNextStep(rca: SnagRca | null, assignees: SiteAssignee[]) {
+  if (rca?.status === 'submitted') {
+    return {
+      title: 'Review the 5 Whys',
+      detail: 'The analysis has been submitted and is waiting on you to accept it or send it back.',
+      reason: 'the analysis is waiting on your review',
+    };
+  }
+  const name = rca ? assignees.find((a) => a.id === rca.assignedTo)?.name : null;
+  return {
+    title: 'Waiting on the 5 Whys analysis',
+    detail: name
+      ? `It's with ${name}. This can't close until the analysis is submitted and accepted.`
+      : "This can't close until the analysis is submitted and accepted.",
+    reason: 'an analysis is in progress — accept or reject it first',
+  };
+}
+
+/** Keeps the collapsed RCA header honest without anyone having to open it. */
+function rcaSummary(rca: SnagRca | null, isResolved: boolean, assignees: SiteAssignee[]): string {
+  if (!rca) return isResolved ? 'Not assigned' : 'Available once resolved';
+  switch (rca.status) {
+    case 'submitted': return 'Submitted — awaiting review';
+    case 'rejected': return 'Sent back — needs another look';
+    case 'accepted': return 'Accepted';
+    case 'cancelled': return 'Cancelled';
+    default: {
+      // Who owes it is the useful part while it's out for analysis; "in
+      // progress" tells a supervisor nothing they can act on.
+      const name = assignees.find((a) => a.id === rca.assignedTo)?.name;
+      return name ? `With ${name}` : 'In progress';
+    }
+  }
+}
+
+function RcaBody({
+  rca, snagId, problem, isResolved, assignees,
+}: {
+  rca: SnagRca | null;
+  snagId: string;
+  problem: string;
+  isResolved: boolean;
+  assignees: SiteAssignee[];
+}) {
+  if (!rca) {
+    return isResolved ? (
+      <Card as="form" action={assignRcaAction} padding="sm">
+        <input type="hidden" name="snagId" value={snagId} />
+        <div className="field">
+          <label htmlFor="assigneeId">Assign the analysis to</label>
+          <select id="assigneeId" name="assigneeId" required defaultValue="">
+            <option value="" disabled>Choose someone</option>
+            {assignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <Button type="submit" variant="secondary" size="sm">Assign analysis</Button>
+      </Card>
+    ) : (
+      <EmptyState>A 5 Whys analysis can be assigned once this snag is resolved.</EmptyState>
+    );
+  }
+
+  const byIndex = new Map(rca.whys.map((w) => [w.whyIndex, w]));
+  const isComplete = (i: number) => Boolean(byIndex.get(i)?.whyText.trim() && byIndex.get(i)?.answerText.trim());
+  const nextIndex = WHY_INDICES.find((i) => !isComplete(i)) ?? null;
+  const editable = rca.status === 'assigned' || rca.status === 'in_progress' || rca.status === 'rejected';
+
+  /** What this why is asked of: the problem for #1, the previous answer after. */
+  const premiseFor = (i: number) => (i === 1 ? problem : byIndex.get(i - 1)?.answerText ?? '');
+
+  return (
+    <>
+      {rca.rejectionNote && <p className="error-text">Sent back: {rca.rejectionNote}</p>}
+
+      {/* The chain so far. Asking all five at once — which is what ten stacked
+          inputs did — invites five parallel guesses at the same question
+          rather than one line of reasoning, because why #2 is asked *of the
+          answer to* #1. */}
+      <ol className={styles.whyChain}>
+        {WHY_INDICES.filter(isComplete).map((i) => {
+          const w = byIndex.get(i)!;
+          return (
+            <li key={i} className={styles.whyStep}>
+              <p className={styles.whyQuestion}>{w.whyText}</p>
+              <p className={styles.whyAnswer}>{w.answerText}</p>
+            </li>
+          );
+        })}
+      </ol>
+
+      {editable && nextIndex !== null && (
+        <Card as="form" action={saveRcaWhyAction} padding="sm">
+          <input type="hidden" name="snagId" value={snagId} />
+          <input type="hidden" name="rcaId" value={rca.id} />
+          <input type="hidden" name="whyIndex" value={nextIndex} />
+          <p className={styles.whyPremise}>
+            Why {nextIndex} of 5 · asked of: {premiseFor(nextIndex) || 'the incident'}
+          </p>
+          <div className="field">
+            <label htmlFor="whyText">{nextIndex === 1 ? 'Why did this happen?' : 'Why did that happen?'}</label>
+            <input
+              id="whyText"
+              name="whyText"
+              type="text"
+              required
+              placeholder={nextIndex === 1 ? 'e.g. Why did the forklift enter the walkway?' : 'Why did that happen?'}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="answerText">The answer</label>
+            <input id="answerText" name="answerText" type="text" required placeholder="Because…" />
+          </div>
+          <p className={styles.hint}>
+            The next why is asked of this answer, so keep it to the one cause that mattered.
+          </p>
+          <Button type="submit" variant="secondary" size="sm">Save why {nextIndex}</Button>
+        </Card>
+      )}
+
+      {editable && nextIndex === null && (
+        <form action={submitRcaAction}>
+          <input type="hidden" name="snagId" value={snagId} />
+          <input type="hidden" name="rcaId" value={rca.id} />
+          <Button type="submit" variant="primary">Submit for review</Button>
+        </form>
+      )}
+
+      {rca.status === 'submitted' && (
+        <div className={styles.actionRow}>
+          <form action={acceptRcaAction}>
+            <input type="hidden" name="snagId" value={snagId} />
+            <input type="hidden" name="rcaId" value={rca.id} />
+            <Button type="submit" variant="primary">Accept</Button>
+          </form>
+          <details className={styles.disclosure}>
+            <summary><Button as="span" variant="secondary">Send back</Button></summary>
+            <form action={rejectRcaAction} className={styles.disclosureBody}>
+              <input type="hidden" name="snagId" value={snagId} />
+              <input type="hidden" name="rcaId" value={rca.id} />
+              <div className="field">
+                <label htmlFor="rejectionNote">What needs another look?</label>
+                <input id="rejectionNote" name="rejectionNote" type="text" required />
+              </div>
+              <Button type="submit" variant="secondary" size="sm">Send it back</Button>
+            </form>
+          </details>
+        </div>
+      )}
+
+      {(rca.status === 'assigned' || rca.status === 'in_progress') && (
+        <div className={styles.actionRow}>
+          <details className={styles.disclosure}>
+            <summary><Button as="span" variant="secondary">Reassign</Button></summary>
+            <form action={reassignRcaAction} className={styles.disclosureBody}>
+              <input type="hidden" name="snagId" value={snagId} />
+              <input type="hidden" name="rcaId" value={rca.id} />
+              <div className="field">
+                <label htmlFor="newAssigneeId">New assignee</label>
+                <select id="newAssigneeId" name="newAssigneeId" required defaultValue="">
+                  <option value="" disabled>Choose someone</option>
+                  {assignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              <Button type="submit" variant="secondary" size="sm">Confirm reassign</Button>
+            </form>
+          </details>
+          <form action={cancelRcaAction}>
+            <input type="hidden" name="snagId" value={snagId} />
+            <input type="hidden" name="rcaId" value={rca.id} />
+            <Button type="submit" variant="secondary">Cancel analysis</Button>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+
+function StatusButton({
+  snagId, status, label, variant = 'secondary',
+}: {
+  snagId: string; status: SnagStatus; label: string; variant?: 'primary' | 'secondary';
+}) {
   return (
     <form action={changeStatusAction}>
       <input type="hidden" name="snagId" value={snagId} />
       <input type="hidden" name="status" value={status} />
-      <Button type="submit" variant="secondary">{label}</Button>
+      <Button type="submit" variant={variant}>{label}</Button>
     </form>
   );
 }
@@ -626,14 +900,11 @@ function NotifiableButton({
   );
 }
 
-function Section({ icon, title, children }: { icon: IconName; title: string; children: React.ReactNode }) {
-  return (
-    <section className={styles.section}>
-      <div className={styles.sectionHead}>
-        <span className={styles.sectionIcon}><Icon name={icon} size="sm" /></span>
-        <h2>{title}</h2>
-      </div>
-      {children}
-    </section>
-  );
+/** Due dates arrive as ISO dates; rendering one raw leaks the schema. */
+function formatDate(value: string | null): string {
+  if (!value) return 'no date';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime())
+    ? value
+    : d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
 }

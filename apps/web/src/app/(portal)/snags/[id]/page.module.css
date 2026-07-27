@@ -1,3 +1,10 @@
+/* The snag detail page. Every value here is a token — CLAUDE.md forbids inline
+   style objects on this app, and this page used to carry about thirty of them. */
+
+.page {
+  max-width: 780px;
+}
+
 .header {
   margin-bottom: var(--space-xl);
 }
@@ -10,6 +17,7 @@
 
 .reference {
   font-size: var(--text-2xl);
+  font-family: var(--font-mono-family);
   margin-bottom: var(--space-md);
 }
 
@@ -28,42 +36,20 @@
 .meta {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
-  margin: 0 0 var(--space-xl);
+  margin: 0 0 var(--space-md);
 }
 
-.section {
-  margin-bottom: var(--space-4xl);
-}
-
-.sectionHead {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-lg);
-}
-
-.sectionHead h2 {
-  font-size: var(--text-lg);
-  margin: 0;
-}
-
-.sectionIcon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-button);
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-  flex-shrink: 0;
-}
+/* ── Shared section furniture ───────────────────────────────────────────── */
 
 .actionRow {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-sm);
   margin-bottom: var(--space-lg);
+}
+
+.actionRow:last-child {
+  margin-bottom: 0;
 }
 
 .formGrid {
@@ -75,12 +61,13 @@
 .inlineForm {
   display: flex;
   gap: var(--space-sm);
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-lg);
 }
 
 .inlineForm input,
 .inlineForm select {
   flex: 1;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-input);
@@ -90,9 +77,118 @@
   color: var(--color-text-primary);
 }
 
+.subheading {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  margin: var(--space-lg) 0 var(--space-sm);
+  color: var(--color-text-primary);
+}
+
+.itemList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+}
+
+.itemList:empty {
+  margin-bottom: 0;
+}
+
+/* One saved record: a witness statement, a comment, a corrective action. */
+.record {
+  background: var(--color-background);
+  border-radius: var(--radius-button);
+  padding: var(--space-md);
+}
+
+.recordName {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 2px;
+}
+
+.recordBody {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.recordMeta {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono-family);
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-sm);
+}
+
+.bullet,
+.bulletLesson {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 4px;
+  padding-left: var(--space-md);
+  position: relative;
+}
+
+.bullet::before,
+.bulletLesson::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--color-text-muted);
+}
+
+/* Lessons outlive the snag they came from, so they read differently to a
+   finding about it. */
+.bulletLesson::before {
+  content: '→';
+  color: var(--color-primary);
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0 0 var(--space-md);
+}
+
+/* ── Notifiable decision ────────────────────────────────────────────────── */
+
+.question {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  margin: 0 0 var(--space-sm);
+}
+
+.decision {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-md);
+}
+
+/* Resolve while the gate is closed: a statement, not a control. Muted rather
+   than an error — nothing has gone wrong, there is just work outstanding. */
+.blocked {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-lg);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+/* ── Checklist ──────────────────────────────────────────────────────────── */
+
 .checklist {
   list-style: none;
-  margin: 0 0 var(--space-md);
+  margin: 0 0 var(--space-lg);
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -111,25 +207,17 @@
   color: var(--color-text-primary);
 }
 
-.subheading {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  margin: 0 0 var(--space-md);
-  color: var(--color-text-primary);
-}
-
-.itemList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-lg);
-}
+/* ── Evidence ───────────────────────────────────────────────────────────── */
 
 .evidenceGrid {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-sm);
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.evidenceGrid:empty {
+  margin-bottom: 0;
 }
 
 .evidenceThumb {
@@ -140,22 +228,98 @@
   border: 1px solid var(--color-border);
 }
 
-.rcaWhys {
-  margin: 0 0 var(--space-lg);
-  padding-left: 20px;
-}
-
-.rcaWhys li {
-  margin-bottom: var(--space-sm);
-}
-
-.rcaWhyQuestion {
-  font-weight: var(--weight-semibold);
-}
-
-.rcaWhyAnswer {
+/* A caption with no photo is still evidence. It renders as a note rather than
+   a broken thumbnail. */
+.evidenceNote {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
+  background: var(--color-background);
+  border-radius: var(--radius-button);
 }
+
+/* ── 5 Whys ─────────────────────────────────────────────────────────────── */
+
+.whyChain {
+  list-style: none;
+  margin: 0 0 var(--space-lg);
+  padding: 0;
+  counter-reset: why;
+}
+
+.whyChain:empty {
+  margin-bottom: 0;
+}
+
+/* Numbered because the whys genuinely are a sequence — each is asked of the
+   answer above it — with a rail making the chain visible as one. */
+.whyStep {
+  position: relative;
+  padding: 0 0 var(--space-lg) var(--space-2xl);
+  counter-increment: why;
+}
+
+.whyStep::before {
+  content: counter(why);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  font-family: var(--font-mono-family);
+}
+
+.whyStep::after {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 28px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--color-success-border);
+}
+
+.whyStep:last-child {
+  padding-bottom: var(--space-md);
+}
+
+.whyStep:last-child::after {
+  display: none;
+}
+
+.whyQuestion {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 2px;
+  line-height: 1.5;
+}
+
+.whyAnswer {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.whyPremise {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+  line-height: 1.6;
+  margin: 0 0 var(--space-md);
+}
+
+/* ── Disclosures inside a section (reject, reassign) ────────────────────── */
 
 .disclosure summary {
   list-style: none;
@@ -166,20 +330,11 @@
   display: none;
 }
 
-.commentItem {
-  padding-bottom: var(--space-md);
+.disclosureBody {
+  margin-top: var(--space-sm);
 }
 
-.commentAuthor {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  margin: 0 0 2px;
-}
-
-.commentBody {
-  margin: 0;
-  font-size: var(--text-sm);
-}
+/* ── Activity ───────────────────────────────────────────────────────────── */
 
 .timeline {
   display: flex;
@@ -201,34 +356,4 @@
   .inlineForm {
     flex-direction: column;
   }
-}
-
-.decision {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  line-height: 1.6;
-  margin: 0 0 var(--space-md);
-}
-
-/* Resolve while the gate is closed: a statement, not a control. Muted rather
-   than an error — nothing has gone wrong, there is just work outstanding. */
-.blocked {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  margin: 0;
-  padding: var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-card);
-}
-
-.evidenceNote {
-  margin: 0;
-  padding: var(--space-sm) var(--space-md);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  background: var(--color-background);
-  border-radius: var(--radius-button);
 }

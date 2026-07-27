@@ -4,11 +4,11 @@
 
 | Tier | What it covers | Credentials | Writes data? |
 |---|---|---|---|
-| 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens. Jest, no browser, no network | none | no |
+| 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens, and the shared serious-lane resolve gate (its ordering pinned against `update_snag_status`). Jest, no browser, no network | none | no |
 | 1 | `apps/web/e2e/public.spec.ts` — every public route, both themes, three viewports, no horizontal overflow, no failed subresources | none | no |
 | 1 | `apps/web/e2e/auth-gate.spec.ts` — portal routes redirect anonymously; export routes reject GET and refuse anonymous POST | none | no |
 | 1 | `apps/mobile/e2e/auth.spec.ts` — auth screen renders, password masked, bad credentials rejected, both join paths reachable | none | no |
-| 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused | `E2E_EMAIL`/`E2E_PASSWORD` | no |
+| 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused, plus the snag detail page: sections start collapsed and the next step opens the one it names, the notifiable question offers both answers, Resolve is stated as blocked, every counted evidence item renders, the 5 Whys are asked one at a time | `E2E_EMAIL`/`E2E_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/report.spec.ts` — worker signs in, report screen shows both lanes and the right org, tab bar, snags list | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/incident.spec.ts` — the serious-incident screen: next step above the fold, no empty photo block, Resolve stated as blocked, every collapsed card reports its state, the evidence sheet is usable, WorkSafe criteria stay behind their disclosure, composer starts collapsed | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
 | 3 | `apps/mobile/e2e/write-path.spec.ts` — reports a serious incident, then satisfies each resolve-gate condition in turn (notifiable decision → checklist → witness → evidence → root cause) and resolves it, asserting the gate blocks until the last one is met | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes** |
@@ -97,6 +97,22 @@ E2E_WORKER_PASSWORD=…
 
 Specs that lack their credentials skip rather than fail, so a partial setup
 still gives a green, honest run.
+
+### One sign-in per run
+
+`e2e/auth.setup.ts` is a setup project that logs in once and saves the session
+to `e2e/.auth/` (gitignored); the portal specs reuse it via `storageState`.
+
+This matters more than it looks. Logging in per test was ~40 sign-ins a run
+across the three browser projects, which Supabase Auth rate-limits — and the
+failure is invisible, because `loginAction` maps *every* `signInWithPassword`
+error to "Incorrect email or password." The symptom was a spec partway through
+the run finding itself back on `/login` for no reason anything on the page
+could explain. It also cut the suite from 9.2 to 3.8 minutes.
+
+One consequence worth knowing: any spec that signs out needs its own session,
+because `signOut` ends the session it is called on. The sign-out spec logs in
+separately for exactly that reason.
 
 ### Sandboxes with a pre-installed Chromium
 
@@ -233,9 +249,12 @@ when upgrading.
 
 ## Known gaps
 
-- No tests for `packages/supabase-queries`. Its functions each take a
-  `SupabaseClient`, so they are straightforward to test against a stub — the
-  cheapest coverage still on the table.
+- `packages/supabase-queries` is only partly covered: `seriousResolveGate` has
+  unit tests (`apps/mobile/src/lib/resolveGate.test.ts` — it runs in the mobile
+  Jest project because that is where a runner already exists), but the query
+  wrappers themselves don't. They each take a `SupabaseClient`, so they are
+  straightforward to test against a stub — the cheapest coverage still on the
+  table.
 - No accessibility audit. `@axe-core/playwright` would slot into the Tier 1
   specs directly.
 - Native mobile paths are untested: `expo-camera` (QR scan),

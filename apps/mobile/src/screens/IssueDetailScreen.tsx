@@ -30,7 +30,7 @@ import {
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
   getSiteAssignees, SiteAssignee, unmergeSnag,
   getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation, escalateSnag,
-  getSnagRca, SnagRca, getSnagDebriefs, SnagDebrief,
+  getSnagRca, SnagRca, RcaStatus, getSnagDebriefs, SnagDebrief,
   seriousResolveGate, ResolveGateCondition,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
@@ -164,22 +164,36 @@ const GATE_COPY: Record<ResolveGateCondition['key'], Omit<GateCondition, 'unmet'
   },
 };
 
-// The two states that aren't gate conditions — an RCA out for review, and the
-// investigation not loaded yet — are handled here rather than in the shared
-// gate, since neither is something update_snag_status checks.
+// Two states sit outside the shared gate. An open RCA is refused by
+// update_snag_status above its resolved block rather than inside it, so it
+// isn't one of the gate's conditions; and "not loaded yet" isn't a state the
+// server has an opinion about at all.
 function computeGate(
   status: SnagStatus | undefined,
   inv: InvestigationState | null,
   notifiableDecided: boolean,
+  rcaStatus?: RcaStatus,
+  rcaWithName?: string | null,
 ): GateCondition[] {
   if (status === 'rca_pending') {
+    // Submitted and waiting on you, versus out with someone else, ask
+    // different things of the reader — and only one of them is an action they
+    // can take right now. Saying "submitted" for an assigned analysis sent a
+    // supervisor looking for a review that didn't exist yet.
+    const submitted = rcaStatus === 'submitted';
     return [{
       unmet: true,
-      title: 'Review the 5 Whys',
-      detail: 'The analysis has been submitted and is waiting on you to accept it or send it back.',
+      title: submitted ? 'Review the 5 Whys' : 'Waiting on the 5 Whys analysis',
+      detail: submitted
+        ? 'The analysis has been submitted and is waiting on you to accept it or send it back.'
+        : rcaWithName
+        ? `It's with ${rcaWithName}. This can't close until the analysis is submitted and accepted.`
+        : "This can't close until the analysis is submitted and accepted.",
       cta: 'Open the analysis',
       stepKey: 'rca',
-      blockReason: 'RCA in progress — accept or reject it first',
+      blockReason: submitted
+        ? 'The analysis is waiting on your review'
+        : 'An analysis is in progress — accept or reject it first',
     }];
   }
   if (!inv) {
@@ -214,8 +228,11 @@ function computeResolveBlockReason(
   status: SnagStatus | undefined,
   inv: InvestigationState | null,
   notifiableDecided: boolean,
+  rcaStatus?: RcaStatus,
+  rcaWithName?: string | null,
 ): string | null {
-  return computeGate(status, inv, notifiableDecided).find((c) => c.unmet)?.blockReason ?? null;
+  return computeGate(status, inv, notifiableDecided, rcaStatus, rcaWithName)
+    .find((c) => c.unmet)?.blockReason ?? null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -447,7 +464,8 @@ export default function IssueDetailScreen() {
   // the seeding effect below already treats it as step one. `remaining`
   // counts only real gate conditions, so the locked Resolve row stays
   // truthful about what's actually blocking closure.
-  const gate = computeGate(issue?.status, investigation, notifiableDecided);
+  const rcaWithName = rcaState ? orgMembers.find((m) => m.id === rcaState.assignedTo)?.name ?? null : null;
+  const gate = computeGate(issue?.status, investigation, notifiableDecided, rcaState?.status, rcaWithName);
   const gateRemaining = gate.filter((c) => c.unmet).length;
   const firstUnmet = gate.find((c) => c.unmet);
   const nextStep: NextStep | null = firstUnmet
@@ -933,7 +951,7 @@ export default function IssueDetailScreen() {
                   severity={issue.severity}
                   owner={issue.owner ?? null}
                   assignees={siteAssignees}
-                  resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided)}
+                  resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
                   isPublicSubmission={issue.is_public_submission ?? false}
                   onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
                 />
@@ -950,7 +968,7 @@ export default function IssueDetailScreen() {
               severity={issue.severity}
               owner={issue.owner ?? null}
               assignees={siteAssignees}
-              resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided)}
+              resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
               isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
             />

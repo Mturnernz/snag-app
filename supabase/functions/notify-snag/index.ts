@@ -9,7 +9,11 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const INTERNAL_SECRET = Deno.env.get("SNAG_INTERNAL_SECRET");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const FROM_ADDRESS = Deno.env.get("SNAG_FROM_ADDRESS") ?? "Snag <onboarding@resend.dev>";
-const APP_URL = Deno.env.get("SNAG_APP_URL") ?? "https://snagv1.netlify.app";
+// The supervisor portal. Every link this function sends now points at its
+// /go/snag/<id> handoff rather than at a client directly — see the comment on
+// `go()` below. The app's own URL moved with that decision: /go is what knows
+// where to send someone, so NEXT_PUBLIC_SNAG_APP_URL lives in apps/web now.
+const PORTAL_URL = Deno.env.get("SNAG_PORTAL_URL") ?? "https://snag-app-website.netlify.app";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -92,7 +96,7 @@ async function sendOverdueActionsDigest(orgId: string) {
     `${overdue.length} overdue corrective action${overdue.length === 1 ? "" : "s"}`,
     `The following corrective action${
       overdue.length === 1 ? " is" : "s are"
-    } overdue:\n\n${lines}\n\nReview them here: ${APP_URL}`
+    } overdue:\n\n${lines}\n\nReview them here: ${PORTAL_URL}/dashboard`
   );
 }
 
@@ -120,17 +124,26 @@ Deno.serve(async (req: Request) => {
   const { data: snag } = await supabase.from("snags").select("*").eq("id", snag_id).maybeSingle();
   if (!snag) return new Response("ok");
 
-  // Both clients route `/snags/:id` and both accept `?step=`, so one link
-  // works whichever SNAG_APP_URL points at: the Expo web build resolves it
-  // through its linking config (and `snag://` deep-links the installed app),
-  // and apps/web's portal opens the matching section.
+  // Every per-snag mail points at the same handoff, which decides per visitor:
+  // a supervisor is sent straight into the portal, everyone else is offered the
+  // app. Choosing a client per *event* cannot work here — `serious_created` is
+  // one email to a whole site's members, whose roles are mixed, and RCAs are
+  // usually assigned to workers, who the portal refuses outright.
   //
-  // `rcaLink` used to be `/snags/<id>/rca` — a path neither client has ever
-  // had a route for. It didn't 404 loudly, either: the web build is
-  // `output: "single"`, so it served the app shell and dropped the reader on
-  // the Report tab with no sign anything had gone wrong.
-  const link = `${APP_URL}/snags/${snag_id}`;
-  const rcaLink = `${APP_URL}/snags/${snag_id}?step=rca`;
+  // These used to point straight at the app, and the RCA ones at
+  // `/snags/<id>/rca` — a path no client has ever had a route for. It never
+  // failed loudly: the app's web build is `output: "single"`, so it served the
+  // app shell and dropped the reader on the Report tab.
+  const go = (step?: string) =>
+    `${PORTAL_URL}/go/snag/${snag_id}${step ? `?step=${step}` : ""}`;
+
+  const link = go();
+  // Lands on the analysis rather than the top of the snag it hangs off.
+  const rcaLink = go("rca");
+  // The notifiable decision is the first thing update_snag_status checks and
+  // the one with a statutory clock on it, so a "serious incident reported"
+  // mail opens there.
+  const seriousLink = go("notifiable");
 
   if (event === "serious_created") {
     const { data: members } = await supabase
@@ -143,7 +156,7 @@ Deno.serve(async (req: Request) => {
     await sendEmail(
       emails,
       `Heads up — ${snag.kind} reported (${snag.reference})`,
-      `A ${snag.kind} was just reported.\n\n${snag.description ?? ""}\n\nSee it here: ${link}`
+      `A ${snag.kind} was just reported.\n\n${snag.description ?? ""}\n\nSee it here: ${seriousLink}`
     );
   } else if (event === "niggle_assigned" && snag.owner_id) {
     const email = await emailOf(snag.owner_id);

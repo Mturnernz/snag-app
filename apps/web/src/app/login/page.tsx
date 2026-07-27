@@ -1,13 +1,18 @@
 import Link from 'next/link';
 import { Button } from '@/components/Button';
+import { safeNextPath } from '@/lib/nextPath';
 import { loginAction } from './actions';
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
+  // Validated here as well as in the action: this value is echoed into the
+  // page, so an unchecked one would be reflected content as well as a
+  // redirect target.
+  const returnTo = safeNextPath(next);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -21,6 +26,7 @@ export default async function LoginPage({
         </p>
 
         <form action={loginAction}>
+          {returnTo && <input type="hidden" name="next" value={returnTo} />}
           <div className="field">
             <label htmlFor="email">Email</label>
             <input id="email" name="email" type="email" required autoComplete="email" autoFocus />

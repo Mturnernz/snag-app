@@ -209,6 +209,22 @@ unless it's a one-off simple `select`.
 - TypeScript strict mode — no `any` except for Supabase row shapes
 - Import order: React → React Native → Expo → third-party → local (types, lib, components)
 
+## Notification links and the handoff
+
+Every per-snag notification `supabase/functions/notify-snag` sends points at
+**`<portal>/go/snag/<id>[?step=]`**, never at a client directly.
+
+That route (`apps/web/src/app/go/snag/[id]/page.tsx`, deliberately *outside*
+the `(portal)` group) decides per visitor: a supervisor or officer admin is
+redirected straight into the portal, and everyone else is offered the app.
+Choosing a client per *event* cannot work — `serious_created` is one email to a
+whole site's members, whose roles are mixed, and RCAs are usually assigned to
+workers, whom the portal refuses outright.
+
+A signed-out supervisor is sent to `/login?next=<portal path>` so the snag
+survives the login round trip. `next` is validated by `src/lib/nextPath.ts` —
+same-origin paths only, or it's an open redirect on a domain people trust.
+
 ## Deep links
 
 Both clients route **`/snags/:id`**, and both accept **`?step=`** naming one

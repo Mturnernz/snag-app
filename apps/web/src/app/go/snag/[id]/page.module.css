@@ -1,0 +1,85 @@
+.wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-2xl);
+  text-align: center;
+}
+
+.mark {
+  display: block;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.12em;
+  font-size: var(--text-sm);
+  color: var(--color-primary);
+  margin-bottom: var(--space-xl);
+}
+
+.title {
+  font-size: var(--text-2xl);
+  margin: 0 0 var(--space-sm);
+}
+
+.lead {
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-2xl);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+
+.appAction {
+  width: 100%;
+}
+
+.scheme {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.scheme:hover {
+  color: var(--color-primary);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0;
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.link {
+  color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+}

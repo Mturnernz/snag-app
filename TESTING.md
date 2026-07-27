@@ -6,6 +6,7 @@
 |---|---|---|---|
 | 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens, and the shared serious-lane resolve gate (its ordering pinned against `update_snag_status`). Jest, no browser, no network | none | no |
 | 1 | `apps/web/e2e/public.spec.ts` — every public route, both themes, three viewports, no horizontal overflow, no failed subresources | none | no |
+| 1 | `apps/web/e2e/handoff.spec.ts` — `/go/snag/[id]` is public, offers the app, carries a valid `?step=` and drops an invalid one, remembers the snag through login, 404s a malformed id, and refuses an off-site `?next=`. Its supervisor pass-through spec is Tier 2 | none (one spec needs `E2E_EMAIL`) | no |
 | 1 | `apps/web/e2e/auth-gate.spec.ts` — portal routes redirect anonymously; export routes reject GET and refuse anonymous POST | none | no |
 | 1 | `apps/mobile/e2e/auth.spec.ts` — auth screen renders, password masked, bad credentials rejected, both join paths reachable | none | no |
 | 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused, plus the snag detail page: sections start collapsed and the next step opens the one it names, the notifiable question offers both answers, Resolve is stated as blocked, every counted evidence item renders, the 5 Whys are asked one at a time | `E2E_EMAIL`/`E2E_PASSWORD` | no |

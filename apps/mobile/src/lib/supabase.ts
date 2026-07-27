@@ -692,6 +692,11 @@ export type InvestigationState = queries.InvestigationState;
 // Drives the live progress display and the serious-lane resolve gate.
 export const getInvestigationState = (snagId: string) => queries.getInvestigationState(supabase, snagId);
 
+// The gate itself is pure and shared with apps/web, so the two clients can't
+// disagree about what's outstanding or what order to do it in.
+export type ResolveGateCondition = queries.ResolveGateCondition;
+export const seriousResolveGate = queries.seriousResolveGate;
+
 // ─── Corrective actions (CAPA) ────────────────────────────────────────────────
 // create_corrective_action/complete_corrective_action are supervisor/admin-or-
 // owner actions on a serious snag; verify_corrective_action is deliberately

@@ -244,4 +244,6 @@ when upgrading.
 - Tier 3 covers the serious lane only. The niggle lane's own path (report →
   assign → `resolve_snag`) and the RCA/debrief flows are still uncovered.
 - The web portal's snag detail page is a separate implementation from the
-  mobile screen and has no coverage beyond "the page renders".
+  mobile screen. It now has three read-only specs (the notifiable question, the
+  stated resolve gate, evidence rendering), but its RCA, debrief, and corrective
+  -action sections are still uncovered.

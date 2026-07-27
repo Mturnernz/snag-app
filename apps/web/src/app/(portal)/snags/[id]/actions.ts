@@ -86,7 +86,11 @@ export async function addCommentAction(formData: FormData) {
   redirect(`/snags/${snagId}`);
 }
 
-export async function toggleNotifiableAction(formData: FormData) {
+// Named for what it records, not what it flips: the portal now asks the
+// question and stores the answer, so "toggle" no longer describes it. Either
+// answer stamps notifiable_marked_at server-side, which is what satisfies the
+// resolve gate.
+export async function setNotifiableDecisionAction(formData: FormData) {
   await requireSupervisorOrAdmin();
   const supabase = await createClient();
   const snagId = String(formData.get('snagId') ?? '');

@@ -66,8 +66,82 @@ test.describe('portal (supervisor/admin)', () => {
     }
 
     await firstLink.click();
-    await expect(page).toHaveURL(/\/snags\/[0-9a-f-]{36}/);
+    // Longer than the default: this is usually the first request to
+    // /snags/[id] in a run, and the dev server compiles the route on demand.
+    // At 10s it failed on the compile rather than on the navigation.
+    await expect(page).toHaveURL(/\/snags\/[0-9a-f-]{36}/, { timeout: 45_000 });
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  });
+
+  // The snag detail page had no coverage beyond "the row opens it". These
+  // three assert the properties it was actually getting wrong, and all of them
+  // are state-aware: which snags an org has is not something a read-only spec
+  // gets to choose, so each looks for its subject and annotates out if the org
+  // has nothing in that state.
+  test.describe('snag detail', () => {
+    /** Opens snags until one matches, or annotates and returns null. */
+    async function findSnagWhere(
+      page: import('@playwright/test').Page,
+      predicate: (body: string) => boolean,
+      what: string,
+    ): Promise<string | null> {
+      await page.goto('/snags');
+      const links = await page.locator('main a[href^="/snags/"]').evaluateAll(
+        (els) => els.map((e) => (e as HTMLAnchorElement).getAttribute('href')!)
+      );
+      for (const href of links.slice(0, 12)) {
+        await page.goto(href);
+        const body = await page.locator('main').innerText();
+        if (predicate(body)) return body;
+      }
+      test.info().annotations.push({ type: 'note', description: `no snag with ${what} visible to this account` });
+      return null;
+    }
+
+    test('an undecided serious snag asks the notifiable question both ways', async ({ page }) => {
+      // The portal used to offer one button, "Mark notifiable". Recording "no"
+      // — which update_snag_status requires before resolving — meant flagging
+      // a notifiable event and retracting it.
+      const body = await findSnagWhere(page, (b) => /Notifiable: undecided/.test(b), 'an undecided notifiable decision');
+      if (!body) return;
+
+      await expect(page.getByText('Does this need reporting to WorkSafe?')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Yes — notifiable' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'No', exact: true })).toBeVisible();
+    });
+
+    test('Resolve is stated as blocked rather than offered', async ({ page }) => {
+      // Same property the mobile screen asserts: while the gate is closed the
+      // page names the outstanding condition instead of offering an action the
+      // server will refuse with a raw Postgres exception.
+      const body = await findSnagWhere(page, (b) => /Resolve is blocked/.test(b), 'a blocked resolve gate');
+      if (!body) return;
+
+      expect(body, 'the blocked line should name what is outstanding').toMatch(
+        /Resolve is blocked — (decide|finish|add|record|close)/i
+      );
+      await expect(page.getByRole('button', { name: /^Resolve$/ })).toBeHidden();
+    });
+
+    test('caption-only evidence is visible, not silently dropped', async ({ page }) => {
+      // Mobile's evidence sheet accepts a caption with no photo, and
+      // add_evidence_item stores an empty media path for it. The portal
+      // rendered thumbnails only, so those items vanished while the heading
+      // above them still counted them.
+      const body = await findSnagWhere(
+        page,
+        (b) => /Evidence \((\d+)\)/.test(b) && !/Evidence \(0\)/.test(b),
+        'any evidence recorded',
+      );
+      if (!body) return;
+
+      const count = Number(body.match(/Evidence \((\d+)\)/)![1]);
+      const rendered = await page.locator('[data-evidence-item]').count();
+      expect(
+        rendered,
+        `the heading counts ${count} evidence item(s); every one of them must render`
+      ).toBe(count);
+    });
   });
 
   test('reports page loads and does not auto-fire an export', async ({ page }) => {

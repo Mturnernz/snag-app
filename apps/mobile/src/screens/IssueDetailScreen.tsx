@@ -31,6 +31,7 @@ import {
   getSiteAssignees, SiteAssignee, unmergeSnag,
   getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation, escalateSnag,
   getSnagRca, SnagRca, getSnagDebriefs, SnagDebrief,
+  seriousResolveGate, ResolveGateCondition,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -118,10 +119,54 @@ interface GateCondition {
   blockReason: string;
 }
 
-// Mirrors the serious-lane resolve gate in update_snag_status. This is the one
-// place that ordering lives: both the Next-step card and ManageIssuePanel's
-// blocked-reason line read from it, so they can never disagree about what's
-// outstanding.
+/**
+ * How each shared gate condition is presented here: the imperative title and
+ * detail the Next-step card needs, and which card its CTA opens. The condition
+ * itself — whether it's unmet, and what order it's checked in — comes from
+ * seriousResolveGate, shared with apps/web so the two can't drift.
+ */
+const GATE_COPY: Record<ResolveGateCondition['key'], Omit<GateCondition, 'unmet' | 'blockReason'>> = {
+  notifiable: {
+    title: 'Decide if this is notifiable',
+    detail: "Does it meet WorkSafe's threshold? A notifiable event has to be reported as soon as possible, and the site preserved.",
+    cta: 'Make the call',
+    stepKey: 'notifiable',
+  },
+  checklist: {
+    title: 'Finish the first-response checklist',
+    detail: 'Make safe, preserve the scene, capture evidence, identify witnesses, find the cause.',
+    cta: 'Open the checklist',
+    stepKey: 'checklist',
+  },
+  witnesses: {
+    title: 'Add a witness statement',
+    detail: 'Record what someone who was there saw, in their words.',
+    cta: 'Add a witness',
+    stepKey: 'witnesses',
+  },
+  evidence: {
+    title: 'Capture evidence',
+    detail: 'Photos of the scene, the equipment, and anything that explains how this happened.',
+    cta: 'Add evidence',
+    stepKey: 'evidence',
+  },
+  rootCause: {
+    title: 'Record the root cause',
+    detail: 'What actually caused this — not what went wrong, but why it could.',
+    cta: 'Record root cause',
+    stepKey: 'rootCause',
+  },
+  correctiveActions: {
+    title: 'Close the corrective actions',
+    detail: 'Each one needs completing and verifying before this can close.',
+    cta: 'Open corrective actions',
+    stepKey: 'correctiveActions',
+  },
+};
+
+// The two states that aren't gate conditions — an RCA out for review, and the
+// investigation not loaded yet — are handled here rather than in the shared
+// gate, since neither is something update_snag_status checks.
 function computeGate(
   status: SnagStatus | undefined,
   inv: InvestigationState | null,
@@ -149,58 +194,19 @@ function computeGate(
   }
 
   const done = inv.completedSteps.length;
-  return [
-    {
-      // First, matching the server: the most time-critical thing on a serious
-      // snag, and the one with a statutory clock attached.
-      unmet: !notifiableDecided,
-      title: 'Decide if this is notifiable',
-      detail: "Does it meet WorkSafe's threshold? A notifiable event has to be reported as soon as possible, and the site preserved.",
-      cta: 'Make the call',
-      stepKey: 'notifiable',
-      blockReason: 'Decide if this is a notifiable event',
-    },
-    {
-      unmet: done < 5,
-      title: 'Finish the first-response checklist',
-      detail: `${done} of 5 steps done — make safe, preserve the scene, capture evidence, identify witnesses, find the cause.`,
-      cta: 'Open the checklist',
-      stepKey: 'checklist',
-      blockReason: `Finish the checklist (${done}/5)`,
-    },
-    {
-      unmet: inv.witnesses.length === 0,
-      title: 'Add a witness statement',
-      detail: 'Record what someone who was there saw, in their words.',
-      cta: 'Add a witness',
-      stepKey: 'witnesses',
-      blockReason: 'Add a witness statement',
-    },
-    {
-      unmet: inv.evidence.length === 0,
-      title: 'Capture evidence',
-      detail: 'Photos of the scene, the equipment, and anything that explains how this happened.',
-      cta: 'Add evidence',
-      stepKey: 'evidence',
-      blockReason: 'Add evidence',
-    },
-    {
-      unmet: !inv.rootCause || !inv.rootCause.trim(),
-      title: 'Record the root cause',
-      detail: 'What actually caused this — not what went wrong, but why it could.',
-      cta: 'Record root cause',
-      stepKey: 'rootCause',
-      blockReason: 'Record a root cause',
-    },
-    {
-      unmet: inv.openCorrectiveActions > 0,
-      title: 'Close the corrective actions',
-      detail: `${inv.openCorrectiveActions} still open — each needs completing and verifying.`,
-      cta: 'Open corrective actions',
-      stepKey: 'correctiveActions',
-      blockReason: 'Close corrective actions',
-    },
-  ];
+  return seriousResolveGate(inv, notifiableDecided).map((c) => {
+    const copy = GATE_COPY[c.key];
+    return {
+      ...copy,
+      unmet: c.unmet,
+      blockReason: c.reason,
+      // Two conditions read better with the count the card already knows.
+      detail:
+        c.key === 'checklist' ? `${done} of 5 steps done — ${copy.detail.toLowerCase()}`
+        : c.key === 'correctiveActions' ? `${inv.openCorrectiveActions} still open — each needs completing and verifying.`
+        : copy.detail,
+    };
+  });
 }
 
 /** The first unmet gate condition — the reason Resolve is blocked, or null. */

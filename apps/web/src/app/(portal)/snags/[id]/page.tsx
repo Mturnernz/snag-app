@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import {
   getSnagRca, getSnagDebriefs, getInvestigationState, getCorrectiveActions,
   getSnagAuditLog, describeAuditAction, getSiteAssignees, getOrgMembers, getEvidencePhotoUrl,
+  resolveBlockReason,
   type SiteAssignee,
 } from '@snag/supabase-queries';
 import {
@@ -12,11 +13,11 @@ import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { Card, EmptyState } from '@/components/Card';
 import { Button } from '@/components/Button';
-import { StatusBadge, KindBadge, SeverityBadge, NotifiableBadge } from '@/components/Badge';
+import { Badge, StatusBadge, KindBadge, SeverityBadge, NotifiableBadge } from '@/components/Badge';
 import Icon, { type IconName } from '@/components/Icon';
 import {
   changeStatusAction, resolveNiggleAction, assignOwnerAction, recategoriseAction,
-  addCommentAction, toggleNotifiableAction, unmergeAction,
+  addCommentAction, setNotifiableDecisionAction, unmergeAction,
 } from './actions';
 import {
   completeChecklistStepAction, addWitnessStatementAction, addEvidenceAction, setRootCauseAction,
@@ -50,7 +51,7 @@ export default async function SnagDetailPage({
 
   const { data: snag } = await supabase
     .from('snags_with_details')
-    .select('id, reference, description, status, kind, lane, severity, site_id, site_name, owner_id, owner_name, reporter_name, created_at, is_notifiable, parent_snag_id, child_count')
+    .select('id, reference, description, status, kind, lane, severity, site_id, site_name, owner_id, owner_name, reporter_name, created_at, is_notifiable, notifiable_marked_at, parent_snag_id, child_count')
     .eq('id', id)
     .maybeSingle();
 
@@ -79,6 +80,11 @@ export default async function SnagDetailPage({
   const completedDebriefs = debriefs.filter((d) => d.status !== 'in_progress');
   const remainingChecklist = CHECKLIST_STEPS.filter((s) => !investigation?.completedSteps.includes(s));
 
+  // Decided is not the same as notifiable: `notifiable_marked_at` is stamped by
+  // either answer, and only an answered snag can be resolved.
+  const notifiableDecided = snag.is_notifiable === true || snag.notifiable_marked_at !== null;
+  const blockReason = investigation ? resolveBlockReason(investigation, notifiableDecided) : null;
+
   return (
     <div style={{ maxWidth: 760 }}>
       <div className={styles.header}>
@@ -88,7 +94,11 @@ export default async function SnagDetailPage({
           <StatusBadge status={snag.status as SnagStatus} />
           <KindBadge kind={snag.kind as SnagKind} />
           {snag.severity && <SeverityBadge severity={snag.severity as SnagSeverity} />}
-          {snag.is_notifiable && <NotifiableBadge />}
+          {snag.is_notifiable
+            ? <NotifiableBadge />
+            : snag.notifiable_marked_at
+            ? <Badge>Not notifiable</Badge>
+            : isSerious && <Badge tone="primary">Notifiable: undecided</Badge>}
         </div>
         <p className={styles.description}>{snag.description ?? '(no description)'}</p>
         <p className={styles.meta}>
@@ -111,16 +121,41 @@ export default async function SnagDetailPage({
               <Button type="submit" variant="secondary">Unmerge</Button>
             </form>
           )}
-          {isSerious && (
-            <form action={toggleNotifiableAction}>
-              <input type="hidden" name="snagId" value={snag.id} />
-              <input type="hidden" name="value" value={(!snag.is_notifiable).toString()} />
-              <Button type="submit" variant="secondary">
-                {snag.is_notifiable ? 'Unmark notifiable' : 'Mark notifiable'}
-              </Button>
-            </form>
-          )}
         </div>
+
+        {/* The notifiable decision, as a question with two answers rather than
+            a one-way toggle. As a toggle the only control on an undecided snag
+            read "Mark notifiable", so recording "no" — which update_snag_status
+            requires before this can be resolved — meant claiming a notifiable
+            event first and retracting it, leaving a marked_notifiable entry in
+            the audit log that never happened. */}
+        {isSerious && (
+          <Card style={{ marginBottom: 'var(--space-lg)' }}>
+            <p className={styles.subheading}>Does this need reporting to WorkSafe?</p>
+            {notifiableDecided ? (
+              <>
+                <p className={styles.decision}>
+                  {snag.is_notifiable
+                    ? 'Flagged as notifiable — it has to be reported as soon as possible, and the site preserved.'
+                    : 'Reviewed and recorded as not notifiable.'}
+                </p>
+                <NotifiableButton snagId={snag.id} value={!snag.is_notifiable} label={
+                  snag.is_notifiable ? "This isn't notifiable after all" : 'Actually, this is notifiable'
+                } />
+              </>
+            ) : (
+              <>
+                <p className={styles.decision}>
+                  Undecided. This has to be answered either way before the snag can be resolved.
+                </p>
+                <div className={styles.actionRow} style={{ marginBottom: 0 }}>
+                  <NotifiableButton snagId={snag.id} value={true} label="Yes — notifiable" variant="danger" />
+                  <NotifiableButton snagId={snag.id} value={false} label="No" />
+                </div>
+              </>
+            )}
+          </Card>
+        )}
 
         {snag.status !== 'resolved' && isNiggle && (
           <Card as="form" action={resolveNiggleAction} style={{ marginBottom: 'var(--space-lg)' }}>
@@ -134,7 +169,17 @@ export default async function SnagDetailPage({
         )}
         {snag.status !== 'resolved' && isSerious && (
           <div style={{ marginBottom: 'var(--space-lg)' }}>
-            <StatusButton snagId={snag.id} status="resolved" label="Resolve (requires completed investigation)" />
+            {blockReason ? (
+              // Named, not annotated. This used to be a live button labelled
+              // "Resolve (requires completed investigation)", so the only way to
+              // find out what was missing was to press it and read the raw
+              // Postgres exception the server raised.
+              <p className={styles.blocked}>
+                <Icon name="Lock" size="sm" /> Resolve is blocked — {blockReason.toLowerCase()}
+              </p>
+            ) : (
+              <StatusButton snagId={snag.id} status="resolved" label="Resolve" />
+            )}
           </div>
         )}
 
@@ -219,15 +264,23 @@ export default async function SnagDetailPage({
           <p className={styles.subheading}>Evidence ({investigation.evidence.length})</p>
           <div className={styles.evidenceGrid}>
             {investigation.evidence.map((e, i) => (
-              evidenceUrls[i] && (
-                <a key={e.id} href={evidenceUrls[i]!} target="_blank" rel="noreferrer">
+              evidenceUrls[i] ? (
+                <a key={e.id} data-evidence-item href={evidenceUrls[i]!} target="_blank" rel="noreferrer">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={evidenceUrls[i]!} alt={e.caption ?? 'Evidence'} className={styles.evidenceThumb} />
                 </a>
+              ) : (
+                // Caption-only evidence is a first-class record — the mobile
+                // sheet accepts one, and add_evidence_item stores an empty
+                // media path for it. Rendering only thumbnails dropped those
+                // items silently, so the count said 1 and the grid was empty.
+                <p key={e.id} data-evidence-item className={styles.evidenceNote}>
+                  {e.caption || 'Evidence (no caption)'}
+                </p>
               )
             ))}
           </div>
-          <Card as="form" action={addEvidenceAction} encType="multipart/form-data" padding="sm" style={{ marginBottom: 'var(--space-xl)' }}>
+          <Card as="form" action={addEvidenceAction} padding="sm" style={{ marginBottom: 'var(--space-xl)' }}>
             <input type="hidden" name="snagId" value={snag.id} />
             <div className="field">
               <label htmlFor="evidenceFile">File</label>
@@ -241,18 +294,25 @@ export default async function SnagDetailPage({
           </Card>
 
           <p className={styles.subheading}>Root cause</p>
-          {investigation.rootCause ? (
-            <p style={{ fontSize: 'var(--text-sm)' }}>{investigation.rootCause}</p>
-          ) : (
-            <Card as="form" action={setRootCauseAction} padding="sm">
-              <input type="hidden" name="snagId" value={snag.id} />
-              <div className="field">
-                <label htmlFor="rootCauseText">What caused this?</label>
-                <input id="rootCauseText" name="rootCauseText" type="text" required />
-              </div>
-              <Button type="submit" variant="secondary" size="sm">Save root cause</Button>
-            </Card>
-          )}
+          {/* Editable after the first save. set_root_cause upserts, and an
+              investigation's understanding of the cause is exactly the thing
+              that changes as evidence comes in. */}
+          <Card as="form" action={setRootCauseAction} padding="sm">
+            <input type="hidden" name="snagId" value={snag.id} />
+            <div className="field">
+              <label htmlFor="rootCauseText">What caused this?</label>
+              <input
+                id="rootCauseText"
+                name="rootCauseText"
+                type="text"
+                required
+                defaultValue={investigation.rootCause ?? ''}
+              />
+            </div>
+            <Button type="submit" variant="secondary" size="sm">
+              {investigation.rootCause ? 'Update root cause' : 'Save root cause'}
+            </Button>
+          </Card>
         </Section>
       )}
 
@@ -548,6 +608,20 @@ function StatusButton({ snagId, status, label }: { snagId: string; status: SnagS
       <input type="hidden" name="snagId" value={snagId} />
       <input type="hidden" name="status" value={status} />
       <Button type="submit" variant="secondary">{label}</Button>
+    </form>
+  );
+}
+
+function NotifiableButton({
+  snagId, value, label, variant = 'secondary',
+}: {
+  snagId: string; value: boolean; label: string; variant?: 'secondary' | 'danger';
+}) {
+  return (
+    <form action={setNotifiableDecisionAction}>
+      <input type="hidden" name="snagId" value={snagId} />
+      <input type="hidden" name="value" value={value.toString()} />
+      <Button type="submit" variant={variant}>{label}</Button>
     </form>
   );
 }

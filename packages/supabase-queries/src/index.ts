@@ -309,6 +309,53 @@ export async function getInvestigationState(client: SupabaseClient, snagId: stri
   };
 }
 
+export type ResolveGateKey =
+  | 'notifiable' | 'checklist' | 'witnesses' | 'evidence' | 'rootCause' | 'correctiveActions';
+
+export interface ResolveGateCondition {
+  key: ResolveGateKey;
+  unmet: boolean;
+  /** Why Resolve is refused while this is outstanding, in the user's terms. */
+  reason: string;
+}
+
+/**
+ * The serious-lane resolve gate, in `update_snag_status`'s own order.
+ *
+ * The server refuses `resolved` until every one of these is satisfied and
+ * raises on the first it finds, so a client that guesses a different order
+ * tells people to do the wrong thing next. It lives here rather than in either
+ * app because both of them need it and they were drifting: mobile disabled
+ * Resolve and named the blocking condition, while the portal offered a live
+ * button annotated "(requires completed investigation)" and surfaced the raw
+ * Postgres exception when the server refused.
+ *
+ * The notifiable decision leads. It isn't enforced by the older conditions'
+ * logic — it's a separate check added later — but it's first in the server
+ * function and it's the one with a statutory clock on it.
+ */
+export function seriousResolveGate(
+  inv: InvestigationState,
+  notifiableDecided: boolean,
+): ResolveGateCondition[] {
+  return [
+    { key: 'notifiable', unmet: !notifiableDecided, reason: 'Decide if this is a notifiable event' },
+    { key: 'checklist', unmet: inv.completedSteps.length < 5, reason: `Finish the checklist (${inv.completedSteps.length}/5)` },
+    { key: 'witnesses', unmet: inv.witnesses.length === 0, reason: 'Add a witness statement' },
+    { key: 'evidence', unmet: inv.evidence.length === 0, reason: 'Add evidence' },
+    { key: 'rootCause', unmet: !inv.rootCause?.trim(), reason: 'Record a root cause' },
+    { key: 'correctiveActions', unmet: inv.openCorrectiveActions > 0, reason: 'Close corrective actions' },
+  ];
+}
+
+/** The first unmet condition's reason — why Resolve is refused, or null. */
+export function resolveBlockReason(
+  inv: InvestigationState,
+  notifiableDecided: boolean,
+): string | null {
+  return seriousResolveGate(inv, notifiableDecided).find((c) => c.unmet)?.reason ?? null;
+}
+
 // ─── Corrective actions (CAPA) ─────────────────────────────────────────────
 
 export async function getCorrectiveActions(client: SupabaseClient, snagId: string): Promise<CorrectiveAction[]> {

@@ -202,3 +202,33 @@
     flex-direction: column;
   }
 }
+
+.decision {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-md);
+}
+
+/* Resolve while the gate is closed: a statement, not a control. Muted rather
+   than an error — nothing has gone wrong, there is just work outstanding. */
+.blocked {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  margin: 0;
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.evidenceNote {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-background);
+  border-radius: var(--radius-button);
+}

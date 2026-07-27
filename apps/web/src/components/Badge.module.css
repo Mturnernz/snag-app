@@ -16,35 +16,35 @@
 
 .badge[data-variant='primary'] {
   background: var(--color-primary-light);
-  color: var(--color-primary);
+  color: var(--color-primary-fg);
 }
 
 .badge[data-variant='success'] {
   background: var(--color-success-bg);
-  color: var(--color-success);
+  color: var(--color-success-fg);
 }
 
 .badge[data-variant='danger'] {
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-fg);
 }
 
 .badge[data-variant='flagged'] {
   background: var(--color-status-flagged-bg);
-  color: var(--color-status-flagged);
+  color: var(--color-status-flagged-fg);
 }
 
 .badge[data-variant='in-progress'] {
   background: var(--color-status-in-progress-bg);
-  color: var(--color-status-in-progress);
+  color: var(--color-status-in-progress-fg);
 }
 
 .badge[data-variant='resolved'] {
   background: var(--color-status-resolved-bg);
-  color: var(--color-status-resolved);
+  color: var(--color-status-resolved-fg);
 }
 
 .badge[data-variant='rca-pending'] {
   background: var(--color-status-rca-pending-bg);
-  color: var(--color-status-rca-pending);
+  color: var(--color-status-rca-pending-fg);
 }

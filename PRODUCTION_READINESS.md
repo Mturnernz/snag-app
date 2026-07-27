@@ -18,7 +18,7 @@ Where a claim here is measured, it says so. Where it's reasoning, it says that t
 | Live data | 3 active orgs · 6 users · 42 snags (22 serious) |
 | Mobile | Expo SDK 54, RN 0.81.5, React 19.1.0 |
 | Portal | Next.js 16, React 19.1.0 |
-| Tests | 49 unit · 116 web E2E · 24 mobile E2E, plus an opt-in write-path suite |
+| Tests | 49 unit · 149 web E2E (34 of them accessibility) · 24 mobile E2E, plus an opt-in write-path suite |
 | CI | 5 jobs on every PR and push to `main`, green |
 
 The repo had **zero automated tests** three days ago. That is the single biggest
@@ -270,17 +270,60 @@ showing two fields at once — but that is reasoning, not evidence. Folds into D
    `resolve_snag` and the niggle assign flow are untested end to end.
 2. **The portal's debrief and corrective-action sections** have no coverage beyond
    rendering.
-3. **No accessibility audit.** `@axe-core/playwright` would slot straight into the
-   Tier 1 specs. This is the cheapest real coverage still on the table.
-4. **`packages/supabase-queries` is only partly tested** — the resolve gate has unit
+3. **`packages/supabase-queries` is only partly tested** — the resolve gate has unit
    tests; the query wrappers don't. They each take a `SupabaseClient`, so a stub is
    straightforward.
-5. **`notify-snag` has no test coverage at all.** No tier touches edge functions, and
+4. **`notify-snag` has no test coverage at all.** No tier touches edge functions, and
    there's no Deno in CI. Its links are now verified by hand only.
-6. **Test data accumulates in `SNAG QA`.** By design — the org exists to be
+5. **Test data accumulates in `SNAG QA`.** By design — the org exists to be
    disposable — but it will grow with every Tier 3 run.
 
 ---
+
+## 8a. Accessibility — audited and fixed
+
+`@axe-core/playwright` now runs WCAG 2.1 A/AA against every public route, the
+handoff, and the portal's dashboard, snags, reports and detail pages, in all
+three viewport projects. **34 specs, passing.**
+
+The first run failed 10 of 12 routes — every one of them `color-contrast`, and
+nothing else. No missing labels, no broken focus order, no unlabelled controls.
+The structure was sound; the palette wasn't.
+
+**What was wrong.** The design tokens are Tailwind's default greys and status
+hues, which are chosen to look right, not to pass AA on their own tints:
+
+| | Measured | Required |
+|---|---|---|
+| `--color-text-muted` `#9CA3AF` on the app background | **2.43:1** | 4.5:1 |
+| `in_progress` badge — `#F59E0B` on `#FFFBEB` | **2.07:1** | 4.5:1 |
+| `resolved` badge — `#10B981` on `#ECFDF5` | **2.41:1** | 4.5:1 |
+| Mobile's "NEXT STEP" label on a white card | **2.15:1** | 4.5:1 |
+| `flagged`, `rca_pending`, `danger`, `success`, active nav link | 3.2–4.3:1 | 4.5:1 |
+
+The in-progress badge is the one that decided it. On a health-and-safety
+product, the label telling someone whether a hazard is being dealt with is not
+decoration — and 2.07:1 is not a rounding error.
+
+**The fix, and why it is shaped this way.** A colour and *that colour as text on
+its own tint* are different jobs, so they are now different tokens: base hues
+(dots, icons, rails, button backgrounds — WCAG's 3:1 non-text threshold) keep
+their values, and new `*-fg` / `*Fg` tokens carry the darker shade used for
+label text. The brand blue `#2563EB` is untouched; only its text-on-tint
+variant changed.
+
+The two lower text tiers shifted down a step (`secondary` `#6B7280` → `#4B5563`,
+`muted` `#9CA3AF` → `#6B7280`) because AA leaves no room for a lighter muted on
+a near-white ground — `#6B7280` is about the lightest grey that passes at all.
+That is a visible change across both apps, and it is the one judgement here
+most worth a second opinion. Reverting is two token values.
+
+Dark theme largely passed already; only `--color-text-muted` needed a nudge, and
+only because it failed on `--color-surface-raised` specifically.
+
+**Caveat worth keeping:** axe catches roughly a third of real accessibility
+issues. A green run is a floor, not a certificate — it says nothing about screen
+-reader flow, or about using this one-handed in gloves.
 
 ## 9. Standing hazards worth remembering
 

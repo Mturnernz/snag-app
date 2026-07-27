@@ -102,7 +102,8 @@
 
 .navLink[data-active='true'] {
   background: var(--color-primary-light);
-  color: var(--color-primary);
+  /* -fg, not -primary: the brand blue on its own tint is 4.24:1, just under AA. */
+  color: var(--color-primary-fg);
 }
 
 .footer {

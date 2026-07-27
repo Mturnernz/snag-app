@@ -79,7 +79,10 @@ All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or 
 - **Border**: `#E5E7EB` (1px) — used on flat/nested surfaces (rows inside lists)
 - **Elevation**: use the `Shadow` scale (`sm`/`md`/`lg`) for standalone surfaces instead of borders — `sm` for list cards, `md` for standalone cards (stats, invite code, comments), `lg` for hero/sticky bars and modals/dialogs. An elevated card drops its border; don't combine both on the same surface.
 - **Primary accent**: `#2563EB` (Tailwind blue-600)
-- **Text**: primary `#111827`, secondary `#6B7280`, muted `#9CA3AF`
+- **Text**: primary `#111827`, secondary `#4B5563`, muted `#6B7280` — the two lower tiers
+  are deliberately darker than the Tailwind greys they look like: at WCAG AA (4.5:1) there
+  is no room for a lighter muted on this background. `apps/web/e2e/a11y.spec.ts` fails if
+  either regresses.
 - **Card radius**: 12px | **Button radius**: 8px | **Chip radius**: 4px
 - **Icons**: `@expo/vector-icons` (Ionicons) via the shared `Icon` component — never emoji/unicode glyphs. `-outline` variants by default; filled reserved for the active tab, active vote, and the serious-lane header icon. Size from the `IconSize` scale.
 - **Priority badges**: only `high` carries an alert colour (`Colors.priority.high`); `low`/`medium` render as neutral dots — this avoids colliding with status badge colours.

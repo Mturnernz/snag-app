@@ -24,7 +24,12 @@ test.describe('portal (supervisor/admin)', () => {
 
   test.beforeEach(async ({ page }) => {
     await login(page, EMAIL!, PASSWORD!);
-    await expect(page, 'login should land on the dashboard').toHaveURL(/\/dashboard/);
+    // Signing in is a server action plus a Supabase round-trip, so it needs more
+    // than the default expect timeout on a loaded machine — otherwise the whole
+    // authenticated suite flakes on timing rather than on behaviour.
+    await expect(page, 'login should land on the dashboard').toHaveURL(/\/dashboard/, {
+      timeout: 45_000,
+    });
   });
 
   test('dashboard renders stats without errors', async ({ page }) => {

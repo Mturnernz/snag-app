@@ -13,5 +13,10 @@
     "test:mobile": "npm run test --workspace=apps/mobile",
     "test": "npm run test:mobile && npm run test:e2e && npm run test:e2e:mobile",
     "test:e2e:mobile": "npm run test:e2e --workspace=apps/mobile"
+  },
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-test-renderer": "19.1.0"
   }
 }

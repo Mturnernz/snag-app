@@ -1,4 +1,26 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
+
+// Expo loads .env.local then .env for the bundle, but not for this process, so
+// the E2E_* credentials would sit in the file while the authenticated specs
+// silently skipped. Same precedence as Expo: .env.local wins, real environment
+// variables win over both.
+//
+// Resolved from cwd rather than the config's own path: Playwright transpiles
+// this file to CJS, where import.meta is unavailable. Both `npx playwright test`
+// run here and `npm run test:e2e --workspace=apps/mobile` put cwd at this
+// directory.
+for (const file of ['.env.local', '.env']) {
+  try {
+    for (const line of readFileSync(resolve(process.cwd(), file), 'utf8').split('\n')) {
+      const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
+      if (m && !(m[1] in process.env)) process.env[m[1]] = m[2];
+    }
+  } catch {
+    // No such file — fine, the specs skip themselves without credentials.
+  }
+}
 
 // Browser-level specs for the Expo app, rendered through react-native-web.
 //

@@ -149,14 +149,21 @@ the real, fully-verified TLS hop to Supabase.
 
 ```bash
 NODE_USE_ENV_PROXY=1 node scripts/supabase-relay.mjs   # listens on :8090
-# then point the app at it — Metro inlines EXPO_PUBLIC_* at bundle time, and
-# .env takes precedence over shell vars, so edit .env rather than exporting:
-#   EXPO_PUBLIC_SUPABASE_URL=http://localhost:8090
-npx expo start --web --clear
 ```
 
-Restore the real URL in `.env` afterwards. This is local test scaffolding only —
-never a deployment path, and unnecessary on a normal machine with direct egress.
+Then point the bundle at it. Metro inlines `EXPO_PUBLIC_*` at bundle time and
+**a shell variable will not override `.env`** — exporting one silently does
+nothing. Expo loads `.env.local` before `.env`, so put the override there and
+leave `.env` alone:
+
+```bash
+echo 'EXPO_PUBLIC_SUPABASE_URL=http://localhost:8090' >> apps/mobile/.env.local
+npx expo start --web --clear     # --clear matters; the old bundle is cached
+```
+
+`.env.local` is gitignored, and deleting that line restores normal behaviour.
+This is local test scaffolding only — never a deployment path, and unnecessary on
+a machine with direct egress.
 
 ## Network access
 
@@ -182,13 +189,28 @@ A `200` means the gate specs are meaningful. Anything else (or a `CONNECT tunnel
 failed`) means they are passing vacuously, and the Tier 2 specs will fail to log
 in no matter how correct the app is.
 
+## Pinned React version
+
+The root `package.json` has an `overrides` block pinning `react`, `react-dom`, and
+`react-test-renderer` to `19.1.0`. Both apps already depend on `19.1.0` exactly,
+but a transitive peer range is enough for npm to hoist a newer `react` to the
+root while `react-dom` stays put — and a mismatched pair breaks the
+react-native-web bundle at runtime with `Incompatible React versions`, which
+surfaces as a blank page rather than a build error. Keep the three in lockstep
+when upgrading.
+
 ## Known gaps
 
 - No favicon: there is no `public/` directory and no `src/app/icon.*`, so every
   page load 404s on the browser's implicit `/favicon.ico` request. The Tier 1
   specs filter that one un-attributable console line; adding an icon lets the
   filter go.
-- No unit tests. There is no runner installed for `packages/supabase-queries`,
-  which is where pure, fast tests would pay off most.
+- No tests for `packages/supabase-queries`. Its functions each take a
+  `SupabaseClient`, so they are straightforward to test against a stub — the
+  cheapest coverage still on the table.
 - No accessibility audit. `@axe-core/playwright` would slot into the Tier 1
   specs directly.
+- Native mobile paths are untested: `expo-camera` (QR scan),
+  `expo-image-picker`/`-manipulator` (`PhotoPicker`), `expo-file-system`. These
+  need a device via Expo Go.
+- No Tier 3 write-path coverage yet. The `SNAG QA` org exists for it.

@@ -692,6 +692,9 @@ export const setNotifiableFlag = (snagId: string, value: boolean) =>
 
 export type InvestigationState = queries.InvestigationState;
 
+/** Photo vs. document — evidence accepts both. */
+export const isImageEvidence = queries.isImageEvidence;
+
 // Reads the five investigation tables for a serious snag — all org-scoped by RLS.
 // Drives the live progress display and the serious-lane resolve gate.
 export const getInvestigationState = (snagId: string) => queries.getInvestigationState(supabase, snagId);
@@ -745,7 +748,7 @@ export const nominateNotifyingPcbu = (snagId: string, orgId: string | null, note
   queries.nominateNotifyingPcbu(supabase, snagId, orgId, note);
 
 // ─── Debriefs ───────────────────────────────────────────────────────────────────
-export const startDebrief = (snagId: string, format: 'hot' | 'formal') => queries.startDebrief(supabase, snagId, format);
+export const startDebrief = (snagId: string) => queries.startDebrief(supabase, snagId);
 
 export const addDebriefFinding = (debriefId: string, findingText: string) =>
   queries.addDebriefFinding(supabase, debriefId, findingText);

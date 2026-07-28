@@ -29,7 +29,7 @@ export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged, 
   const { showToast } = useToast();
   const [debriefs, setDebriefs] = useState<SnagDebrief[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [starting, setStarting] = useState<'hot' | 'formal' | null>(null);
+  const [starting, setStarting] = useState(false);
 
   // Per-in-progress-debrief input state, keyed by debrief id so several
   // debriefs' forms don't collide (any number of debriefs are allowed).
@@ -60,12 +60,12 @@ export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged, 
     return orgMembers.find((m) => m.id === profileId)?.name ?? 'Unknown';
   }
 
-  async function handleStart(format: 'hot' | 'formal') {
-    setStarting(format);
-    const { error } = await startDebrief(issueId, format);
-    setStarting(null);
+  async function handleStart() {
+    setStarting(true);
+    const { error } = await startDebrief(issueId);
+    setStarting(false);
     if (error) showToast(error.message ?? 'Could not start the debrief');
-    else { showToast(`${format === 'hot' ? 'Hot' : 'Formal'} debrief started`); fetchDebriefs(); onChanged(); }
+    else { showToast('Debrief started'); fetchDebriefs(); onChanged(); }
   }
 
   async function handleAddFinding(debriefId: string) {
@@ -109,23 +109,18 @@ export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged, 
 
   return (
     <>
-      {canEdit && (
-        <View style={styles.startRow}>
-          <Button
-            label="Start hot debrief"
-            variant="outline"
-            onPress={() => handleStart('hot')}
-            loading={starting === 'hot'}
-            style={styles.flex1}
-          />
-          <Button
-            label="Start formal debrief"
-            variant="outline"
-            onPress={() => handleStart('formal')}
-            loading={starting === 'formal'}
-            style={styles.flex1}
-          />
-        </View>
+      {/* One button, and only while there is nothing to open. A snag has at
+          most one debrief (enforced by a unique index); the two-format picker
+          this replaced started a new one on every tap, and one snag in
+          production reached thirteen. */}
+      {canEdit && debriefs.length === 0 && (
+        <Button
+          label="Start debrief"
+          variant="outline"
+          onPress={handleStart}
+          loading={starting}
+          fullWidth
+        />
       )}
 
       {debriefs.length === 0 ? (
@@ -137,7 +132,7 @@ export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged, 
           return (
             <View key={d.id} style={styles.debriefBlock}>
               <View style={styles.debriefHeaderRow}>
-                <Text style={styles.debriefFormat}>{d.format === 'hot' ? 'Hot debrief' : 'Formal debrief'}</Text>
+                <Text style={styles.debriefFormat}>Debrief</Text>
                 <Text style={styles.debriefMeta}>
                   {inProgress ? 'In progress' : 'Completed'} · started by {nameOf(d.startedBy)}
                 </Text>
@@ -228,7 +223,6 @@ export default function DebriefPanel({ issueId, canEdit, orgMembers, onChanged, 
 const styles = StyleSheet.create({
   hint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
 
-  startRow: { flexDirection: 'row', gap: Spacing.sm },
   flex1: { flex: 1 },
 
   debriefBlock: {

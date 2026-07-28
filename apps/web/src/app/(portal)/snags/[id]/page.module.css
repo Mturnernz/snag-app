@@ -357,3 +357,26 @@
     flex-direction: column;
   }
 }
+
+/* Evidence that isn't a picture: a link that opens the file, rather than an
+   <img> pointed at a PDF. */
+.evidenceFile {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--color-primary-fg);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidenceFile:hover {
+  border-color: var(--color-primary);
+}

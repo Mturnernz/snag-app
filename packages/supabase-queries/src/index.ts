@@ -245,6 +245,7 @@ export interface DebriefLesson {
 
 export interface SnagDebrief {
   id: string;
+  /** Historic only: debriefs used to be hot or formal. New ones don't ask. */
   format: 'hot' | 'formal';
   status: 'in_progress' | 'completed';
   startedBy: string;
@@ -698,6 +699,19 @@ export async function uploadSnagEvidenceFile(
   return { path: data.path, error: null };
 }
 
+/**
+ * Whether an evidence item should render as a picture or as a file to open.
+ *
+ * Evidence has always accepted any file the storage bucket would take — the
+ * portal's upload is a plain file input — but both clients rendered every item
+ * with a URL as an <img>. A PDF therefore appeared as a broken image icon, and
+ * the thing someone had attached as proof was unopenable.
+ */
+export function isImageEvidence(path: string | null | undefined): boolean {
+  if (!path) return false;
+  return /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(path.split('?')[0]);
+}
+
 export async function getEvidencePhotoUrl(client: SupabaseClient, path: string): Promise<string | null> {
   const { data, error } = await client.storage.from(SNAG_EVIDENCE_BUCKET).createSignedUrl(path, 60 * 60);
   if (error || !data) return null;
@@ -762,8 +776,11 @@ export async function escalateSnag(client: SupabaseClient, snagId: string) {
 
 // ─── Debrief mutations ──────────────────────────────────────────────────────
 
-export async function startDebrief(client: SupabaseClient, snagId: string, format: 'hot' | 'formal') {
-  return client.rpc('start_debrief', { p_snag_id: snagId, p_format: format });
+// Idempotent: returns the existing debrief if there is one. A snag has at most
+// one, enforced by a unique index — the old two-argument form let each tap of
+// the hot/formal selector start another, and one snag reached 13.
+export async function startDebrief(client: SupabaseClient, snagId: string) {
+  return client.rpc('start_debrief', { p_snag_id: snagId });
 }
 
 export async function addDebriefFinding(client: SupabaseClient, debriefId: string, findingText: string) {

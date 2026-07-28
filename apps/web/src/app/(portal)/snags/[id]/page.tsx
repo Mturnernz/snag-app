@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import {
   getSnagRca, getSnagDebriefs, getInvestigationState, getCorrectiveActions,
   getSnagAuditLog, describeAuditAction, getSiteAssignees, getOrgMembers, getEvidencePhotoUrl,
+  isImageEvidence,
   seriousResolveGate,
   type SiteAssignee, type ResolveGateKey, type SnagRca,
 } from '@snag/supabase-queries';
@@ -342,10 +343,24 @@ export default async function SnagDetailPage({
           >
             <div className={styles.evidenceGrid}>
               {investigation.evidence.map((e, i) => (
-                evidenceUrls[i] ? (
+                evidenceUrls[i] && isImageEvidence(e.media_path) ? (
                   <a key={e.id} data-evidence-item href={evidenceUrls[i]!} target="_blank" rel="noreferrer">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={evidenceUrls[i]!} alt={e.caption ?? 'Evidence'} className={styles.evidenceThumb} />
+                  </a>
+                ) : evidenceUrls[i] ? (
+                  // A document, not a picture. Rendering it as an <img> gave a
+                  // broken-image icon and no way to open what was attached.
+                  <a
+                    key={e.id}
+                    data-evidence-item
+                    className={styles.evidenceFile}
+                    href={evidenceUrls[i]!}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Icon name="FileText" size="sm" />
+                    {e.caption || e.media_path.split('/').pop()}
                   </a>
                 ) : (
                   // Caption-only evidence is a first-class record — the mobile
@@ -361,7 +376,7 @@ export default async function SnagDetailPage({
             <Card as="form" action={addEvidenceAction} padding="sm">
               <input type="hidden" name="snagId" value={snag.id} />
               <div className="field">
-                <label htmlFor="evidenceFile">Photo</label>
+                <label htmlFor="evidenceFile">Photo or document</label>
                 <input id="evidenceFile" name="file" type="file" required />
               </div>
               <div className="field">
@@ -491,7 +506,7 @@ export default async function SnagDetailPage({
             {activeDebrief ? (
               <Card>
                 <p className={styles.recordName}>
-                  {activeDebrief.format === 'hot' ? 'Hot debrief' : 'Formal debrief'} — in progress
+                  Debrief — in progress
                 </p>
 
                 <p className={styles.subheading}>Findings</p>
@@ -536,17 +551,10 @@ export default async function SnagDetailPage({
                 </form>
               </Card>
             ) : (
-              <Card as="form" action={startDebriefAction} padding="sm">
-                <div className="field">
-                  <input type="hidden" name="snagId" value={snag.id} />
-                  <label htmlFor="format">Format</label>
-                  <select id="format" name="format" defaultValue="hot">
-                    <option value="hot">Hot debrief</option>
-                    <option value="formal">Formal debrief</option>
-                  </select>
-                </div>
+              <form action={startDebriefAction}>
+                <input type="hidden" name="snagId" value={snag.id} />
                 <Button type="submit" variant="secondary" size="sm">Start debrief</Button>
-              </Card>
+              </form>
             )}
 
             {completedDebriefs.length > 0 && (
@@ -554,7 +562,7 @@ export default async function SnagDetailPage({
                 {completedDebriefs.map((d) => (
                   <Card key={d.id} padding="sm">
                     <p className={styles.recordName}>
-                      {d.format === 'hot' ? 'Hot debrief' : 'Formal debrief'} · completed
+                      Debrief · completed
                     </p>
                     {d.findings.map((f) => <p key={f.id} className={styles.bullet}>{f.finding_text}</p>)}
                     {/* Lessons were collected and then never shown back. They

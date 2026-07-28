@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Linking, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 
 import { EvidenceItem } from '../types';
-import { InvestigationState, addEvidenceItem, getEvidencePhotoUrl } from '../lib/supabase';
+import { InvestigationState, addEvidenceItem, getEvidencePhotoUrl, isImageEvidence } from '../lib/supabase';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useToast } from '../hooks/useToast';
 import Button from './Button';
@@ -103,22 +103,39 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
 
 function EvidenceRow({ item }: { item: EvidenceItem }) {
   const [url, setUrl] = useState<string | null>(null);
+  // Evidence uploaded from the portal can be any file, not just a photo.
+  // Rendering a PDF through <Image> produced an empty box.
+  const isPicture = isImageEvidence(item.media_path);
+
   useEffect(() => {
     if (item.media_path) getEvidencePhotoUrl(item.media_path).then(setUrl);
   }, [item.media_path]);
 
-  return (
-    <View style={styles.row}>
-      {url ? (
+  const body = (
+    <>
+      {url && isPicture ? (
         <Image source={{ uri: url }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" />
       ) : (
         <View style={[styles.thumb, styles.thumbEmpty]}>
-          <Icon name="document-text-outline" size="md" color={Colors.textMuted} />
+          <Icon name="document-text-outline" size="md" color={url ? Colors.primary : Colors.textMuted} />
         </View>
       )}
-      <Text style={styles.caption} numberOfLines={2}>{item.caption || 'Evidence'}</Text>
-    </View>
+      <Text style={styles.caption} numberOfLines={2}>
+        {item.caption || (item.media_path ? item.media_path.split('/').pop() : 'Evidence')}
+      </Text>
+    </>
   );
+
+  // A document is worth opening; a photo is already visible in the row.
+  if (url && !isPicture) {
+    return (
+      <TouchableOpacity style={styles.row} onPress={() => Linking.openURL(url)} activeOpacity={0.7}>
+        {body}
+        <Icon name="open-outline" size="sm" color={Colors.textMuted} />
+      </TouchableOpacity>
+    );
+  }
+  return <View style={styles.row}>{body}</View>;
 }
 
 const styles = StyleSheet.create({

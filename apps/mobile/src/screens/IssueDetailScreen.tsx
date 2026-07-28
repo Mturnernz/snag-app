@@ -156,6 +156,20 @@ const GATE_COPY: Record<ResolveGateCondition['key'], Omit<GateCondition, 'unmet'
     cta: 'Open corrective actions',
     stepKey: 'correctiveActions',
   },
+  // Document mode: the org runs its own investigation process and evidences
+  // it with a file. These replace root cause and corrective actions above.
+  investigationDocument: {
+    title: 'Attach the investigation document',
+    detail: "This snag is using your organisation's own investigation process, so the completed document is what closes it.",
+    cta: 'Attach the document',
+    stepKey: 'rootCause',
+  },
+  documentAccepted: {
+    title: 'Accept the investigation document',
+    detail: 'A supervisor has to read it and sign it off — attaching a file is not the same as accepting the investigation.',
+    cta: 'Review the document',
+    stepKey: 'rootCause',
+  },
 };
 
 // Two states sit outside the shared gate. An open RCA is refused by

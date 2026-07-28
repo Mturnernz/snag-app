@@ -279,12 +279,19 @@ export async function getSnagDebriefs(client: SupabaseClient, snagId: string): P
 
 // ─── Investigation (serious lane) ──────────────────────────────────────────
 
+export type InvestigationMode = 'snag' | 'document';
+
 export interface InvestigationState {
   completedSteps: ChecklistStep[];
   witnesses: WitnessStatement[];
   evidence: EvidenceItem[];
   rootCause: string | null;
   openCorrectiveActions: number;
+  /** 'document' = the org runs its own process and evidences it with a file. */
+  mode: InvestigationMode;
+  leadInvestigatorId: string | null;
+  documentId: string | null;
+  documentAccepted: boolean;
 }
 
 // Reads the five investigation tables for a serious snag — all org-scoped by
@@ -294,7 +301,9 @@ export async function getInvestigationState(client: SupabaseClient, snagId: stri
     client.from('checklist_completions').select('step').eq('snag_id', snagId),
     client.from('witness_statements').select('*').eq('snag_id', snagId).order('taken_at', { ascending: true }),
     client.from('evidence_items').select('*').eq('snag_id', snagId).is('corrective_action_id', null).order('sort_index', { ascending: true }),
-    client.from('investigations').select('root_cause_text').eq('snag_id', snagId).maybeSingle(),
+    client.from('investigations')
+      .select('root_cause_text, mode, lead_investigator_id, document_id, document_accepted_at')
+      .eq('snag_id', snagId).maybeSingle(),
     // "Blocking" mirrors update_snag_status's resolve gate: done-but-unverified
     // still counts, so this pill can't show 0 while resolve is still blocked.
     client.from('corrective_actions').select('id', { count: 'exact', head: true })
@@ -307,11 +316,16 @@ export async function getInvestigationState(client: SupabaseClient, snagId: stri
     evidence: (evidenceRes.data ?? []) as EvidenceItem[],
     rootCause: (investigationRes.data as any)?.root_cause_text ?? null,
     openCorrectiveActions: actionsRes.count ?? 0,
+    mode: ((investigationRes.data as any)?.mode ?? 'snag') as InvestigationMode,
+    leadInvestigatorId: (investigationRes.data as any)?.lead_investigator_id ?? null,
+    documentId: (investigationRes.data as any)?.document_id ?? null,
+    documentAccepted: Boolean((investigationRes.data as any)?.document_accepted_at),
   };
 }
 
 export type ResolveGateKey =
-  | 'notifiable' | 'checklist' | 'witnesses' | 'evidence' | 'rootCause' | 'correctiveActions';
+  | 'notifiable' | 'checklist' | 'witnesses' | 'evidence' | 'rootCause' | 'correctiveActions'
+  | 'investigationDocument' | 'documentAccepted';
 
 export interface ResolveGateCondition {
   key: ResolveGateKey;
@@ -339,11 +353,26 @@ export function seriousResolveGate(
   inv: InvestigationState,
   notifiableDecided: boolean,
 ): ResolveGateCondition[] {
-  return [
+  const shared: ResolveGateCondition[] = [
     { key: 'notifiable', unmet: !notifiableDecided, reason: 'Decide if this is a notifiable event' },
     { key: 'checklist', unmet: inv.completedSteps.length < 5, reason: `Finish the checklist (${inv.completedSteps.length}/5)` },
     { key: 'witnesses', unmet: inv.witnesses.length === 0, reason: 'Add a witness statement' },
     { key: 'evidence', unmet: inv.evidence.length === 0, reason: 'Add evidence' },
+  ];
+
+  // An organisation running its own investigation process substitutes two
+  // conditions for the last two — it does not get fewer. Everything above is
+  // required either way.
+  if (inv.mode === 'document') {
+    return [
+      ...shared,
+      { key: 'investigationDocument', unmet: !inv.documentId, reason: 'Attach the investigation document' },
+      { key: 'documentAccepted', unmet: !inv.documentAccepted, reason: 'A supervisor must accept the investigation document' },
+    ];
+  }
+
+  return [
+    ...shared,
     { key: 'rootCause', unmet: !inv.rootCause?.trim(), reason: 'Record a root cause' },
     { key: 'correctiveActions', unmet: inv.openCorrectiveActions > 0, reason: 'Close corrective actions' },
   ];
@@ -772,6 +801,26 @@ export async function unwaiveRca(client: SupabaseClient, snagId: string) {
 // actually unsafe" — not a supervisor action. Open niggles only, once each.
 export async function escalateSnag(client: SupabaseClient, snagId: string) {
   return client.rpc('escalate_snag', { p_snag_id: snagId });
+}
+
+// ─── Investigation assignment and mode ──────────────────────────────────────
+
+export async function assignInvestigation(
+  client: SupabaseClient, snagId: string, assigneeId: string, mode: InvestigationMode
+) {
+  return client.rpc('assign_investigation', {
+    p_snag_id: snagId, p_assignee_id: assigneeId, p_mode: mode,
+  });
+}
+
+/** Always an org_documents row, whether it was already in the library or
+ *  uploaded for this investigation — one register, discoverable later. */
+export async function attachInvestigationDocument(client: SupabaseClient, snagId: string, documentId: string) {
+  return client.rpc('attach_investigation_document', { p_snag_id: snagId, p_document_id: documentId });
+}
+
+export async function acceptInvestigationDocument(client: SupabaseClient, snagId: string) {
+  return client.rpc('accept_investigation_document', { p_snag_id: snagId });
 }
 
 // ─── Debrief mutations ──────────────────────────────────────────────────────

@@ -23,6 +23,30 @@ function complete(): InvestigationState {
     evidence: [{ id: 'e1' } as any],
     rootCause: 'Racking was never re-rated for the heavier stock line.',
     openCorrectiveActions: 0,
+    mode: 'snag',
+    leadInvestigatorId: null,
+    documentId: null,
+    documentAccepted: false,
+  };
+}
+
+/** The same, but run through the organisation's own process. */
+function completeViaDocument(): InvestigationState {
+  return {
+    ...complete(),
+    rootCause: null,
+    mode: 'document',
+    documentId: 'doc-1',
+    documentAccepted: true,
+  };
+}
+
+/** Only the four shared conditions — nothing mode-specific done yet. */
+function bare(mode: 'snag' | 'document' = 'snag'): InvestigationState {
+  return {
+    completedSteps: [], witnesses: [], evidence: [], rootCause: null,
+    openCorrectiveActions: 0, mode, leadInvestigatorId: null,
+    documentId: null, documentAccepted: false,
   };
 }
 
@@ -50,19 +74,14 @@ describe('seriousResolveGate', () => {
     // A brand-new snag has every condition unmet. The one named must be the
     // notifiable decision — it is first in the server function and the only
     // one that can carry a duty to preserve the site.
-    const fresh: InvestigationState = {
-      completedSteps: [], witnesses: [], evidence: [], rootCause: null, openCorrectiveActions: 0,
-    };
+    const fresh: InvestigationState = bare();
     expect(resolveBlockReason(fresh, false)).toBe('Decide if this is a notifiable event');
   });
 
   it('names the first unmet condition and not merely any of them', () => {
     // Notifiable answered, checklist part-done, everything after it missing:
     // the checklist is what to do next, not the witness statement.
-    const partial: InvestigationState = {
-      completedSteps: ['make_safe', 'preserve_scene'], witnesses: [], evidence: [],
-      rootCause: null, openCorrectiveActions: 0,
-    };
+    const partial: InvestigationState = { ...bare(), completedSteps: ['make_safe', 'preserve_scene'] };
     expect(resolveBlockReason(partial, true)).toBe('Finish the checklist (2/5)');
   });
 
@@ -87,11 +106,45 @@ describe('seriousResolveGate', () => {
     });
   });
 
+  describe("document mode — the organisation's own investigation process", () => {
+    it('substitutes two conditions rather than removing them', () => {
+      // The point of the fork: it is a swap, not a shortcut. Everything up to
+      // and including evidence still applies.
+      expect(seriousResolveGate(completeViaDocument(), true).map((c) => c.key)).toEqual([
+        'notifiable', 'checklist', 'witnesses', 'evidence',
+        'investigationDocument', 'documentAccepted',
+      ]);
+    });
+
+    it('still demands the checklist, a witness and evidence', () => {
+      const gate = seriousResolveGate({ ...bare('document'), documentId: 'd', documentAccepted: true }, true);
+      expect(gate.filter((c) => c.unmet).map((c) => c.key)).toEqual(['checklist', 'witnesses', 'evidence']);
+    });
+
+    it('blocks until a document is attached', () => {
+      expect(resolveBlockReason({ ...completeViaDocument(), documentId: null, documentAccepted: false }, true))
+        .toBe('Attach the investigation document');
+    });
+
+    it('blocks until a supervisor accepts it — attaching is not accepting', () => {
+      expect(resolveBlockReason({ ...completeViaDocument(), documentAccepted: false }, true))
+        .toBe('A supervisor must accept the investigation document');
+    });
+
+    it('opens once the document is attached and accepted', () => {
+      expect(resolveBlockReason(completeViaDocument(), true)).toBeNull();
+    });
+
+    it('never asks for a root cause, which is what the document replaces', () => {
+      const keys = seriousResolveGate(completeViaDocument(), true).map((c) => c.key);
+      expect(keys).not.toContain('rootCause');
+      expect(keys).not.toContain('correctiveActions');
+    });
+  });
+
   it('counts every outstanding condition, not just the first', () => {
     // What the locked "Resolve — blocked, N steps remaining" row reads from.
-    const nothingDone: InvestigationState = {
-      completedSteps: [], witnesses: [], evidence: [], rootCause: null, openCorrectiveActions: 2,
-    };
+    const nothingDone: InvestigationState = { ...bare(), openCorrectiveActions: 2 };
     expect(seriousResolveGate(nothingDone, false).filter((c) => c.unmet)).toHaveLength(6);
   });
 });

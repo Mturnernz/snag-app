@@ -18,14 +18,58 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+/**
+ * Every request gets a deadline, because supabase-js gives none of them one.
+ *
+ * Phone connections don't fail cleanly — a request goes out and is simply never
+ * answered. Without a timeout that `fetch` stays pending for the life of the
+ * page, and one particular case poisons the whole client: supabase-js resolves
+ * an access token before *every* request, and if the token needs refreshing it
+ * awaits `/auth/v1/token`. A stalled refresh means `getSession()` never settles,
+ * so no later call is ever issued at all.
+ *
+ * That failure is invisible from every angle. Nothing reaches the server, so
+ * there's nothing in the logs; nothing rejects, so no error is shown; the app
+ * carries on rendering the data it already had. All the user sees is a button
+ * that spins forever — which is exactly how it was found.
+ *
+ * The deadlines differ by what's on the other end. Auth and data calls are
+ * small and quick. Uploads are not: an evidence photo on a bad site connection
+ * is slow rather than broken, and cutting it off at 20s would invent a failure
+ * where there wasn't one.
+ */
+const AUTH_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 20_000;
+const UPLOAD_TIMEOUT_MS = 60_000;
+
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  const ms = url.includes('/auth/v1/') ? AUTH_TIMEOUT_MS
+    : url.includes('/storage/v1/') ? UPLOAD_TIMEOUT_MS
+    : REQUEST_TIMEOUT_MS;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  // Don't drop a caller's own cancellation on the floor.
+  if (init?.signal) {
+    if (init.signal.aborted) controller.abort();
+    else init.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: fetchWithTimeout },
   auth: {
     storage: Platform.OS === 'web' ? undefined : AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: Platform.OS === 'web',
     // Disable Web Locks API on web — prevents "Lock broken by another request
-    // with the 'steal' option" AbortErrors on page load/reload.
+    // with the 'steal' option" AbortErrors on page load/reload. Note this also
+    // discards the acquire timeout, so the deadline above is the only thing
+    // bounding a stalled auth call.
     ...(Platform.OS === 'web' && {
       lock: <R,>(_name: string, _acquireTimeout: number, fn: () => Promise<R>) => fn(),
     }),

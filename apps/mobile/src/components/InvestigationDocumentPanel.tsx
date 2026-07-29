@@ -84,47 +84,56 @@ export default function InvestigationDocumentPanel({
     if (!title.trim()) { showToast('Give the document a title'); return; }
 
     setBusy(true);
-    const { path, error: uploadError } = await uploadOrgDocumentFromUri(
-      orgId, picked.uri, picked.name, picked.mimeType,
-    );
-    if (uploadError || !path) {
-      setBusy(false);
-      showToast(uploadError?.message ?? 'Upload failed');
-      return;
-    }
-    const { id, error: createError } = await createOrgDocument(path, title.trim(), 'investigation');
-    if (createError || !id) {
-      setBusy(false);
-      showToast(createError?.message ?? 'Could not file the document');
-      return;
-    }
-    const { error } = await attachInvestigationDocument(issueId, id);
-    setBusy(false);
-    if (error) { showToast(error.message ?? 'Could not attach the document'); return; }
+    try {
+      const { path, error: uploadError } = await uploadOrgDocumentFromUri(
+        orgId, picked.uri, picked.name, picked.mimeType,
+      );
+      if (uploadError || !path) { showToast(uploadError?.message ?? 'Upload failed'); return; }
 
-    showToast('Document attached');
-    closeSheet();
-    loadLibrary();
-    onChanged();
+      const { id, error: createError } = await createOrgDocument(path, title.trim(), 'investigation');
+      if (createError || !id) { showToast(createError?.message ?? 'Could not file the document'); return; }
+
+      const { error } = await attachInvestigationDocument(issueId, id);
+      if (error) { showToast(error.message ?? 'Could not attach the document'); return; }
+
+      showToast('Document attached');
+      closeSheet();
+      loadLibrary();
+      onChanged();
+    } catch (err: any) {
+      showToast(err?.message ?? 'Upload failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleAttachExisting(doc: OrgDocument) {
     setBusy(true);
-    const { error } = await attachInvestigationDocument(issueId, doc.id);
-    setBusy(false);
-    if (error) { showToast(error.message ?? 'Could not attach the document'); return; }
-    showToast('Document attached');
-    closeSheet();
-    onChanged();
+    try {
+      const { error } = await attachInvestigationDocument(issueId, doc.id);
+      if (error) { showToast(error.message ?? 'Could not attach the document'); return; }
+      showToast('Document attached');
+      closeSheet();
+      onChanged();
+    } catch (err: any) {
+      showToast(err?.message ?? 'Could not attach the document');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleAccept() {
     setBusy(true);
-    const { error } = await acceptInvestigationDocument(issueId);
-    setBusy(false);
-    if (error) { showToast(error.message ?? 'Could not accept the document'); return; }
-    showToast('Investigation accepted');
-    onChanged();
+    try {
+      const { error } = await acceptInvestigationDocument(issueId);
+      if (error) { showToast(error.message ?? 'Could not accept the document'); return; }
+      showToast('Investigation accepted');
+      onChanged();
+    } catch (err: any) {
+      showToast(err?.message ?? 'Could not accept the document');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleOpen() {

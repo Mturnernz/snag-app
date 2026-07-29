@@ -2,8 +2,8 @@ import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { File } from 'expo-file-system';
 import * as queries from '@snag/supabase-queries';
+import { readForUpload } from './uploadBody';
 import {
   Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
   ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction,
@@ -823,10 +823,9 @@ export const deleteOrgDocument = (documentId: string) => queries.deleteOrgDocume
  * Uploads a document the user picked from their device.
  *
  * The shared `uploadOrgDocumentFile` takes a browser `File`/`Blob`; here the
- * picker hands back a local URI, and the same constraint as photos applies —
- * `fetch(uri).blob()` produces something storage-js can't reliably read on
- * React Native and the API rejects it with a 400 before RLS is ever consulted.
- * So read it as an ArrayBuffer, exactly as uploadSnagPhoto does.
+ * picker hands back a local URI, which `readForUpload` turns into an
+ * ArrayBuffer the way the current platform allows — exactly as uploadSnagPhoto
+ * does.
  */
 export async function uploadOrgDocumentFromUri(
   orgId: string,
@@ -835,7 +834,7 @@ export async function uploadOrgDocumentFromUri(
   mimeType?: string | null,
 ): Promise<{ path: string | null; error: any }> {
   try {
-    const arrayBuffer = await new File(localUri).arrayBuffer();
+    const arrayBuffer = await readForUpload(localUri);
     const path = `${orgId}/${Date.now()}-${fileName}`;
     const { data, error } = await supabase.storage
       .from('org-documents')
@@ -962,11 +961,10 @@ export async function uploadSnagPhoto(
   bucket: string = SNAG_PHOTOS_BUCKET,
 ): Promise<{ path: string | null; error: any }> {
   try {
-    // fetch(localUri).blob() produces a Blob the storage-js upload can't
-    // reliably read on React Native, which the API rejects outright (400)
-    // before it ever reaches the bucket's RLS check — read the file as an
-    // ArrayBuffer instead.
-    const arrayBuffer = await new File(localUri).arrayBuffer();
+    // Reading the picked file is platform-specific — and a wrong read fails
+    // before any request is made, which looks like an upload failure with
+    // nothing in the Storage logs. See readForUpload.
+    const arrayBuffer = await readForUpload(localUri);
 
     const { data, error } = await supabase.storage
       .from(bucket)

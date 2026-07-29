@@ -179,8 +179,17 @@ onboarding, and the full report-a-snag screen (photo picker, type toggle, seriou
 
 Only 10 of the ~55 files under `src/` touch a native module, and 6 of those are
 `expo-haptics`, which no-ops harmlessly on web. The genuine gaps are
-`expo-camera` (QR scan), `expo-image-picker`/`expo-image-manipulator`
-(`PhotoPicker`), and `expo-file-system`. Those still need a device via Expo Go.
+`expo-camera` (QR scan) and `expo-file-system`, which have no web
+implementation at all — `expo-file-system`'s is a stub that warns and throws.
+Those still need a device via Expo Go.
+
+`expo-image-picker` and `expo-image-manipulator` are *not* in that list: both
+run on web, so the whole photo path up to the upload is exercisable in the
+browser. This page listed them as native-only for a long time, which is how
+`uploadSnagPhoto` came to read the picked file through `expo-file-system` — a
+change that fixed native and left every browser upload failing before it made a
+request (see `src/lib/uploadBody.ts`). The Netlify site is a shipped client, not
+a preview of one: a path that only works on a phone is a broken path.
 
 Note that rendering under react-native-web is real coverage but not equivalent
 coverage: layout, styling, navigation, and data flow transfer well; native
@@ -276,6 +285,12 @@ when upgrading.
   `apps/mobile/e2e/stalled-network.spec.ts`. Worth knowing because the failure
   is invisible to every other kind of test: only a stalled — not failed —
   request reproduces it.
+- **Uploads are platform-split and only one half is exercised.** Reading a
+  picked file needs `expo-file-system` on native and `fetch` on web, and using
+  the wrong one throws before any request is made — "Couldn't upload a photo",
+  Submit disabled, nothing in the Storage logs. `src/lib/uploadBody.test.ts`
+  pins which reader each platform gets; the byte path beyond it (a real photo
+  reaching a real bucket) is still device- and browser-only.
 - Native mobile paths are untested: `expo-camera` (QR scan),
   `expo-image-picker`/`-manipulator` (`PhotoPicker`), `expo-document-picker`
   (the document library's upload and the investigation-document attach),

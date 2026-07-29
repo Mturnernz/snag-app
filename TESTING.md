@@ -14,6 +14,7 @@
 | 2 | `apps/mobile/e2e/report.spec.ts` — worker signs in, report screen shows both lanes and the right org, tab bar, snags list | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/deep-link.spec.ts` — `/snags/:id` opens that snag from a cold load, `?step=` expands one section and leaves the rest collapsed, an unknown step is ignored, and navigating writes the URL back | `E2E_EMAIL`/`E2E_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/incident.spec.ts` — the serious-incident screen: next step above the fold, no empty photo block, Resolve stated as blocked, every collapsed card reports its state, the evidence sheet is usable, WorkSafe criteria stay behind their disclosure, composer starts collapsed | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
+| 2 | `apps/mobile/e2e/stalled-network.spec.ts` — a request that is issued and never answered must not leave a Save button spinning forever, and a stalled token refresh must not stop later requests being issued at all. The regression test for the bug in §Known gaps below | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
 | 2 | `apps/mobile/e2e/documents.spec.ts` — a worker can reach the org document register and add to it, the listing renders (or says it's empty), and allocating a serious snag prompts for the investigation mode with each option's consequence stated | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD`, plus `E2E_EMAIL`/`E2E_PASSWORD` for the mode spec | no |
 | 3 | `apps/web/e2e/documents.spec.ts` — the org document register end to end: upload, listing, signed-URL download of the actual bytes, then delete. Cleans up after itself (unlike snags, documents can be removed) | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes, self-cleaning** |
 | 3 | `apps/web/e2e/investigation-document.spec.ts` — document mode end to end: allocating with "our own process" swaps root cause + corrective actions for the document step while leaving everything before the fork intact, upload-and-attach files the document in the library, and the attacher is refused the Accept button rather than offered one that can only fail. Restores the snag to guided mode and deletes its probe document | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes, self-cleaning** |
@@ -263,6 +264,18 @@ when upgrading.
   table.
 - No accessibility audit. `@axe-core/playwright` would slot into the Tier 1
   specs directly.
+- **A stalled request used to wedge the whole client, silently.** supabase-js
+  puts no timeout on its own `fetch`, and it resolves an access token before
+  every request — so one `/auth/v1/token` refresh that was issued and never
+  answered left `getSession()` pending forever, after which no call was ever
+  issued at all. Nothing reached the server, so nothing was in the logs;
+  nothing rejected, so no error appeared; the loaded screen kept rendering. The
+  only symptom was a Save button spinning for good. Fixed by a per-request
+  deadline in `apps/mobile/src/lib/supabase.ts` (15s auth / 20s data / 60s
+  uploads) plus try/finally around the investigation saves, and pinned by
+  `apps/mobile/e2e/stalled-network.spec.ts`. Worth knowing because the failure
+  is invisible to every other kind of test: only a stalled — not failed —
+  request reproduces it.
 - Native mobile paths are untested: `expo-camera` (QR scan),
   `expo-image-picker`/`-manipulator` (`PhotoPicker`), `expo-document-picker`
   (the document library's upload and the investigation-document attach),

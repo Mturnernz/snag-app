@@ -38,11 +38,20 @@ export default function WitnessesPanel({ issueId, state, onChanged }: Props) {
       showToast('Add the witness name and their statement');
       return;
     }
+    // try/finally, not a bare await: a save that throws used to leave the
+    // button spinning with nothing said, which is indistinguishable from one
+    // still in flight. Whatever happens, the spinner stops and the user is
+    // told something.
     setSaving(true);
-    const { error } = await addWitnessStatement(issueId, name.trim(), text.trim());
-    setSaving(false);
-    if (error) showToast(error.message ?? 'Could not add witness statement');
-    else { close(); onChanged(); }
+    try {
+      const { error } = await addWitnessStatement(issueId, name.trim(), text.trim());
+      if (error) showToast(error.message ?? 'Could not add witness statement');
+      else { close(); onChanged(); }
+    } catch (err: any) {
+      showToast(err?.message ?? 'Could not add witness statement');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (

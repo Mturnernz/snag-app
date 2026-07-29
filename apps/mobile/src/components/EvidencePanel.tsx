@@ -49,12 +49,17 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
       return;
     }
     setSaving(true);
-    // add_evidence_item takes a single media_path; use the first photo (an
-    // empty string when this is a caption-only note).
-    const { error } = await addEvidenceItem(issueId, paths[0] ?? '', caption.trim() || null);
-    setSaving(false);
-    if (error) showToast(error.message ?? 'Could not add evidence');
-    else { close(); onChanged(); }
+    try {
+      // add_evidence_item takes a single media_path; use the first photo (an
+      // empty string when this is a caption-only note).
+      const { error } = await addEvidenceItem(issueId, paths[0] ?? '', caption.trim() || null);
+      if (error) showToast(error.message ?? 'Could not add evidence');
+      else { close(); onChanged(); }
+    } catch (err: any) {
+      showToast(err?.message ?? 'Could not add evidence');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (

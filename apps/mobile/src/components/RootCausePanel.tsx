@@ -35,10 +35,15 @@ export default function RootCausePanel({ issueId, state, onChanged }: Props) {
       return;
     }
     setSaving(true);
-    const { error } = await setRootCause(issueId, text.trim());
-    setSaving(false);
-    if (error) showToast(error.message ?? 'Could not save root cause');
-    else { showToast('Root cause recorded'); onChanged(); }
+    try {
+      const { error } = await setRootCause(issueId, text.trim());
+      if (error) showToast(error.message ?? 'Could not save root cause');
+      else { showToast('Root cause recorded'); onChanged(); }
+    } catch (err: any) {
+      showToast(err?.message ?? 'Could not save root cause');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (

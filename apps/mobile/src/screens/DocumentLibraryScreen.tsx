@@ -77,22 +77,24 @@ export default function DocumentLibraryScreen() {
     if (!title.trim()) { showToast('Give the document a title'); return; }
 
     setUploading(true);
-    const { path, error: uploadError } = await uploadOrgDocumentFromUri(
-      orgId, picked.uri, picked.name, picked.mimeType,
-    );
-    if (uploadError || !path) {
-      setUploading(false);
-      showToast(uploadError?.message ?? 'Upload failed');
-      return;
-    }
-    const { error } = await createOrgDocument(path, title.trim());
-    setUploading(false);
-    if (error) { showToast(error.message ?? 'Could not file the document'); return; }
+    try {
+      const { path, error: uploadError } = await uploadOrgDocumentFromUri(
+        orgId, picked.uri, picked.name, picked.mimeType,
+      );
+      if (uploadError || !path) { showToast(uploadError?.message ?? 'Upload failed'); return; }
 
-    showToast('Document added');
-    setPicked(null);
-    setTitle('');
-    load();
+      const { error } = await createOrgDocument(path, title.trim());
+      if (error) { showToast(error.message ?? 'Could not file the document'); return; }
+
+      showToast('Document added');
+      setPicked(null);
+      setTitle('');
+      load();
+    } catch (err: any) {
+      showToast(err?.message ?? 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function handleOpen(doc: OrgDocument) {

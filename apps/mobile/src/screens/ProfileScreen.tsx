@@ -272,6 +272,19 @@ export default function ProfileScreen() {
           </Card>
         </TouchableOpacity>
 
+        {/* The org's document register. All roles: the policies and procedures
+            kept here are the ones workers are expected to follow, and until now
+            they only existed in the portal, which workers can't reach. */}
+        <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('DocumentLibrary')}>
+          <Card variant="elevated" style={styles.mentionsCard}>
+            <View style={styles.mentionsRow}>
+              <Icon name="folder-open-outline" size="md" color={Colors.primary} />
+              <Text style={styles.mentionsTitle}>Documents</Text>
+              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+            </View>
+          </Card>
+        </TouchableOpacity>
+
         {/* Replay tutorial — all roles, not just workers. Opens the overview
             carousel as a modal; doesn't touch has_seen_onboarding. */}
         <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('OnboardingCarousel')}>

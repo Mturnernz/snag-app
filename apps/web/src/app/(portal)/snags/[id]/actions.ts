@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   updateSnagStatus, resolveSnag, assignSnagOwner, recategoriseSnag, addComment,
-  setNotifiableFlag, unmergeSnag,
+  setNotifiableFlag, unmergeSnag, assignInvestigation,
 } from '@snag/supabase-queries';
 import { SnagKind, SnagSeverity, SnagStatus } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
@@ -42,15 +42,36 @@ export async function resolveNiggleAction(formData: FormData) {
   redirect(`/snags/${snagId}`);
 }
 
+/**
+ * Allocating a snag. On the serious lane this is also where the investigation
+ * gets its mode and its lead.
+ *
+ * The prompt lives here rather than behind a separate "Assign investigation"
+ * button because allocating is when a supervisor is already deciding who deals
+ * with this — asking twice, in two places, is how a snag ends up with an owner
+ * and no investigator. The owner *is* the lead investigator: one person is
+ * accountable for the snag, and splitting the two roles buys nothing except a
+ * second thing to keep in sync.
+ *
+ * Mode is only sent when someone is actually named, because assign_investigation
+ * needs an assignee. Unassigning a serious snag therefore leaves the existing
+ * mode alone rather than silently reverting it to the guided process.
+ */
 export async function assignOwnerAction(formData: FormData) {
   await requireSupervisorOrAdmin();
   const supabase = await createClient();
   const snagId = String(formData.get('snagId') ?? '');
   const ownerId = String(formData.get('ownerId') ?? '') || null;
+  const modeRaw = String(formData.get('mode') ?? '');
   if (!snagId) return;
 
   const { error } = await assignSnagOwner(supabase, snagId, ownerId);
   if (error) fail(snagId, error.message);
+
+  if (ownerId && (modeRaw === 'snag' || modeRaw === 'document')) {
+    const { error: modeError } = await assignInvestigation(supabase, snagId, ownerId, modeRaw);
+    if (modeError) fail(snagId, modeError.message);
+  }
 
   revalidatePath(`/snags/${snagId}`);
   redirect(`/snags/${snagId}`);

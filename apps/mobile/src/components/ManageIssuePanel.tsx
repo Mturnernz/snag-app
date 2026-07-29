@@ -10,7 +10,8 @@ import {
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
-  updateSnagStatus, recategoriseSnag, assignSnagOwner, blockPublicReporter, resolveSnag, SiteAssignee,
+  updateSnagStatus, recategoriseSnag, assignSnagOwner, blockPublicReporter, resolveSnag,
+  assignInvestigation, SiteAssignee, InvestigationMode,
 } from '../lib/supabase';
 import { useToast } from '../hooks/useToast';
 import Card from './Card';
@@ -23,13 +24,29 @@ import ConfirmDialog from './ConfirmDialog';
 import ResolvedCheckmark from './ResolvedCheckmark';
 import OwnerPicker from './OwnerPicker';
 
-type EditingField = 'severity' | 'kind' | 'assignee' | null;
+type EditingField = 'severity' | 'kind' | 'assignee' | 'mode' | null;
 
 interface PendingUpdates {
   kind?: SnagKind;
   severity?: SnagSeverity | null;
   owner_id?: string | null;
+  mode?: InvestigationMode;
 }
+
+// Two genuinely different ways to run an investigation, so each option carries
+// its consequence — picking the second changes what closes the snag.
+const MODE_OPTIONS: { value: InvestigationMode; title: string; detail: string }[] = [
+  {
+    value: 'snag',
+    title: "SNAG's guided investigation",
+    detail: 'Root cause, then corrective actions, tracked in the app.',
+  },
+  {
+    value: 'document',
+    title: 'Our own process',
+    detail: 'Attach the completed investigation document. A second supervisor has to accept it before this snag can be resolved.',
+  },
+];
 
 interface Props {
   issueId: string;
@@ -40,6 +57,8 @@ interface Props {
   owner: { id: string; name: string } | null;
   /** Site-scoped assignees for the owner picker (site members/supervisors + admins). */
   assignees: SiteAssignee[];
+  /** Serious lane only: how this snag is being investigated. */
+  investigationMode?: InvestigationMode;
   /** Serious lane only: null = resolvable, otherwise the reason Resolve is
    *  blocked (e.g. "Checklist 2/5"). Ignored for niggles. */
   resolveBlockReason?: string | null;
@@ -50,7 +69,7 @@ interface Props {
 }
 
 export default function ManageIssuePanel({
-  issueId, status, lane, kind, severity, owner, assignees,
+  issueId, status, lane, kind, severity, owner, assignees, investigationMode = 'snag',
   resolveBlockReason = null, isPublicSubmission = false, onUpdated,
 }: Props) {
   const { showToast } = useToast();
@@ -120,6 +139,7 @@ export default function ManageIssuePanel({
   const shownOwner = pendingUpdates.owner_id !== undefined
     ? (pendingUpdates.owner_id ? assignees.find((m) => m.id === pendingUpdates.owner_id) ?? null : null)
     : owner;
+  const shownMode = pendingUpdates.mode ?? investigationMode;
 
   function stageUpdate(updates: PendingUpdates) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -149,6 +169,21 @@ export default function ManageIssuePanel({
     }
 
     const results = await Promise.all(calls);
+
+    // Sequenced after the owner change rather than alongside it:
+    // assign_investigation names the lead investigator, and on a snag being
+    // allocated in the same save that person is whoever was just picked.
+    const leadId = pendingUpdates.owner_id !== undefined ? pendingUpdates.owner_id : owner?.id ?? null;
+    if (pendingUpdates.mode !== undefined) {
+      if (!leadId) {
+        setSaving(false);
+        showToast("Pick an owner — they're the one running the investigation");
+        return;
+      }
+      const { error: modeError } = await assignInvestigation(issueId, leadId, pendingUpdates.mode);
+      if (modeError) results.push({ error: modeError });
+    }
+
     const error = results.find((r) => r.error)?.error ?? null;
     setSaving(false);
 
@@ -256,6 +291,55 @@ export default function ManageIssuePanel({
           currentOwnerId={shownOwner?.id ?? null}
           onSelect={(id) => stageUpdate({ owner_id: id })}
         />
+      )}
+
+      {/* Investigation mode — asked here, while someone is already deciding who
+          deals with this. Behind its own "Assign investigation" button it was a
+          second decision in a second place, which is how a snag ends up with an
+          owner and nobody running the investigation. */}
+      {shownIsSerious && isOpen && (
+        <>
+          <View style={styles.row}>
+            <Text style={styles.label}>Investigation</Text>
+            <TouchableOpacity onPress={() => toggleField('mode')} style={styles.currentChip}>
+              <Text style={styles.currentText}>
+                {shownMode === 'document' ? 'Our own process' : 'SNAG guided'}
+              </Text>
+              <Icon name={editingField === 'mode' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+          {editingField === 'mode' && (
+            <View style={styles.modeList}>
+              {MODE_OPTIONS.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.modeOption, shownMode === option.value && styles.modeOptionActive]}
+                  onPress={() => stageUpdate({ mode: option.value })}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: shownMode === option.value }}
+                >
+                  <Icon
+                    name={shownMode === option.value ? 'radio-button-on' : 'radio-button-off'}
+                    size="sm"
+                    color={shownMode === option.value ? Colors.primary : Colors.textMuted}
+                  />
+                  <View style={styles.modeOptionText}>
+                    <Text style={styles.modeOptionTitle}>{option.title}</Text>
+                    <Text style={styles.modeOptionDetail}>{option.detail}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {/* assign_investigation needs somebody to assign it to, so the mode
+              can't be saved on an unassigned snag. Said here rather than
+              surfaced later as a server error. */}
+          {pendingUpdates.mode !== undefined && !shownOwner && (
+            <Text style={styles.modeWarning}>
+              Choose an owner too — they&apos;re the one running the investigation.
+            </Text>
+          )}
+        </>
       )}
 
       {hasPendingChanges && (
@@ -389,6 +473,45 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textSecondary,
     fontWeight: Typography.medium,
+  },
+
+  // Full-width rows rather than chips: each option carries a sentence of
+  // consequence, which a horizontal chip strip has nowhere to put.
+  modeList: {
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  modeOption: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+    padding: Spacing.md,
+    borderRadius: Radius.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  modeOptionActive: {
+    backgroundColor: Colors.primaryLight,
+    borderColor: Colors.primary,
+  },
+  modeOptionText: { flex: 1 },
+  modeOptionTitle: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  modeOptionDetail: {
+    fontSize: Typography.xs,
+    color: Colors.textSecondary,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  modeWarning: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    marginBottom: Spacing.sm,
   },
 
   resolveSection: {

@@ -132,12 +132,67 @@ screens (mirrored in `packages/shared-types/src/index.ts`, shared by both apps).
 
 `snag_status` is `flagged | in_progress | resolved | rca_pending` — `resolved` is the single
 terminal status for both the niggle lane (fixit/improvement) and the serious lane
-(hazard/incident); serious snags can only reach it once the guided investigation
-(`update_snag_status`'s checklist/witness/evidence/root-cause/corrective-action checks) is
-complete. There is no separate "sorted" status — it was retired and collapsed into `resolved`.
+(hazard/incident); serious snags can only reach it once the investigation is complete
+(`update_snag_status`'s notifiable/checklist/witness/evidence checks, then whichever pair the
+investigation mode calls for — see below). There is no separate "sorted" status — it was retired
+and collapsed into `resolved`.
 
 Photos/evidence go to the `snag-photos` and `snag-evidence` Storage buckets (private,
-org-folder-scoped via RLS), not a public `issue-photos` bucket.
+org-folder-scoped via RLS), not a public `issue-photos` bucket. Org-wide documents live in
+`org-documents` / `org_documents` — see "The document library" below.
+
+## Investigation modes
+
+A serious snag is investigated one of two ways, chosen **when it is allocated**
+(`investigations.mode`, set by `assign_investigation`):
+
+| mode | what closes it |
+|---|---|
+| `snag` (default) | SNAG's guided process: a root cause, then corrective actions completed and verified. |
+| `document` | The organisation's own process: an investigation document is attached, and a supervisor **other than whoever attached it** accepts it. |
+
+This is a **substitution, not a shortcut**. Document mode swaps the last two resolve-gate
+conditions for two of its own; the notifiable decision, the first-response checklist, a witness
+statement and evidence are all still required. The fork lives in one place per layer:
+`update_snag_status` in SQL, `seriousResolveGate` in `packages/supabase-queries` (both clients read
+it), and one conditional section in each client's snag detail view.
+
+Accepting is deliberately a separate act from attaching, by a separate person —
+`accept_investigation_document` raises if the acceptor is `document_attached_by`, the same rule
+corrective actions already use for their verifier. Both clients hide the Accept button from the
+attacher rather than offering one that can only fail. **An organisation with exactly one
+supervisor and no admin cannot accept a document that supervisor attached** — have the assigned
+investigator attach it, or add a second supervisor.
+
+Replacing the document clears the acceptance: a different document is a different investigation.
+
+### Who can do what
+
+`require_investigation_access` (not `require_serious_snag`) gates the investigation writes, and
+draws the line at **doing versus directing**:
+
+- **Doing** — checklist, witness statements, evidence, root cause, attaching the document.
+  The assigned lead investigator (any role, including a worker), plus supervisors and admins.
+- **Directing** — assigning, accepting/rejecting an RCA, accepting the document, waiving,
+  creating corrective actions, starting a debrief. Supervisors and admins only.
+
+Before this split every investigation write required `can_edit_site`, so `assign_investigation`
+could name a lead who was then refused by every RPC the job consists of — and the same hole was
+live in the RCA flow, where an assigned worker could answer all five whys and be unable to submit
+(`submit_rca` allows the assignee, then calls `set_root_cause`, which raised).
+
+## The document library
+
+`org_documents` + the `org-documents` bucket: an org-wide register, distinct from snag-scoped
+evidence. **Any org member can read and upload; only a supervisor or admin can delete.**
+
+Both clients reach it — the portal at `/documents`, mobile at Profile → Documents
+(`DocumentLibraryScreen`). Workers need upload because someone running a document-mode
+investigation has to file the completed document, and because the policies kept here are the ones
+workers are expected to follow.
+
+Investigation documents go into the same library rather than a per-snag hiding place, so the
+person who needs one in two years — who wasn't on the snag — can find it.
 
 ## Supabase MCP (for Claude Code)
 
@@ -198,9 +253,9 @@ Read `SNAG_WEB_APP_PLAN.md` first — it covers folder structure, auth strategy,
 to reuse vs. what's a genuine gap, storage, and deployment, and its §10 tracks open decisions.
 The scaffold (marketing site, login, portal with dashboard/snags/reports/documents) is built.
 `documents/` is a working org-wide document register — upload, list, signed-URL download, delete,
-backed by the `org-documents` bucket and the `org_documents` table. It was described here as a
-stub long after it was finished, which is how it reached production with zero rows in it; the
-round trip is now covered by `apps/web/e2e/documents.spec.ts`.
+backed by the `org-documents` bucket and the `org_documents` table (see "The document library"
+above). It was described here as a stub long after it was finished, which is how it reached
+production with zero rows in it; the round trip is now covered by `apps/web/e2e/documents.spec.ts`.
 New read-only query functions belong in `packages/supabase-queries` (each takes a `SupabaseClient`
 param so both apps can call it with their own client) rather than being written inline in a page
 unless it's a one-off simple `select`.
@@ -244,8 +299,11 @@ same-origin paths only, or it's an open redirect on a domain people trust.
 
 Both clients route **`/snags/:id`**, and both accept **`?step=`** naming one
 section of a serious snag (`notifiable`, `checklist`, `witnesses`, `evidence`,
-`rootCause`, `correctiveActions`, `rca`, `debrief` — `SnagStepKey` in
-`packages/shared-types`). One link therefore works whichever client
+`rootCause`, `correctiveActions`, `investigationDocument`, `rca`, `debrief` —
+`SnagStepKey` in `packages/shared-types`). `rootCause`/`correctiveActions`
+render only in `snag` mode and `investigationDocument` only in `document` mode,
+so a link to the wrong one lands on the snag with nothing expanded rather than
+erroring. One link therefore works whichever client
 `SNAG_APP_URL` points at, which is what `supabase/functions/notify-snag` relies
 on when it mails someone about an RCA.
 

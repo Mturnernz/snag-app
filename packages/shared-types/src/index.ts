@@ -211,12 +211,15 @@ export type SnagStepKey =
   | 'evidence'
   | 'rootCause'
   | 'correctiveActions'
+  // Document mode only: shown in place of rootCause/correctiveActions when the
+  // organisation runs its own investigation process.
+  | 'investigationDocument'
   | 'rca'
   | 'debrief';
 
 export const SNAG_STEP_KEYS: SnagStepKey[] = [
   'notifiable', 'checklist', 'witnesses', 'evidence',
-  'rootCause', 'correctiveActions', 'rca', 'debrief',
+  'rootCause', 'correctiveActions', 'investigationDocument', 'rca', 'debrief',
 ];
 
 export type RootStackParamList = {
@@ -235,6 +238,7 @@ export type RootStackParamList = {
   ManageSites: undefined;
   ManageWorkGroups: undefined;
   Mentions: undefined;
+  DocumentLibrary: undefined;
   OnboardingCarousel: undefined;
 };
 

@@ -4,7 +4,8 @@ import {
   getSnagAuditLog, describeAuditAction, getSiteAssignees, getOrgMembers, getEvidencePhotoUrl,
   isImageEvidence,
   seriousResolveGate,
-  type SiteAssignee, type ResolveGateKey, type SnagRca,
+  getOrgDocuments, getOrgDocumentUrl,
+  type SiteAssignee, type ResolveGateKey, type SnagRca, type OrgDocument,
 } from '@snag/supabase-queries';
 import {
   STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, CHECKLIST_STEP_LABELS, CHECKLIST_STEPS,
@@ -36,6 +37,10 @@ import {
 import {
   createCorrectiveActionAction, completeCorrectiveActionAction, verifyCorrectiveActionAction,
 } from './capa-actions';
+import {
+  attachInvestigationDocumentAction, uploadInvestigationDocumentAction,
+  acceptInvestigationDocumentAction,
+} from './document-actions';
 import styles from './page.module.css';
 
 const KIND_OPTIONS: SnagKind[] = ['fixit', 'improvement', 'hazard', 'incident'];
@@ -91,13 +96,13 @@ const GATE_COPY: Record<ResolveGateKey, { title: string; detail: string; cta: st
     title: 'Attach the investigation document',
     detail: "This snag is using your organisation's own investigation process, so the completed document is what closes it.",
     cta: 'Attach the document',
-    section: 'rootCause',
+    section: 'investigationDocument',
   },
   documentAccepted: {
     title: 'Accept the investigation document',
     detail: 'A supervisor has to read it and sign it off — attaching a file is not the same as accepting the investigation.',
     cta: 'Review the document',
-    section: 'rootCause',
+    section: 'investigationDocument',
   },
 };
 
@@ -109,7 +114,7 @@ export default async function SnagDetailPage({
 }) {
   const { id } = await params;
   const { error, step } = await searchParams;
-  await requireSupervisorOrAdmin();
+  const { userId, activeMembership } = await requireSupervisorOrAdmin();
   const supabase = await createClient();
 
   const { data: snag } = await supabase
@@ -139,7 +144,23 @@ export default async function SnagDetailPage({
     ? await Promise.all(investigation.evidence.map((e) => getEvidencePhotoUrl(supabase, e.media_path)))
     : [];
 
+  // Document mode only. Fetching the library on every serious snag would be a
+  // round trip nobody reads on the guided path.
+  const isDocumentMode = investigation?.mode === 'document';
+  const [libraryDocuments, documentUrl]: [OrgDocument[], string | null] = isDocumentMode
+    ? await Promise.all([
+        getOrgDocuments(supabase, activeMembership.org_id),
+        investigation!.documentPath ? getOrgDocumentUrl(supabase, investigation!.documentPath) : Promise.resolve(null),
+      ])
+    : [[], null];
+
+  // The server refuses the attacher, so the button is hidden from them rather
+  // than offered and then rejected.
+  const canAcceptDocument = Boolean(investigation?.documentId) && investigation!.documentAttachedBy !== userId;
+
   const siteAssignees: SiteAssignee[] = assignees.data ?? [];
+  const nameOf = (profileId: string | null) =>
+    profileId ? members.find((m) => m.id === profileId)?.name ?? null : null;
   const activeDebrief = debriefs.find((d) => d.status === 'in_progress');
   const completedDebriefs = debriefs.filter((d) => d.status !== 'in_progress');
   const remainingChecklist = CHECKLIST_STEPS.filter((s) => !investigation?.completedSteps.includes(s));
@@ -401,6 +422,121 @@ export default async function SnagDetailPage({
             </Card>
           </StepSection>
 
+          {/* ── The fork. From here on the two investigation modes diverge:
+                 the guided process asks for a root cause and corrective
+                 actions; an organisation running its own process attaches the
+                 document it produced and has a second supervisor sign it off.
+                 Everything above this line is required either way. ── */}
+          {isDocumentMode ? (
+            <StepSection
+              id="investigationDocument"
+              icon="FileText"
+              title="Investigation document"
+              state={investigation.documentAccepted ? 'done' : investigation.documentId ? 'in_progress' : 'pending'}
+              summary={
+                investigation.documentAccepted ? 'Accepted'
+                : investigation.documentId ? 'Attached — awaiting sign-off'
+                : 'Not attached'
+              }
+              defaultOpen={isOpen('investigationDocument')}
+            >
+              <p className={styles.decision}>
+                This snag is being investigated under your organisation&rsquo;s own process. The
+                completed document takes the place of the root cause and corrective actions —
+                everything before this point still applies.
+              </p>
+
+              {investigation.documentId ? (
+                <Card padding="sm">
+                  <p className={styles.recordName}>
+                    {documentUrl ? (
+                      <a href={documentUrl} target="_blank" rel="noreferrer" data-investigation-document>
+                        <Icon name="FileText" size="sm" /> {investigation.documentTitle ?? 'Investigation document'}
+                      </a>
+                    ) : (
+                      investigation.documentTitle ?? 'Investigation document'
+                    )}
+                  </p>
+                  <p className={styles.recordMeta}>
+                    Attached by {nameOf(investigation.documentAttachedBy) ?? 'someone in your organisation'}
+                    {investigation.documentAccepted
+                      ? ` · accepted by ${nameOf(investigation.documentAcceptedBy) ?? 'a supervisor'}`
+                      : ' · not yet accepted'}
+                  </p>
+
+                  {!investigation.documentAccepted && (
+                    canAcceptDocument ? (
+                      <form action={acceptInvestigationDocumentAction}>
+                        <input type="hidden" name="snagId" value={snag.id} />
+                        <Button type="submit" variant="primary" size="sm">Accept this document</Button>
+                      </form>
+                    ) : (
+                      // Attaching is not accepting. The server refuses the
+                      // attacher outright, so offering the button here would
+                      // only ever produce an error someone has to decode.
+                      <p className={styles.blocked}>
+                        <Icon name="Lock" size="sm" />
+                        You attached this — another supervisor has to sign it off.
+                      </p>
+                    )
+                  )}
+                </Card>
+              ) : (
+                <EmptyState>No investigation document attached yet.</EmptyState>
+              )}
+
+              <Card as="form" action={uploadInvestigationDocumentAction} padding="sm">
+                <p className={styles.recordName}>Upload the completed investigation</p>
+                <div className="field">
+                  <label htmlFor="documentFile">File</label>
+                  <input id="documentFile" name="file" type="file" required />
+                </div>
+                <div className="field">
+                  <label htmlFor="documentTitle">Title</label>
+                  <input
+                    id="documentTitle"
+                    name="title"
+                    type="text"
+                    required
+                    placeholder={`Investigation report — ${snag.reference}`}
+                  />
+                </div>
+                <input type="hidden" name="snagId" value={snag.id} />
+                <Button type="submit" variant="secondary" size="sm">
+                  {investigation.documentId ? 'Replace with a new upload' : 'Upload and attach'}
+                </Button>
+                <p className={styles.recordMeta}>
+                  It&rsquo;s filed in the document library too, so it can be found later by
+                  someone who wasn&rsquo;t involved.
+                </p>
+              </Card>
+
+              {libraryDocuments.length > 0 && (
+                <Card as="form" action={attachInvestigationDocumentAction} padding="sm">
+                  <p className={styles.recordName}>Or attach one already in the library</p>
+                  <input type="hidden" name="snagId" value={snag.id} />
+                  <div className="field">
+                    <label htmlFor="documentId">Document</label>
+                    <select id="documentId" name="documentId" required defaultValue="">
+                      <option value="" disabled>Choose a document</option>
+                      {libraryDocuments.map((d) => (
+                        <option key={d.id} value={d.id}>{d.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button type="submit" variant="secondary" size="sm">Attach</Button>
+                </Card>
+              )}
+
+              {investigation.documentAccepted && (
+                <p className={styles.recordMeta}>
+                  Replacing the document clears this acceptance — a different document is a
+                  different investigation.
+                </p>
+              )}
+            </StepSection>
+          ) : (
+          <>
           <StepSection
             id="rootCause"
             icon="Search"
@@ -487,6 +623,8 @@ export default async function SnagDetailPage({
               <Button type="submit" variant="secondary" size="sm">Create corrective action</Button>
             </Card>
           </StepSection>
+          </>
+          )}
 
           <StepSection
             id="rca"
@@ -647,7 +785,33 @@ export default async function SnagDetailPage({
                 {siteAssignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
-            <Button type="submit" variant="secondary" size="sm">Save</Button>
+            {/* Allocating a serious snag is the moment someone decides how it
+                will be investigated, so the choice is asked here rather than
+                behind a separate button that gets missed. The owner is the
+                lead investigator. */}
+            {isSerious && !isResolved && (
+              <fieldset className={styles.modeChoice}>
+                <legend>How will this be investigated?</legend>
+                <label className={styles.modeOption}>
+                  <input type="radio" name="mode" value="snag" defaultChecked={!isDocumentMode} />
+                  <span>
+                    <strong>SNAG&rsquo;s guided investigation</strong>
+                    Root cause, then corrective actions, tracked here.
+                  </span>
+                </label>
+                <label className={styles.modeOption}>
+                  <input type="radio" name="mode" value="document" defaultChecked={isDocumentMode} />
+                  <span>
+                    <strong>Our own process</strong>
+                    Attach the completed investigation document. A second supervisor
+                    has to accept it before this snag can be resolved.
+                  </span>
+                </label>
+              </fieldset>
+            )}
+            <Button type="submit" variant="secondary" size="sm">
+              {isSerious ? 'Save allocation' : 'Save'}
+            </Button>
           </Card>
 
           <Card as="form" action={recategoriseAction}>

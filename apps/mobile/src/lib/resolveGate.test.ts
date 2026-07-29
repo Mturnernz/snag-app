@@ -26,7 +26,11 @@ function complete(): InvestigationState {
     mode: 'snag',
     leadInvestigatorId: null,
     documentId: null,
+    documentTitle: null,
+    documentPath: null,
+    documentAttachedBy: null,
     documentAccepted: false,
+    documentAcceptedBy: null,
   };
 }
 
@@ -37,7 +41,10 @@ function completeViaDocument(): InvestigationState {
     rootCause: null,
     mode: 'document',
     documentId: 'doc-1',
+    documentTitle: 'Incident investigation report — bay 4',
+    documentAttachedBy: 'lead-1',
     documentAccepted: true,
+    documentAcceptedBy: 'supervisor-1',
   };
 }
 
@@ -46,7 +53,8 @@ function bare(mode: 'snag' | 'document' = 'snag'): InvestigationState {
   return {
     completedSteps: [], witnesses: [], evidence: [], rootCause: null,
     openCorrectiveActions: 0, mode, leadInvestigatorId: null,
-    documentId: null, documentAccepted: false,
+    documentId: null, documentTitle: null, documentPath: null,
+    documentAttachedBy: null, documentAccepted: false, documentAcceptedBy: null,
   };
 }
 

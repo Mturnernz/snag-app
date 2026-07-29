@@ -291,7 +291,16 @@ export interface InvestigationState {
   mode: InvestigationMode;
   leadInvestigatorId: string | null;
   documentId: string | null;
+  documentTitle: string | null;
+  documentPath: string | null;
+  /**
+   * Who attached it. The server refuses to let that person accept it too, so
+   * both clients read this to hide the Accept button rather than offer a button
+   * that can only fail.
+   */
+  documentAttachedBy: string | null;
   documentAccepted: boolean;
+  documentAcceptedBy: string | null;
 }
 
 // Reads the five investigation tables for a serious snag — all org-scoped by
@@ -302,7 +311,11 @@ export async function getInvestigationState(client: SupabaseClient, snagId: stri
     client.from('witness_statements').select('*').eq('snag_id', snagId).order('taken_at', { ascending: true }),
     client.from('evidence_items').select('*').eq('snag_id', snagId).is('corrective_action_id', null).order('sort_index', { ascending: true }),
     client.from('investigations')
-      .select('root_cause_text, mode, lead_investigator_id, document_id, document_accepted_at')
+      .select(`
+        root_cause_text, mode, lead_investigator_id,
+        document_id, document_attached_by, document_accepted_by, document_accepted_at,
+        document:org_documents!investigations_document_id_fkey ( title, file_path )
+      `)
       .eq('snag_id', snagId).maybeSingle(),
     // "Blocking" mirrors update_snag_status's resolve gate: done-but-unverified
     // still counts, so this pill can't show 0 while resolve is still blocked.
@@ -319,7 +332,11 @@ export async function getInvestigationState(client: SupabaseClient, snagId: stri
     mode: ((investigationRes.data as any)?.mode ?? 'snag') as InvestigationMode,
     leadInvestigatorId: (investigationRes.data as any)?.lead_investigator_id ?? null,
     documentId: (investigationRes.data as any)?.document_id ?? null,
+    documentTitle: (investigationRes.data as any)?.document?.title ?? null,
+    documentPath: (investigationRes.data as any)?.document?.file_path ?? null,
+    documentAttachedBy: (investigationRes.data as any)?.document_attached_by ?? null,
     documentAccepted: Boolean((investigationRes.data as any)?.document_accepted_at),
+    documentAcceptedBy: (investigationRes.data as any)?.document_accepted_by ?? null,
   };
 }
 
@@ -516,9 +533,13 @@ export async function exportGovernanceReport(
 // ─── Org document library ──────────────────────────────────────────────────
 // Added for SNAG_WEB_APP_PLAN.md decision D2 — a general org-wide document
 // library, distinct from snag-scoped evidence. Migration:
-// supabase/migrations/20260722200000_org_documents.sql. Read access is any
-// org member; upload/delete are supervisor/officer_admin only, enforced by
-// the create_org_document/delete_org_document RPCs and mirrored in the
+// supabase/migrations/20260722200000_org_documents.sql.
+//
+// Read and upload are any org member; delete is supervisor/officer_admin only.
+// Workers were opened up in 20260729000000 so someone running an investigation
+// under their organisation's own process can file the completed document —
+// removing an org record stays a supervisor's call. Enforced by the
+// create_org_document/delete_org_document RPCs and mirrored in the
 // org-documents storage bucket's own policies.
 
 export interface OrgDocument {

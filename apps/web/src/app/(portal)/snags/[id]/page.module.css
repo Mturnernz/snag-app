@@ -184,6 +184,53 @@
   border-radius: var(--radius-card);
 }
 
+/* ── Investigation mode ─────────────────────────────────────────────────── */
+
+/* Two genuinely different ways to run an investigation, so each option carries
+   its consequence rather than a bare label — picking "our own process" changes
+   what closes the snag. */
+.modeChoice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: var(--space-md);
+  margin: 0 0 var(--space-md);
+}
+
+.modeChoice legend {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  padding: 0 var(--space-xs);
+}
+
+.modeOption {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.modeOption input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.modeOption span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modeOption strong {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+}
+
 /* ── Checklist ──────────────────────────────────────────────────────────── */
 
 .checklist {

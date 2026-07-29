@@ -1,6 +1,7 @@
 # SNAG — production readiness
 
 Written 27 July 2026, against `main` @ `e9dc818` plus the branch described in §6.
+Updated 29 July 2026 with the investigation-mode work (§4.4a, §4.4b, D8).
 
 What this is: the decisions taken while getting SNAG ready to run for real, why each
 one went the way it did, and — in §7 — the decisions that are **not mine to make**,
@@ -18,7 +19,7 @@ Where a claim here is measured, it says so. Where it's reasoning, it says that t
 | Live data | 3 active orgs · 6 users · 42 snags (22 serious) |
 | Mobile | Expo SDK 54, RN 0.81.5, React 19.1.0 |
 | Portal | Next.js 16, React 19.1.0 |
-| Tests | 49 unit · 149 web E2E (34 of them accessibility) · 24 mobile E2E, plus an opt-in write-path suite |
+| Tests | 55 unit · 149 web E2E (34 of them accessibility) · 27 mobile E2E, plus two opt-in write-path suites |
 | CI | 5 jobs on every PR and push to `main`, green |
 
 The repo had **zero automated tests** three days ago. That is the single biggest
@@ -67,6 +68,7 @@ Ordered by what they would have cost in production.
 | **Caption-only evidence was invisible in the portal** | Mobile's sheet accepts a caption with no photo; the portal rendered thumbnails only. The heading counted items the page didn't show. |
 | **Disabled buttons rendered at full strength, app-wide** | Reanimated writes its animated style directly onto the view, overriding the later static `styles.disabled`. Measured: `opacity: 1`, full-strength background, `pointer-events: none`. Every disabled button in the app looked pressable. |
 | **Collapsed cards couldn't show their summaries** | `StepCard` only mounts children while expanded, so panels that report their own state left every collapsed card blank — in exactly the state the progress list exists to describe. |
+| **An assigned worker could not submit their own RCA** | `submit_rca` deliberately allows the assignee, then calls `set_root_cause`, which called `require_serious_snag` and demanded `can_edit_site`. A worker could answer all five whys and be refused with *"Only a supervisor of this site, or an admin, can run the investigation"*. CLAUDE.md says RCAs are usually assigned to workers, so this is the **normal** case — it had never fired only because a supervisor had always pressed submit on the assignee's behalf. Confirmed against the live project as the QA worker before and after the fix. |
 
 ---
 
@@ -107,6 +109,49 @@ Before, mobile disabled Resolve and named the blocking condition while the porta
 offered a live button annotated "(requires completed investigation)". Unit tests pin
 the *ordering* against the SQL — moving the notifiable condition off the front fails
 two of them.
+
+### 4.4a An organisation can run its own investigation, without a way out of one
+
+Plenty of organisations already have an investigation process and a form they are
+required to use. Forcing SNAG's five-step version on top of it means the real
+investigation lives somewhere else and SNAG holds a hollow copy.
+
+So `investigations.mode` forks the tail of the gate — and it is a **substitution, not
+a shortcut**. Document mode replaces the last two conditions (root cause, corrective
+actions) with two of its own (a document is attached; a supervisor accepts it). The
+notifiable decision, the checklist, a witness statement and evidence are unchanged.
+The fork exists once per layer: `update_snag_status` in SQL, `seriousResolveGate` in
+the shared package, one conditional section in each client.
+
+Three decisions inside that are worth stating:
+
+- **Accepting is a separate act by a separate person.** `accept_investigation_document`
+  raises if the acceptor is `document_attached_by` — the same rule corrective actions
+  already apply to their verifier. Without it, "a supervisor read this and signed it
+  off" isn't true and the condition is decorative. Both clients hide the Accept button
+  from the attacher rather than offering one that can only fail.
+- **The mode is chosen while allocating**, not behind a separate "Assign investigation"
+  button. Allocating is when someone is already deciding who deals with this; asking
+  twice in two places is how a snag ends up with an owner and no investigator. The
+  owner *is* the lead investigator — splitting the roles buys a second thing to keep
+  in sync.
+- **Investigation documents go into the org library**, not a per-snag hiding place.
+  The person who needs one in two years wasn't on the snag and won't think to look
+  at it.
+
+### 4.4b Doing versus directing
+
+Assigning an investigation has to actually give someone the investigation. Every
+investigation write used to require `can_edit_site`, so `assign_investigation` could
+name a lead who was then refused by every RPC the job consists of — and the same hole
+was already live and load-bearing in the RCA flow (see §3).
+
+`require_investigation_access` draws the line at **doing versus directing**: the
+assigned lead investigator (any role) can work the checklist, take statements, add
+evidence, record a cause and attach the document; assigning, accepting, rejecting,
+waiving, creating corrective actions and starting a debrief stay with supervisors and
+admins. Reads were never restricted, so this only opens the writes the assignee was
+always expected to make.
 
 ### 4.5 Notifications hand off per visitor, not per event
 
@@ -252,6 +297,8 @@ a real build, not Expo Go.
 ### D6 — Native paths that no test can reach
 
 `expo-camera` (QR scan), `expo-image-picker` / `-manipulator` (`PhotoPicker`),
+`expo-document-picker` (the document library and investigation-document attach —
+**a new native dependency, so it needs a fresh EAS build to reach a device at all**),
 `expo-file-system`. react-native-web can't exercise these; neither can CI.
 
 | Option | Trade-off |
@@ -266,6 +313,26 @@ Reviewed through react-native-web at 412 px, which is faithful for layout and
 hierarchy but *not* for native scroll, keyboard avoidance, or the picker. Stage 2
 should have largely fixed the three-inputs-behind-one-keyboard problem by never
 showing two fields at once — but that is reasoning, not evidence. Folds into D6.
+
+### D8 — A one-supervisor organisation can deadlock a document investigation
+
+You asked for acceptance to be "someone else", and it is: the server refuses the
+person who attached the document. The consequence is that an org whose only
+supervisor/admin is the same person who attached the file has nobody left who can
+accept it, and the snag cannot be resolved.
+
+The ordinary path is unaffected — a supervisor allocates the snag to an investigator,
+the investigator attaches the completed document, the supervisor accepts. It only
+bites when a lone supervisor attaches their own.
+
+| Option | Trade-off |
+|---|---|
+| **A. Leave it, and let the UI steer** *(recommended)* | The rule stays absolute, which is what makes the acceptance record worth anything. The way out — have the assigned investigator attach it — is already the intended flow, and the block message names it. Costs nothing now. |
+| B. Allow self-acceptance when the org has exactly one supervisor | Removes the deadlock, but the audit record then says "signed off" for a document nobody but its author read. That is the exact claim the condition exists to make true. |
+| C. Require two supervisors before an org can pick document mode | Honest and enforceable, but it turns a small org's first serious incident into an admin task at the worst possible moment. |
+
+Nothing needs doing unless a real one-supervisor org hits it. Flagging it because the
+failure appears as "Resolve is blocked" with no way forward, which reads like a bug.
 
 ---
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Linking, StyleSheet } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 
+import { Profile } from '../types';
 import {
   InvestigationState, OrgDocument,
   getOrgDocuments, createOrgDocument, uploadOrgDocumentFromUri, getOrgDocumentUrl,
@@ -19,7 +20,8 @@ interface Props {
   state: InvestigationState;
   /** Supervisor/admin on this site. Accepting is a supervisor's act. */
   canEdit: boolean;
-  currentUserId: string | null;
+  /** For naming who attached and who accepted — see the note on the meta line. */
+  orgMembers: Profile[];
   onChanged: () => void;
 }
 
@@ -30,15 +32,17 @@ interface Props {
  * path — a substitution, not a shortcut. Everything before it (the notifiable
  * decision, the checklist, a witness statement, evidence) is still required,
  * and two conditions replace the two it displaces: a document is attached, and
- * somebody *other than whoever attached it* accepts it.
+ * a supervisor accepts it.
  *
- * That second condition is the reason this is worth a card rather than a file
- * field. `accept_investigation_document` refuses the attacher outright, so the
- * Accept button is hidden from them — offering it would produce an error that
- * reads like a bug rather than a rule.
+ * The acceptance need not be a *different* supervisor: a site lead allocates the
+ * investigation to a crew, so the crew that completes it and the supervisor who
+ * signs it off are already different people without a rule forcing it — and
+ * forcing it deadlocked the case where the supervisor did the work themselves.
+ * So the card names who attached and who accepted instead of preventing them
+ * from being the same person.
  */
 export default function InvestigationDocumentPanel({
-  issueId, orgId, state, canEdit, currentUserId, onChanged,
+  issueId, orgId, state, canEdit, orgMembers, onChanged,
 }: Props) {
   const { showToast } = useToast();
 
@@ -55,9 +59,8 @@ export default function InvestigationDocumentPanel({
   useEffect(() => { loadLibrary(); }, [loadLibrary]);
 
   const attached = Boolean(state.documentId);
-  // The one person who can never accept it. Hidden rather than disabled: a
-  // disabled button still reads as "this is yours to do, later".
-  const isAttacher = Boolean(state.documentAttachedBy && state.documentAttachedBy === currentUserId);
+  const nameOf = (id: string | null) =>
+    (id ? orgMembers.find((m) => m.id === id)?.name : null) ?? null;
 
   function closeSheet() {
     setPickerOpen(false);
@@ -144,8 +147,14 @@ export default function InvestigationDocumentPanel({
           <Icon name="document-text-outline" size="md" color={Colors.textSecondary} />
           <View style={styles.docText}>
             <Text style={styles.docTitle}>{state.documentTitle ?? 'Investigation document'}</Text>
+            {/* Names both, because the record is what carries this now. When
+                the same person appears twice, that is visible rather than
+                prevented. */}
             <Text style={styles.docMeta}>
-              {state.documentAccepted ? 'Accepted' : 'Attached — not yet accepted'}
+              Attached by {nameOf(state.documentAttachedBy) ?? 'someone in your organisation'}
+              {state.documentAccepted
+                ? ` · accepted by ${nameOf(state.documentAcceptedBy) ?? 'a supervisor'}`
+                : ' · not yet accepted'}
             </Text>
           </View>
           <Icon name="open-outline" size="sm" color={Colors.textMuted} />
@@ -156,8 +165,14 @@ export default function InvestigationDocumentPanel({
         </Text>
       )}
 
+      {/* Attaching is still not accepting — the gate wants a supervisor to have
+          read it and said so. But it need not be a *different* supervisor: a
+          site lead allocates the investigation to a crew, so the two are
+          usually different people anyway, and forcing it deadlocked the case
+          where the supervisor did the work themselves. The record names both,
+          which is the half worth keeping. */}
       {attached && !state.documentAccepted && (
-        canEdit && !isAttacher ? (
+        canEdit ? (
           <Button
             label="Accept this document"
             variant="primary"
@@ -169,9 +184,7 @@ export default function InvestigationDocumentPanel({
           <View style={styles.blocked}>
             <Icon name="lock-closed-outline" size="sm" color={Colors.textMuted} />
             <Text style={styles.blockedText}>
-              {isAttacher
-                ? 'You attached this — another supervisor has to sign it off.'
-                : 'A supervisor has to read it and sign it off before this snag can be resolved.'}
+              A supervisor has to read it and sign it off before this snag can be resolved.
             </Text>
           </View>
         )

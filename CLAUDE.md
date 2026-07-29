@@ -149,7 +149,7 @@ A serious snag is investigated one of two ways, chosen **when it is allocated**
 | mode | what closes it |
 |---|---|
 | `snag` (default) | SNAG's guided process: a root cause, then corrective actions completed and verified. |
-| `document` | The organisation's own process: an investigation document is attached, and a supervisor **other than whoever attached it** accepts it. |
+| `document` | The organisation's own process: an investigation document is attached, and a supervisor accepts it. |
 
 This is a **substitution, not a shortcut**. Document mode swaps the last two resolve-gate
 conditions for two of its own; the notifiable decision, the first-response checklist, a witness
@@ -157,12 +157,18 @@ statement and evidence are all still required. The fork lives in one place per l
 `update_snag_status` in SQL, `seriousResolveGate` in `packages/supabase-queries` (both clients read
 it), and one conditional section in each client's snag detail view.
 
-Accepting is deliberately a separate act from attaching, by a separate person —
-`accept_investigation_document` raises if the acceptor is `document_attached_by`, the same rule
-corrective actions already use for their verifier. Both clients hide the Accept button from the
-attacher rather than offering one that can only fail. **An organisation with exactly one
-supervisor and no admin cannot accept a document that supervisor attached** — have the assigned
-investigator attach it, or add a second supervisor.
+Accepting is a separate act from attaching, but **not necessarily by a separate person** — a
+supervisor can sign off their own work. The assumption is that a site lead allocates the
+investigation to a crew, so whoever completes it and whoever accepts it are already different
+people without a rule forcing it. Forcing it (which an earlier migration did) only ever bit the
+case where a supervisor did the work themselves, and there it deadlocked: a one-supervisor org had
+nobody left who could accept. `document_attached_by` and `document_accepted_by` are both recorded
+and both shown, so a self-signed investigation is visible in the record rather than prevented.
+
+This is deliberately asymmetric with corrective actions, which keep their
+verifier-cannot-be-owner rule: that is about a task someone was assigned and marked done
+themselves, this is about an organisation's completed investigation the supervisor is accountable
+for either way.
 
 Replacing the document clears the acceptance: a different document is a different investigation.
 

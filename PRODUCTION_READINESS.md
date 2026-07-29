@@ -125,11 +125,18 @@ the shared package, one conditional section in each client.
 
 Three decisions inside that are worth stating:
 
-- **Accepting is a separate act by a separate person.** `accept_investigation_document`
-  raises if the acceptor is `document_attached_by` — the same rule corrective actions
-  already apply to their verifier. Without it, "a supervisor read this and signed it
-  off" isn't true and the condition is decorative. Both clients hide the Accept button
-  from the attacher rather than offering one that can only fail.
+- **Accepting is a separate act, but not necessarily a separate person.** The first
+  cut required one, mirroring the rule corrective actions apply to their verifier.
+  That was built on a wrong assumption about who does the work: a site lead allocates
+  the investigation to a crew, so the crew that completes it and the supervisor who
+  signs it off are already different people without a rule forcing it. The rule only
+  ever bit the case where a supervisor did the work themselves, and there it
+  deadlocked — a one-supervisor org had nobody left who could accept, and the snag
+  could not be resolved at all. Blocking a legitimate closure is a worse failure than
+  recording a self-signed one, so both clients now name the attacher and the acceptor
+  instead of preventing them from matching. Corrective actions keep their rule: a task
+  someone marked done themselves is a different thing from an organisation's completed
+  investigation.
 - **The mode is chosen while allocating**, not behind a separate "Assign investigation"
   button. Allocating is when someone is already deciding who deals with this; asking
   twice in two places is how a snag ends up with an owner and no investigator. The
@@ -314,25 +321,23 @@ hierarchy but *not* for native scroll, keyboard avoidance, or the picker. Stage 
 should have largely fixed the three-inputs-behind-one-keyboard problem by never
 showing two fields at once — but that is reasoning, not evidence. Folds into D6.
 
-### D8 — A one-supervisor organisation can deadlock a document investigation
+### D8 — Self-acceptance — ✅ decided: a supervisor can sign off their own work
 
-You asked for acceptance to be "someone else", and it is: the server refuses the
-person who attached the document. The consequence is that an org whose only
-supervisor/admin is the same person who attached the file has nobody left who can
-accept it, and the snag cannot be resolved.
+I flagged that an org whose only supervisor attached the document had nobody left who
+could accept it, so the snag could not be resolved. Decided: drop the rule.
 
-The ordinary path is unaffected — a supervisor allocates the snag to an investigator,
-the investigator attaches the completed document, the supervisor accepts. It only
-bites when a lone supervisor attaches their own.
+The reasoning behind it was a wrong assumption about who does the work. A site lead
+allocates the investigation to a crew; the crew completes it and the supervisor
+accepts, so the two are different people in the normal case anyway. The rule bought
+nothing there and deadlocked the case it did apply to.
 
-| Option | Trade-off |
-|---|---|
-| **A. Leave it, and let the UI steer** *(recommended)* | The rule stays absolute, which is what makes the acceptance record worth anything. The way out — have the assigned investigator attach it — is already the intended flow, and the block message names it. Costs nothing now. |
-| B. Allow self-acceptance when the org has exactly one supervisor | Removes the deadlock, but the audit record then says "signed off" for a document nobody but its author read. That is the exact claim the condition exists to make true. |
-| C. Require two supervisors before an org can pick document mode | Honest and enforceable, but it turns a small org's first serious incident into an admin task at the worst possible moment. |
+The record still carries what the rule was trying to guarantee: `document_attached_by`
+and `document_accepted_by` are both stamped and both shown, so an auditor can see when
+they are the same person. That was always the more useful half.
 
-Nothing needs doing unless a real one-supervisor org hits it. Flagging it because the
-failure appears as "Resolve is blocked" with no way forward, which reads like a bug.
+Corrective actions keep their verifier-cannot-be-owner rule — a task someone was
+assigned and marked done themselves is a different thing from an organisation's
+completed investigation.
 
 ---
 

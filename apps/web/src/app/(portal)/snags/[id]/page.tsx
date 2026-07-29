@@ -114,7 +114,7 @@ export default async function SnagDetailPage({
 }) {
   const { id } = await params;
   const { error, step } = await searchParams;
-  const { userId, activeMembership } = await requireSupervisorOrAdmin();
+  const { activeMembership } = await requireSupervisorOrAdmin();
   const supabase = await createClient();
 
   const { data: snag } = await supabase
@@ -154,9 +154,10 @@ export default async function SnagDetailPage({
       ])
     : [[], null];
 
-  // The server refuses the attacher, so the button is hidden from them rather
-  // than offered and then rejected.
-  const canAcceptDocument = Boolean(investigation?.documentId) && investigation!.documentAttachedBy !== userId;
+  // Any supervisor or admin, including whoever attached it — the whole
+  // (portal) group is already role-gated, so reaching this page is the check.
+  // Self-acceptance is recorded rather than prevented; see the meta line below.
+  const canAcceptDocument = Boolean(investigation?.documentId);
 
   const siteAssignees: SiteAssignee[] = assignees.data ?? [];
   const nameOf = (profileId: string | null) =>
@@ -464,21 +465,18 @@ export default async function SnagDetailPage({
                       : ' · not yet accepted'}
                   </p>
 
-                  {!investigation.documentAccepted && (
-                    canAcceptDocument ? (
-                      <form action={acceptInvestigationDocumentAction}>
-                        <input type="hidden" name="snagId" value={snag.id} />
-                        <Button type="submit" variant="primary" size="sm">Accept this document</Button>
-                      </form>
-                    ) : (
-                      // Attaching is not accepting. The server refuses the
-                      // attacher outright, so offering the button here would
-                      // only ever produce an error someone has to decode.
-                      <p className={styles.blocked}>
-                        <Icon name="Lock" size="sm" />
-                        You attached this — another supervisor has to sign it off.
-                      </p>
-                    )
+                  {/* Attaching is still not accepting — the gate wants a
+                      supervisor to have read it and said so. But it need not be
+                      a *different* supervisor: a site lead allocates the
+                      investigation to a crew, so the two are usually different
+                      people anyway, and forcing it deadlocked the case where
+                      the supervisor did the work themselves. The record names
+                      both, which is the half worth keeping. */}
+                  {!investigation.documentAccepted && canAcceptDocument && (
+                    <form action={acceptInvestigationDocumentAction}>
+                      <input type="hidden" name="snagId" value={snag.id} />
+                      <Button type="submit" variant="primary" size="sm">Accept this document</Button>
+                    </form>
                   )}
                 </Card>
               ) : (

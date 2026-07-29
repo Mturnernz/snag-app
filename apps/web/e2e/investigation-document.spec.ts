@@ -87,14 +87,17 @@ test.describe('investigation document mode', () => {
         'the attached document should be listed'
       ).toContainText(title, { timeout: 60_000 });
 
-      // ── The one thing the attacher cannot do ─────────────────────────────
-      // accept_investigation_document refuses whoever attached it, so the page
-      // has to say so rather than offer a button that can only fail.
+      // ── Attaching is still not accepting ─────────────────────────────────
+      // The gate wants a supervisor to have read it and said so. It need not be
+      // a *different* supervisor — a site lead allocates the investigation to a
+      // crew, so the two are usually different people anyway, and forcing it
+      // deadlocked the one-supervisor org. What the page must do instead is
+      // name both, so a self-signed investigation is visible in the record.
       await expect(
         page.getByRole('button', { name: /accept this document/i }),
-        'the attacher should not be offered the Accept button'
-      ).toHaveCount(0);
-      await expect(page.locator('main')).toContainText(/another supervisor has to sign it off/i);
+        'a supervisor can sign off their own work'
+      ).toBeVisible();
+      await expect(page.locator('main')).toContainText(/attached by .+ · not yet accepted/i);
 
       // ── And the gate counts acceptance among what's outstanding ───────────
       // Not *names* it: the Next-step card names the first unmet condition, and
@@ -108,6 +111,12 @@ test.describe('investigation document mode', () => {
         page.locator('main'),
         'the guided process should not be mentioned at all in document mode'
       ).not.toContainText(/record the root cause/i);
+
+      // ── Signing it off closes that condition and names who did ────────────
+      await page.goto(`/snags/${SNAG_ID}?step=investigationDocument`);
+      await page.getByRole('button', { name: /accept this document/i }).click();
+      await expect(page.locator('#investigationDocument')).toContainText(/accepted by /i, { timeout: 60_000 });
+      await expect(page.locator('main')).toContainText('4 steps remaining');
     } finally {
       // Leave the snag on the guided path and take the probe document with us.
       await allocateWithMode(page, 'snag').catch(() => {});

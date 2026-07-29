@@ -1154,7 +1154,7 @@ export default function IssueDetailScreen() {
                     orgId={issue.org_id}
                     state={investigation}
                     canEdit={canEdit}
-                    currentUserId={currentUserId}
+                    orgMembers={orgMembers}
                     onChanged={onInvestigationChanged}
                   />
                 </StepCard>

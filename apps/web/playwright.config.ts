@@ -14,6 +14,12 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined;
 // to the dev server on loopback — a proxy in between breaks that.
 process.env.NO_PROXY = [process.env.NO_PROXY, 'localhost,127.0.0.1'].filter(Boolean).join(',');
 
+// A couple of specs fetch a Supabase signed URL from the test process itself
+// rather than through the browser. Node's fetch ignores HTTPS_PROXY unless
+// told otherwise, and Chromium can't negotiate TLS through some proxies at
+// all — so the Node path is the one that works. Harmless without a proxy.
+process.env.NODE_USE_ENV_PROXY = '1';
+
 const PORT = Number(process.env.E2E_PORT ?? 3000);
 const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
 

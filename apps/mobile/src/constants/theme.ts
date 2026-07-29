@@ -12,18 +12,34 @@ export const Colors = {
 
   // Text
   textPrimary: '#111827',
-  textSecondary: '#6B7280',
-  textMuted: '#9CA3AF',
+  // Darker than the Tailwind greys these started as. WCAG AA (4.5:1) leaves
+  // no room for a lighter tier on this background: the old muted #9CA3AF
+  // measured 2.43:1 against #F9FAFB. apps/web mirrors these exactly and its
+  // axe suite holds the line.
+  textSecondary: '#4B5563',
+  textMuted: '#6B7280',
 
   // Status colours (Snagv1's real snag_status enum: flagged/in_progress/resolved/rca_pending)
+  //
+  // Each status has three values, and the third is the point: `*Fg` is the
+  // colour to use for *text on the matching tint*. The base hue is for dots,
+  // icons and rails, where WCAG's 3:1 non-text threshold applies; as label
+  // text on its own tinted pill it does not clear 4.5:1 — in-progress managed
+  // 2.07:1, which on a badge that says whether a hazard is being dealt with
+  // is not a rounding error. apps/web mirrors these and its axe suite fails
+  // if either regresses.
   status: {
     flagged: '#3B82F6',
+    flaggedFg: '#1D4ED8',
     flaggedBg: '#EFF6FF',
     inProgress: '#F59E0B',
+    inProgressFg: '#B45309',
     inProgressBg: '#FFFBEB',
     resolved: '#10B981',
+    resolvedFg: '#047857',
     resolvedBg: '#ECFDF5',
     rcaPending: '#DC2626',
+    rcaPendingFg: '#B91C1C',
     rcaPendingBg: '#FEE2E2',
   },
 
@@ -66,6 +82,7 @@ export const Colors = {
 
   // Success — save confirmations, positive vote state, "copied" feedback
   success: '#16A34A',
+  successFg: '#15803D',
   successBg: '#F0FDF4',
   successBorder: '#BBF7D0',
 
@@ -73,11 +90,13 @@ export const Colors = {
   // health & safety category and the incident report flow. Never reused for
   // "priority" so it can't collide with priority.high.
   serious: '#DC2626',
+  seriousFg: '#B91C1C',
   seriousBg: '#FEE2E2',
 
   white: '#FFFFFF',
   black: '#000000',
   danger: '#EF4444',
+  dangerFg: '#B91C1C',
 };
 
 // Work group tile colours — a curated palette an admin/supervisor picks from

@@ -85,11 +85,13 @@ const styles = StyleSheet.create({
   label: {
     fontSize: Typography.xs,
     fontWeight: Typography.semibold,
-    color: Colors.status.inProgress,
+    // The base amber is 2.15:1 on the card's white surface — unreadable for
+    // the one label telling someone what to do next.
+    color: Colors.status.inProgressFg,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
-  labelReady: { color: Colors.success },
+  labelReady: { color: Colors.successFg },
 
   title: {
     fontSize: Typography.xl,

@@ -79,7 +79,10 @@ All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or 
 - **Border**: `#E5E7EB` (1px) — used on flat/nested surfaces (rows inside lists)
 - **Elevation**: use the `Shadow` scale (`sm`/`md`/`lg`) for standalone surfaces instead of borders — `sm` for list cards, `md` for standalone cards (stats, invite code, comments), `lg` for hero/sticky bars and modals/dialogs. An elevated card drops its border; don't combine both on the same surface.
 - **Primary accent**: `#2563EB` (Tailwind blue-600)
-- **Text**: primary `#111827`, secondary `#6B7280`, muted `#9CA3AF`
+- **Text**: primary `#111827`, secondary `#4B5563`, muted `#6B7280` — the two lower tiers
+  are deliberately darker than the Tailwind greys they look like: at WCAG AA (4.5:1) there
+  is no room for a lighter muted on this background. `apps/web/e2e/a11y.spec.ts` fails if
+  either regresses.
 - **Card radius**: 12px | **Button radius**: 8px | **Chip radius**: 4px
 - **Icons**: `@expo/vector-icons` (Ionicons) via the shared `Icon` component — never emoji/unicode glyphs. `-outline` variants by default; filled reserved for the active tab, active vote, and the serious-lane header icon. Size from the `IconSize` scale.
 - **Priority badges**: only `high` carries an alert colour (`Colors.priority.high`); `low`/`medium` render as neutral dots — this avoids colliding with status badge colours.
@@ -108,12 +111,15 @@ All tokens are CSS custom properties in `src/app/globals.css`. Light values mirr
 
 ## Database
 
-The app's live backend is the **Snagv1** Supabase project (`wpkdpukpllxuyqqlxkxf`), not the
-`schema.sql` scaffold below. `supabase/schema.sql` and `supabase/migration_*.sql` are leftovers
-from an earlier, now-inactive prototype project and do not reflect what's deployed — don't run them
-against Snagv1. The real schema history lives in `supabase/migrations/` (recovered from Snagv1's
-`schema_migrations`, timestamped, "SNAPSHOT — do NOT re-apply") and in `MVP-SPEC.md` /
+The app's live backend is the **Snagv1** Supabase project (`wpkdpukpllxuyqqlxkxf`). The real
+schema history lives in `supabase/migrations/` (recovered from Snagv1's `schema_migrations`,
+timestamped, "SNAPSHOT — do NOT re-apply") and in `MVP-SPEC.md` /
 `Snag-Architecture-Build-Plan.md` at the repo root.
+
+`supabase/schema.sql` and `supabase/migration_*.sql` used to sit alongside them: leftovers from an
+earlier, now-inactive prototype whose only property was being catastrophic if anyone ran them
+against Snagv1. They were deleted rather than re-labelled — a warning comment doesn't help someone
+who pipes the file into psql, and git still has them if they're ever wanted.
 
 Key tables: `organisations`, `profiles`, `sites`, `snags`, `comments`, `votes`, plus the
 investigation/RCA/debrief tables (`checklist_completions`, `witness_statements`,
@@ -126,12 +132,73 @@ screens (mirrored in `packages/shared-types/src/index.ts`, shared by both apps).
 
 `snag_status` is `flagged | in_progress | resolved | rca_pending` — `resolved` is the single
 terminal status for both the niggle lane (fixit/improvement) and the serious lane
-(hazard/incident); serious snags can only reach it once the guided investigation
-(`update_snag_status`'s checklist/witness/evidence/root-cause/corrective-action checks) is
-complete. There is no separate "sorted" status — it was retired and collapsed into `resolved`.
+(hazard/incident); serious snags can only reach it once the investigation is complete
+(`update_snag_status`'s notifiable/checklist/witness/evidence checks, then whichever pair the
+investigation mode calls for — see below). There is no separate "sorted" status — it was retired
+and collapsed into `resolved`.
 
 Photos/evidence go to the `snag-photos` and `snag-evidence` Storage buckets (private,
-org-folder-scoped via RLS), not a public `issue-photos` bucket.
+org-folder-scoped via RLS), not a public `issue-photos` bucket. Org-wide documents live in
+`org-documents` / `org_documents` — see "The document library" below.
+
+## Investigation modes
+
+A serious snag is investigated one of two ways, chosen **when it is allocated**
+(`investigations.mode`, set by `assign_investigation`):
+
+| mode | what closes it |
+|---|---|
+| `snag` (default) | SNAG's guided process: a root cause, then corrective actions completed and verified. |
+| `document` | The organisation's own process: an investigation document is attached, and a supervisor accepts it. |
+
+This is a **substitution, not a shortcut**. Document mode swaps the last two resolve-gate
+conditions for two of its own; the notifiable decision, the first-response checklist, a witness
+statement and evidence are all still required. The fork lives in one place per layer:
+`update_snag_status` in SQL, `seriousResolveGate` in `packages/supabase-queries` (both clients read
+it), and one conditional section in each client's snag detail view.
+
+Accepting is a separate act from attaching, but **not necessarily by a separate person** — a
+supervisor can sign off their own work. The assumption is that a site lead allocates the
+investigation to a crew, so whoever completes it and whoever accepts it are already different
+people without a rule forcing it. Forcing it (which an earlier migration did) only ever bit the
+case where a supervisor did the work themselves, and there it deadlocked: a one-supervisor org had
+nobody left who could accept. `document_attached_by` and `document_accepted_by` are both recorded
+and both shown, so a self-signed investigation is visible in the record rather than prevented.
+
+This is deliberately asymmetric with corrective actions, which keep their
+verifier-cannot-be-owner rule: that is about a task someone was assigned and marked done
+themselves, this is about an organisation's completed investigation the supervisor is accountable
+for either way.
+
+Replacing the document clears the acceptance: a different document is a different investigation.
+
+### Who can do what
+
+`require_investigation_access` (not `require_serious_snag`) gates the investigation writes, and
+draws the line at **doing versus directing**:
+
+- **Doing** — checklist, witness statements, evidence, root cause, attaching the document.
+  The assigned lead investigator (any role, including a worker), plus supervisors and admins.
+- **Directing** — assigning, accepting/rejecting an RCA, accepting the document, waiving,
+  creating corrective actions, starting a debrief. Supervisors and admins only.
+
+Before this split every investigation write required `can_edit_site`, so `assign_investigation`
+could name a lead who was then refused by every RPC the job consists of — and the same hole was
+live in the RCA flow, where an assigned worker could answer all five whys and be unable to submit
+(`submit_rca` allows the assignee, then calls `set_root_cause`, which raised).
+
+## The document library
+
+`org_documents` + the `org-documents` bucket: an org-wide register, distinct from snag-scoped
+evidence. **Any org member can read and upload; only a supervisor or admin can delete.**
+
+Both clients reach it — the portal at `/documents`, mobile at Profile → Documents
+(`DocumentLibraryScreen`). Workers need upload because someone running a document-mode
+investigation has to file the completed document, and because the policies kept here are the ones
+workers are expected to follow.
+
+Investigation documents go into the same library rather than a per-snag hiding place, so the
+person who needs one in two years — who wasn't on the snag — can find it.
 
 ## Supabase MCP (for Claude Code)
 
@@ -190,8 +257,11 @@ For a simulator: press `i` for iOS Simulator or `a` for Android emulator.
 ### Working on `apps/web`
 Read `SNAG_WEB_APP_PLAN.md` first — it covers folder structure, auth strategy, which RPCs/views
 to reuse vs. what's a genuine gap, storage, and deployment, and its §10 tracks open decisions.
-The scaffold (marketing site, login, portal with dashboard/snags/reports) is built; `documents/`
-is a deliberate stub pending decision D2 (snag-scoped evidence vs. a general document library).
+The scaffold (marketing site, login, portal with dashboard/snags/reports/documents) is built.
+`documents/` is a working org-wide document register — upload, list, signed-URL download, delete,
+backed by the `org-documents` bucket and the `org_documents` table (see "The document library"
+above). It was described here as a stub long after it was finished, which is how it reached
+production with zero rows in it; the round trip is now covered by `apps/web/e2e/documents.spec.ts`.
 New read-only query functions belong in `packages/supabase-queries` (each takes a `SupabaseClient`
 param so both apps can call it with their own client) rather than being written inline in a page
 unless it's a one-off simple `select`.
@@ -209,12 +279,37 @@ unless it's a one-off simple `select`.
 - TypeScript strict mode — no `any` except for Supabase row shapes
 - Import order: React → React Native → Expo → third-party → local (types, lib, components)
 
+## Notification links and the handoff
+
+Every per-snag notification `supabase/functions/notify-snag` sends points at
+**`<portal>/go/snag/<id>[?step=]`**, never at a client directly.
+
+That route (`apps/web/src/app/go/snag/[id]/page.tsx`, deliberately *outside*
+the `(portal)` group) decides per visitor: a supervisor or officer admin is
+redirected straight into the portal, and everyone else is offered the app.
+Choosing a client per *event* cannot work — `serious_created` is one email to a
+whole site's members, whose roles are mixed, and RCAs are usually assigned to
+workers, whom the portal refuses outright.
+
+**Deploy the portal before the function.** The links only resolve once a
+portal build containing `/go/snag/[id]` is live, and they are only ever
+followed from an inbox — so a mismatch is invisible to the app, to CI, and to
+anyone not reading their email. `SNAG_PORTAL_URL` is a Supabase function
+secret, so re-pointing it later needs no redeploy.
+
+A signed-out supervisor is sent to `/login?next=<portal path>` so the snag
+survives the login round trip. `next` is validated by `src/lib/nextPath.ts` —
+same-origin paths only, or it's an open redirect on a domain people trust.
+
 ## Deep links
 
 Both clients route **`/snags/:id`**, and both accept **`?step=`** naming one
 section of a serious snag (`notifiable`, `checklist`, `witnesses`, `evidence`,
-`rootCause`, `correctiveActions`, `rca`, `debrief` — `SnagStepKey` in
-`packages/shared-types`). One link therefore works whichever client
+`rootCause`, `correctiveActions`, `investigationDocument`, `rca`, `debrief` —
+`SnagStepKey` in `packages/shared-types`). `rootCause`/`correctiveActions`
+render only in `snag` mode and `investigationDocument` only in `document` mode,
+so a link to the wrong one lands on the snag with nothing expanded rather than
+erroring. One link therefore works whichever client
 `SNAG_APP_URL` points at, which is what `supabase/functions/notify-snag` relies
 on when it mails someone about an RCA.
 

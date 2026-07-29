@@ -245,6 +245,7 @@ export interface DebriefLesson {
 
 export interface SnagDebrief {
   id: string;
+  /** Historic only: debriefs used to be hot or formal. New ones don't ask. */
   format: 'hot' | 'formal';
   status: 'in_progress' | 'completed';
   startedBy: string;
@@ -278,12 +279,28 @@ export async function getSnagDebriefs(client: SupabaseClient, snagId: string): P
 
 // ─── Investigation (serious lane) ──────────────────────────────────────────
 
+export type InvestigationMode = 'snag' | 'document';
+
 export interface InvestigationState {
   completedSteps: ChecklistStep[];
   witnesses: WitnessStatement[];
   evidence: EvidenceItem[];
   rootCause: string | null;
   openCorrectiveActions: number;
+  /** 'document' = the org runs its own process and evidences it with a file. */
+  mode: InvestigationMode;
+  leadInvestigatorId: string | null;
+  documentId: string | null;
+  documentTitle: string | null;
+  documentPath: string | null;
+  /**
+   * Who attached it. The server refuses to let that person accept it too, so
+   * both clients read this to hide the Accept button rather than offer a button
+   * that can only fail.
+   */
+  documentAttachedBy: string | null;
+  documentAccepted: boolean;
+  documentAcceptedBy: string | null;
 }
 
 // Reads the five investigation tables for a serious snag — all org-scoped by
@@ -293,7 +310,13 @@ export async function getInvestigationState(client: SupabaseClient, snagId: stri
     client.from('checklist_completions').select('step').eq('snag_id', snagId),
     client.from('witness_statements').select('*').eq('snag_id', snagId).order('taken_at', { ascending: true }),
     client.from('evidence_items').select('*').eq('snag_id', snagId).is('corrective_action_id', null).order('sort_index', { ascending: true }),
-    client.from('investigations').select('root_cause_text').eq('snag_id', snagId).maybeSingle(),
+    client.from('investigations')
+      .select(`
+        root_cause_text, mode, lead_investigator_id,
+        document_id, document_attached_by, document_accepted_by, document_accepted_at,
+        document:org_documents!investigations_document_id_fkey ( title, file_path )
+      `)
+      .eq('snag_id', snagId).maybeSingle(),
     // "Blocking" mirrors update_snag_status's resolve gate: done-but-unverified
     // still counts, so this pill can't show 0 while resolve is still blocked.
     client.from('corrective_actions').select('id', { count: 'exact', head: true })
@@ -306,11 +329,20 @@ export async function getInvestigationState(client: SupabaseClient, snagId: stri
     evidence: (evidenceRes.data ?? []) as EvidenceItem[],
     rootCause: (investigationRes.data as any)?.root_cause_text ?? null,
     openCorrectiveActions: actionsRes.count ?? 0,
+    mode: ((investigationRes.data as any)?.mode ?? 'snag') as InvestigationMode,
+    leadInvestigatorId: (investigationRes.data as any)?.lead_investigator_id ?? null,
+    documentId: (investigationRes.data as any)?.document_id ?? null,
+    documentTitle: (investigationRes.data as any)?.document?.title ?? null,
+    documentPath: (investigationRes.data as any)?.document?.file_path ?? null,
+    documentAttachedBy: (investigationRes.data as any)?.document_attached_by ?? null,
+    documentAccepted: Boolean((investigationRes.data as any)?.document_accepted_at),
+    documentAcceptedBy: (investigationRes.data as any)?.document_accepted_by ?? null,
   };
 }
 
 export type ResolveGateKey =
-  | 'notifiable' | 'checklist' | 'witnesses' | 'evidence' | 'rootCause' | 'correctiveActions';
+  | 'notifiable' | 'checklist' | 'witnesses' | 'evidence' | 'rootCause' | 'correctiveActions'
+  | 'investigationDocument' | 'documentAccepted';
 
 export interface ResolveGateCondition {
   key: ResolveGateKey;
@@ -338,11 +370,26 @@ export function seriousResolveGate(
   inv: InvestigationState,
   notifiableDecided: boolean,
 ): ResolveGateCondition[] {
-  return [
+  const shared: ResolveGateCondition[] = [
     { key: 'notifiable', unmet: !notifiableDecided, reason: 'Decide if this is a notifiable event' },
     { key: 'checklist', unmet: inv.completedSteps.length < 5, reason: `Finish the checklist (${inv.completedSteps.length}/5)` },
     { key: 'witnesses', unmet: inv.witnesses.length === 0, reason: 'Add a witness statement' },
     { key: 'evidence', unmet: inv.evidence.length === 0, reason: 'Add evidence' },
+  ];
+
+  // An organisation running its own investigation process substitutes two
+  // conditions for the last two — it does not get fewer. Everything above is
+  // required either way.
+  if (inv.mode === 'document') {
+    return [
+      ...shared,
+      { key: 'investigationDocument', unmet: !inv.documentId, reason: 'Attach the investigation document' },
+      { key: 'documentAccepted', unmet: !inv.documentAccepted, reason: 'A supervisor must accept the investigation document' },
+    ];
+  }
+
+  return [
+    ...shared,
     { key: 'rootCause', unmet: !inv.rootCause?.trim(), reason: 'Record a root cause' },
     { key: 'correctiveActions', unmet: inv.openCorrectiveActions > 0, reason: 'Close corrective actions' },
   ];
@@ -486,9 +533,13 @@ export async function exportGovernanceReport(
 // ─── Org document library ──────────────────────────────────────────────────
 // Added for SNAG_WEB_APP_PLAN.md decision D2 — a general org-wide document
 // library, distinct from snag-scoped evidence. Migration:
-// supabase/migrations/20260722200000_org_documents.sql. Read access is any
-// org member; upload/delete are supervisor/officer_admin only, enforced by
-// the create_org_document/delete_org_document RPCs and mirrored in the
+// supabase/migrations/20260722200000_org_documents.sql.
+//
+// Read and upload are any org member; delete is supervisor/officer_admin only.
+// Workers were opened up in 20260729000000 so someone running an investigation
+// under their organisation's own process can file the completed document —
+// removing an org record stays a supervisor's call. Enforced by the
+// create_org_document/delete_org_document RPCs and mirrored in the
 // org-documents storage bucket's own policies.
 
 export interface OrgDocument {
@@ -698,6 +749,19 @@ export async function uploadSnagEvidenceFile(
   return { path: data.path, error: null };
 }
 
+/**
+ * Whether an evidence item should render as a picture or as a file to open.
+ *
+ * Evidence has always accepted any file the storage bucket would take — the
+ * portal's upload is a plain file input — but both clients rendered every item
+ * with a URL as an <img>. A PDF therefore appeared as a broken image icon, and
+ * the thing someone had attached as proof was unopenable.
+ */
+export function isImageEvidence(path: string | null | undefined): boolean {
+  if (!path) return false;
+  return /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(path.split('?')[0]);
+}
+
 export async function getEvidencePhotoUrl(client: SupabaseClient, path: string): Promise<string | null> {
   const { data, error } = await client.storage.from(SNAG_EVIDENCE_BUCKET).createSignedUrl(path, 60 * 60);
   if (error || !data) return null;
@@ -760,10 +824,33 @@ export async function escalateSnag(client: SupabaseClient, snagId: string) {
   return client.rpc('escalate_snag', { p_snag_id: snagId });
 }
 
+// ─── Investigation assignment and mode ──────────────────────────────────────
+
+export async function assignInvestigation(
+  client: SupabaseClient, snagId: string, assigneeId: string, mode: InvestigationMode
+) {
+  return client.rpc('assign_investigation', {
+    p_snag_id: snagId, p_assignee_id: assigneeId, p_mode: mode,
+  });
+}
+
+/** Always an org_documents row, whether it was already in the library or
+ *  uploaded for this investigation — one register, discoverable later. */
+export async function attachInvestigationDocument(client: SupabaseClient, snagId: string, documentId: string) {
+  return client.rpc('attach_investigation_document', { p_snag_id: snagId, p_document_id: documentId });
+}
+
+export async function acceptInvestigationDocument(client: SupabaseClient, snagId: string) {
+  return client.rpc('accept_investigation_document', { p_snag_id: snagId });
+}
+
 // ─── Debrief mutations ──────────────────────────────────────────────────────
 
-export async function startDebrief(client: SupabaseClient, snagId: string, format: 'hot' | 'formal') {
-  return client.rpc('start_debrief', { p_snag_id: snagId, p_format: format });
+// Idempotent: returns the existing debrief if there is one. A snag has at most
+// one, enforced by a unique index — the old two-argument form let each tap of
+// the hot/formal selector start another, and one snag reached 13.
+export async function startDebrief(client: SupabaseClient, snagId: string) {
+  return client.rpc('start_debrief', { p_snag_id: snagId });
 }
 
 export async function addDebriefFinding(client: SupabaseClient, debriefId: string, findingText: string) {

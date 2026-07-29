@@ -21,6 +21,7 @@ import ManageOrganisationScreen from '../screens/ManageOrganisationScreen';
 import ManageSitesScreen from '../screens/ManageSitesScreen';
 import ManageWorkGroupsScreen from '../screens/ManageWorkGroupsScreen';
 import MentionsScreen from '../screens/MentionsScreen';
+import DocumentLibraryScreen from '../screens/DocumentLibraryScreen';
 import OnboardingCarouselScreen from '../screens/OnboardingCarouselScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 import { ReportTargetProvider } from '../context/ReportTargetContext';
@@ -160,6 +161,11 @@ export default function RootNavigator({ userRole, initialTab }: { userRole: User
         <Stack.Screen
           name="Mentions"
           component={MentionsScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="DocumentLibrary"
+          component={DocumentLibraryScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
         <Stack.Screen

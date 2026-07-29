@@ -329,9 +329,10 @@ const styles = StyleSheet.create({
   pill_done: { backgroundColor: Colors.successBg },
   pillText: { fontSize: Typography.xs, fontWeight: Typography.semibold },
   pillText_open: { color: Colors.textSecondary },
-  pillText_overdue: { color: Colors.danger },
-  pillText_pending: { color: Colors.status.inProgress },
-  pillText_done: { color: Colors.success },
+  // *Fg throughout: these are label text on a tint, not dots. See theme.ts.
+  pillText_overdue: { color: Colors.dangerFg },
+  pillText_pending: { color: Colors.status.inProgressFg },
+  pillText_done: { color: Colors.successFg },
 
   evidenceRow: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,

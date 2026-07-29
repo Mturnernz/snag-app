@@ -89,7 +89,7 @@
   gap: 4px;
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
-  color: var(--color-serious);
+  color: var(--color-serious-fg);
   background: var(--color-serious-bg);
   padding: 3px 8px;
   border-radius: var(--radius-chip);
@@ -107,7 +107,7 @@
   flex-shrink: 0;
   border-radius: var(--radius-button);
   background: var(--color-serious-bg);
-  color: var(--color-serious);
+  color: var(--color-serious-fg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -155,7 +155,7 @@
   align-items: center;
   gap: 8px;
   background: var(--color-status-in-progress-bg);
-  color: var(--color-status-in-progress);
+  color: var(--color-status-in-progress-fg);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   padding: 8px 10px;
@@ -177,7 +177,7 @@
   height: 40px;
   border-radius: var(--radius-button);
   background: var(--color-primary-light);
-  color: var(--color-primary);
+  color: var(--color-primary-fg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -261,7 +261,7 @@
   height: 48px;
   border-radius: var(--radius-button);
   background: var(--color-serious-bg);
-  color: var(--color-serious);
+  color: var(--color-serious-fg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -358,7 +358,8 @@
 }
 
 .pricingBody a {
-  color: var(--color-primary);
+  /* This block sits on --color-primary-light, where the brand blue is 4.23:1. */
+  color: var(--color-primary-fg);
   font-weight: var(--weight-semibold);
 }
 

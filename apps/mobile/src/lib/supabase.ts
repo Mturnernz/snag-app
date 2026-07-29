@@ -692,6 +692,9 @@ export const setNotifiableFlag = (snagId: string, value: boolean) =>
 
 export type InvestigationState = queries.InvestigationState;
 
+/** Photo vs. document — evidence accepts both. */
+export const isImageEvidence = queries.isImageEvidence;
+
 // Reads the five investigation tables for a serious snag — all org-scoped by RLS.
 // Drives the live progress display and the serious-lane resolve gate.
 export const getInvestigationState = (snagId: string) => queries.getInvestigationState(supabase, snagId);
@@ -740,12 +743,77 @@ export const exportInvestigation = (snagId: string) => queries.exportInvestigati
 export const exportGovernanceReport = (periodStart?: string, periodEnd?: string) =>
   queries.exportGovernanceReport(supabase, periodStart, periodEnd);
 
+// ─── Investigation mode ────────────────────────────────────────────────────
+// A serious snag is investigated one of two ways: SNAG's guided process, or the
+// organisation's own — evidenced by a document a second supervisor signs off.
+// The mode is chosen when the snag is allocated, and it swaps the last two
+// resolve-gate conditions rather than removing them.
+
+export type InvestigationMode = queries.InvestigationMode;
+
+export const assignInvestigation = (snagId: string, assigneeId: string, mode: InvestigationMode) =>
+  queries.assignInvestigation(supabase, snagId, assigneeId, mode);
+
+export const attachInvestigationDocument = (snagId: string, documentId: string) =>
+  queries.attachInvestigationDocument(supabase, snagId, documentId);
+
+// Refused server-side for whoever attached the document — attaching a file and
+// signing the investigation off are two different acts by two different people.
+export const acceptInvestigationDocument = (snagId: string) =>
+  queries.acceptInvestigationDocument(supabase, snagId);
+
+// ─── Org document library ──────────────────────────────────────────────────
+// Org-wide, not snag-scoped. Any member can read and upload; only a supervisor
+// or admin can delete.
+
+export type OrgDocument = queries.OrgDocument;
+
+export const getOrgDocuments = (orgId: string) => queries.getOrgDocuments(supabase, orgId);
+
+export const createOrgDocument = (filePath: string, title: string, category?: string | null) =>
+  queries.createOrgDocument(supabase, filePath, title, category);
+
+export const deleteOrgDocument = (documentId: string) => queries.deleteOrgDocument(supabase, documentId);
+
+/**
+ * Uploads a document the user picked from their device.
+ *
+ * The shared `uploadOrgDocumentFile` takes a browser `File`/`Blob`; here the
+ * picker hands back a local URI, and the same constraint as photos applies —
+ * `fetch(uri).blob()` produces something storage-js can't reliably read on
+ * React Native and the API rejects it with a 400 before RLS is ever consulted.
+ * So read it as an ArrayBuffer, exactly as uploadSnagPhoto does.
+ */
+export async function uploadOrgDocumentFromUri(
+  orgId: string,
+  localUri: string,
+  fileName: string,
+  mimeType?: string | null,
+): Promise<{ path: string | null; error: any }> {
+  try {
+    const arrayBuffer = await new File(localUri).arrayBuffer();
+    const path = `${orgId}/${Date.now()}-${fileName}`;
+    const { data, error } = await supabase.storage
+      .from('org-documents')
+      .upload(path, arrayBuffer, {
+        contentType: mimeType || 'application/octet-stream',
+        upsert: false,
+      });
+    if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
+    return { path: data.path, error: null };
+  } catch (err) {
+    return { path: null, error: err };
+  }
+}
+
+export const getOrgDocumentUrl = (path: string) => queries.getOrgDocumentUrl(supabase, path);
+
 // ─── Multi-PCBU notification nomination ────────────────────────────────────────
 export const nominateNotifyingPcbu = (snagId: string, orgId: string | null, note: string | null) =>
   queries.nominateNotifyingPcbu(supabase, snagId, orgId, note);
 
 // ─── Debriefs ───────────────────────────────────────────────────────────────────
-export const startDebrief = (snagId: string, format: 'hot' | 'formal') => queries.startDebrief(supabase, snagId, format);
+export const startDebrief = (snagId: string) => queries.startDebrief(supabase, snagId);
 
 export const addDebriefFinding = (debriefId: string, findingText: string) =>
   queries.addDebriefFinding(supabase, debriefId, findingText);

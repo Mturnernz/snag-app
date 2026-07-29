@@ -8,10 +8,11 @@ interface Props {
 }
 
 const statusConfig: Record<SnagStatus, { color: string; bg: string }> = {
-  flagged: { color: Colors.status.flagged, bg: Colors.status.flaggedBg },
-  in_progress: { color: Colors.status.inProgress, bg: Colors.status.inProgressBg },
-  resolved: { color: Colors.status.resolved, bg: Colors.status.resolvedBg },
-  rca_pending: { color: Colors.status.rcaPending, bg: Colors.status.rcaPendingBg },
+  // *Fg, not the base hue: this is label text on the tint. See theme.ts.
+  flagged: { color: Colors.status.flaggedFg, bg: Colors.status.flaggedBg },
+  in_progress: { color: Colors.status.inProgressFg, bg: Colors.status.inProgressBg },
+  resolved: { color: Colors.status.resolvedFg, bg: Colors.status.resolvedBg },
+  rca_pending: { color: Colors.status.rcaPendingFg, bg: Colors.status.rcaPendingBg },
 };
 
 export default function StatusBadge({ status }: Props) {

@@ -14,10 +14,9 @@ export async function startDebriefAction(formData: FormData) {
   await requireSupervisorOrAdmin();
   const supabase = await createClient();
   const snagId = String(formData.get('snagId') ?? '');
-  const format = String(formData.get('format') ?? 'hot') as 'hot' | 'formal';
   if (!snagId) return;
 
-  const { error } = await startDebrief(supabase, snagId, format);
+  const { error } = await startDebrief(supabase, snagId);
   if (error) fail(snagId, error.message);
 
   revalidatePath(`/snags/${snagId}`);

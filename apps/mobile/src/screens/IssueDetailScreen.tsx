@@ -42,6 +42,7 @@ import ChecklistPanel from '../components/ChecklistPanel';
 import WitnessesPanel from '../components/WitnessesPanel';
 import EvidencePanel from '../components/EvidencePanel';
 import RootCausePanel from '../components/RootCausePanel';
+import InvestigationDocumentPanel from '../components/InvestigationDocumentPanel';
 import NotifiableEventPanel from '../components/NotifiableEventPanel';
 import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
@@ -155,6 +156,20 @@ const GATE_COPY: Record<ResolveGateCondition['key'], Omit<GateCondition, 'unmet'
     detail: 'Each one needs completing and verifying before this can close.',
     cta: 'Open corrective actions',
     stepKey: 'correctiveActions',
+  },
+  // Document mode: the org runs its own investigation process and evidences
+  // it with a file. These replace root cause and corrective actions above.
+  investigationDocument: {
+    title: 'Attach the investigation document',
+    detail: "This snag is using your organisation's own investigation process, so the completed document is what closes it.",
+    cta: 'Attach the document',
+    stepKey: 'investigationDocument',
+  },
+  documentAccepted: {
+    title: 'Accept the investigation document',
+    detail: 'A supervisor has to read it and sign it off — attaching a file is not the same as accepting the investigation.',
+    cta: 'Review the document',
+    stepKey: 'investigationDocument',
   },
 };
 
@@ -381,7 +396,8 @@ export default function IssueDetailScreen() {
   // never fights a manual toggle afterward.
   const [stepExpanded, setStepExpanded] = useState<Record<StepKey, boolean>>({
     notifiable: false, checklist: false, witnesses: false, evidence: false,
-    rootCause: false, correctiveActions: false, rca: false, debrief: false,
+    rootCause: false, correctiveActions: false, investigationDocument: false,
+    rca: false, debrief: false,
   });
   const toggleStep = useCallback((key: string) => {
     setStepExpanded((prev) => ({ ...prev, [key]: !prev[key as StepKey] }));
@@ -470,6 +486,17 @@ export default function IssueDetailScreen() {
   const hasRootCause = Boolean(investigation?.rootCause?.trim());
   const rootCauseStatus: StepStatus = hasRootCause ? 'done' : 'pending';
   const rootCauseSummary = hasRootCause ? 'Recorded' : 'Not recorded';
+
+  // Document mode replaces the two cards above with one of its own. Attached
+  // isn't done: the gate wants a second supervisor's acceptance, so the header
+  // has to distinguish "a file is there" from "somebody signed it off".
+  const isDocumentMode = investigation?.mode === 'document';
+  const investigationDocumentStatus: StepStatus =
+    investigation?.documentAccepted ? 'done' : investigation?.documentId ? 'in_progress' : 'pending';
+  const investigationDocumentSummary =
+    investigation?.documentAccepted ? 'Accepted'
+    : investigation?.documentId ? 'Attached — awaiting sign-off'
+    : 'Not attached';
 
   // What NextStepCard points at. The notifiable decision comes first even
   // though it isn't a resolve-gate condition — it's the most time-critical
@@ -964,6 +991,7 @@ export default function IssueDetailScreen() {
                   severity={issue.severity}
                   owner={issue.owner ?? null}
                   assignees={siteAssignees}
+                  investigationMode={investigation?.mode ?? 'snag'}
                   resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
                   isPublicSubmission={issue.is_public_submission ?? false}
                   onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
@@ -981,6 +1009,7 @@ export default function IssueDetailScreen() {
               severity={issue.severity}
               owner={issue.owner ?? null}
               assignees={siteAssignees}
+              investigationMode={investigation?.mode ?? 'snag'}
               resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
               isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
@@ -1108,27 +1137,52 @@ export default function IssueDetailScreen() {
                 />
               </StepCard>
 
-              <StepCard
-                title="Root cause"
-                status={rootCauseStatus}
-                summary={rootCauseSummary}
-                expanded={stepExpanded.rootCause}
-                onToggle={() => toggleStep('rootCause')}
-              >
-                <RootCausePanel
-                  issueId={issue.id}
-                  state={investigation}
-                  onChanged={onInvestigationChanged}
-                />
-              </StepCard>
+              {/* The fork. An organisation running its own investigation
+                  process attaches the document it produced instead of
+                  recording a root cause and corrective actions here — a
+                  substitution, so every card above this one still applies. */}
+              {isDocumentMode ? (
+                <StepCard
+                  title="Investigation document"
+                  status={investigationDocumentStatus}
+                  summary={investigationDocumentSummary}
+                  expanded={stepExpanded.investigationDocument}
+                  onToggle={() => toggleStep('investigationDocument')}
+                >
+                  <InvestigationDocumentPanel
+                    issueId={issue.id}
+                    orgId={issue.org_id}
+                    state={investigation}
+                    canEdit={canEdit}
+                    orgMembers={orgMembers}
+                    onChanged={onInvestigationChanged}
+                  />
+                </StepCard>
+              ) : (
+                <StepCard
+                  title="Root cause"
+                  status={rootCauseStatus}
+                  summary={rootCauseSummary}
+                  expanded={stepExpanded.rootCause}
+                  onToggle={() => toggleStep('rootCause')}
+                >
+                  <RootCausePanel
+                    issueId={issue.id}
+                    state={investigation}
+                    onChanged={onInvestigationChanged}
+                  />
+                </StepCard>
+              )}
             </>
           )}
 
           {/* Corrective actions — visible to any org member on the snag's own
               org (not just editors), since an owner who isn't a supervisor
               still needs to see and complete their own assigned action;
-              creating and verifying stay canEdit-gated inside the panel. */}
-          {isSerious && isOrgMember && (
+              creating and verifying stay canEdit-gated inside the panel.
+              Hidden in document mode, where the org's own process covers what
+              happens next and the gate doesn't ask for them. */}
+          {isSerious && isOrgMember && !isDocumentMode && (
             <StepCard
               title="Corrective Actions"
               status={correctiveActionsStatus.status}

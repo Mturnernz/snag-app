@@ -6,12 +6,17 @@
 |---|---|---|---|
 | 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens, and the shared serious-lane resolve gate (its ordering pinned against `update_snag_status`). Jest, no browser, no network | none | no |
 | 1 | `apps/web/e2e/public.spec.ts` — every public route, both themes, three viewports, no horizontal overflow, no failed subresources | none | no |
+| 1 | `apps/web/e2e/a11y.spec.ts` — axe-core against WCAG 2.1 A/AA on every public route, the handoff, and the portal's dashboard/snags/reports/detail pages, in all three viewport projects | none (portal specs need `E2E_EMAIL`) | no |
+| 1 | `apps/web/e2e/handoff.spec.ts` — `/go/snag/[id]` is public, offers the app, carries a valid `?step=` and drops an invalid one, remembers the snag through login, 404s a malformed id, and refuses an off-site `?next=`. Its supervisor pass-through spec is Tier 2 | none (one spec needs `E2E_EMAIL`) | no |
 | 1 | `apps/web/e2e/auth-gate.spec.ts` — portal routes redirect anonymously; export routes reject GET and refuse anonymous POST | none | no |
 | 1 | `apps/mobile/e2e/auth.spec.ts` — auth screen renders, password masked, bad credentials rejected, both join paths reachable | none | no |
 | 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused, plus the snag detail page: sections start collapsed and the next step opens the one it names, the notifiable question offers both answers, Resolve is stated as blocked, every counted evidence item renders, the 5 Whys are asked one at a time | `E2E_EMAIL`/`E2E_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/report.spec.ts` — worker signs in, report screen shows both lanes and the right org, tab bar, snags list | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/deep-link.spec.ts` — `/snags/:id` opens that snag from a cold load, `?step=` expands one section and leaves the rest collapsed, an unknown step is ignored, and navigating writes the URL back | `E2E_EMAIL`/`E2E_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/incident.spec.ts` — the serious-incident screen: next step above the fold, no empty photo block, Resolve stated as blocked, every collapsed card reports its state, the evidence sheet is usable, WorkSafe criteria stay behind their disclosure, composer starts collapsed | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
+| 2 | `apps/mobile/e2e/documents.spec.ts` — a worker can reach the org document register and add to it, the listing renders (or says it's empty), and allocating a serious snag prompts for the investigation mode with each option's consequence stated | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD`, plus `E2E_EMAIL`/`E2E_PASSWORD` for the mode spec | no |
+| 3 | `apps/web/e2e/documents.spec.ts` — the org document register end to end: upload, listing, signed-URL download of the actual bytes, then delete. Cleans up after itself (unlike snags, documents can be removed) | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes, self-cleaning** |
+| 3 | `apps/web/e2e/investigation-document.spec.ts` — document mode end to end: allocating with "our own process" swaps root cause + corrective actions for the document step while leaving everything before the fork intact, upload-and-attach files the document in the library, and the attacher is refused the Accept button rather than offered one that can only fail. Restores the snag to guided mode and deletes its probe document | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes, self-cleaning** |
 | 3 | `apps/mobile/e2e/write-path.spec.ts` — reports a serious incident, then satisfies each resolve-gate condition in turn (notifiable decision → checklist → witness → evidence → root cause) and resolves it, asserting the gate blocks until the last one is met | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes** |
 
 Tier 0 runs anywhere and takes seconds. Tier 1 needs only a served bundle. Tier 2
@@ -259,8 +264,18 @@ when upgrading.
 - No accessibility audit. `@axe-core/playwright` would slot into the Tier 1
   specs directly.
 - Native mobile paths are untested: `expo-camera` (QR scan),
-  `expo-image-picker`/`-manipulator` (`PhotoPicker`), `expo-file-system`. These
-  need a device via Expo Go.
+  `expo-image-picker`/`-manipulator` (`PhotoPicker`), `expo-document-picker`
+  (the document library's upload and the investigation-document attach),
+  `expo-file-system`. These need a device via Expo Go — and
+  `expo-document-picker` is a *new native dependency*, so reaching a device at
+  all needs a fresh EAS build, not just a bundle reload.
+- Server-side rules verified against the live project through the real API but
+  not yet in a suite: that a worker can file (but not delete) an
+  `org_documents` row, that an unassigned worker is refused
+  `attach_investigation_document`, that the assigned investigator is not, and
+  that `accept_investigation_document` refuses the attacher. The portal spec
+  covers the last of these through the UI; the rest are one Node script away
+  from being a Tier 3 spec.
 - Tier 3 covers the serious lane only. The niggle lane's own path (report →
   assign → `resolve_snag`) and the RCA/debrief flows are still uncovered.
 - The web portal's snag detail page is a separate implementation from the

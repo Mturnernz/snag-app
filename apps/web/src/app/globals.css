@@ -63,8 +63,14 @@
   --color-on-primary: #FFFFFF;
 
   --color-text-primary: #111827;
-  --color-text-secondary: #6B7280;
-  --color-text-muted: #9CA3AF;
+  /* Both tiers are darker than the Tailwind greys they started as, because
+     WCAG AA (4.5:1) leaves no room for a lighter one on a near-white ground:
+     the old muted #9CA3AF measured 2.43:1 on --color-background, and #6B7280
+     — the previous *secondary* — is about the lightest grey that passes at
+     all. So the scale shifted down one step rather than collapsing to a
+     single tier. Verified by e2e/a11y.spec.ts. */
+  --color-text-secondary: #4B5563;
+  --color-text-muted: #6B7280;
 
   --color-status-flagged: #3B82F6;
   --color-status-flagged-bg: #EFF6FF;
@@ -93,6 +99,22 @@
   --color-category-other: #7C3AED;
   --color-category-other-bg: #EDE9FE;
 
+  /* Text-on-tint. A status colour and the same colour *as text on its own
+     tinted background* are different jobs: #F59E0B on #FFFBEB measured
+     2.07:1, and on a health-and-safety product the badge saying "in progress"
+     is not decoration. These are the darkest-hue-preserving shades that clear
+     WCAG AA, kept separate so the base colours stay usable as button
+     backgrounds, icons and dots. Dark theme already passed, so there the two
+     are the same value. */
+  --color-status-flagged-fg: #1D4ED8;
+  --color-status-in-progress-fg: #B45309;
+  --color-status-resolved-fg: #047857;
+  --color-status-rca-pending-fg: #B91C1C;
+  --color-success-fg: #15803D;
+  --color-danger-fg: #B91C1C;
+  --color-primary-fg: #1D4ED8;
+  --color-serious-fg: #B91C1C;
+
   color-scheme: light;
 }
 
@@ -112,7 +134,7 @@
 
     --color-text-primary: #F3F4F6;
     --color-text-secondary: #A0AAB8;
-    --color-text-muted: #6B7688;
+    --color-text-muted: #828C9E;
 
     --color-status-flagged: #60A5FA;
     --color-status-flagged-bg: #14233D;
@@ -131,6 +153,15 @@
     --color-serious-bg: #3B1319;
     --color-danger: #F87171;
     --color-danger-bg: #351417;
+
+  --color-status-flagged-fg: #60A5FA;
+  --color-status-in-progress-fg: #FBBF24;
+  --color-status-resolved-fg: #34D399;
+  --color-status-rca-pending-fg: #F87171;
+  --color-success-fg: #4ADE80;
+  --color-danger-fg: #F87171;
+  --color-primary-fg: #5B8DEF;
+  --color-serious-fg: #F87171;
 
     --color-category-niggle: #9CA6B8;
     --color-category-niggle-bg: #1B212C;
@@ -157,7 +188,7 @@
   --color-on-primary: #08101F;
   --color-text-primary: #F3F4F6;
   --color-text-secondary: #A0AAB8;
-  --color-text-muted: #6B7688;
+  --color-text-muted: #828C9E;
   --color-status-flagged: #60A5FA;
   --color-status-flagged-bg: #14233D;
   --color-status-in-progress: #FBBF24;
@@ -173,6 +204,15 @@
   --color-serious-bg: #3B1319;
   --color-danger: #F87171;
   --color-danger-bg: #351417;
+
+  --color-status-flagged-fg: #60A5FA;
+  --color-status-in-progress-fg: #FBBF24;
+  --color-status-resolved-fg: #34D399;
+  --color-status-rca-pending-fg: #F87171;
+  --color-success-fg: #4ADE80;
+  --color-danger-fg: #F87171;
+  --color-primary-fg: #5B8DEF;
+  --color-serious-fg: #F87171;
   --color-category-niggle: #9CA6B8;
   --color-category-niggle-bg: #1B212C;
   --color-category-broken-equipment: #F0B429;

@@ -69,6 +69,7 @@ Ordered by what they would have cost in production.
 | **Disabled buttons rendered at full strength, app-wide** | Reanimated writes its animated style directly onto the view, overriding the later static `styles.disabled`. Measured: `opacity: 1`, full-strength background, `pointer-events: none`. Every disabled button in the app looked pressable. |
 | **Collapsed cards couldn't show their summaries** | `StepCard` only mounts children while expanded, so panels that report their own state left every collapsed card blank — in exactly the state the progress list exists to describe. |
 | **A stalled request wedged the client, silently and permanently** | supabase-js puts no timeout on its own `fetch`, and it resolves an access token before *every* request. One `/auth/v1/token` refresh that was issued and never answered — what a phone losing signal mid-request actually looks like — left `getSession()` pending forever, after which **no call was ever issued at all**. Invisible from every angle: nothing reached the server so there was nothing in the logs, nothing rejected so no error was shown, and the loaded screen kept rendering its existing data. The only symptom was a Save button spinning for good. Found from a screenshot of exactly that, reproduced against the deployed production bundle, and fixed with a per-request deadline plus try/finally around the saves. |
+| **No photo could be attached from the browser build** | The app is shipped to the web as well as to phones, and there the file read never happened: `expo-file-system` has no web implementation — its `File` is a stub that warns and is missing the methods the JS wrapper calls, so `new File(uri)` throws on construction. Every pick came back "Couldn't upload a photo", which correctly disables Submit, so a worker with a photo could file nothing at all. Invisible server-side for the same reason as the stalled request above: it fails *before* the request, so Storage logged nothing. Reading the picked file is now platform-split (`src/lib/uploadBody.ts`), which is what it always was — one half was just missing. |
 | **An assigned worker could not submit their own RCA** | `submit_rca` deliberately allows the assignee, then calls `set_root_cause`, which called `require_serious_snag` and demanded `can_edit_site`. A worker could answer all five whys and be refused with *"Only a supervisor of this site, or an admin, can run the investigation"*. CLAUDE.md says RCAs are usually assigned to workers, so this is the **normal** case — it had never fired only because a supervisor had always pressed submit on the assignee's behalf. Confirmed against the live project as the QA worker before and after the fix. |
 
 ---
@@ -308,6 +309,17 @@ a real build, not Expo Go.
 `expo-document-picker` (the document library and investigation-document attach —
 **a new native dependency, so it needs a fresh EAS build to reach a device at all**),
 `expo-file-system`. react-native-web can't exercise these; neither can CI.
+
+The list overstated itself, and it cost. `expo-image-picker` / `-manipulator` /
+`-document-picker` all run in the browser; only `expo-camera` and
+`expo-file-system` are genuinely absent there. Reading that as "the photo path is
+native-only" is what allowed `uploadSnagPhoto` to be moved onto
+`expo-file-system` (#14, the 400-on-native fix) with no thought for the web
+build — where the same call throws on construction, before any request, so
+nothing appears in the Storage logs to say so. Since that change landed on 16
+July, exactly one photo has reached `snag-photos` (27 July, and not from a
+browser). The Netlify export is a shipped client used from real phones;
+"unverified on native" and "broken on web" are different sentences.
 
 | Option | Trade-off |
 |---|---|

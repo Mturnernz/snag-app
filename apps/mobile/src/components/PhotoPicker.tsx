@@ -72,15 +72,24 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
 
   async function runUpload(id: string, uri: string, fileName: string) {
     setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'uploading', path: null } : p)));
-    const compressed = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 1200 } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    const { path, error } = await uploadSnagPhoto(compressed.uri, fileName, bucket);
-    setPhotos((prev) => prev.map((p) => (
-      p.id === id ? { ...p, status: error || !path ? 'failed' : 'success', path } : p
-    )));
+    // Nothing may escape: this is called without being awaited, so a throw
+    // anywhere in here (compression, not just the upload) would leave the
+    // photo 'uploading' for good — a spinner that never resolves and a Submit
+    // button disabled behind it, with no way back but reloading the screen.
+    try {
+      const compressed = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1200 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const { path, error } = await uploadSnagPhoto(compressed.uri, fileName, bucket);
+      setPhotos((prev) => prev.map((p) => (
+        p.id === id ? { ...p, status: error || !path ? 'failed' : 'success', path } : p
+      )));
+    } catch (err) {
+      console.error('Photo upload error:', err);
+      setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'failed', path: null } : p)));
+    }
   }
 
   function addPhoto(uri: string) {

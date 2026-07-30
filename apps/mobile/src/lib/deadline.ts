@@ -14,9 +14,12 @@
  * shape.
  */
 export class DeadlineError extends Error {
+  readonly label: string;
+
   constructor(label: string, ms: number) {
     super(`${label} timed out after ${Math.round(ms / 1000)}s`);
     this.name = 'DeadlineError';
+    this.label = label;
   }
 }
 
@@ -34,12 +37,21 @@ export function withDeadline<T>(promise: Promise<T>, ms: number, label: string):
  * A short, plain-English reason for a failure, for showing next to the thing
  * that failed. The alternative — a generic "something went wrong" — is what
  * makes a failure take a screenshot and a round trip to diagnose.
+ *
+ * The three ways an upload can stall are deliberately worded apart, because
+ * they point at completely different causes and a screenshot is often all the
+ * evidence there is:
+ *
+ * - `preparing timed out` — a local stage never finished. Nothing was sent.
+ * - `sending timed out` — the whole send overran its backstop.
+ * - `no reply from the server` — the request went out and nothing came back,
+ *   which is what an aborted `fetch` means (see fetchWithTimeout).
  */
 export function failureReason(err: unknown): string {
-  if (err instanceof DeadlineError) return 'timed out';
+  if (err instanceof DeadlineError) return `${err.label.toLowerCase()} timed out`;
   const message = typeof err === 'string' ? err : (err as { message?: string })?.message ?? '';
   const name = (err as { name?: string })?.name ?? '';
-  if (name === 'AbortError' || /aborted/i.test(message)) return 'timed out';
+  if (name === 'AbortError' || /aborted/i.test(message)) return 'no reply from the server';
   // What fetch throws when the request never left the device: no connectivity,
   // DNS, a blocked CORS preflight. Indistinguishable from each other by design.
   if (name === 'TypeError' || /failed to fetch|network request failed|load failed/i.test(message)) {

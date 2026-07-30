@@ -293,16 +293,21 @@ when upgrading.
   `apps/mobile/e2e/stalled-network.spec.ts`. Worth knowing because the failure
   is invisible to every other kind of test: only a stalled — not failed —
   request reproduces it.
-- **A photo that hangs rather than fails.** After the read was fixed, a photo
-  was reported spinning indefinitely on the web build. Driving the deployed
-  bundle's own modules in Chromium (`__r(...)` on the Metro bundle, Supabase
-  intercepted) reproduced none of it: compression, the read, and the upload all
-  settled, including with a stalled token refresh. So the cause is still
-  unknown, and what shipped is a bound rather than a fix — a 75s backstop around
-  the whole job plus the reason shown on the tile, so the next occurrence
-  reports itself instead of needing a screenshot. Verified in Chromium against a
-  local build: a never-settling stage fails at its deadline, and a stalled
-  upload request fails at 60s with "timed out".
+- **A photo upload that stalls before the request arrives.** Two reports, in
+  order: the tile spun forever (no deadline), then it said "timed out" — and in
+  both cases *nothing* reached Storage, not even a CORS preflight. Driving the
+  deployed bundle's own modules in Chromium (`__r(...)` on the Metro bundle,
+  Supabase intercepted) reproduced neither: compression, the read and the upload
+  all settle, including with a stalled token refresh. Two things changed as a
+  result. Web now hands storage-js a **Blob**, so the upload goes as
+  `multipart/form-data` — the path every browser upload takes — instead of the
+  raw binary POST an ArrayBuffer produces; that is the difference most likely to
+  matter to whatever is dropping the request, and it is verifiable in Chromium
+  (`content-type: multipart/form-data; boundary=…`). And each stage now names
+  itself when it gives up: `preparing timed out` (nothing sent), `sending timed
+  out` (backstop), `no reply from the server` (request sent, aborted at 60s).
+  The next screenshot therefore says which side stalled. The cause is still not
+  identified — do not read the Blob change as a diagnosis.
 - **Uploads are platform-split and only one half is exercised.** Reading a
   picked file needs `expo-file-system` on native and `fetch` on web, and using
   the wrong one throws before any request is made — "Couldn't upload a photo",

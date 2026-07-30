@@ -4,13 +4,14 @@ import { readForUpload } from './uploadBody';
 
 // Reading a picked file is the first step of every upload, and the only step
 // that differs by platform. It is also the step whose failure is hardest to
-// see: it throws before any request is made, so the user gets "Couldn't upload
-// a photo" (and a Submit button that stays disabled) while the Storage logs
-// show nothing at all — which is how the web build shipped for two weeks
-// unable to attach a single photo.
+// see: it happens before any request, so the user gets "Couldn't upload a
+// photo" (and a Submit button that stays disabled) while the Storage logs show
+// nothing at all — which is how the web build shipped for two weeks unable to
+// attach a single photo.
 //
-// So what's pinned here is which reader each platform gets, and that neither
-// one is ever used on the other.
+// What each platform gets is not a detail. storage-js sends a Blob as
+// multipart/form-data and anything else as a raw binary body, so this function
+// also decides which of the two upload paths the request takes.
 
 jest.mock('expo-file-system', () => ({
   File: jest.fn().mockImplementation(() => ({
@@ -33,32 +34,28 @@ beforeEach(() => {
 afterEach(() => setPlatform(originalPlatform));
 
 describe('readForUpload', () => {
-  it('reads a file:// URI through expo-file-system on native', async () => {
+  it('reads a file:// URI as an ArrayBuffer on native', async () => {
     setPlatform('ios');
     const fetchSpy = jest.fn();
     global.fetch = fetchSpy as unknown as typeof fetch;
 
-    const buffer = await readForUpload('file:///tmp/photo.jpg');
+    const body = await readForUpload('file:///tmp/photo.jpg', 'image/jpeg');
 
-    expect(new Uint8Array(buffer)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(new Uint8Array(body as ArrayBuffer)).toEqual(new Uint8Array([1, 2, 3]));
     expect(FileMock).toHaveBeenCalledWith('file:///tmp/photo.jpg');
-    // fetch(uri).blob() is what Storage rejected with a 400 before RLS ever
-    // ran — the reason this branch exists at all.
+    // A Blob here is what Storage rejected with a 400 before RLS ever ran —
+    // the reason this branch exists at all.
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('reads a blob: URL through fetch on web', async () => {
+  it('reads a blob: URL as a Blob on web, so the upload goes as multipart', async () => {
     setPlatform('web');
-    const body = new Uint8Array([4, 5, 6]).buffer;
-    global.fetch = jest.fn(async () => ({
-      ok: true,
-      status: 200,
-      arrayBuffer: async () => body,
-    })) as unknown as typeof fetch;
+    const blob = new Blob([new Uint8Array([4, 5, 6])], { type: 'image/jpeg' });
+    global.fetch = jest.fn(async () => ({ ok: true, status: 200, blob: async () => blob })) as unknown as typeof fetch;
 
-    const buffer = await readForUpload('blob:http://localhost:8081/abc');
+    const body = await readForUpload('blob:http://localhost:8081/abc', 'image/jpeg');
 
-    expect(new Uint8Array(buffer)).toEqual(new Uint8Array([4, 5, 6]));
+    expect(body).toBe(blob);
     expect(global.fetch).toHaveBeenCalledWith('blob:http://localhost:8081/abc');
     // expo-file-system has no web implementation: its File is a stub missing
     // the methods the JS wrapper calls, so constructing one here throws and
@@ -66,12 +63,30 @@ describe('readForUpload', () => {
     expect(FileMock).not.toHaveBeenCalled();
   });
 
+  it('retypes a blob that lost its mime type, so it is not stored as octet-stream', async () => {
+    setPlatform('web');
+    const untyped = new Blob([new Uint8Array([7])], { type: '' });
+    global.fetch = jest.fn(async () => ({ ok: true, status: 200, blob: async () => untyped })) as unknown as typeof fetch;
+
+    const body = (await readForUpload('blob:x', 'application/pdf')) as Blob;
+
+    // Multipart carries the Blob's own type, not storage-js's contentType
+    // option — an untyped blob downloads as a file nothing will open.
+    expect(body.type).toBe('application/pdf');
+  });
+
+  it('leaves a correctly typed blob alone', async () => {
+    setPlatform('web');
+    const blob = new Blob([new Uint8Array([8])], { type: 'application/pdf' });
+    global.fetch = jest.fn(async () => ({ ok: true, status: 200, blob: async () => blob })) as unknown as typeof fetch;
+
+    expect(await readForUpload('blob:x', 'application/pdf')).toBe(blob);
+  });
+
   it('throws rather than uploading an error response as if it were the file', async () => {
     setPlatform('web');
     global.fetch = jest.fn(async () => ({
-      ok: false,
-      status: 404,
-      arrayBuffer: async () => new ArrayBuffer(0),
+      ok: false, status: 404, blob: async () => new Blob([]),
     })) as unknown as typeof fetch;
 
     // A revoked or expired object URL 404s. Uploading that body would store a

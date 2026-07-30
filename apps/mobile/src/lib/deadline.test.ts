@@ -20,9 +20,9 @@ describe('withDeadline', () => {
   });
 
   it('rejects a promise that never settles', async () => {
-    const result = withDeadline(new Promise(() => {}), 75_000, 'The upload');
-    const assertion = expect(result).rejects.toThrow(/The upload timed out after 75s/);
-    jest.advanceTimersByTime(75_000);
+    const result = withDeadline(new Promise(() => {}), 65_000, 'Sending');
+    const assertion = expect(result).rejects.toThrow(/Sending timed out after 65s/);
+    jest.advanceTimersByTime(65_000);
     await assertion;
   });
 
@@ -34,8 +34,11 @@ describe('withDeadline', () => {
 
 describe('failureReason', () => {
   it.each([
-    [new DeadlineError('The upload', 75_000), 'timed out'],
-    [Object.assign(new Error('signal is aborted without reason'), { name: 'AbortError' }), 'timed out'],
+    // The three stalls are worded apart on purpose: nothing sent, send
+    // overran, or sent-and-no-answer. They point at different causes.
+    [new DeadlineError('Preparing', 30_000), 'preparing timed out'],
+    [new DeadlineError('Sending', 65_000), 'sending timed out'],
+    [Object.assign(new Error('signal is aborted without reason'), { name: 'AbortError' }), 'no reply from the server'],
     [new TypeError('Failed to fetch'), 'no connection'],
     [new Error('Network request failed'), 'no connection'],
     [new Error('new row violates row-level security policy'), 'new row violates row-level security policy'],

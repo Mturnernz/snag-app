@@ -13,14 +13,22 @@ const MAX_PHOTOS = 5;
 const THUMB_SIZE = 92;
 
 /**
- * Backstop for the whole compress-then-upload job. Deliberately longer than the
- * 60s deadline on the upload request itself (lib/supabase.ts), so a slow site
- * connection fails with the network's own error rather than this one. What this
- * catches is a stage that has no deadline at all — image decode and compression
- * run in a native/browser module that can simply never call back, and when that
- * happens the photo spins forever and Submit stays disabled behind it.
+ * The two stages are bounded separately, and say which one gave up, because
+ * "the photo didn't upload" has two completely different causes and a
+ * screenshot of the failure is usually all the evidence there is.
+ *
+ * Preparing is local: decode, resize, re-encode, all inside a native/browser
+ * module that can simply never call back. Nothing has been sent, so 30s is
+ * already generous.
+ *
+ * Sending has its own 60s deadline on the request itself (`fetchWithTimeout` in
+ * lib/supabase.ts) — a photo on a bad site connection is slow rather than
+ * broken. This backstop sits just past it, so the normal outcome is the
+ * request's own "no reply from the server" and this only fires if something
+ * before the request stalls.
  */
-const UPLOAD_DEADLINE_MS = 75_000;
+const PREPARE_DEADLINE_MS = 30_000;
+const SEND_DEADLINE_MS = 65_000;
 
 type PhotoStatus = 'uploading' | 'success' | 'failed';
 
@@ -86,13 +94,17 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   }, [photos, onBlockingChange]);
 
   async function compressAndUpload(uri: string, fileName: string) {
-    const compressed = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 1200 } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+    const compressed = await withDeadline(
+      ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1200 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      ),
+      PREPARE_DEADLINE_MS,
+      'Preparing',
     );
     try {
-      return await uploadSnagPhoto(compressed.uri, fileName, bucket);
+      return await withDeadline(uploadSnagPhoto(compressed.uri, fileName, bucket), SEND_DEADLINE_MS, 'Sending');
     } finally {
       // On web the compressed copy is an object URL held by the document until
       // it's revoked, and a phone browser doing this five times over is the
@@ -113,9 +125,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     // good — a spinner that never resolves and a Submit button disabled behind
     // it, with no way back but reloading the screen.
     try {
-      const { path, error } = await withDeadline(
-        compressAndUpload(uri, fileName), UPLOAD_DEADLINE_MS, 'The upload'
-      );
+      const { path, error } = await compressAndUpload(uri, fileName);
       if (error || !path) console.error('Photo upload error:', error);
       setPhotos((prev) => prev.map((p) => (
         p.id === id

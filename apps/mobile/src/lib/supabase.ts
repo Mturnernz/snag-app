@@ -823,9 +823,10 @@ export const deleteOrgDocument = (documentId: string) => queries.deleteOrgDocume
  * Uploads a document the user picked from their device.
  *
  * The shared `uploadOrgDocumentFile` takes a browser `File`/`Blob`; here the
- * picker hands back a local URI, which `readForUpload` turns into an
- * ArrayBuffer the way the current platform allows — exactly as uploadSnagPhoto
- * does.
+ * picker hands back a local URI, which `readForUpload` turns into whatever this
+ * platform can upload — exactly as uploadSnagPhoto does. The mime type goes to
+ * the reader too, because on web it travels on the body rather than in the
+ * options.
  */
 export async function uploadOrgDocumentFromUri(
   orgId: string,
@@ -834,11 +835,11 @@ export async function uploadOrgDocumentFromUri(
   mimeType?: string | null,
 ): Promise<{ path: string | null; error: any }> {
   try {
-    const arrayBuffer = await readForUpload(localUri);
+    const body = await readForUpload(localUri, mimeType || 'application/octet-stream');
     const path = `${orgId}/${Date.now()}-${fileName}`;
     const { data, error } = await supabase.storage
       .from('org-documents')
-      .upload(path, arrayBuffer, {
+      .upload(path, body, {
         contentType: mimeType || 'application/octet-stream',
         upsert: false,
       });
@@ -964,11 +965,11 @@ export async function uploadSnagPhoto(
     // Reading the picked file is platform-specific — and a wrong read fails
     // before any request is made, which looks like an upload failure with
     // nothing in the Storage logs. See readForUpload.
-    const arrayBuffer = await readForUpload(localUri);
+    const body = await readForUpload(localUri, 'image/jpeg');
 
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, arrayBuffer, {
+      .upload(fileName, body, {
         contentType: 'image/jpeg',
         upsert: false,
       });

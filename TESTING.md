@@ -293,21 +293,30 @@ when upgrading.
   `apps/mobile/e2e/stalled-network.spec.ts`. Worth knowing because the failure
   is invisible to every other kind of test: only a stalled — not failed —
   request reproduces it.
-- **A photo upload that stalls before the request arrives.** Two reports, in
-  order: the tile spun forever (no deadline), then it said "timed out" — and in
-  both cases *nothing* reached Storage, not even a CORS preflight. Driving the
-  deployed bundle's own modules in Chromium (`__r(...)` on the Metro bundle,
-  Supabase intercepted) reproduced neither: compression, the read and the upload
-  all settle, including with a stalled token refresh. Two things changed as a
-  result. Web now hands storage-js a **Blob**, so the upload goes as
-  `multipart/form-data` — the path every browser upload takes — instead of the
-  raw binary POST an ArrayBuffer produces; that is the difference most likely to
-  matter to whatever is dropping the request, and it is verifiable in Chromium
-  (`content-type: multipart/form-data; boundary=…`). And each stage now names
-  itself when it gives up: `preparing timed out` (nothing sent), `sending timed
-  out` (backstop), `no reply from the server` (request sent, aborted at 60s).
-  The next screenshot therefore says which side stalled. The cause is still not
-  identified — do not read the Blob change as a diagnosis.
+- **A photo upload that stalled before the request arrived — solved, and it was
+  never about photos.** Three reports: the tile spun forever, then said "timed
+  out", then said "sending timed out" — and each time *nothing* reached Storage,
+  not even a CORS preflight. That last wording is what cracked it: the backstop
+  fired at 65s while the request's own 60s deadline never did, so `fetch` was
+  never reached. It was an `async` `onAuthStateChange` callback deadlocking the
+  auth lock (see PRODUCTION_READINESS.md §3 and `src/lib/authEvents.ts`) — the
+  client had stopped issuing requests entirely, and the photo screen was just
+  where it showed. Reproduced against the deployed bundle by driving the app's
+  real callback; fixed by making that callback synchronous.
+
+  Two things from the wrong turns are worth keeping. Web hands storage-js a
+  **Blob** so the upload goes as `multipart/form-data`, the path every browser
+  upload takes, rather than the raw binary POST an ArrayBuffer produces. And
+  each stage names itself when it gives up — `preparing timed out` (nothing
+  sent), `sending timed out` (never reached `fetch`), `no reply from the server`
+  (sent, aborted at 60s). The third screenshot diagnosed the bug on its own,
+  which is the whole point of wording them apart.
+
+  The lesson for testing: the deceptive part was that everything *around* the
+  failure worked. Auth, REST and signed-URL calls were all 200 in the same
+  session, because the client only wedges once a hidden tab becomes visible
+  again — which no spec does, and which is exactly what picking a photo from the
+  gallery does.
 - **Uploads are platform-split and only one half is exercised.** Reading a
   picked file needs `expo-file-system` on native and `fetch` on web, and using
   the wrong one throws before any request is made — "Couldn't upload a photo",

@@ -278,6 +278,13 @@ unless it's a one-off simple `select`.
 - All styles via `StyleSheet.create()` at the bottom of each file
 - TypeScript strict mode — no `any` except for Supabase row shapes
 - Import order: React → React Native → Expo → third-party → local (types, lib, components)
+- **`onAuthStateChange` callbacks must be synchronous.** auth-js runs them inside
+  its lock and awaits them, so awaiting any Supabase call in one deadlocks the
+  client for the life of the page: no request is ever issued again, nothing
+  rejects, nothing is logged, and the per-request deadlines never fire because it
+  never reaches `fetch`. Set state in the callback; put anything that touches
+  Supabase through `queueAuthWork` (`src/lib/authEvents.ts`). A hidden tab
+  becoming visible is enough to trigger it — see that file.
 - **Never call `Alert.alert` directly — use `showAlert` from `src/lib/alert.ts`.**
   react-native-web's `Alert` is `static alert() {}`, so on the web build (which is
   shipped, at snagv1.netlify.app) a direct call does nothing: the dialog never

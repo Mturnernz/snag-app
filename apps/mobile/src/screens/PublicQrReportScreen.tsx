@@ -6,7 +6,6 @@ import {
   TextInput,
   ScrollView,
   Switch,
-  Alert,
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
@@ -14,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { getSiteByPublicToken, createPublicSnagByToken, PublicIntakeSite } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -47,11 +47,11 @@ export default function PublicQrReportScreen({ token, userId }: Props) {
 
   async function handleSubmit() {
     if (!description.trim()) {
-      Alert.alert('Description required', "Tell us what's wrong.");
+      showAlert('Description required', "Tell us what's wrong.");
       return;
     }
     if (photosBlocked) {
-      Alert.alert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before submitting.');
+      showAlert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before submitting.');
       return;
     }
     setSubmitting(true);
@@ -69,7 +69,7 @@ export default function PublicQrReportScreen({ token, userId }: Props) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
     } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not submit your report.');
+      showAlert('Error', err.message ?? 'Could not submit your report.');
     } finally {
       setSubmitting(false);
     }

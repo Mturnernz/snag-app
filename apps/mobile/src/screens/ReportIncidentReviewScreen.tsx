@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
+import { showAlert } from '../lib/alert';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -62,7 +63,7 @@ export default function ReportIncidentReviewScreen() {
     const { error, reference: ref } = await submit();
     setSubmitting(false);
     if (error) {
-      Alert.alert('Error', error);
+      showAlert('Error', error);
       return;
     }
     setReference(ref ?? null);

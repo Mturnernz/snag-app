@@ -69,6 +69,7 @@ Ordered by what they would have cost in production.
 | **Disabled buttons rendered at full strength, app-wide** | Reanimated writes its animated style directly onto the view, overriding the later static `styles.disabled`. Measured: `opacity: 1`, full-strength background, `pointer-events: none`. Every disabled button in the app looked pressable. |
 | **Collapsed cards couldn't show their summaries** | `StepCard` only mounts children while expanded, so panels that report their own state left every collapsed card blank — in exactly the state the progress list exists to describe. |
 | **A stalled request wedged the client, silently and permanently** | supabase-js puts no timeout on its own `fetch`, and it resolves an access token before *every* request. One `/auth/v1/token` refresh that was issued and never answered — what a phone losing signal mid-request actually looks like — left `getSession()` pending forever, after which **no call was ever issued at all**. Invisible from every angle: nothing reached the server so there was nothing in the logs, nothing rejected so no error was shown, and the loaded screen kept rendering its existing data. The only symptom was a Save button spinning for good. Found from a screenshot of exactly that, reproduced against the deployed production bundle, and fixed with a per-request deadline plus try/finally around the saves. |
+| **Every dialog in the app did nothing on web, including Sign Out** | react-native-web's `Alert` is `static alert() {}` — a no-op stub. So on the shipped web build, tapping Sign Out produced no dialog and never called `signOut`; the button was simply dead. So were deactivate/reactivate an organisation, delete a work group, escalate a snag to a hazard, and the photo picker's "+" tile — every action that sat behind a confirmation. And so was every error message, which is worse than dead: the action failed and the user was told nothing at all. 26 call sites, all of them silent. Replaced with `showAlert` (`src/lib/alert.ts`): `Alert.alert` on native, `confirm`/`alert` on web. Plain-looking, but it cannot fail to appear, which is the property that was missing. The follow-up is named below (D9): this app already has both better patterns in it. |
 | **No photo could be attached from the browser build** | The app is shipped to the web as well as to phones, and there the file read never happened: `expo-file-system` has no web implementation — its `File` is a stub that warns and is missing the methods the JS wrapper calls, so `new File(uri)` throws on construction. Every pick came back "Couldn't upload a photo", which correctly disables Submit, so a worker with a photo could file nothing at all. Invisible server-side for the same reason as the stalled request above: it fails *before* the request, so Storage logged nothing. Reading the picked file is now platform-split (`src/lib/uploadBody.ts`), which is what it always was — one half was just missing. |
 | **An assigned worker could not submit their own RCA** | `submit_rca` deliberately allows the assignee, then calls `set_root_cause`, which called `require_serious_snag` and demanded `can_edit_site`. A worker could answer all five whys and be refused with *"Only a supervisor of this site, or an admin, can run the investigation"*. CLAUDE.md says RCAs are usually assigned to workers, so this is the **normal** case — it had never fired only because a supervisor had always pressed submit on the assignee's behalf. Confirmed against the live project as the QA worker before and after the fix. |
 
@@ -333,6 +334,27 @@ Reviewed through react-native-web at 412 px, which is faithful for layout and
 hierarchy but *not* for native scroll, keyboard avoidance, or the picker. Stage 2
 should have largely fixed the three-inputs-behind-one-keyboard problem by never
 showing two fields at once — but that is reasoning, not evidence. Folds into D6.
+
+### D9 — Three dialog conventions, one of which was dead
+
+Fixing Sign Out turned up the real problem: this app has **three** ways to tell the
+user something, and it was using the worst one in 26 places.
+
+| Pattern | Where | Works on web |
+|---|---|---|
+| `ConfirmDialog` (RN `Modal`, themed, `Shadow.lg`) | 5 files, e.g. `IssueDetailScreen`, `ManageOrganisationScreen` | yes |
+| `useToast` / `showToast` | 6 files, e.g. `RootCausePanel` | yes |
+| `Alert.alert` | was 26 call sites | **no — silent no-op** |
+
+`showAlert` makes the third one work everywhere, which is the fix for a dead button.
+It is not the destination: the app already has a themed dialog for confirmations and
+a toast for "that didn't work", and `window.confirm` looks like neither.
+
+| Option | Trade-off |
+|---|---|
+| **A. Convert per site: `ConfirmDialog` for the 8 confirmations, `showToast` for the 18 messages** *(recommended)* | Ends the split and looks like the rest of the app. It is a UI change to 26 flows, so it wants doing deliberately, with eyes on each screen — not folded into a bug fix. |
+| B. Keep `showAlert` everywhere | Uniform and honest, but a browser dialog in a designed app, and it can't carry a destructive-red confirm. |
+| C. Give `showAlert` a themed web implementation behind the same call | One place to change, no call-site churn. Needs a portal/provider at the app root, and a synchronous-looking API over an async dialog. |
 
 ### D8 — Self-acceptance — ✅ decided: a supervisor can sign off their own work
 

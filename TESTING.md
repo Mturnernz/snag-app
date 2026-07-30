@@ -183,6 +183,14 @@ Only 10 of the ~55 files under `src/` touch a native module, and 6 of those are
 implementation at all — `expo-file-system`'s is a stub that warns and throws.
 Those still need a device via Expo Go.
 
+A stub is not always an error, and that is what makes this class of bug quiet.
+react-native-web's `Alert` is `static alert() {}` — it *succeeds* at doing
+nothing, so every dialog in the app was invisible on web and every action behind
+a confirmation was dead, Sign Out included. Nothing throws, nothing logs, and
+the E2E specs pass because they never open a dialog. Dialogs now go through
+`showAlert` (`src/lib/alert.ts`, unit-tested on both platforms); when adding a
+platform API, assume nothing until you have checked its web implementation.
+
 `expo-image-picker` and `expo-image-manipulator` are *not* in that list: both
 run on web, so the whole photo path up to the upload is exercisable in the
 browser. This page listed them as native-only for a long time, which is how

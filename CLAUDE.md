@@ -278,6 +278,16 @@ unless it's a one-off simple `select`.
 - All styles via `StyleSheet.create()` at the bottom of each file
 - TypeScript strict mode — no `any` except for Supabase row shapes
 - Import order: React → React Native → Expo → third-party → local (types, lib, components)
+- **Never call `Alert.alert` directly — use `showAlert` from `src/lib/alert.ts`.**
+  react-native-web's `Alert` is `static alert() {}`, so on the web build (which is
+  shipped, at snagv1.netlify.app) a direct call does nothing: the dialog never
+  appears, and any action behind a confirmation never runs. `showAlert` is
+  `Alert.alert`'s shape on native and `confirm`/`alert` on web, and takes **two
+  buttons at most** — a choice between three things needs real UI, not a dialog.
+- The same trap applies to every native-only module. `apps/mobile` runs in the
+  browser as well as on phones, so before using a platform API, check that it has
+  a web implementation — `expo-file-system` and `expo-camera` have none, and
+  `expo-file-system`'s stub throws rather than no-oping. See TESTING.md.
 
 ## Notification links and the handoff
 

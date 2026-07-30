@@ -7,7 +7,6 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
-  Alert,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -20,6 +19,7 @@ import {
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useBreakpoint } from '../hooks/useBreakpoint';
+import { showAlert } from '../lib/alert';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -112,7 +112,7 @@ export default function AdminDashboardScreen() {
     const { error } = await assignSnagOwner(snagId, ownerId);
     setAssigningSnagId(null);
     if (error) {
-      Alert.alert('Error', error.message ?? 'Could not assign this snag');
+      showAlert('Error', error.message ?? 'Could not assign this snag');
       return;
     }
     setUnassignedBySite((prev) => ({ ...prev, [siteId]: prev[siteId].filter((s) => s.id !== snagId) }));
@@ -126,7 +126,7 @@ export default function AdminDashboardScreen() {
 
   function handleToggleActive(m: Membership) {
     const deactivating = m.org_active;
-    Alert.alert(
+    showAlert(
       deactivating ? 'Deactivate organisation?' : 'Reactivate organisation?',
       deactivating
         ? `${m.org_name} will be hidden from every member's org switcher, and they won't be able to view or submit snags there until you reactivate it.`
@@ -141,7 +141,7 @@ export default function AdminDashboardScreen() {
             const { error } = await setOrganisationActive(m.org_id, !deactivating);
             setTogglingOrgId(null);
             if (error) {
-              Alert.alert('Error', error.message ?? 'Could not update organisation status');
+              showAlert('Error', error.message ?? 'Could not update organisation status');
             } else {
               await load();
             }

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme';
 import { Membership, setOrganisationActive } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
 
@@ -22,7 +23,7 @@ export default function OrgInactiveScreen({ memberships, onRecheck, onSignOut }:
   const ownedOrgs = memberships.filter((m) => m.role === 'officer_admin');
 
   async function handleReactivate(orgId: string, orgName: string) {
-    Alert.alert('Reactivate organisation?', `${orgName} will become visible and usable again for every member.`, [
+    showAlert('Reactivate organisation?', `${orgName} will become visible and usable again for every member.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Reactivate',
@@ -31,7 +32,7 @@ export default function OrgInactiveScreen({ memberships, onRecheck, onSignOut }:
           const { error } = await setOrganisationActive(orgId, true);
           setReactivating(null);
           if (error) {
-            Alert.alert('Error', error.message ?? 'Could not reactivate organisation');
+            showAlert('Error', error.message ?? 'Could not reactivate organisation');
           } else {
             await onRecheck();
           }

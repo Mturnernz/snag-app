@@ -6,7 +6,7 @@ import {
 
 import {
   SnagStatus, SnagKind, SnagSeverity, SnagLane,
-  KIND_LABELS, SEVERITY_LABELS,
+  KIND_LABELS, SEVERITY_LABELS, INVESTIGATION_MODE_OPTIONS,
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
@@ -34,19 +34,10 @@ interface PendingUpdates {
 }
 
 // Two genuinely different ways to run an investigation, so each option carries
-// its consequence — picking the second changes what closes the snag.
-const MODE_OPTIONS: { value: InvestigationMode; title: string; detail: string }[] = [
-  {
-    value: 'snag',
-    title: "SNAG's guided investigation",
-    detail: 'Root cause, then corrective actions, tracked in the app.',
-  },
-  {
-    value: 'document',
-    title: 'Our own process',
-    detail: 'Attach the completed investigation document. A second supervisor has to accept it before this snag can be resolved.',
-  },
-];
+// its consequence — picking the second changes what closes the snag. The copy
+// is shared with the triage prompt (@snag/shared-types), which asks the same
+// question at allocation time; this panel is the re-decide path.
+const MODE_OPTIONS = INVESTIGATION_MODE_OPTIONS;
 
 interface Props {
   issueId: string;
@@ -290,6 +281,7 @@ export default function ManageIssuePanel({
           assignees={assignees}
           currentOwnerId={shownOwner?.id ?? null}
           onSelect={(id) => stageUpdate({ owner_id: id })}
+          searchable
         />
       )}
 

@@ -63,9 +63,14 @@ test.describe('investigation mode', () => {
   test.skip(!EMAIL || !PASSWORD, 'set E2E_EMAIL and E2E_PASSWORD to run the investigation-mode specs');
 
   test('allocating a serious snag asks how it will be investigated', async ({ page }) => {
-    // The prompt lives in the allocate flow rather than behind its own button:
-    // allocating is when a supervisor is already deciding who deals with this,
-    // and asking in two places is how a snag gets an owner and no investigator.
+    // Asked at allocation time, not behind a button of its own: allocating is
+    // when a supervisor is already deciding who deals with this, and asking in
+    // two places is how a snag gets an owner and no investigator.
+    //
+    // There are two surfaces and this spec accepts either, because which one a
+    // given snag shows depends on whether it has been triaged already and this
+    // tier writes nothing: the triage prompt on the way in, and the Manage
+    // panel afterwards. Both have to state each option's consequence.
     await signIn(page, EMAIL!, PASSWORD!);
     await page.getByText('Snags', { exact: true }).first().click();
 
@@ -75,21 +80,36 @@ test.describe('investigation mode', () => {
       .first();
     await expect(badge, 'the account needs a serious snag it can see').toBeVisible({ timeout: 90_000 });
     await badge.click();
-    await expect(page.getByText('Health & Safety Report')).toBeVisible({ timeout: 90_000 });
 
-    // Manage is a disclosure — settings shouldn't sit between the reader and
-    // the work.
-    await page.getByText('Manage', { exact: true }).first().click();
-    await expect(page.getByText('MANAGE ISSUE', { exact: true })).toBeVisible({ timeout: 90_000 });
-    // The row's value chip is the control, not its label — same shape as the
-    // Type/Severity/Owner rows above it.
-    await expect(page.getByText('Investigation', { exact: true })).toBeVisible();
-    await page.getByText('SNAG guided', { exact: true }).click();
+    const triage = page.getByText('Triage this incident', { exact: true });
+    const untriaged = await triage.isVisible({ timeout: 90_000 }).catch(() => false);
+
+    if (untriaged) {
+      // The prompt is not dismissible, so everything it asks has to be here.
+      await expect(page.getByText('How will this be investigated?', { exact: true })).toBeVisible();
+      await expect(page.getByText('Who is running it?', { exact: true })).toBeVisible();
+      await expect(page.getByText('Is this a notifiable event?', { exact: true })).toBeVisible();
+      await expect(
+        page.getByText("I'm not sure yet", { exact: true }),
+        'the notifiable question has a statutory threshold — a modal is no place to make someone guess'
+      ).toBeVisible();
+    } else {
+      await expect(page.getByText('Health & Safety Report')).toBeVisible({ timeout: 90_000 });
+      // Manage is a disclosure — settings shouldn't sit between the reader and
+      // the work.
+      await page.getByText('Manage', { exact: true }).first().click();
+      await expect(page.getByText('MANAGE ISSUE', { exact: true })).toBeVisible({ timeout: 90_000 });
+      // The row's value chip is the control, not its label — same shape as the
+      // Type/Severity/Owner rows above it.
+      await expect(page.getByText('Investigation', { exact: true })).toBeVisible();
+      await page.getByText('SNAG guided', { exact: true }).click();
+    }
 
     // Each option states its consequence — picking the second changes what
-    // closes the snag, which a bare label can't convey.
+    // closes the snag, which a bare label can't convey. Same wording on both
+    // surfaces: the copy is shared (INVESTIGATION_MODE_OPTIONS).
     await expect(page.getByText("SNAG's guided investigation", { exact: true })).toBeVisible();
     await expect(page.getByText('Our own process', { exact: true })).toBeVisible();
-    await expect(page.getByText(/A second supervisor has to accept it/)).toBeVisible();
+    await expect(page.getByText(/A supervisor has to accept it/)).toBeVisible();
   });
 });

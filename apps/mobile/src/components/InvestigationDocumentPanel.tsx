@@ -18,8 +18,11 @@ interface Props {
   issueId: string;
   orgId: string;
   state: InvestigationState;
-  /** Supervisor/admin on this site. Accepting is a supervisor's act. */
-  canEdit: boolean;
+  /** Doing the investigation — the assigned lead, or a supervisor/admin.
+   *  Matches attach_investigation_document's require_investigation_access. */
+  canAttach: boolean;
+  /** Signing it off. Supervisor/admin only, per require_serious_snag. */
+  canAccept: boolean;
   /** For naming who attached and who accepted — see the note on the meta line. */
   orgMembers: Profile[];
   onChanged: () => void;
@@ -42,7 +45,7 @@ interface Props {
  * from being the same person.
  */
 export default function InvestigationDocumentPanel({
-  issueId, orgId, state, canEdit, orgMembers, onChanged,
+  issueId, orgId, state, canAttach, canAccept, orgMembers, onChanged,
 }: Props) {
   const { showToast } = useToast();
 
@@ -181,7 +184,7 @@ export default function InvestigationDocumentPanel({
           where the supervisor did the work themselves. The record names both,
           which is the half worth keeping. */}
       {attached && !state.documentAccepted && (
-        canEdit ? (
+        canAccept ? (
           <Button
             label="Accept this document"
             variant="primary"
@@ -199,13 +202,15 @@ export default function InvestigationDocumentPanel({
         )
       )}
 
-      <Button
-        label={attached ? 'Replace the document' : 'Attach a document'}
-        variant="outline"
-        icon="attach-outline"
-        onPress={() => setPickerOpen(true)}
-        fullWidth
-      />
+      {canAttach && (
+        <Button
+          label={attached ? 'Replace the document' : 'Attach a document'}
+          variant="outline"
+          icon="attach-outline"
+          onPress={() => setPickerOpen(true)}
+          fullWidth
+        />
+      )}
 
       {state.documentAccepted && (
         <Text style={styles.footnote}>

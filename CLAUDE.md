@@ -166,6 +166,30 @@ eligible, because owning a serious incident means running the investigation and
 `require_investigation_access` refuses anyone else — nominating a worker would name an owner the
 RPCs then reject. Managed at Manage Organisation → Serious incident owners.
 
+## Triage: the moment a serious snag is allocated
+
+Opening an unallocated serious snag as a supervisor puts up a **blocking prompt** asking the three
+things that constitute triaging it, in one place: how it will be investigated, who is running it,
+and whether it is notifiable. `TriageSheet.tsx` on mobile, `TriageDialog.tsx` + `triageAction` on
+web; neither is dismissible.
+
+Before this the three lived in three different collapsed places, and on the serious lane the
+allocation controls sat in Manage — *below* the entire investigation they configure. A hazard could
+be read end to end by a supervisor who never scrolled to the part that assigns it.
+
+- **Untriaged means unallocated**: `investigations.lead_investigator_id is null`. Not `owner_id` —
+  `apply_default_owner` fills that on the way in, so a serious snag arrives owned but unallocated,
+  which is the state triage exists to end.
+- **The notifiable question can be deferred** ("I'm not sure yet"), and nothing is written when it
+  is. It carries a statutory threshold and a modal is no place to make somebody guess. It stays on
+  the resolve gate, which still refuses to close the snag without it. Mode and investigator cannot
+  be deferred — those are the reason the snag is in front of them.
+- **Order of writes matters**: `assign_investigation` → `assign_snag_owner` → `set_notifiable_flag`.
+  The middle one fires `notify_after_snag_update`, whose mail names how the investigation is being
+  run, so the `investigations` row has to exist first.
+- Manage (both clients) keeps the mode and owner controls as the **re-decide** path. The wording is
+  shared (`INVESTIGATION_MODE_OPTIONS` in `packages/shared-types`) so the two surfaces can't drift.
+
 ## Investigation modes
 
 A serious snag is investigated one of two ways, chosen **when it is allocated**
@@ -211,6 +235,21 @@ Before this split every investigation write required `can_edit_site`, so `assign
 could name a lead who was then refused by every RPC the job consists of — and the same hole was
 live in the RCA flow, where an assigned worker could answer all five whys and be unable to submit
 (`submit_rca` allows the assignee, then calls `set_root_cause`, which raised).
+
+**The clients have to mirror that split, and for a while only the SQL did.** Mobile gated every
+investigation card on `canEdit` (supervisor/admin), so the assigned investigator saw none of the
+work they had just been given: not the checklist, not evidence, not the notifiable state, and — in
+document mode — not the upload that `20260729000000` widened the bucket policy specifically to
+allow. `IssueDetailScreen` now derives **`canInvestigate`** alongside `canManageInvestigation`,
+matching `require_investigation_access` term for term (site editor, or the lead investigator, or an
+open RCA assignee), and `InvestigationDocumentPanel` takes **`canAttach`/`canAccept`** rather than
+one `canEdit` — attaching is doing, accepting is directing, and a single flag could only ever get
+one of them right.
+
+**An assigned worker investigator can only work in `apps/mobile`.** The portal's `(portal)` group
+refuses workers at the route level and `/go/snag/[id]` offers them the app instead, so that is
+correct rather than a gap — but it does mean mobile has to carry the whole investigator experience.
+Don't "fix" it by loosening `requireSupervisorOrAdmin`.
 
 ## The document library
 
@@ -368,3 +407,21 @@ returns 200 — a broken link fails silently rather than 404ing (which is how
 And `/` is deliberately unmapped in the mobile linking config: an unmatched URL
 leaves the tab navigator on its `initialRouteName`, which is what carries the
 post-onboarding tab.
+
+### Which tab you land on, on the web build
+
+`initialRouteName` is `Report`, but a *matched* path beats it — and on the web
+build React Navigation writes the URL back on every navigation and re-reads it
+when `NavigationContainer` mounts. Sign Out lives on the Profile tab, so the
+address bar always read `/profile` when the session ended, and `AuthScreen`
+renders with the navigator unmounted and the URL untouched. Signing back in
+therefore landed everyone on Profile, for no reason anything on the page could
+explain.
+
+`resetWebPathIfStale` (`apps/mobile/src/lib/webLocation.ts`) clears the path on
+`SIGNED_OUT` and `SIGNED_IN`, keeping the two URLs somebody meant to arrive at:
+`/snags/<id>` (what `notify-snag` mails, and it has to survive the sign-in round
+trip) and `?report=<token>` (the QR landing). Deliberately not `INITIAL_SESSION`
+— reloading the page on a tab is not logging in, and staying put is what a
+browser is supposed to do. Unit-tested in `webLocation.test.ts`; it no-ops off
+web.

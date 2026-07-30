@@ -30,6 +30,16 @@ async function openFirstSeriousSnag(page: Page) {
   await expect(badge, 'the account needs a serious snag it can see').toBeVisible({ timeout: 90_000 });
   await badge.click();
 
+  // An untriaged serious snag opens onto the triage prompt, which is not
+  // dismissible by design — answering it is a write, and this tier writes
+  // nothing. So the precondition is a *triaged* serious snag, and a spec that
+  // finds an untriaged one skips rather than hanging on a modal it must not
+  // answer. documents.spec.ts covers the prompt itself.
+  const triage = page.getByText('Triage this incident', { exact: true });
+  if (await triage.isVisible({ timeout: 30_000 }).catch(() => false)) {
+    test.skip(true, 'the first serious snag is untriaged — allocate it, or point E2E_EMAIL at an org whose serious snags are');
+  }
+
   // The H&S header is the marker that this is the serious lane; a niggle shows
   // "Snag Details" instead and has none of the investigation cards.
   await expect(page.getByText('Health & Safety Report')).toBeVisible({ timeout: 90_000 });

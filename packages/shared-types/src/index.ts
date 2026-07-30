@@ -298,3 +298,40 @@ export const CHECKLIST_STEP_LABELS: Record<ChecklistStep, string> = {
 export const CHECKLIST_STEPS: ChecklistStep[] = [
   'make_safe', 'preserve_scene', 'capture_evidence', 'identify_witnesses', 'find_root_cause',
 ];
+
+/**
+ * How a serious snag is investigated — the choice made when it is allocated.
+ *
+ * Mirrors the `investigation_mode` Postgres enum. Duplicated as a value here
+ * (rather than only in @snag/supabase-queries) because the two apps' triage UI
+ * needs the labels, not just the type.
+ */
+export type InvestigationModeValue = 'snag' | 'document';
+
+/**
+ * The wording offered when allocating. Each option carries its consequence,
+ * because picking the second one changes what closes the snag: document mode
+ * substitutes "attach the investigation document" and "a supervisor accepts it"
+ * for the root cause and corrective actions. It is not a shortcut, and the copy
+ * has to say so — a supervisor choosing between two unlabelled radio buttons is
+ * choosing at random.
+ *
+ * Shared so the triage prompt and the re-allocate controls in both clients read
+ * identically; they were three separate copies of nearly-the-same sentence.
+ */
+export const INVESTIGATION_MODE_OPTIONS: {
+  value: InvestigationModeValue;
+  title: string;
+  detail: string;
+}[] = [
+  {
+    value: 'snag',
+    title: "SNAG's guided investigation",
+    detail: 'Root cause, then corrective actions, tracked in the app.',
+  },
+  {
+    value: 'document',
+    title: 'Our own process',
+    detail: 'Attach the completed investigation document. A supervisor has to accept it before this snag can be resolved.',
+  },
+];

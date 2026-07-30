@@ -285,6 +285,16 @@ when upgrading.
   `apps/mobile/e2e/stalled-network.spec.ts`. Worth knowing because the failure
   is invisible to every other kind of test: only a stalled — not failed —
   request reproduces it.
+- **A photo that hangs rather than fails.** After the read was fixed, a photo
+  was reported spinning indefinitely on the web build. Driving the deployed
+  bundle's own modules in Chromium (`__r(...)` on the Metro bundle, Supabase
+  intercepted) reproduced none of it: compression, the read, and the upload all
+  settled, including with a stalled token refresh. So the cause is still
+  unknown, and what shipped is a bound rather than a fix — a 75s backstop around
+  the whole job plus the reason shown on the tile, so the next occurrence
+  reports itself instead of needing a screenshot. Verified in Chromium against a
+  local build: a never-settling stage fails at its deadline, and a stalled
+  upload request fails at 60s with "timed out".
 - **Uploads are platform-split and only one half is exercised.** Reading a
   picked file needs `expo-file-system` on native and `fetch` on web, and using
   the wrong one throws before any request is made — "Couldn't upload a photo",

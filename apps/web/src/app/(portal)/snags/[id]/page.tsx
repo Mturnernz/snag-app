@@ -15,7 +15,7 @@ import {
 import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { Card, EmptyState } from '@/components/Card';
-import { Button } from '@/components/Button';
+import { Button, LinkButton } from '@/components/Button';
 import { Badge, StatusBadge, KindBadge, SeverityBadge, NotifiableBadge } from '@/components/Badge';
 import Icon from '@/components/Icon';
 import StepSection from '@/components/StepSection';
@@ -544,7 +544,24 @@ export default async function SnagDetailPage({
                 </p>
               </Card>
 
-              {libraryDocuments.length > 0 && (
+              {/* Always rendered, even with nothing to choose. Hiding it when
+                  the library is empty meant the copy above ("it's filed in the
+                  document library too") promised a picker that wasn't on the
+                  page, and an org whose library had never been used read that
+                  as the feature being missing rather than as the library being
+                  empty. An empty library is a fact worth stating. */}
+              {libraryDocuments.length === 0 ? (
+                <Card padding="sm">
+                  <p className={styles.recordName}>Or attach one already in the library</p>
+                  <p className={styles.recordMeta}>
+                    Your organisation&rsquo;s document library is empty, so there is nothing to
+                    choose yet. Upload above, or add documents to the library first.
+                  </p>
+                  <LinkButton href="/documents" variant="ghost" size="sm">
+                    <Icon name="FileText" size="sm" /> Open the document library
+                  </LinkButton>
+                </Card>
+              ) : (
                 <Card as="form" action={attachInvestigationDocumentAction} padding="sm">
                   <p className={styles.recordName}>Or attach one already in the library</p>
                   <input type="hidden" name="snagId" value={snag.id} />

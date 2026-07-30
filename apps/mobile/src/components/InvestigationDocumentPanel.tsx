@@ -252,9 +252,18 @@ export default function InvestigationDocumentPanel({
           </>
         )}
 
-        {library.length > 0 && (
+        {/* Rendered even when there is nothing in it. The hint above offers the
+            library unconditionally, so hiding this section on an empty library
+            left only "Choose a file" — which opens the OS file picker — and the
+            promised library looked like a feature that wasn't there. */}
+        <Text style={styles.sheetHeading}>Already in the library</Text>
+        {library.length === 0 ? (
+          <Text style={styles.empty}>
+            Your organisation&apos;s document library is empty, so there is nothing to choose yet.
+            Upload the file above, or add documents under Profile → Documents first.
+          </Text>
+        ) : (
           <>
-            <Text style={styles.sheetHeading}>Already in the library</Text>
             {library.map((doc) => (
               <TouchableOpacity
                 key={doc.id}

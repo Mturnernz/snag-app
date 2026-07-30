@@ -5,10 +5,21 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { uploadSnagPhoto } from '../lib/supabase';
+import { withDeadline, failureReason } from '../lib/deadline';
 import Icon from './Icon';
 
 const MAX_PHOTOS = 5;
 const THUMB_SIZE = 92;
+
+/**
+ * Backstop for the whole compress-then-upload job. Deliberately longer than the
+ * 60s deadline on the upload request itself (lib/supabase.ts), so a slow site
+ * connection fails with the network's own error rather than this one. What this
+ * catches is a stage that has no deadline at all — image decode and compression
+ * run in a native/browser module that can simply never call back, and when that
+ * happens the photo spins forever and Submit stays disabled behind it.
+ */
+const UPLOAD_DEADLINE_MS = 75_000;
 
 type PhotoStatus = 'uploading' | 'success' | 'failed';
 
@@ -18,6 +29,9 @@ interface PhotoItem {
   fileName: string;
   path: string | null;
   status: PhotoStatus;
+  /** Why this photo failed, shown to the user. A photo that failed for a
+   *  reason nobody can see costs a screenshot and a round trip to diagnose. */
+  error: string | null;
 }
 
 export interface PhotoPickerHandle {
@@ -70,25 +84,53 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     onBlockingChange?.(photos.some((p) => p.status === 'uploading' || p.status === 'failed'));
   }, [photos, onBlockingChange]);
 
-  async function runUpload(id: string, uri: string, fileName: string) {
-    setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'uploading', path: null } : p)));
-    // Nothing may escape: this is called without being awaited, so a throw
-    // anywhere in here (compression, not just the upload) would leave the
-    // photo 'uploading' for good — a spinner that never resolves and a Submit
-    // button disabled behind it, with no way back but reloading the screen.
+  async function compressAndUpload(uri: string, fileName: string) {
+    const compressed = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 1200 } }],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+    );
     try {
-      const compressed = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 1200 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      return await uploadSnagPhoto(compressed.uri, fileName, bucket);
+    } finally {
+      // On web the compressed copy is an object URL held by the document until
+      // it's revoked, and a phone browser doing this five times over is the
+      // most memory-hungry thing this screen does. The thumbnail renders from
+      // the original `uri`, not this one, so nothing on screen needs it after
+      // the upload.
+      if (compressed.uri.startsWith('blob:')) URL.revokeObjectURL(compressed.uri);
+    }
+  }
+
+  async function runUpload(id: string, uri: string, fileName: string) {
+    setPhotos((prev) => prev.map((p) => (
+      p.id === id ? { ...p, status: 'uploading', path: null, error: null } : p
+    )));
+    // Nothing may escape and nothing may hang: this is called without being
+    // awaited, so a throw anywhere in here (compression, not just the upload),
+    // or a stage that never calls back, would leave the photo 'uploading' for
+    // good — a spinner that never resolves and a Submit button disabled behind
+    // it, with no way back but reloading the screen.
+    try {
+      const { path, error } = await withDeadline(
+        compressAndUpload(uri, fileName), UPLOAD_DEADLINE_MS, 'The upload'
       );
-      const { path, error } = await uploadSnagPhoto(compressed.uri, fileName, bucket);
+      if (error || !path) console.error('Photo upload error:', error);
       setPhotos((prev) => prev.map((p) => (
-        p.id === id ? { ...p, status: error || !path ? 'failed' : 'success', path } : p
+        p.id === id
+          ? {
+            ...p,
+            status: error || !path ? 'failed' : 'success',
+            path,
+            error: error || !path ? failureReason(error) : null,
+          }
+          : p
       )));
     } catch (err) {
       console.error('Photo upload error:', err);
-      setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'failed', path: null } : p)));
+      setPhotos((prev) => prev.map((p) => (
+        p.id === id ? { ...p, status: 'failed', path: null, error: failureReason(err) } : p
+      )));
     }
   }
 
@@ -100,10 +142,10 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
       // Offline — stage it as already "done" from this component's point of
       // view (no spinner, doesn't block submit). The real upload happens
       // later, out of band, when the offline queue drains.
-      setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'success' }]);
+      setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'success', error: null }]);
       return;
     }
-    setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'uploading' }]);
+    setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'uploading', error: null }]);
     runUpload(id, uri, fileName);
   }
 
@@ -165,6 +207,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     setPhotos((prev) => prev.filter((p) => p.id !== id));
   }
 
+  const failedReason = photos.find((p) => p.status === 'failed')?.error ?? null;
   const hasFailed = photos.some((p) => p.status === 'failed');
 
   useImperativeHandle(ref, () => ({
@@ -220,7 +263,11 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
         )}
       </ScrollView>
       {hasFailed && (
-        <Text style={styles.failedHint}>Couldn't upload a photo — tap it to retry, or remove it.</Text>
+        <Text style={styles.failedHint}>
+          {failedReason
+            ? `Couldn't upload a photo (${failedReason}) — tap it to retry, or remove it.`
+            : "Couldn't upload a photo — tap it to retry, or remove it."}
+        </Text>
       )}
     </View>
   );

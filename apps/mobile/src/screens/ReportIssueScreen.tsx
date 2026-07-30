@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   Switch,
-  Alert,
   Modal,
   ActivityIndicator,
   StyleSheet,
@@ -31,6 +30,7 @@ import {
 import { useReportTarget } from '../context/ReportTargetContext';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
+import { showAlert } from '../lib/alert';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
@@ -143,7 +143,7 @@ export default function ReportIssueScreen() {
         await loadWorkGroups(Boolean(profile?.org_id));
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not switch organisation.');
+      showAlert('Error', err.message ?? 'Could not switch organisation.');
     } finally {
       setSwitchingOrg(false);
     }
@@ -168,7 +168,7 @@ export default function ReportIssueScreen() {
   // tile submits immediately (no separate confirm step).
   function handleSubmit() {
     if (!description.trim()) {
-      Alert.alert('Description required', "Tell us what's wrong.");
+      showAlert('Description required', "Tell us what's wrong.");
       return;
     }
     if (!isPublicSubmission && workGroups.length > 0) {
@@ -184,7 +184,7 @@ export default function ReportIssueScreen() {
     // never be silently left out of what gets submitted.
     if (photosBlocked) {
       setShowGroupPicker(false);
-      Alert.alert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before submitting.');
+      showAlert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before submitting.');
       return;
     }
     setShowGroupPicker(false);
@@ -270,7 +270,7 @@ export default function ReportIssueScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
     } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Could not submit snag.');
+      showAlert('Error', err.message ?? 'Could not submit snag.');
     } finally {
       setSubmitting(false);
     }

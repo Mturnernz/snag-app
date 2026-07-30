@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert, ScrollView } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -7,6 +7,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SnagKind, SnagSeverity, SEVERITY_LABELS, KIND_LABELS, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { supabase, getDefaultSiteId, createSnag, resolveActiveOrg } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import ScreenHeader from '../components/ScreenHeader';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
@@ -59,11 +60,11 @@ export default function ReportIncidentDetailsScreen() {
 
   function handleNext() {
     if (!description.trim()) {
-      Alert.alert('Description required', 'Please describe what happened.');
+      showAlert('Description required', 'Please describe what happened.');
       return;
     }
     if (photosBlocked) {
-      Alert.alert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before continuing.');
+      showAlert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before continuing.');
       return;
     }
 

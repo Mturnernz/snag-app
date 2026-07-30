@@ -1,11 +1,12 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { uploadSnagPhoto } from '../lib/supabase';
 import { withDeadline, failureReason } from '../lib/deadline';
+import { showAlert } from '../lib/alert';
 import Icon from './Icon';
 
 const MAX_PHOTOS = 5;
@@ -164,7 +165,15 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   }, [pathPrefix, initialUris]);
 
   function offerSource() {
-    Alert.alert('Add a photo', undefined, [
+    // Three choices is more than a browser dialog can offer, and on web it
+    // doesn't need to: the file picker a library pick opens already includes
+    // the camera as a source. Asking first would be a dialog whose options the
+    // next dialog repeats.
+    if (Platform.OS === 'web') {
+      pickFromLibrary();
+      return;
+    }
+    showAlert('Add a photo', undefined, [
       { text: 'Take Photo', onPress: takePhoto },
       { text: 'Choose from Library', onPress: pickFromLibrary },
       { text: 'Cancel', style: 'cancel' },
@@ -189,7 +198,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   async function takePhoto() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera access is needed to take photos.');
+      showAlert('Permission required', 'Camera access is needed to take photos.');
       return;
     }
     // No allowsEditing — the camera's own retake/use-photo confirmation is

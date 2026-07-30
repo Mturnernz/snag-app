@@ -14,7 +14,6 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   Linking,
-  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -57,6 +56,7 @@ import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useBadge } from '../context/BadgeContext';
 import { useToast } from '../hooks/useToast';
+import { showAlert } from '../lib/alert';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -577,7 +577,7 @@ export default function IssueDetailScreen() {
   // card wins and everything below it starts collapsed.
 
   function handleEscalate() {
-    Alert.alert(
+    showAlert(
       'Flag this as a safety issue?',
       "This tells the supervisors for this site that what you reported is a hazard, not just a niggle. You can only do this once.",
       [

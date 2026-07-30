@@ -163,13 +163,37 @@ Deno.serve(async (req: Request) => {
   const seriousLink = go("notifiable");
 
   if (event === "serious_created") {
-    const { data: members } = await supabase
-      .from("site_members")
-      .select("profiles(email)")
-      .eq("site_id", snag.site_id);
-    const emails = (members ?? [])
-      .map((m: { profiles: { email: string } | null }) => m.profiles?.email)
+    // The organisation's nominated serious-incident owners are the health &
+    // safety team the app tells reporters about. This used to mail every member
+    // of the snag's site instead, which meant the claim was true only by
+    // accident: on a one-member site it reached that person, and on a site whose
+    // members have no email it reached nobody.
+    const { data: owners } = await supabase
+      .from("serious_incident_owners")
+      .select("profiles!serious_incident_owners_profile_id_fkey(email)")
+      .eq("org_id", snag.org_id);
+    let emails = (owners ?? [])
+      .map((o: { profiles: { email: string } | null }) => o.profiles?.email)
       .filter((e): e is string => Boolean(e));
+
+    // Every org has owners (the migration backfilled them and the RPC won't
+    // remove the last), but a serious incident is the wrong thing to drop on
+    // the floor if that ever stops being true.
+    if (emails.length === 0) {
+      const { data: members } = await supabase
+        .from("site_members")
+        .select("profiles(email)")
+        .eq("site_id", snag.site_id);
+      emails = (members ?? [])
+        .map((m: { profiles: { email: string } | null }) => m.profiles?.email)
+        .filter((e): e is string => Boolean(e));
+      console.warn("notify-snag: no serious incident owners, fell back to site members", {
+        snag_id,
+        org_id: snag.org_id,
+        recipients: emails.length,
+      });
+    }
+
     await sendEmail(
       emails,
       `Heads up — ${snag.kind} reported (${snag.reference})`,

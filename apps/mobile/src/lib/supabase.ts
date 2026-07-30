@@ -284,6 +284,21 @@ export async function removeOrgMember(memberId: string) {
   return supabase.rpc('remove_org_member', { p_member_id: memberId });
 }
 
+// ─── Serious incident owners ──────────────────────────────────────────────────
+// Who a serious incident goes to: notified when one is filed, and the first of
+// them is assigned it on the way in. See the migration for why there is always
+// at least one.
+export type SeriousIncidentOwner = queries.SeriousIncidentOwner;
+
+export const getSeriousIncidentOwners = (orgId: string) =>
+  queries.getSeriousIncidentOwners(supabase, orgId);
+
+export const addSeriousIncidentOwner = (profileId: string) =>
+  queries.addSeriousIncidentOwner(supabase, profileId);
+
+export const removeSeriousIncidentOwner = (profileId: string) =>
+  queries.removeSeriousIncidentOwner(supabase, profileId);
+
 // ─── Multi-org membership helpers ─────────────────────────────────────────────
 
 export type Membership = queries.Membership;

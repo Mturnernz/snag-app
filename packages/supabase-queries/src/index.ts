@@ -51,6 +51,51 @@ export async function getOrgMembers(client: SupabaseClient) {
   return data ?? [];
 }
 
+// ─── Serious incident owners ───────────────────────────────────────────────
+
+// The supervisors an organisation nominates to own serious incidents: the ones
+// notify-snag mails when one is filed, and the first of whom the snag is
+// assigned to on the way in (apply_default_owner).
+//
+// Readable by every member on purpose — the app tells a reporter their incident
+// reached the health & safety team, and the person who filed it should be able
+// to see who that is.
+export interface SeriousIncidentOwner {
+  profile_id: string;
+  name: string | null;
+  email: string | null;
+  created_at: string;
+}
+
+export async function getSeriousIncidentOwners(
+  client: SupabaseClient, orgId: string,
+): Promise<SeriousIncidentOwner[]> {
+  const { data, error } = await client
+    .from('serious_incident_owners')
+    .select('profile_id, created_at, profile:profiles!serious_incident_owners_profile_id_fkey(name, email)')
+    .eq('org_id', orgId)
+    // Oldest first, because the first of them is the one a new incident is
+    // assigned to — the list reads in the order it takes effect.
+    .order('created_at', { ascending: true });
+  if (error || !data) return [];
+  return (data as any[]).map((row) => ({
+    profile_id: row.profile_id,
+    name: row.profile?.name ?? null,
+    email: row.profile?.email ?? null,
+    created_at: row.created_at,
+  }));
+}
+
+export async function addSeriousIncidentOwner(client: SupabaseClient, profileId: string) {
+  return client.rpc('add_serious_incident_owner', { p_profile_id: profileId });
+}
+
+// Refuses to remove the last one — an org with nobody nominated is the state
+// this feature exists to prevent, so it can't be reached one removal at a time.
+export async function removeSeriousIncidentOwner(client: SupabaseClient, profileId: string) {
+  return client.rpc('remove_serious_incident_owner', { p_profile_id: profileId });
+}
+
 // ─── Org/site snapshot stats ───────────────────────────────────────────────
 
 export interface OrgStats {

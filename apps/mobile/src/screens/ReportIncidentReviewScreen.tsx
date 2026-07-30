@@ -9,6 +9,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
+import { supabase, getProfile, getSeriousIncidentOwners } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -20,11 +21,36 @@ import ConfirmDialog from '../components/ConfirmDialog';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+// "Mike", "Mike and Alyssa", "Mike, Alyssa and 2 others" — a list of five names
+// on a confirmation screen is noise, and the point is only that it reached
+// people with names.
+function formatNames(names: string[]): string {
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} ${names.length - 2 === 1 ? 'other' : 'others'}`;
+}
+
 // Serious-lane acknowledgment — a slow fade/settle rather than the niggle
 // lane's pulse. Composed, not celebratory: this is a formal H&S record.
 function SeriousSuccessBlock({ reference, onDone }: { reference: string | null; onDone: () => void }) {
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(12);
+  // "Your health & safety team has been notified" was the complaint, not the
+  // reassurance it was meant to be: nobody could say who that was. Name them.
+  const [notified, setNotified] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const profile = await getProfile(user.id);
+      if (!profile?.org_id) return;
+      const owners = await getSeriousIncidentOwners(profile.org_id);
+      if (!cancelled) setNotified(owners.map((o) => o.name ?? o.email ?? '').filter(Boolean));
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     opacity.value = withTiming(1, { duration: 500 });
@@ -41,7 +67,10 @@ function SeriousSuccessBlock({ reference, onDone }: { reference: string | null; 
       <Icon name="shield-checkmark-outline" size="xxl" color={Colors.serious} />
       <Text style={styles.successTitle}>This has been logged</Text>
       <Text style={styles.successMessage}>
-        {reference ? `${reference} is now` : 'This is now'} a formal record, and your organisation's health & safety team has been notified.
+        {reference ? `${reference} is now` : 'This is now'} a formal record, and{' '}
+        {notified.length === 0
+          ? "your organisation's health & safety team has been notified."
+          : `${formatNames(notified)} ${notified.length === 1 ? 'has' : 'have'} been notified.`}
       </Text>
       <Button label="Done" variant="serious" onPress={onDone} fullWidth />
     </Animated.View>

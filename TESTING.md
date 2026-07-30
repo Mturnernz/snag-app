@@ -317,6 +317,14 @@ when upgrading.
   session, because the client only wedges once a hidden tab becomes visible
   again — which no spec does, and which is exactly what picking a photo from the
   gallery does.
+- **`serious_incident_owners` is verified against the live project, not by a
+  suite.** The trigger side was checked by inserting into a transaction and
+  rolling it back (pg_net queues into a transactional table, so no mail goes
+  out): a serious insert and an escalated niggle both pick up the org's owner and
+  stamp `assigned_at`, and a niggle still follows the site-candidate rule. The two
+  RPC guards — only supervisors/admins are eligible, and the last owner can't be
+  removed — are enforced in SQL and read as correct, but need an authenticated
+  session to exercise, so they are Tier 3 candidates rather than covered.
 - **Uploads are platform-split and only one half is exercised.** Reading a
   picked file needs `expo-file-system` on native and `fetch` on web, and using
   the wrong one throws before any request is made — "Couldn't upload a photo",

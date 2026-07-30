@@ -121,10 +121,10 @@ earlier, now-inactive prototype whose only property was being catastrophic if an
 against Snagv1. They were deleted rather than re-labelled — a warning comment doesn't help someone
 who pipes the file into psql, and git still has them if they're ever wanted.
 
-Key tables: `organisations`, `profiles`, `sites`, `snags`, `comments`, `votes`, plus the
-investigation/RCA/debrief tables (`checklist_completions`, `witness_statements`,
-`evidence_items`, `investigations`, `corrective_actions`, `snag_rca`, `rca_why_steps`,
-`snag_debriefs`).
+Key tables: `organisations`, `profiles`, `sites`, `snags`, `comments`, `votes`,
+`serious_incident_owners` (see below), plus the investigation/RCA/debrief tables
+(`checklist_completions`, `witness_statements`, `evidence_items`, `investigations`,
+`corrective_actions`, `snag_rca`, `rca_why_steps`, `snag_debriefs`).
 
 Key view: `snags_with_details` — snags joined with reporter/owner/site names and
 comment/evidence/vote/checklist counts. Always query this view for the issue list and detail
@@ -140,6 +140,31 @@ and collapsed into `resolved`.
 Photos/evidence go to the `snag-photos` and `snag-evidence` Storage buckets (private,
 org-folder-scoped via RLS), not a public `issue-photos` bucket. Org-wide documents live in
 `org-documents` / `org_documents` — see "The document library" below.
+
+## Who owns a serious incident
+
+`serious_incident_owners` (org_id, profile_id) is the set of supervisors an organisation
+nominates to own hazards and incidents. They are **the health & safety team the app tells
+reporters about** — before this existed, `serious_created` mailed every member of the snag's
+site, so that claim was true only by accident: on a one-member site it reached that person, and
+on a site whose members have no email it reached nobody.
+
+Two things follow from the table, and both matter:
+
+- **Notification.** `supabase/functions/notify-snag` mails these owners on `serious_created`,
+  falling back to site members if an org somehow has none.
+- **Assignment.** `apply_default_owner()` (BEFORE INSERT OR UPDATE OF kind on `snags`) assigns
+  the earliest-added owner to any serious snag that arrives without one — including a niggle
+  escalated into the serious lane. It only ever fills a gap, so a site's own default-owner rules
+  and deliberate assignments both still win. Note `lane` is a generated column and therefore
+  unreadable from a BEFORE trigger; the lane test is on `kind`.
+
+**There is always at least one.** `create_organisation_and_owner` makes the creator the first
+(they are the only member at that point, so there is nothing to ask), and
+`remove_serious_incident_owner` refuses to remove the last one. Only supervisors and admins are
+eligible, because owning a serious incident means running the investigation and
+`require_investigation_access` refuses anyone else — nominating a worker would name an owner the
+RPCs then reject. Managed at Manage Organisation → Serious incident owners.
 
 ## Investigation modes
 

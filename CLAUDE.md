@@ -264,6 +264,13 @@ workers are expected to follow.
 Investigation documents go into the same library rather than a per-snag hiding place, so the
 person who needs one in two years — who wasn't on the snag — can find it.
 
+**Nothing is seeded.** A new org's library is empty, and both clients used to hide the
+"attach one already in the library" picker entirely when it was — so the promised library read
+as a missing feature rather than an empty cabinet. Both now render the section and say it's
+empty. Content to fill it with is drafted in `docs/templates/` (scope from the compliance
+docs' Part F.2 / §8 — see that folder's README); it is unreviewed draft content and is not
+uploaded to any org.
+
 ## Supabase MCP (for Claude Code)
 
 If connected, you can use the Supabase MCP to:

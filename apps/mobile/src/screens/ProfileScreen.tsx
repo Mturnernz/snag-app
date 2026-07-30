@@ -14,6 +14,7 @@ import { Profile, Organisation, SnagStatus, STATUS_LABELS, ROLE_LABELS, RootStac
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { supabase, signOut, getMemberships, getOrgSnagSummary, OrgSnagSummary, Membership } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { failureReason } from '../lib/deadline';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Avatar from '../components/Avatar';
@@ -141,8 +142,16 @@ export default function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           setSigningOut(true);
-          await signOut();
-          setSigningOut(false);
+          try {
+            // signOut() is bounded and falls back to dropping the session
+            // locally, so this resolves either way — but the spinner comes off
+            // in a finally regardless, because a spinner that outlives its
+            // work is indistinguishable from an app that has stopped.
+            const { error } = await signOut();
+            if (error) showAlert('Still signed in', failureReason(error));
+          } finally {
+            setSigningOut(false);
+          }
         },
       },
     ]);

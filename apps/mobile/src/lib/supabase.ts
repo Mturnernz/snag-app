@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as queries from '@snag/supabase-queries';
 import { readForUpload } from './uploadBody';
+import { withDeadline } from './deadline';
 import {
   Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
   ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction,
@@ -86,12 +87,61 @@ export async function signUpWithEmail(email: string, password: string) {
   return supabase.auth.signUp({ email, password });
 }
 
-export async function signOut() {
-  // Local scope, not the supabase-js default of 'global'. Global revokes every
-  // refresh token the user has, so signing out on this phone also signed them
-  // out of the supervisor portal in their browser. Signing out of a device
-  // means this device.
-  return supabase.auth.signOut({ scope: 'local' });
+/** The stored-session key supabase-js derives from the project ref. */
+const AUTH_STORAGE_KEY = `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
+
+// Shorter than the 15s on the auth request itself, deliberately. A logout that
+// hasn't come back is not worth waiting on: `scope: 'local'` only revokes this
+// device's refresh token, and dropping the stored session achieves the same
+// thing for the person holding the phone. Getting them out beats revoking
+// tidily.
+const SIGN_OUT_TIMEOUT_MS = 10_000;
+
+/**
+ * Signs out, and gets the user out even when signing out is what's broken.
+ *
+ * Sign out is the escape hatch from a session that isn't working, so it must not
+ * depend on the session working. `supabase.auth.signOut()` takes the auth lock,
+ * and a wedged lock means it never settles and never even reaches the network —
+ * which is what a permanently spinning Sign Out button was (see
+ * lib/authEvents.ts for how the lock got wedged). Waiting on it forever leaves
+ * someone trapped in an app they can't use and can't leave.
+ *
+ * So: bound it, and if it doesn't come back, drop the stored session directly
+ * and reload. That bypasses supabase-js entirely, because supabase-js is the
+ * part that may be stuck.
+ *
+ * Local scope, not the supabase-js default of 'global'. Global revokes every
+ * refresh token the user has, so signing out on this phone also signed them out
+ * of the supervisor portal in their browser. Signing out of a device means this
+ * device.
+ */
+export async function signOut(): Promise<{ error: any; forced?: boolean }> {
+  try {
+    const { error } = await withDeadline(
+      supabase.auth.signOut({ scope: 'local' }), SIGN_OUT_TIMEOUT_MS, 'Signing out',
+    );
+    if (!error) return { error: null };
+    console.error('signOut error:', error);
+  } catch (err) {
+    console.error('signOut error:', err);
+  }
+
+  // The client couldn't do it. Do it without the client.
+  try {
+    if (Platform.OS === 'web') {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+      // A wedged client never emits SIGNED_OUT, so nothing would re-render and
+      // the app would sit there still showing a signed-in screen. Reloading is
+      // the only thing that reliably completes it.
+      window.location.reload();
+    } else {
+      await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+    return { error: null, forced: true };
+  } catch (err) {
+    return { error: err };
+  }
 }
 
 export async function getCurrentUser() {

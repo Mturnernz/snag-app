@@ -1,9 +1,23 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LinkButton } from '@/components/Button';
 import Icon from '@/components/Icon';
+import { canonical } from '@/lib/seo';
 import styles from './page.module.css';
 
 const WORKSAFE_NOTIFIABLE_EVENTS_URL = 'https://www.worksafe.govt.nz/notifications/what-events-need-to-be-notified/';
+
+// The one page in this app that has to be findable. Target intent:
+// "workplace health and safety software New Zealand" / "hazard reporting app
+// NZ". The leaf title carries the exact phrase and the root layout's template
+// appends "| SnagHQ", landing at ~57 characters — inside what a search result
+// shows rather than truncates.
+export const metadata: Metadata = {
+  title: 'Workplace health and safety software, New Zealand',
+  description:
+    'Workers report hazards from their phone in seconds. Supervisors triage, investigate, and close the loop — with a guided root-cause process for anything serious.',
+  ...canonical('/'),
+};
 
 export default function LandingPage() {
   return (

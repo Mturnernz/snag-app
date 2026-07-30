@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { STATUS_LABELS, type SnagStatus, type SnagKind, type SnagSeverity } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
@@ -8,6 +9,10 @@ import { StatusBadge, KindBadge, SeverityBadge } from '@/components/Badge';
 import Icon from '@/components/Icon';
 import { mergeSelectedAction } from './actions';
 import styles from './page.module.css';
+
+export const metadata: Metadata = {
+  title: 'Snags',
+};
 
 const STATUS_FILTERS: (SnagStatus | 'all')[] = ['all', 'flagged', 'in_progress', 'rca_pending', 'resolved'];
 

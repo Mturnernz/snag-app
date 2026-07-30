@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { SNAG_STEP_KEYS, type SnagStepKey } from '@snag/shared-types';
 import { getPortalAccess } from '@/lib/auth';
@@ -24,6 +25,25 @@ import styles from './page.module.css';
 
 export const dynamic = 'force-dynamic';
 
+// Never indexed. There is one of these URLs per snag id, they are reached only
+// from somebody's inbox, and they are public by design (the id is shape-checked,
+// not looked up). `follow: false` as well as `index: false`: the outbound links
+// here are a deep link into a specific org's snag, which is not a crawl path.
+export const metadata: Metadata = {
+  title: 'Open this snag',
+  robots: { index: false, follow: false },
+};
+
+// The mobile app's *own* deployment — its Expo web build, on a separate Netlify
+// site (see apps/mobile/netlify.toml). Deliberately NOT the portal domain, and
+// not to be "corrected" to www.snaghq.co.nz in a domain sweep: this value is
+// only ever used for visitors this page has already decided cannot use the
+// portal, so pointing it at the portal sends them to /snags/<id> inside the
+// (portal) group, where requireSupervisorOrAdmin() bounces them to
+// /unauthorized, which offers them the app — a loop straight back to here.
+//
+// Distinct again from the `snag://` custom scheme below, which only resolves if
+// the native app is installed.
 const APP_URL = process.env.NEXT_PUBLIC_SNAG_APP_URL ?? 'https://snagv1.netlify.app';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -1,7 +1,18 @@
+import type { Metadata } from 'next';
 import { Card } from '@/components/Card';
 import { LinkButton } from '@/components/Button';
 import Icon from '@/components/Icon';
+import { canonical } from '@/lib/seo';
 import styles from './page.module.css';
+
+// Target intent: "health and safety software pricing NZ", and the comparison
+// searches people run when they've been quoted per-seat elsewhere.
+export const metadata: Metadata = {
+  title: 'Pricing',
+  description:
+    'Free for single-site teams — unlimited reports, investigations, and the full supervisor portal. Priced per organisation as you grow, never per seat.',
+  ...canonical('/pricing'),
+};
 
 export default function PricingPage() {
   return (

@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import {
   getSnagRca, getSnagDebriefs, getInvestigationState, getCorrectiveActions,
@@ -44,6 +45,10 @@ import {
   acceptInvestigationDocumentAction,
 } from './document-actions';
 import styles from './page.module.css';
+
+export const metadata: Metadata = {
+  title: 'Snag',
+};
 
 const KIND_OPTIONS: SnagKind[] = ['fixit', 'improvement', 'hazard', 'incident'];
 const SEVERITY_OPTIONS: SnagSeverity[] = ['minor', 'moderate', 'injury', 'critical'];

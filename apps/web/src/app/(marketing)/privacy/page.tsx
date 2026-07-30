@@ -1,3 +1,15 @@
+import type { Metadata } from 'next';
+import { canonical } from '@/lib/seo';
+
+// Indexable on purpose: procurement and H&S officers look for these two pages
+// before they look at the product.
+export const metadata: Metadata = {
+  title: 'Privacy Policy',
+  description:
+    "How SnagHQ handles your organisation's data. Full policy in progress — get in touch and we'll answer directly in the meantime.",
+  ...canonical('/privacy'),
+};
+
 export default function PrivacyPage() {
   return (
     <section className="container" style={{ padding: 'var(--space-5xl) 0', maxWidth: 640 }}>

@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getOrgStats, getSiteBreakdown } from '@snag/supabase-queries';
 import { STATUS_LABELS, type SnagStatus } from '@snag/shared-types';
@@ -5,6 +6,10 @@ import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { PageHeader, StatGrid, StatTile, EmptyState } from '@/components/Card';
 import tableStyles from '@/components/Table.module.css';
+
+export const metadata: Metadata = {
+  title: 'Dashboard',
+};
 
 export default async function DashboardPage() {
   const { activeMembership } = await requireSupervisorOrAdmin();

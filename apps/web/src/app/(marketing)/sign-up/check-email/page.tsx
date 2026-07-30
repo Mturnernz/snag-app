@@ -1,4 +1,12 @@
+import type { Metadata } from 'next';
 import Icon from '@/components/Icon';
+
+// A transient state in the middle of sign-up, not a destination. Indexing it
+// would put "Check your email" in front of someone searching for the product.
+export const metadata: Metadata = {
+  title: 'Check your email',
+  robots: { index: false, follow: true },
+};
 
 export default function CheckEmailPage() {
   return (

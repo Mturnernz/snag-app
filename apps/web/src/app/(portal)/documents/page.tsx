@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { getOrgDocuments, getOrgDocumentUrl } from '@snag/supabase-queries';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
@@ -5,6 +6,10 @@ import { Card, PageHeader, EmptyState } from '@/components/Card';
 import { Button } from '@/components/Button';
 import Icon from '@/components/Icon';
 import { uploadDocumentAction, deleteDocumentAction } from './actions';
+
+export const metadata: Metadata = {
+  title: 'Documents',
+};
 
 export default async function DocumentsPage({
   searchParams,

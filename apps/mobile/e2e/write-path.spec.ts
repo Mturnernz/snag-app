@@ -145,7 +145,25 @@ test.describe('write path: report → investigate → resolve', () => {
     const row = page.getByText(new RegExp(RUN_ID)).filter({ visible: true }).first();
     await expect(row, 'the reported incident should appear in the list').toBeVisible({ timeout: 90_000 });
     await row.click();
-    await expect(visible(page, 'Health & Safety Report').first()).toBeVisible({ timeout: 90_000 });
+
+    // ── Triage ───────────────────────────────────────────────────────────────
+    // A serious snag arrives owned (apply_default_owner names the first serious
+    // incident owner) but unallocated — no investigations row — so opening it as
+    // a supervisor means answering the triage prompt before anything else. It is
+    // not dismissible: that is the point of it.
+    await expect(visible(page, 'Triage this incident').first()).toBeVisible({ timeout: 90_000 });
+    await visible(page, "SNAG's guided investigation").first().click();
+    await expect(
+      page.getByText(/^Assigning to /),
+      'the auto-assigned serious incident owner should be offered as the default lead'
+    ).toBeVisible();
+    // Deferred on purpose: this spec's subject is the resolve gate, and
+    // answering the notifiable question here would take a condition off the
+    // count before the walk below starts.
+    await visible(page, "I'm not sure yet").first().click();
+    await visible(page, 'Start the investigation').first().click();
+
+    await expect(visible(page, 'Health & Safety Report').first()).toBeVisible({ timeout: SAVED });
 
     // A fresh serious snag is blocked on five conditions, and the notifiable
     // decision is named first — matching update_snag_status's own ordering.

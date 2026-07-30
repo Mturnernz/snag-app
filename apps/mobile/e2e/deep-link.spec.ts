@@ -30,6 +30,14 @@ async function firstSeriousSnagId(page: Page): Promise<string | null> {
     .first();
   await expect(badge, 'the account needs a serious snag it can see').toBeVisible({ timeout: 90_000 });
   await badge.click();
+
+  // An untriaged serious snag opens onto the triage prompt, which is not
+  // dismissible — answering it is a write and this tier writes nothing.
+  const triage = page.getByText('Triage this incident', { exact: true });
+  if (await triage.isVisible({ timeout: 30_000 }).catch(() => false)) {
+    test.skip(true, 'the first serious snag is untriaged — allocate it, or point E2E_EMAIL at an org whose serious snags are');
+  }
+
   await expect(page.getByText('Health & Safety Report')).toBeVisible({ timeout: 90_000 });
 
   // Now that a snag is open, the URL is the thing under test in reverse: the

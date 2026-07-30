@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiveOrg, getMemberships, Membership, markOnboardingSeen, signInAnonymouslyForReport } from './src/lib/supabase';
 import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
 import { createAuthEventQueue } from './src/lib/authEvents';
+import { resetWebPathIfStale } from './src/lib/webLocation';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import { linking } from './src/navigation/linking';
@@ -205,6 +206,16 @@ export default function App() {
     // more exotic than picking a photo and coming back.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+
+      // Both ends of the sign-out/sign-in round trip, because either one alone
+      // leaves a hole: SIGNED_OUT clears the `/profile` the Sign Out button
+      // itself put in the address bar, and SIGNED_IN covers a session that
+      // ended some other way (expiry, another tab). Deliberately not
+      // INITIAL_SESSION — reloading the page on a tab is not logging in, and
+      // staying put is what a browser is supposed to do. Synchronous, and
+      // touches nothing but `history`, so it is safe in this callback.
+      if (event === 'SIGNED_OUT' || event === 'SIGNED_IN') resetWebPathIfStale();
+
       // Only re-fetch the profile on meaningful auth events.
       // TOKEN_REFRESHED must not overwrite a profile that was just set by
       // onComplete() after org creation — that would reset the user back to

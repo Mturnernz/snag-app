@@ -27,6 +27,11 @@ interface Props {
   submitting?: boolean;
   submitDisabled?: boolean;
   onClose: () => void;
+  /** Set false for a sheet that must be answered: drops the backdrop tap, the
+   *  close X and the Android back dismissal, leaving the actions in the body as
+   *  the only way out. Used by the serious-lane triage prompt, where skipping is
+   *  how a hazard ends up with nobody running the investigation. */
+  dismissible?: boolean;
   children: React.ReactNode;
 }
 
@@ -39,7 +44,8 @@ interface Props {
 // whichever one you touched. Giving a single record the whole screen is what
 // actually fixes that; making the inline fields bigger would not have.
 export default function Sheet({
-  visible, title, subtitle, submitLabel, onSubmit, submitting, submitDisabled, onClose, children,
+  visible, title, subtitle, submitLabel, onSubmit, submitting, submitDisabled, onClose,
+  dismissible = true, children,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -50,26 +56,37 @@ export default function Sheet({
   const maxHeight = Math.round(height * 0.86);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={dismissible ? onClose : undefined}
+    >
       <View style={styles.overlay}>
         {/* Tapping the dimmed area behind the sheet dismisses it. */}
-        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+        {dismissible
+          ? <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+          : <View style={styles.backdrop} />}
 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.lift}
         >
           <View style={[styles.sheet, { maxHeight, paddingBottom: insets.bottom + Spacing.lg }]}>
-            <View style={styles.grabber} />
+            {/* The grabber advertises a swipe-to-dismiss that isn't there when
+                the sheet has to be answered. */}
+            {dismissible && <View style={styles.grabber} />}
 
             <View style={styles.header}>
               <View style={styles.headerText}>
                 <Text style={styles.title}>{title}</Text>
                 {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
               </View>
-              <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.close}>
-                <Icon name="close" size="md" color={Colors.textSecondary} />
-              </TouchableOpacity>
+              {dismissible && (
+                <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.close}>
+                  <Icon name="close" size="md" color={Colors.textSecondary} />
+                </TouchableOpacity>
+              )}
             </View>
 
             <ScrollView

@@ -200,8 +200,33 @@ Deno.serve(async (req: Request) => {
       `A ${snag.kind} was just reported.\n\n${snag.description ?? ""}\n\nSee it here: ${seriousLink}`
     );
   } else if (event === "niggle_assigned" && snag.owner_id) {
+    // The event name is a misnomer: notify_after_snag_update fires it on *any*
+    // owner change, serious lane included. On the serious lane the owner is the
+    // lead investigator (triage sets both in one act), and "you've been
+    // assigned a snag" is a poor description of being handed an investigation —
+    // so the same event says the right thing for each lane.
     const email = await emailOf(snag.owner_id);
-    if (email) {
+    if (email && snag.lane === "serious") {
+      // Read after assign_investigation, which triage calls first for exactly
+      // this reason: the mail names how the investigation is being run.
+      const { data: investigation } = await supabase
+        .from("investigations")
+        .select("mode")
+        .eq("snag_id", snag_id)
+        .maybeSingle();
+      const documentMode = investigation?.mode === "document";
+      const how = documentMode
+        ? "Your organisation's own process: run the investigation and attach the completed document. A supervisor accepts it, and that's what closes this."
+        : "SNAG's guided process: a root cause, then corrective actions completed and verified.";
+
+      await sendEmail(
+        [email],
+        `You're leading the investigation — ${snag.reference}`,
+        `You've been assigned the investigation into ${snag.reference}: ${
+          snag.description ?? "(see photo)"
+        }\n\n${how}\n\nStart with making the area safe and preserving the scene: ${go("checklist")}`
+      );
+    } else if (email) {
       await sendEmail(
         [email],
         `You've been assigned a snag (${snag.reference})`,

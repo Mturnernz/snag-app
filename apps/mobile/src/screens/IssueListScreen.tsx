@@ -104,6 +104,7 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 
 // Per-user, persisted across app opens (see the load/save effects below).
 const STATUS_FILTER_STORAGE_PREFIX = 'snag.statusFilters.';
+const ASSIGNED_FILTER_STORAGE_PREFIX = 'snag.assignedOnly.';
 
 const PAGE_SIZE = 50;
 
@@ -130,6 +131,11 @@ export default function IssueListScreen() {
   // have already fetched.
   const [attention, setAttention] = useState<Snag[]>([]);
   const [publicOnly, setPublicOnly] = useState(false);
+  // "Assigned" — snags that have somebody on them, whoever that is. Distinct
+  // from the Scope dropdown's "Assigned to me": this is the supervisor's view
+  // of what is actually being worked, which is why it's a one-tap category
+  // rather than an eighth entry in a dropdown nobody opens.
+  const [assignedOnly, setAssignedOnly] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<DropdownKey>(null);
   const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
   const [isPublicOrg, setIsPublicOrg] = useState(false);
@@ -174,7 +180,13 @@ export default function IssueListScreen() {
   const { showToast } = useToast();
 
   const hasActiveFilters = !setsEqual(statusFilters, DEFAULT_STATUS_FILTERS) || siteFilters.size > 0 || publicOnly
-    || scopeFilter !== DEFAULT_SCOPE_FILTER;
+    || scopeFilter !== DEFAULT_SCOPE_FILTER || assignedOnly;
+
+  // The two unassigned scopes ask for the opposite of what Assigned asks for,
+  // so together they can only ever return nothing. Offer one or the other
+  // rather than an empty list with no explanation.
+  const scopeIsUnassigned =
+    scopeFilter === 'unassigned_in_my_sites' || scopeFilter === 'unassigned_in_my_work_groups';
 
   const scopeOptions = role === 'officer_admin' || role === 'supervisor'
     ? [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA]
@@ -226,6 +238,11 @@ export default function IssueListScreen() {
     if (siteFilters.size > 0) {
       query = query.in('site_id', Array.from(siteFilters));
     }
+    // Has an assignee, whoever it is. owner_id is the assignee on both lanes —
+    // on the serious lane triage sets it to the lead investigator.
+    if (assignedOnly) {
+      query = query.not('owner_id', 'is', null);
+    }
 
     // Scope — org members only (the filter bar's Scope button is hidden for
     // non-members/public reporters, so this must never silently apply to
@@ -271,7 +288,7 @@ export default function IssueListScreen() {
     }
 
     return query.order('created_at', { ascending: sortMode === 'oldest' });
-  }, [statusFilters, siteFilters, sortMode, publicOnly, scopeFilter]);
+  }, [statusFilters, siteFilters, sortMode, publicOnly, scopeFilter, assignedOnly]);
 
   // Unresolved injuries in this org, independent of the filter bar: this is an
   // alert, not a view of what the user asked for. Small limit — if there are
@@ -453,9 +470,10 @@ export default function IssueListScreen() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
       userIdRef.current = user.id;
-      const [statusRaw, scopeRaw] = await Promise.all([
+      const [statusRaw, scopeRaw, assignedRaw] = await Promise.all([
         AsyncStorage.getItem(STATUS_FILTER_STORAGE_PREFIX + user.id),
         AsyncStorage.getItem(SCOPE_FILTER_STORAGE_PREFIX + user.id),
+        AsyncStorage.getItem(ASSIGNED_FILTER_STORAGE_PREFIX + user.id),
       ]);
       if (statusRaw) {
         try {
@@ -468,6 +486,7 @@ export default function IssueListScreen() {
       if (scopeRaw && [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA].some((o) => o.key === scopeRaw)) {
         setScopeFilter(scopeRaw as ScopeFilter);
       }
+      if (assignedRaw === 'true') setAssignedOnly(true);
     });
   }, []);
 
@@ -483,6 +502,17 @@ export default function IssueListScreen() {
     if (!userIdRef.current) return;
     AsyncStorage.setItem(SCOPE_FILTER_STORAGE_PREFIX + userIdRef.current, scopeFilter);
   }, [scopeFilter]);
+
+  useEffect(() => {
+    if (!userIdRef.current) return;
+    AsyncStorage.setItem(ASSIGNED_FILTER_STORAGE_PREFIX + userIdRef.current, String(assignedOnly));
+  }, [assignedOnly]);
+
+  // Switching to an unassigned scope clears Assigned rather than quietly
+  // returning nothing — the two are asking for opposite things.
+  useEffect(() => {
+    if (scopeIsUnassigned && assignedOnly) setAssignedOnly(false);
+  }, [scopeIsUnassigned, assignedOnly]);
 
   useEffect(() => {
     setLoading(true);
@@ -604,6 +634,14 @@ export default function IssueListScreen() {
                 label="Site"
                 active={siteFilters.size > 0}
                 onPress={() => setOpenDropdown('site')}
+              />
+            )}
+            {hasOrg && !scopeIsUnassigned && (
+              <FilterBarButton
+                label="Assigned"
+                active={assignedOnly}
+                dropdown={false}
+                onPress={() => setAssignedOnly((prev) => !prev)}
               />
             )}
             <FilterBarButton

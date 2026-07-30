@@ -4,7 +4,7 @@
 
 | Tier | What it covers | Credentials | Writes data? |
 |---|---|---|---|
-| 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens, and the shared serious-lane resolve gate (its ordering pinned against `update_snag_status`). Jest, no browser, no network | none | no |
+| 0 | `apps/mobile/src/**/*.test.ts(x)` — offline queue behaviour, badge colour rules, theme tokens, which URLs survive an auth transition on the web build (`webLocation.test.ts`), and the shared serious-lane resolve gate (its ordering pinned against `update_snag_status`). Jest, no browser, no network | none | no |
 | 1 | `apps/web/e2e/public.spec.ts` — every public route, both themes, three viewports, no horizontal overflow, no failed subresources | none | no |
 | 1 | `apps/web/e2e/a11y.spec.ts` — axe-core against WCAG 2.1 A/AA on every public route, the handoff, and the portal's dashboard/snags/reports/detail pages, in all three viewport projects | none (portal specs need `E2E_EMAIL`) | no |
 | 1 | `apps/web/e2e/handoff.spec.ts` — `/go/snag/[id]` is public, offers the app, carries a valid `?step=` and drops an invalid one, remembers the snag through login, 404s a malformed id, and refuses an off-site `?next=`. Its supervisor pass-through spec is Tier 2 | none (one spec needs `E2E_EMAIL`) | no |
@@ -13,16 +13,35 @@
 | 2 | `apps/web/e2e/portal.spec.ts` — dashboard/snags/reports render, no query-failure banners, sidebar navigation, sign-out revokes access, worker role refused, plus the snag detail page: sections start collapsed and the next step opens the one it names, the notifiable question offers both answers, Resolve is stated as blocked, every counted evidence item renders, the 5 Whys are asked one at a time | `E2E_EMAIL`/`E2E_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/report.spec.ts` — worker signs in, report screen shows both lanes and the right org, tab bar, snags list | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD` | no |
 | 2 | `apps/mobile/e2e/deep-link.spec.ts` — `/snags/:id` opens that snag from a cold load, `?step=` expands one section and leaves the rest collapsed, an unknown step is ignored, and navigating writes the URL back | `E2E_EMAIL`/`E2E_PASSWORD` | no |
-| 2 | `apps/mobile/e2e/incident.spec.ts` — the serious-incident screen: next step above the fold, no empty photo block, Resolve stated as blocked, every collapsed card reports its state, the evidence sheet is usable, WorkSafe criteria stay behind their disclosure, composer starts collapsed | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
+| 2 | `apps/mobile/e2e/incident.spec.ts` — the serious-incident screen: next step above the fold, no empty photo block, Resolve stated as blocked, every collapsed card reports its state, the evidence sheet is usable, WorkSafe criteria stay behind their disclosure, composer starts collapsed | `E2E_EMAIL`/`E2E_PASSWORD` **and an already-triaged serious snag the account can see** (see §Triage below) | no |
 | 2 | `apps/mobile/e2e/stalled-network.spec.ts` — a request that is issued and never answered must not leave a Save button spinning forever, and a stalled token refresh must not stop later requests being issued at all. The regression test for the bug in §Known gaps below | `E2E_EMAIL`/`E2E_PASSWORD` **and a serious snag the account can see** | no |
 | 2 | `apps/mobile/e2e/documents.spec.ts` — a worker can reach the org document register and add to it, the listing renders (or says it's empty), and allocating a serious snag prompts for the investigation mode with each option's consequence stated | `E2E_WORKER_EMAIL`/`E2E_WORKER_PASSWORD`, plus `E2E_EMAIL`/`E2E_PASSWORD` for the mode spec | no |
 | 3 | `apps/web/e2e/documents.spec.ts` — the org document register end to end: upload, listing, signed-URL download of the actual bytes, then delete. Cleans up after itself (unlike snags, documents can be removed) | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes, self-cleaning** |
 | 3 | `apps/web/e2e/investigation-document.spec.ts` — document mode end to end: allocating with "our own process" swaps root cause + corrective actions for the document step while leaving everything before the fork intact, upload-and-attach files the document in the library, and the attacher is refused the Accept button rather than offered one that can only fail. Restores the snag to guided mode and deletes its probe document | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes, self-cleaning** |
-| 3 | `apps/mobile/e2e/write-path.spec.ts` — reports a serious incident, then satisfies each resolve-gate condition in turn (notifiable decision → checklist → witness → evidence → root cause) and resolves it, asserting the gate blocks until the last one is met | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes** |
+| 3 | `apps/mobile/e2e/write-path.spec.ts` — reports a serious incident, triages it (deferring the notifiable call so the gate stays intact), then satisfies each resolve-gate condition in turn (notifiable decision → checklist → witness → evidence → root cause) and resolves it, asserting the gate blocks until the last one is met | `E2E_WRITE_PATH=1` + `E2E_EMAIL`/`E2E_PASSWORD` | **yes** |
 
 Tier 0 runs anywhere and takes seconds. Tier 1 needs only a served bundle. Tier 2
 is read-only, so it is safe against an environment with real data. Tier 3 mutates
 and needs the disposable org described below.
+
+### Triage, and why some read-only specs skip
+
+An *unallocated* serious snag opens onto the triage prompt — a modal that has to be
+answered, with everything behind it inert. Answering it is a write, so the
+read-only tiers can't, and they take one of two routes:
+
+- **Mobile** (`incident`, `deep-link`, `stalled-network`) skips with a note if the
+  first serious snag it finds is untriaged. Their subject is the investigation
+  screen, which only exists once somebody is running the investigation. Allocate
+  the QA org's serious snag once and they stay green.
+- **Web** (`portal.spec.ts`) appends **`?triaged=1`** — the same "already answered
+  this visit" flag `triageAction` redirects with — so the page underneath can be
+  inspected without the prompt. Use `snagUrl()` there rather than building snag
+  URLs by hand.
+
+The prompt itself is covered where a write is allowed or the assertion is
+read-only: `apps/mobile/e2e/documents.spec.ts` asserts it asks all three
+questions and offers the deferral, and the two Tier 3 specs drive it for real.
 
 ### Running Tier 3
 

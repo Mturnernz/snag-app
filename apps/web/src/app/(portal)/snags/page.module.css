@@ -88,10 +88,31 @@
   flex-shrink: 0;
 }
 
+/* Mono because it sits with the badges as row data, matching the reference and
+   the counts elsewhere in the portal. Muted, but muted here is the AA-checked
+   --color-text-muted, not a lighter grey — e2e/a11y.spec.ts fails otherwise. */
+.rowOwner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-family: var(--font-mono-family);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (max-width: 640px) {
   .rowLink {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-sm);
+  }
+
+  /* Stacked, the badge row wraps rather than pushing the owner off the edge. */
+  .rowBadges {
+    flex-wrap: wrap;
   }
 }

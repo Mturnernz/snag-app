@@ -95,6 +95,20 @@ test.describe('portal (supervisor/admin)', () => {
       );
     }
 
+    /**
+     * A snag URL with the triage prompt suppressed.
+     *
+     * An untriaged serious snag opens onto a non-dismissible `<dialog>`, and
+     * answering it is a write these specs must not make — with the modal up,
+     * everything behind it is inert and nothing else on the page can be
+     * inspected. `?triaged=1` is the same "asked and answered for this visit"
+     * flag the triage action redirects with, so this suppresses the prompt
+     * rather than working around it. The prompt has its own spec below.
+     */
+    function snagUrl(href: string, step?: string): string {
+      return `${href}?triaged=1${step ? `&step=${step}` : ''}`;
+    }
+
     /** Opens each snag until one matches, and leaves the page on it. */
     async function findSnag(
       page: import('@playwright/test').Page,
@@ -103,7 +117,7 @@ test.describe('portal (supervisor/admin)', () => {
       step?: string,
     ): Promise<string | null> {
       for (const href of (await snagHrefs(page)).slice(0, 8)) {
-        await page.goto(step ? `${href}?step=${step}` : href);
+        await page.goto(snagUrl(href, step));
         const body = await page.locator('main').innerText();
         if (matches(body)) return href;
       }
@@ -121,8 +135,13 @@ test.describe('portal (supervisor/admin)', () => {
       expect(await open.count(), 'nothing should be expanded before you ask for it').toBe(0);
 
       // The CTA is a link carrying ?step=…, so following it must expand
-      // exactly one section — the one the card named.
-      await page.locator('main a[href*="?step="]').first().click();
+      // exactly one section — the one the card named. Followed by URL rather
+      // than clicked: the CTA's own href has no ?triaged=1, so on an
+      // unallocated snag a click would land behind the triage modal and make
+      // this assert something else.
+      const cta = await page.locator('main a[href*="?step="]').first().getAttribute('href');
+      expect(cta, 'the next-step card should link to the section it names').toBeTruthy();
+      await page.goto(`${cta}&triaged=1`);
       await expect(page.locator('details[open]')).toHaveCount(1);
     });
 
@@ -157,7 +176,7 @@ test.describe('portal (supervisor/admin)', () => {
       await expect(page.getByRole('button', { name: /^Resolve( this snag)?$/ })).toBeHidden();
 
       // And Manage must agree rather than contradict it.
-      await page.goto(`${href}?step=manage`);
+      await page.goto(snagUrl(href, 'manage'));
       await expect(page.getByText(/Resolve is blocked — /)).toBeVisible();
     });
 

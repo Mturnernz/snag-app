@@ -1,5 +1,6 @@
 import type { LinkingOptions } from '@react-navigation/native';
 import type { RootStackParamList } from '../types';
+import { APP_URL } from '../lib/appUrl';
 
 // Deep links.
 //
@@ -18,8 +19,14 @@ import type { RootStackParamList } from '../types';
 const PREFIXES = [
   // Native. Requires `scheme` in app.json, which is where `snag://` comes from.
   'snag://',
-  // The web build. Both hosts are listed so a link is portable between the
-  // deployed app and a local run.
+  // The web build's current home. See lib/appUrl.
+  APP_URL,
+  // Its previous one, kept deliberately rather than replaced. Site QR codes
+  // encoding this host have been printed and put up on walls, and every
+  // notification sent before the move carries it too. Netlify redirects the old
+  // subdomain to the new domain, so those still arrive — but a redirect only
+  // gets them to the app, and it is this list that decides whether the path
+  // then resolves to the right screen instead of the default tab.
   'https://snagv1.netlify.app',
   'http://localhost:8081',
 ];

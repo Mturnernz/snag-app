@@ -391,6 +391,33 @@ unless it's a one-off simple `select`.
   a web implementation — `expo-file-system` and `expo-camera` have none, and
   `expo-file-system`'s stub throws rather than no-oping. See TESTING.md.
 
+## Hosts
+
+Three, and they are not interchangeable:
+
+| Host | What it serves | Set in |
+|---|---|---|
+| `www.snaghq.co.nz` | `apps/web` — marketing site **and** supervisor portal, one Next.js app | `apps/web/src/lib/seo.ts` (`SITE_URL`), `SNAG_PORTAL_URL` |
+| `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — a **separate Netlify site** | `apps/mobile/src/lib/appUrl.ts`, `NEXT_PUBLIC_SNAG_APP_URL` |
+| `snagv1.netlify.app` | the app's previous host, now a Netlify redirect to `app.snaghq.co.nz` | — |
+
+The apex `snaghq.co.nz` redirects to `www`. DNS is Netlify-managed.
+
+`snagv1.netlify.app` has to keep resolving, and not only for tidiness: **site QR
+codes encoding it have been printed and put on walls**, and every notification
+sent before the move carries it. That is why it stays in
+`apps/mobile/src/navigation/linking.ts`'s prefix list rather than being replaced
+— the Netlify redirect gets someone to the app, but the prefix list is what
+decides whether the path then resolves to the right screen rather than the
+default tab.
+
+Never point `NEXT_PUBLIC_SNAG_APP_URL` at the portal host. `/go` only uses it
+for visitors it has already decided cannot use the portal, so that sends them to
+`/snags/<id>` inside `(portal)`, where `requireSupervisorOrAdmin()` bounces them
+to `/unauthorized`, which offers them the app — a loop back to where they
+started. The two being subdomains of one domain makes them look more
+interchangeable than they are.
+
 ## Notification links and the handoff
 
 Every per-snag notification `supabase/functions/notify-snag` sends points at

@@ -245,20 +245,52 @@ redeploy the function.
 
 ## 7. Decisions I need from you
 
-### D1 — Production domain — ✅ decided: `www.snaghq.co.nz`
+### D1 — Production domain — ✅ decided, and now three hosts
 
-The in-code default for `SNAG_PORTAL_URL` now points there. **It is aspirational
-until you do two things**, and deploying before them sends every notification to a
-dead host:
+| Host | Serves |
+|---|---|
+| `www.snaghq.co.nz` | `apps/web` — marketing + portal (apex redirects here) |
+| `app.snaghq.co.nz` | `apps/mobile`'s Expo web export, a separate Netlify site |
+| `snagv1.netlify.app` | the app's old host — must keep redirecting, see below |
 
-1. Netlify → the `apps/web` site → Domain management → add `www.snaghq.co.nz`, then
-   repoint DNS. It currently resolves to `27.124.125.171`, which is not Netlify.
-2. Confirm the handoff answers there, then set the secret and redeploy:
+The code now says all of this: `SITE_URL`, `SNAG_PORTAL_URL`'s default, and
+`NEXT_PUBLIC_SNAG_APP_URL`'s default. **It is still aspirational until DNS moves**,
+and deploying the function before then sends every notification to a dead host.
+
+Remaining manual steps, in order — each blocks the next:
+
+1. Netlify → Domains → add `snaghq.co.nz` with Netlify-managed DNS; point the
+   registrar's nameservers at the four it returns.
+2. `apps/web` site → add `www.snaghq.co.nz` (primary) + the apex redirect.
+   `apps/mobile` site → add `app.snaghq.co.nz` (primary).
+3. Verify, including that the printed-QR redirect keeps its query string:
+   ```
+   curl -sI https://www.snaghq.co.nz | head -1                        # 200
+   curl -sI "https://snagv1.netlify.app/?report=test" | grep -i location
+   #   → https://app.snaghq.co.nz/?report=test
+   ```
+4. Netlify `apps/web` env → `NEXT_PUBLIC_SNAG_APP_URL=https://app.snaghq.co.nz`.
+5. Supabase → Auth → URL Configuration. Nothing in either client passes
+   `emailRedirectTo`, so every confirmation link goes to **Site URL**: set it to
+   `https://www.snaghq.co.nz` and add the other hosts as additional redirect URLs.
+6. Resend → verify `snaghq.co.nz`, then set `SNAG_FROM_ADDRESS`. Until then
+   notifications send as `onboarding@resend.dev`, Resend's shared sandbox sender,
+   which is generally restricted to your own verified address — so **mail to
+   anyone else may already be failing silently** (`sendEmail` logs the rejection
+   and returns normally).
+7. Provision a `hello@snaghq.co.nz` mailbox — the marketing footer already
+   publishes it.
+8. Confirm the handoff answers, then set `SNAG_PORTAL_URL` and redeploy:
    ```
    curl -o /dev/null -w '%{http_code}\n' https://www.snaghq.co.nz/go/snag/<any-uuid>
    ```
    200 (the chooser) or 307 (a signed-in supervisor) means go. **404 means the
    portal build hasn't caught up — deploy that first.**
+
+**The deployed `notify-snag` is v14 and predates all of this**: it links straight
+to the app rather than through `/go`, and `serious_created` mails every member of
+the site rather than the nominated serious-incident owners. Step 8's redeploy
+brings both changes at once.
 
 ### D2 — Leaked-password protection — ✅ decided: on
 

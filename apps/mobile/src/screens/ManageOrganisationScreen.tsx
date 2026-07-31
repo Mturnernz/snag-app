@@ -36,10 +36,11 @@ import {
   SeriousIncidentOwner,
 } from '../lib/supabase';
 
-// Matches the edge functions' SNAG_APP_URL default — the QR always encodes
-// the web export's URL (works with or without the native app installed);
-// see PublicQrReportScreen.tsx / App.tsx for the landing side of this link.
-const APP_URL = 'https://snagv1.netlify.app';
+// The QR always encodes the web export's URL, so it works with or without the
+// native app installed; see PublicQrReportScreen.tsx / App.tsx for the landing
+// side of this link. The host lives in one place because these codes get
+// printed — see lib/appUrl.
+import { APP_URL } from '../lib/appUrl';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';

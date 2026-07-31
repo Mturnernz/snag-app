@@ -35,8 +35,10 @@ export const metadata: Metadata = {
 };
 
 // The mobile app's *own* deployment — its Expo web build, on a separate Netlify
-// site (see apps/mobile/netlify.toml). Deliberately NOT the portal domain, and
-// not to be "corrected" to www.snaghq.co.nz in a domain sweep: this value is
+// site (see apps/mobile/netlify.toml). A subdomain of the same domain since the
+// move off snagv1.netlify.app, which makes it look more interchangeable with the
+// portal than it is: deliberately NOT the portal host, and not to be
+// "corrected" to www.snaghq.co.nz in a domain sweep. This value is
 // only ever used for visitors this page has already decided cannot use the
 // portal, so pointing it at the portal sends them to /snags/<id> inside the
 // (portal) group, where requireSupervisorOrAdmin() bounces them to
@@ -44,7 +46,7 @@ export const metadata: Metadata = {
 //
 // Distinct again from the `snag://` custom scheme below, which only resolves if
 // the native app is installed.
-const APP_URL = process.env.NEXT_PUBLIC_SNAG_APP_URL ?? 'https://snagv1.netlify.app';
+const APP_URL = process.env.NEXT_PUBLIC_SNAG_APP_URL ?? 'https://app.snaghq.co.nz';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function stepSuffix(step: string | undefined): string {

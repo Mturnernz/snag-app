@@ -812,6 +812,7 @@ export const getInvestigationState = (snagId: string) => queries.getInvestigatio
 // disagree about what's outstanding or what order to do it in.
 export type ResolveGateCondition = queries.ResolveGateCondition;
 export const seriousResolveGate = queries.seriousResolveGate;
+export const investigationModeLocked = queries.investigationModeLocked;
 
 // ─── Corrective actions (CAPA) ────────────────────────────────────────────────
 // create_corrective_action/complete_corrective_action are supervisor/admin-or-

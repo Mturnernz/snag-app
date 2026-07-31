@@ -32,7 +32,7 @@ import {
   getSiteAssignees, SiteAssignee, unmergeSnag,
   getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation, escalateSnag,
   getSnagRca, SnagRca, RcaStatus, isRcaClosed, getSnagDebriefs, SnagDebrief,
-  seriousResolveGate, ResolveGateCondition,
+  seriousResolveGate, ResolveGateCondition, investigationModeLocked,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -307,6 +307,9 @@ export default function IssueDetailScreen() {
   // viewing their own cross-org report) sees status + details only.
   const isOrgMember = Boolean(userProfile?.org_id && issue && userProfile.org_id === issue.org_id);
   const canEdit = isOrgMember && (userProfile?.role === 'officer_admin' || userProfile?.role === 'supervisor');
+  // Only an officer admin can overturn a locked investigation mode — a
+  // supervisor can allocate one but not re-decide it once work has started.
+  const isOfficerAdmin = isOrgMember && userProfile?.role === 'officer_admin';
   const isSerious = issue?.lane === 'serious';
 
   // Comments and system activity entries merged into one chronological feed.
@@ -588,6 +591,10 @@ export default function IssueDetailScreen() {
   // isn't done: the gate wants a second supervisor's acceptance, so the header
   // has to distinguish "a file is there" from "somebody signed it off".
   const isDocumentMode = investigation?.mode === 'document';
+  // Whether Manage may still offer the mode choice. Mirrors
+  // assign_investigation's guard so the panel hides a control the server would
+  // refuse, rather than offering one that can only fail.
+  const modeLocked = investigation ? investigationModeLocked(investigation) : false;
   const investigationDocumentStatus: StepStatus =
     investigation?.documentAccepted ? 'done' : investigation?.documentId ? 'in_progress' : 'pending';
   const investigationDocumentSummary =
@@ -1095,6 +1102,8 @@ export default function IssueDetailScreen() {
                   owner={issue.owner ?? null}
                   assignees={siteAssignees}
                   investigationMode={investigation?.mode ?? 'snag'}
+                  modeLocked={modeLocked}
+                  canOverrideMode={isOfficerAdmin}
                   resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
                   isPublicSubmission={issue.is_public_submission ?? false}
                   onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
@@ -1113,6 +1122,8 @@ export default function IssueDetailScreen() {
               owner={issue.owner ?? null}
               assignees={siteAssignees}
               investigationMode={investigation?.mode ?? 'snag'}
+              modeLocked={modeLocked}
+              canOverrideMode={isOfficerAdmin}
               resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
               isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}

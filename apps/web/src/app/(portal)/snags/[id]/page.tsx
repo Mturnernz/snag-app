@@ -4,7 +4,7 @@ import {
   getSnagRca, getSnagDebriefs, getInvestigationState, getCorrectiveActions,
   getSnagAuditLog, describeAuditAction, getSiteAssignees, getOrgMembers, getEvidencePhotoUrl,
   isImageEvidence,
-  seriousResolveGate,
+  seriousResolveGate, investigationModeLocked,
   getOrgDocuments, getOrgDocumentUrl,
   type SiteAssignee, type ResolveGateKey, type SnagRca, type OrgDocument,
 } from '@snag/supabase-queries';
@@ -154,6 +154,11 @@ export default async function SnagDetailPage({
   // Document mode only. Fetching the library on every serious snag would be a
   // round trip nobody reads on the guided path.
   const isDocumentMode = investigation?.mode === 'document';
+  // Whether Manage may still offer the mode choice. Mirrors
+  // assign_investigation's guard, so the form doesn't present a control the
+  // server would refuse. Officer admins keep it, with a warning.
+  const modeLocked = investigation ? investigationModeLocked(investigation) : false;
+  const canOverrideMode = activeMembership.role === 'officer_admin';
   const [libraryDocuments, documentUrl]: [OrgDocument[], string | null] = isDocumentMode
     ? await Promise.all([
         getOrgDocuments(supabase, activeMembership.org_id),
@@ -824,28 +829,52 @@ export default async function SnagDetailPage({
               </select>
             </div>
             {/* The re-allocate path. Triage asks this first, on the way in;
-                this is where it gets changed afterwards. Same wording either
-                way — the copy is shared, because a supervisor comparing the two
-                screens should not have to work out whether they mean the same
-                thing. The owner is the lead investigator. */}
+                this is where the *investigator* gets changed afterwards.
+                Same wording either way — the copy is shared, because a
+                supervisor comparing the two screens should not have to work out
+                whether they mean the same thing. The owner is the lead
+                investigator.
+
+                How it is investigated is a different matter: once work has been
+                recorded under the chosen mode, switching would strand it and
+                assign_investigation refuses. With no `mode` field on the form,
+                assignOwnerAction skips the RPC and re-assigning the
+                investigator keeps working. */}
             {isSerious && !isResolved && (
-              <fieldset className={styles.modeChoice}>
-                <legend>How will this be investigated?</legend>
-                {INVESTIGATION_MODE_OPTIONS.map((option) => (
-                  <label key={option.value} className={styles.modeOption}>
-                    <input
-                      type="radio"
-                      name="mode"
-                      value={option.value}
-                      defaultChecked={option.value === (isDocumentMode ? 'document' : 'snag')}
-                    />
-                    <span>
-                      <strong>{option.title}</strong>
-                      {option.detail}
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
+              modeLocked && !canOverrideMode ? (
+                <p className={styles.modeLocked}>
+                  <Icon name="Lock" size="sm" />
+                  <span>
+                    Investigated using{' '}
+                    <strong>{isDocumentMode ? "your organisation's own process" : 'the SNAG investigation'}</strong>.
+                    Work has been recorded against it, so this can no longer be changed.
+                  </span>
+                </p>
+              ) : (
+                <fieldset className={styles.modeChoice}>
+                  <legend>How will this be investigated?</legend>
+                  {modeLocked && (
+                    <p className={styles.modeWarning}>
+                      This investigation is already under way. Changing it now leaves the work
+                      already recorded counting for nothing, and is recorded against your name.
+                    </p>
+                  )}
+                  {INVESTIGATION_MODE_OPTIONS.map((option) => (
+                    <label key={option.value} className={styles.modeOption}>
+                      <input
+                        type="radio"
+                        name="mode"
+                        value={option.value}
+                        defaultChecked={option.value === (isDocumentMode ? 'document' : 'snag')}
+                      />
+                      <span>
+                        <strong>{option.title}</strong>
+                        {option.detail}
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              )
             )}
             <Button type="submit" variant="secondary" size="sm">
               {isSerious ? 'Save allocation' : 'Save'}

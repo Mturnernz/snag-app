@@ -187,8 +187,10 @@ be read end to end by a supervisor who never scrolled to the part that assigns i
 - **Order of writes matters**: `assign_investigation` → `assign_snag_owner` → `set_notifiable_flag`.
   The middle one fires `notify_after_snag_update`, whose mail names how the investigation is being
   run, so the `investigations` row has to exist first.
-- Manage (both clients) keeps the mode and owner controls as the **re-decide** path. The wording is
-  shared (`INVESTIGATION_MODE_OPTIONS` in `packages/shared-types`) so the two surfaces can't drift.
+- Manage (both clients) is where the **owner** is re-decided afterwards. The mode can also be
+  changed there, but only until the investigation has work under it — see "The mode freezes once
+  work starts" below. The wording is shared (`INVESTIGATION_MODE_OPTIONS` in
+  `packages/shared-types`) so the two surfaces can't drift.
 
 ## Investigation modes
 
@@ -220,6 +222,35 @@ themselves, this is about an organisation's completed investigation the supervis
 for either way.
 
 Replacing the document clears the acceptance: a different document is a different investigation.
+
+### The mode freezes once work starts
+
+`assign_investigation` refuses to change the mode of an investigation that has been **allocated**
+and has work recorded **under its current mode** — a root cause or a corrective action in `snag`
+mode, an attached document in `document` mode. An **officer admin** may still override, and the
+override is audited under its own action (`investigation_mode_overridden_*`) so it reads as a
+decision overturned rather than one merely re-made.
+
+The reason is the gate, not tidiness. `update_snag_status` forks on `mode`, so a switch
+mid-investigation is a hole in it: complete and verify every corrective action, switch to
+`document`, attach and accept a file, and the snag resolves with those actions still open —
+`document` mode never asks. In reverse, an accepted investigation document stops counting the
+moment the mode flips back. SNAG-00038 was sitting in exactly that state before
+`20260731000000_lock_investigation_mode.sql` repaired it.
+
+Three things follow:
+
+- **Only the current mode's work locks it.** The checklist, witnesses and evidence are required by
+  both modes and survive a switch, so they are deliberately no reason to refuse one.
+- **Reassigning the lead investigator still works.** It goes through the same RPC; only a *change
+  of mode* is frozen. Who runs it and how it is run are different decisions.
+- **`attach_investigation_document` no longer sets `mode`.** It used to flip a snag-mode
+  investigation to `document` just by attaching a file — a second, quieter re-triage that never
+  went near Manage. It now requires the investigation to already be in document mode.
+
+Both clients mirror the rule with `investigationModeLocked` (`packages/supabase-queries`), the same
+way they mirror the resolve gate with `seriousResolveGate`: the server enforces, the clients hide a
+control it would refuse. They gate on `locked && !isOfficerAdmin`, never on `locked` alone.
 
 ### Who can do what
 

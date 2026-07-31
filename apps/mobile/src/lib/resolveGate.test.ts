@@ -1,5 +1,6 @@
 import {
-  seriousResolveGate, resolveBlockReason, type InvestigationState,
+  seriousResolveGate, resolveBlockReason, investigationModeLocked,
+  type InvestigationState,
 } from '@snag/supabase-queries';
 
 // The serious-lane resolve gate, which both clients read and neither enforces.
@@ -23,6 +24,7 @@ function complete(): InvestigationState {
     evidence: [{ id: 'e1' } as any],
     rootCause: 'Racking was never re-rated for the heavier stock line.',
     openCorrectiveActions: 0,
+    correctiveActionCount: 2,
     mode: 'snag',
     leadInvestigatorId: null,
     documentId: null,
@@ -52,7 +54,7 @@ function completeViaDocument(): InvestigationState {
 function bare(mode: 'snag' | 'document' = 'snag'): InvestigationState {
   return {
     completedSteps: [], witnesses: [], evidence: [], rootCause: null,
-    openCorrectiveActions: 0, mode, leadInvestigatorId: null,
+    openCorrectiveActions: 0, correctiveActionCount: 0, mode, leadInvestigatorId: null,
     documentId: null, documentTitle: null, documentPath: null,
     documentAttachedBy: null, documentAccepted: false, documentAcceptedBy: null,
   };
@@ -154,5 +156,66 @@ describe('seriousResolveGate', () => {
     // What the locked "Resolve — blocked, N steps remaining" row reads from.
     const nothingDone: InvestigationState = { ...bare(), openCorrectiveActions: 2 };
     expect(seriousResolveGate(nothingDone, false).filter((c) => c.unmet)).toHaveLength(6);
+  });
+});
+
+// Whether an allocated investigation can still be re-triaged into the other
+// mode. Mirrors assign_investigation's guard, so that the clients hide a
+// control the server would refuse rather than offering one that can only fail.
+//
+// The rule is about *stranding*: only work belonging to the mode you'd be
+// leaving counts. The checklist, witnesses and evidence are required either
+// way, survive the switch, and must never lock it.
+describe('investigationModeLocked', () => {
+  const allocated = (s: InvestigationState): InvestigationState => ({ ...s, leadInvestigatorId: 'lead-1' });
+
+  it('is open before the snag has been allocated', () => {
+    // Triage itself, not re-triage — leadInvestigatorId is what distinguishes
+    // them, because apply_default_owner fills owner_id on the way in.
+    expect(investigationModeLocked({ ...complete(), leadInvestigatorId: null })).toBe(false);
+  });
+
+  it('is open once allocated but before any mode-specific work', () => {
+    expect(investigationModeLocked(allocated(bare('snag')))).toBe(false);
+    expect(investigationModeLocked(allocated(bare('document')))).toBe(false);
+  });
+
+  it('locks snag mode on a root cause', () => {
+    expect(investigationModeLocked(allocated({ ...bare(), rootCause: 'Racking never re-rated.' }))).toBe(true);
+  });
+
+  it('locks snag mode on a corrective action, even once every one is verified', () => {
+    // The trap: openCorrectiveActions is 0 when they're all done and verified,
+    // so a lock keyed off that number would quietly unlock the most complete
+    // investigations of all.
+    expect(investigationModeLocked(allocated({
+      ...bare(), openCorrectiveActions: 0, correctiveActionCount: 3,
+    }))).toBe(true);
+  });
+
+  it('locks document mode as soon as a document is attached, accepted or not', () => {
+    expect(investigationModeLocked(allocated({
+      ...bare('document'), documentId: 'doc-1', documentAccepted: false,
+    }))).toBe(true);
+    expect(investigationModeLocked(allocated(completeViaDocument()))).toBe(true);
+  });
+
+  it('ignores work both modes share, which a switch would not strand', () => {
+    const shared = allocated({
+      ...bare(),
+      completedSteps: ['make_safe', 'preserve_scene', 'capture_evidence', 'identify_witnesses', 'find_root_cause'],
+      witnesses: [{ id: 'w1' } as any],
+      evidence: [{ id: 'e1' } as any],
+    });
+    expect(investigationModeLocked(shared)).toBe(false);
+  });
+
+  it("does not let the other mode's leftovers lock the current one", () => {
+    // A snag-mode investigation still carrying a document from before the mode
+    // was frozen: nothing snag-mode has been done, so it can still be moved —
+    // which is what repairs it.
+    expect(investigationModeLocked(allocated({
+      ...bare('snag'), documentId: 'doc-1', documentAccepted: true,
+    }))).toBe(false);
   });
 });

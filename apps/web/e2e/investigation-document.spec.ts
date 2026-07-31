@@ -31,9 +31,15 @@ const SNAG_ID = process.env.E2E_SERIOUS_SNAG_ID ?? '4687e567-9b2c-4ade-9700-00e9
  *
  * An unallocated serious snag opens onto the triage prompt — a modal that has
  * to be answered, so Manage is unreachable until it is. Once allocated the
- * prompt is gone and Manage is the re-decide path. Both write the same three
- * RPCs, and this spec runs repeatedly against a snag whose state it leaves
- * behind, so it has to cope with either.
+ * prompt is gone and Manage carries the choice instead. Both write the same
+ * three RPCs, and this spec runs repeatedly against a snag whose state it
+ * leaves behind, so it has to cope with either.
+ *
+ * Manage only still offers the mode while nothing mode-specific has been
+ * recorded. Once it has, `assign_investigation` refuses to switch — which is
+ * why the cleanup below removes the document *before* moving the snag back to
+ * the guided path, not after. Doing it the other way round is what left
+ * SNAG-00038 sitting in snag mode holding an accepted investigation document.
  */
 async function allocateWithMode(page: Page, mode: 'snag' | 'document') {
   await page.goto(`/snags/${SNAG_ID}?step=manage`);
@@ -136,12 +142,27 @@ test.describe('investigation document mode', () => {
       await page.getByRole('button', { name: /accept this document/i }).click();
       await expect(page.locator('#investigationDocument')).toContainText(/accepted by /i, { timeout: 60_000 });
       await expect(page.locator('main')).toContainText('4 steps remaining');
+
+      // ── And now it can't be re-triaged out from under that work ──────────
+      // The failure this prevents is not cosmetic: the two modes satisfy the
+      // gate with different evidence, so switching mid-investigation leaves a
+      // signed-off investigation counting for nothing — and in the other
+      // direction lets a snag resolve with corrective actions still open.
+      await page.goto(`/snags/${SNAG_ID}?step=manage`);
+      await expect(
+        page.locator('input[name="mode"]'),
+        'a supervisor should not be offered the mode once work exists'
+      ).toHaveCount(0);
+      await expect(page.locator('main')).toContainText(/can no longer be changed/i);
     } finally {
-      // Leave the snag on the guided path and take the probe document with us.
-      await allocateWithMode(page, 'snag').catch(() => {});
+      // Order matters. Deleting the document clears the only document-mode work
+      // on this snag, which is what unlocks the mode again — do it the other way
+      // round and the re-allocate is refused and the snag is left mid-journey.
       await page.goto('/documents');
       const del = page.getByRole('button', { name: `Delete ${title}` });
       if (await del.count()) await del.click();
+      // Leave the snag on the guided path for the next run.
+      await allocateWithMode(page, 'snag').catch(() => {});
       fs.rmSync(file, { force: true });
     }
   });

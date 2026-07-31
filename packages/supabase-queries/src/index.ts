@@ -332,6 +332,13 @@ export interface InvestigationState {
   evidence: EvidenceItem[];
   rootCause: string | null;
   openCorrectiveActions: number;
+  /**
+   * Every corrective action, not just the blocking ones. `openCorrectiveActions`
+   * answers "can this resolve"; this answers "has anyone done snag-mode work
+   * here", which stays true once they're all complete and verified — and that
+   * is what investigationModeLocked has to know.
+   */
+  correctiveActionCount: number;
   /** 'document' = the org runs its own process and evidences it with a file. */
   mode: InvestigationMode;
   leadInvestigatorId: string | null;
@@ -362,18 +369,27 @@ export async function getInvestigationState(client: SupabaseClient, snagId: stri
         document:org_documents!investigations_document_id_fkey ( title, file_path )
       `)
       .eq('snag_id', snagId).maybeSingle(),
-    // "Blocking" mirrors update_snag_status's resolve gate: done-but-unverified
-    // still counts, so this pill can't show 0 while resolve is still blocked.
-    client.from('corrective_actions').select('id', { count: 'exact', head: true })
-      .eq('snag_id', snagId).or('status.neq.done,verified_by.is.null'),
+    // Rows rather than a filtered count, because two different questions are
+    // asked of this table and they have different answers once everything is
+    // done: how many still block resolve (none), and whether any exist at all
+    // (yes — which is what locks the investigation mode).
+    client.from('corrective_actions').select('id, status, verified_by').eq('snag_id', snagId),
   ]);
+
+  const correctiveActions = (actionsRes.data ?? []) as { status: string; verified_by: string | null }[];
 
   return {
     completedSteps: (stepsRes.data ?? []).map((r: any) => r.step as ChecklistStep),
     witnesses: (witnessRes.data ?? []) as WitnessStatement[],
     evidence: (evidenceRes.data ?? []) as EvidenceItem[],
     rootCause: (investigationRes.data as any)?.root_cause_text ?? null,
-    openCorrectiveActions: actionsRes.count ?? 0,
+    // Mirrors update_snag_status's resolve gate exactly — `not (status = 'done'
+    // and verified_by is not null)` — so this pill can't show 0 while resolve is
+    // still blocked.
+    openCorrectiveActions: correctiveActions.filter(
+      (a) => !(a.status === 'done' && a.verified_by !== null)
+    ).length,
+    correctiveActionCount: correctiveActions.length,
     mode: ((investigationRes.data as any)?.mode ?? 'snag') as InvestigationMode,
     leadInvestigatorId: (investigationRes.data as any)?.lead_investigator_id ?? null,
     documentId: (investigationRes.data as any)?.document_id ?? null,
@@ -411,6 +427,29 @@ export interface ResolveGateCondition {
  * logic — it's a separate check added later — but it's first in the server
  * function and it's the one with a statutory clock on it.
  */
+/**
+ * Can this investigation still be re-triaged into the other mode?
+ *
+ * Mirrors `assign_investigation`'s guard and `investigation_mode_has_work` in
+ * SQL, so the clients hide a control the server would refuse rather than
+ * offering one that can only fail. The server is still the enforcement — this
+ * is the same relationship `seriousResolveGate` has with `update_snag_status`.
+ *
+ * Only work belonging to the *current* mode counts, because that is what a
+ * switch would strand. The checklist, witnesses and evidence are required by
+ * both modes, survive a switch, and are deliberately no reason to refuse one.
+ *
+ * Officer admins can override a locked mode (audited under its own action), so
+ * callers gate on `locked && !isOfficerAdmin`, not on `locked` alone.
+ */
+export function investigationModeLocked(inv: InvestigationState): boolean {
+  // Never allocated, so this is still triage rather than re-triage.
+  if (!inv.leadInvestigatorId) return false;
+  return inv.mode === 'document'
+    ? inv.documentId !== null
+    : inv.rootCause !== null || inv.correctiveActionCount > 0;
+}
+
 export function seriousResolveGate(
   inv: InvestigationState,
   notifiableDecided: boolean,
@@ -521,6 +560,14 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   root_cause_set: 'recorded the root cause',
   corrective_action_created: 'created a corrective action',
   rca_assigned: 'assigned the root cause analysis',
+  investigation_assigned_snag: 'set this to the SNAG investigation',
+  investigation_assigned_document: "set this to the organisation's own process",
+  investigation_document_attached: 'attached the investigation document',
+  investigation_document_accepted: 'accepted the investigation document',
+  // Overriding a locked mode is an admin overturning a decision, not making
+  // one — named differently in the log so the two never read alike.
+  investigation_mode_overridden_snag: 'overrode this to the SNAG investigation',
+  investigation_mode_overridden_document: "overrode this to the organisation's own process",
 };
 
 export function describeAuditAction(action: string): string {

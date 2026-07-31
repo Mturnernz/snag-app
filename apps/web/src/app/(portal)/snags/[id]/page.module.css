@@ -231,6 +231,38 @@
   font-weight: var(--weight-semibold);
 }
 
+/* The frozen mode, stated rather than offered. Same box as .modeChoice so the
+   panel doesn't reflow when an investigation locks — it reads as the control
+   settling, not as one control being swapped for a different thing. */
+.modeLocked {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: var(--space-md);
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.modeLocked strong {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+/* Only an officer admin sees this: they can still overturn the mode, and the
+   warning is the whole reason the control is still here. */
+.modeWarning {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  border-left: 3px solid var(--color-serious);
+  padding-left: var(--space-sm);
+}
+
 /* ── Checklist ──────────────────────────────────────────────────────────── */
 
 .checklist {

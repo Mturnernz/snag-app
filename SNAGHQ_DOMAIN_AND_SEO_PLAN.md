@@ -147,19 +147,23 @@ flows 3 and 4.
 
 ### 2.3 Manual steps — these cannot be done from this repo
 
-1. **Buy/confirm `snaghq.co.nz`** and verify ownership with the registrar.
-2. **Netlify → the `apps/web` site → Domain management** → add `www.snaghq.co.nz`, set it primary,
-   let Netlify provision TLS.
-3. **DNS** → repoint `www.snaghq.co.nz` at Netlify. `PRODUCTION_READINESS.md:256` records it
-   currently resolving to `27.124.125.171`, which is not Netlify. Add the apex redirect too.
-4. **Verify the handoff before touching the function**, as its own header instructs:
-   `curl -o /dev/null -w '%{http_code}\n' https://www.snaghq.co.nz/go/snag/<any-uuid>` — 200 or 307
-   is go, 404 means the portal build hasn't caught up.
-5. **Then** set the `SNAG_PORTAL_URL` function secret and redeploy `notify-snag`.
-6. **Provision the `hello@snaghq.co.nz` mailbox** before this reaches production. The code change
-   lands first; without the mailbox it swaps a working contact address for a bouncing one.
-7. **Google Search Console** → add the property, submit `https://www.snaghq.co.nz/sitemap.xml`.
-8. **Flow 2 — app store listing/ASO only.** Title, subtitle, keyword field, screenshots, and
+**Status: 1–4 are done.** `www.snaghq.co.nz` serves the site, the apex 301s to it, DNS is
+Netlify-managed, and `/go/snag/<uuid>` answers 200 — so the "deploy the portal before the function"
+precondition is met. §5 carries the step-by-step for what is left.
+
+1. ~~Buy/confirm `snaghq.co.nz`.~~ ✅
+2. ~~**Netlify → `snag-app-website`** → add `www.snaghq.co.nz`, set primary, provision TLS.~~ ✅
+   Let's Encrypt issued a wildcard, `*.snaghq.co.nz` + apex.
+3. ~~**DNS** → repoint at Netlify, add the apex redirect.~~ ✅ Netlify-managed.
+4. ~~**Verify the handoff.**~~ ✅ 200.
+5. **`app.snaghq.co.nz`** → Netlify → project `snagv1` → Domain management → add, set primary. The
+   wildcard already covers it. Leave `snagv1.netlify.app` in place so it 301s — **printed site QR
+   codes encode it** (§5.1).
+6. **Set `SNAG_PORTAL_URL` and `SNAG_FROM_ADDRESS`**, then redeploy `notify-snag` (§5.4).
+7. **Provision `hello@snaghq.co.nz`** (§5.3). It is published in the marketing footer and bounces
+   until this is done.
+8. **Google Search Console** → add the property, submit `https://www.snaghq.co.nz/sitemap.xml`.
+9. **Flow 2 — app store listing/ASO only.** Title, subtitle, keyword field, screenshots, and
    description in App Store Connect / Play Console. No repo change (§4.2).
 
 ### 2.4 SEO metadata plan
@@ -342,9 +346,153 @@ Stated rather than smoothed over.
   canonicalise to production. That's the correct trade-off for a single canonical domain (a preview
   that self-canonicalises is worse), but if you want previews to self-reference it needs an env-var
   design, and I'd rather ask than guess.
-- **The canonical domain doesn't resolve yet** (`PRODUCTION_READINESS.md` D1). Nothing in this PR
-  changes that — it only makes the repo agree with the decision already recorded. Until DNS moves,
-  every canonical and OG URL points at a host that isn't serving.
+- ~~**The canonical domain doesn't resolve yet.**~~ **Resolved.** `www.snaghq.co.nz` serves the site,
+  the apex 301s to it, TLS is a Let's Encrypt wildcard, and `/go/snag/<uuid>` answers 200 — verified
+  by request, not assumed. Every canonical and OG URL now points somewhere real. `app.snaghq.co.nz`
+  is the remaining host; see §5.
 - **Titles were not checked against live SERP truncation.** `/` renders at 59 characters, inside the
   usual ~60 limit, but Google measures pixels rather than characters and this is an estimate.
 - **No OG image**, so link previews will render without a graphic until one is designed (§2.4).
+
+---
+
+## 5. Service setup — the third-party dependencies
+
+Everything here is dashboard work. Nothing in this section can be done from the repo, and most of it
+cannot be done through the MCP tooling either, so it is written out rather than assumed.
+
+Hosts, for reference — three, and they are not interchangeable (see `CLAUDE.md` § Hosts):
+
+| Host | Serves | Netlify project |
+|---|---|---|
+| `www.snaghq.co.nz` | `apps/web` — marketing + portal | `snag-app-website` |
+| `app.snaghq.co.nz` | `apps/mobile` Expo web export | `snagv1` |
+| `snagv1.netlify.app` | the app's former host — must keep redirecting | `snagv1` |
+
+### 5.1 Netlify
+
+**`app.snaghq.co.nz`** — project `snagv1` → Domain management → add as a custom domain, set primary.
+No certificate wait; the wildcard issued for `snag-app-website` covers it.
+
+**Do not remove `snagv1.netlify.app`.** Netlify will 301 it to the new primary, preserving path and
+query, and that redirect is load-bearing twice over: **site QR codes encoding it have been printed
+and put up on walls**, and every notification sent before the move carries it. Verify the redirect
+keeps the query string, because the QR landing depends on `?report=<token>`:
+
+```bash
+curl -sI "https://snagv1.netlify.app/?report=test" | grep -i location
+#   → https://app.snaghq.co.nz/?report=test
+```
+
+**Environment variables** — project `snag-app-website` → Site settings → Environment variables:
+
+| Key | Value |
+|---|---|
+| `NEXT_PUBLIC_SNAG_APP_URL` | `https://app.snaghq.co.nz` |
+| `NEXT_PUBLIC_SUPABASE_URL` | already set |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | already set |
+
+Never point `NEXT_PUBLIC_SNAG_APP_URL` at the portal host — `/go` only uses it for visitors it has
+already decided cannot use the portal, so that creates a redirect loop. `e2e/handoff.spec.ts` asserts
+against exactly this.
+
+### 5.2 Resend — sending domain
+
+The domain object already exists (`snaghq.co.nz`, `ap-northeast-1`, click and open tracking off —
+tracking rewrites links, and nothing should sit between a supervisor and an incident notification).
+What remains is DNS and verification.
+
+Add in Netlify DNS, zone `snaghq.co.nz`:
+
+| Type | Name | Value | Priority |
+|---|---|---|---|
+| TXT | `resend._domainkey` | the DKIM public key from the Resend dashboard | — |
+| MX | `send` | `feedback-smtp.ap-northeast-1.amazonses.com` | 10 |
+| TXT | `send` | `v=spf1 include:amazonses.com ~all` | — |
+
+Then **resend.com → Domains → snaghq.co.nz → Verify**. Records go green individually.
+
+**API key** — Resend → API Keys. One must exist with send permission, and if it is domain-scoped it
+must cover `snaghq.co.nz`. Its value is `RESEND_API_KEY` in Supabase. Check whether that secret is
+already set before minting a new one: `sendEmail` skips silently when it is missing, logging to the
+function console and returning normally, so the failure is invisible from the app.
+
+### 5.3 Google Workspace — `hello@snaghq.co.nz`
+
+1. **workspace.google.com** → start a trial → "I have a domain" → `snaghq.co.nz`.
+2. **Verify ownership** — Google issues a root TXT record; add it in Netlify DNS.
+3. **MX on the root (`@`)**. Current Google guidance is a single record, `smtp.google.com` priority
+   `1`, replacing the older five-record ASPMX set. Use whatever the setup wizard shows — it is
+   authoritative and this changed relatively recently.
+4. **Create `hello@`**, as a user or as an alias on an existing account.
+5. **DKIM** — Admin console → Apps → Google Workspace → Gmail → Authenticate email. Generate and
+   publish `google._domainkey`. Easy to miss; Workspace does not do it for you.
+
+Three things that look like conflicts and are not:
+
+- **Two sets of MX records is correct.** Google's on the root, Resend's `feedback-smtp` on `send`.
+  Different names, different jobs — Resend's only handles bounces.
+- **Two SPF records on *different names* is correct; two on the *same* name is not.** Root gets
+  `v=spf1 include:_spf.google.com ~all`, `send` gets `v=spf1 include:amazonses.com ~all`. Never
+  merge them.
+- **DKIM selectors don't collide** — `resend._domainkey` and `google._domainkey`.
+
+Once both senders verify, add **DMARC**: TXT on `_dmarc`,
+`v=DMARC1; p=none; rua=mailto:hello@snaghq.co.nz`. Stay at `p=none` and read the reports for a
+couple of weeks before tightening. Going straight to enforcement with two freshly configured senders
+is how an organisation silently drops its own incident notifications.
+
+### 5.4 Supabase — project `wpkdpukpllxuyqqlxkxf` (Snagv1)
+
+**Authentication → URL Configuration.** Nothing in either client passes `emailRedirectTo`, so *every*
+confirmation and recovery link goes to **Site URL**:
+
+- Site URL → `https://www.snaghq.co.nz` (sign-up happens on the marketing site and makes the person
+  an officer admin, so the portal is where confirming should land them)
+- Additional redirect URLs → `https://app.snaghq.co.nz/**`, `https://snagv1.netlify.app/**`,
+  `http://localhost:8081/**`
+
+A consequence worth knowing: someone who signs up *in the mobile app* also confirms onto the portal.
+Pre-existing rather than caused by the move, and fixable later with an explicit `emailRedirectTo`
+per client.
+
+**Edge Functions → Secrets:**
+
+| Secret | Value | Notes |
+|---|---|---|
+| `SNAG_PORTAL_URL` | `https://www.snaghq.co.nz` | where every notification link points |
+| `SNAG_FROM_ADDRESS` | `SnagHQ <notifications@snaghq.co.nz>` | set only after Resend verifies |
+| `RESEND_API_KEY` | from §5.2 | without it, no mail is sent and nothing says so |
+| `SNAG_INTERNAL_SECRET` | existing | gates the function against the DB triggers; without it every call is 403 |
+
+**Then redeploy `notify-snag`.** Order matters and the function's own header says so: confirm the
+handoff answers on the target host *first*, because these links are only ever followed from an
+inbox — a mismatch is invisible to the app, to CI, and to anyone not reading their email.
+
+```bash
+curl -o /dev/null -w '%{http_code}\n' https://www.snaghq.co.nz/go/snag/<any-uuid>
+# 200 = the chooser, 307 = a signed-in supervisor, 404 = the portal build hasn't caught up
+```
+
+**The redeploy changes behaviour beyond the domain.** The deployed function is v14, which predates
+the `/go` handoff entirely and mails `serious_created` to *every member of the snag's site*. The
+repo version mails the nominated serious-incident owners, falling back to site members only if an
+org has none. That is the intended design (`CLAUDE.md` § Who owns a serious incident) — but it
+changes who is told about a hazard, so it is worth doing deliberately rather than as a side effect.
+
+**Authentication → Policies → Leaked password protection** — decided "on" in
+`PRODUCTION_READINESS.md` D2 and still outstanding. No API for it; dashboard only.
+
+### 5.5 Checking DNS without `dig`
+
+The sandbox has no DNS tooling and routes HTTP through a proxy, so DNS-over-HTTPS is the way to
+verify records from a shell:
+
+```bash
+for r in "app.snaghq.co.nz:A" "resend._domainkey.snaghq.co.nz:TXT" \
+         "send.snaghq.co.nz:TXT" "snaghq.co.nz:MX" "_dmarc.snaghq.co.nz:TXT"; do
+  echo -n "${r} -> "
+  curl -s "https://dns.google/resolve?name=${r%%:*}&type=${r##*:}" \
+    | python3 -c "import sys,json;d=json.load(sys.stdin);print(', '.join(a.get('data','') for a in d.get('Answer',[])) or 'NO ANSWER')"
+done
+```

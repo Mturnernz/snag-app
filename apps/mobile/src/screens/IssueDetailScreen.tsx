@@ -13,6 +13,7 @@ import {
   Dimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  LayoutChangeEvent,
   Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -58,6 +59,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useBadge } from '../context/BadgeContext';
 import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
+import { stepScrollOffset } from '../lib/stepScroll';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -418,11 +420,61 @@ export default function IssueDetailScreen() {
     fetchInvestigation(); fetchIssue(); fetchActivity();
   }, [fetchInvestigation, fetchIssue, fetchActivity]);
 
+  // Where each step card sits, so opening one can bring it into view.
+  //
+  // Expanding a card is invisible on its own: the target is below the hero
+  // photo, the description, the meta block, the Next-step card itself and one
+  // or two other steps, so the CTA that named it looked like a dead button.
+  // apps/web has no equivalent of this because its CTA is an anchor into a
+  // <details id> and the browser scrolls; React Native has no fragment nav.
+  const scrollRef = useRef<ScrollView>(null);
+  /** Offset of the content wrapper inside the ScrollView — i.e. the height of
+   *  the hero photo, which is 0 on a snag with no photo. `null` until measured,
+   *  which is not the same as 0: see scrollToStep. */
+  const contentY = useRef<number | null>(null);
+  /** Offset of each card inside that wrapper. Populated by onLayout. */
+  const stepY = useRef<Partial<Record<StepKey, number>>>({});
+  /** A step asked for before everything it needs had been measured. */
+  const pendingScroll = useRef<StepKey | null>(null);
+
+  /** Scrolls only once *both* coordinates are known, and parks the request
+   *  until then otherwise.
+   *
+   *  Both halves really can arrive late, in either order. A deep-linked arrival
+   *  runs before first layout; the investigation cards don't mount at all until
+   *  their data loads; and onLayout fires bottom-up, so a card routinely
+   *  measures before its own wrapper does. Treating an unmeasured wrapper as 0
+   *  would land a photo's height short of the card — right on every snag
+   *  without a photo, wrong on every snag with one. */
+  const scrollToStep = useCallback((key: StepKey) => {
+    const y = stepY.current[key];
+    if (y == null || contentY.current == null) { pendingScroll.current = key; return; }
+    pendingScroll.current = null;
+    scrollRef.current?.scrollTo({ y: stepScrollOffset(contentY.current, y), animated: true });
+  }, []);
+
+  /** Records a card's position, and honours a scroll that was waiting on it. */
+  const measureStep = useCallback((key: StepKey) => (e: LayoutChangeEvent) => {
+    stepY.current[key] = e.nativeEvent.layout.y;
+    if (pendingScroll.current === key) scrollToStep(key);
+  }, [scrollToStep]);
+
+  /** Same, for the wrapper the card offsets are relative to. */
+  const measureContent = useCallback((e: LayoutChangeEvent) => {
+    contentY.current = e.nativeEvent.layout.y;
+    if (pendingScroll.current) scrollToStep(pendingScroll.current);
+  }, [scrollToStep]);
+
   /** Open a step outright rather than toggle it — what NextStepCard needs, so
-   *  its CTA can't close the very thing it just pointed you at. */
+   *  its CTA can't close the very thing it just pointed you at — and scroll to
+   *  it, so the CTA visibly does something.
+   *
+   *  No rAF or timeout before the scroll: expanding a card grows it downwards,
+   *  so the target's own offset doesn't move. Only the cards below it shift. */
   const openStep = useCallback((key: StepKey) => {
     setStepExpanded((prev) => ({ ...prev, [key]: true }));
-  }, []);
+    scrollToStep(key);
+  }, [scrollToStep]);
 
   // A link can point at one section of the snag rather than at the snag. The
   // RCA is the case that forced it: an assignee's notification is about the
@@ -899,6 +951,7 @@ export default function IssueDetailScreen() {
       />
 
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 80 }}
         keyboardShouldPersistTaps="handled"
@@ -942,7 +995,12 @@ export default function IssueDetailScreen() {
             photo, pushing every actionable thing below the fold to advertise
             an absence the user already knows about. */}
 
-        <View style={[styles.content, isSerious && styles.contentSerious]}>
+        <View
+          style={[styles.content, isSerious && styles.contentSerious]}
+          // Step offsets are measured inside this wrapper; the hero photo above
+          // it is 280px on a snag with a photo and 0 on one without.
+          onLayout={measureContent}
+        >
           {/* Reference + site */}
           <View style={styles.referenceRow}>
             <Text style={styles.reference}>{issue.reference}</Text>
@@ -1122,6 +1180,7 @@ export default function IssueDetailScreen() {
               summary={notifiableSummary}
               expanded={stepExpanded.notifiable}
               onToggle={() => toggleStep('notifiable')}
+              onLayout={measureStep('notifiable')}
             >
               <NotifiableEventPanel
                 issueId={issue.id}
@@ -1149,6 +1208,7 @@ export default function IssueDetailScreen() {
                 summary={checklistSummary}
                 expanded={stepExpanded.checklist}
                 onToggle={() => toggleStep('checklist')}
+                onLayout={measureStep('checklist')}
               >
                 <ChecklistPanel
                   issueId={issue.id}
@@ -1163,6 +1223,7 @@ export default function IssueDetailScreen() {
                 summary={witnessSummary}
                 expanded={stepExpanded.witnesses}
                 onToggle={() => toggleStep('witnesses')}
+                onLayout={measureStep('witnesses')}
               >
                 <WitnessesPanel
                   issueId={issue.id}
@@ -1177,6 +1238,7 @@ export default function IssueDetailScreen() {
                 summary={evidenceSummary}
                 expanded={stepExpanded.evidence}
                 onToggle={() => toggleStep('evidence')}
+                onLayout={measureStep('evidence')}
               >
                 <EvidencePanel
                   issueId={issue.id}
@@ -1197,6 +1259,7 @@ export default function IssueDetailScreen() {
                   summary={investigationDocumentSummary}
                   expanded={stepExpanded.investigationDocument}
                   onToggle={() => toggleStep('investigationDocument')}
+                  onLayout={measureStep('investigationDocument')}
                 >
                   {/* Two different permissions, which is why they are two
                       props: attaching the document is doing the investigation
@@ -1221,6 +1284,7 @@ export default function IssueDetailScreen() {
                   summary={rootCauseSummary}
                   expanded={stepExpanded.rootCause}
                   onToggle={() => toggleStep('rootCause')}
+                  onLayout={measureStep('rootCause')}
                 >
                   <RootCausePanel
                     issueId={issue.id}
@@ -1245,6 +1309,7 @@ export default function IssueDetailScreen() {
               summary={correctiveActionsSummary}
               expanded={stepExpanded.correctiveActions}
               onToggle={() => toggleStep('correctiveActions')}
+              onLayout={measureStep('correctiveActions')}
             >
               <CorrectiveActionsPanel
                 issueId={issue.id}
@@ -1268,6 +1333,7 @@ export default function IssueDetailScreen() {
               summary={rcaSummary}
               expanded={stepExpanded.rca}
               onToggle={() => toggleStep('rca')}
+              onLayout={measureStep('rca')}
             >
               <RcaPanel
                 issueId={issue.id}
@@ -1294,6 +1360,7 @@ export default function IssueDetailScreen() {
               summary={debriefSummary}
               expanded={stepExpanded.debrief}
               onToggle={() => toggleStep('debrief')}
+              onLayout={measureStep('debrief')}
             >
               <DebriefPanel
                 issueId={issue.id}

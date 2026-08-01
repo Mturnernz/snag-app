@@ -469,7 +469,11 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textSecondary,
     fontWeight: Typography.medium,
-    width: 72,
+    // minWidth, not width: 72 is a gutter that keeps the short labels aligned,
+    // but "Investigation" is wider than it and a fixed width wrapped it onto a
+    // second line. flexShrink: 0 stops the value chip's flex: 1 reclaiming it.
+    minWidth: 72,
+    flexShrink: 0,
   },
   currentChip: {
     flexDirection: 'row',

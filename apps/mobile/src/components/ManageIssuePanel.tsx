@@ -6,7 +6,7 @@ import {
 
 import {
   SnagStatus, SnagKind, SnagSeverity, SnagLane,
-  KIND_LABELS, SEVERITY_LABELS,
+  KIND_LABELS, SEVERITY_LABELS, INVESTIGATION_MODE_OPTIONS,
 } from '../types';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
@@ -34,19 +34,10 @@ interface PendingUpdates {
 }
 
 // Two genuinely different ways to run an investigation, so each option carries
-// its consequence — picking the second changes what closes the snag.
-const MODE_OPTIONS: { value: InvestigationMode; title: string; detail: string }[] = [
-  {
-    value: 'snag',
-    title: "SNAG's guided investigation",
-    detail: 'Root cause, then corrective actions, tracked in the app.',
-  },
-  {
-    value: 'document',
-    title: 'Our own process',
-    detail: 'Attach the completed investigation document. A second supervisor has to accept it before this snag can be resolved.',
-  },
-];
+// its consequence — picking the second changes what closes the snag. The copy
+// is shared with the triage prompt (@snag/shared-types), which asks the same
+// question at allocation time; this panel is the re-decide path.
+const MODE_OPTIONS = INVESTIGATION_MODE_OPTIONS;
 
 interface Props {
   issueId: string;
@@ -59,6 +50,12 @@ interface Props {
   assignees: SiteAssignee[];
   /** Serious lane only: how this snag is being investigated. */
   investigationMode?: InvestigationMode;
+  /** The investigation is under way and has work recorded under its current
+   *  mode, so switching would strand it. Mirrors assign_investigation's guard —
+   *  see investigationModeLocked in @snag/supabase-queries. */
+  modeLocked?: boolean;
+  /** Officer admins may still overturn a locked mode; the server audits it. */
+  canOverrideMode?: boolean;
   /** Serious lane only: null = resolvable, otherwise the reason Resolve is
    *  blocked (e.g. "Checklist 2/5"). Ignored for niggles. */
   resolveBlockReason?: string | null;
@@ -70,12 +67,16 @@ interface Props {
 
 export default function ManageIssuePanel({
   issueId, status, lane, kind, severity, owner, assignees, investigationMode = 'snag',
+  modeLocked = false, canOverrideMode = false,
   resolveBlockReason = null, isPublicSubmission = false, onUpdated,
 }: Props) {
   const { showToast } = useToast();
 
   const isSerious = lane === 'serious';
   const isOpen = status === 'flagged' || status === 'in_progress';
+  /** Locked *and* this person can't overturn it — the case where the control
+   *  should not be offered at all. */
+  const modeFrozen = modeLocked && !canOverrideMode;
 
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [saving, setSaving] = useState(false);
@@ -290,6 +291,7 @@ export default function ManageIssuePanel({
           assignees={assignees}
           currentOwnerId={shownOwner?.id ?? null}
           onSelect={(id) => stageUpdate({ owner_id: id })}
+          searchable
         />
       )}
 
@@ -301,14 +303,42 @@ export default function ManageIssuePanel({
         <>
           <View style={styles.row}>
             <Text style={styles.label}>Investigation</Text>
-            <TouchableOpacity onPress={() => toggleField('mode')} style={styles.currentChip}>
-              <Text style={styles.currentText}>
-                {shownMode === 'document' ? 'Our own process' : 'SNAG guided'}
-              </Text>
-              <Icon name={editingField === 'mode' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
-            </TouchableOpacity>
+            {modeFrozen ? (
+              // Not a disabled control: a chevron that does nothing is worse
+              // than no chevron. The reason sits under it.
+              <View style={styles.currentChip}>
+                <Text style={styles.currentText}>
+                  {shownMode === 'document' ? 'Our own process' : 'SNAG guided'}
+                </Text>
+                <Icon name="lock-closed-outline" size="sm" color={Colors.textMuted} />
+              </View>
+            ) : (
+              <TouchableOpacity onPress={() => toggleField('mode')} style={styles.currentChip}>
+                <Text style={styles.currentText}>
+                  {shownMode === 'document' ? 'Our own process' : 'SNAG guided'}
+                </Text>
+                <Icon name={editingField === 'mode' ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
+              </TouchableOpacity>
+            )}
           </View>
-          {editingField === 'mode' && (
+
+          {modeFrozen && (
+            <Text style={styles.modeWarning}>
+              The investigation is under way and has work recorded against it. Changing how it
+              runs now would strand that work.
+            </Text>
+          )}
+
+          {/* An officer admin can still overturn it. Said plainly, because the
+              cost lands on someone else's completed work. */}
+          {modeLocked && canOverrideMode && (
+            <Text style={styles.modeWarning}>
+              This investigation is already under way. Changing it now leaves the work already
+              recorded counting for nothing, and is recorded against your name.
+            </Text>
+          )}
+
+          {!modeFrozen && editingField === 'mode' && (
             <View style={styles.modeList}>
               {MODE_OPTIONS.map((option) => (
                 <TouchableOpacity
@@ -439,7 +469,11 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textSecondary,
     fontWeight: Typography.medium,
-    width: 72,
+    // minWidth, not width: 72 is a gutter that keeps the short labels aligned,
+    // but "Investigation" is wider than it and a fixed width wrapped it onto a
+    // second line. flexShrink: 0 stops the value chip's flex: 1 reclaiming it.
+    minWidth: 72,
+    flexShrink: 0,
   },
   currentChip: {
     flexDirection: 'row',

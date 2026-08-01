@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, ViewStyle, StyleProp, StyleSheet } from 'react-native';
+import { View, ViewStyle, StyleProp, StyleSheet, LayoutChangeEvent } from 'react-native';
 import { Colors, Radius, Spacing, Shadow } from '../constants/theme';
 
 type Variant = 'elevated' | 'outlined' | 'flat';
@@ -13,6 +13,9 @@ interface Props {
    *  serious/incident lane's visual identity. */
   accentColor?: string;
   accentBg?: string;
+  /** Where this card ended up. Needed by anything that has to scroll one into
+   *  view — see IssueDetailScreen's openStep. */
+  onLayout?: (event: LayoutChangeEvent) => void;
 }
 
 export default function Card({
@@ -22,9 +25,11 @@ export default function Card({
   style,
   accentColor,
   accentBg,
+  onLayout,
 }: Props) {
   return (
     <View
+      onLayout={onLayout}
       style={[
         styles.base,
         variant === 'elevated' && Shadow[elevation],

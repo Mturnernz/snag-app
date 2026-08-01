@@ -68,7 +68,12 @@ Ordered by what they would have cost in production.
 | **Caption-only evidence was invisible in the portal** | Mobile's sheet accepts a caption with no photo; the portal rendered thumbnails only. The heading counted items the page didn't show. |
 | **Disabled buttons rendered at full strength, app-wide** | Reanimated writes its animated style directly onto the view, overriding the later static `styles.disabled`. Measured: `opacity: 1`, full-strength background, `pointer-events: none`. Every disabled button in the app looked pressable. |
 | **Collapsed cards couldn't show their summaries** | `StepCard` only mounts children while expanded, so panels that report their own state left every collapsed card blank — in exactly the state the progress list exists to describe. |
-| **A stalled request wedged the client, silently and permanently** | supabase-js puts no timeout on its own `fetch`, and it resolves an access token before *every* request. One `/auth/v1/token` refresh that was issued and never answered — what a phone losing signal mid-request actually looks like — left `getSession()` pending forever, after which **no call was ever issued at all**. Invisible from every angle: nothing reached the server so there was nothing in the logs, nothing rejected so no error was shown, and the loaded screen kept rendering its existing data. The only symptom was a Save button spinning for good. Found from a screenshot of exactly that, reproduced against the deployed production bundle, and fixed with a per-request deadline plus try/finally around the saves. |
+| **A stalled request wedged the client, silently and permanently** | supabase-js puts no timeout on its own `fetch`, and it resolves an access token before *every* request. One `/auth/v1/token` refresh that was issued and never answered — what a phone losing signal mid-request actually looks like — left `getSession()` pending forever, after which **no call was ever issued at all**. Invisible from every angle: nothing reached the server so there was nothing in the logs, nothing rejected so no error was shown, and the loaded screen kept rendering its existing data. The only symptom was a Save button spinning for good. Found from a screenshot of exactly that, reproduced against the deployed production bundle, and fixed with a per-request deadline plus try/finally around the saves. **Read this row alongside the auth-lock deadlock above:** that is a second, likelier cause of the same screenshot, needing no network fault at all, and the details recorded here — nothing in the logs, no error, 97 successful requests in the twenty seconds before — fit it exactly. The deadlines are still right; they were not, on their own, the fix. |
+| **"Your health & safety team has been notified" named nobody** | Reported after filing a serious incident: the app said it, and nobody could say who that was. `serious_created` mailed every member of the snag's site, so the claim was true only by accident — on a one-member site it reached that person, on a site whose members have no email it reached nobody, and no one was accountable for it either way. `serious_incident_owners` now makes it a real set of supervisors: mailed on report, and the first of them assigned the snag on the way in so it never sits with no name against it. Every existing org was backfilled with its longest-standing admin, new orgs get their creator, and the last owner can't be removed — the empty state this fixes isn't reachable. |
+| **The newest snag appeared top-right, not top-left** | Unresolved injury snags were pinned to the front of the list, so filing into an org with an open injury put the new snag in slot two — which on a two-column grid is the top *right*. The pin was worth wanting and wrong to implement that way: it took the front of a list whose whole promise is chronological, and it only ever reordered the page pagination happened to have loaded. Open injuries now get a "Needs attention" strip above the grid, fetched in its own right, and the grid is strictly newest-first. |
+| **An async `onAuthStateChange` callback deadlocked the entire client** | The worst bug in this list, and the cause of two of the reports above. `App.tsx` passed an `async` callback to `onAuthStateChange` and awaited `loadUserState` inside it. auth-js invokes those callbacks **from inside its lock and awaits them**; every Supabase request needs the same lock, so the query the callback awaits queues behind the callback that is waiting for it. Circular wait, permanent: from that moment the client issues **no requests at all** for the life of the page. Nothing rejects, nothing is logged, and the per-request deadlines added in #26 never fire because the code never reaches `fetch`. The trigger is mundane — `_onVisibilityChanged` → `_recoverAndRefresh` announces a still-valid session as `SIGNED_IN` from inside the lock when a hidden tab becomes visible, i.e. **when you leave the browser to pick a photo and come back**. It comes and goes because the two neighbouring paths are safe: `INITIAL_SESSION` notifications are deliberately deferred by auth-js, and a near-expiry session takes the refresh path and announces `TOKEN_REFRESHED`, which this app ignores. Reproduced against the deployed bundle by driving the real callback (`setSession` announces `SIGNED_IN` under the lock the same way): before, the sign-in and a following photo upload both never settle and zero storage requests are issued; after, both settle and the upload goes out. Fixed by making the callback synchronous and routing its work through `queueAuthWork` (`src/lib/authEvents.ts`), which defers past the lock and serialises. |
+| **Every dialog in the app did nothing on web, including Sign Out** | react-native-web's `Alert` is `static alert() {}` — a no-op stub. So on the shipped web build, tapping Sign Out produced no dialog and never called `signOut`; the button was simply dead. So were deactivate/reactivate an organisation, delete a work group, escalate a snag to a hazard, and the photo picker's "+" tile — every action that sat behind a confirmation. And so was every error message, which is worse than dead: the action failed and the user was told nothing at all. 26 call sites, all of them silent. Replaced with `showAlert` (`src/lib/alert.ts`): `Alert.alert` on native, `confirm`/`alert` on web. Plain-looking, but it cannot fail to appear, which is the property that was missing. The follow-up is named below (D9): this app already has both better patterns in it. |
+| **No photo could be attached from the browser build** | The app is shipped to the web as well as to phones, and there the file read never happened: `expo-file-system` has no web implementation — its `File` is a stub that warns and is missing the methods the JS wrapper calls, so `new File(uri)` throws on construction. Every pick came back "Couldn't upload a photo", which correctly disables Submit, so a worker with a photo could file nothing at all. Invisible server-side for the same reason as the stalled request above: it fails *before* the request, so Storage logged nothing. Reading the picked file is now platform-split (`src/lib/uploadBody.ts`), which is what it always was — one half was just missing. |
 | **An assigned worker could not submit their own RCA** | `submit_rca` deliberately allows the assignee, then calls `set_root_cause`, which called `require_serious_snag` and demanded `can_edit_site`. A worker could answer all five whys and be refused with *"Only a supervisor of this site, or an admin, can run the investigation"*. CLAUDE.md says RCAs are usually assigned to workers, so this is the **normal** case — it had never fired only because a supervisor had always pressed submit on the assignee's behalf. Confirmed against the live project as the QA worker before and after the fix. |
 
 ---
@@ -240,20 +245,52 @@ redeploy the function.
 
 ## 7. Decisions I need from you
 
-### D1 — Production domain — ✅ decided: `www.snaghq.co.nz`
+### D1 — Production domain — ✅ decided, and now three hosts
 
-The in-code default for `SNAG_PORTAL_URL` now points there. **It is aspirational
-until you do two things**, and deploying before them sends every notification to a
-dead host:
+| Host | Serves |
+|---|---|
+| `www.snaghq.co.nz` | `apps/web` — marketing + portal (apex redirects here) |
+| `app.snaghq.co.nz` | `apps/mobile`'s Expo web export, a separate Netlify site |
+| `snagv1.netlify.app` | the app's old host — must keep redirecting, see below |
 
-1. Netlify → the `apps/web` site → Domain management → add `www.snaghq.co.nz`, then
-   repoint DNS. It currently resolves to `27.124.125.171`, which is not Netlify.
-2. Confirm the handoff answers there, then set the secret and redeploy:
+The code now says all of this: `SITE_URL`, `SNAG_PORTAL_URL`'s default, and
+`NEXT_PUBLIC_SNAG_APP_URL`'s default. **It is still aspirational until DNS moves**,
+and deploying the function before then sends every notification to a dead host.
+
+Remaining manual steps, in order — each blocks the next:
+
+1. Netlify → Domains → add `snaghq.co.nz` with Netlify-managed DNS; point the
+   registrar's nameservers at the four it returns.
+2. `apps/web` site → add `www.snaghq.co.nz` (primary) + the apex redirect.
+   `apps/mobile` site → add `app.snaghq.co.nz` (primary).
+3. Verify, including that the printed-QR redirect keeps its query string:
+   ```
+   curl -sI https://www.snaghq.co.nz | head -1                        # 200
+   curl -sI "https://snagv1.netlify.app/?report=test" | grep -i location
+   #   → https://app.snaghq.co.nz/?report=test
+   ```
+4. Netlify `apps/web` env → `NEXT_PUBLIC_SNAG_APP_URL=https://app.snaghq.co.nz`.
+5. Supabase → Auth → URL Configuration. Nothing in either client passes
+   `emailRedirectTo`, so every confirmation link goes to **Site URL**: set it to
+   `https://www.snaghq.co.nz` and add the other hosts as additional redirect URLs.
+6. Resend → verify `snaghq.co.nz`, then set `SNAG_FROM_ADDRESS`. Until then
+   notifications send as `onboarding@resend.dev`, Resend's shared sandbox sender,
+   which is generally restricted to your own verified address — so **mail to
+   anyone else may already be failing silently** (`sendEmail` logs the rejection
+   and returns normally).
+7. Provision a `hello@snaghq.co.nz` mailbox — the marketing footer already
+   publishes it.
+8. Confirm the handoff answers, then set `SNAG_PORTAL_URL` and redeploy:
    ```
    curl -o /dev/null -w '%{http_code}\n' https://www.snaghq.co.nz/go/snag/<any-uuid>
    ```
    200 (the chooser) or 307 (a signed-in supervisor) means go. **404 means the
    portal build hasn't caught up — deploy that first.**
+
+**The deployed `notify-snag` is v14 and predates all of this**: it links straight
+to the app rather than through `/go`, and `serious_created` mails every member of
+the site rather than the nominated serious-incident owners. Step 8's redeploy
+brings both changes at once.
 
 ### D2 — Leaked-password protection — ✅ decided: on
 
@@ -309,6 +346,17 @@ a real build, not Expo Go.
 **a new native dependency, so it needs a fresh EAS build to reach a device at all**),
 `expo-file-system`. react-native-web can't exercise these; neither can CI.
 
+The list overstated itself, and it cost. `expo-image-picker` / `-manipulator` /
+`-document-picker` all run in the browser; only `expo-camera` and
+`expo-file-system` are genuinely absent there. Reading that as "the photo path is
+native-only" is what allowed `uploadSnagPhoto` to be moved onto
+`expo-file-system` (#14, the 400-on-native fix) with no thought for the web
+build — where the same call throws on construction, before any request, so
+nothing appears in the Storage logs to say so. Since that change landed on 16
+July, exactly one photo has reached `snag-photos` (27 July, and not from a
+browser). The Netlify export is a shipped client used from real phones;
+"unverified on native" and "broken on web" are different sentences.
+
 | Option | Trade-off |
 |---|---|
 | **A. A written manual pass before each release** *(recommended)* | Cheap, honest, and these are exactly the paths a worker uses first. |
@@ -321,6 +369,27 @@ Reviewed through react-native-web at 412 px, which is faithful for layout and
 hierarchy but *not* for native scroll, keyboard avoidance, or the picker. Stage 2
 should have largely fixed the three-inputs-behind-one-keyboard problem by never
 showing two fields at once — but that is reasoning, not evidence. Folds into D6.
+
+### D9 — Three dialog conventions, one of which was dead
+
+Fixing Sign Out turned up the real problem: this app has **three** ways to tell the
+user something, and it was using the worst one in 26 places.
+
+| Pattern | Where | Works on web |
+|---|---|---|
+| `ConfirmDialog` (RN `Modal`, themed, `Shadow.lg`) | 5 files, e.g. `IssueDetailScreen`, `ManageOrganisationScreen` | yes |
+| `useToast` / `showToast` | 6 files, e.g. `RootCausePanel` | yes |
+| `Alert.alert` | was 26 call sites | **no — silent no-op** |
+
+`showAlert` makes the third one work everywhere, which is the fix for a dead button.
+It is not the destination: the app already has a themed dialog for confirmations and
+a toast for "that didn't work", and `window.confirm` looks like neither.
+
+| Option | Trade-off |
+|---|---|
+| **A. Convert per site: `ConfirmDialog` for the 8 confirmations, `showToast` for the 18 messages** *(recommended)* | Ends the split and looks like the rest of the app. It is a UI change to 26 flows, so it wants doing deliberately, with eyes on each screen — not folded into a bug fix. |
+| B. Keep `showAlert` everywhere | Uniform and honest, but a browser dialog in a designed app, and it can't carry a destructive-red confirm. |
+| C. Give `showAlert` a themed web implementation behind the same call | One place to change, no call-site churn. Needs a portal/provider at the app root, and a synchronous-looking API over an async dialog. |
 
 ### D8 — Self-acceptance — ✅ decided: a supervisor can sign off their own work
 

@@ -1,5 +1,16 @@
+import type { Metadata } from 'next';
 import { Button } from '@/components/Button';
+import { canonical } from '@/lib/seo';
 import { signUpAction } from './actions';
+
+// The bottom of the funnel — indexable, because "sign up" is a real branded
+// search once someone has been told the product's name by a colleague.
+export const metadata: Metadata = {
+  title: 'Create your organisation',
+  description:
+    "Set up your organisation in a minute. You'll be the first officer admin, and you can invite supervisors and workers once you're in.",
+  ...canonical('/sign-up'),
+};
 
 export default async function SignUpPage({
   searchParams,

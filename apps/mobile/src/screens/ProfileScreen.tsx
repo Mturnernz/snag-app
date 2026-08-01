@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Profile, Organisation, SnagStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { supabase, signOut, getMemberships, getOrgSnagSummary, OrgSnagSummary, Membership } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
+import { failureReason } from '../lib/deadline';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Avatar from '../components/Avatar';
@@ -134,15 +135,23 @@ export default function ProfileScreen() {
   }
 
   async function handleSignOut() {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+    showAlert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign Out',
         style: 'destructive',
         onPress: async () => {
           setSigningOut(true);
-          await signOut();
-          setSigningOut(false);
+          try {
+            // signOut() is bounded and falls back to dropping the session
+            // locally, so this resolves either way — but the spinner comes off
+            // in a finally regardless, because a spinner that outlives its
+            // work is indistinguishable from an app that has stopped.
+            const { error } = await signOut();
+            if (error) showAlert('Still signed in', failureReason(error));
+          } finally {
+            setSigningOut(false);
+          }
         },
       },
     ]);

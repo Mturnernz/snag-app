@@ -92,6 +92,9 @@ function StatsRow({ commentCount, voteScore }: { commentCount: number; voteScore
 
 function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable, selected }: Props) {
   const reporterName = issue.reporter_name || issue.reporter?.name || 'Unknown';
+  // owner_name comes off snags_with_details, already selected by both clients'
+  // list queries and, until now, displayed by neither.
+  const assigneeName = issue.owner_name || issue.owner?.name || null;
   const commentCount = issue.comment_count ?? 0;
   const voteScore = issue.vote_score ?? 0;
   const borderColor = alertBorderColor(issue);
@@ -205,6 +208,19 @@ function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable,
               {issue.site_name ? `${issue.site_name} · ` : ''}{reporterName} · {timeAgo(issue.created_at)}
             </Text>
             <StatsRow commentCount={commentCount} voteScore={voteScore} />
+          </View>
+        )}
+
+        {/* Who is on it, bottom right. Omitted rather than labelled
+            "Unassigned": most snags in a list have nobody on them, so the
+            label would be on nearly every card and carry no information —
+            the empty slot says the same thing more quietly. The Scope
+            dropdown's "Unassigned in my sites" is where you go looking for
+            them deliberately. */}
+        {assigneeName && (
+          <View style={styles.assignee}>
+            <Icon name="person-circle-outline" size="sm" color={Colors.textMuted} />
+            <Text style={styles.assigneeName} numberOfLines={1}>{assigneeName}</Text>
           </View>
         )}
       </View>
@@ -343,6 +359,21 @@ const styles = StyleSheet.create({
   metaCompact: {
     fontSize: Typography.xs,
     color: Colors.textMuted,
+  },
+  // Its own row, right-aligned, in both variants: the compact footer is a
+  // column (not a row), and the full-width footer already has StatsRow in its
+  // right-hand slot — so there is nowhere to tuck this into either one.
+  assignee: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: Spacing.xs,
+    marginTop: Spacing.xs,
+  },
+  assigneeName: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    flexShrink: 1,
   },
   statsRow: {
     flexDirection: 'row',

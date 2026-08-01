@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { SUPERVISOR_STATE } from './auth-state';
+import { SITE_URL } from '../src/lib/seo';
 
 // /go/snag/[id] — the single destination every notification links to.
 //
@@ -27,6 +28,26 @@ test.describe('snag handoff (anonymous)', () => {
     await page.goto(`/go/snag/${SNAG_ID}?step=rca`);
     const href = await page.getByRole('link', { name: /open in the snag app/i }).getAttribute('href');
     expect(href, 'the app link should point at the section the mail was about').toContain('?step=rca');
+  });
+
+  test('sends people to the app, never back into the portal', async ({ page }) => {
+    // The loop this route exists to avoid, and the one a domain sweep will
+    // reintroduce: everyone who reaches this page has already been refused by
+    // the portal, so an app link on the portal's own origin sends them to
+    // /snags/<id> inside (portal) -> requireSupervisorOrAdmin() ->
+    // /unauthorized -> "open the app" -> here again.
+    //
+    // Checked against SITE_URL, the portal's own canonical host, rather than
+    // against the origin the test happens to be served from. Under `next dev`
+    // that origin is localhost, so it differs from anything anyone could
+    // plausibly get wrong — the check would pass while the bug shipped.
+    await page.goto(`/go/snag/${SNAG_ID}`);
+    const href = await page.getByRole('link', { name: /open in the snag app/i }).getAttribute('href');
+    expect(href, 'the app link must be absolute').toMatch(/^https?:\/\//);
+    expect(
+      new URL(href!).origin,
+      'the app link must not point back at the portal'
+    ).not.toBe(new URL(SITE_URL).origin);
   });
 
   test('drops a step it does not recognise', async ({ page }) => {

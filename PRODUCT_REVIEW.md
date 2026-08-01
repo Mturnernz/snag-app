@@ -62,7 +62,7 @@ where org_id = p_org_id and lane = 'serious'
 
 **The gap.** A serious snag that is `resolved` but has **never had an accepted RCA** is counted in exactly zero columns. It is only visible during the narrow `rca_pending` window. The moment an RCA is cancelled — or was never assigned in the first place — the outstanding analysis work vanishes from every management view.
 
-**This is not theoretical.** In the Docunation org right now:
+**This is not theoretical.** In the live pilot org right now:
 
 | Reference | Severity | RCA state |
 |---|---|---|

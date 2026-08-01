@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { getOrgStats, getOrgSnagTrend } from '@snag/supabase-queries';
 import { STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, type SnagStatus, type SnagKind, type SnagSeverity } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
@@ -6,6 +7,10 @@ import { Card, PageHeader, EmptyState } from '@/components/Card';
 import { Button } from '@/components/Button';
 import Icon from '@/components/Icon';
 import styles from './page.module.css';
+
+export const metadata: Metadata = {
+  title: 'Reports',
+};
 
 function Bar({ label, count, total }: { label: string; count: number; total: number }) {
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;

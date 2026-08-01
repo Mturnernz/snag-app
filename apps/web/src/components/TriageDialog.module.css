@@ -1,0 +1,142 @@
+/* The triage prompt. Deliberately the only modal in the portal: it is the one
+   place where scrolling past is the failure mode the UI exists to prevent. */
+
+.dialog {
+  width: min(560px, calc(100vw - 2 * var(--space-lg)));
+  max-height: calc(100vh - 2 * var(--space-xl));
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-lg);
+  overflow: auto;
+}
+
+.dialog::backdrop {
+  background: rgb(17 24 39 / 60%);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.title {
+  font-size: var(--text-xl);
+  margin: 0;
+}
+
+.subtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.description {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: var(--space-xs) 0 0;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.question {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  padding: 0;
+}
+
+.hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  cursor: pointer;
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+}
+
+.option[data-active='true'] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.option input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.option span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.option strong {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  color: var(--color-text-muted);
+}
+
+.search input {
+  flex: 1;
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: var(--space-sm) 0;
+  min-height: 44px;
+}
+
+.search input:focus {
+  outline: none;
+}
+
+/* Capped so a large site doesn't push the notifiable question off the bottom
+   of the dialog — the third decision has to stay reachable. */
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: 240px;
+  overflow-y: auto;
+}

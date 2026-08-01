@@ -9,6 +9,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiveOrg, getMemberships, Membership, markOnboardingSeen, signInAnonymouslyForReport } from './src/lib/supabase';
 import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
+import { createAuthEventQueue } from './src/lib/authEvents';
+import { resetWebPathIfStale } from './src/lib/webLocation';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import { linking } from './src/navigation/linking';
@@ -67,6 +69,9 @@ export default function App() {
   const [qrTokenChecked, setQrTokenChecked] = useState(false);
   const [anonSignInAttempted, setAnonSignInAttempted] = useState(false);
   const qrTokenRef = useRef<string | null>(null);
+  // Everything an auth event triggers runs through here, off the auth lock and
+  // one at a time. See src/lib/authEvents.ts.
+  const queueAuthWork = useRef(createAuthEventQueue()).current;
   function setQrToken(token: string | null) {
     qrTokenRef.current = token;
     setQrTokenState(token);
@@ -192,8 +197,25 @@ export default function App() {
     // also after processing the URL hash from email confirmation links.
     // Using it exclusively avoids a race condition on web where getSession()
     // runs before the hash token has been exchanged.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    //
+    // This callback MUST stay synchronous. auth-js runs it inside its lock and
+    // awaits it, so awaiting a Supabase call in here deadlocks the whole client
+    // permanently — no request is ever issued again, nothing rejects, nothing
+    // is logged. It shipped that way and cost three rounds of debugging; see
+    // src/lib/authEvents.ts for the cycle and how it gets triggered by nothing
+    // more exotic than picking a photo and coming back.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+
+      // Both ends of the sign-out/sign-in round trip, because either one alone
+      // leaves a hole: SIGNED_OUT clears the `/profile` the Sign Out button
+      // itself put in the address bar, and SIGNED_IN covers a session that
+      // ended some other way (expiry, another tab). Deliberately not
+      // INITIAL_SESSION — reloading the page on a tab is not logging in, and
+      // staying put is what a browser is supposed to do. Synchronous, and
+      // touches nothing but `history`, so it is safe in this callback.
+      if (event === 'SIGNED_OUT' || event === 'SIGNED_IN') resetWebPathIfStale();
+
       // Only re-fetch the profile on meaningful auth events.
       // TOKEN_REFRESHED must not overwrite a profile that was just set by
       // onComplete() after org creation — that would reset the user back to
@@ -208,7 +230,7 @@ export default function App() {
         // resolution an anonymous reporter has none of.
         setLoading(false);
       } else if (session && event !== 'TOKEN_REFRESHED') {
-        await loadUserState(session.user.id);
+        queueAuthWork(() => loadUserState(session.user.id));
       } else {
         setLoading(false);
       }

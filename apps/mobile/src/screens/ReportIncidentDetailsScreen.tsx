@@ -1,17 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert, ScrollView } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { SnagKind, SnagSeverity, SEVERITY_LABELS, KIND_LABELS, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, getDefaultSiteId, createSnag, resolveActiveOrg } from '../lib/supabase';
+import {
+  supabase, getReportableSites, getLastReportedSiteId, createSnag, resolveActiveOrg,
+} from '../lib/supabase';
+import { showAlert } from '../lib/alert';
+import { ReportSite, resolveReportSite, cacheReportSiteId } from '../lib/reportSite';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import ScreenHeader from '../components/ScreenHeader';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
+import SitePicker from '../components/SitePicker';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -39,13 +44,32 @@ export default function ReportIncidentDetailsScreen() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
+  const [sites, setSites] = useState<ReportSite[]>([]);
+  const [site, setSite] = useState<ReportSite | null>(
+    draft.siteId && draft.siteName ? { id: draft.siteId, name: draft.siteName } : null
+  );
 
   useEffect(() => {
     (async () => {
       const org = await resolveActiveOrg();
       setOrgId(org?.orgId ?? null);
+      if (!org) return;
+      const [available, lastReported] = await Promise.all([
+        getReportableSites(org.orgId),
+        getLastReportedSiteId(org.orgId),
+      ]);
+      setSites(available);
+      // A site already on the draft wins — coming back from Review must not
+      // silently re-pick for someone who already chose.
+      const resolved = await resolveReportSite(org.orgId, available, lastReported);
+      setSite((prev) => prev ?? resolved);
     })();
   }, []);
+
+  function handleSiteChange(next: ReportSite) {
+    setSite(next);
+    setDraft({ siteId: next.id, siteName: next.name });
+  }
 
   const touched = description.trim().length > 0;
 
@@ -59,15 +83,20 @@ export default function ReportIncidentDetailsScreen() {
 
   function handleNext() {
     if (!description.trim()) {
-      Alert.alert('Description required', 'Please describe what happened.');
+      showAlert('Description required', 'Please describe what happened.');
       return;
     }
     if (photosBlocked) {
-      Alert.alert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before continuing.');
+      showAlert('Photo not ready', 'One of your photos is still uploading or failed to upload. Retry or remove it before continuing.');
       return;
     }
 
-    setDraft({ description: description.trim(), kind, severity, photoCount });
+    setDraft({
+      description: description.trim(), kind, severity, photoCount,
+      siteId: site?.id ?? null, siteName: site?.name ?? null,
+    });
+
+    const chosenSiteId = site?.id ?? null;
 
     setSubmitHandler(async () => {
       try {
@@ -77,7 +106,16 @@ export default function ReportIncidentDetailsScreen() {
         const org = await resolveActiveOrg();
         if (!org) return { error: 'No organisation found' };
 
-        const siteId = await getDefaultSiteId(org.orgId);
+        // Normally the site the picker resolved; the fallback covers a report
+        // submitted before the site list finished loading, which used to
+        // resolve at this point anyway.
+        const siteId = chosenSiteId
+          ?? (await resolveReportSite(
+            org.orgId,
+            await getReportableSites(org.orgId),
+            await getLastReportedSiteId(org.orgId)
+          ))?.id
+          ?? null;
         if (!siteId) return { error: 'No site found for your organisation' };
 
         const photoPaths = await photoPickerRef.current?.getPhotoUrls() ?? [];
@@ -93,6 +131,7 @@ export default function ReportIncidentDetailsScreen() {
         });
 
         if (error) return { error: error.message };
+        cacheReportSiteId(org.orgId, siteId);
         return { snagId: data?.id, reference: data?.reference };
       } catch (err: any) {
         return { error: err.message ?? 'Could not submit incident report.' };
@@ -114,6 +153,10 @@ export default function ReportIncidentDetailsScreen() {
           Use this for anything involving injury, a near-miss, or a serious health & safety hazard.
           This creates a formal record for your organisation.
         </Text>
+
+        {sites.length > 1 && (
+          <SitePicker sites={sites} value={site} onChange={handleSiteChange} label="Site" />
+        )}
 
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>Type</Text>

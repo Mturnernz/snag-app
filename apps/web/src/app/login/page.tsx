@@ -1,7 +1,16 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Button } from '@/components/Button';
 import { safeNextPath } from '@/lib/nextPath';
 import { loginAction } from './actions';
+
+// An entry point to the product, not a landing page. Left indexable it
+// competes with `/` for branded searches and lands people on a password field
+// instead of an explanation.
+export const metadata: Metadata = {
+  title: 'Log in',
+  robots: { index: false, follow: true },
+};
 
 export default async function LoginPage({
   searchParams,

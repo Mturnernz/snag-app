@@ -121,10 +121,10 @@ earlier, now-inactive prototype whose only property was being catastrophic if an
 against Snagv1. They were deleted rather than re-labelled — a warning comment doesn't help someone
 who pipes the file into psql, and git still has them if they're ever wanted.
 
-Key tables: `organisations`, `profiles`, `sites`, `snags`, `comments`, `votes`, plus the
-investigation/RCA/debrief tables (`checklist_completions`, `witness_statements`,
-`evidence_items`, `investigations`, `corrective_actions`, `snag_rca`, `rca_why_steps`,
-`snag_debriefs`).
+Key tables: `organisations`, `profiles`, `sites`, `snags`, `comments`, `votes`,
+`serious_incident_owners` (see below), plus the investigation/RCA/debrief tables
+(`checklist_completions`, `witness_statements`, `evidence_items`, `investigations`,
+`corrective_actions`, `snag_rca`, `rca_why_steps`, `snag_debriefs`).
 
 Key view: `snags_with_details` — snags joined with reporter/owner/site names and
 comment/evidence/vote/checklist counts. Always query this view for the issue list and detail
@@ -140,6 +140,92 @@ and collapsed into `resolved`.
 Photos/evidence go to the `snag-photos` and `snag-evidence` Storage buckets (private,
 org-folder-scoped via RLS), not a public `issue-photos` bucket. Org-wide documents live in
 `org-documents` / `org_documents` — see "The document library" below.
+
+## Which site a report goes to
+
+The reporter picks it, on both mobile report flows: `SitePicker`, a dropdown in the form's own
+field style, rendered only when they have more than one site to choose between.
+
+It is worth knowing what this replaced, because the failure was silent. `getDefaultSiteId` took
+`my_member_site_ids()[0]`, and that RPC has no `ORDER BY` — so a member of three sites sent
+every report to whichever row Postgres happened to return first, forever, with nothing in the UI
+naming the site at all. It looked like a permissions problem to the person hitting it.
+
+- **The default is the site they last actually reported into** (`getLastReportedSiteId`, read
+  from their own snags), not the site they last tapped: what someone reported is a better
+  account of where they work than a selection they made and abandoned. It's a server read, so it
+  holds on a new device and on the web build. `resolveReportSite` falls back to a per-org
+  AsyncStorage cache (the offline path — see `src/lib/reportSite.ts`) and then to the first site
+  by name.
+- **The list is about relevance, not permission.** `create_snag` accepts any site in the org, but
+  `getReportableSites` offers a reporter their own site memberships — falling back to every site
+  in the org for someone with none, typically an admin. Don't widen it to "every site" for
+  workers; work-group scoping (`work_group_sites`) assumes the reporter is at the site.
+- **Supervising a site means belonging to it**, so a site supervisor is offered the sites they
+  supervise without this list needing to know about `site_supervisors` at all.
+  `20260801120000_supervising_implies_membership.sql` made `assign_site_supervisor` write both
+  rows and backfilled the ones it had missed; every other path already did this.
+- **The niggle form's work-group picker follows the selected site**, since custom groups can be
+  site-scoped. Changing site mid-report changes which groups are on offer, which is correct.
+- The serious lane carries the site on `IncidentDraft` so the Review screen can show it, and its
+  submit handler still resolves a site late if one was never loaded — that path predates the
+  picker and is the safety net for a report submitted before the list arrived.
+
+One piece of copy nearby: the work-group sheet's primary button says **"Assign to the queue"**,
+fixed copy rather than the default group's name. That group is the reserved literal `Submit`
+(`create_work_group` seeds it and refuses the name to anyone else), so rendering its name put a
+button reading "Submit" on a sheet asking which team should handle the snag.
+
+## Who owns a serious incident
+
+`serious_incident_owners` (org_id, profile_id) is the set of supervisors an organisation
+nominates to own hazards and incidents. They are **the health & safety team the app tells
+reporters about** — before this existed, `serious_created` mailed every member of the snag's
+site, so that claim was true only by accident: on a one-member site it reached that person, and
+on a site whose members have no email it reached nobody.
+
+Two things follow from the table, and both matter:
+
+- **Notification.** `supabase/functions/notify-snag` mails these owners on `serious_created`,
+  falling back to site members if an org somehow has none.
+- **Assignment.** `apply_default_owner()` (BEFORE INSERT OR UPDATE OF kind on `snags`) assigns
+  the earliest-added owner to any serious snag that arrives without one — including a niggle
+  escalated into the serious lane. It only ever fills a gap, so a site's own default-owner rules
+  and deliberate assignments both still win. Note `lane` is a generated column and therefore
+  unreadable from a BEFORE trigger; the lane test is on `kind`.
+
+**There is always at least one.** `create_organisation_and_owner` makes the creator the first
+(they are the only member at that point, so there is nothing to ask), and
+`remove_serious_incident_owner` refuses to remove the last one. Only supervisors and admins are
+eligible, because owning a serious incident means running the investigation and
+`require_investigation_access` refuses anyone else — nominating a worker would name an owner the
+RPCs then reject. Managed at Manage Organisation → Serious incident owners.
+
+## Triage: the moment a serious snag is allocated
+
+Opening an unallocated serious snag as a supervisor puts up a **blocking prompt** asking the three
+things that constitute triaging it, in one place: how it will be investigated, who is running it,
+and whether it is notifiable. `TriageSheet.tsx` on mobile, `TriageDialog.tsx` + `triageAction` on
+web; neither is dismissible.
+
+Before this the three lived in three different collapsed places, and on the serious lane the
+allocation controls sat in Manage — *below* the entire investigation they configure. A hazard could
+be read end to end by a supervisor who never scrolled to the part that assigns it.
+
+- **Untriaged means unallocated**: `investigations.lead_investigator_id is null`. Not `owner_id` —
+  `apply_default_owner` fills that on the way in, so a serious snag arrives owned but unallocated,
+  which is the state triage exists to end.
+- **The notifiable question can be deferred** ("I'm not sure yet"), and nothing is written when it
+  is. It carries a statutory threshold and a modal is no place to make somebody guess. It stays on
+  the resolve gate, which still refuses to close the snag without it. Mode and investigator cannot
+  be deferred — those are the reason the snag is in front of them.
+- **Order of writes matters**: `assign_investigation` → `assign_snag_owner` → `set_notifiable_flag`.
+  The middle one fires `notify_after_snag_update`, whose mail names how the investigation is being
+  run, so the `investigations` row has to exist first.
+- Manage (both clients) is where the **owner** is re-decided afterwards. The mode can also be
+  changed there, but only until the investigation has work under it — see "The mode freezes once
+  work starts" below. The wording is shared (`INVESTIGATION_MODE_OPTIONS` in
+  `packages/shared-types`) so the two surfaces can't drift.
 
 ## Investigation modes
 
@@ -172,6 +258,35 @@ for either way.
 
 Replacing the document clears the acceptance: a different document is a different investigation.
 
+### The mode freezes once work starts
+
+`assign_investigation` refuses to change the mode of an investigation that has been **allocated**
+and has work recorded **under its current mode** — a root cause or a corrective action in `snag`
+mode, an attached document in `document` mode. An **officer admin** may still override, and the
+override is audited under its own action (`investigation_mode_overridden_*`) so it reads as a
+decision overturned rather than one merely re-made.
+
+The reason is the gate, not tidiness. `update_snag_status` forks on `mode`, so a switch
+mid-investigation is a hole in it: complete and verify every corrective action, switch to
+`document`, attach and accept a file, and the snag resolves with those actions still open —
+`document` mode never asks. In reverse, an accepted investigation document stops counting the
+moment the mode flips back. SNAG-00038 was sitting in exactly that state before
+`20260731000000_lock_investigation_mode.sql` repaired it.
+
+Three things follow:
+
+- **Only the current mode's work locks it.** The checklist, witnesses and evidence are required by
+  both modes and survive a switch, so they are deliberately no reason to refuse one.
+- **Reassigning the lead investigator still works.** It goes through the same RPC; only a *change
+  of mode* is frozen. Who runs it and how it is run are different decisions.
+- **`attach_investigation_document` no longer sets `mode`.** It used to flip a snag-mode
+  investigation to `document` just by attaching a file — a second, quieter re-triage that never
+  went near Manage. It now requires the investigation to already be in document mode.
+
+Both clients mirror the rule with `investigationModeLocked` (`packages/supabase-queries`), the same
+way they mirror the resolve gate with `seriousResolveGate`: the server enforces, the clients hide a
+control it would refuse. They gate on `locked && !isOfficerAdmin`, never on `locked` alone.
+
 ### Who can do what
 
 `require_investigation_access` (not `require_serious_snag`) gates the investigation writes, and
@@ -186,6 +301,21 @@ Before this split every investigation write required `can_edit_site`, so `assign
 could name a lead who was then refused by every RPC the job consists of — and the same hole was
 live in the RCA flow, where an assigned worker could answer all five whys and be unable to submit
 (`submit_rca` allows the assignee, then calls `set_root_cause`, which raised).
+
+**The clients have to mirror that split, and for a while only the SQL did.** Mobile gated every
+investigation card on `canEdit` (supervisor/admin), so the assigned investigator saw none of the
+work they had just been given: not the checklist, not evidence, not the notifiable state, and — in
+document mode — not the upload that `20260729000000` widened the bucket policy specifically to
+allow. `IssueDetailScreen` now derives **`canInvestigate`** alongside `canManageInvestigation`,
+matching `require_investigation_access` term for term (site editor, or the lead investigator, or an
+open RCA assignee), and `InvestigationDocumentPanel` takes **`canAttach`/`canAccept`** rather than
+one `canEdit` — attaching is doing, accepting is directing, and a single flag could only ever get
+one of them right.
+
+**An assigned worker investigator can only work in `apps/mobile`.** The portal's `(portal)` group
+refuses workers at the route level and `/go/snag/[id]` offers them the app instead, so that is
+correct rather than a gap — but it does mean mobile has to carry the whole investigator experience.
+Don't "fix" it by loosening `requireSupervisorOrAdmin`.
 
 ## The document library
 
@@ -278,6 +408,50 @@ unless it's a one-off simple `select`.
 - All styles via `StyleSheet.create()` at the bottom of each file
 - TypeScript strict mode — no `any` except for Supabase row shapes
 - Import order: React → React Native → Expo → third-party → local (types, lib, components)
+- **`onAuthStateChange` callbacks must be synchronous.** auth-js runs them inside
+  its lock and awaits them, so awaiting any Supabase call in one deadlocks the
+  client for the life of the page: no request is ever issued again, nothing
+  rejects, nothing is logged, and the per-request deadlines never fire because it
+  never reaches `fetch`. Set state in the callback; put anything that touches
+  Supabase through `queueAuthWork` (`src/lib/authEvents.ts`). A hidden tab
+  becoming visible is enough to trigger it — see that file.
+- **Never call `Alert.alert` directly — use `showAlert` from `src/lib/alert.ts`.**
+  react-native-web's `Alert` is `static alert() {}`, so on the web build (which is
+  shipped, at snagv1.netlify.app) a direct call does nothing: the dialog never
+  appears, and any action behind a confirmation never runs. `showAlert` is
+  `Alert.alert`'s shape on native and `confirm`/`alert` on web, and takes **two
+  buttons at most** — a choice between three things needs real UI, not a dialog.
+- The same trap applies to every native-only module. `apps/mobile` runs in the
+  browser as well as on phones, so before using a platform API, check that it has
+  a web implementation — `expo-file-system` and `expo-camera` have none, and
+  `expo-file-system`'s stub throws rather than no-oping. See TESTING.md.
+
+## Hosts
+
+Three, and they are not interchangeable:
+
+| Host | What it serves | Set in |
+|---|---|---|
+| `www.snaghq.co.nz` | `apps/web` — marketing site **and** supervisor portal, one Next.js app | `apps/web/src/lib/seo.ts` (`SITE_URL`), `SNAG_PORTAL_URL` |
+| `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — a **separate Netlify site** | `apps/mobile/src/lib/appUrl.ts`, `NEXT_PUBLIC_SNAG_APP_URL` |
+| `snagv1.netlify.app` | the app's previous host, now a Netlify redirect to `app.snaghq.co.nz` | — |
+
+The apex `snaghq.co.nz` redirects to `www`. DNS is Netlify-managed.
+
+`snagv1.netlify.app` has to keep resolving, and not only for tidiness: **site QR
+codes encoding it have been printed and put on walls**, and every notification
+sent before the move carries it. That is why it stays in
+`apps/mobile/src/navigation/linking.ts`'s prefix list rather than being replaced
+— the Netlify redirect gets someone to the app, but the prefix list is what
+decides whether the path then resolves to the right screen rather than the
+default tab.
+
+Never point `NEXT_PUBLIC_SNAG_APP_URL` at the portal host. `/go` only uses it
+for visitors it has already decided cannot use the portal, so that sends them to
+`/snags/<id>` inside `(portal)`, where `requireSupervisorOrAdmin()` bounces them
+to `/unauthorized`, which offers them the app — a loop back to where they
+started. The two being subdomains of one domain makes them look more
+interchangeable than they are.
 
 ## Notification links and the handoff
 
@@ -326,3 +500,21 @@ returns 200 — a broken link fails silently rather than 404ing (which is how
 And `/` is deliberately unmapped in the mobile linking config: an unmatched URL
 leaves the tab navigator on its `initialRouteName`, which is what carries the
 post-onboarding tab.
+
+### Which tab you land on, on the web build
+
+`initialRouteName` is `Report`, but a *matched* path beats it — and on the web
+build React Navigation writes the URL back on every navigation and re-reads it
+when `NavigationContainer` mounts. Sign Out lives on the Profile tab, so the
+address bar always read `/profile` when the session ended, and `AuthScreen`
+renders with the navigator unmounted and the URL untouched. Signing back in
+therefore landed everyone on Profile, for no reason anything on the page could
+explain.
+
+`resetWebPathIfStale` (`apps/mobile/src/lib/webLocation.ts`) clears the path on
+`SIGNED_OUT` and `SIGNED_IN`, keeping the two URLs somebody meant to arrive at:
+`/snags/<id>` (what `notify-snag` mails, and it has to survive the sign-in round
+trip) and `?report=<token>` (the QR landing). Deliberately not `INITIAL_SESSION`
+— reloading the page on a tab is not logging in, and staying put is what a
+browser is supposed to do. Unit-tested in `webLocation.test.ts`; it no-ops off
+web.

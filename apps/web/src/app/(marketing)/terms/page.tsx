@@ -1,3 +1,13 @@
+import type { Metadata } from 'next';
+import { canonical } from '@/lib/seo';
+
+export const metadata: Metadata = {
+  title: 'Terms of Service',
+  description:
+    "The terms covering use of SnagHQ. Full terms in progress — get in touch before signing up and we'll answer directly.",
+  ...canonical('/terms'),
+};
+
 export default function TermsPage() {
   return (
     <section className="container" style={{ padding: 'var(--space-5xl) 0', maxWidth: 640 }}>

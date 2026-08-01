@@ -64,8 +64,12 @@ export async function uploadInvestigationDocumentAction(formData: FormData) {
 }
 
 /**
- * Sign the document off. The server refuses this to whoever attached it, so the
- * page hides the button from them rather than offering one that can only fail.
+ * Sign the document off — a separate act from attaching it, but not necessarily
+ * by a separate person. The acceptor-cannot-be-the-attacher rule was reverted in
+ * 20260729000200: it only ever bit the case where a supervisor did the work
+ * themselves, and there it deadlocked a one-supervisor org. Both
+ * `document_attached_by` and `document_accepted_by` are recorded and shown, so a
+ * self-signed investigation is visible in the record rather than prevented.
  */
 export async function acceptInvestigationDocumentAction(formData: FormData) {
   await requireSupervisorOrAdmin();

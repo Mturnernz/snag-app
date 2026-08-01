@@ -163,21 +163,70 @@ Deno.serve(async (req: Request) => {
   const seriousLink = go("notifiable");
 
   if (event === "serious_created") {
-    const { data: members } = await supabase
-      .from("site_members")
-      .select("profiles(email)")
-      .eq("site_id", snag.site_id);
-    const emails = (members ?? [])
-      .map((m: { profiles: { email: string } | null }) => m.profiles?.email)
+    // The organisation's nominated serious-incident owners are the health &
+    // safety team the app tells reporters about. This used to mail every member
+    // of the snag's site instead, which meant the claim was true only by
+    // accident: on a one-member site it reached that person, and on a site whose
+    // members have no email it reached nobody.
+    const { data: owners } = await supabase
+      .from("serious_incident_owners")
+      .select("profiles!serious_incident_owners_profile_id_fkey(email)")
+      .eq("org_id", snag.org_id);
+    let emails = (owners ?? [])
+      .map((o: { profiles: { email: string } | null }) => o.profiles?.email)
       .filter((e): e is string => Boolean(e));
+
+    // Every org has owners (the migration backfilled them and the RPC won't
+    // remove the last), but a serious incident is the wrong thing to drop on
+    // the floor if that ever stops being true.
+    if (emails.length === 0) {
+      const { data: members } = await supabase
+        .from("site_members")
+        .select("profiles(email)")
+        .eq("site_id", snag.site_id);
+      emails = (members ?? [])
+        .map((m: { profiles: { email: string } | null }) => m.profiles?.email)
+        .filter((e): e is string => Boolean(e));
+      console.warn("notify-snag: no serious incident owners, fell back to site members", {
+        snag_id,
+        org_id: snag.org_id,
+        recipients: emails.length,
+      });
+    }
+
     await sendEmail(
       emails,
       `Heads up — ${snag.kind} reported (${snag.reference})`,
       `A ${snag.kind} was just reported.\n\n${snag.description ?? ""}\n\nSee it here: ${seriousLink}`
     );
   } else if (event === "niggle_assigned" && snag.owner_id) {
+    // The event name is a misnomer: notify_after_snag_update fires it on *any*
+    // owner change, serious lane included. On the serious lane the owner is the
+    // lead investigator (triage sets both in one act), and "you've been
+    // assigned a snag" is a poor description of being handed an investigation —
+    // so the same event says the right thing for each lane.
     const email = await emailOf(snag.owner_id);
-    if (email) {
+    if (email && snag.lane === "serious") {
+      // Read after assign_investigation, which triage calls first for exactly
+      // this reason: the mail names how the investigation is being run.
+      const { data: investigation } = await supabase
+        .from("investigations")
+        .select("mode")
+        .eq("snag_id", snag_id)
+        .maybeSingle();
+      const documentMode = investigation?.mode === "document";
+      const how = documentMode
+        ? "Your organisation's own process: run the investigation and attach the completed document. A supervisor accepts it, and that's what closes this."
+        : "SNAG's guided process: a root cause, then corrective actions completed and verified.";
+
+      await sendEmail(
+        [email],
+        `You're leading the investigation — ${snag.reference}`,
+        `You've been assigned the investigation into ${snag.reference}: ${
+          snag.description ?? "(see photo)"
+        }\n\n${how}\n\nStart with making the area safe and preserving the scene: ${go("checklist")}`
+      );
+    } else if (email) {
       await sendEmail(
         [email],
         `You've been assigned a snag (${snag.reference})`,

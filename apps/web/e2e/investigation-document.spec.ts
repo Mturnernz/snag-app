@@ -8,14 +8,15 @@ import { SUPERVISOR_STATE } from './auth-state';
 //
 // The fork is a *substitution*, not a shortcut — the notifiable decision, the
 // checklist, a witness statement and evidence are all still required, and in
-// their place at the end sit two new conditions: a document is attached, and
-// somebody other than the person who attached it accepts it.
+// their place at the end sit two new conditions: a document is attached, and a
+// supervisor accepts it. Not necessarily a *different* supervisor: that rule was
+// reverted in 20260729000200 because it deadlocked a one-supervisor org, so the
+// page names who attached and who accepted rather than preventing them from
+// being the same person.
 //
 // The gate arithmetic is covered by unit tests against the shared function and
 // the rules are enforced in SQL. What only a browser can tell you is whether
-// the page puts the right control in front of the right person — and whether it
-// refuses to put the Accept button in front of the one person who can never
-// use it.
+// the page puts the right control in front of the right person.
 //
 // Writes, so it's opt-in, and it runs against a live org. Snags can't be
 // deleted (5-year retention), so it uses a snag the QA org already has and
@@ -25,8 +26,36 @@ const ENABLED = process.env.E2E_WRITE_PATH === '1';
 // The QA org's spare serious snag. Flagged, unresolved, no real content.
 const SNAG_ID = process.env.E2E_SERIOUS_SNAG_ID ?? '4687e567-9b2c-4ade-9700-00e98356836f';
 
+/**
+ * Put the snag on `mode`, via whichever surface it currently offers.
+ *
+ * An unallocated serious snag opens onto the triage prompt — a modal that has
+ * to be answered, so Manage is unreachable until it is. Once allocated the
+ * prompt is gone and Manage carries the choice instead. Both write the same
+ * three RPCs, and this spec runs repeatedly against a snag whose state it
+ * leaves behind, so it has to cope with either.
+ *
+ * Manage only still offers the mode while nothing mode-specific has been
+ * recorded. Once it has, `assign_investigation` refuses to switch — which is
+ * why the cleanup below removes the document *before* moving the snag back to
+ * the guided path, not after. Doing it the other way round is what left
+ * SNAG-00038 sitting in snag mode holding an accepted investigation document.
+ */
 async function allocateWithMode(page: Page, mode: 'snag' | 'document') {
   await page.goto(`/snags/${SNAG_ID}?step=manage`);
+
+  const triage = page.getByRole('heading', { name: 'Triage this incident' });
+  if (await triage.isVisible().catch(() => false)) {
+    await page.locator(`input[name="modeChoice"][value="${mode}"]`).check();
+    await page.locator('input[name="investigatorChoice"]').first().check();
+    // Not "yes"/"no": this spec asserts on the gate's remaining count, and
+    // answering the notifiable question here would change it.
+    await page.locator('input[name="notifiableChoice"][value="later"]').check();
+    await page.getByRole('button', { name: 'Start the investigation' }).click();
+    await page.waitForURL(`**/snags/${SNAG_ID}**`);
+    return;
+  }
+
   await page.locator(`input[name="mode"][value="${mode}"]`).check();
   await page.getByRole('button', { name: 'Save allocation' }).click();
   await page.waitForURL(`**/snags/${SNAG_ID}`);
@@ -47,16 +76,12 @@ test.describe('investigation document mode', () => {
 
     try {
       // ── Allocate, and choose the mode while doing it ──────────────────────
-      // The prompt lives in the allocate flow rather than behind its own
-      // button: allocating is when someone is already deciding who deals with
+      // The mode is asked at allocation time rather than behind a button of its
+      // own: allocating is when someone is already deciding who deals with
       // this, and asking in two places is how a snag gets an owner and no
       // investigator.
-      const owner = page.locator('#ownerId');
-      await page.goto(`/snags/${SNAG_ID}?step=manage`);
-      await owner.selectOption({ index: 1 });
-      await page.locator('input[name="mode"][value="document"]').check();
-      await page.getByRole('button', { name: 'Save allocation' }).click();
-      await page.waitForURL(`**/snags/${SNAG_ID}`);
+      await allocateWithMode(page, 'document');
+      await page.goto(`/snags/${SNAG_ID}`);
 
       // ── The guided steps are gone; the document step has taken their place ─
       await expect(
@@ -117,12 +142,27 @@ test.describe('investigation document mode', () => {
       await page.getByRole('button', { name: /accept this document/i }).click();
       await expect(page.locator('#investigationDocument')).toContainText(/accepted by /i, { timeout: 60_000 });
       await expect(page.locator('main')).toContainText('4 steps remaining');
+
+      // ── And now it can't be re-triaged out from under that work ──────────
+      // The failure this prevents is not cosmetic: the two modes satisfy the
+      // gate with different evidence, so switching mid-investigation leaves a
+      // signed-off investigation counting for nothing — and in the other
+      // direction lets a snag resolve with corrective actions still open.
+      await page.goto(`/snags/${SNAG_ID}?step=manage`);
+      await expect(
+        page.locator('input[name="mode"]'),
+        'a supervisor should not be offered the mode once work exists'
+      ).toHaveCount(0);
+      await expect(page.locator('main')).toContainText(/can no longer be changed/i);
     } finally {
-      // Leave the snag on the guided path and take the probe document with us.
-      await allocateWithMode(page, 'snag').catch(() => {});
+      // Order matters. Deleting the document clears the only document-mode work
+      // on this snag, which is what unlocks the mode again — do it the other way
+      // round and the re-allocate is refused and the snag is left mid-journey.
       await page.goto('/documents');
       const del = page.getByRole('button', { name: `Delete ${title}` });
       if (await del.count()) await del.click();
+      // Leave the snag on the guided path for the next run.
+      await allocateWithMode(page, 'snag').catch(() => {});
       fs.rmSync(file, { force: true });
     }
   });

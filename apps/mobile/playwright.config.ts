@@ -25,9 +25,13 @@ for (const file of ['.env.local', '.env']) {
 // Browser-level specs for the Expo app, rendered through react-native-web.
 //
 // This is real coverage of layout, navigation, and data flow, but it is not
-// equivalent to a native build: expo-camera, expo-image-picker,
-// expo-image-manipulator, and expo-file-system have no web implementation worth
-// asserting on, so those paths still need a device via Expo Go. See TESTING.md.
+// equivalent to a native build: expo-camera and expo-file-system have no web
+// implementation, so those paths still need a device via Expo Go. See
+// TESTING.md.
+//
+// expo-image-picker and expo-image-manipulator *do* run on web — this config
+// used to say otherwise, and treating the photo path as native-only is how the
+// web build shipped unable to upload a photo at all.
 
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined;
 

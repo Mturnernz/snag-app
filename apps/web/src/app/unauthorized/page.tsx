@@ -1,5 +1,11 @@
+import type { Metadata } from 'next';
 import { LinkButton } from '@/components/Button';
 import Icon from '@/components/Icon';
+
+export const metadata: Metadata = {
+  title: 'Access restricted',
+  robots: { index: false, follow: false },
+};
 
 export default function UnauthorizedPage() {
   return (
@@ -13,7 +19,7 @@ export default function UnauthorizedPage() {
           Your account is signed in, but doesn&apos;t have supervisor or officer admin access in
           this organisation. Report and track issues from the SNAG mobile app instead.
         </p>
-        <LinkButton href="/" variant="secondary">Back to snag.app</LinkButton>
+        <LinkButton href="/" variant="secondary">Back to SnagHQ</LinkButton>
       </div>
     </div>
   );

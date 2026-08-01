@@ -8,7 +8,6 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Modal,
   KeyboardAvoidingView,
   Platform,
@@ -21,6 +20,7 @@ import {
   updateWorkGroup, assignWorkGroupSupervisor, removeWorkGroupSupervisor, deleteWorkGroup, WorkGroupDetail,
 } from '../lib/supabase';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../constants/theme';
+import { showAlert } from '../lib/alert';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -102,7 +102,7 @@ export default function ManageWorkGroupsScreen() {
       setNewGroupSiteIds([]);
       await refreshWorkGroups();
     } else {
-      Alert.alert('Error', error.message ?? 'Could not create work group');
+      showAlert('Error', error.message ?? 'Could not create work group');
     }
   }
 
@@ -112,7 +112,7 @@ export default function ManageWorkGroupsScreen() {
     const { error } = await createSite(newSiteName.trim());
     setCreatingSite(false);
     if (error) {
-      Alert.alert('Error', error.message ?? 'Could not create site');
+      showAlert('Error', error.message ?? 'Could not create site');
       return;
     }
     setNewSiteName('');
@@ -304,7 +304,7 @@ function WorkGroupSupervisorModal({
     const { error } = await updateWorkGroup(group.id, editName.trim(), editColor, editSiteIds);
     setSavingEdit(false);
     if (error) {
-      Alert.alert('Error', error.message ?? 'Could not update work group');
+      showAlert('Error', error.message ?? 'Could not update work group');
     } else {
       await onChanged();
     }
@@ -316,7 +316,7 @@ function WorkGroupSupervisorModal({
     const { error } = await createSite(newSiteName.trim());
     setCreatingSite(false);
     if (error) {
-      Alert.alert('Error', error.message ?? 'Could not create site');
+      showAlert('Error', error.message ?? 'Could not create site');
       return;
     }
     setNewSiteName('');
@@ -340,7 +340,7 @@ function WorkGroupSupervisorModal({
 
   function handleDelete() {
     if (!group) return;
-    Alert.alert(
+    showAlert(
       'Delete work group?',
       `"${group.name}" will be deleted. Any open snags assigned to it go back to Unassigned — resolved snags keep their history.`,
       [
@@ -353,7 +353,7 @@ function WorkGroupSupervisorModal({
             const { error } = await deleteWorkGroup(group.id);
             setDeleting(false);
             if (error) {
-              Alert.alert('Error', error.message ?? 'Could not delete work group');
+              showAlert('Error', error.message ?? 'Could not delete work group');
             } else {
               onClose();
               await onChanged();
@@ -370,7 +370,7 @@ function WorkGroupSupervisorModal({
     const { error } = active
       ? await removeWorkGroupSupervisor(group.id, userId)
       : await assignWorkGroupSupervisor(group.id, userId);
-    if (error) Alert.alert('Error', error.message ?? 'Could not update this work group');
+    if (error) showAlert('Error', error.message ?? 'Could not update this work group');
     await onChanged();
     setBusy(null);
   }

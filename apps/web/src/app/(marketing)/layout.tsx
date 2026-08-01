@@ -2,7 +2,10 @@ import Link from 'next/link';
 import { LinkButton } from '@/components/Button';
 import styles from './layout.module.css';
 
-const CONTACT_EMAIL = 'hello@snag.app';
+// On the canonical domain (see the root layout's metadataBase). The mailbox
+// has to exist before this ships — swapping a working address for a bouncing
+// one is worse than the wrong domain.
+const CONTACT_EMAIL = 'hello@snaghq.co.nz';
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (

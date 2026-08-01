@@ -77,6 +77,54 @@ export async function assignOwnerAction(formData: FormData) {
   redirect(`/snags/${snagId}`);
 }
 
+/**
+ * Triage: the three decisions in one submit — how it's investigated, who runs
+ * it, and whether it's notifiable. The portal half of the same prompt
+ * apps/mobile's TriageSheet makes; both write the same three RPCs in the same
+ * order, and all three are supervisor/admin-gated server-side too.
+ *
+ * Order matters. assign_snag_owner fires notify_after_snag_update, which mails
+ * the new owner — and that mail names how the investigation is being run, so
+ * the investigations row has to exist before it goes out. Allocating first also
+ * means a failure leaves the snag untriaged rather than owned-but-unallocated.
+ *
+ * `notifiable = 'later'` writes nothing: the decision carries a statutory
+ * threshold, and a modal is no place to make somebody guess. It stays on the
+ * resolve gate and the prompt asks again next visit.
+ */
+export async function triageAction(formData: FormData) {
+  await requireSupervisorOrAdmin();
+  const supabase = await createClient();
+  const snagId = String(formData.get('snagId') ?? '');
+  const investigatorId = String(formData.get('investigatorId') ?? '');
+  const modeRaw = String(formData.get('mode') ?? '');
+  const notifiable = String(formData.get('notifiable') ?? '');
+  if (!snagId) return;
+  if (!investigatorId) fail(snagId, 'Pick who is running the investigation.');
+  if (modeRaw !== 'snag' && modeRaw !== 'document') fail(snagId, 'Pick how this will be investigated.');
+  if (notifiable !== 'yes' && notifiable !== 'no' && notifiable !== 'later') {
+    fail(snagId, 'Answer the notifiable question, or say you are not sure yet.');
+  }
+
+  const { error: modeError } = await assignInvestigation(supabase, snagId, investigatorId, modeRaw);
+  if (modeError) fail(snagId, modeError.message);
+
+  const { error: ownerError } = await assignSnagOwner(supabase, snagId, investigatorId);
+  if (ownerError) fail(snagId, ownerError.message);
+
+  if (notifiable !== 'later') {
+    const { error: notifiableError } = await setNotifiableFlag(supabase, snagId, notifiable === 'yes');
+    if (notifiableError) fail(snagId, notifiableError.message);
+  }
+
+  revalidatePath(`/snags/${snagId}`);
+  // `?triaged=1` means "this visit has already answered it". The redirect
+  // carries it so a cached render can't put the modal straight back up on the
+  // navigation that answered it; the read-only portal specs use it for the same
+  // reason, since answering the prompt is a write they must not make.
+  redirect(`/snags/${snagId}?triaged=1`);
+}
+
 export async function recategoriseAction(formData: FormData) {
   await requireSupervisorOrAdmin();
   const supabase = await createClient();

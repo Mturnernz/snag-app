@@ -30,12 +30,17 @@ import {
   renameOrganisation,
   getSitesWithDetail,
   SiteDetail,
+  getSeriousIncidentOwners,
+  addSeriousIncidentOwner,
+  removeSeriousIncidentOwner,
+  SeriousIncidentOwner,
 } from '../lib/supabase';
 
-// Matches the edge functions' SNAG_APP_URL default — the QR always encodes
-// the web export's URL (works with or without the native app installed);
-// see PublicQrReportScreen.tsx / App.tsx for the landing side of this link.
-const APP_URL = 'https://snagv1.netlify.app';
+// The QR always encodes the web export's URL, so it works with or without the
+// native app installed; see PublicQrReportScreen.tsx / App.tsx for the landing
+// side of this link. The host lives in one place because these codes get
+// printed — see lib/appUrl.
+import { APP_URL } from '../lib/appUrl';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -93,6 +98,10 @@ export default function ManageOrganisationScreen() {
   const [cancellingInvite, setCancellingInvite] = useState<string | null>(null);
   const [showAllInvites, setShowAllInvites] = useState(false);
 
+  // Serious incident owners
+  const [seriousOwners, setSeriousOwners] = useState<SeriousIncidentOwner[]>([]);
+  const [updatingOwner, setUpdatingOwner] = useState<string | null>(null);
+
   // QR
   const [regeneratingCode, setRegeneratingCode] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
@@ -119,14 +128,16 @@ export default function ManageOrganisationScreen() {
       setNameDraft(organisation?.name ?? '');
 
       if (profile.org_id) {
-        const [list, invites, siteDetails] = await Promise.all([
+        const [list, invites, siteDetails, owners] = await Promise.all([
           getOrgMembers(profile.org_id),
           getPendingInvites(profile.org_id),
           getSitesWithDetail(),
+          getSeriousIncidentOwners(profile.org_id),
         ]);
         setMembers(list);
         setPendingInvites(invites as PendingInvite[]);
         setSites(siteDetails);
+        setSeriousOwners(owners);
         setIntakeSiteId(organisation?.public_intake_site_id ?? siteDetails[0]?.id ?? null);
       }
     }
@@ -142,6 +153,41 @@ export default function ManageOrganisationScreen() {
   }, [load]);
 
   const orgName = org?.name ?? 'Your Organisation';
+
+  // ── Serious incident owners ──────────────────────────────────────────────
+  // Only supervisors and admins can be nominated: owning a serious incident
+  // means running the investigation, and require_investigation_access refuses
+  // anyone else. The server enforces this too — this just doesn't offer people
+  // it would then reject.
+  const ownerIds = new Set(seriousOwners.map((o) => o.profile_id));
+  const eligibleOwners = members.filter(
+    (m) => !ownerIds.has(m.id) && (m.role === 'supervisor' || m.role === 'officer_admin')
+  );
+
+  async function handleAddOwner(profileId: string) {
+    setUpdatingOwner(profileId);
+    const { error } = await addSeriousIncidentOwner(profileId);
+    setUpdatingOwner(null);
+    if (error) {
+      showToast(error.message ?? 'Could not add that owner');
+      return;
+    }
+    showToast('Added to serious incident owners');
+    await load();
+  }
+
+  async function handleRemoveOwner(profileId: string) {
+    setUpdatingOwner(profileId);
+    const { error } = await removeSeriousIncidentOwner(profileId);
+    setUpdatingOwner(null);
+    if (error) {
+      // Includes the last-owner refusal, whose message names the fix.
+      showToast(error.message ?? 'Could not remove that owner');
+      return;
+    }
+    showToast('Removed from serious incident owners');
+    await load();
+  }
 
   // ── Organisation name ────────────────────────────────────────────────────
   async function handleSaveName() {
@@ -325,6 +371,67 @@ export default function ManageOrganisationScreen() {
                 <Icon name="create-outline" size="md" color={Colors.primary} />
               </TouchableOpacity>
             </View>
+          )}
+        </Card>
+
+        {/* Serious incident owners */}
+        <Card variant="elevated" style={styles.card}>
+          <Text style={styles.sectionLabel}>SERIOUS INCIDENT OWNERS</Text>
+          <Text style={styles.sectionHint}>
+            Notified the moment a hazard or incident is reported. The first of them is assigned it
+            straight away, so it never sits with nobody's name on it.
+          </Text>
+
+          {seriousOwners.map((owner, index) => (
+            <View key={owner.profile_id} style={styles.ownerRow}>
+              <Avatar name={owner.name ?? owner.email ?? '?'} size={36} />
+              <View style={styles.ownerText}>
+                <Text style={styles.ownerName} numberOfLines={1}>{owner.name ?? owner.email}</Text>
+                <Text style={styles.ownerMeta} numberOfLines={1}>
+                  {index === 0 ? 'Assigned new incidents' : 'Notified'}
+                </Text>
+              </View>
+              {seriousOwners.length > 1 && (
+                <TouchableOpacity
+                  style={styles.ownerAction}
+                  onPress={() => handleRemoveOwner(owner.profile_id)}
+                  disabled={updatingOwner === owner.profile_id}
+                  hitSlop={8}
+                >
+                  {updatingOwner === owner.profile_id
+                    ? <ActivityIndicator size="small" color={Colors.danger} />
+                    : <Icon name="close" size="md" color={Colors.danger} />}
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+
+          {eligibleOwners.length > 0 ? (
+            <>
+              <Text style={styles.fieldLabel}>Add a supervisor or admin</Text>
+              {eligibleOwners.map((member) => (
+                <TouchableOpacity
+                  key={member.id}
+                  style={styles.ownerRow}
+                  onPress={() => handleAddOwner(member.id)}
+                  disabled={updatingOwner === member.id}
+                  activeOpacity={0.7}
+                >
+                  <Avatar name={member.name ?? member.email ?? '?'} size={36} />
+                  <View style={styles.ownerText}>
+                    <Text style={styles.ownerName} numberOfLines={1}>{member.name ?? member.email}</Text>
+                    <Text style={styles.ownerMeta}>{ROLE_LABELS[member.role]}</Text>
+                  </View>
+                  {updatingOwner === member.id
+                    ? <ActivityIndicator size="small" color={Colors.primary} />
+                    : <Icon name="add" size="md" color={Colors.primary} />}
+                </TouchableOpacity>
+              ))}
+            </>
+          ) : (
+            <Text style={styles.sectionHint}>
+              Every supervisor and admin is already an owner. Invite or promote someone to add more.
+            </Text>
           )}
         </Card>
 
@@ -558,6 +665,25 @@ const styles = StyleSheet.create({
   sectionCount: { fontSize: Typography.xs, color: Colors.textMuted },
   fieldLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary, marginTop: Spacing.xs },
   hint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
+  sectionHint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
+  ownerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    paddingTop: Spacing.sm,
+  },
+  ownerText: { flex: 1, gap: 2 },
+  ownerName: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  ownerMeta: { fontSize: Typography.xs, color: Colors.textMuted },
+  ownerAction: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   hintMuted: { fontSize: Typography.sm, color: Colors.textMuted, fontStyle: 'italic' },
   topGap: { marginTop: Spacing.sm },
   flex1: { flex: 1 },

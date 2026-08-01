@@ -2,8 +2,10 @@ import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { File } from 'expo-file-system';
 import * as queries from '@snag/supabase-queries';
+import { readForUpload } from './uploadBody';
+import { withDeadline } from './deadline';
+import { ReportSite } from './reportSite';
 import {
   Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
   ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction,
@@ -86,12 +88,61 @@ export async function signUpWithEmail(email: string, password: string) {
   return supabase.auth.signUp({ email, password });
 }
 
-export async function signOut() {
-  // Local scope, not the supabase-js default of 'global'. Global revokes every
-  // refresh token the user has, so signing out on this phone also signed them
-  // out of the supervisor portal in their browser. Signing out of a device
-  // means this device.
-  return supabase.auth.signOut({ scope: 'local' });
+/** The stored-session key supabase-js derives from the project ref. */
+const AUTH_STORAGE_KEY = `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
+
+// Shorter than the 15s on the auth request itself, deliberately. A logout that
+// hasn't come back is not worth waiting on: `scope: 'local'` only revokes this
+// device's refresh token, and dropping the stored session achieves the same
+// thing for the person holding the phone. Getting them out beats revoking
+// tidily.
+const SIGN_OUT_TIMEOUT_MS = 10_000;
+
+/**
+ * Signs out, and gets the user out even when signing out is what's broken.
+ *
+ * Sign out is the escape hatch from a session that isn't working, so it must not
+ * depend on the session working. `supabase.auth.signOut()` takes the auth lock,
+ * and a wedged lock means it never settles and never even reaches the network —
+ * which is what a permanently spinning Sign Out button was (see
+ * lib/authEvents.ts for how the lock got wedged). Waiting on it forever leaves
+ * someone trapped in an app they can't use and can't leave.
+ *
+ * So: bound it, and if it doesn't come back, drop the stored session directly
+ * and reload. That bypasses supabase-js entirely, because supabase-js is the
+ * part that may be stuck.
+ *
+ * Local scope, not the supabase-js default of 'global'. Global revokes every
+ * refresh token the user has, so signing out on this phone also signed them out
+ * of the supervisor portal in their browser. Signing out of a device means this
+ * device.
+ */
+export async function signOut(): Promise<{ error: any; forced?: boolean }> {
+  try {
+    const { error } = await withDeadline(
+      supabase.auth.signOut({ scope: 'local' }), SIGN_OUT_TIMEOUT_MS, 'Signing out',
+    );
+    if (!error) return { error: null };
+    console.error('signOut error:', error);
+  } catch (err) {
+    console.error('signOut error:', err);
+  }
+
+  // The client couldn't do it. Do it without the client.
+  try {
+    if (Platform.OS === 'web') {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+      // A wedged client never emits SIGNED_OUT, so nothing would re-render and
+      // the app would sit there still showing a signed-in screen. Reloading is
+      // the only thing that reliably completes it.
+      window.location.reload();
+    } else {
+      await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+    return { error: null, forced: true };
+  } catch (err) {
+    return { error: err };
+  }
 }
 
 export async function getCurrentUser() {
@@ -197,23 +248,43 @@ export async function joinOrgViaCode(code: string, name: string) {
   return { error };
 }
 
-// A real site picker is a Phase 4 feature (multi-site isn't in this pass's
-// scope). Reports still need a valid site_id, so resolve the user's first
-// site membership — falling back to the org's first site if they have none —
-// rather than blocking reporting on a UI that doesn't exist yet.
-export async function getDefaultSiteId(orgId: string): Promise<string | null> {
-  const { data: memberSiteIds } = await supabase.rpc('my_member_site_ids');
-  if (memberSiteIds && memberSiteIds.length > 0) {
-    return memberSiteIds[0] as string;
-  }
-
-  const { data: orgSites } = await supabase
-    .from('sites')
-    .select('id')
+// The sites a reporter may file into, named, for the report screens' picker:
+// their own site memberships, or — for someone who has none, typically an
+// admin — every site in the org. That second branch is the long-standing
+// fallback; the first used to be `my_member_site_ids()[0]` with no picker and
+// no ORDER BY behind it, which is how a member of three sites reported into
+// one of them forever.
+//
+// create_snag accepts any site in the org, so this list is about relevance
+// rather than permission — it deliberately doesn't offer a worker sites they
+// aren't on. Ordered by name so the fallback choice is at least stable.
+// The site this person last actually filed a report into, in this org — what
+// the picker defaults to. Server-side rather than a local preference so it
+// holds on a new device and on the web build, and so it follows what was
+// reported rather than what was merely tapped.
+//
+// Null when they've never reported here, and null offline; resolveReportSite
+// falls back to the cached value and then to the first site by name.
+export async function getLastReportedSiteId(orgId: string): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from('snags')
+    .select('site_id')
+    .eq('reporter_id', user.id)
     .eq('org_id', orgId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(1);
-  return orgSites?.[0]?.id ?? null;
+  return (data?.[0]?.site_id as string | undefined) ?? null;
+}
+
+export async function getReportableSites(orgId: string): Promise<ReportSite[]> {
+  const { data: memberSiteIds } = await supabase.rpc('my_member_site_ids');
+  const query = supabase.from('sites').select('id, name');
+  const { data } = memberSiteIds && memberSiteIds.length > 0
+    ? await query.in('id', memberSiteIds as string[]).order('name')
+    : await query.eq('org_id', orgId).order('name');
+  return (data ?? []) as ReportSite[];
 }
 
 // ─── Admin helpers ────────────────────────────────────────────────────────────
@@ -233,6 +304,21 @@ export async function updateMemberRole(memberId: string, role: UserRole) {
 export async function removeOrgMember(memberId: string) {
   return supabase.rpc('remove_org_member', { p_member_id: memberId });
 }
+
+// ─── Serious incident owners ──────────────────────────────────────────────────
+// Who a serious incident goes to: notified when one is filed, and the first of
+// them is assigned it on the way in. See the migration for why there is always
+// at least one.
+export type SeriousIncidentOwner = queries.SeriousIncidentOwner;
+
+export const getSeriousIncidentOwners = (orgId: string) =>
+  queries.getSeriousIncidentOwners(supabase, orgId);
+
+export const addSeriousIncidentOwner = (profileId: string) =>
+  queries.addSeriousIncidentOwner(supabase, profileId);
+
+export const removeSeriousIncidentOwner = (profileId: string) =>
+  queries.removeSeriousIncidentOwner(supabase, profileId);
 
 // ─── Multi-org membership helpers ─────────────────────────────────────────────
 
@@ -747,6 +833,7 @@ export const getInvestigationState = (snagId: string) => queries.getInvestigatio
 // disagree about what's outstanding or what order to do it in.
 export type ResolveGateCondition = queries.ResolveGateCondition;
 export const seriousResolveGate = queries.seriousResolveGate;
+export const investigationModeLocked = queries.investigationModeLocked;
 
 // ─── Corrective actions (CAPA) ────────────────────────────────────────────────
 // create_corrective_action/complete_corrective_action are supervisor/admin-or-
@@ -823,10 +910,10 @@ export const deleteOrgDocument = (documentId: string) => queries.deleteOrgDocume
  * Uploads a document the user picked from their device.
  *
  * The shared `uploadOrgDocumentFile` takes a browser `File`/`Blob`; here the
- * picker hands back a local URI, and the same constraint as photos applies —
- * `fetch(uri).blob()` produces something storage-js can't reliably read on
- * React Native and the API rejects it with a 400 before RLS is ever consulted.
- * So read it as an ArrayBuffer, exactly as uploadSnagPhoto does.
+ * picker hands back a local URI, which `readForUpload` turns into whatever this
+ * platform can upload — exactly as uploadSnagPhoto does. The mime type goes to
+ * the reader too, because on web it travels on the body rather than in the
+ * options.
  */
 export async function uploadOrgDocumentFromUri(
   orgId: string,
@@ -835,11 +922,11 @@ export async function uploadOrgDocumentFromUri(
   mimeType?: string | null,
 ): Promise<{ path: string | null; error: any }> {
   try {
-    const arrayBuffer = await new File(localUri).arrayBuffer();
+    const body = await readForUpload(localUri, mimeType || 'application/octet-stream');
     const path = `${orgId}/${Date.now()}-${fileName}`;
     const { data, error } = await supabase.storage
       .from('org-documents')
-      .upload(path, arrayBuffer, {
+      .upload(path, body, {
         contentType: mimeType || 'application/octet-stream',
         upsert: false,
       });
@@ -962,15 +1049,14 @@ export async function uploadSnagPhoto(
   bucket: string = SNAG_PHOTOS_BUCKET,
 ): Promise<{ path: string | null; error: any }> {
   try {
-    // fetch(localUri).blob() produces a Blob the storage-js upload can't
-    // reliably read on React Native, which the API rejects outright (400)
-    // before it ever reaches the bucket's RLS check — read the file as an
-    // ArrayBuffer instead.
-    const arrayBuffer = await new File(localUri).arrayBuffer();
+    // Reading the picked file is platform-specific — and a wrong read fails
+    // before any request is made, which looks like an upload failure with
+    // nothing in the Storage logs. See readForUpload.
+    const body = await readForUpload(localUri, 'image/jpeg');
 
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, arrayBuffer, {
+      .upload(fileName, body, {
         contentType: 'image/jpeg',
         upsert: false,
       });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, LayoutChangeEvent } from 'react-native';
 
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import Card from './Card';
@@ -18,6 +18,10 @@ interface Props {
   /** Controlled by the parent (not internal state) so ProgressStrip can
    *  drive the same expanded/collapsed flags as tapping the header directly. */
   onToggle: () => void;
+  /** Reports where this card sits, so NextStepCard's CTA can scroll to it.
+   *  Measured on the card as a whole: the header is what should come into view,
+   *  and expanding the body grows it downwards without moving that. */
+  onLayout?: (event: LayoutChangeEvent) => void;
   children: React.ReactNode;
 }
 
@@ -37,9 +41,9 @@ function StatusDot({ status }: { status: StepStatus }) {
   );
 }
 
-export default function StepCard({ title, status, summary, expanded, onToggle, children }: Props) {
+export default function StepCard({ title, status, summary, expanded, onToggle, onLayout, children }: Props) {
   return (
-    <Card variant="elevated" style={styles.card}>
+    <Card variant="elevated" style={styles.card} onLayout={onLayout}>
       <TouchableOpacity style={styles.header} onPress={onToggle} activeOpacity={0.7}>
         <StatusDot status={status} />
         <View style={styles.headerText}>

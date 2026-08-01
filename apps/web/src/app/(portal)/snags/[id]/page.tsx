@@ -1,14 +1,16 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import {
   getSnagRca, getSnagDebriefs, getInvestigationState, getCorrectiveActions,
   getSnagAuditLog, describeAuditAction, getSiteAssignees, getOrgMembers, getEvidencePhotoUrl,
   isImageEvidence,
-  seriousResolveGate,
+  seriousResolveGate, investigationModeLocked,
   getOrgDocuments, getOrgDocumentUrl,
   type SiteAssignee, type ResolveGateKey, type SnagRca, type OrgDocument,
 } from '@snag/supabase-queries';
 import {
   STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS, CHECKLIST_STEP_LABELS, CHECKLIST_STEPS,
+  INVESTIGATION_MODE_OPTIONS,
   type SnagStatus, type SnagKind, type SnagSeverity, type Profile,
 } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
@@ -19,9 +21,10 @@ import { Badge, StatusBadge, KindBadge, SeverityBadge, NotifiableBadge } from '@
 import Icon from '@/components/Icon';
 import StepSection from '@/components/StepSection';
 import NextStep, { ReadyToResolve } from '@/components/NextStep';
+import TriageDialog from '@/components/TriageDialog';
 import {
   changeStatusAction, resolveNiggleAction, assignOwnerAction, recategoriseAction,
-  addCommentAction, setNotifiableDecisionAction, unmergeAction,
+  addCommentAction, setNotifiableDecisionAction, unmergeAction, triageAction,
 } from './actions';
 import {
   completeChecklistStepAction, addWitnessStatementAction, addEvidenceAction, setRootCauseAction,
@@ -42,6 +45,10 @@ import {
   acceptInvestigationDocumentAction,
 } from './document-actions';
 import styles from './page.module.css';
+
+export const metadata: Metadata = {
+  title: 'Snag',
+};
 
 const KIND_OPTIONS: SnagKind[] = ['fixit', 'improvement', 'hazard', 'incident'];
 const SEVERITY_OPTIONS: SnagSeverity[] = ['minor', 'moderate', 'injury', 'critical'];
@@ -110,10 +117,10 @@ export default async function SnagDetailPage({
   params, searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; step?: string }>;
+  searchParams: Promise<{ error?: string; step?: string; triaged?: string }>;
 }) {
   const { id } = await params;
-  const { error, step } = await searchParams;
+  const { error, step, triaged } = await searchParams;
   const { activeMembership } = await requireSupervisorOrAdmin();
   const supabase = await createClient();
 
@@ -147,6 +154,11 @@ export default async function SnagDetailPage({
   // Document mode only. Fetching the library on every serious snag would be a
   // round trip nobody reads on the guided path.
   const isDocumentMode = investigation?.mode === 'document';
+  // Whether Manage may still offer the mode choice. Mirrors
+  // assign_investigation's guard, so the form doesn't present a control the
+  // server would refuse. Officer admins keep it, with a warning.
+  const modeLocked = investigation ? investigationModeLocked(investigation) : false;
+  const canOverrideMode = activeMembership.role === 'officer_admin';
   const [libraryDocuments, documentUrl]: [OrgDocument[], string | null] = isDocumentMode
     ? await Promise.all([
         getOrgDocuments(supabase, activeMembership.org_id),
@@ -170,6 +182,24 @@ export default async function SnagDetailPage({
   // Decided is not the same as notifiable: `notifiable_marked_at` is stamped by
   // either answer, and only an answered snag can be resolved.
   const notifiableDecided = snag.is_notifiable === true || snag.notifiable_marked_at !== null;
+
+  // Untriaged means unallocated: nobody has been given the investigation.
+  //
+  // leadInvestigatorId rather than owner_id, because apply_default_owner fills
+  // owner_id on the way in (the first serious incident owner) without creating
+  // an investigations row — a snag arrives owned but unallocated, which is the
+  // state triage exists to end.
+  //
+  // Deliberately *not* also "notifiable is undecided", even though triage asks
+  // that too. Deferring the notifiable call is a legitimate answer, and
+  // re-prompting on every page load would turn "I'm not sure yet" into a wall.
+  // Once allocated, the decision lives on the resolve gate and the Notifiable
+  // section, which already refuse to let the snag close without it.
+  const needsTriage = Boolean(
+    isSerious && investigation && triaged !== '1' &&
+    (snag.status === 'flagged' || snag.status === 'in_progress') &&
+    investigation.leadInvestigatorId === null
+  );
 
   const gate = investigation ? seriousResolveGate(investigation, notifiableDecided) : [];
   const firstUnmet = gate.find((c) => c.unmet);
@@ -198,6 +228,21 @@ export default async function SnagDetailPage({
 
   return (
     <div className={styles.page}>
+      {/* Triage — the first thing a supervisor meets on an unallocated serious
+          snag, and deliberately not dismissible. Everything below it on the
+          page assumes somebody is running this investigation. */}
+      {needsTriage && investigation && (
+        <TriageDialog
+          snagId={snag.id}
+          reference={snag.reference}
+          description={snag.description ?? null}
+          assignees={siteAssignees}
+          currentOwnerId={snag.owner_id ?? null}
+          currentMode={investigation.mode}
+          action={triageAction}
+        />
+      )}
+
       <header className={styles.header}>
         <p className={styles.site}>{snag.site_name}</p>
         <h1 className={styles.reference}>{snag.reference}</h1>
@@ -783,29 +828,53 @@ export default async function SnagDetailPage({
                 {siteAssignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
-            {/* Allocating a serious snag is the moment someone decides how it
-                will be investigated, so the choice is asked here rather than
-                behind a separate button that gets missed. The owner is the
-                lead investigator. */}
+            {/* The re-allocate path. Triage asks this first, on the way in;
+                this is where the *investigator* gets changed afterwards.
+                Same wording either way — the copy is shared, because a
+                supervisor comparing the two screens should not have to work out
+                whether they mean the same thing. The owner is the lead
+                investigator.
+
+                How it is investigated is a different matter: once work has been
+                recorded under the chosen mode, switching would strand it and
+                assign_investigation refuses. With no `mode` field on the form,
+                assignOwnerAction skips the RPC and re-assigning the
+                investigator keeps working. */}
             {isSerious && !isResolved && (
-              <fieldset className={styles.modeChoice}>
-                <legend>How will this be investigated?</legend>
-                <label className={styles.modeOption}>
-                  <input type="radio" name="mode" value="snag" defaultChecked={!isDocumentMode} />
+              modeLocked && !canOverrideMode ? (
+                <p className={styles.modeLocked}>
+                  <Icon name="Lock" size="sm" />
                   <span>
-                    <strong>SNAG&rsquo;s guided investigation</strong>
-                    Root cause, then corrective actions, tracked here.
+                    Investigated using{' '}
+                    <strong>{isDocumentMode ? "your organisation's own process" : 'the SNAG investigation'}</strong>.
+                    Work has been recorded against it, so this can no longer be changed.
                   </span>
-                </label>
-                <label className={styles.modeOption}>
-                  <input type="radio" name="mode" value="document" defaultChecked={isDocumentMode} />
-                  <span>
-                    <strong>Our own process</strong>
-                    Attach the completed investigation document. A second supervisor
-                    has to accept it before this snag can be resolved.
-                  </span>
-                </label>
-              </fieldset>
+                </p>
+              ) : (
+                <fieldset className={styles.modeChoice}>
+                  <legend>How will this be investigated?</legend>
+                  {modeLocked && (
+                    <p className={styles.modeWarning}>
+                      This investigation is already under way. Changing it now leaves the work
+                      already recorded counting for nothing, and is recorded against your name.
+                    </p>
+                  )}
+                  {INVESTIGATION_MODE_OPTIONS.map((option) => (
+                    <label key={option.value} className={styles.modeOption}>
+                      <input
+                        type="radio"
+                        name="mode"
+                        value={option.value}
+                        defaultChecked={option.value === (isDocumentMode ? 'document' : 'snag')}
+                      />
+                      <span>
+                        <strong>{option.title}</strong>
+                        {option.detail}
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              )
             )}
             <Button type="submit" variant="secondary" size="sm">
               {isSerious ? 'Save allocation' : 'Save'}

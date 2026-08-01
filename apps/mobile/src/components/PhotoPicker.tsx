@@ -1,14 +1,34 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { uploadSnagPhoto } from '../lib/supabase';
+import { withDeadline, failureReason } from '../lib/deadline';
+import { showAlert } from '../lib/alert';
 import Icon from './Icon';
 
 const MAX_PHOTOS = 5;
 const THUMB_SIZE = 92;
+
+/**
+ * The two stages are bounded separately, and say which one gave up, because
+ * "the photo didn't upload" has two completely different causes and a
+ * screenshot of the failure is usually all the evidence there is.
+ *
+ * Preparing is local: decode, resize, re-encode, all inside a native/browser
+ * module that can simply never call back. Nothing has been sent, so 30s is
+ * already generous.
+ *
+ * Sending has its own 60s deadline on the request itself (`fetchWithTimeout` in
+ * lib/supabase.ts) — a photo on a bad site connection is slow rather than
+ * broken. This backstop sits just past it, so the normal outcome is the
+ * request's own "no reply from the server" and this only fires if something
+ * before the request stalls.
+ */
+const PREPARE_DEADLINE_MS = 30_000;
+const SEND_DEADLINE_MS = 65_000;
 
 type PhotoStatus = 'uploading' | 'success' | 'failed';
 
@@ -18,6 +38,9 @@ interface PhotoItem {
   fileName: string;
   path: string | null;
   status: PhotoStatus;
+  /** Why this photo failed, shown to the user. A photo that failed for a
+   *  reason nobody can see costs a screenshot and a round trip to diagnose. */
+  error: string | null;
 }
 
 export interface PhotoPickerHandle {
@@ -70,17 +93,56 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     onBlockingChange?.(photos.some((p) => p.status === 'uploading' || p.status === 'failed'));
   }, [photos, onBlockingChange]);
 
-  async function runUpload(id: string, uri: string, fileName: string) {
-    setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'uploading', path: null } : p)));
-    const compressed = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 1200 } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+  async function compressAndUpload(uri: string, fileName: string) {
+    const compressed = await withDeadline(
+      ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1200 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      ),
+      PREPARE_DEADLINE_MS,
+      'Preparing',
     );
-    const { path, error } = await uploadSnagPhoto(compressed.uri, fileName, bucket);
+    try {
+      return await withDeadline(uploadSnagPhoto(compressed.uri, fileName, bucket), SEND_DEADLINE_MS, 'Sending');
+    } finally {
+      // On web the compressed copy is an object URL held by the document until
+      // it's revoked, and a phone browser doing this five times over is the
+      // most memory-hungry thing this screen does. The thumbnail renders from
+      // the original `uri`, not this one, so nothing on screen needs it after
+      // the upload.
+      if (compressed.uri.startsWith('blob:')) URL.revokeObjectURL(compressed.uri);
+    }
+  }
+
+  async function runUpload(id: string, uri: string, fileName: string) {
     setPhotos((prev) => prev.map((p) => (
-      p.id === id ? { ...p, status: error || !path ? 'failed' : 'success', path } : p
+      p.id === id ? { ...p, status: 'uploading', path: null, error: null } : p
     )));
+    // Nothing may escape and nothing may hang: this is called without being
+    // awaited, so a throw anywhere in here (compression, not just the upload),
+    // or a stage that never calls back, would leave the photo 'uploading' for
+    // good — a spinner that never resolves and a Submit button disabled behind
+    // it, with no way back but reloading the screen.
+    try {
+      const { path, error } = await compressAndUpload(uri, fileName);
+      if (error || !path) console.error('Photo upload error:', error);
+      setPhotos((prev) => prev.map((p) => (
+        p.id === id
+          ? {
+            ...p,
+            status: error || !path ? 'failed' : 'success',
+            path,
+            error: error || !path ? failureReason(error) : null,
+          }
+          : p
+      )));
+    } catch (err) {
+      console.error('Photo upload error:', err);
+      setPhotos((prev) => prev.map((p) => (
+        p.id === id ? { ...p, status: 'failed', path: null, error: failureReason(err) } : p
+      )));
+    }
   }
 
   function addPhoto(uri: string) {
@@ -91,10 +153,10 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
       // Offline — stage it as already "done" from this component's point of
       // view (no spinner, doesn't block submit). The real upload happens
       // later, out of band, when the offline queue drains.
-      setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'success' }]);
+      setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'success', error: null }]);
       return;
     }
-    setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'uploading' }]);
+    setPhotos((prev) => [...prev, { id, uri, fileName, path: null, status: 'uploading', error: null }]);
     runUpload(id, uri, fileName);
   }
 
@@ -113,7 +175,15 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   }, [pathPrefix, initialUris]);
 
   function offerSource() {
-    Alert.alert('Add a photo', undefined, [
+    // Three choices is more than a browser dialog can offer, and on web it
+    // doesn't need to: the file picker a library pick opens already includes
+    // the camera as a source. Asking first would be a dialog whose options the
+    // next dialog repeats.
+    if (Platform.OS === 'web') {
+      pickFromLibrary();
+      return;
+    }
+    showAlert('Add a photo', undefined, [
       { text: 'Take Photo', onPress: takePhoto },
       { text: 'Choose from Library', onPress: pickFromLibrary },
       { text: 'Cancel', style: 'cancel' },
@@ -138,7 +208,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   async function takePhoto() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera access is needed to take photos.');
+      showAlert('Permission required', 'Camera access is needed to take photos.');
       return;
     }
     // No allowsEditing — the camera's own retake/use-photo confirmation is
@@ -156,6 +226,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     setPhotos((prev) => prev.filter((p) => p.id !== id));
   }
 
+  const failedReason = photos.find((p) => p.status === 'failed')?.error ?? null;
   const hasFailed = photos.some((p) => p.status === 'failed');
 
   useImperativeHandle(ref, () => ({
@@ -211,7 +282,11 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
         )}
       </ScrollView>
       {hasFailed && (
-        <Text style={styles.failedHint}>Couldn't upload a photo — tap it to retry, or remove it.</Text>
+        <Text style={styles.failedHint}>
+          {failedReason
+            ? `Couldn't upload a photo (${failedReason}) — tap it to retry, or remove it.`
+            : "Couldn't upload a photo — tap it to retry, or remove it."}
+        </Text>
       )}
     </View>
   );

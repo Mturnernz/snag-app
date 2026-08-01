@@ -37,10 +37,10 @@ import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 import { useToast } from '../hooks/useToast';
 import { useBadge } from '../context/BadgeContext';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
+import { sortSnags as orderSnags, needsAttention, SortMode } from '../lib/snagOrdering';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type SortMode = 'newest' | 'oldest' | 'trending';
 type DropdownKey = 'status' | 'date' | 'site' | 'scope' | null;
 
 type ScopeFilter =
@@ -104,6 +104,7 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 
 // Per-user, persisted across app opens (see the load/save effects below).
 const STATUS_FILTER_STORAGE_PREFIX = 'snag.statusFilters.';
+const ASSIGNED_FILTER_STORAGE_PREFIX = 'snag.assignedOnly.';
 
 const PAGE_SIZE = 50;
 
@@ -125,7 +126,16 @@ export default function IssueListScreen() {
   // a shared device).
   const userIdRef = React.useRef<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('newest');
+  // Open injuries, fetched in their own right rather than picked out of the
+  // loaded page — a pinned card only ever surfaced what pagination happened to
+  // have already fetched.
+  const [attention, setAttention] = useState<Snag[]>([]);
   const [publicOnly, setPublicOnly] = useState(false);
+  // "Assigned" — snags that have somebody on them, whoever that is. Distinct
+  // from the Scope dropdown's "Assigned to me": this is the supervisor's view
+  // of what is actually being worked, which is why it's a one-tap category
+  // rather than an eighth entry in a dropdown nobody opens.
+  const [assignedOnly, setAssignedOnly] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<DropdownKey>(null);
   const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
   const [isPublicOrg, setIsPublicOrg] = useState(false);
@@ -170,7 +180,13 @@ export default function IssueListScreen() {
   const { showToast } = useToast();
 
   const hasActiveFilters = !setsEqual(statusFilters, DEFAULT_STATUS_FILTERS) || siteFilters.size > 0 || publicOnly
-    || scopeFilter !== DEFAULT_SCOPE_FILTER;
+    || scopeFilter !== DEFAULT_SCOPE_FILTER || assignedOnly;
+
+  // The two unassigned scopes ask for the opposite of what Assigned asks for,
+  // so together they can only ever return nothing. Offer one or the other
+  // rather than an empty list with no explanation.
+  const scopeIsUnassigned =
+    scopeFilter === 'unassigned_in_my_sites' || scopeFilter === 'unassigned_in_my_work_groups';
 
   const scopeOptions = role === 'officer_admin' || role === 'supervisor'
     ? [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA]
@@ -222,6 +238,11 @@ export default function IssueListScreen() {
     if (siteFilters.size > 0) {
       query = query.in('site_id', Array.from(siteFilters));
     }
+    // Has an assignee, whoever it is. owner_id is the assignee on both lanes —
+    // on the serious lane triage sets it to the lead investigator.
+    if (assignedOnly) {
+      query = query.not('owner_id', 'is', null);
+    }
 
     // Scope — org members only (the filter bar's Scope button is hidden for
     // non-members/public reporters, so this must never silently apply to
@@ -267,7 +288,24 @@ export default function IssueListScreen() {
     }
 
     return query.order('created_at', { ascending: sortMode === 'oldest' });
-  }, [statusFilters, siteFilters, sortMode, publicOnly, scopeFilter]);
+  }, [statusFilters, siteFilters, sortMode, publicOnly, scopeFilter, assignedOnly]);
+
+  // Unresolved injuries in this org, independent of the filter bar: this is an
+  // alert, not a view of what the user asked for. Small limit — if there are
+  // more than a handful of open injuries, a strip is not the problem.
+  const fetchAttention = useCallback(async (activeOrgId: string | null) => {
+    if (!activeOrgId) { setAttention([]); return; }
+    const { data } = await supabase
+      .from('snags_with_details')
+      .select('id, reference, status, kind, lane, severity, photo_path, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, description, site_id, site_name, is_public_submission, child_count, work_group_id')
+      .is('parent_snag_id', null)
+      .eq('org_id', activeOrgId)
+      .eq('severity', 'injury')
+      .neq('status', 'resolved')
+      .order('created_at', { ascending: false })
+      .limit(6);
+    setAttention(needsAttention((data ?? []) as unknown as Snag[]));
+  }, []);
 
   // Most to least actionable — a snag matching several reasons only shows
   // the first that applies (see IssueCard's relevance tag).
@@ -294,19 +332,10 @@ export default function IssueListScreen() {
     }));
   };
 
-  // Injury snags float to the top regardless of the active sort, unless
-  // already resolved. Trending re-ranks everything else by combined
-  // engagement (votes + comments); otherwise the DB order (newest/oldest)
-  // is preserved (Array.sort is stable).
-  const sortSnags = useCallback((arr: Snag[]): Snag[] => {
-    const isPinned = (s: Snag) => s.severity === 'injury' && s.status !== 'resolved';
-    const engagement = (s: Snag) => (s.vote_score ?? 0) + (s.comment_count ?? 0);
-    return [...arr].sort((a, b) => {
-      const pinDiff = Number(isPinned(b)) - Number(isPinned(a));
-      if (pinDiff !== 0) return pinDiff;
-      return sortMode === 'trending' ? engagement(b) - engagement(a) : 0;
-    });
-  }, [sortMode]);
+  // The first card is the most recent one — see lib/snagOrdering.ts for why
+  // that needed writing down. Open injuries are surfaced by the strip above the
+  // grid instead of by displacing it.
+  const sortSnags = useCallback((arr: Snag[]): Snag[] => orderSnags(arr, sortMode), [sortMode]);
 
   const fetchIssues = useCallback(async () => {
     // Re-check org state every fetch — it changes with the org switcher, and
@@ -392,6 +421,7 @@ export default function IssueListScreen() {
 
     setSites(siteList);
     setHasPublicSnags(publicFlag);
+    fetchAttention(memberOfOrg ? activeOrgId : null);
 
     if (!error && data) {
       setIssues(sortSnags(mapRows(data, currentUserId, myMentionedSnagIds, myRcaSnagIds)));
@@ -404,7 +434,7 @@ export default function IssueListScreen() {
     // load rather than only on app foreground, so merges/status changes
     // made in this session are reflected immediately.
     refreshOpenIssueCount();
-  }, [buildSnagQuery, sortSnags, refreshOpenIssueCount]);
+  }, [buildSnagQuery, sortSnags, refreshOpenIssueCount, fetchAttention]);
 
   // Infinite scroll: fetch the next page with the same filters and append.
   // Offset-based paging can double up a row if something is inserted while
@@ -440,9 +470,10 @@ export default function IssueListScreen() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
       userIdRef.current = user.id;
-      const [statusRaw, scopeRaw] = await Promise.all([
+      const [statusRaw, scopeRaw, assignedRaw] = await Promise.all([
         AsyncStorage.getItem(STATUS_FILTER_STORAGE_PREFIX + user.id),
         AsyncStorage.getItem(SCOPE_FILTER_STORAGE_PREFIX + user.id),
+        AsyncStorage.getItem(ASSIGNED_FILTER_STORAGE_PREFIX + user.id),
       ]);
       if (statusRaw) {
         try {
@@ -455,6 +486,7 @@ export default function IssueListScreen() {
       if (scopeRaw && [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA].some((o) => o.key === scopeRaw)) {
         setScopeFilter(scopeRaw as ScopeFilter);
       }
+      if (assignedRaw === 'true') setAssignedOnly(true);
     });
   }, []);
 
@@ -470,6 +502,17 @@ export default function IssueListScreen() {
     if (!userIdRef.current) return;
     AsyncStorage.setItem(SCOPE_FILTER_STORAGE_PREFIX + userIdRef.current, scopeFilter);
   }, [scopeFilter]);
+
+  useEffect(() => {
+    if (!userIdRef.current) return;
+    AsyncStorage.setItem(ASSIGNED_FILTER_STORAGE_PREFIX + userIdRef.current, String(assignedOnly));
+  }, [assignedOnly]);
+
+  // Switching to an unassigned scope clears Assigned rather than quietly
+  // returning nothing — the two are asking for opposite things.
+  useEffect(() => {
+    if (scopeIsUnassigned && assignedOnly) setAssignedOnly(false);
+  }, [scopeIsUnassigned, assignedOnly]);
 
   useEffect(() => {
     setLoading(true);
@@ -593,6 +636,14 @@ export default function IssueListScreen() {
                 onPress={() => setOpenDropdown('site')}
               />
             )}
+            {hasOrg && !scopeIsUnassigned && (
+              <FilterBarButton
+                label="Assigned"
+                active={assignedOnly}
+                dropdown={false}
+                onPress={() => setAssignedOnly((prev) => !prev)}
+              />
+            )}
             <FilterBarButton
               label="Trending"
               active={sortMode === 'trending'}
@@ -712,6 +763,36 @@ export default function IssueListScreen() {
             styles.listContent,
             { paddingBottom: insets.bottom + 16 },
           ]}
+          ListHeaderComponent={
+            attention.length > 0 && !selectMode ? (
+              <View style={styles.attentionBlock}>
+                <View style={styles.attentionHeader}>
+                  <Icon name="alert-circle" size="sm" color={Colors.serious} />
+                  <Text style={styles.attentionTitle}>
+                    Needs attention · {attention.length} open {attention.length === 1 ? 'injury' : 'injuries'}
+                  </Text>
+                </View>
+                {/* Horizontal, so it costs one row of height whatever the count
+                    — the grid below it stays the answer to "what's newest". */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.attentionRow}
+                >
+                  {attention.map((snag) => (
+                    <View key={snag.id} style={styles.attentionCard}>
+                      <IssueCard
+                        issue={snag}
+                        compact
+                        photoUrl={snag.photo_path ? photoUrls[snag.photo_path] ?? null : null}
+                        onPress={() => handleCardPress(snag)}
+                      />
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null
+          }
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           removeClippedSubviews
           windowSize={5}
@@ -1377,6 +1458,32 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: Spacing.lg,
+  },
+  // The serious lane's own identity colour — this strip is the injury lane
+  // speaking, not a generic notice.
+  attentionBlock: {
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  attentionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  attentionTitle: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.serious,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  attentionRow: {
+    gap: Spacing.sm,
+  },
+  // Half the viewport-ish, so a second card is always partly visible and the
+  // strip reads as scrollable rather than as one pinned snag.
+  attentionCard: {
+    width: 200,
   },
   footerSpinner: {
     paddingVertical: Spacing.lg,

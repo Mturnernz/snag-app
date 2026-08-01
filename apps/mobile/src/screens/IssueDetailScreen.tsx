@@ -13,8 +13,8 @@ import {
   Dimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  LayoutChangeEvent,
   Linking,
-  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,8 +31,8 @@ import {
   addComment, getSnagPhotoUrl, getInvestigationState, InvestigationState,
   getSiteAssignees, SiteAssignee, unmergeSnag,
   getSnagAuditLog, describeAuditAction, AuditLogEntry, exportInvestigation, escalateSnag,
-  getSnagRca, SnagRca, RcaStatus, getSnagDebriefs, SnagDebrief,
-  seriousResolveGate, ResolveGateCondition,
+  getSnagRca, SnagRca, RcaStatus, isRcaClosed, getSnagDebriefs, SnagDebrief,
+  seriousResolveGate, ResolveGateCondition, investigationModeLocked,
 } from '../lib/supabase';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -47,6 +47,7 @@ import NotifiableEventPanel from '../components/NotifiableEventPanel';
 import CorrectiveActionsPanel from '../components/CorrectiveActionsPanel';
 import RcaPanel from '../components/RcaPanel';
 import DebriefPanel from '../components/DebriefPanel';
+import TriageSheet from '../components/TriageSheet';
 import StepCard, { StepStatus } from '../components/StepCard';
 import NextStepCard, { NextStep } from '../components/NextStepCard';
 import ScreenHeader from '../components/ScreenHeader';
@@ -57,6 +58,8 @@ import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useBadge } from '../context/BadgeContext';
 import { useToast } from '../hooks/useToast';
+import { showAlert } from '../lib/alert';
+import { stepScrollOffset } from '../lib/stepScroll';
 
 type Route = RouteProp<RootStackParamList, 'IssueDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -289,6 +292,10 @@ export default function IssueDetailScreen() {
   const [siteAssignees, setSiteAssignees] = useState<SiteAssignee[]>([]);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [escalating, setEscalating] = useState(false);
+  // Set the moment triage is answered, so the sheet closes on the answer rather
+  // than on the re-fetch that follows it — otherwise it sits there through a
+  // round trip it has already finished with.
+  const [triaged, setTriaged] = useState(false);
 
   // System activity trail — audit_log entries for this snag, shown alongside
   // comments so every status/owner/category change is timestamped and
@@ -300,6 +307,9 @@ export default function IssueDetailScreen() {
   // viewing their own cross-org report) sees status + details only.
   const isOrgMember = Boolean(userProfile?.org_id && issue && userProfile.org_id === issue.org_id);
   const canEdit = isOrgMember && (userProfile?.role === 'officer_admin' || userProfile?.role === 'supervisor');
+  // Only an officer admin can overturn a locked investigation mode — a
+  // supervisor can allocate one but not re-decide it once work has started.
+  const isOfficerAdmin = isOrgMember && userProfile?.role === 'officer_admin';
   const isSerious = issue?.lane === 'serious';
 
   // Comments and system activity entries merged into one chronological feed.
@@ -347,8 +357,8 @@ export default function IssueDetailScreen() {
     }, [issueId])
   );
 
-  // Serious-lane investigation state powers the progress panel and the
-  // resolve gate. Only fetched for editors of a serious snag.
+  // Directing the investigation: allocating it, accepting a document, waiving,
+  // creating corrective actions, exporting. Supervisors and admins.
   const canManageInvestigation = isSerious && canEdit;
 
   // Escalation is reporter-only, enforced server-side (escalate_snag checks
@@ -363,10 +373,15 @@ export default function IssueDetailScreen() {
     !issue.escalated_at
   );
 
+  // Fetched for any org member on a serious snag, not just editors. All five
+  // investigation tables are SELECT-open to the org by RLS (writes are RPC-only),
+  // and the state is what tells us who the lead investigator is — gating the
+  // read on being a supervisor meant the one person it describes could never
+  // load it.
   const fetchInvestigation = useCallback(async () => {
-    if (!canManageInvestigation) { setInvestigation(null); return; }
+    if (!isSerious || !isOrgMember) { setInvestigation(null); return; }
     setInvestigation(await getInvestigationState(issueId));
-  }, [canManageInvestigation, issueId]);
+  }, [isSerious, isOrgMember, issueId]);
 
   useEffect(() => { fetchInvestigation(); }, [fetchInvestigation]);
 
@@ -408,11 +423,61 @@ export default function IssueDetailScreen() {
     fetchInvestigation(); fetchIssue(); fetchActivity();
   }, [fetchInvestigation, fetchIssue, fetchActivity]);
 
+  // Where each step card sits, so opening one can bring it into view.
+  //
+  // Expanding a card is invisible on its own: the target is below the hero
+  // photo, the description, the meta block, the Next-step card itself and one
+  // or two other steps, so the CTA that named it looked like a dead button.
+  // apps/web has no equivalent of this because its CTA is an anchor into a
+  // <details id> and the browser scrolls; React Native has no fragment nav.
+  const scrollRef = useRef<ScrollView>(null);
+  /** Offset of the content wrapper inside the ScrollView — i.e. the height of
+   *  the hero photo, which is 0 on a snag with no photo. `null` until measured,
+   *  which is not the same as 0: see scrollToStep. */
+  const contentY = useRef<number | null>(null);
+  /** Offset of each card inside that wrapper. Populated by onLayout. */
+  const stepY = useRef<Partial<Record<StepKey, number>>>({});
+  /** A step asked for before everything it needs had been measured. */
+  const pendingScroll = useRef<StepKey | null>(null);
+
+  /** Scrolls only once *both* coordinates are known, and parks the request
+   *  until then otherwise.
+   *
+   *  Both halves really can arrive late, in either order. A deep-linked arrival
+   *  runs before first layout; the investigation cards don't mount at all until
+   *  their data loads; and onLayout fires bottom-up, so a card routinely
+   *  measures before its own wrapper does. Treating an unmeasured wrapper as 0
+   *  would land a photo's height short of the card — right on every snag
+   *  without a photo, wrong on every snag with one. */
+  const scrollToStep = useCallback((key: StepKey) => {
+    const y = stepY.current[key];
+    if (y == null || contentY.current == null) { pendingScroll.current = key; return; }
+    pendingScroll.current = null;
+    scrollRef.current?.scrollTo({ y: stepScrollOffset(contentY.current, y), animated: true });
+  }, []);
+
+  /** Records a card's position, and honours a scroll that was waiting on it. */
+  const measureStep = useCallback((key: StepKey) => (e: LayoutChangeEvent) => {
+    stepY.current[key] = e.nativeEvent.layout.y;
+    if (pendingScroll.current === key) scrollToStep(key);
+  }, [scrollToStep]);
+
+  /** Same, for the wrapper the card offsets are relative to. */
+  const measureContent = useCallback((e: LayoutChangeEvent) => {
+    contentY.current = e.nativeEvent.layout.y;
+    if (pendingScroll.current) scrollToStep(pendingScroll.current);
+  }, [scrollToStep]);
+
   /** Open a step outright rather than toggle it — what NextStepCard needs, so
-   *  its CTA can't close the very thing it just pointed you at. */
+   *  its CTA can't close the very thing it just pointed you at — and scroll to
+   *  it, so the CTA visibly does something.
+   *
+   *  No rAF or timeout before the scroll: expanding a card grows it downwards,
+   *  so the target's own offset doesn't move. Only the cards below it shift. */
   const openStep = useCallback((key: StepKey) => {
     setStepExpanded((prev) => ({ ...prev, [key]: true }));
-  }, []);
+    scrollToStep(key);
+  }, [scrollToStep]);
 
   // A link can point at one section of the snag rather than at the snag. The
   // RCA is the case that forced it: an assignee's notification is about the
@@ -453,8 +518,43 @@ export default function IssueDetailScreen() {
   const handleRcaStatusChange = useCallback((status: StepStatus, summary: string) => setRcaStatus({ status, summary }), []);
   const handleDebriefStatusChange = useCallback((status: StepStatus, summary: string) => setDebriefStatus({ status, summary }), []);
 
+  // Doing the investigation, as opposed to directing it — the split
+  // require_investigation_access draws in SQL, mirrored here so the UI offers
+  // exactly what the server will accept.
+  //
+  // It was `canEdit` alone, which made the lead investigator's own job
+  // invisible to them: 20260729000100 widened the RPCs specifically so an
+  // assigned investigator (any role, including a worker) could run the
+  // checklist, take statements, add evidence, record a cause and attach the
+  // investigation document, and not one of those cards ever rendered for them.
+  const canInvestigate = Boolean(
+    isSerious && isOrgMember && (
+      canEdit ||
+      (investigation?.leadInvestigatorId != null && investigation.leadInvestigatorId === currentUserId) ||
+      (rcaState != null && rcaState.assignedTo === currentUserId && !isRcaClosed(rcaState.status))
+    )
+  );
+
   const notifiableDecided = Boolean(issue?.is_notifiable || issue?.notifiable_marked_at);
   const notifiableStatus: StepStatus = notifiableDecided ? 'done' : 'pending';
+
+  // Untriaged means unallocated: nobody has been given the investigation.
+  //
+  // leadInvestigatorId rather than owner_id, because apply_default_owner fills
+  // owner_id on the way in (the first serious incident owner) without creating
+  // an investigations row — so a snag arrives owned but unallocated, which is
+  // exactly the state triage exists to end.
+  //
+  // Deliberately *not* also "notifiable is undecided", even though triage asks
+  // that too. Deferring the notifiable call is a legitimate answer, and
+  // re-prompting every time the screen re-reads itself would turn "I'm not sure
+  // yet" into a wall. Once allocated, the decision lives on the resolve gate and
+  // the Notifiable card, which already refuse to let the snag close without it.
+  const needsTriage = Boolean(
+    canManageInvestigation && !triaged && investigation && issue &&
+    (issue.status === 'flagged' || issue.status === 'in_progress') &&
+    investigation.leadInvestigatorId == null
+  );
   const notifiableSummary = issue?.is_notifiable
     ? 'Flagged as notifiable'
     : issue?.notifiable_marked_at
@@ -491,6 +591,10 @@ export default function IssueDetailScreen() {
   // isn't done: the gate wants a second supervisor's acceptance, so the header
   // has to distinguish "a file is there" from "somebody signed it off".
   const isDocumentMode = investigation?.mode === 'document';
+  // Whether Manage may still offer the mode choice. Mirrors
+  // assign_investigation's guard so the panel hides a control the server would
+  // refuse, rather than offering one that can only fail.
+  const modeLocked = investigation ? investigationModeLocked(investigation) : false;
   const investigationDocumentStatus: StepStatus =
     investigation?.documentAccepted ? 'done' : investigation?.documentId ? 'in_progress' : 'pending';
   const investigationDocumentSummary =
@@ -573,11 +677,11 @@ export default function IssueDetailScreen() {
   // its CTA opens it, so seeding one open as well showed the same question
   // twice — once as "Decide if this is notifiable / Make the call", and again
   // in an already-open card directly below it. The card and the seeding served
-  // the same audience (canManageInvestigation) and the same purpose, so the
+  // the same audience (canInvestigate) and the same purpose, so the
   // card wins and everything below it starts collapsed.
 
   function handleEscalate() {
-    Alert.alert(
+    showAlert(
       'Flag this as a safety issue?',
       "This tells the supervisors for this site that what you reported is a hazard, not just a niggle. You can only do this once.",
       [
@@ -854,6 +958,7 @@ export default function IssueDetailScreen() {
       />
 
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 80 }}
         keyboardShouldPersistTaps="handled"
@@ -897,7 +1002,12 @@ export default function IssueDetailScreen() {
             photo, pushing every actionable thing below the fold to advertise
             an absence the user already knows about. */}
 
-        <View style={[styles.content, isSerious && styles.contentSerious]}>
+        <View
+          style={[styles.content, isSerious && styles.contentSerious]}
+          // Step offsets are measured inside this wrapper; the hero photo above
+          // it is 280px on a snag with a photo and 0 on one without.
+          onLayout={measureContent}
+        >
           {/* Reference + site */}
           <View style={styles.referenceRow}>
             <Text style={styles.reference}>{issue.reference}</Text>
@@ -992,6 +1102,8 @@ export default function IssueDetailScreen() {
                   owner={issue.owner ?? null}
                   assignees={siteAssignees}
                   investigationMode={investigation?.mode ?? 'snag'}
+                  modeLocked={modeLocked}
+                  canOverrideMode={isOfficerAdmin}
                   resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
                   isPublicSubmission={issue.is_public_submission ?? false}
                   onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
@@ -1010,6 +1122,8 @@ export default function IssueDetailScreen() {
               owner={issue.owner ?? null}
               assignees={siteAssignees}
               investigationMode={investigation?.mode ?? 'snag'}
+              modeLocked={modeLocked}
+              canOverrideMode={isOfficerAdmin}
               resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
               isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
@@ -1056,7 +1170,7 @@ export default function IssueDetailScreen() {
           {/* One answer to "what do I do now", above the fold. The collapsed
               StepCards below are the progress list — each carries its own
               summary, so nothing needs a separate strip to advertise it. */}
-          {canManageInvestigation && (
+          {canInvestigate && (
             <NextStepCard
               step={nextStep}
               onGo={() => openStep(nextStepKey)}
@@ -1065,14 +1179,19 @@ export default function IssueDetailScreen() {
           )}
 
           {/* Notifiable-event decision — ahead of the investigation checklist,
-              since "preserve the scene" below is how the decision gets acted on. */}
-          {canManageInvestigation && (
+              since "preserve the scene" below is how the decision gets acted on.
+              Shown to whoever is running the investigation, not just whoever can
+              answer it: the decision carries a statutory duty the investigator
+              is the one acting on. The panel is already read-only without
+              canEdit, and set_notifiable_flag is supervisor/admin regardless. */}
+          {canInvestigate && (
             <StepCard
               title="Notifiable Event"
               status={notifiableStatus}
               summary={notifiableSummary}
               expanded={stepExpanded.notifiable}
               onToggle={() => toggleStep('notifiable')}
+              onLayout={measureStep('notifiable')}
             >
               <NotifiableEventPanel
                 issueId={issue.id}
@@ -1092,7 +1211,7 @@ export default function IssueDetailScreen() {
               that opened onto a checklist plus three simultaneous add-forms;
               split, each card carries its own summary while collapsed and
               only one task is ever on screen. */}
-          {canManageInvestigation && investigation && (
+          {canInvestigate && investigation && (
             <>
               <StepCard
                 title="Make safe & preserve scene"
@@ -1100,6 +1219,7 @@ export default function IssueDetailScreen() {
                 summary={checklistSummary}
                 expanded={stepExpanded.checklist}
                 onToggle={() => toggleStep('checklist')}
+                onLayout={measureStep('checklist')}
               >
                 <ChecklistPanel
                   issueId={issue.id}
@@ -1114,6 +1234,7 @@ export default function IssueDetailScreen() {
                 summary={witnessSummary}
                 expanded={stepExpanded.witnesses}
                 onToggle={() => toggleStep('witnesses')}
+                onLayout={measureStep('witnesses')}
               >
                 <WitnessesPanel
                   issueId={issue.id}
@@ -1128,6 +1249,7 @@ export default function IssueDetailScreen() {
                 summary={evidenceSummary}
                 expanded={stepExpanded.evidence}
                 onToggle={() => toggleStep('evidence')}
+                onLayout={measureStep('evidence')}
               >
                 <EvidencePanel
                   issueId={issue.id}
@@ -1148,12 +1270,20 @@ export default function IssueDetailScreen() {
                   summary={investigationDocumentSummary}
                   expanded={stepExpanded.investigationDocument}
                   onToggle={() => toggleStep('investigationDocument')}
+                  onLayout={measureStep('investigationDocument')}
                 >
+                  {/* Two different permissions, which is why they are two
+                      props: attaching the document is doing the investigation
+                      (require_investigation_access), accepting it is signing it
+                      off (require_serious_snag). One flag could only ever get
+                      one of them right, and the one it got wrong was the
+                      worker's upload. */}
                   <InvestigationDocumentPanel
                     issueId={issue.id}
                     orgId={issue.org_id}
                     state={investigation}
-                    canEdit={canEdit}
+                    canAttach={canInvestigate}
+                    canAccept={canEdit}
                     orgMembers={orgMembers}
                     onChanged={onInvestigationChanged}
                   />
@@ -1165,6 +1295,7 @@ export default function IssueDetailScreen() {
                   summary={rootCauseSummary}
                   expanded={stepExpanded.rootCause}
                   onToggle={() => toggleStep('rootCause')}
+                  onLayout={measureStep('rootCause')}
                 >
                   <RootCausePanel
                     issueId={issue.id}
@@ -1189,6 +1320,7 @@ export default function IssueDetailScreen() {
               summary={correctiveActionsSummary}
               expanded={stepExpanded.correctiveActions}
               onToggle={() => toggleStep('correctiveActions')}
+              onLayout={measureStep('correctiveActions')}
             >
               <CorrectiveActionsPanel
                 issueId={issue.id}
@@ -1212,6 +1344,7 @@ export default function IssueDetailScreen() {
               summary={rcaSummary}
               expanded={stepExpanded.rca}
               onToggle={() => toggleStep('rca')}
+              onLayout={measureStep('rca')}
             >
               <RcaPanel
                 issueId={issue.id}
@@ -1238,6 +1371,7 @@ export default function IssueDetailScreen() {
               summary={debriefSummary}
               expanded={stepExpanded.debrief}
               onToggle={() => toggleStep('debrief')}
+              onLayout={measureStep('debrief')}
             >
               <DebriefPanel
                 issueId={issue.id}
@@ -1425,6 +1559,27 @@ export default function IssueDetailScreen() {
         onConfirm={handleUnmerge}
         onCancel={() => setChildToRemove(null)}
       />
+
+      {/* Triage — the first thing a supervisor meets on an unallocated serious
+          snag, and deliberately not dismissible. Everything below it in the
+          screen assumes somebody is running this investigation. */}
+      {needsTriage && issue && investigation && (
+        <TriageSheet
+          visible
+          snagId={issue.id}
+          reference={issue.reference}
+          description={issue.description ?? null}
+          assignees={siteAssignees}
+          currentOwnerId={issue.owner?.id ?? null}
+          currentMode={investigation.mode}
+          onDone={() => {
+            setTriaged(true);
+            fetchIssue();
+            fetchInvestigation();
+            fetchActivity();
+          }}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }

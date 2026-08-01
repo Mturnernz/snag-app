@@ -9,6 +9,11 @@ export interface IncidentDraft {
   /** Local file URIs carried over from the niggle form's photo picker when
    *  the reporter switches to "Report a Serious Incident" mid-report. */
   photoUris: string[];
+  /** Where this happened. Carried through the draft so the Review screen can
+   *  show it — on a formal H&S record, which site it belongs to is part of
+   *  what someone is being asked to confirm. */
+  siteId: string | null;
+  siteName: string | null;
 }
 
 const INITIAL_DRAFT: IncidentDraft = {
@@ -17,6 +22,8 @@ const INITIAL_DRAFT: IncidentDraft = {
   severity: 'moderate',
   photoCount: 0,
   photoUris: [],
+  siteId: null,
+  siteName: null,
 };
 
 type SubmitFn = () => Promise<{ error?: string; snagId?: string; reference?: string }>;

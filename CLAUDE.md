@@ -141,6 +141,27 @@ Photos/evidence go to the `snag-photos` and `snag-evidence` Storage buckets (pri
 org-folder-scoped via RLS), not a public `issue-photos` bucket. Org-wide documents live in
 `org-documents` / `org_documents` — see "The document library" below.
 
+## Which site a report goes to
+
+The reporter picks it, on both mobile report flows (`SitePicker`, shown only when they have
+more than one site to choose between), and the choice is remembered per org in AsyncStorage
+(`src/lib/reportSite.ts`) so the form opens where they last filed.
+
+It is worth knowing what this replaced, because the failure was silent. `getDefaultSiteId` took
+`my_member_site_ids()[0]`, and that RPC has no `ORDER BY` — so a member of three sites sent
+every report to whichever row Postgres happened to return first, forever, with nothing in the UI
+naming the site at all. It looked like a permissions problem to the person hitting it.
+
+- **The list is about relevance, not permission.** `create_snag` accepts any site in the org, but
+  `getReportableSites` offers a reporter their own site memberships — falling back to every site
+  in the org for someone with none, typically an admin. Don't widen it to "every site" for
+  workers; work-group scoping (`work_group_sites`) assumes the reporter is at the site.
+- **The niggle form's work-group picker follows the selected site**, since custom groups can be
+  site-scoped. Changing site mid-report changes which groups are on offer, which is correct.
+- The serious lane carries the site on `IncidentDraft` so the Review screen can show it, and its
+  submit handler still resolves a site late if one was never loaded — that path predates the
+  picker and is the safety net for a report submitted before the list arrived.
+
 ## Who owns a serious incident
 
 `serious_incident_owners` (org_id, profile_id) is the set of supervisors an organisation

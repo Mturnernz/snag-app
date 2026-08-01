@@ -258,6 +258,26 @@ export async function joinOrgViaCode(code: string, name: string) {
 // create_snag accepts any site in the org, so this list is about relevance
 // rather than permission — it deliberately doesn't offer a worker sites they
 // aren't on. Ordered by name so the fallback choice is at least stable.
+// The site this person last actually filed a report into, in this org — what
+// the picker defaults to. Server-side rather than a local preference so it
+// holds on a new device and on the web build, and so it follows what was
+// reported rather than what was merely tapped.
+//
+// Null when they've never reported here, and null offline; resolveReportSite
+// falls back to the cached value and then to the first site by name.
+export async function getLastReportedSiteId(orgId: string): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from('snags')
+    .select('site_id')
+    .eq('reporter_id', user.id)
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  return (data?.[0]?.site_id as string | undefined) ?? null;
+}
+
 export async function getReportableSites(orgId: string): Promise<ReportSite[]> {
   const { data: memberSiteIds } = await supabase.rpc('my_member_site_ids');
   const query = supabase.from('sites').select('id, name');

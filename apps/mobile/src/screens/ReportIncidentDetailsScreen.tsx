@@ -6,9 +6,11 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { SnagKind, SnagSeverity, SEVERITY_LABELS, KIND_LABELS, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import { supabase, getReportableSites, createSnag, resolveActiveOrg } from '../lib/supabase';
+import {
+  supabase, getReportableSites, getLastReportedSiteId, createSnag, resolveActiveOrg,
+} from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { ReportSite, resolveReportSite, setLastReportSiteId } from '../lib/reportSite';
+import { ReportSite, resolveReportSite, cacheReportSiteId } from '../lib/reportSite';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import ScreenHeader from '../components/ScreenHeader';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
@@ -52,11 +54,14 @@ export default function ReportIncidentDetailsScreen() {
       const org = await resolveActiveOrg();
       setOrgId(org?.orgId ?? null);
       if (!org) return;
-      const available = await getReportableSites(org.orgId);
+      const [available, lastReported] = await Promise.all([
+        getReportableSites(org.orgId),
+        getLastReportedSiteId(org.orgId),
+      ]);
       setSites(available);
       // A site already on the draft wins — coming back from Review must not
       // silently re-pick for someone who already chose.
-      const resolved = await resolveReportSite(org.orgId, available);
+      const resolved = await resolveReportSite(org.orgId, available, lastReported);
       setSite((prev) => prev ?? resolved);
     })();
   }, []);
@@ -64,7 +69,6 @@ export default function ReportIncidentDetailsScreen() {
   function handleSiteChange(next: ReportSite) {
     setSite(next);
     setDraft({ siteId: next.id, siteName: next.name });
-    if (orgId) setLastReportSiteId(orgId, next.id);
   }
 
   const touched = description.trim().length > 0;
@@ -106,7 +110,11 @@ export default function ReportIncidentDetailsScreen() {
         // submitted before the site list finished loading, which used to
         // resolve at this point anyway.
         const siteId = chosenSiteId
-          ?? (await resolveReportSite(org.orgId, await getReportableSites(org.orgId)))?.id
+          ?? (await resolveReportSite(
+            org.orgId,
+            await getReportableSites(org.orgId),
+            await getLastReportedSiteId(org.orgId)
+          ))?.id
           ?? null;
         if (!siteId) return { error: 'No site found for your organisation' };
 
@@ -123,6 +131,7 @@ export default function ReportIncidentDetailsScreen() {
         });
 
         if (error) return { error: error.message };
+        cacheReportSiteId(org.orgId, siteId);
         return { snagId: data?.id, reference: data?.reference };
       } catch (err: any) {
         return { error: err.message ?? 'Could not submit incident report.' };

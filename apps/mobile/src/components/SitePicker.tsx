@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { ReportSite } from '../lib/reportSite';
@@ -9,144 +9,139 @@ interface Props {
   sites: ReportSite[];
   value: ReportSite | null;
   onChange: (site: ReportSite) => void;
-  /** The pill's caption. "Reporting from" on the niggle form; the serious
-   *  lane asks about the site of an event rather than the reporter. */
+  /** Field label above the control. */
   label?: string;
 }
 
 /**
- * Which site this report goes to. Deliberately shaped like the org pill it
- * sits under on the report screen — the two answer the same kind of question
- * ("where is this going?") and were both invisible before, though only the org
- * one was ever adjustable.
+ * Which site this report goes to — a dropdown in the form's own field style
+ * (label, bordered control, chevron), not a pill or a bottom sheet: it is one
+ * of the report's fields, and it should read like the ones above and below it.
+ *
+ * The list opens inline under the control rather than as an overlay. React
+ * Native has no anchored-menu primitive, and an absolutely positioned one
+ * inside a ScrollView clips on Android and misplaces itself on the web build —
+ * the form simply grows while the list is open, which costs nothing on a
+ * scrolling form.
  *
  * Rendered by the caller only when there's a choice to make: a reporter on one
- * site has nothing to pick, and a row that can't change anything is noise on a
- * form whose whole point is speed.
+ * site has nothing to pick.
  */
-export default function SitePicker({ sites, value, onChange, label = 'Reporting from' }: Props) {
+export default function SitePicker({ sites, value, onChange, label = 'Site' }: Props) {
   const [open, setOpen] = useState(false);
 
   return (
-    <>
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+
       <TouchableOpacity
-        style={styles.pill}
-        onPress={() => setOpen(true)}
+        style={[styles.control, open && styles.controlOpen]}
+        onPress={() => setOpen((prev) => !prev)}
         activeOpacity={0.7}
         accessibilityRole="button"
-        accessibilityLabel={`${label} ${value?.name ?? 'no site selected'}. Change site.`}
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${label}: ${value?.name ?? 'choose a site'}`}
       >
-        <Icon name="location-outline" size="sm" color={Colors.primary} />
-        <View style={styles.pillText}>
-          <Text style={styles.pillLabel}>{label}</Text>
-          <Text style={styles.pillSite} numberOfLines={1}>{value?.name ?? 'Choose a site'}</Text>
-        </View>
-        <View style={styles.pillChangeRow}>
-          <Text style={styles.pillChange}>Change</Text>
-          <Icon name="chevron-down" size="sm" color={Colors.primary} />
-        </View>
+        <Icon name="location-outline" size="sm" color={Colors.textMuted} />
+        <Text style={[styles.controlText, !value && styles.placeholder]} numberOfLines={1}>
+          {value?.name ?? 'Choose a site'}
+        </Text>
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
       </TouchableOpacity>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setOpen(false)}>
-          <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Which site?</Text>
-            <Text style={styles.modalHint}>This report goes to the team at the site you pick.</Text>
-            {sites.map((site) => (
+      {open && (
+        <View style={styles.menu}>
+          {sites.map((site) => {
+            const selected = site.id === value?.id;
+            return (
               <TouchableOpacity
                 key={site.id}
-                style={styles.option}
+                style={[styles.option, selected && styles.optionSelected]}
                 onPress={() => { setOpen(false); onChange(site); }}
                 activeOpacity={0.7}
                 accessibilityRole="radio"
-                accessibilityState={{ selected: site.id === value?.id }}
+                accessibilityState={{ selected }}
               >
-                <Text style={styles.optionName}>{site.name}</Text>
-                {site.id === value?.id && <Icon name="checkmark" size="md" color={Colors.primary} />}
+                <Text style={[styles.optionText, selected && styles.optionTextSelected]} numberOfLines={1}>
+                  {site.name}
+                </Text>
+                {selected && <Icon name="checkmark" size="sm" color={Colors.primary} />}
               </TouchableOpacity>
-            ))}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-    </>
+            );
+          })}
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  pill: {
+  field: {
+    gap: Spacing.sm,
+  },
+  label: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  control: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
     minHeight: MIN_TOUCH_TARGET,
     backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
+    borderRadius: Radius.input,
     borderWidth: 1,
     borderColor: Colors.border,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  pillText: {
-    flex: 1,
-    gap: 1,
-    alignItems: 'center',
+  // Open: the control and the list below it read as one surface.
+  controlOpen: {
+    borderColor: Colors.primary,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
   },
-  pillLabel: {
-    fontSize: Typography.xs,
-    color: Colors.textMuted,
-    textAlign: 'center',
-  },
-  pillSite: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  pillChangeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  pillChange: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.primary,
-  },
-
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.card,
-    borderTopRightRadius: Radius.card,
-    padding: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  modalTitle: {
-    fontSize: Typography.lg,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
-  },
-  modalHint: {
-    fontSize: Typography.sm,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.sm,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.sm,
-    borderRadius: Radius.button,
-    minHeight: MIN_TOUCH_TARGET,
-  },
-  optionName: {
+  controlText: {
     flex: 1,
     fontSize: Typography.base,
     fontWeight: Typography.medium,
     color: Colors.textPrimary,
+  },
+  placeholder: {
+    fontWeight: Typography.regular,
+    color: Colors.textMuted,
+  },
+  menu: {
+    marginTop: -Spacing.sm,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: Colors.primary,
+    borderBottomLeftRadius: Radius.input,
+    borderBottomRightRadius: Radius.input,
+    overflow: 'hidden',
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  optionSelected: {
+    backgroundColor: Colors.primaryLight,
+  },
+  optionText: {
+    flex: 1,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  optionTextSelected: {
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
   },
 });

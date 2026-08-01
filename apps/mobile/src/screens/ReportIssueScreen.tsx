@@ -24,14 +24,14 @@ import {
 } from '../types';
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
-  supabase, getProfile, getReportableSites, createSnag, createPublicSnag, getMemberships, setActiveOrg,
-  resolveActiveOrg, Membership, getWorkGroupsWithDetail, WorkGroupDetail,
+  supabase, getProfile, getReportableSites, getLastReportedSiteId, createSnag, createPublicSnag,
+  getMemberships, setActiveOrg, resolveActiveOrg, Membership, getWorkGroupsWithDetail, WorkGroupDetail,
 } from '../lib/supabase';
 import { useReportTarget } from '../context/ReportTargetContext';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
 import { showAlert } from '../lib/alert';
-import { ReportSite, resolveReportSite, setLastReportSiteId } from '../lib/reportSite';
+import { ReportSite, resolveReportSite, cacheReportSiteId } from '../lib/reportSite';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
@@ -100,19 +100,15 @@ export default function ReportIssueScreen() {
   const reportSiteId = site?.id ?? null;
 
   // The sites this reporter can file into, and which of them the form opens
-  // on: whichever they last used in this org, else the first by name.
+  // on: the site they last reported into here, else the first by name.
   async function loadSites(forOrgId: string | null) {
     if (!forOrgId) { setSites([]); setSite(null); return; }
-    const available = await getReportableSites(forOrgId);
+    const [available, lastReported] = await Promise.all([
+      getReportableSites(forOrgId),
+      getLastReportedSiteId(forOrgId),
+    ]);
     setSites(available);
-    setSite(await resolveReportSite(forOrgId, available));
-  }
-
-  function handleSiteChange(next: ReportSite) {
-    setSite(next);
-    // Remembered on pick rather than on submit: an abandoned report still
-    // says something about where this person works.
-    if (orgId) setLastReportSiteId(orgId, next.id);
+    setSite(await resolveReportSite(forOrgId, available, lastReported));
   }
 
   // Work groups only apply to member (not public) submissions, and are
@@ -248,6 +244,10 @@ export default function ReportIssueScreen() {
             photoPathPrefix: orgId,
             params: { kind, description: description.trim(), severity: null, siteId: reportSiteId, workGroupId },
           });
+          // Cached now rather than when the queue drains: this is the offline
+          // stand-in for getLastReportedSiteId, which can't answer until the
+          // snag actually exists.
+          cacheReportSiteId(orgId, reportSiteId);
           setSubmittedTo(destinationLabel);
         }
         setReference(null);
@@ -285,6 +285,7 @@ export default function ReportIssueScreen() {
           workGroupId,
         });
         if (error) throw error;
+        cacheReportSiteId(orgId, reportSiteId);
         setSubmittedTo(destinationLabel);
         setReference(data?.reference ?? null);
       }
@@ -409,7 +410,7 @@ export default function ReportIssueScreen() {
 
         {/* Site — only when there's more than one to choose between. */}
         {!isPublicSubmission && sites.length > 1 && (
-          <SitePicker sites={sites} value={site} onChange={handleSiteChange} />
+          <SitePicker sites={sites} value={site} onChange={setSite} />
         )}
 
         <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} />
@@ -559,9 +560,14 @@ export default function ReportIssueScreen() {
             <Text style={styles.modalTitle}>Select a work group</Text>
             <Text style={styles.modalHint}>Which team should handle this?</Text>
 
+            {/* The default group's name is the reserved literal 'Submit'
+                (create_work_group seeds it and refuses the name to anyone
+                else), so rendering it read as the form's own submit button
+                rather than the routing choice it is. Fixed copy instead: this
+                is the unrouted queue, whatever the row is called. */}
             {defaultGroup && (
               <Button
-                label={defaultGroup.name}
+                label="Assign to the queue"
                 onPress={() => doSubmit(defaultGroup.id)}
                 loading={submitting}
                 fullWidth

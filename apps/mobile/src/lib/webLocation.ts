@@ -25,6 +25,10 @@ import { Platform } from 'react-native';
  *   to survive the round trip or the link was pointless.
  * - `?report=<token>` — the QR public-report landing, read on boot by
  *   `getQrReportToken`. Its anonymous sign-in fires an auth event of its own.
+ * - `?join=<code>` — the org join QR landing, read on boot by
+ *   `getInitialJoinCode`. Someone scanning a "scan to join" poster signs up or
+ *   signs in on the way through, so it has to survive both transitions or the
+ *   poster drops them on the default tab of an org they haven't joined.
  *
  * No-ops off web: on native there is no address bar, `history` doesn't exist,
  * and a cold launch has no initial URL to be stale.
@@ -44,6 +48,8 @@ export function resetWebPathIfStale(): void {
 export function isPreservedUrl(pathname: string, search: string): boolean {
   // A specific snag, not the `/snags` list tab: only the former names a record.
   if (/^\/snags\/[^/]+/.test(pathname)) return true;
-  if (new URLSearchParams(search).has('report')) return true;
+  const params = new URLSearchParams(search);
+  if (params.has('report')) return true;
+  if (params.has('join')) return true;
   return false;
 }

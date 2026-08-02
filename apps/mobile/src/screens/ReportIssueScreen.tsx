@@ -25,17 +25,19 @@ import {
 } from '../types';
 import { Colors, Spacing, Typography, IconSize, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
-  supabase, getProfile, getDefaultSiteId, createSnag, createPublicSnag, getMemberships, setActiveOrg,
-  resolveActiveOrg, Membership, getWorkGroupsWithDetail, WorkGroupDetail,
+  supabase, getProfile, getReportableSites, getLastReportedSiteId, createSnag, createPublicSnag,
+  getMemberships, setActiveOrg, resolveActiveOrg, Membership, getWorkGroupsWithDetail, WorkGroupDetail,
 } from '../lib/supabase';
 import { useReportTarget } from '../context/ReportTargetContext';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
 import { showAlert } from '../lib/alert';
+import { ReportSite, resolveReportSite, cacheReportSiteId } from '../lib/reportSite';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
+import SitePicker from '../components/SitePicker';
 import ScreenEntrance from '../components/ScreenEntrance';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -97,9 +99,23 @@ export default function ReportIssueScreen() {
   const [switchingOrg, setSwitchingOrg] = useState(false);
   const [workGroups, setWorkGroups] = useState<WorkGroupDetail[]>([]);
   const [showGroupPicker, setShowGroupPicker] = useState(false);
-  const [reportSiteId, setReportSiteId] = useState<string | null>(null);
+  const [sites, setSites] = useState<ReportSite[]>([]);
+  const [site, setSite] = useState<ReportSite | null>(null);
+  const reportSiteId = site?.id ?? null;
   // The custom group this reporter last submitted to, in this org.
   const [lastGroupId, setLastGroupId] = useState<string | null>(null);
+
+  // The sites this reporter can file into, and which of them the form opens
+  // on: the site they last reported into here, else the first by name.
+  async function loadSites(forOrgId: string | null) {
+    if (!forOrgId) { setSites([]); setSite(null); return; }
+    const [available, lastReported] = await Promise.all([
+      getReportableSites(forOrgId),
+      getLastReportedSiteId(forOrgId),
+    ]);
+    setSites(available);
+    setSite(await resolveReportSite(forOrgId, available, lastReported));
+  }
 
   // Work groups only apply to member (not public) submissions, and are
   // scoped to whichever org is currently active — refetched whenever that
@@ -135,7 +151,7 @@ export default function ReportIssueScreen() {
         setMemberships((await getMemberships()).filter((m) => m.org_active));
         const profile = await getProfile(user.id);
         setHasProfileName(Boolean(profile?.name));
-        setReportSiteId(org ? await getDefaultSiteId(org.orgId) : null);
+        await loadSites(org?.orgId ?? null);
         await loadWorkGroups(Boolean(org));
         await loadLastGroup(user.id, org?.orgId ?? null);
       })();
@@ -154,8 +170,11 @@ export default function ReportIssueScreen() {
         setOrgId(profile?.org_id ?? null);
         setOrgName(profile?.organisation?.name ?? null);
         setMemberships((await getMemberships()).filter((m) => m.org_active));
-        setReportSiteId(profile?.org_id ? await getDefaultSiteId(profile.org_id) : null);
+        await loadSites(profile?.org_id ?? null);
         await loadWorkGroups(Boolean(profile?.org_id));
+        // Work groups belong to an organisation, so the remembered one has to
+        // be re-read for the org just switched to rather than carried over.
+        await loadLastGroup(user.id, profile?.org_id ?? null);
       }
     } catch (err: any) {
       showAlert('Error', err.message ?? 'Could not switch organisation.');
@@ -165,6 +184,10 @@ export default function ReportIssueScreen() {
   }
 
   const isPublicSubmission = target !== null;
+  // What the confirmation says the report went to. The site is named because
+  // it's now a choice — and because "which site did that land on?" was
+  // unanswerable from anywhere in the app before it was one.
+  const destinationLabel = site && orgName ? `${orgName} · ${site.name}` : orgName;
   // Members upload photos into their org's folder; public submissions go into
   // the reporter's own user folder (each has a matching storage RLS policy).
   const photoPathPrefix = isPublicSubmission ? userId : orgId;
@@ -253,7 +276,11 @@ export default function ReportIssueScreen() {
             photoPathPrefix: orgId,
             params: { kind, description: description.trim(), severity: null, siteId: reportSiteId, workGroupId },
           });
-          setSubmittedTo(orgName);
+          // Cached now rather than when the queue drains: this is the offline
+          // stand-in for getLastReportedSiteId, which can't answer until the
+          // snag actually exists.
+          cacheReportSiteId(orgId, reportSiteId);
+          setSubmittedTo(destinationLabel);
         }
         setReference(null);
         setQueuedOffline(true);
@@ -277,9 +304,7 @@ export default function ReportIssueScreen() {
         setReference(data?.reference ?? null);
       } else {
         if (!orgId) throw new Error('No organisation found');
-
-        const siteId = await getDefaultSiteId(orgId);
-        if (!siteId) throw new Error('No site found for your organisation');
+        if (!reportSiteId) throw new Error('No site found for your organisation');
 
         const { data, error } = await createSnag({
           kind,
@@ -288,11 +313,12 @@ export default function ReportIssueScreen() {
           photoPaths,
           latitude: null,
           longitude: null,
-          siteId,
+          siteId: reportSiteId,
           workGroupId,
         });
         if (error) throw error;
-        setSubmittedTo(orgName);
+        cacheReportSiteId(orgId, reportSiteId);
+        setSubmittedTo(destinationLabel);
         setReference(data?.reference ?? null);
       }
 
@@ -412,6 +438,11 @@ export default function ReportIssueScreen() {
               </View>
             ) : null}
           </TouchableOpacity>
+        )}
+
+        {/* Site — only when there's more than one to choose between. */}
+        {!isPublicSubmission && sites.length > 1 && (
+          <SitePicker sites={sites} value={site} onChange={setSite} />
         )}
 
         <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} />
@@ -561,9 +592,14 @@ export default function ReportIssueScreen() {
             <Text style={styles.modalTitle}>Select a work group</Text>
             <Text style={styles.modalHint}>Which team should handle this?</Text>
 
+            {/* The default group's name is the reserved literal 'Submit'
+                (create_work_group seeds it and refuses the name to anyone
+                else), so rendering it read as the form's own submit button
+                rather than the routing choice it is. Fixed copy instead: this
+                is the unrouted queue, whatever the row is called. */}
             {defaultGroup && (
               <Button
-                label={defaultGroup.name}
+                label="Assign to the queue"
                 onPress={() => doSubmit(defaultGroup.id)}
                 loading={submitting}
                 fullWidth

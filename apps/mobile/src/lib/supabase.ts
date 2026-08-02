@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import * as queries from '@snag/supabase-queries';
 import { readForUpload } from './uploadBody';
 import { withDeadline } from './deadline';
+import { ReportSite } from './reportSite';
 import {
   Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
   ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction,
@@ -237,9 +238,44 @@ export interface OrgJoinPreview {
   org_name: string;
 }
 
-export async function getOrgByJoinCode(code: string) {
-  const { data, error } = await supabase.rpc('get_org_by_join_code', { p_code: code }).single();
-  return { data: data as OrgJoinPreview | null, error };
+export interface JoinCodeLookup {
+  org: OrgJoinPreview | null;
+  /** The exact string that matched, to hand to joinOrgViaCode — see the case
+   *  retry below. Null when nothing matched. */
+  code: string | null;
+  /** The call itself failed (permission, network, server) rather than the code
+   *  simply not existing. The two need different words: collapsing them is how
+   *  a missing anon grant on get_org_by_join_code read to every new user as
+   *  "that code is invalid" for three weeks. */
+  failed: boolean;
+}
+
+export async function getOrgByJoinCode(code: string): Promise<JoinCodeLookup> {
+  // Codes are compared as opaque strings server-side, and the two live formats
+  // differ in case: the current charset is uppercase, while orgs that haven't
+  // regenerated since 20260711140000 still carry 10-char lowercase hex. The
+  // manual-entry field uppercases as you type, which is right for the current
+  // format and made a legacy code unenterable — so try what was typed or
+  // scanned, then both cases. Whichever matched is what we return;
+  // join_org_via_code has to be given the same exact string.
+  const typed = code.trim();
+  const attempts = [typed, typed.toUpperCase(), typed.toLowerCase()]
+    .filter((v, i, all) => all.indexOf(v) === i);
+
+  for (const attempt of attempts) {
+    // maybeSingle, not single: `single` turns "no rows" into an error object,
+    // which makes an unknown code indistinguishable from a failed call.
+    const { data, error } = await supabase
+      .rpc('get_org_by_join_code', { p_code: attempt })
+      .maybeSingle();
+    if (error) {
+      console.error('Join code lookup failed', error);
+      return { org: null, code: null, failed: true };
+    }
+    if (data) return { org: data as OrgJoinPreview, code: attempt, failed: false };
+  }
+
+  return { org: null, code: null, failed: false };
 }
 
 export async function joinOrgViaCode(code: string, name: string) {
@@ -247,23 +283,43 @@ export async function joinOrgViaCode(code: string, name: string) {
   return { error };
 }
 
-// A real site picker is a Phase 4 feature (multi-site isn't in this pass's
-// scope). Reports still need a valid site_id, so resolve the user's first
-// site membership — falling back to the org's first site if they have none —
-// rather than blocking reporting on a UI that doesn't exist yet.
-export async function getDefaultSiteId(orgId: string): Promise<string | null> {
-  const { data: memberSiteIds } = await supabase.rpc('my_member_site_ids');
-  if (memberSiteIds && memberSiteIds.length > 0) {
-    return memberSiteIds[0] as string;
-  }
-
-  const { data: orgSites } = await supabase
-    .from('sites')
-    .select('id')
+// The sites a reporter may file into, named, for the report screens' picker:
+// their own site memberships, or — for someone who has none, typically an
+// admin — every site in the org. That second branch is the long-standing
+// fallback; the first used to be `my_member_site_ids()[0]` with no picker and
+// no ORDER BY behind it, which is how a member of three sites reported into
+// one of them forever.
+//
+// create_snag accepts any site in the org, so this list is about relevance
+// rather than permission — it deliberately doesn't offer a worker sites they
+// aren't on. Ordered by name so the fallback choice is at least stable.
+// The site this person last actually filed a report into, in this org — what
+// the picker defaults to. Server-side rather than a local preference so it
+// holds on a new device and on the web build, and so it follows what was
+// reported rather than what was merely tapped.
+//
+// Null when they've never reported here, and null offline; resolveReportSite
+// falls back to the cached value and then to the first site by name.
+export async function getLastReportedSiteId(orgId: string): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from('snags')
+    .select('site_id')
+    .eq('reporter_id', user.id)
     .eq('org_id', orgId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(1);
-  return orgSites?.[0]?.id ?? null;
+  return (data?.[0]?.site_id as string | undefined) ?? null;
+}
+
+export async function getReportableSites(orgId: string): Promise<ReportSite[]> {
+  const { data: memberSiteIds } = await supabase.rpc('my_member_site_ids');
+  const query = supabase.from('sites').select('id, name');
+  const { data } = memberSiteIds && memberSiteIds.length > 0
+    ? await query.in('id', memberSiteIds as string[]).order('name')
+    : await query.eq('org_id', orgId).order('name');
+  return (data ?? []) as ReportSite[];
 }
 
 // ─── Admin helpers ────────────────────────────────────────────────────────────

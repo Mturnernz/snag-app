@@ -3,10 +3,13 @@ import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getOrgByJoinCode, joinOrgViaCode, getMemberships, setActiveOrg, OrgJoinPreview } from '../lib/supabase';
+import { parseScannedJoinCode } from '../lib/joinLink';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Icon from '../components/Icon';
+
+const LOOKUP_FAILED = "We couldn't check that code just now. Check your connection and try again.";
 
 interface Props {
   onComplete: () => void;
@@ -50,33 +53,37 @@ export default function ScanJoinCodeScreen({
   const [manualCode, setManualCode] = useState('');
   const [manualSubmitting, setManualSubmitting] = useState(false);
 
-  // Resume-a-scan mode: the code was captured on the login page; look it up
-  // and jump straight to the join step. If the name was already collected
-  // too (the sign-up stepper), join immediately instead of asking again.
+  // Resume mode: the code came from the login page's scan, or from the
+  // `?join=` link on a poster. Look it up and jump straight to the join step —
+  // or, if the name was already collected too (the sign-up stepper), join
+  // immediately instead of asking again.
   useEffect(() => {
     if (!initialCode) return;
     (async () => {
-      const { data: org, error: lookupError } = await getOrgByJoinCode(initialCode);
-      if (lookupError || !org) {
+      const { org, code: matched, failed } = await getOrgByJoinCode(initialCode);
+      if (failed) {
+        setError(LOOKUP_FAILED);
+        return;
+      }
+      if (!org || !matched) {
         setError('That join code is no longer valid — it may have been regenerated. Scan the poster again.');
         return;
       }
       if (initialName && initialName.trim()) {
         setAccepting(true);
-        const { error: joinError } = await joinOrgViaCode(initialCode, initialName.trim());
+        const { error: joinError } = await joinOrgViaCode(matched, initialName.trim());
         setAccepting(false);
         if (joinError) {
           setError(joinError.message ?? 'That join code is invalid or has expired.');
           setName(initialName);
-          setScannedCode(initialCode);
+          setScannedCode(matched);
           setPreview(org);
           return;
         }
         onComplete();
         return;
       }
-      setScannedCode(initialCode);
-      setPreview(org);
+      await routeToOrg(org, matched);
     })();
   }, [initialCode]);
 
@@ -85,12 +92,25 @@ export default function ScanJoinCodeScreen({
   // way. Returns whether resolution succeeded (caller resets its own busy
   // state on failure).
   async function resolveCode(code: string, invalidMessage: string): Promise<boolean> {
-    const { data: org, error: lookupError } = await getOrgByJoinCode(code);
-    if (lookupError || !org) {
+    const { org, code: matched, failed } = await getOrgByJoinCode(code);
+    // A code nobody recognises and a lookup that never completed are different
+    // problems and get different words. Telling someone their perfectly good
+    // code is invalid sends them to re-read the poster; the code isn't the
+    // thing to check.
+    if (failed) {
+      setError(LOOKUP_FAILED);
+      return false;
+    }
+    if (!org || !matched) {
       setError(invalidMessage);
       return false;
     }
 
+    return routeToOrg(org, matched);
+  }
+
+  // What to do once a code has resolved to an org.
+  async function routeToOrg(org: OrgJoinPreview, code: string): Promise<boolean> {
     // Pre-auth mode: report the org back to the login screen.
     if (onCodeScanned) {
       onCodeScanned({ code, orgId: org.org_id, orgName: org.org_name });
@@ -118,12 +138,20 @@ export default function ScanJoinCodeScreen({
     if (scanned) return;
     setScanned(true);
     setError(null);
-    const ok = await resolveCode(data, 'That QR code is not a valid Snag join code.');
+    // The QR encodes a link now; bare-code posters are already on walls, so
+    // parseScannedJoinCode takes either.
+    const code = parseScannedJoinCode(data);
+    if (!code) {
+      setError('That QR code is not a Snag join code.');
+      setScanned(false);
+      return;
+    }
+    const ok = await resolveCode(code, 'That QR code is not a valid Snag join code.');
     if (!ok) setScanned(false);
   }
 
   async function handleManualSubmit() {
-    const code = manualCode.trim().toUpperCase();
+    const code = manualCode.trim();
     if (!code) return;
     setManualSubmitting(true);
     setError(null);
@@ -222,7 +250,9 @@ export default function ScanJoinCodeScreen({
             onChangeText={(t) => setManualCode(t.toUpperCase())}
             autoCapitalize="characters"
             autoCorrect={false}
-            maxLength={8}
+            // 8 for the current format, 10 for the lowercase-hex codes of orgs
+            // that predate it — capping at 8 made those literally untypeable.
+            maxLength={10}
             returnKeyType="done"
             onSubmitEditing={handleManualSubmit}
             autoFocus

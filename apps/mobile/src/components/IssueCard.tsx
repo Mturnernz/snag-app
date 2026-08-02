@@ -8,7 +8,7 @@ import {
 import { Image } from 'expo-image';
 import { SnagGateSummary } from '@snag/supabase-queries';
 import { Snag } from '../types';
-import { Colors, Radius, Spacing, Typography, Shadow, IconSize, CardAlertBorder } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, Shadow, IconSize, CardAlertBorder, CardAlertGlyph } from '../constants/theme';
 import Badge from './Badge';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
@@ -33,6 +33,8 @@ interface Props {
   /** Whether select mode is active — tapping toggles selection instead of navigating. */
   selectable?: boolean;
   selected?: boolean;
+  /** Filed since the reader last left this list — see lib/snagFreshness.ts. */
+  isNew?: boolean;
 }
 
 function timeAgo(dateStr: string): string {
@@ -62,10 +64,10 @@ function thumbnailUrl(url: string): string {
 // Severity takes priority over kind — an injury/critical fixit is still an
 // injury/critical fixit. Everything else (fixit/hazard, minor/moderate)
 // keeps the plain shadow-only card.
-function alertBorderColor(issue: Snag): string | null {
-  if (issue.severity === 'injury') return CardAlertBorder.injury;
-  if (issue.severity === 'critical') return CardAlertBorder.critical;
-  if (issue.kind === 'improvement') return CardAlertBorder.improvement;
+function alertKind(issue: Snag): keyof typeof CardAlertBorder | null {
+  if (issue.severity === 'injury') return 'injury';
+  if (issue.severity === 'critical') return 'critical';
+  if (issue.kind === 'improvement') return 'improvement';
   return null;
 }
 
@@ -114,14 +116,15 @@ function GateBadge({ gate, compact }: { gate: SnagGateSummary; compact?: boolean
   return <Badge label={label} color={Colors.textSecondary} bg={Colors.priority.mediumBg} variant="solid" />;
 }
 
-function IssueCard({ issue, photoUrl, compact, gate, onPress, onLongPress, selectable, selected }: Props) {
+function IssueCard({ issue, photoUrl, compact, gate, onPress, onLongPress, selectable, selected, isNew }: Props) {
   const reporterName = issue.reporter_name || issue.reporter?.name || 'Unknown';
   // owner_name comes off snags_with_details, already selected by both clients'
   // list queries and, until now, displayed by neither.
   const assigneeName = issue.owner_name || issue.owner?.name || null;
   const commentCount = issue.comment_count ?? 0;
   const voteScore = issue.vote_score ?? 0;
-  const borderColor = alertBorderColor(issue);
+  const alert = alertKind(issue);
+  const borderColor = alert && CardAlertBorder[alert];
 
   // TouchableOpacity fires onPress on release even after onLongPress has
   // already fired for the same gesture — suppress that one auto-fired press
@@ -197,11 +200,37 @@ function IssueCard({ issue, photoUrl, compact, gate, onPress, onLongPress, selec
           <StatusBadge status={issue.status} />
         </View>
 
-        {/* Site — bottom-center pill on the photo */}
-        {issue.site_name && (
-          <View style={styles.sitePillRow} pointerEvents="none">
-            <View style={styles.sitePill}>
-              <Text style={styles.sitePillText} numberOfLines={1}>{issue.site_name}</Text>
+        {/* Bottom edge of the photo: severity glyph left, site pill centre,
+            "new since your last visit" right. One row rather than three
+            absolutely-positioned overlays — on a 110px compact card all three
+            land within a few pixels of each other, and a centred site pill
+            wide enough to be worth reading will run straight through both
+            corners. As a row the pill simply shrinks instead. */}
+        {(alert || issue.site_name || isNew) && (
+          <View style={styles.photoFooterRow} pointerEvents="none">
+            <View style={styles.photoFooterSide}>
+              {alert && (
+                <View style={styles.alertGlyph}>
+                  <Icon name={CardAlertGlyph[alert]} size="sm" color={CardAlertBorder[alert]} />
+                </View>
+              )}
+            </View>
+
+            <View style={styles.photoFooterCenter}>
+              {issue.site_name && (
+                <View style={styles.sitePill}>
+                  <Text style={styles.sitePillText} numberOfLines={1}>{issue.site_name}</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={[styles.photoFooterSide, styles.photoFooterSideRight]}>
+              {isNew && (
+                <View style={styles.newBadge}>
+                  <View style={styles.newDot} />
+                  <Text style={styles.newLabel}>NEW</Text>
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -312,23 +341,38 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   mergeOverlay: {
-    backgroundColor: 'rgba(17, 24, 39, 0.75)',
+    backgroundColor: Colors.photoOverlay,
     borderRadius: Radius.chip,
     padding: Spacing.xs,
   },
   photoWrap: {
     position: 'relative',
   },
-  sitePillRow: {
+  photoFooterRow: {
     position: 'absolute',
     bottom: Spacing.sm,
-    left: 0,
-    right: 0,
+    left: Spacing.sm,
+    right: Spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  // Equal-width side slots so the site pill stays centred on the photo
+  // whether or not either corner is occupied.
+  photoFooterSide: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  photoFooterSideRight: {
+    alignItems: 'flex-end',
+  },
+  photoFooterCenter: {
+    flexShrink: 1,
     alignItems: 'center',
   },
   sitePill: {
-    maxWidth: '85%',
-    backgroundColor: 'rgba(17, 24, 39, 0.75)',
+    maxWidth: '100%',
+    backgroundColor: Colors.photoOverlay,
     borderRadius: Radius.chip,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 3,
@@ -337,6 +381,40 @@ const styles = StyleSheet.create({
     fontSize: Typography.xs,
     fontWeight: Typography.semibold,
     color: Colors.white,
+  },
+  // On a light coin rather than the dark scrim the other photo chips use: the
+  // glyph is carrying the border's own colour, and that colour is the point.
+  alertGlyph: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.avatar,
+    padding: Spacing.xs,
+    ...Shadow.sm,
+  },
+  // Neutral by design. The warm hues are all spoken for by lane and severity,
+  // so a "new" pill in any of them reads as a fourth alert on a card that can
+  // already carry three. White on the standard photo scrim has no hue to
+  // mistake for one — and grey-on-scrim, the other way to say "neutral", is
+  // two greys deep and unreadable at 11px.
+  newBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    backgroundColor: Colors.photoOverlay,
+    borderRadius: Radius.chip,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+  },
+  newDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.white,
+  },
+  newLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
+    letterSpacing: 0.4,
   },
   body: {
     padding: Spacing.md,

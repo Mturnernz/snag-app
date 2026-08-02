@@ -359,7 +359,7 @@ function SiteStat({ label, value, alert, onPress }: { label: string; value: numb
   const Wrapper = onPress ? TouchableOpacity : View;
   return (
     <Wrapper
-      style={[styles.siteStat, onPress && styles.tappableStat]}
+      style={styles.siteStat}
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityRole={onPress ? 'button' : undefined}
@@ -436,13 +436,23 @@ const styles = StyleSheet.create({
     gap: Spacing.sm, paddingVertical: Spacing.sm,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  // Wraps because there are four stats now — on a narrow phone they'd
-  // otherwise squeeze or clip.
-  siteStatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.lg, rowGap: Spacing.md },
-  siteStat: { alignItems: 'flex-start', gap: 2 },
+  // Four stats on a narrow phone: a fixed two-column grid rather than
+  // content-width items with a gap. Sized items wrapped into ragged columns
+  // whose numbers and labels lined up with nothing above or below them.
+  siteStatRow: { flexDirection: 'row', flexWrap: 'wrap', rowGap: Spacing.md },
+  siteStat: {
+    width: '50%',
+    paddingRight: Spacing.md,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    gap: 2,
+    // On every stat, not just the tappable ones: the touch target is what set
+    // the row height, so giving it to one item pushed that number and its
+    // label off the baseline its neighbours sat on.
+    minHeight: MIN_TOUCH_TARGET,
+  },
   siteStatLabel: { fontSize: Typography.xs, color: Colors.textMuted },
   tappableCell: { minHeight: MIN_TOUCH_TARGET },
-  tappableStat: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   siteCountText: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
   siteCountTextAlert: { color: Colors.danger },
   siteCountTextTappable: { color: Colors.primary, textDecorationLine: 'underline' },

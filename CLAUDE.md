@@ -86,6 +86,7 @@ All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or 
 - **Card radius**: 12px | **Button radius**: 8px | **Chip radius**: 4px
 - **Icons**: `@expo/vector-icons` (Ionicons) via the shared `Icon` component — never emoji/unicode glyphs. `-outline` variants by default; filled reserved for the active tab, active vote, and the serious-lane header icon. Size from the `IconSize` scale.
 - **Priority badges**: only `high` carries an alert colour (`Colors.priority.high`); `low`/`medium` render as neutral dots — this avoids colliding with status badge colours.
+- **Colour is never the only signal.** The one place it was — `CardAlertBorder`, the injury/critical/improvement border on a snag card — now pairs with `CardAlertGlyph`, a different icon per border colour, on the photo's bottom-left corner. Add to both maps together or the new border says nothing in monochrome.
 - **Minimum touch target**: 48px (use `MIN_TOUCH_TARGET` constant)
 - **Font**: System (San Francisco on iOS) — no custom typeface
 - **Light mode only** — no dark mode handling needed
@@ -148,6 +149,48 @@ and collapsed into `resolved`.
 Photos/evidence go to the `snag-photos` and `snag-evidence` Storage buckets (private,
 org-folder-scoped via RLS), not a public `issue-photos` bucket. Org-wide documents live in
 `org-documents` / `org_documents` — see "The document library" below.
+
+## Which site a report goes to
+
+The reporter picks it, on both mobile report flows: `SitePicker`, a dropdown in the form's own
+field style, rendered only when they have more than one site to choose between.
+
+It is worth knowing what this replaced, because the failure was silent. `getDefaultSiteId` took
+`my_member_site_ids()[0]`, and that RPC has no `ORDER BY` — so a member of three sites sent
+every report to whichever row Postgres happened to return first, forever, with nothing in the UI
+naming the site at all. It looked like a permissions problem to the person hitting it.
+
+- **The default is the site they last actually reported into** (`getLastReportedSiteId`, read
+  from their own snags), not the site they last tapped: what someone reported is a better
+  account of where they work than a selection they made and abandoned. It's a server read, so it
+  holds on a new device and on the web build. `resolveReportSite` falls back to a per-org
+  AsyncStorage cache (the offline path — see `src/lib/reportSite.ts`) and then to the first site
+  by name.
+- **The list is about relevance, not permission.** `create_snag` accepts any site in the org, but
+  `getReportableSites` offers a reporter their own site memberships — falling back to every site
+  in the org for someone with none, typically an admin. Don't widen it to "every site" for
+  workers; work-group scoping (`work_group_sites`) assumes the reporter is at the site.
+- **Supervising a site means belonging to it**, so a site supervisor is offered the sites they
+  supervise without this list needing to know about `site_supervisors` at all.
+  `20260801120000_supervising_implies_membership.sql` made `assign_site_supervisor` write both
+  rows and backfilled the ones it had missed; every other path already did this.
+- **And belonging to a site means seeing it**, for every role. `can_view_site` used to ask
+  supervisors a different question — `site_supervisors` only, membership never consulted — so a
+  supervisor saw *less* at a site they belonged to than a worker standing next to them, and
+  promotion silently took read access away. `20260802140000_membership_implies_visibility.sql`
+  made the non-admin branch `site_members OR site_supervisors`. Read only: `can_edit_site` is
+  untouched, so triage, assignment and the investigation writes still need a real
+  `site_supervisors` row. Sight, not command.
+- **The niggle form's work-group picker follows the selected site**, since custom groups can be
+  site-scoped. Changing site mid-report changes which groups are on offer, which is correct.
+- The serious lane carries the site on `IncidentDraft` so the Review screen can show it, and its
+  submit handler still resolves a site late if one was never loaded — that path predates the
+  picker and is the safety net for a report submitted before the list arrived.
+
+One piece of copy nearby: the work-group sheet's primary button says **"Assign to the queue"**,
+fixed copy rather than the default group's name. That group is the reserved literal `Submit`
+(`create_work_group` seeds it and refuses the name to anyone else), so rendering its name put a
+button reading "Submit" on a sheet asking which team should handle the snag.
 
 ## Who owns a serious incident
 

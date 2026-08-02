@@ -17,6 +17,10 @@ interface Props {
    *  confirmation message. */
   onDone: (message: string) => void;
   onBack: () => void;
+  /** A code that arrived with them, from the `?join=` link on an org's QR
+   *  poster. Skips the "how would you like to find your organisation" step —
+   *  they've already answered it by scanning. */
+  initialCode?: string;
 }
 
 type Step = 'name' | 'choice' | 'code' | 'account';
@@ -27,7 +31,7 @@ type Step = 'name' | 'choice' | 'code' | 'account';
 // pending-join intent BEFORE signing up (mirrors CreateOrgAccountScreen's
 // ordering) so that if email confirmation is off, App.tsx already sees it
 // on the immediate session.
-export default function SignUpScreen({ onDone, onBack }: Props) {
+export default function SignUpScreen({ onDone, onBack, initialCode }: Props) {
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
@@ -51,10 +55,12 @@ export default function SignUpScreen({ onDone, onBack }: Props) {
   if (step === 'code') {
     return (
       <ScanJoinCodeScreen
+        initialCode={initialCode}
         startInManualEntry={manualEntry}
         onCodeScanned={(org) => { setCode({ code: org.code, orgName: org.orgName }); setStep('account'); }}
         onComplete={() => {}}
-        onBack={() => setStep('choice')}
+        // With a code from a link there was no choice step to go back to.
+        onBack={() => setStep(initialCode ? 'name' : 'choice')}
       />
     );
   }
@@ -142,10 +148,10 @@ export default function SignUpScreen({ onDone, onBack }: Props) {
             value={name}
             onChangeText={setName}
             returnKeyType="next"
-            onSubmitEditing={() => name.trim() && setStep('choice')}
+            onSubmitEditing={() => name.trim() && setStep(initialCode ? 'code' : 'choice')}
             autoFocus
           />
-          <Button label="Continue" onPress={() => setStep('choice')} disabled={!name.trim()} fullWidth />
+          <Button label="Continue" onPress={() => setStep(initialCode ? 'code' : 'choice')} disabled={!name.trim()} fullWidth />
         </View>
 
         <TouchableOpacity onPress={onBack} style={styles.backRow}>

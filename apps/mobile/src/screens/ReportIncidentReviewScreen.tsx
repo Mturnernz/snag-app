@@ -134,6 +134,12 @@ export default function ReportIncidentReviewScreen() {
             <Text style={styles.label}>Severity</Text>
             <PriorityBadge severity={draft.severity} />
           </View>
+          {draft.siteName && (
+            <View style={styles.row}>
+              <Text style={styles.label}>Site</Text>
+              <Text style={styles.value}>{draft.siteName}</Text>
+            </View>
+          )}
           <View style={styles.divider} />
           <Text style={styles.label}>What happened</Text>
           <Text style={styles.value}>{draft.description}</Text>

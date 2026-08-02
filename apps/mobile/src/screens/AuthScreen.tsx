@@ -24,9 +24,16 @@ import CreateOrgAccountScreen from './CreateOrgAccountScreen';
 
 type View_ = 'main' | 'signup' | 'signUpFlow' | 'createOrg';
 
-export default function AuthScreen() {
+interface Props {
+  /** A join code from the `?join=` link on an org's QR poster. Opens the
+   *  sign-up stepper on that organisation instead of the sign-in form. */
+  initialJoinCode?: string | null;
+  onClearJoinCode?: () => void;
+}
+
+export default function AuthScreen({ initialJoinCode, onClearJoinCode }: Props) {
   const insets = useSafeAreaInsets();
-  const [view, setView] = useState<View_>('main');
+  const [view, setView] = useState<View_>(initialJoinCode ? 'signUpFlow' : 'main');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -90,8 +97,10 @@ export default function AuthScreen() {
   if (view === 'signUpFlow') {
     return (
       <SignUpScreen
-        onBack={() => setView('main')}
+        initialCode={initialJoinCode ?? undefined}
+        onBack={() => { onClearJoinCode?.(); setView('main'); }}
         onDone={(msg) => {
+          onClearJoinCode?.();
           getPendingIntent().then(({ join }) => setPendingJoinState(join));
           setMessage({ text: msg, error: false });
           setView('main');

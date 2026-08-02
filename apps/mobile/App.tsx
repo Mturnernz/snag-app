@@ -11,6 +11,7 @@ import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiv
 import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
 import { createAuthEventQueue } from './src/lib/authEvents';
 import { resetWebPathIfStale } from './src/lib/webLocation';
+import { getInitialJoinCode } from './src/lib/joinLink';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import { linking } from './src/navigation/linking';
@@ -21,6 +22,7 @@ import OrgInactiveScreen from './src/screens/OrgInactiveScreen';
 import OnboardingWelcomeScreen from './src/screens/OnboardingWelcomeScreen';
 import OnboardingCarouselScreen from './src/screens/OnboardingCarouselScreen';
 import PublicQrReportScreen from './src/screens/PublicQrReportScreen';
+import ScanJoinCodeScreen from './src/screens/ScanJoinCodeScreen';
 import { ToastProvider } from './src/hooks/useToast';
 
 const PUBLIC_REPORTER_KEY = 'snag.publicReporterMode';
@@ -67,6 +69,10 @@ export default function App() {
   // first render.
   const [qrToken, setQrTokenState] = useState<string | null>(null);
   const [qrTokenChecked, setQrTokenChecked] = useState(false);
+  // Org join QR landing — `?join=<code>`, the other printable code. Unlike the
+  // report token this needs a real account, so it feeds the sign-up flow rather
+  // than an anonymous session.
+  const [joinCode, setJoinCode] = useState<string | null>(null);
   const [anonSignInAttempted, setAnonSignInAttempted] = useState(false);
   const qrTokenRef = useRef<string | null>(null);
   // Everything an auth event triggers runs through here, off the auth lock and
@@ -82,7 +88,17 @@ export default function App() {
       setQrToken(token);
       setQrTokenChecked(true);
     });
+    getInitialJoinCode().then(setJoinCode);
   }, []);
+
+  // Done with the join landing (joined, switched, or backed out). Drop the
+  // param as well as the state so a refresh doesn't put them back on it.
+  function clearJoinCode() {
+    setJoinCode(null);
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.history?.replaceState) {
+      window.history.replaceState(null, '', '/');
+    }
+  }
 
   // Once the token is known and the initial session has resolved to "signed
   // out", sign in anonymously so create_public_snag_by_token's auth.uid()
@@ -100,6 +116,14 @@ export default function App() {
       }
     });
   }, [qrTokenChecked, qrToken, loading, session, anonSignInAttempted]);
+
+  // A pending join carries the same code *plus* the name they gave at sign-up,
+  // so it supersedes the raw link — otherwise the poster's `?join=`, which
+  // survives the sign-in round trip by design, would out-rank it and ask for
+  // the name a second time.
+  useEffect(() => {
+    if (pendingJoin && joinCode) clearJoinCode();
+  }, [pendingJoin, joinCode]);
 
   useEffect(() => {
     if (profile?.role === 'worker' && profile.has_seen_onboarding === false) {
@@ -268,13 +292,38 @@ export default function App() {
     );
   }
 
-  // Not signed in
+  // Not signed in. A `?join=` code opens the sign-up stepper on the org it
+  // names — that poster's audience is people without an account — but the
+  // stepper's own "Back to sign in" still gets an existing user home.
   if (!session) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
         <ToastProvider>
-          <AuthScreen />
+          <AuthScreen initialJoinCode={joinCode} onClearJoinCode={clearJoinCode} />
+        </ToastProvider>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Signed in and landing on a join link: straight to the join step. Handles
+  // the already-a-member case too — ScanJoinCodeScreen treats that as a switch
+  // rather than a join, which is what scanning another site's poster means.
+  if (joinCode) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="dark" backgroundColor="#FFFFFF" />
+        <ToastProvider>
+          <ScanJoinCodeScreen
+            initialCode={joinCode}
+            onComplete={async () => {
+              clearJoinCode();
+              // Not just getProfile: joining or switching changes the active
+              // org and the membership set, which loadUserState owns.
+              await loadUserState(session.user.id);
+            }}
+            onBack={clearJoinCode}
+          />
         </ToastProvider>
       </SafeAreaProvider>
     );

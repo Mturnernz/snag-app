@@ -57,6 +57,12 @@ describe('resetWebPathIfStale', () => {
     expect(replaceState).not.toHaveBeenCalled();
   });
 
+  it('keeps the org join QR landing', () => {
+    atUrl('/', '?join=VDJQFNEM');
+    resetWebPathIfStale();
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
   it('does nothing when already at the root', () => {
     atUrl('/');
     resetWebPathIfStale();
@@ -80,6 +86,7 @@ describe('isPreservedUrl', () => {
     ['/admin', '', false],
     ['/mentions', '', false],
     ['/', '?report=tok', true],
+    ['/', '?join=VDJQFNEM', true],
   ])('%s%s -> %s', (pathname, search, expected) => {
     expect(isPreservedUrl(pathname, search)).toBe(expected);
   });

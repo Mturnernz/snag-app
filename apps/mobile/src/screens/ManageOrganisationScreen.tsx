@@ -35,6 +35,7 @@ import {
   removeSeriousIncidentOwner,
   SeriousIncidentOwner,
 } from '../lib/supabase';
+import { buildJoinLink } from '../lib/joinLink';
 
 // The QR always encodes the web export's URL, so it works with or without the
 // native app installed; see PublicQrReportScreen.tsx / App.tsx for the landing
@@ -569,10 +570,11 @@ export default function ManageOrganisationScreen() {
           <Card variant="elevated" style={styles.qrCard}>
             <Text style={styles.sectionLabel}>SCAN TO JOIN</Text>
             <Text style={styles.hint}>
-              Anyone who scans this joins {orgName} as a worker. Regenerate it to invalidate old QR codes.
+              Anyone who scans this with their phone camera joins {orgName} as a worker — or they can
+              type the code below. Regenerate it to invalidate old QR codes.
             </Text>
             <View style={styles.qrWrap}>
-              <QRCode value={org.join_code} size={180} />
+              <QRCode value={buildJoinLink(org.join_code)} size={180} />
             </View>
             <TouchableOpacity style={styles.codeRow} onPress={handleCopyCode} activeOpacity={0.7}>
               <Text style={styles.codeText} selectable>{org.join_code}</Text>

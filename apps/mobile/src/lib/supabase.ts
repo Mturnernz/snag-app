@@ -238,9 +238,44 @@ export interface OrgJoinPreview {
   org_name: string;
 }
 
-export async function getOrgByJoinCode(code: string) {
-  const { data, error } = await supabase.rpc('get_org_by_join_code', { p_code: code }).single();
-  return { data: data as OrgJoinPreview | null, error };
+export interface JoinCodeLookup {
+  org: OrgJoinPreview | null;
+  /** The exact string that matched, to hand to joinOrgViaCode — see the case
+   *  retry below. Null when nothing matched. */
+  code: string | null;
+  /** The call itself failed (permission, network, server) rather than the code
+   *  simply not existing. The two need different words: collapsing them is how
+   *  a missing anon grant on get_org_by_join_code read to every new user as
+   *  "that code is invalid" for three weeks. */
+  failed: boolean;
+}
+
+export async function getOrgByJoinCode(code: string): Promise<JoinCodeLookup> {
+  // Codes are compared as opaque strings server-side, and the two live formats
+  // differ in case: the current charset is uppercase, while orgs that haven't
+  // regenerated since 20260711140000 still carry 10-char lowercase hex. The
+  // manual-entry field uppercases as you type, which is right for the current
+  // format and made a legacy code unenterable — so try what was typed or
+  // scanned, then both cases. Whichever matched is what we return;
+  // join_org_via_code has to be given the same exact string.
+  const typed = code.trim();
+  const attempts = [typed, typed.toUpperCase(), typed.toLowerCase()]
+    .filter((v, i, all) => all.indexOf(v) === i);
+
+  for (const attempt of attempts) {
+    // maybeSingle, not single: `single` turns "no rows" into an error object,
+    // which makes an unknown code indistinguishable from a failed call.
+    const { data, error } = await supabase
+      .rpc('get_org_by_join_code', { p_code: attempt })
+      .maybeSingle();
+    if (error) {
+      console.error('Join code lookup failed', error);
+      return { org: null, code: null, failed: true };
+    }
+    if (data) return { org: data as OrgJoinPreview, code: attempt, failed: false };
+  }
+
+  return { org: null, code: null, failed: false };
 }
 
 export async function joinOrgViaCode(code: string, name: string) {

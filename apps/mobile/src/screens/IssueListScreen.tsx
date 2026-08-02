@@ -17,7 +17,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 
 import {
   Snag, SnagStatus, SnagKind, SnagSeverity, SnagRelevanceReason, STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
@@ -40,7 +39,9 @@ import { useBadge } from '../context/BadgeContext';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
 import { sortSnags as orderSnags, needsAttention, SortMode } from '../lib/snagOrdering';
 import { isNewSince } from '../lib/snagFreshness';
-import { countActiveOffscreen, describeFilteredEmptyState, FilterButtonLayout } from '../lib/filterSummary';
+import { readLastSeen, markSeen } from '../lib/lastSeen';
+import { describeFilteredEmptyState } from '../lib/filterSummary';
+import FilterBar, { FilterButtonSpec } from '../components/FilterBar';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -108,9 +109,6 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 // Per-user, persisted across app opens (see the load/save effects below).
 const STATUS_FILTER_STORAGE_PREFIX = 'snag.statusFilters.';
 const ASSIGNED_FILTER_STORAGE_PREFIX = 'snag.assignedOnly.';
-// When this user last left the list — what the "NEW" badge is measured
-// against. Written on blur, read once on mount; see lib/snagFreshness.ts.
-const LAST_SEEN_STORAGE_PREFIX = 'snag.lastSeenAt.';
 
 const PAGE_SIZE = 50;
 
@@ -486,7 +484,7 @@ export default function IssueListScreen() {
         AsyncStorage.getItem(STATUS_FILTER_STORAGE_PREFIX + user.id),
         AsyncStorage.getItem(SCOPE_FILTER_STORAGE_PREFIX + user.id),
         AsyncStorage.getItem(ASSIGNED_FILTER_STORAGE_PREFIX + user.id),
-        AsyncStorage.getItem(LAST_SEEN_STORAGE_PREFIX + user.id),
+        readLastSeen(user.id),
       ]);
       setLastSeenAt(lastSeenRaw);
       if (statusRaw) {
@@ -541,16 +539,8 @@ export default function IssueListScreen() {
     }, [fetchIssues])
   );
 
-  // Mark the list read on the way *out*, not on the way in. Stamping it on
-  // focus would clear every "NEW" badge before the reader had looked at one of
-  // them — the badge would only ever be visible to someone who wasn't here.
-  // Guarded on userIdRef for the same reason the filter effects above are.
-  useFocusEffect(
-    useCallback(() => () => {
-      if (!userIdRef.current) return;
-      AsyncStorage.setItem(LAST_SEEN_STORAGE_PREFIX + userIdRef.current, new Date().toISOString());
-    }, [])
-  );
+  // Mark the list read on the way *out*, not on the way in — see lib/lastSeen.
+  useFocusEffect(useCallback(() => () => { markSeen(userIdRef.current); }, []));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -895,123 +885,6 @@ export default function IssueListScreen() {
         }}
       />
     </View>
-  );
-}
-
-// ── Filter bar ───────────────────────────────────────────────────────────────
-// Seven controls that don't fit one phone-width row, so the bar scrolls and
-// the last two or three sit off the right-hand edge with nothing saying so.
-// Two things address that here, and they're the same fix twice:
-//
-//  - a fade on the right edge while there is more to scroll to, which is the
-//    standard way to say "there's more" without spending a control on it;
-//  - a count in that fade of how many *active* filters are currently out of
-//    sight. The bar's rule is that a button renders active only when it
-//    differs from its default — which is a fine rule right up until the
-//    button doing the filtering is off screen. See lib/filterSummary.ts.
-//
-// The bar owns its own scroll position rather than lifting it to the screen,
-// so a scroll frame re-renders seven chips and not the grid below them.
-
-interface FilterButtonSpec {
-  key: string;
-  label: string;
-  active: boolean;
-  /** Opens a dropdown (chevron shown). Trending/Public/Assigned toggle on tap. */
-  dropdown?: boolean;
-  onPress: () => void;
-}
-
-const FILTER_FADE_WIDTH = 56;
-
-function FilterBar({ buttons }: { buttons: FilterButtonSpec[] }) {
-  const [scrollX, setScrollX] = useState(0);
-  const [viewportWidth, setViewportWidth] = useState(0);
-  const [contentWidth, setContentWidth] = useState(0);
-  const [layouts, setLayouts] = useState<Record<string, FilterButtonLayout>>({});
-
-  const measure = useCallback((key: string, layout: FilterButtonLayout) => {
-    setLayouts((prev) => {
-      const seen = prev[key];
-      if (seen && seen.x === layout.x && seen.width === layout.width) return prev;
-      return { ...prev, [key]: layout };
-    });
-  }, []);
-
-  // 1px of slack — content and viewport widths are floats and can land a
-  // hair apart at rest, which would leave the fade permanently on.
-  const canScrollRight = contentWidth - viewportWidth - scrollX > 1;
-  const hiddenActive = countActiveOffscreen(buttons, layouts, scrollX, viewportWidth);
-
-  return (
-    <View style={styles.filterWrap} onLayout={(e) => setViewportWidth(e.nativeEvent.layout.width)}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterBarRow}
-        scrollEventThrottle={32}
-        onScroll={(e) => setScrollX(e.nativeEvent.contentOffset.x)}
-        onContentSizeChange={(w) => setContentWidth(w)}
-      >
-        {buttons.map((b) => (
-          <FilterBarButton key={b.key} spec={b} onMeasure={measure} />
-        ))}
-      </ScrollView>
-
-      {canScrollRight && (
-        <View style={styles.filterFade} pointerEvents="none">
-          <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
-            <Defs>
-              <LinearGradient id="filterFade" x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0" stopColor={Colors.surface} stopOpacity="0" />
-                <Stop offset="1" stopColor={Colors.surface} stopOpacity="1" />
-              </LinearGradient>
-            </Defs>
-            <Rect x="0" y="0" width="100%" height="100%" fill="url(#filterFade)" />
-          </Svg>
-          {hiddenActive > 0 && (
-            <View style={styles.filterHiddenCount}>
-              <Text style={styles.filterHiddenCountText}>{hiddenActive}</Text>
-            </View>
-          )}
-        </View>
-      )}
-    </View>
-  );
-}
-
-// The chips are 34px tall — the one place this page bends MIN_TOUCH_TARGET
-// (48), so seven controls fit a single scrollable row. That trade was about
-// pixels on screen; it was never about the tap area, which nobody can see.
-// 7px top and bottom takes the target to 48 with nothing moving. Horizontal
-// is capped at 4 because the gap between chips is Spacing.sm (8) and two
-// chips must not both claim the same pixel.
-const FILTER_CHIP_HIT_SLOP = { top: 7, bottom: 7, left: 4, right: 4 };
-
-function FilterBarButton({
-  spec,
-  onMeasure,
-}: {
-  spec: FilterButtonSpec;
-  onMeasure: (key: string, layout: FilterButtonLayout) => void;
-}) {
-  const { key, label, active, onPress, dropdown = true } = spec;
-  return (
-    <TouchableOpacity
-      style={[styles.filterBarButton, active && styles.filterBarButtonActive]}
-      onPress={onPress}
-      activeOpacity={0.7}
-      hitSlop={FILTER_CHIP_HIT_SLOP}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: active }}
-      onLayout={(e) => onMeasure(key, { x: e.nativeEvent.layout.x, width: e.nativeEvent.layout.width })}
-    >
-      <Text style={[styles.filterBarButtonText, active && styles.filterBarButtonTextActive]}>{label}</Text>
-      {dropdown && (
-        <Icon name="chevron-down" size="sm" color={active ? Colors.primary : Colors.textSecondary} />
-      )}
-    </TouchableOpacity>
   );
 }
 
@@ -1437,67 +1310,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
     color: Colors.primary,
-  },
-  filterWrap: {
-    backgroundColor: Colors.surface,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  // Stops 1px short of the bottom so it doesn't paint over the bar's own
-  // bottom border and leave a notch in it.
-  filterFade: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 1,
-    width: FILTER_FADE_WIDTH,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    paddingRight: Spacing.lg,
-  },
-  filterHiddenCount: {
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 5,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterHiddenCountText: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    color: Colors.white,
-  },
-  filterBarRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-  },
-  filterBarButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    height: 34,
-    paddingHorizontal: Spacing.md,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-  },
-  filterBarButtonActive: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
-  },
-  filterBarButtonText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-  },
-  filterBarButtonTextActive: {
-    color: Colors.primary,
-    fontWeight: Typography.semibold,
   },
   dropdownScroll: {
     maxHeight: 320,

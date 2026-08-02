@@ -1,0 +1,29 @@
+-- Restore the anon grant on get_org_by_join_code.
+--
+-- 20260708130000_join_code_anon_lookup.sql granted it for a reason the join
+-- flow depends on absolutely: the code is resolved to an org *before* the
+-- account exists (SignUpScreen's stepper asks for the code at step 2 and for
+-- an email at step 4), so the caller is the anon role every time.
+--
+-- 20260712090000_security_hardening_pass.sql then looped over every function
+-- in the schema revoking execute from `public, anon`, and re-granted exactly
+-- one thing back to anon (get_invite_preview). That loop was right to exist —
+-- the default PUBLIC grant really did expose every RPC — but it took this
+-- deliberate grant with it, and nothing failed loudly enough to notice:
+--
+--   - The client collapses any lookup failure into "That code is not a valid
+--     Snag join code" (ScanJoinCodeScreen's resolveCode), so a 42501 from the
+--     server and a typo'd code are the same red text. Fixed alongside this.
+--   - Nobody already signed in can reproduce it. Joining a second org from
+--     Profile works fine; only brand-new users are blocked, and they have no
+--     way to report it because they never get an account.
+--
+-- Net effect: sign-up by QR or company code has been impossible since
+-- 2026-07-12. Docunation's VDJQFNEM was live and correct the whole time.
+--
+-- Still safe to expose, for the same reason as before: it returns only the id
+-- and name of an org whose code the caller already holds (they scanned the
+-- poster or were told it). It cannot list orgs, and joining still requires a
+-- signed-in user via join_org_via_code — which stays authenticated-only.
+
+grant execute on function public.get_org_by_join_code(text) to anon;

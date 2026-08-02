@@ -725,6 +725,11 @@ export type SiteAssignee = queries.SiteAssignee;
 
 export const getSiteAssignees = (siteId: string) => queries.getSiteAssignees(supabase, siteId);
 
+// The rows behind the dashboard's two alert numbers — same views
+// get_site_breakdown counts, so the list always matches the figure.
+export const getOverdueActions = (siteId: string) => queries.getOverdueActions(supabase, siteId);
+export const getRcaOutstanding = (siteId: string) => queries.getRcaOutstanding(supabase, siteId);
+
 export interface UnassignedSnag {
   id: string;
   reference: string;

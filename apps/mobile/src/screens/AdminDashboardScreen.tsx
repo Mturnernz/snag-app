@@ -16,7 +16,9 @@ import { Organisation, Profile, UserRole, RootStackParamList } from '../types';
 import {
   supabase, getSiteBreakdown, SiteBreakdown, getMemberships, setOrganisationActive, Membership,
   getUnassignedSnags, UnassignedSnag, getSiteAssignees, SiteAssignee, assignSnagOwner,
+  getOverdueActions, getRcaOutstanding,
 } from '../lib/supabase';
+import type { OverdueActionRow, RcaOutstandingRow } from '@snag/supabase-queries';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { showAlert } from '../lib/alert';
@@ -27,6 +29,9 @@ import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 import OwnerPicker from '../components/OwnerPicker';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+/** Which of a site's numbers is expanded beneath it. */
+type ExpandMetric = 'unassigned' | 'rca' | 'overdue';
 
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -41,8 +46,13 @@ export default function AdminDashboardScreen() {
   // unassigned snags right there, each with an OwnerPicker that assigns
   // immediately (no staged-edit step, unlike ManageIssuePanel's own use of
   // the same picker).
-  const [expandedSiteId, setExpandedSiteId] = useState<string | null>(null);
+  // Which site is expanded, and under which of its numbers. Was a bare site id
+  // when Unassigned was the only figure you could open; the two alert numbers
+  // were counts with nothing behind them, which is the thing being fixed.
+  const [expanded, setExpanded] = useState<{ siteId: string; metric: ExpandMetric } | null>(null);
   const [unassignedBySite, setUnassignedBySite] = useState<Record<string, UnassignedSnag[]>>({});
+  const [overdueBySite, setOverdueBySite] = useState<Record<string, OverdueActionRow[]>>({});
+  const [rcaBySite, setRcaBySite] = useState<Record<string, RcaOutstandingRow[]>>({});
   const [siteAssigneesCache, setSiteAssigneesCache] = useState<Record<string, SiteAssignee[]>>({});
   const [assigningSnagId, setAssigningSnagId] = useState<string | null>(null);
   const [ownedOrgs, setOwnedOrgs] = useState<Membership[]>([]);
@@ -94,16 +104,31 @@ export default function AdminDashboardScreen() {
     setLoading(false);
   }, []);
 
-  async function toggleUnassignedExpand(siteId: string) {
-    if (expandedSiteId === siteId) { setExpandedSiteId(null); return; }
-    setExpandedSiteId(siteId);
-    if (!unassignedBySite[siteId]) {
-      const snags = await getUnassignedSnags(siteId);
-      setUnassignedBySite((prev) => ({ ...prev, [siteId]: snags }));
+  // Tapping the same number again closes it; tapping a different one swaps,
+  // rather than opening two panels under one row.
+  async function toggleExpand(siteId: string, metric: ExpandMetric) {
+    if (expanded?.siteId === siteId && expanded.metric === metric) { setExpanded(null); return; }
+    setExpanded({ siteId, metric });
+
+    if (metric === 'unassigned') {
+      if (!unassignedBySite[siteId]) {
+        const snags = await getUnassignedSnags(siteId);
+        setUnassignedBySite((prev) => ({ ...prev, [siteId]: snags }));
+      }
+      if (!siteAssigneesCache[siteId]) {
+        const { data } = await getSiteAssignees(siteId);
+        setSiteAssigneesCache((prev) => ({ ...prev, [siteId]: data }));
+      }
+      return;
     }
-    if (!siteAssigneesCache[siteId]) {
-      const { data } = await getSiteAssignees(siteId);
-      setSiteAssigneesCache((prev) => ({ ...prev, [siteId]: data }));
+    if (metric === 'overdue' && !overdueBySite[siteId]) {
+      const rows = await getOverdueActions(siteId);
+      setOverdueBySite((prev) => ({ ...prev, [siteId]: rows }));
+      return;
+    }
+    if (metric === 'rca' && !rcaBySite[siteId]) {
+      const rows = await getRcaOutstanding(siteId);
+      setRcaBySite((prev) => ({ ...prev, [siteId]: rows }));
     }
   }
 
@@ -210,18 +235,46 @@ export default function AdminDashboardScreen() {
                     <SiteCountCell value={s.openInvestigations} />
                     <SiteCountCell
                       value={s.unassigned}
-                      onPress={s.unassigned > 0 ? () => toggleUnassignedExpand(s.siteId) : undefined}
+                      onPress={s.unassigned > 0 ? () => toggleExpand(s.siteId, 'unassigned') : undefined}
                     />
-                    <SiteCountCell value={s.rcaOutstanding} alert />
-                    <SiteCountCell value={s.overdueActions} alert />
+                    <SiteCountCell
+                      value={s.rcaOutstanding}
+                      alert
+                      onPress={s.rcaOutstanding > 0 ? () => toggleExpand(s.siteId, 'rca') : undefined}
+                    />
+                    <SiteCountCell
+                      value={s.overdueActions}
+                      alert
+                      onPress={s.overdueActions > 0 ? () => toggleExpand(s.siteId, 'overdue') : undefined}
+                    />
                   </View>
-                  {expandedSiteId === s.siteId && (
+                  {expanded?.siteId === s.siteId && expanded.metric === 'unassigned' && (
                     <UnassignedQuickAssign
                       siteId={s.siteId}
                       snags={unassignedBySite[s.siteId] ?? []}
                       assignees={siteAssigneesCache[s.siteId] ?? []}
                       assigningSnagId={assigningSnagId}
                       onAssign={handleQuickAssign}
+                    />
+                  )}
+                  {expanded?.siteId === s.siteId && expanded.metric === 'rca' && (
+                    <OutstandingList
+                      rows={(rcaBySite[s.siteId] ?? []).map((r) => ({
+                        key: r.snag_id, snagId: r.snag_id, reference: r.reference,
+                        detail: r.description ?? 'No description',
+                      }))}
+                      emptyLabel="No RCAs outstanding at this site."
+                      onOpen={(snagId) => navigation.navigate('IssueDetail', { issueId: snagId, step: 'rca' })}
+                    />
+                  )}
+                  {expanded?.siteId === s.siteId && expanded.metric === 'overdue' && (
+                    <OutstandingList
+                      rows={(overdueBySite[s.siteId] ?? []).map((r) => ({
+                        key: r.action_id, snagId: r.snag_id, reference: r.reference,
+                        detail: `${r.action_description} · due ${r.due_date}`,
+                      }))}
+                      emptyLabel="No overdue actions at this site."
+                      onOpen={(snagId) => navigation.navigate('IssueDetail', { issueId: snagId, step: 'correctiveActions' })}
                     />
                   )}
                 </React.Fragment>
@@ -237,18 +290,48 @@ export default function AdminDashboardScreen() {
                     <SiteStat
                       label="Unassigned"
                       value={s.unassigned}
-                      onPress={s.unassigned > 0 ? () => toggleUnassignedExpand(s.siteId) : undefined}
+                      onPress={s.unassigned > 0 ? () => toggleExpand(s.siteId, 'unassigned') : undefined}
                     />
-                    <SiteStat label="RCA outstanding" value={s.rcaOutstanding} alert />
-                    <SiteStat label="Overdue actions" value={s.overdueActions} alert />
+                    <SiteStat
+                      label="RCA outstanding"
+                      value={s.rcaOutstanding}
+                      alert
+                      onPress={s.rcaOutstanding > 0 ? () => toggleExpand(s.siteId, 'rca') : undefined}
+                    />
+                    <SiteStat
+                      label="Overdue actions"
+                      value={s.overdueActions}
+                      alert
+                      onPress={s.overdueActions > 0 ? () => toggleExpand(s.siteId, 'overdue') : undefined}
+                    />
                   </View>
-                  {expandedSiteId === s.siteId && (
+                  {expanded?.siteId === s.siteId && expanded.metric === 'unassigned' && (
                     <UnassignedQuickAssign
                       siteId={s.siteId}
                       snags={unassignedBySite[s.siteId] ?? []}
                       assignees={siteAssigneesCache[s.siteId] ?? []}
                       assigningSnagId={assigningSnagId}
                       onAssign={handleQuickAssign}
+                    />
+                  )}
+                  {expanded?.siteId === s.siteId && expanded.metric === 'rca' && (
+                    <OutstandingList
+                      rows={(rcaBySite[s.siteId] ?? []).map((r) => ({
+                        key: r.snag_id, snagId: r.snag_id, reference: r.reference,
+                        detail: r.description ?? 'No description',
+                      }))}
+                      emptyLabel="No RCAs outstanding at this site."
+                      onOpen={(snagId) => navigation.navigate('IssueDetail', { issueId: snagId, step: 'rca' })}
+                    />
+                  )}
+                  {expanded?.siteId === s.siteId && expanded.metric === 'overdue' && (
+                    <OutstandingList
+                      rows={(overdueBySite[s.siteId] ?? []).map((r) => ({
+                        key: r.action_id, snagId: r.snag_id, reference: r.reference,
+                        detail: `${r.action_description} · due ${r.due_date}`,
+                      }))}
+                      emptyLabel="No overdue actions at this site."
+                      onOpen={(snagId) => navigation.navigate('IssueDetail', { issueId: snagId, step: 'correctiveActions' })}
                     />
                   )}
                 </View>
@@ -339,6 +422,44 @@ export default function AdminDashboardScreen() {
 
 // Tappable variants get a MIN_TOUCH_TARGET-high hit area — the number alone is
 // well under the 48px the design system mandates.
+// A site's outstanding work, listed under the number that counts it. Rows are
+// read-only and open the snag at the step that owes the work — unlike the
+// Unassigned expander, which assigns in place, because "who owns this" is one
+// tap and "why is this RCA outstanding" is not.
+function OutstandingList({
+  rows, emptyLabel, onOpen,
+}: {
+  rows: { key: string; snagId: string; reference: string; detail: string }[];
+  emptyLabel: string;
+  onOpen: (snagId: string) => void;
+}) {
+  if (rows.length === 0) {
+    return (
+      <View style={styles.outstandingWrap}>
+        <Text style={styles.outstandingEmpty}>{emptyLabel}</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.outstandingWrap}>
+      {rows.map((r) => (
+        <TouchableOpacity
+          key={r.key}
+          style={styles.outstandingRow}
+          onPress={() => onOpen(r.snagId)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.outstandingText}>
+            <Text style={styles.outstandingRef}>{r.reference}</Text>
+            <Text style={styles.outstandingDetail} numberOfLines={2}>{r.detail}</Text>
+          </View>
+          <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 function SiteCountCell({ value, alert, onPress }: { value: number; alert?: boolean; onPress?: () => void }) {
   const Wrapper = onPress ? TouchableOpacity : View;
   return (
@@ -452,6 +573,40 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
   },
   siteStatLabel: { fontSize: Typography.xs, color: Colors.textMuted },
+  outstandingWrap: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    paddingVertical: Spacing.xs,
+  },
+  outstandingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  outstandingText: {
+    flex: 1,
+    gap: 2,
+  },
+  outstandingRef: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  outstandingDetail: {
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
+  },
+  outstandingEmpty: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
+  },
   tappableCell: { minHeight: MIN_TOUCH_TARGET },
   siteCountText: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
   siteCountTextAlert: { color: Colors.danger },

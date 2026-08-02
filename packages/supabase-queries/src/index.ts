@@ -570,6 +570,55 @@ export async function getSnagGateInputs(
   return map;
 }
 
+// ─── Outstanding work, per site ────────────────────────────────────────────
+//
+// The rows behind the dashboard's two alert numbers. Both read the same views
+// `get_site_breakdown` counts, so a list can never disagree with the figure
+// that led someone to open it.
+
+export interface OverdueActionRow {
+  action_id: string;
+  snag_id: string;
+  action_description: string;
+  due_date: string;
+  reference: string;
+  snag_description: string | null;
+}
+
+export interface RcaOutstandingRow {
+  snag_id: string;
+  reference: string;
+  description: string | null;
+  status: SnagStatus;
+  severity: SnagSeverity | null;
+}
+
+export async function getOverdueActions(
+  client: SupabaseClient,
+  siteId: string,
+): Promise<OverdueActionRow[]> {
+  const { data, error } = await client
+    .from('snag_overdue_actions')
+    .select('action_id, snag_id, action_description, due_date, reference, snag_description')
+    .eq('site_id', siteId)
+    .order('due_date', { ascending: true });
+  if (error || !data) return [];
+  return data as unknown as OverdueActionRow[];
+}
+
+export async function getRcaOutstanding(
+  client: SupabaseClient,
+  siteId: string,
+): Promise<RcaOutstandingRow[]> {
+  const { data, error } = await client
+    .from('snag_rca_outstanding')
+    .select('snag_id, reference, description, status, severity')
+    .eq('site_id', siteId)
+    .order('reference', { ascending: true });
+  if (error || !data) return [];
+  return data as unknown as RcaOutstandingRow[];
+}
+
 // ─── Corrective actions (CAPA) ─────────────────────────────────────────────
 
 export async function getCorrectiveActions(client: SupabaseClient, snagId: string): Promise<CorrectiveAction[]> {

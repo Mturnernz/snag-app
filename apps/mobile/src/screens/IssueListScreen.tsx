@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 
 import {
   Snag, SnagStatus, SnagKind, SnagSeverity, SnagRelevanceReason, STATUS_LABELS, KIND_LABELS, SEVERITY_LABELS,
@@ -38,6 +39,8 @@ import { useToast } from '../hooks/useToast';
 import { useBadge } from '../context/BadgeContext';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
 import { sortSnags as orderSnags, needsAttention, SortMode } from '../lib/snagOrdering';
+import { isNewSince } from '../lib/snagFreshness';
+import { countActiveOffscreen, describeFilteredEmptyState, FilterButtonLayout } from '../lib/filterSummary';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -105,6 +108,9 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 // Per-user, persisted across app opens (see the load/save effects below).
 const STATUS_FILTER_STORAGE_PREFIX = 'snag.statusFilters.';
 const ASSIGNED_FILTER_STORAGE_PREFIX = 'snag.assignedOnly.';
+// When this user last left the list — what the "NEW" badge is measured
+// against. Written on blur, read once on mount; see lib/snagFreshness.ts.
+const LAST_SEEN_STORAGE_PREFIX = 'snag.lastSeenAt.';
 
 const PAGE_SIZE = 50;
 
@@ -125,6 +131,11 @@ export default function IssueListScreen() {
   // user" is (and from overwriting one user's saved filter with another's on
   // a shared device).
   const userIdRef = React.useRef<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Snapshotted once on mount and deliberately not refreshed while the screen
+  // is alive: opening a snag and coming back should not clear the badges off
+  // every other card on the way past.
+  const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   // Open injuries, fetched in their own right rather than picked out of the
   // loaded page — a pinned card only ever surfaced what pagination happened to
@@ -470,11 +481,14 @@ export default function IssueListScreen() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
       userIdRef.current = user.id;
-      const [statusRaw, scopeRaw, assignedRaw] = await Promise.all([
+      setCurrentUserId(user.id);
+      const [statusRaw, scopeRaw, assignedRaw, lastSeenRaw] = await Promise.all([
         AsyncStorage.getItem(STATUS_FILTER_STORAGE_PREFIX + user.id),
         AsyncStorage.getItem(SCOPE_FILTER_STORAGE_PREFIX + user.id),
         AsyncStorage.getItem(ASSIGNED_FILTER_STORAGE_PREFIX + user.id),
+        AsyncStorage.getItem(LAST_SEEN_STORAGE_PREFIX + user.id),
       ]);
+      setLastSeenAt(lastSeenRaw);
       if (statusRaw) {
         try {
           const saved: SnagStatus[] = JSON.parse(statusRaw);
@@ -527,6 +541,17 @@ export default function IssueListScreen() {
     }, [fetchIssues])
   );
 
+  // Mark the list read on the way *out*, not on the way in. Stamping it on
+  // focus would clear every "NEW" badge before the reader had looked at one of
+  // them — the badge would only ever be visible to someone who wasn't here.
+  // Guarded on userIdRef for the same reason the filter effects above are.
+  useFocusEffect(
+    useCallback(() => () => {
+      if (!userIdRef.current) return;
+      AsyncStorage.setItem(LAST_SEEN_STORAGE_PREFIX + userIdRef.current, new Date().toISOString());
+    }, [])
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchIssues();
@@ -560,6 +585,68 @@ export default function IssueListScreen() {
     await fetchIssues();
     navigation.navigate('IssueDetail', { issueId: newSnag.id });
   }
+
+  // The bar as data rather than markup, so FilterBar can answer "is an active
+  // filter currently scrolled off the right-hand edge" without every scroll
+  // frame re-rendering this screen (and with it the grid).
+  const filterButtons: FilterButtonSpec[] = [
+    ...(hasOrg ? [{
+      key: 'scope',
+      label: scopeOptions.find((o) => o.key === scopeFilter)?.shortLabel ?? 'Mine',
+      active: scopeFilter !== DEFAULT_SCOPE_FILTER,
+      onPress: () => setOpenDropdown('scope'),
+    }] : []),
+    {
+      key: 'status',
+      label: 'Status',
+      active: !setsEqual(statusFilters, DEFAULT_STATUS_FILTERS),
+      onPress: () => setOpenDropdown('status'),
+    },
+    {
+      key: 'date',
+      label: sortMode === 'oldest' ? 'Oldest' : 'Date',
+      active: sortMode === 'oldest',
+      onPress: () => setOpenDropdown('date'),
+    },
+    ...(hasOrg ? [{
+      key: 'site',
+      label: 'Site',
+      active: siteFilters.size > 0,
+      onPress: () => setOpenDropdown('site'),
+    }] : []),
+    ...(hasOrg && !scopeIsUnassigned ? [{
+      key: 'assigned',
+      label: 'Assigned',
+      active: assignedOnly,
+      dropdown: false,
+      onPress: () => setAssignedOnly((prev) => !prev),
+    }] : []),
+    {
+      key: 'trending',
+      label: 'Trending',
+      active: sortMode === 'trending',
+      dropdown: false,
+      onPress: () => setSortMode((prev) => (prev === 'trending' ? 'newest' : 'trending')),
+    },
+    ...(isPublicOrg && hasPublicSnags ? [{
+      key: 'public',
+      label: 'Public',
+      active: publicOnly,
+      dropdown: false,
+      onPress: () => setPublicOnly((prev) => !prev),
+    }] : []),
+  ];
+
+  // "Nothing matches those filters" is true of every filtered empty list; this
+  // says which filters. Statuses are read in the bar's own order rather than
+  // the Set's insertion order, so the copy doesn't depend on which chip
+  // someone happened to tap first.
+  const filteredEmptyTitle = describeFilteredEmptyState(
+    setsEqual(statusFilters, DEFAULT_STATUS_FILTERS)
+      ? []
+      : STATUS_FILTER_OPTIONS.filter((o) => statusFilters.has(o.key)).map((o) => o.label),
+    sites.filter((s) => siteFilters.has(s.id)).map((s) => s.name)
+  );
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -610,56 +697,7 @@ export default function IssueListScreen() {
           </View>
         </View>
       ) : (
-        <View style={styles.filterWrap}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterBarRow}>
-            {hasOrg && (
-              <FilterBarButton
-                label={scopeOptions.find((o) => o.key === scopeFilter)?.shortLabel ?? 'Mine'}
-                active={scopeFilter !== DEFAULT_SCOPE_FILTER}
-                onPress={() => setOpenDropdown('scope')}
-              />
-            )}
-            <FilterBarButton
-              label="Status"
-              active={!setsEqual(statusFilters, DEFAULT_STATUS_FILTERS)}
-              onPress={() => setOpenDropdown('status')}
-            />
-            <FilterBarButton
-              label={sortMode === 'oldest' ? 'Oldest' : 'Date'}
-              active={sortMode === 'oldest'}
-              onPress={() => setOpenDropdown('date')}
-            />
-            {hasOrg && (
-              <FilterBarButton
-                label="Site"
-                active={siteFilters.size > 0}
-                onPress={() => setOpenDropdown('site')}
-              />
-            )}
-            {hasOrg && !scopeIsUnassigned && (
-              <FilterBarButton
-                label="Assigned"
-                active={assignedOnly}
-                dropdown={false}
-                onPress={() => setAssignedOnly((prev) => !prev)}
-              />
-            )}
-            <FilterBarButton
-              label="Trending"
-              active={sortMode === 'trending'}
-              dropdown={false}
-              onPress={() => setSortMode((prev) => (prev === 'trending' ? 'newest' : 'trending'))}
-            />
-            {isPublicOrg && hasPublicSnags && (
-              <FilterBarButton
-                label="Public"
-                active={publicOnly}
-                dropdown={false}
-                onPress={() => setPublicOnly((prev) => !prev)}
-              />
-            )}
-          </ScrollView>
-        </View>
+        <FilterBar buttons={filterButtons} />
       )}
 
       <Modal visible={openDropdown !== null} transparent animationType="fade" onRequestClose={() => setOpenDropdown(null)}>
@@ -757,6 +795,7 @@ export default function IssueListScreen() {
               onLongPress={() => handleLongPress(item.id)}
               selectable={selectMode}
               selected={selectedIds.includes(item.id)}
+              isNew={isNewSince(item, lastSeenAt, currentUserId)}
             />
           )}
           contentContainerStyle={[
@@ -786,6 +825,7 @@ export default function IssueListScreen() {
                         compact
                         photoUrl={snag.photo_path ? photoUrls[snag.photo_path] ?? null : null}
                         onPress={() => handleCardPress(snag)}
+                        isNew={isNewSince(snag, lastSeenAt, currentUserId)}
                       />
                     </View>
                   ))}
@@ -814,7 +854,11 @@ export default function IssueListScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="build-outline"
-              title={hasActiveFilters ? 'Nothing matches those filters' : 'All quiet here'}
+              title={
+                hasActiveFilters
+                  ? filteredEmptyTitle ?? 'Nothing matches those filters'
+                  : 'All quiet here'
+              }
               message={
                 hasActiveFilters
                   ? 'Try widening your filters, or report something new.'
@@ -854,25 +898,114 @@ export default function IssueListScreen() {
   );
 }
 
-// ── Filter bar button ────────────────────────────────────────────────────────
-// Status/Date/Site open a dropdown (chevron shown); Trending/Public are
-// plain toggles applied immediately on tap.
-function FilterBarButton({
-  label,
-  active,
-  onPress,
-  dropdown = true,
-}: {
+// ── Filter bar ───────────────────────────────────────────────────────────────
+// Seven controls that don't fit one phone-width row, so the bar scrolls and
+// the last two or three sit off the right-hand edge with nothing saying so.
+// Two things address that here, and they're the same fix twice:
+//
+//  - a fade on the right edge while there is more to scroll to, which is the
+//    standard way to say "there's more" without spending a control on it;
+//  - a count in that fade of how many *active* filters are currently out of
+//    sight. The bar's rule is that a button renders active only when it
+//    differs from its default — which is a fine rule right up until the
+//    button doing the filtering is off screen. See lib/filterSummary.ts.
+//
+// The bar owns its own scroll position rather than lifting it to the screen,
+// so a scroll frame re-renders seven chips and not the grid below them.
+
+interface FilterButtonSpec {
+  key: string;
   label: string;
   active: boolean;
-  onPress: () => void;
+  /** Opens a dropdown (chevron shown). Trending/Public/Assigned toggle on tap. */
   dropdown?: boolean;
+  onPress: () => void;
+}
+
+const FILTER_FADE_WIDTH = 56;
+
+function FilterBar({ buttons }: { buttons: FilterButtonSpec[] }) {
+  const [scrollX, setScrollX] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
+  const [layouts, setLayouts] = useState<Record<string, FilterButtonLayout>>({});
+
+  const measure = useCallback((key: string, layout: FilterButtonLayout) => {
+    setLayouts((prev) => {
+      const seen = prev[key];
+      if (seen && seen.x === layout.x && seen.width === layout.width) return prev;
+      return { ...prev, [key]: layout };
+    });
+  }, []);
+
+  // 1px of slack — content and viewport widths are floats and can land a
+  // hair apart at rest, which would leave the fade permanently on.
+  const canScrollRight = contentWidth - viewportWidth - scrollX > 1;
+  const hiddenActive = countActiveOffscreen(buttons, layouts, scrollX, viewportWidth);
+
+  return (
+    <View style={styles.filterWrap} onLayout={(e) => setViewportWidth(e.nativeEvent.layout.width)}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterBarRow}
+        scrollEventThrottle={32}
+        onScroll={(e) => setScrollX(e.nativeEvent.contentOffset.x)}
+        onContentSizeChange={(w) => setContentWidth(w)}
+      >
+        {buttons.map((b) => (
+          <FilterBarButton key={b.key} spec={b} onMeasure={measure} />
+        ))}
+      </ScrollView>
+
+      {canScrollRight && (
+        <View style={styles.filterFade} pointerEvents="none">
+          <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+            <Defs>
+              <LinearGradient id="filterFade" x1="0" y1="0" x2="1" y2="0">
+                <Stop offset="0" stopColor={Colors.surface} stopOpacity="0" />
+                <Stop offset="1" stopColor={Colors.surface} stopOpacity="1" />
+              </LinearGradient>
+            </Defs>
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#filterFade)" />
+          </Svg>
+          {hiddenActive > 0 && (
+            <View style={styles.filterHiddenCount}>
+              <Text style={styles.filterHiddenCountText}>{hiddenActive}</Text>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// The chips are 34px tall — the one place this page bends MIN_TOUCH_TARGET
+// (48), so seven controls fit a single scrollable row. That trade was about
+// pixels on screen; it was never about the tap area, which nobody can see.
+// 7px top and bottom takes the target to 48 with nothing moving. Horizontal
+// is capped at 4 because the gap between chips is Spacing.sm (8) and two
+// chips must not both claim the same pixel.
+const FILTER_CHIP_HIT_SLOP = { top: 7, bottom: 7, left: 4, right: 4 };
+
+function FilterBarButton({
+  spec,
+  onMeasure,
+}: {
+  spec: FilterButtonSpec;
+  onMeasure: (key: string, layout: FilterButtonLayout) => void;
 }) {
+  const { key, label, active, onPress, dropdown = true } = spec;
   return (
     <TouchableOpacity
       style={[styles.filterBarButton, active && styles.filterBarButtonActive]}
       onPress={onPress}
       activeOpacity={0.7}
+      hitSlop={FILTER_CHIP_HIT_SLOP}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+      onLayout={(e) => onMeasure(key, { x: e.nativeEvent.layout.x, width: e.nativeEvent.layout.width })}
     >
       <Text style={[styles.filterBarButtonText, active && styles.filterBarButtonTextActive]}>{label}</Text>
       {dropdown && (
@@ -1311,6 +1444,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  // Stops 1px short of the bottom so it doesn't paint over the bar's own
+  // bottom border and leave a notch in it.
+  filterFade: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 1,
+    width: FILTER_FADE_WIDTH,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingRight: Spacing.lg,
+  },
+  filterHiddenCount: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterHiddenCountText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.white,
+  },
   filterBarRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
@@ -1460,10 +1619,16 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
   },
   // The serious lane's own identity colour — this strip is the injury lane
-  // speaking, not a generic notice.
+  // speaking, not a generic notice. The tint says in colour what the block
+  // already said in words: this is an alert, not a view of what you asked
+  // for. Same tint family as the status and kind badges, so it introduces no
+  // new hue to a page that has run out of room for one.
   attentionBlock: {
     gap: Spacing.sm,
     marginBottom: Spacing.lg,
+    backgroundColor: Colors.seriousBg,
+    borderRadius: Radius.card,
+    padding: Spacing.md,
   },
   attentionHeader: {
     flexDirection: 'row',

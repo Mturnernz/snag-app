@@ -97,6 +97,12 @@ export const Colors = {
   black: '#000000',
   danger: '#EF4444',
   dangerFg: '#B91C1C',
+
+  // Scrim for chips laid over a photo (site pill, merge indicator, the "new
+  // since your last visit" dot). A photo is not a background you can pick a
+  // text colour against, so anything sitting on one gets this behind it and
+  // white on top.
+  photoOverlay: 'rgba(17, 24, 39, 0.75)',
 };
 
 // Work group tile colours — a curated palette an admin/supervisor picks from
@@ -121,6 +127,18 @@ export const CardAlertBorder = {
   injury: Colors.black,
   critical: Colors.priority.high,
   improvement: Colors.category.other,
+};
+
+// The other half of the alert border. The border alone is the one place on the
+// card where colour is the only signal — which the rest of the design system
+// forbids — so each border colour also gets a glyph, sat on the photo's
+// bottom-left corner where nothing else on the card is competing for space.
+// The icons have to be distinguishable from each other in monochrome; that is
+// the whole point of them.
+export const CardAlertGlyph: Record<keyof typeof CardAlertBorder, 'medkit-outline' | 'alert-circle-outline' | 'bulb-outline'> = {
+  injury: 'medkit-outline',
+  critical: 'alert-circle-outline',
+  improvement: 'bulb-outline',
 };
 
 export const Radius = {

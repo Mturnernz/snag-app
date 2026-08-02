@@ -86,6 +86,7 @@ All tokens are in `src/constants/theme.ts`. Never hardcode colours, spacing, or 
 - **Card radius**: 12px | **Button radius**: 8px | **Chip radius**: 4px
 - **Icons**: `@expo/vector-icons` (Ionicons) via the shared `Icon` component — never emoji/unicode glyphs. `-outline` variants by default; filled reserved for the active tab, active vote, and the serious-lane header icon. Size from the `IconSize` scale.
 - **Priority badges**: only `high` carries an alert colour (`Colors.priority.high`); `low`/`medium` render as neutral dots — this avoids colliding with status badge colours.
+- **Colour is never the only signal.** The one place it was — `CardAlertBorder`, the injury/critical/improvement border on a snag card — now pairs with `CardAlertGlyph`, a different icon per border colour, on the photo's bottom-left corner. Add to both maps together or the new border says nothing in monochrome.
 - **Minimum touch target**: 48px (use `MIN_TOUCH_TARGET` constant)
 - **Font**: System (San Francisco on iOS) — no custom typeface
 - **Light mode only** — no dark mode handling needed

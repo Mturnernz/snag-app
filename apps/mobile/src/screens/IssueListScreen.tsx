@@ -38,6 +38,10 @@ import { useToast } from '../hooks/useToast';
 import { useBadge } from '../context/BadgeContext';
 import { useOfflineQueue } from '../context/OfflineQueueContext';
 import { sortSnags as orderSnags, needsAttention, SortMode } from '../lib/snagOrdering';
+import { isNewSince } from '../lib/snagFreshness';
+import { readLastSeen, markSeen } from '../lib/lastSeen';
+import { describeFilteredEmptyState } from '../lib/filterSummary';
+import FilterBar, { FilterButtonSpec } from '../components/FilterBar';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -125,6 +129,11 @@ export default function IssueListScreen() {
   // user" is (and from overwriting one user's saved filter with another's on
   // a shared device).
   const userIdRef = React.useRef<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Snapshotted once on mount and deliberately not refreshed while the screen
+  // is alive: opening a snag and coming back should not clear the badges off
+  // every other card on the way past.
+  const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   // Open injuries, fetched in their own right rather than picked out of the
   // loaded page — a pinned card only ever surfaced what pagination happened to
@@ -470,11 +479,14 @@ export default function IssueListScreen() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
       userIdRef.current = user.id;
-      const [statusRaw, scopeRaw, assignedRaw] = await Promise.all([
+      setCurrentUserId(user.id);
+      const [statusRaw, scopeRaw, assignedRaw, lastSeenRaw] = await Promise.all([
         AsyncStorage.getItem(STATUS_FILTER_STORAGE_PREFIX + user.id),
         AsyncStorage.getItem(SCOPE_FILTER_STORAGE_PREFIX + user.id),
         AsyncStorage.getItem(ASSIGNED_FILTER_STORAGE_PREFIX + user.id),
+        readLastSeen(user.id),
       ]);
+      setLastSeenAt(lastSeenRaw);
       if (statusRaw) {
         try {
           const saved: SnagStatus[] = JSON.parse(statusRaw);
@@ -527,6 +539,9 @@ export default function IssueListScreen() {
     }, [fetchIssues])
   );
 
+  // Mark the list read on the way *out*, not on the way in — see lib/lastSeen.
+  useFocusEffect(useCallback(() => () => { markSeen(userIdRef.current); }, []));
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchIssues();
@@ -560,6 +575,68 @@ export default function IssueListScreen() {
     await fetchIssues();
     navigation.navigate('IssueDetail', { issueId: newSnag.id });
   }
+
+  // The bar as data rather than markup, so FilterBar can answer "is an active
+  // filter currently scrolled off the right-hand edge" without every scroll
+  // frame re-rendering this screen (and with it the grid).
+  const filterButtons: FilterButtonSpec[] = [
+    ...(hasOrg ? [{
+      key: 'scope',
+      label: scopeOptions.find((o) => o.key === scopeFilter)?.shortLabel ?? 'Mine',
+      active: scopeFilter !== DEFAULT_SCOPE_FILTER,
+      onPress: () => setOpenDropdown('scope'),
+    }] : []),
+    {
+      key: 'status',
+      label: 'Status',
+      active: !setsEqual(statusFilters, DEFAULT_STATUS_FILTERS),
+      onPress: () => setOpenDropdown('status'),
+    },
+    {
+      key: 'date',
+      label: sortMode === 'oldest' ? 'Oldest' : 'Date',
+      active: sortMode === 'oldest',
+      onPress: () => setOpenDropdown('date'),
+    },
+    ...(hasOrg ? [{
+      key: 'site',
+      label: 'Site',
+      active: siteFilters.size > 0,
+      onPress: () => setOpenDropdown('site'),
+    }] : []),
+    ...(hasOrg && !scopeIsUnassigned ? [{
+      key: 'assigned',
+      label: 'Assigned',
+      active: assignedOnly,
+      dropdown: false,
+      onPress: () => setAssignedOnly((prev) => !prev),
+    }] : []),
+    {
+      key: 'trending',
+      label: 'Trending',
+      active: sortMode === 'trending',
+      dropdown: false,
+      onPress: () => setSortMode((prev) => (prev === 'trending' ? 'newest' : 'trending')),
+    },
+    ...(isPublicOrg && hasPublicSnags ? [{
+      key: 'public',
+      label: 'Public',
+      active: publicOnly,
+      dropdown: false,
+      onPress: () => setPublicOnly((prev) => !prev),
+    }] : []),
+  ];
+
+  // "Nothing matches those filters" is true of every filtered empty list; this
+  // says which filters. Statuses are read in the bar's own order rather than
+  // the Set's insertion order, so the copy doesn't depend on which chip
+  // someone happened to tap first.
+  const filteredEmptyTitle = describeFilteredEmptyState(
+    setsEqual(statusFilters, DEFAULT_STATUS_FILTERS)
+      ? []
+      : STATUS_FILTER_OPTIONS.filter((o) => statusFilters.has(o.key)).map((o) => o.label),
+    sites.filter((s) => siteFilters.has(s.id)).map((s) => s.name)
+  );
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -610,56 +687,7 @@ export default function IssueListScreen() {
           </View>
         </View>
       ) : (
-        <View style={styles.filterWrap}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterBarRow}>
-            {hasOrg && (
-              <FilterBarButton
-                label={scopeOptions.find((o) => o.key === scopeFilter)?.shortLabel ?? 'Mine'}
-                active={scopeFilter !== DEFAULT_SCOPE_FILTER}
-                onPress={() => setOpenDropdown('scope')}
-              />
-            )}
-            <FilterBarButton
-              label="Status"
-              active={!setsEqual(statusFilters, DEFAULT_STATUS_FILTERS)}
-              onPress={() => setOpenDropdown('status')}
-            />
-            <FilterBarButton
-              label={sortMode === 'oldest' ? 'Oldest' : 'Date'}
-              active={sortMode === 'oldest'}
-              onPress={() => setOpenDropdown('date')}
-            />
-            {hasOrg && (
-              <FilterBarButton
-                label="Site"
-                active={siteFilters.size > 0}
-                onPress={() => setOpenDropdown('site')}
-              />
-            )}
-            {hasOrg && !scopeIsUnassigned && (
-              <FilterBarButton
-                label="Assigned"
-                active={assignedOnly}
-                dropdown={false}
-                onPress={() => setAssignedOnly((prev) => !prev)}
-              />
-            )}
-            <FilterBarButton
-              label="Trending"
-              active={sortMode === 'trending'}
-              dropdown={false}
-              onPress={() => setSortMode((prev) => (prev === 'trending' ? 'newest' : 'trending'))}
-            />
-            {isPublicOrg && hasPublicSnags && (
-              <FilterBarButton
-                label="Public"
-                active={publicOnly}
-                dropdown={false}
-                onPress={() => setPublicOnly((prev) => !prev)}
-              />
-            )}
-          </ScrollView>
-        </View>
+        <FilterBar buttons={filterButtons} />
       )}
 
       <Modal visible={openDropdown !== null} transparent animationType="fade" onRequestClose={() => setOpenDropdown(null)}>
@@ -757,6 +785,7 @@ export default function IssueListScreen() {
               onLongPress={() => handleLongPress(item.id)}
               selectable={selectMode}
               selected={selectedIds.includes(item.id)}
+              isNew={isNewSince(item, lastSeenAt, currentUserId)}
             />
           )}
           contentContainerStyle={[
@@ -786,6 +815,7 @@ export default function IssueListScreen() {
                         compact
                         photoUrl={snag.photo_path ? photoUrls[snag.photo_path] ?? null : null}
                         onPress={() => handleCardPress(snag)}
+                        isNew={isNewSince(snag, lastSeenAt, currentUserId)}
                       />
                     </View>
                   ))}
@@ -814,7 +844,11 @@ export default function IssueListScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="build-outline"
-              title={hasActiveFilters ? 'Nothing matches those filters' : 'All quiet here'}
+              title={
+                hasActiveFilters
+                  ? filteredEmptyTitle ?? 'Nothing matches those filters'
+                  : 'All quiet here'
+              }
               message={
                 hasActiveFilters
                   ? 'Try widening your filters, or report something new.'
@@ -851,34 +885,6 @@ export default function IssueListScreen() {
         }}
       />
     </View>
-  );
-}
-
-// ── Filter bar button ────────────────────────────────────────────────────────
-// Status/Date/Site open a dropdown (chevron shown); Trending/Public are
-// plain toggles applied immediately on tap.
-function FilterBarButton({
-  label,
-  active,
-  onPress,
-  dropdown = true,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  dropdown?: boolean;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.filterBarButton, active && styles.filterBarButtonActive]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <Text style={[styles.filterBarButtonText, active && styles.filterBarButtonTextActive]}>{label}</Text>
-      {dropdown && (
-        <Icon name="chevron-down" size="sm" color={active ? Colors.primary : Colors.textSecondary} />
-      )}
-    </TouchableOpacity>
   );
 }
 
@@ -1305,41 +1311,6 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
     color: Colors.primary,
   },
-  filterWrap: {
-    backgroundColor: Colors.surface,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  filterBarRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-  },
-  filterBarButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    height: 34,
-    paddingHorizontal: Spacing.md,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-  },
-  filterBarButtonActive: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
-  },
-  filterBarButtonText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-  },
-  filterBarButtonTextActive: {
-    color: Colors.primary,
-    fontWeight: Typography.semibold,
-  },
   dropdownScroll: {
     maxHeight: 320,
   },
@@ -1460,10 +1431,16 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
   },
   // The serious lane's own identity colour — this strip is the injury lane
-  // speaking, not a generic notice.
+  // speaking, not a generic notice. The tint says in colour what the block
+  // already said in words: this is an alert, not a view of what you asked
+  // for. Same tint family as the status and kind badges, so it introduces no
+  // new hue to a page that has run out of room for one.
   attentionBlock: {
     gap: Spacing.sm,
     marginBottom: Spacing.lg,
+    backgroundColor: Colors.seriousBg,
+    borderRadius: Radius.card,
+    padding: Spacing.md,
   },
   attentionHeader: {
     flexDirection: 'row',

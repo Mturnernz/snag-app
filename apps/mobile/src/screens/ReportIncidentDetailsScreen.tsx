@@ -10,6 +10,7 @@ import {
   supabase, getReportableSites, getLastReportedSiteId, createSnag, resolveActiveOrg,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { shouldShowHint, markHintSeen } from '../lib/firstRunHints';
 import { ReportSite, resolveReportSite, cacheReportSiteId } from '../lib/reportSite';
 import { useIncidentDraft } from '../context/IncidentDraftContext';
 import ScreenHeader from '../components/ScreenHeader';
@@ -33,6 +34,10 @@ const KIND_OPTIONS: { key: SnagKind; label: string }[] = [
 
 export default function ReportIncidentDetailsScreen() {
   const insets = useSafeAreaInsets();
+  // Shown once, on somebody's first serious report. The onboarding carousel
+  // describes the lane split before anyone has filed anything; this is the
+  // moment it actually means something.
+  const [hint, setHint] = useState<{ show: boolean; userId: string | null }>({ show: false, userId: null });
   const navigation = useNavigation<Nav>();
   const photoPickerRef = useRef<PhotoPickerHandle>(null);
   const { draft, setDraft, setSubmitHandler } = useIncidentDraft();
@@ -141,6 +146,13 @@ export default function ReportIncidentDetailsScreen() {
     navigation.navigate('ReportIncidentReview');
   }
 
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      setHint({ show: await shouldShowHint('seriousReport', user.id), userId: user.id });
+    });
+  }, []);
+
   return (
     <View style={styles.container}>
       <ScreenHeader title="Report a Serious Incident" tone="serious" onBack={handleBack} />
@@ -153,6 +165,27 @@ export default function ReportIncidentDetailsScreen() {
           Use this for anything involving injury, a near-miss, or a serious health & safety hazard.
           This creates a formal record for your organisation.
         </Text>
+
+        {/* First serious report only. The intro above says what this is for;
+            this says what happens next, which is the part nobody expects the
+            first time — a report that cannot simply be marked done. */}
+        {hint.show && (
+          <View style={styles.firstTimeHint}>
+            <Text style={styles.firstTimeHintTitle}>What happens after you submit</Text>
+            <Text style={styles.firstTimeHintBody}>
+              Your health & safety team is notified and an investigation is opened. Someone is
+              assigned to lead it, and it stays open until the first-response checklist, a witness
+              statement and evidence are recorded — plus either a root cause or your
+              organisation&apos;s own investigation document.
+            </Text>
+            <Text
+              style={styles.firstTimeHintDismiss}
+              onPress={() => { setHint((h) => ({ ...h, show: false })); markHintSeen('seriousReport', hint.userId); }}
+            >
+              Got it
+            </Text>
+          </View>
+        )}
 
         {sites.length > 1 && (
           <SitePicker sites={sites} value={site} onChange={handleSiteChange} label="Site" />
@@ -230,6 +263,29 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: Spacing.lg,
     gap: Spacing.lg,
+  },
+  firstTimeHint: {
+    backgroundColor: Colors.seriousBg,
+    borderRadius: Radius.card,
+    padding: Spacing.md,
+    gap: Spacing.xs,
+  },
+  firstTimeHintTitle: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.bold,
+    color: Colors.seriousFg,
+  },
+  firstTimeHintBody: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    lineHeight: 19,
+  },
+  firstTimeHintDismiss: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.seriousFg,
+    paddingVertical: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET / 2,
   },
   intro: {
     fontSize: Typography.sm,

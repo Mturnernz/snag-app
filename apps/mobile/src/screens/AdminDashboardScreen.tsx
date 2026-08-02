@@ -16,12 +16,13 @@ import { Organisation, Profile, UserRole, RootStackParamList } from '../types';
 import {
   supabase, getSiteBreakdown, SiteBreakdown, getMemberships, setOrganisationActive, Membership,
   getUnassignedSnags, UnassignedSnag, getSiteAssignees, SiteAssignee, assignSnagOwner,
-  getOverdueActions, getRcaOutstanding,
+  getOverdueActions, getRcaOutstanding, getSeriousIncidentOwners, getSitesWithDetail, SiteDetail,
 } from '../lib/supabase';
 import type { OverdueActionRow, RcaOutstandingRow } from '@snag/supabase-queries';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { showAlert } from '../lib/alert';
+import { shouldShowHint, markHintSeen } from '../lib/firstRunHints';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -63,12 +64,27 @@ export default function AdminDashboardScreen() {
   // it's asked about isn't the caller's active org, and that used to surface as
   // an empty card on an org with three sites. See PRODUCT_REVIEW.md §3.4.
   const [breakdownError, setBreakdownError] = useState(false);
+  // Who a serious report reaches, and who can act on it once it lands. These
+  // are configuration facts with no home in the app: nothing told a manager
+  // that every hazard in the organisation notifies one person, or that a site
+  // has nobody able to run an investigation at it.
+  const [incidentOwnerCount, setIncidentOwnerCount] = useState<number | null>(null);
+  // Shown once, the first time someone opens this tab. It appears the day they
+  // are promoted, with nothing to say what it is for.
+  const [showManagerHint, setShowManagerHint] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [sitesDetail, setSitesDetail] = useState<SiteDetail[]>([]);
 
   const canManageWorkGroups = role === 'officer_admin' || role === 'supervisor';
+
+  const sitesWithoutLead = sitesDetail.filter((s) => s.supervisorIds.length === 0).map((s) => s.name);
+  const sitesWithoutDefaultOwner = sitesDetail.filter((s) => !s.defaultOwnerId).map((s) => s.name);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
+    setUserId(user.id);
+    setShowManagerHint(await shouldShowHint('managerTab', user.id));
 
     const { data } = await supabase
       .from('profiles')
@@ -99,6 +115,14 @@ export default function AdminDashboardScreen() {
       const { data: rows, error } = await getSiteBreakdown(activeOrgId);
       setSiteBreakdown(rows);
       setBreakdownError(Boolean(error));
+
+      // Independent of each other and of the breakdown above.
+      const [owners, sites] = await Promise.all([
+        getSeriousIncidentOwners(activeOrgId),
+        getSitesWithDetail(),
+      ]);
+      setIncidentOwnerCount(owners.length);
+      setSitesDetail(sites);
     }
 
     setLoading(false);
@@ -206,6 +230,25 @@ export default function AdminDashboardScreen() {
             overdue corrective actions, by site. The full org-wide status/
             type/severity breakdown still lives on Reports; this is the
             site-scoped complement, not a replacement. */}
+        {showManagerHint && (
+          <Card variant="elevated" style={styles.hintCard}>
+            <View style={styles.hintHeader}>
+              <Icon name="information-circle-outline" size="md" color={Colors.primary} />
+              <Text style={styles.hintTitle}>This is the Manager tab</Text>
+            </View>
+            <Text style={styles.hintBody}>
+              Outstanding work by site, so nothing sits waiting on somebody who doesn&apos;t know it&apos;s
+              theirs. Tap any number to see what it counts. Cover below shows who a serious report
+              reaches and who can act on it once it lands.
+            </Text>
+            <Button
+              label="Got it"
+              variant="outline"
+              onPress={() => { setShowManagerHint(false); markHintSeen('managerTab', userId); }}
+            />
+          </Card>
+        )}
+
         <Card variant="elevated" style={styles.breakdownCard}>
           <Text style={styles.sectionLabel}>OUTSTANDING WORK</Text>
           {breakdownError ? (
@@ -340,6 +383,57 @@ export default function AdminDashboardScreen() {
           )}
         </Card>
 
+        {/* Cover — who a serious report reaches, and who can act on it.
+            Read-only: every fix lives on a Manage screen, and putting the
+            controls here would be a third place to change the same thing. */}
+        {incidentOwnerCount !== null && (
+          <Card variant="elevated" style={styles.breakdownCard}>
+            <Text style={styles.sectionLabel}>COVER</Text>
+
+            <CoverRow
+              label="Serious incident owners"
+              value={String(incidentOwnerCount)}
+              // One is the minimum the server allows, and it means every hazard
+              // and incident in the organisation notifies one person and is
+              // assigned to them by default. If they are away, a serious report
+              // lands nowhere anybody is watching.
+              warn={incidentOwnerCount <= 1}
+              hint={incidentOwnerCount <= 1 ? 'Every serious report goes to one person' : undefined}
+              onPress={isAdmin ? () => navigation.navigate('ManageOrganisation') : undefined}
+            />
+
+            <CoverRow
+              label="Sites with no site lead"
+              value={String(sitesWithoutLead.length)}
+              // can_edit_site is what triage, assignment and the investigation
+              // writes require, and it needs a real site_supervisors row. A site
+              // with none has nobody who can run an investigation at it.
+              warn={sitesWithoutLead.length > 0}
+              hint={sitesWithoutLead.length > 0 ? sitesWithoutLead.join(', ') : undefined}
+              onPress={isAdmin ? () => navigation.navigate('ManageSites') : undefined}
+            />
+
+            <CoverRow
+              label="Sites with no default owner"
+              value={String(sitesWithoutDefaultOwner.length)}
+              // Not an alert: apply_default_owner still names the earliest
+              // serious incident owner, so nothing arrives ownerless on the
+              // serious lane. It does mean niggles land unassigned.
+              hint={sitesWithoutDefaultOwner.length > 0 ? sitesWithoutDefaultOwner.join(', ') : undefined}
+              onPress={isAdmin ? () => navigation.navigate('ManageSites') : undefined}
+            />
+
+            {org?.is_public && (
+              <CoverRow
+                label="Public reporting"
+                value="On"
+                hint="Anyone with a site QR code can file a report"
+                onPress={isAdmin ? () => navigation.navigate('ManageOrganisation') : undefined}
+              />
+            )}
+          </Card>
+        )}
+
         {/* Actions */}
         {isAdmin && (
           <>
@@ -426,6 +520,32 @@ export default function AdminDashboardScreen() {
 // read-only and open the snag at the step that owes the work — unlike the
 // Unassigned expander, which assigns in place, because "who owns this" is one
 // tap and "why is this RCA outstanding" is not.
+// One configuration fact, with the gap named rather than left as a number to
+// interpret. Tappable only for an admin, since only an admin can fix any of
+// them — a row that navigates to a screen you can't act on is worse than a
+// static one.
+function CoverRow({
+  label, value, warn, hint, onPress,
+}: {
+  label: string;
+  value: string;
+  warn?: boolean;
+  hint?: string;
+  onPress?: () => void;
+}) {
+  const Wrapper = onPress ? TouchableOpacity : View;
+  return (
+    <Wrapper style={styles.coverRow} onPress={onPress} activeOpacity={0.7}>
+      <View style={styles.coverText}>
+        <Text style={styles.coverLabel}>{label}</Text>
+        {hint && <Text style={[styles.coverHint, warn && styles.coverHintWarn]} numberOfLines={2}>{hint}</Text>}
+      </View>
+      <Text style={[styles.coverValue, warn && styles.coverValueWarn]}>{value}</Text>
+      {onPress && <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />}
+    </Wrapper>
+  );
+}
+
 function OutstandingList({
   rows, emptyLabel, onOpen,
 }: {
@@ -573,6 +693,51 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
   },
   siteStatLabel: { fontSize: Typography.xs, color: Colors.textMuted },
+  hintCard: { gap: Spacing.sm },
+  hintHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  hintTitle: {
+    flex: 1,
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  hintBody: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    lineHeight: 19,
+  },
+  coverRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingVertical: Spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  coverText: {
+    flex: 1,
+    gap: 2,
+  },
+  coverLabel: {
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  coverHint: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+  },
+  coverHintWarn: {
+    color: Colors.serious,
+  },
+  coverValue: {
+    fontSize: Typography.lg,
+    fontWeight: Typography.bold,
+    color: Colors.textPrimary,
+  },
+  coverValueWarn: {
+    color: Colors.serious,
+  },
   outstandingWrap: {
     borderTopWidth: 1,
     borderTopColor: Colors.border,

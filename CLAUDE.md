@@ -166,6 +166,13 @@ naming the site at all. It looked like a permissions problem to the person hitti
   supervise without this list needing to know about `site_supervisors` at all.
   `20260801120000_supervising_implies_membership.sql` made `assign_site_supervisor` write both
   rows and backfilled the ones it had missed; every other path already did this.
+- **And belonging to a site means seeing it**, for every role. `can_view_site` used to ask
+  supervisors a different question — `site_supervisors` only, membership never consulted — so a
+  supervisor saw *less* at a site they belonged to than a worker standing next to them, and
+  promotion silently took read access away. `20260802140000_membership_implies_visibility.sql`
+  made the non-admin branch `site_members OR site_supervisors`. Read only: `can_edit_site` is
+  untouched, so triage, assignment and the investigation writes still need a real
+  `site_supervisors` row. Sight, not command.
 - **The niggle form's work-group picker follows the selected site**, since custom groups can be
   site-scoped. Changing site mid-report changes which groups are on offer, which is correct.
 - The serious lane carries the site on `IncidentDraft` so the Review screen can show it, and its

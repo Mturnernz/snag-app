@@ -487,6 +487,89 @@ export function resolveBlockReason(
   return seriousResolveGate(inv, notifiableDecided).find((c) => c.unmet)?.reason ?? null;
 }
 
+// ─── The gate, from a list row ──────────────────────────────────────────────
+
+/**
+ * One row of `snag_gate_inputs` — the facts the gate consumes, for a serious
+ * snag, cheap enough to fetch for a whole page of them.
+ */
+export interface SnagGateInputs {
+  snag_id: string;
+  status: SnagStatus;
+  is_notifiable: boolean | null;
+  checklist_completed_count: number;
+  witness_count: number;
+  evidence_count: number;
+  open_corrective_action_count: number;
+  investigation_mode: InvestigationMode | null;
+  has_root_cause: boolean;
+  has_document: boolean;
+  document_accepted: boolean;
+}
+
+export interface SnagGateSummary {
+  /** How many conditions are still unmet. 0 means Resolve would be accepted. */
+  outstanding: number;
+  /** The first unmet condition's reason, in the same order the gate applies. */
+  firstBlocker: string | null;
+}
+
+/**
+ * What a serious snag is still waiting on, for a list.
+ *
+ * Deliberately routed through `seriousResolveGate` rather than reimplemented:
+ * the mode fork is the thing most likely to drift, and a list that disagreed
+ * with the detail screen about whether a snag can close would be worse than a
+ * list that says nothing. The only work here is shaping a view row into the
+ * `InvestigationState` the gate already reads — the counts stand in for the
+ * arrays, since the gate only ever asks for their length.
+ *
+ * A snag with no investigation row reads as `snag` mode, matching
+ * `assign_investigation`'s default and `update_snag_status`'s own fallback.
+ */
+export function snagGateSummary(row: SnagGateInputs): SnagGateSummary {
+  const inv: InvestigationState = {
+    completedSteps: new Array(row.checklist_completed_count).fill('make_safe') as ChecklistStep[],
+    witnesses: new Array(row.witness_count).fill(null) as unknown as WitnessStatement[],
+    evidence: new Array(row.evidence_count).fill(null) as unknown as EvidenceItem[],
+    rootCause: row.has_root_cause ? 'set' : null,
+    openCorrectiveActions: row.open_corrective_action_count,
+    correctiveActionCount: row.open_corrective_action_count,
+    mode: row.investigation_mode ?? 'snag',
+    leadInvestigatorId: null,
+    documentId: row.has_document ? 'set' : null,
+    documentTitle: null,
+    documentPath: null,
+    documentAttachedBy: null,
+    documentAccepted: row.document_accepted,
+    documentAcceptedBy: null,
+  };
+  const conditions = seriousResolveGate(inv, row.is_notifiable !== null);
+  return {
+    outstanding: conditions.filter((c) => c.unmet).length,
+    firstBlocker: conditions.find((c) => c.unmet)?.reason ?? null,
+  };
+}
+
+/**
+ * Gate inputs for a page of snags, keyed by snag id. Serious lane only — the
+ * view holds nothing else — so a niggle simply won't appear in the result.
+ */
+export async function getSnagGateInputs(
+  client: SupabaseClient,
+  snagIds: string[],
+): Promise<Record<string, SnagGateInputs>> {
+  if (snagIds.length === 0) return {};
+  const { data, error } = await client
+    .from('snag_gate_inputs')
+    .select('snag_id, status, is_notifiable, checklist_completed_count, witness_count, evidence_count, open_corrective_action_count, investigation_mode, has_root_cause, has_document, document_accepted')
+    .in('snag_id', snagIds);
+  if (error || !data) return {};
+  const map: Record<string, SnagGateInputs> = {};
+  for (const row of data as unknown as SnagGateInputs[]) map[row.snag_id] = row;
+  return map;
+}
+
 // ─── Corrective actions (CAPA) ─────────────────────────────────────────────
 
 export async function getCorrectiveActions(client: SupabaseClient, snagId: string): Promise<CorrectiveAction[]> {

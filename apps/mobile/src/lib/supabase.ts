@@ -808,6 +808,10 @@ export const isImageEvidence = queries.isImageEvidence;
 // Drives the live progress display and the serious-lane resolve gate.
 export const getInvestigationState = (snagId: string) => queries.getInvestigationState(supabase, snagId);
 
+// Gate inputs for a page of serious snags — what the list needs to say which
+// of them are actually blocked. See snagGateSummary.
+export const getSnagGateInputs = (snagIds: string[]) => queries.getSnagGateInputs(supabase, snagIds);
+
 // The gate itself is pure and shared with apps/web, so the two clients can't
 // disagree about what's outstanding or what order to do it in.
 export type ResolveGateCondition = queries.ResolveGateCondition;

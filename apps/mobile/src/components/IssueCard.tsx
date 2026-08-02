@@ -6,8 +6,10 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { SnagGateSummary } from '@snag/supabase-queries';
 import { Snag } from '../types';
 import { Colors, Radius, Spacing, Typography, Shadow, IconSize, CardAlertBorder } from '../constants/theme';
+import Badge from './Badge';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import CategoryBadge from './CategoryBadge';
@@ -22,6 +24,9 @@ interface Props {
   photoUrl?: string | null;
   /** Smaller photo/title and a one-line footer, for the 2-column grid. */
   compact?: boolean;
+  /** Serious-lane only: what the resolve gate is still waiting on. Absent for
+   *  niggles, and for serious snags whose gate inputs haven't loaded yet. */
+  gate?: SnagGateSummary;
   onPress: () => void;
   /** Enters merge select mode on the list screen. */
   onLongPress?: () => void;
@@ -90,7 +95,26 @@ function StatsRow({ commentCount, voteScore }: { commentCount: number; voteScore
   );
 }
 
-function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable, selected }: Props) {
+// What the resolve gate is still waiting on, for the list.
+//
+// The count and the first blocking step only. A full checklist on a 110px card
+// is the horizontal progress strip that was already tried and removed — it fit
+// about two and a half steps. Neutral rather than an alert colour: the card can
+// already carry a status pill, a kind pill and a severity border, and a fourth
+// hue would collide with one of them. "Ready to resolve" is the exception, and
+// uses the documented success token because it is the one state that says
+// somebody can act right now.
+function GateBadge({ gate, compact }: { gate: SnagGateSummary; compact?: boolean }) {
+  if (gate.outstanding === 0) {
+    return <Badge label="Ready to resolve" color={Colors.successFg} bg={Colors.successBg} variant="solid" />;
+  }
+  const label = compact
+    ? `${gate.outstanding} step${gate.outstanding === 1 ? '' : 's'} left`
+    : gate.firstBlocker ?? `${gate.outstanding} steps left`;
+  return <Badge label={label} color={Colors.textSecondary} bg={Colors.priority.mediumBg} variant="solid" />;
+}
+
+function IssueCard({ issue, photoUrl, compact, gate, onPress, onLongPress, selectable, selected }: Props) {
   const reporterName = issue.reporter_name || issue.reporter?.name || 'Unknown';
   // owner_name comes off snags_with_details, already selected by both clients'
   // list queries and, until now, displayed by neither.
@@ -194,6 +218,9 @@ function IssueCard({ issue, photoUrl, compact, onPress, onLongPress, selectable,
         <View style={styles.badgeRow}>
           <CategoryBadge kind={issue.kind} />
           {!compact && <PriorityBadge severity={issue.severity} />}
+          {/* Resolved snags have nothing left to wait on, so the gate goes
+              quiet rather than reporting a satisfied checklist. */}
+          {gate && issue.status !== 'resolved' && <GateBadge gate={gate} compact={compact} />}
         </View>
 
         {/* Footer row */}

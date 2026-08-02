@@ -26,8 +26,9 @@ import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme'
 import {
   supabase, getSnagPhotoUrls, getProfile, mergeSnags, getOrgMembers, getWorkGroupsWithDetail, WorkGroupDetail,
   updateSnagStatus, resolveSnag, assignSnagOwner, assignSnagWorkGroup, getOrgSites, getMySiteIds,
-  getMySupervisedWorkGroupIds, getMyMentionedSnagIds, getMyActiveRcaSnagIds,
+  getMySupervisedWorkGroupIds, getMyMentionedSnagIds, getMyActiveRcaSnagIds, getSnagGateInputs,
 } from '../lib/supabase';
+import { snagGateSummary, SnagGateSummary } from '@snag/supabase-queries';
 import IssueCard from '../components/IssueCard';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
@@ -151,6 +152,9 @@ export default function IssueListScreen() {
 
   const [issues, setIssues] = useState<Snag[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  // What the resolve gate is still waiting on, per serious snag on screen.
+  // Fetched for the page rather than per card, the same way photo URLs are.
+  const [gates, setGates] = useState<Record<string, SnagGateSummary>>({});
   const [hasOrg, setHasOrg] = useState<boolean | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [orgName, setOrgName] = useState<string | null>(null);
@@ -296,6 +300,22 @@ export default function IssueListScreen() {
     return query.order('created_at', { ascending: sortMode === 'oldest' });
   }, [statusFilters, siteFilters, sortMode, publicOnly, scopeFilter, assignedOnly]);
 
+  // Gate state for the serious snags in a page, merged into whatever is already
+  // loaded so an appended page doesn't drop the earlier ones. Niggles are
+  // filtered out before the query rather than fetched and discarded — the view
+  // holds serious snags only. Failures are silent by design: a card that can't
+  // say what it's waiting on is the behaviour we had before, not a broken one.
+  const loadGates = useCallback(async (rows: any[]) => {
+    const ids = rows.filter((r) => r.lane === 'serious').map((r) => r.id as string);
+    if (ids.length === 0) return;
+    const inputs = await getSnagGateInputs(ids);
+    setGates((prev) => {
+      const next = { ...prev };
+      for (const [id, row] of Object.entries(inputs)) next[id] = snagGateSummary(row);
+      return next;
+    });
+  }, []);
+
   // Unresolved injuries in this org, independent of the filter bar: this is an
   // alert, not a view of what the user asked for. Small limit — if there are
   // more than a handful of open injuries, a strip is not the problem.
@@ -311,7 +331,8 @@ export default function IssueListScreen() {
       .order('created_at', { ascending: false })
       .limit(6);
     setAttention(needsAttention((data ?? []) as unknown as Snag[]));
-  }, []);
+    loadGates(data ?? []);
+  }, [loadGates]);
 
   // Most to least actionable — a snag matching several reasons only shows
   // the first that applies (see IssueCard's relevance tag).
@@ -434,13 +455,14 @@ export default function IssueListScreen() {
       setHasMore(data.length === PAGE_SIZE);
       const paths = data.map((row: any) => row.photo_path).filter(Boolean);
       getSnagPhotoUrls(paths).then(setPhotoUrls);
+      loadGates(data);
     }
 
     // Keep the Snags tab badge in sync — cheap enough to refresh on every
     // load rather than only on app foreground, so merges/status changes
     // made in this session are reflected immediately.
     refreshOpenIssueCount();
-  }, [buildSnagQuery, sortSnags, refreshOpenIssueCount, fetchAttention]);
+  }, [buildSnagQuery, sortSnags, refreshOpenIssueCount, fetchAttention, loadGates]);
 
   // Infinite scroll: fetch the next page with the same filters and append.
   // Offset-based paging can double up a row if something is inserted while
@@ -464,9 +486,10 @@ export default function IssueListScreen() {
       if (paths.length > 0) {
         getSnagPhotoUrls(paths).then((map) => setPhotoUrls((prev) => ({ ...prev, ...map })));
       }
+      loadGates(data);
     }
     setLoadingMore(false);
-  }, [loadingMore, hasMore, loading, refreshing, issues.length, buildSnagQuery, sortSnags]);
+  }, [loadingMore, hasMore, loading, refreshing, issues.length, buildSnagQuery, sortSnags, loadGates]);
 
   // Load this user's saved Status/Scope filters (if any) once on mount,
   // overriding the defaults. Runs before the first fetchIssues below
@@ -780,6 +803,7 @@ export default function IssueListScreen() {
             <IssueCard
               issue={item}
               compact
+              gate={gates[item.id]}
               photoUrl={item.photo_path ? photoUrls[item.photo_path] ?? null : null}
               onPress={() => handleCardPress(item)}
               onLongPress={() => handleLongPress(item.id)}
@@ -812,6 +836,7 @@ export default function IssueListScreen() {
                       <IssueCard
                         issue={snag}
                         compact
+                        gate={gates[snag.id]}
                         photoUrl={snag.photo_path ? photoUrls[snag.photo_path] ?? null : null}
                         onPress={() => handleCardPress(snag)}
                       />

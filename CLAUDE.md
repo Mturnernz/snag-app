@@ -131,6 +131,14 @@ Key view: `snags_with_details` — snags joined with reporter/owner/site names a
 comment/evidence/vote/checklist counts. Always query this view for the issue list and detail
 screens (mirrored in `packages/shared-types/src/index.ts`, shared by both apps).
 
+Second view: `snag_gate_inputs` — the facts the serious-lane resolve gate consumes, one row per
+unmerged serious snag, so a *list* can say what a snag is waiting on. It returns **inputs, not a
+verdict**: the rule already exists twice by necessity (`update_snag_status` enforces it,
+`seriousResolveGate` mirrors it), and a third copy in SQL is where the mode fork would drift.
+`snagGateSummary` in `packages/supabase-queries` turns a row into an outstanding count plus the
+first blocking step by feeding it through `seriousResolveGate` itself — so the list and the detail
+screen can never disagree about whether a snag can close. Covered by `snagGateSummary.test.ts`.
+
 `snag_status` is `flagged | in_progress | resolved | rca_pending` — `resolved` is the single
 terminal status for both the niggle lane (fixit/improvement) and the serious lane
 (hazard/incident); serious snags can only reach it once the investigation is complete

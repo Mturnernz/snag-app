@@ -15,6 +15,7 @@ import Animated, { useSharedValue, useAnimatedStyle, withSequence, withSpring } 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   SnagKind,
@@ -40,6 +41,9 @@ import SitePicker from '../components/SitePicker';
 import ScreenEntrance from '../components/ScreenEntrance';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+// Per user, per org — see loadLastGroup.
+const lastGroupKey = (userId: string, orgId: string) => `snag.lastWorkGroup.${userId}.${orgId}`;
 
 const KIND_OPTIONS = (Object.keys(KIND_LABELS) as SnagKind[])
   .filter((k) => k === 'fixit' || k === 'improvement') // hazard/incident belong to the serious lane
@@ -98,6 +102,8 @@ export default function ReportIssueScreen() {
   const [sites, setSites] = useState<ReportSite[]>([]);
   const [site, setSite] = useState<ReportSite | null>(null);
   const reportSiteId = site?.id ?? null;
+  // The custom group this reporter last submitted to, in this org.
+  const [lastGroupId, setLastGroupId] = useState<string | null>(null);
 
   // The sites this reporter can file into, and which of them the form opens
   // on: the site they last reported into here, else the first by name.
@@ -120,6 +126,14 @@ export default function ReportIssueScreen() {
     setWorkGroups(groups);
   }
 
+  // Keyed by user *and* org: work groups belong to an organisation, so the
+  // last one used in one is meaningless in another, and a shared device must
+  // not hand one person's default to the next.
+  async function loadLastGroup(uid: string, org: string | null) {
+    if (!org) { setLastGroupId(null); return; }
+    setLastGroupId(await AsyncStorage.getItem(lastGroupKey(uid, org)));
+  }
+
   // Refetched on focus: the active org (which scopes member submissions and
   // the photo upload folder) can change via the org switcher or a QR scan.
   useFocusEffect(
@@ -139,6 +153,7 @@ export default function ReportIssueScreen() {
         setHasProfileName(Boolean(profile?.name));
         await loadSites(org?.orgId ?? null);
         await loadWorkGroups(Boolean(org));
+        await loadLastGroup(user.id, org?.orgId ?? null);
       })();
     }, [])
   );
@@ -157,6 +172,9 @@ export default function ReportIssueScreen() {
         setMemberships((await getMemberships()).filter((m) => m.org_active));
         await loadSites(profile?.org_id ?? null);
         await loadWorkGroups(Boolean(profile?.org_id));
+        // Work groups belong to an organisation, so the remembered one has to
+        // be re-read for the org just switched to rather than carried over.
+        await loadLastGroup(user.id, profile?.org_id ?? null);
       }
     } catch (err: any) {
       showAlert('Error', err.message ?? 'Could not switch organisation.');
@@ -182,6 +200,13 @@ export default function ReportIssueScreen() {
   const customGroups = workGroups.filter(
     (wg) => !wg.isDefault && (wg.siteIds.length === 0 || (!!reportSiteId && wg.siteIds.includes(reportSiteId)))
   );
+
+  // The reporter's last custom group gets its own row above the grid, rather
+  // than being sorted to the front of it. People find a tile by where it sits,
+  // so re-ordering the grid on every submission would cost more than the
+  // repeat tap it saves. Looked up in customGroups, so a group that has since
+  // been deleted, or scoped away from this site, simply doesn't appear.
+  const lastGroup = lastGroupId ? customGroups.find((wg) => wg.id === lastGroupId) : undefined;
 
   // Capture -> [select work group] -> submit. The grid only ever appears for
   // member submissions when the org has defined any work groups; tapping a
@@ -209,6 +234,13 @@ export default function ReportIssueScreen() {
     }
     setShowGroupPicker(false);
     setSubmitting(true);
+    // Remembered on the way out rather than after a successful write: an
+    // offline report is queued, not submitted, and the group the reporter
+    // picked is still the one they'd want offered next time.
+    if (workGroupId && userId && orgId) {
+      setLastGroupId(workGroupId);
+      AsyncStorage.setItem(lastGroupKey(userId, orgId), workGroupId);
+    }
     try {
       // getSession() reads the locally persisted session and never hits the
       // network (unlike getUser(), which re-verifies against the server) —
@@ -575,7 +607,19 @@ export default function ReportIssueScreen() {
               />
             )}
 
-            {defaultGroup && customGroups.length > 0 && <Text style={styles.orText}>or</Text>}
+            {lastGroup && (
+              <Button
+                label={lastGroup.name}
+                variant="outline"
+                icon="time-outline"
+                onPress={() => { if (!submitting) doSubmit(lastGroup.id); }}
+                loading={submitting}
+                fullWidth
+                style={styles.lastUsedBar}
+              />
+            )}
+
+            {(defaultGroup || lastGroup) && customGroups.length > 0 && <Text style={styles.orText}>or</Text>}
 
             {customGroups.length > 0 && (
               <Chip
@@ -723,6 +767,9 @@ const styles = StyleSheet.create({
   },
 
   submitBar: {
+    marginTop: Spacing.sm,
+  },
+  lastUsedBar: {
     marginTop: Spacing.sm,
   },
   orText: {

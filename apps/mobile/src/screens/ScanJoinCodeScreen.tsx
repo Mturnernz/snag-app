@@ -42,7 +42,14 @@ export default function ScanJoinCodeScreen({
   const [name, setName] = useState('');
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [manualEntry, setManualEntry] = useState(Boolean(startInManualEntry));
+  // Always manual on web: `expo-camera` has no web implementation, so the
+  // scanner below renders a viewfinder that can never resolve a code. A
+  // full-screen camera that cannot work is a worse door than a code field,
+  // and manual entry is already an equal path — both converge on the same
+  // `resolveCode`. `isManualOnly` below keeps the manual view's Back button
+  // from "returning" to a camera this platform never had.
+  const isManualOnly = Boolean(startInManualEntry) || Platform.OS === 'web';
+  const [manualEntry, setManualEntry] = useState(isManualOnly);
   const [manualCode, setManualCode] = useState('');
   const [manualSubmitting, setManualSubmitting] = useState(false);
 
@@ -257,9 +264,10 @@ export default function ScanJoinCodeScreen({
           <TouchableOpacity
             onPress={() => {
               // Reached directly (not via the camera's "Or enter your code"
-              // link) — there's no camera state to fall back to, so back
-              // means back to the caller's own choice step.
-              if (startInManualEntry) { onBack(); return; }
+              // link), or on a platform with no camera at all — there's no
+              // camera state to fall back to, so back means back to the
+              // caller's own choice step.
+              if (isManualOnly) { onBack(); return; }
               setManualEntry(false); setManualCode(''); setError(null);
             }}
             style={styles.backRow}

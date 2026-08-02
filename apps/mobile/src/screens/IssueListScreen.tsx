@@ -81,6 +81,14 @@ const SCOPE_FILTER_OPTIONS_STAFF_EXTRA: { key: ScopeFilter; label: string; short
   { key: 'unassigned_in_my_work_groups', label: 'Unassigned in my work groups', shortLabel: 'Unassigned · Groups' },
 ];
 
+// Which scopes a role may choose from. The two "unassigned" scopes are
+// supervisor/officer_admin only.
+function scopeOptionsForRole(role: UserRole | null) {
+  return role === 'officer_admin' || role === 'supervisor'
+    ? [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA]
+    : SCOPE_FILTER_OPTIONS_BASE;
+}
+
 // Per-user, persisted across app opens (see the load/save effects below).
 const SCOPE_FILTER_STORAGE_PREFIX = 'snag.scopeFilter.';
 
@@ -188,9 +196,7 @@ export default function IssueListScreen() {
   const scopeIsUnassigned =
     scopeFilter === 'unassigned_in_my_sites' || scopeFilter === 'unassigned_in_my_work_groups';
 
-  const scopeOptions = role === 'officer_admin' || role === 'supervisor'
-    ? [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA]
-    : SCOPE_FILTER_OPTIONS_BASE;
+  const scopeOptions = scopeOptionsForRole(role);
 
   function toggleStatusFilter(s: SnagStatus) {
     setStatusFilters((prev) => {
@@ -483,6 +489,10 @@ export default function IssueListScreen() {
           // Ignore malformed storage — keep the default.
         }
       }
+      // Checked against every scope rather than the role's own list, because
+      // the role isn't loaded yet at this point. This only rejects values that
+      // aren't scopes at all; the role-eligibility check is the effect below,
+      // which re-runs whenever the role resolves or changes.
       if (scopeRaw && [...SCOPE_FILTER_OPTIONS_BASE, ...SCOPE_FILTER_OPTIONS_STAFF_EXTRA].some((o) => o.key === scopeRaw)) {
         setScopeFilter(scopeRaw as ScopeFilter);
       }
@@ -507,6 +517,24 @@ export default function IssueListScreen() {
     if (!userIdRef.current) return;
     AsyncStorage.setItem(ASSIGNED_FILTER_STORAGE_PREFIX + userIdRef.current, String(assignedOnly));
   }, [assignedOnly]);
+
+  // A saved scope outlives the role that was allowed to pick it.
+  //
+  // The restore above can't do this check itself: it runs on mount, before the
+  // profile that carries the role has loaded. And the role can change *while*
+  // the screen is mounted — the org switcher moves you to an organisation you
+  // may be a worker in. So the eligibility test lives here, keyed on the role.
+  //
+  // Without it a demoted supervisor keeps `unassigned_in_my_work_groups`:
+  // still applied to the query, but absent from the role-filtered dropdown, so
+  // the button falls back to the default 'Mine' label while rendering in the
+  // *active* style. That is a filter the user can neither see nor clear.
+  useEffect(() => {
+    if (!role) return;
+    if (!scopeOptionsForRole(role).some((o) => o.key === scopeFilter)) {
+      setScopeFilter(DEFAULT_SCOPE_FILTER);
+    }
+  }, [role, scopeFilter]);
 
   // Switching to an unassigned scope clears Assigned rather than quietly
   // returning nothing — the two are asking for opposite things.

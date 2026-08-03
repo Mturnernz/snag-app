@@ -26,6 +26,12 @@ jobs:
           npm run typecheck --workspace=apps/web
           npx tsc --noEmit -p apps/mobile
 
+      # supabase/functions is Deno and sits outside both tsconfigs above, so
+      # nothing here used to look at it. A module that throws on load still
+      # deploys clean and then 503s on every request — see the script.
+      - name: Check edge functions boot
+        run: npm run typecheck:functions
+
   unit:
     name: Mobile unit tests
     runs-on: ubuntu-latest

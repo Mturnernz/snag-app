@@ -12,13 +12,26 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// CORS. See export-investigation: the browser preflights any invoke carrying an
+// Authorization header, and a function that answers OPTIONS with 405 never
+// receives the POST at all.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: CORS_HEADERS });
   }
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
   }
 
   const { snag_id, kind, pdf_base64 } = (await req.json()) as {
@@ -27,21 +40,29 @@ Deno.serve(async (req: Request) => {
     pdf_base64: string;
   };
   if (!snag_id || !pdf_base64 || (kind !== "rca" && kind !== "debrief")) {
-    return new Response("snag_id, kind and pdf_base64 are required", { status: 400 });
+    return new Response("snag_id, kind and pdf_base64 are required", { status: 400, headers: CORS_HEADERS });
   }
 
   const userClient = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   });
 
-  const { data: profile } = await userClient.from("profiles").select("*").maybeSingle();
+  // Scoped to the caller. Unfiltered, this is every profile RLS lets the caller
+  // see; maybeSingle() then gets more than one row and returns null, so any
+  // organisation with more than one member failed the guard below.
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) {
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
+  }
+  const { data: profile } = await userClient
+    .from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (!profile) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
   }
 
   const { data: snag } = await userClient.from("snags").select("*").eq("id", snag_id).maybeSingle();
   if (!snag) {
-    return new Response("Snag not found", { status: 404 });
+    return new Response("Snag not found", { status: 404, headers: CORS_HEADERS });
   }
 
   const supervisorish = profile.role === "supervisor" || profile.role === "officer_admin";
@@ -56,10 +77,10 @@ Deno.serve(async (req: Request) => {
   if (kind === "rca") {
     const isAssignee = rca?.assigned_to === profile.id;
     if (!isAssignee && !supervisorish) {
-      return new Response("Only the RCA assignee, a supervisor or an admin can upload this worksheet", { status: 403 });
+      return new Response("Only the RCA assignee, a supervisor or an admin can upload this worksheet", { status: 403, headers: CORS_HEADERS });
     }
   } else if (!supervisorish) {
-    return new Response("Only a supervisor or admin can upload a debrief worksheet", { status: 403 });
+    return new Response("Only a supervisor or admin can upload a debrief worksheet", { status: 403, headers: CORS_HEADERS });
   }
 
   const bytes = Uint8Array.from(atob(pdf_base64), (c) => c.charCodeAt(0));
@@ -85,7 +106,7 @@ Deno.serve(async (req: Request) => {
   if (parsed.snag_id && parsed.snag_id !== snag_id) {
     return new Response(
       "This worksheet belongs to a different snag. Open that snag and upload it there.",
-      { status: 400 }
+      { status: 400, headers: CORS_HEADERS }
     );
   }
 
@@ -96,7 +117,7 @@ Deno.serve(async (req: Request) => {
     .from("snag-evidence")
     .upload(mediaPath, bytes, { contentType: "application/pdf" });
   if (uploadError) {
-    return new Response(`Upload failed: ${uploadError.message}`, { status: 500 });
+    return new Response(`Upload failed: ${uploadError.message}`, { status: 500, headers: CORS_HEADERS });
   }
 
   // Evidence row + audit trail via the service client: the add_evidence_item
@@ -124,7 +145,7 @@ Deno.serve(async (req: Request) => {
     .select("id")
     .single();
   if (evidenceError || !evidence) {
-    return new Response(`Could not record the worksheet as evidence: ${evidenceError?.message}`, { status: 500 });
+    return new Response(`Could not record the worksheet as evidence: ${evidenceError?.message}`, { status: 500, headers: CORS_HEADERS });
   }
 
   await serviceClient.from("audit_log").insert([
@@ -149,6 +170,6 @@ Deno.serve(async (req: Request) => {
   delete parsed.worksheet_kind;
 
   return new Response(JSON.stringify({ evidence_id: evidence.id, parsed }), {
-    headers: { "Content-Type": "application/json" },
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 });

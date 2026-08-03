@@ -15,36 +15,115 @@ const KIND_LABELS: Record<string, string> = {
   incident: "Incident",
 };
 
+// pdf-lib's standard fonts are WinAnsi (CP1252) only. One character outside it
+// throws mid-render and the whole export fails with no partial output — which
+// is how a single "→" in our own footer broke every worksheet.
+//
+// It is reachable from ordinary use, not just from our strings: descriptions,
+// witness names and site names are user text. On a New Zealand site that
+// includes macrons, which are Latin Extended-A and NOT in CP1252 — so a snag
+// mentioning Manukau with its macron would have failed the same way.
+//
+// Transliterate what has an obvious ASCII equivalent, drop the rest to "?".
+// Lossy, deliberately: a slightly wrong character beats no document at all for
+// something a regulator may ask to see. Embedding a Unicode font via fontkit
+// would fix it properly and is the real answer if this ever matters more.
+const PDF_TEXT_REPLACEMENTS: Record<string, string> = {
+  "\u2192": "->", "\u2190": "<-", "\u2022": "-", "\u2265": ">=", "\u2264": "<=",
+  "\u0101": "a", "\u0113": "e", "\u012b": "i", "\u014d": "o", "\u016b": "u",
+  "\u0100": "A", "\u0112": "E", "\u012a": "I", "\u014c": "O", "\u016a": "U",
+};
+
+function pdfSafe(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const mapped = PDF_TEXT_REPLACEMENTS[ch];
+    if (mapped !== undefined) { out += mapped; continue; }
+    const code = ch.codePointAt(0)!;
+    // Latin-1 plus the typographic characters CP1252 puts in 0x80-0x9F.
+    out += code <= 0xff || "\u2018\u2019\u201c\u201d\u2013\u2014\u2026\u20ac\u2122\u0160\u0161\u017d\u017e\u0152\u0153".includes(ch) ? ch : "?";
+  }
+  return out;
+}
+
+// `String.fromCharCode(...bytes)` spreads every byte as an argument, and a
+// worksheet PDF is tens of kilobytes of AcroForm — past the engine's argument
+// limit, which throws RangeError and surfaces as a bare 500 *after* the PDF has
+// been built. Chunked instead, so size stops being a cliff.
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// CORS. See export-investigation: the browser preflights any invoke carrying an
+// Authorization header, and a function that answers OPTIONS with 405 never
+// receives the POST at all.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+// An unhandled throw returns the platform's own 500, which carries no CORS
+// headers — so in a browser it surfaces as a CORS failure and the real error is
+// never seen. Everything below runs inside this, so a fault comes back as a
+// readable 500 instead.
 Deno.serve(async (req: Request) => {
+  try {
+    return await handle(req);
+  } catch (err) {
+    console.error("worksheet failed:", err);
+    return new Response(`Worksheet generation failed: ${err instanceof Error ? err.message : String(err)}`,
+      { status: 500, headers: CORS_HEADERS });
+  }
+});
+
+async function handle(req: Request): Promise<Response> {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: CORS_HEADERS });
   }
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
   }
 
   const { snag_id, kind } = (await req.json()) as { snag_id: string; kind: "rca" | "debrief" };
   if (!snag_id || (kind !== "rca" && kind !== "debrief")) {
-    return new Response("snag_id and kind ('rca' or 'debrief') are required", { status: 400 });
+    return new Response("snag_id and kind ('rca' or 'debrief') are required", { status: 400, headers: CORS_HEADERS });
   }
 
   const userClient = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   });
 
-  const { data: profile } = await userClient.from("profiles").select("*").maybeSingle();
+  // Scoped to the caller. Unfiltered, this is every profile RLS lets the caller
+  // see; maybeSingle() then gets more than one row and returns null, so any
+  // organisation with more than one member failed the guard below.
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) {
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
+  }
+  const { data: profile } = await userClient
+    .from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (!profile) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
   }
 
   // RLS scopes this read; null means no access.
   const { data: snag } = await userClient.from("snags").select("*").eq("id", snag_id).maybeSingle();
   if (!snag) {
-    return new Response("Snag not found", { status: 404 });
+    return new Response("Snag not found", { status: 404, headers: CORS_HEADERS });
   }
   if (snag.lane !== "serious") {
-    return new Response("Only hazard/incident snags have worksheets", { status: 400 });
+    return new Response("Only hazard/incident snags have worksheets", { status: 400, headers: CORS_HEADERS });
   }
 
   const supervisorish = profile.role === "supervisor" || profile.role === "officer_admin";
@@ -62,10 +141,10 @@ Deno.serve(async (req: Request) => {
   if (kind === "rca") {
     const isAssignee = rca?.assigned_to === profile.id;
     if (!isAssignee && !supervisorish) {
-      return new Response("Only the RCA assignee, a supervisor or an admin can get this worksheet", { status: 403 });
+      return new Response("Only the RCA assignee, a supervisor or an admin can get this worksheet", { status: 403, headers: CORS_HEADERS });
     }
   } else if (!supervisorish) {
-    return new Response("Only a supervisor or admin can get a debrief worksheet", { status: 403 });
+    return new Response("Only a supervisor or admin can get a debrief worksheet", { status: 403, headers: CORS_HEADERS });
   }
 
   const { data: site } = await userClient.from("sites").select("name").eq("id", snag.site_id).maybeSingle();
@@ -84,7 +163,7 @@ Deno.serve(async (req: Request) => {
   let y = 800;
 
   function text(t: string, size = 10, isBold = false) {
-    page.drawText(t, { x: left, y, size, font: isBold ? bold : font, color: rgb(0, 0, 0) });
+    page.drawText(pdfSafe(t), { x: left, y, size, font: isBold ? bold : font, color: rgb(0, 0, 0) });
     y -= size + 6;
   }
 
@@ -93,7 +172,7 @@ Deno.serve(async (req: Request) => {
       page = pdf.addPage([595, 842]);
       y = 800;
     }
-    page.drawText(label, { x: left, y, size: 9, font: bold, color: rgb(0.25, 0.25, 0.25) });
+    page.drawText(pdfSafe(label), { x: left, y, size: 9, font: bold, color: rgb(0.25, 0.25, 0.25) });
     y -= 14;
     const field = form.createTextField(name);
     if (multiline) field.enableMultiline();
@@ -123,7 +202,7 @@ Deno.serve(async (req: Request) => {
   // Machine-readable identity fields (read-only, small): parsing on
   // re-upload is deterministic and mismatched uploads can be refused.
   const idField = form.createTextField("snag_id");
-  idField.setText(snag.id);
+  idField.setText(pdfSafe(snag.id));
   idField.enableReadOnly();
   idField.addToPage(page, { x: left, y: y - 10, width: 260, height: 10, borderWidth: 0 });
   idField.setFontSize(6);
@@ -169,7 +248,7 @@ Deno.serve(async (req: Request) => {
   y -= 74;
 
   page.drawText(
-    "Return this worksheet: open the snag in Snag → Upload completed worksheet.",
+    pdfSafe("Return this worksheet: open the snag in Snag -> Upload completed worksheet."),
     { x: left, y: Math.max(y, 30), size: 9, font, color: rgb(0.4, 0.4, 0.4) }
   );
 
@@ -185,9 +264,9 @@ Deno.serve(async (req: Request) => {
     actor_id: profile.id,
   });
 
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  const base64 = toBase64(bytes);
   return new Response(
     JSON.stringify({ filename: `${snag.reference}-${kind}-worksheet.pdf`, pdfBase64: base64 }),
-    { headers: { "Content-Type": "application/json" } }
+    { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
   );
-});
+}

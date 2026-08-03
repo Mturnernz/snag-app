@@ -37,6 +37,34 @@ const DEBRIEF_FORMAT_LABELS: Record<string, string> = {
   formal: "Formal debrief",
 };
 
+// pdf-lib's standard fonts are WinAnsi (CP1252) only. One character outside it
+// throws mid-render and the whole export fails with no partial output.
+//
+// Reachable from ordinary use: descriptions, witness statements and names are
+// all user text. On a New Zealand site that includes macrons, which are Latin
+// Extended-A and NOT in CP1252 — a statement mentioning a place name with a
+// macron would have failed the export entirely.
+//
+// Transliterate what has an obvious ASCII equivalent, drop the rest to "?".
+// Lossy, deliberately: a slightly wrong character beats no document at all for
+// something a regulator may ask to see.
+const PDF_TEXT_REPLACEMENTS: Record<string, string> = {
+  "\u2192": "->", "\u2190": "<-", "\u2022": "-", "\u2265": ">=", "\u2264": "<=",
+  "\u0101": "a", "\u0113": "e", "\u012b": "i", "\u014d": "o", "\u016b": "u",
+  "\u0100": "A", "\u0112": "E", "\u012a": "I", "\u014c": "O", "\u016a": "U",
+};
+
+function pdfSafe(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const mapped = PDF_TEXT_REPLACEMENTS[ch];
+    if (mapped !== undefined) { out += mapped; continue; }
+    const code = ch.codePointAt(0)!;
+    out += code <= 0xff || "\u2018\u2019\u201c\u201d\u2013\u2014\u2026\u20ac\u2122".includes(ch) ? ch : "?";
+  }
+  return out;
+}
+
 function wrapLines(text: string, maxChars: number): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
@@ -67,7 +95,21 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// An unhandled throw returns the platform's own 500, which carries no CORS
+// headers — so in a browser it surfaces as a CORS failure and the real error is
+// never seen. That is how a single unencodable character looked like a network
+// problem rather than a font problem.
 Deno.serve(async (req: Request) => {
+  try {
+    return await handle(req);
+  } catch (err) {
+    console.error("export-investigation failed:", err);
+    return new Response(`Export generation failed: ${err instanceof Error ? err.message : String(err)}`,
+      { status: 500, headers: CORS_HEADERS });
+  }
+});
+
+async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -90,7 +132,20 @@ Deno.serve(async (req: Request) => {
     global: { headers: { Authorization: authHeader } },
   });
 
-  const { data: profile } = await userClient.from("profiles").select("*").maybeSingle();
+  // Scoped to the caller. Without the filter this is "every profile RLS lets me
+  // see", and an org member can see all of them — line below does exactly that
+  // on purpose, to resolve names. maybeSingle() then gets more than one row,
+  // returns null, and the role guard rejects a caller whose role was never
+  // read at all.
+  //
+  // So the export 403'd for everyone in any organisation with more than one
+  // member, and passed in a one-person org, which is where it was tested.
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) {
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
+  }
+  const { data: profile } = await userClient
+    .from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (!profile || (profile.role !== "officer_admin" && profile.role !== "supervisor")) {
     return new Response("Only a supervisor or admin can export the investigation file", { status: 403, headers: CORS_HEADERS });
   }
@@ -151,14 +206,14 @@ Deno.serve(async (req: Request) => {
   function heading(text: string) {
     ensureSpace(2);
     y -= 8;
-    page.drawText(text, { x: left, y, size: 14, font: bold, color: rgb(0, 0, 0) });
+    page.drawText(pdfSafe(text), { x: left, y, size: 14, font: bold, color: rgb(0, 0, 0) });
     y -= lineHeight;
   }
 
   function paragraph(text: string, size = 11) {
     for (const line of wrapLines(text, 90)) {
       ensureSpace();
-      page.drawText(line, { x: left, y, size, font, color: rgb(0, 0, 0) });
+      page.drawText(pdfSafe(line), { x: left, y, size, font, color: rgb(0, 0, 0) });
       y -= lineHeight;
     }
   }
@@ -340,4 +395,4 @@ Deno.serve(async (req: Request) => {
   return new Response(JSON.stringify({ path: filePath, signedUrl: signed?.signedUrl }), {
     headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
-});
+}

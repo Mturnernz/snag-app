@@ -197,26 +197,24 @@ async function handle(req: Request): Promise<Response> {
     page = pdf.addPage([PAGE_W, PAGE_H]);
     pageIndex += 1;
     if (pageIndex === 1) {
-      // Masthead. The document announces itself before it says anything, so a
-      // printed page found on a desk is identifiable at a glance.
+      // Masthead. The organisation owns this document — it is their record of
+      // their incident, and SNAG is the tool that produced it, not the author.
+      // So the company name is the wordmark and the product is not on it.
       page.drawRectangle({ x: 0, y: PAGE_H - MASTHEAD_H, width: PAGE_W, height: MASTHEAD_H, color: BRAND });
-      page.drawText("SNAG", { x: MARGIN, y: PAGE_H - 46, size: 26, font: bold, color: WHITE });
-      page.drawText(pdfSafe(orgName || "Investigation record"), {
-        x: MARGIN, y: PAGE_H - 66, size: 10, font, color: BRAND_TINT,
-      });
-      const label = "INVESTIGATION FILE";
-      page.drawText(label, {
-        x: PAGE_W - MARGIN - bold.widthOfTextAtSize(label, 9), y: PAGE_H - 40, size: 9, font: bold, color: BRAND_TINT,
-      });
-      const ref = pdfSafe(snag.reference);
-      page.drawText(ref, {
-        x: PAGE_W - MARGIN - bold.widthOfTextAtSize(ref, 18), y: PAGE_H - 64, size: 18, font: bold, color: WHITE,
-      });
+      const ident = pdfSafe(snag.reference);
+      const identW = bold.widthOfTextAtSize(ident, 18);
+      // Long company names shrink rather than collide with the reference.
+      const orgText = pdfSafe(orgName || "Investigation record");
+      let orgSize = 22;
+      while (orgSize > 12 && bold.widthOfTextAtSize(orgText, orgSize) > CONTENT_W - identW - 30) orgSize -= 1;
+      page.drawText(orgText, { x: MARGIN, y: PAGE_H - 48, size: orgSize, font: bold, color: WHITE });
+      page.drawText("Investigation file", { x: MARGIN, y: PAGE_H - 68, size: 10, font, color: BRAND_TINT });
+      page.drawText(ident, { x: PAGE_W - MARGIN - identW, y: PAGE_H - 56, size: 18, font: bold, color: WHITE });
       y = PAGE_H - MASTHEAD_H - 34;
     } else {
       // Running header: a loose page still names its snag. This document gets
       // printed, so page 4 on its own has to be identifiable.
-      const run = pdfSafe("SNAG  ·  Investigation file  ·  " + snag.reference);
+      const run = pdfSafe((orgName ? orgName + "  ·  " : "") + "Investigation file  ·  " + snag.reference);
       page.drawText(run, { x: MARGIN, y: PAGE_H - 40, size: 8, font, color: MUTED });
       page.drawLine({
         start: { x: MARGIN, y: PAGE_H - 50 }, end: { x: PAGE_W - MARGIN, y: PAGE_H - 50 },
@@ -472,7 +470,7 @@ async function handle(req: Request): Promise<Response> {
       start: { x: MARGIN, y: FOOTER_Y + 14 }, end: { x: PAGE_W - MARGIN, y: FOOTER_Y + 14 },
       thickness: 0.75, color: RULE,
     });
-    p.drawText(pdfSafe(snag.reference + (orgName ? "  ·  " + orgName : "")),
+    p.drawText(pdfSafe((orgName ? orgName + "  ·  " : "") + snag.reference),
       { x: MARGIN, y: FOOTER_Y, size: 8, font, color: MUTED });
     const mid = pdfSafe(generated);
     p.drawText(mid, { x: (PAGE_W - font.widthOfTextAtSize(mid, 8)) / 2, y: FOOTER_Y, size: 8, font, color: MUTED });

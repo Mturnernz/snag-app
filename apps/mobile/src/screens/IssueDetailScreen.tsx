@@ -1238,6 +1238,7 @@ export default function IssueDetailScreen() {
               >
                 <WitnessesPanel
                   issueId={issue.id}
+                  orgId={issue.org_id}
                   state={investigation}
                   onChanged={onInvestigationChanged}
                 />

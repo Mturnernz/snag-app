@@ -1,14 +1,20 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Linking, StyleSheet } from 'react-native';
 
-import { InvestigationState, addWitnessStatement } from '../lib/supabase';
+import { WitnessStatement } from '../types';
+import { InvestigationState, addWitnessStatement, getEvidencePhotoUrl } from '../lib/supabase';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useToast } from '../hooks/useToast';
 import Button from './Button';
+import DocumentAttach from './DocumentAttach';
+import Icon from './Icon';
 import Sheet from './Sheet';
 
 interface Props {
   issueId: string;
+  /** snag-evidence is org-folder scoped — an attached statement document is
+   *  copied in there, same as evidence. */
+  orgId: string;
   state: InvestigationState;
   onChanged: () => void;
 }
@@ -20,17 +26,23 @@ interface Props {
 // nothing marked where one record ended and the next began. In a sheet the
 // statement field gets the height a statement actually needs, and Save means
 // one unambiguous thing.
-export default function WitnessesPanel({ issueId, state, onChanged }: Props) {
+export default function WitnessesPanel({ issueId, orgId, state, onChanged }: Props) {
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
+  // The signed sheet or scan the statement was taken from. Alongside the typed
+  // text, never instead of it: a statement nobody can read without downloading
+  // an attachment is not a searchable record of what the witness said.
+  const [document, setDocument] = useState<{ path: string; label: string } | null>(null);
+  const [documentBusy, setDocumentBusy] = useState(false);
 
   function close() {
     setOpen(false);
     setName('');
     setText('');
+    setDocument(null);
   }
 
   async function handleAdd() {
@@ -44,7 +56,7 @@ export default function WitnessesPanel({ issueId, state, onChanged }: Props) {
     // told something.
     setSaving(true);
     try {
-      const { error } = await addWitnessStatement(issueId, name.trim(), text.trim());
+      const { error } = await addWitnessStatement(issueId, name.trim(), text.trim(), document?.path ?? null);
       if (error) showToast(error.message ?? 'Could not add witness statement');
       else { close(); onChanged(); }
     } catch (err: any) {
@@ -61,12 +73,7 @@ export default function WitnessesPanel({ issueId, state, onChanged }: Props) {
           No statements yet. Record what someone who was there saw, in their words.
         </Text>
       ) : (
-        state.witnesses.map((w) => (
-          <View key={w.id} style={styles.item}>
-            <Text style={styles.itemName}>{w.witness_name}</Text>
-            <Text style={styles.itemBody}>{w.statement_text}</Text>
-          </View>
-        ))
+        state.witnesses.map((w) => <WitnessRow key={w.id} item={w} />)
       )}
 
       <Button label="Add a witness" variant="outline" onPress={() => setOpen(true)} fullWidth />
@@ -78,7 +85,7 @@ export default function WitnessesPanel({ issueId, state, onChanged }: Props) {
         submitLabel="Save statement"
         onSubmit={handleAdd}
         submitting={saving}
-        submitDisabled={!name.trim() || !text.trim()}
+        submitDisabled={!name.trim() || !text.trim() || documentBusy}
         onClose={close}
       >
         <Text style={styles.label}>Who saw it?</Text>
@@ -101,7 +108,39 @@ export default function WitnessesPanel({ issueId, state, onChanged }: Props) {
           multiline
           textAlignVertical="top"
         />
+
+        <Text style={styles.label}>Signed statement or scan (optional)</Text>
+        <DocumentAttach
+          orgId={orgId}
+          value={document}
+          onChange={setDocument}
+          onBusyChange={setDocumentBusy}
+        />
       </Sheet>
+    </View>
+  );
+}
+
+function WitnessRow({ item }: { item: WitnessStatement }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (item.media_path) getEvidencePhotoUrl(item.media_path).then(setUrl);
+  }, [item.media_path]);
+
+  return (
+    <View style={styles.item}>
+      <Text style={styles.itemName}>{item.witness_name}</Text>
+      <Text style={styles.itemBody}>{item.statement_text}</Text>
+      {url && (
+        <TouchableOpacity style={styles.attachment} onPress={() => Linking.openURL(url)} activeOpacity={0.7}>
+          <Icon name="document-text-outline" size="sm" color={Colors.primary} />
+          <Text style={styles.attachmentText} numberOfLines={1}>
+            {item.media_path?.split('/').pop() ?? 'Statement document'}
+          </Text>
+          <Icon name="open-outline" size="sm" color={Colors.textMuted} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -118,6 +157,13 @@ const styles = StyleSheet.create({
   },
   itemName: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
   itemBody: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 20 },
+  attachment: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  attachmentText: { flex: 1, fontSize: Typography.sm, color: Colors.primary },
 
   label: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
   input: {

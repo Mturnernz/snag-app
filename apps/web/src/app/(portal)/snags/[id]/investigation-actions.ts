@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   completeChecklistStep, addWitnessStatement, addEvidenceItem, setRootCause, uploadSnagEvidenceFile,
-  updateEvidenceCaption, deleteEvidenceItem,
+  updateEvidenceCaption, deleteEvidenceItem, copyOrgDocumentToSnagEvidence,
 } from '@snag/supabase-queries';
 import { ChecklistStep } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
@@ -28,15 +28,47 @@ export async function completeChecklistStepAction(formData: FormData) {
   redirect(`/snags/${snagId}`);
 }
 
+/**
+ * Resolves the optional document on a form into a path in snag-evidence.
+ *
+ * Two sources, one destination. A file goes straight into the snag's bucket; a
+ * library pick is *copied* there rather than referenced, so removing the
+ * document from the library later cannot empty the snag's record. Returns null
+ * when neither was supplied, which is the common case.
+ */
+async function resolveAttachment(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  snagId: string,
+  formData: FormData,
+): Promise<string | null> {
+  const documentId = String(formData.get('libraryDocumentPath') ?? '').trim();
+  const file = formData.get('document') as File | null;
+
+  if (file && file.size > 0) {
+    const { path, error } = await uploadSnagEvidenceFile(supabase, orgId, file.name, file);
+    if (error || !path) fail(snagId, `Upload failed: ${error?.message ?? 'unknown error'}`);
+    return path;
+  }
+  if (documentId) {
+    const { path, error } = await copyOrgDocumentToSnagEvidence(supabase, orgId, documentId);
+    if (error || !path) fail(snagId, `Could not copy that document: ${error?.message ?? 'unknown error'}`);
+    return path;
+  }
+  return null;
+}
+
 export async function addWitnessStatementAction(formData: FormData) {
-  await requireSupervisorOrAdmin();
+  const { activeMembership } = await requireSupervisorOrAdmin();
   const supabase = await createClient();
   const snagId = String(formData.get('snagId') ?? '');
   const witnessName = String(formData.get('witnessName') ?? '').trim();
   const statementText = String(formData.get('statementText') ?? '').trim();
   if (!snagId || !witnessName || !statementText) fail(snagId, 'Witness name and statement are both required.');
 
-  const { error } = await addWitnessStatement(supabase, snagId, witnessName, statementText);
+  const mediaPath = await resolveAttachment(supabase, activeMembership.org_id, snagId, formData);
+
+  const { error } = await addWitnessStatement(supabase, snagId, witnessName, statementText, mediaPath);
   if (error) fail(snagId, error.message);
 
   revalidatePath(`/snags/${snagId}`);
@@ -48,13 +80,14 @@ export async function addEvidenceAction(formData: FormData) {
   const supabase = await createClient();
   const snagId = String(formData.get('snagId') ?? '');
   const caption = String(formData.get('caption') ?? '').trim() || null;
-  const file = formData.get('file') as File | null;
-  if (!snagId || !file || file.size === 0) fail(snagId, 'Choose a file to upload as evidence.');
 
-  const { path, error: uploadError } = await uploadSnagEvidenceFile(supabase, activeMembership.org_id, file.name, file);
-  if (uploadError || !path) fail(snagId, `Upload failed: ${uploadError?.message ?? 'unknown error'}`);
+  // Either source will do, and a caption on its own is still evidence — the
+  // mobile sheet has always accepted one, and refusing it here was the portal
+  // disagreeing with the app about what evidence is.
+  const path = await resolveAttachment(supabase, activeMembership.org_id, snagId, formData);
+  if (!path && !caption) fail(snagId, 'Choose a file, pick one from the library, or write a caption.');
 
-  const { error } = await addEvidenceItem(supabase, snagId, path, caption);
+  const { error } = await addEvidenceItem(supabase, snagId, path ?? '', caption);
   if (error) fail(snagId, error.message);
 
   revalidatePath(`/snags/${snagId}`);

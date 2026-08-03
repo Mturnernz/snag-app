@@ -152,18 +152,29 @@ export default async function SnagDetailPage({
     ? await Promise.all(investigation.evidence.map((e) => getEvidencePhotoUrl(supabase, e.media_path)))
     : [];
 
-  // Document mode only. Fetching the library on every serious snag would be a
-  // round trip nobody reads on the guided path.
+  // Statement documents live in snag-evidence too — a copy taken at attach
+  // time, so they are signed from the snag's bucket rather than the library's.
+  const witnessDocUrls = investigation
+    ? await Promise.all(investigation.witnesses.map((w) => (
+        w.media_path ? getEvidencePhotoUrl(supabase, w.media_path) : Promise.resolve(null)
+      )))
+    : [];
+
+  // The library is now read on every serious snag, not just in document mode:
+  // the evidence and witness forms both offer "…or one already in the document
+  // library", so the round trip is no longer one nobody reads.
   const isDocumentMode = investigation?.mode === 'document';
   // Whether Manage may still offer the mode choice. Mirrors
   // assign_investigation's guard, so the form doesn't present a control the
   // server would refuse. Officer admins keep it, with a warning.
   const modeLocked = investigation ? investigationModeLocked(investigation) : false;
   const canOverrideMode = activeMembership.role === 'officer_admin';
-  const [libraryDocuments, documentUrl]: [OrgDocument[], string | null] = isDocumentMode
+  const [libraryDocuments, documentUrl]: [OrgDocument[], string | null] = investigation
     ? await Promise.all([
         getOrgDocuments(supabase, activeMembership.org_id),
-        investigation!.documentPath ? getOrgDocumentUrl(supabase, investigation!.documentPath) : Promise.resolve(null),
+        isDocumentMode && investigation.documentPath
+          ? getOrgDocumentUrl(supabase, investigation.documentPath)
+          : Promise.resolve(null),
       ])
     : [[], null];
 
@@ -388,10 +399,21 @@ export default async function SnagDetailPage({
             defaultOpen={isOpen('witnesses')}
           >
             <div className={styles.itemList}>
-              {investigation.witnesses.map((w) => (
+              {investigation.witnesses.map((w, i) => (
                 <div key={w.id} className={styles.record}>
                   <p className={styles.recordName}>{w.witness_name}</p>
                   <p className={styles.recordBody}>{w.statement_text}</p>
+                  {witnessDocUrls[i] && (
+                    <a
+                      className={styles.evidenceFile}
+                      href={witnessDocUrls[i]!}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Icon name="FileText" size="sm" />
+                      {w.media_path!.split('/').pop()}
+                    </a>
+                  )}
                 </div>
               ))}
             </div>
@@ -411,6 +433,23 @@ export default async function SnagDetailPage({
                   placeholder="In their own words — not your summary of it"
                 />
               </div>
+              <div className="field">
+                <label htmlFor="witnessDocument">Signed statement or scan (optional)</label>
+                <input id="witnessDocument" name="document" type="file" />
+              </div>
+              {libraryDocuments.length > 0 && (
+                <div className="field">
+                  <label htmlFor="witnessLibrary">…or one already in the document library</label>
+                  <select id="witnessLibrary" name="libraryDocumentPath" defaultValue="">
+                    <option value="">None</option>
+                    {libraryDocuments.map((d) => (
+                      <option key={d.id} value={d.file_path}>
+                        {d.title}{d.category ? ` · ${d.category}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <Button type="submit" variant="secondary" size="sm">Add witness statement</Button>
             </Card>
           </StepSection>
@@ -480,8 +519,23 @@ export default async function SnagDetailPage({
               <input type="hidden" name="snagId" value={snag.id} />
               <div className="field">
                 <label htmlFor="evidenceFile">Photo or document</label>
-                <input id="evidenceFile" name="file" type="file" required />
+                <input id="evidenceFile" name="document" type="file" />
               </div>
+              {libraryDocuments.length > 0 && (
+                <div className="field">
+                  <label htmlFor="evidenceLibrary">…or one already in the document library</label>
+                  {/* A copy is taken, so the snag keeps the document even if
+                      the library entry is later removed. */}
+                  <select id="evidenceLibrary" name="libraryDocumentPath" defaultValue="">
+                    <option value="">None</option>
+                    {libraryDocuments.map((d) => (
+                      <option key={d.id} value={d.file_path}>
+                        {d.title}{d.category ? ` · ${d.category}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="field">
                 <label htmlFor="caption">What does this show?</label>
                 <input id="caption" name="caption" type="text" placeholder="e.g. Walkway markings worn away at the dock corner" />

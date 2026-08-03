@@ -936,11 +936,14 @@ export async function completeChecklistStep(client: SupabaseClient, snagId: stri
   return client.rpc('complete_checklist_step', { p_snag_id: snagId, p_step: step });
 }
 
-export async function addWitnessStatement(client: SupabaseClient, snagId: string, witnessName: string, statementText: string) {
+export async function addWitnessStatement(
+  client: SupabaseClient, snagId: string, witnessName: string, statementText: string, mediaPath?: string | null,
+) {
   return client.rpc('add_witness_statement', {
     p_snag_id: snagId,
     p_witness_name: witnessName,
     p_statement_text: statementText,
+    p_media_path: mediaPath ?? null,
   });
 }
 
@@ -998,6 +1001,43 @@ export async function uploadSnagEvidenceFile(
   const { data, error } = await client.storage.from(SNAG_EVIDENCE_BUCKET).upload(path, file, { upsert: false });
   if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
   return { path: data.path, error: null };
+}
+
+/**
+ * Copies a document out of the org library and into the snag's own bucket,
+ * returning the new path.
+ *
+ * A copy, deliberately, not a reference. `investigations.document_id` points at
+ * an org_documents row, which is fine for a document whose whole purpose is to
+ * live in the library — but evidence and witness statements are the record of
+ * what happened, and someone tidying the library two years from now must not be
+ * able to empty them. The duplicate storage is the price of a record that
+ * stands on its own.
+ *
+ * The copy happens inside Storage (`destinationBucket`), so the bytes never
+ * travel to the client — which matters when the client is a phone on site
+ * data. RLS still applies at both ends: read on org-documents, write into the
+ * caller's own org folder in snag-evidence.
+ */
+export async function copyOrgDocumentToSnagEvidence(
+  client: SupabaseClient,
+  orgId: string,
+  documentPath: string,
+): Promise<{ path: string | null; error: any }> {
+  const fileName = documentPath.split('/').pop() ?? 'document';
+  const destination = `${orgId}/${Date.now()}-${fileName}`;
+  const { error } = await client.storage
+    .from(ORG_DOCUMENTS_BUCKET)
+    .copy(documentPath, destination, { destinationBucket: SNAG_EVIDENCE_BUCKET });
+  if (error) return { path: null, error };
+  return { path: destination, error: null };
+}
+
+export async function attachWitnessDocument(client: SupabaseClient, statementId: string, mediaPath: string | null) {
+  return client.rpc('attach_witness_document', {
+    p_statement_id: statementId,
+    p_media_path: mediaPath ?? null,
+  });
 }
 
 /**

@@ -12,6 +12,7 @@ import { showAlert } from '../lib/alert';
 import { useToast } from '../hooks/useToast';
 import Button from './Button';
 import Icon from './Icon';
+import DocumentAttach from './DocumentAttach';
 import PhotoPicker, { PhotoPickerHandle } from './PhotoPicker';
 import Sheet from './Sheet';
 
@@ -35,6 +36,10 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
   const [caption, setCaption] = useState('');
   const [blocked, setBlocked] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A document attached alongside (or instead of) photos — a report, a
+  // certificate, a datasheet. Its own evidence item, not a photo caption.
+  const [document, setDocument] = useState<{ path: string; label: string } | null>(null);
+  const [documentBusy, setDocumentBusy] = useState(false);
 
   // Editing one item's caption. Its own sheet rather than an inline field on
   // the row: the row is 48px tall and already carries a thumbnail.
@@ -46,6 +51,7 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
   function close() {
     setOpen(false);
     setCaption('');
+    setDocument(null);
     pickerRef.current?.reset();
   }
 
@@ -97,9 +103,12 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
       showToast('A photo is still uploading or failed to upload — retry or remove it first');
       return;
     }
-    const paths = (await pickerRef.current?.getPhotoUrls()) ?? [];
+    const photoPaths = (await pickerRef.current?.getPhotoUrls()) ?? [];
+    // A document is evidence in its own right, so it takes its own row rather
+    // than riding along on a photo's caption.
+    const paths = document ? [...photoPaths, document.path] : photoPaths;
     if (paths.length === 0 && !caption.trim()) {
-      showToast('Add a photo or a caption for the evidence');
+      showToast('Add a photo, a document, or a caption for the evidence');
       return;
     }
     setSaving(true);
@@ -171,7 +180,7 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
         submitLabel="Save evidence"
         onSubmit={handleAdd}
         submitting={saving}
-        submitDisabled={blocked}
+        submitDisabled={blocked || documentBusy}
         onClose={close}
       >
         <Text style={styles.label}>Photos</Text>
@@ -180,6 +189,14 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
           pathPrefix={orgId}
           bucket="snag-evidence"
           onBlockingChange={setBlocked}
+        />
+
+        <Text style={styles.label}>Document</Text>
+        <DocumentAttach
+          orgId={orgId}
+          value={document}
+          onChange={setDocument}
+          onBusyChange={setDocumentBusy}
         />
 
         <Text style={styles.label}>What does this show?</Text>

@@ -847,8 +847,9 @@ export const unmergeSnag = (snagId: string) => queries.unmergeSnag(supabase, sna
 export const completeChecklistStep = (snagId: string, step: ChecklistStep) =>
   queries.completeChecklistStep(supabase, snagId, step);
 
-export const addWitnessStatement = (snagId: string, witnessName: string, statementText: string) =>
-  queries.addWitnessStatement(supabase, snagId, witnessName, statementText);
+export const addWitnessStatement = (
+  snagId: string, witnessName: string, statementText: string, mediaPath?: string | null,
+) => queries.addWitnessStatement(supabase, snagId, witnessName, statementText, mediaPath);
 
 export const addEvidenceItem = (snagId: string, mediaPath: string, caption?: string | null) =>
   queries.addEvidenceItem(supabase, snagId, mediaPath, caption);
@@ -1093,6 +1094,38 @@ const SNAG_EVIDENCE_BUCKET = 'snag-evidence';
 // Returns { path, error } rather than throwing or swallowing failures —
 // callers (PhotoPicker) need to distinguish "no photo" from "upload failed"
 // so a failure can be shown and retried instead of silently dropped.
+/**
+ * Uploads a picked document (not a photo) into the snag-evidence bucket.
+ *
+ * Same shape as uploadOrgDocumentFromUri, different bucket: a statement or a
+ * report attached to a snag belongs with the snag's own files, so the record
+ * survives whatever happens to the document library.
+ */
+export async function uploadSnagDocumentFromUri(
+  orgId: string,
+  localUri: string,
+  fileName: string,
+  mimeType?: string | null,
+): Promise<{ path: string | null; error: any }> {
+  try {
+    const body = await readForUpload(localUri, mimeType || 'application/octet-stream');
+    const path = `${orgId}/${Date.now()}-${fileName}`;
+    const { data, error } = await supabase.storage
+      .from(SNAG_EVIDENCE_BUCKET)
+      .upload(path, body, { contentType: mimeType || 'application/octet-stream', upsert: false });
+    if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
+    return { path: data.path, error: null };
+  } catch (err) {
+    return { path: null, error: err };
+  }
+}
+
+export const copyOrgDocumentToSnagEvidence = (orgId: string, documentPath: string) =>
+  queries.copyOrgDocumentToSnagEvidence(supabase, orgId, documentPath);
+
+export const attachWitnessDocument = (statementId: string, mediaPath: string | null) =>
+  queries.attachWitnessDocument(supabase, statementId, mediaPath);
+
 export async function uploadSnagPhoto(
   localUri: string,
   fileName: string,

@@ -162,6 +162,11 @@ export interface WitnessStatement {
   statement_text: string;
   taken_by: string;
   taken_at: string;
+  /** Signed sheet, scan, or a copy taken from the org document library — an
+   *  object in snag-evidence, alongside the typed statement rather than
+   *  instead of it. */
+  media_path?: string | null;
+  locked?: boolean;
 }
 
 export interface EvidenceItem {

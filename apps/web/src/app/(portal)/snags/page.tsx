@@ -5,8 +5,9 @@ import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { PageHeader, EmptyState } from '@/components/Card';
 import { Button } from '@/components/Button';
-import { StatusBadge, KindBadge, SeverityBadge } from '@/components/Badge';
+import { Badge, StatusBadge, KindBadge, SeverityBadge } from '@/components/Badge';
 import Icon from '@/components/Icon';
+import { getSnagGateInputs, snagGateSummary } from '@snag/supabase-queries';
 import { mergeSelectedAction } from './actions';
 import styles from './page.module.css';
 
@@ -45,7 +46,7 @@ export default async function SnagsPage({
   // SNAG_WEB_APP_PLAN.md §4 ("reads are plain PostgREST selects").
   let query = supabase
     .from('snags_with_details')
-    .select('id, reference, description, status, kind, severity, site_id, site_name, owner_name, reporter_name, comment_count, created_at')
+    .select('id, reference, description, status, kind, lane, severity, site_id, site_name, owner_name, reporter_name, comment_count, created_at')
     .eq('org_id', activeMembership.org_id)
     .is('parent_snag_id', null)
     .order('created_at', { ascending: false })
@@ -58,6 +59,15 @@ export default async function SnagsPage({
   if (assignedOnly) query = query.not('owner_id', 'is', null);
 
   const { data: snags, error } = await query;
+
+  // What the resolve gate is still waiting on, for the serious snags on this
+  // page. Same helper apps/mobile's list uses, feeding the same
+  // seriousResolveGate the detail screen reads — so the portal and the app
+  // cannot disagree about whether a snag can close.
+  const gateInputs = await getSnagGateInputs(
+    supabase,
+    (snags ?? []).filter((s) => s.lane === 'serious').map((s) => s.id as string),
+  );
 
   return (
     <div>
@@ -114,6 +124,14 @@ export default async function SnagsPage({
                         {snag.owner_name}
                       </span>
                     )}
+                    {/* Serious lane only, and silent once resolved — there is
+                        nothing left to wait on. */}
+                    {gateInputs[snag.id] && snag.status !== 'resolved' && (() => {
+                      const gate = snagGateSummary(gateInputs[snag.id]);
+                      return gate.outstanding === 0
+                        ? <Badge tone="success">Ready to resolve</Badge>
+                        : <Badge>{gate.firstBlocker ?? `${gate.outstanding} steps left`}</Badge>;
+                    })()}
                     <KindBadge kind={snag.kind as SnagKind} />
                     {snag.severity && <SeverityBadge severity={snag.severity as SnagSeverity} />}
                     <StatusBadge status={snag.status as SnagStatus} />

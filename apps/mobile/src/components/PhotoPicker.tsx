@@ -201,7 +201,29 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
       exif: false,
     });
     if (!result.canceled) {
-      result.assets.forEach((asset) => addPhoto(asset.uri));
+      // selectionLimit is a request to the OS picker, not a guarantee. iOS and
+      // Android 13+ honour it; the web build ignores it outright —
+      // expo-image-picker's web path is an <input type="file" multiple> that
+      // never reads the option — so picking twelve on app.snaghq.co.nz used to
+      // add twelve, and "Add up to 5 photos" was the only thing enforcing the
+      // cap there. Enforce it on what comes back, so every platform agrees
+      // with the label.
+      const accepted = result.assets.slice(0, remaining);
+      accepted.forEach((asset) => addPhoto(asset.uri));
+      const dropped = result.assets.slice(remaining);
+      if (dropped.length > 0) {
+        // Web assets are object URLs held by the document until revoked, and
+        // nothing downstream will ever see these ones.
+        dropped.forEach((asset) => {
+          if (asset.uri.startsWith('blob:')) URL.revokeObjectURL(asset.uri);
+        });
+        // Say so. Silently keeping some of a selection is the same class of
+        // bug as silently keeping the first of five.
+        showAlert(
+          `Up to ${MAX_PHOTOS} photos`,
+          `You chose ${result.assets.length}. The first ${accepted.length} ${accepted.length === 1 ? 'was' : 'were'} added.`,
+        );
+      }
     }
   }
 

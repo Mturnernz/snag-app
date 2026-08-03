@@ -105,7 +105,14 @@ async function handle(req: Request): Promise<Response> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
 
-  const body = (await req.json().catch(() => ({}))) as { period_start?: string; period_end?: string };
+  // Named reqBody, not body: the layout helper below is also called `body`, and
+  // `const body` + `function body` in one scope is a SyntaxError — the module
+  // never evaluates, so the function 503s with BOOT_ERROR on every request
+  // rather than failing on the path that uses either one. This shipped in
+  // 90183f7 and stayed invisible because nothing typechecks supabase/functions
+  // (they are Deno, outside both app tsconfigs), the deploy does not reject it,
+  // and the only caller is a button behind the admin gate.
+  const reqBody = (await req.json().catch(() => ({}))) as { period_start?: string; period_end?: string };
   const userClient = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   });
@@ -129,8 +136,8 @@ async function handle(req: Request): Promise<Response> {
   }
 
   const isoDate = (d: Date) => d.toISOString().slice(0, 10);
-  const periodEnd = body.period_end ?? isoDate(new Date());
-  const periodStart = body.period_start ?? isoDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
+  const periodEnd = reqBody.period_end ?? isoDate(new Date());
+  const periodStart = reqBody.period_start ?? isoDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
 
   const [orgRes, statsRes, breakdownRes, notifiableRes] = await Promise.all([
     userClient.from("organisations").select("name").eq("id", active.org_id).maybeSingle(),

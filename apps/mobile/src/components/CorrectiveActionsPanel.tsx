@@ -2,15 +2,18 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 
 import { CorrectiveAction, EvidenceItem, ROLE_LABELS } from '../types';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   getCorrectiveActions, createCorrectiveAction, completeCorrectiveAction, verifyCorrectiveAction,
   addCorrectiveActionEvidence, getCorrectiveActionEvidence, getEvidencePhotoUrl, SiteAssignee,
+  updateEvidenceCaption, deleteEvidenceItem,
 } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
 import { useToast } from '../hooks/useToast';
 import Button from './Button';
 import Icon from './Icon';
 import PhotoPicker, { PhotoPickerHandle } from './PhotoPicker';
+import Sheet from './Sheet';
 import { StepStatus } from './StepCard';
 
 interface Props {
@@ -62,6 +65,56 @@ export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, curren
   const [evidenceCaption, setEvidenceCaption] = useState('');
   const [evidenceBlocked, setEvidenceBlocked] = useState(false);
   const [addingEvidence, setAddingEvidence] = useState(false);
+
+  // Same edit/remove affordances as the investigation evidence panel — this is
+  // the same table and the same photos, just hung off an action.
+  const [editingEvidence, setEditingEvidence] = useState<EvidenceItem | null>(null);
+  const [editEvidenceCaption, setEditEvidenceCaption] = useState('');
+  const [savingEvidenceEdit, setSavingEvidenceEdit] = useState(false);
+  const [busyEvidenceId, setBusyEvidenceId] = useState<string | null>(null);
+
+  async function refreshEvidence(actionId: string) {
+    const items = await getCorrectiveActionEvidence(actionId);
+    setEvidenceByAction((prev) => ({ ...prev, [actionId]: items }));
+  }
+
+  async function saveEvidenceCaption() {
+    if (!editingEvidence) return;
+    setSavingEvidenceEdit(true);
+    const { error } = await updateEvidenceCaption(editingEvidence.id, editEvidenceCaption.trim() || null);
+    setSavingEvidenceEdit(false);
+    if (error) {
+      showToast(error.message ?? 'Could not update the caption');
+      return;
+    }
+    const actionId = editingEvidence.corrective_action_id;
+    setEditingEvidence(null);
+    if (actionId) await refreshEvidence(actionId);
+  }
+
+  function confirmDeleteEvidence(item: EvidenceItem) {
+    showAlert(
+      'Remove this evidence?',
+      item.caption
+        ? `"${item.caption}" and the file behind it will be deleted.`
+        : 'The file and its record will be deleted.',
+      [
+        { text: 'Remove', style: 'destructive', onPress: () => { void doDeleteEvidence(item); } },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }
+
+  async function doDeleteEvidence(item: EvidenceItem) {
+    setBusyEvidenceId(item.id);
+    const { error } = await deleteEvidenceItem(item.id);
+    setBusyEvidenceId(null);
+    if (error) {
+      showToast(error.message ?? 'Could not remove this evidence');
+      return;
+    }
+    if (item.corrective_action_id) await refreshEvidence(item.corrective_action_id);
+  }
 
   const fetchActions = useCallback(async () => {
     const data = await getCorrectiveActions(issueId);
@@ -208,7 +261,15 @@ export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, curren
                 )}
 
                 {(evidenceByAction[action.id] ?? []).map((e) => (
-                  <EvidenceRow key={e.id} item={e} />
+                  <EvidenceRow
+                    key={e.id}
+                    item={e}
+                    // Whoever may attach completion evidence may take it back.
+                    canChange={canAddEvidence}
+                    busy={busyEvidenceId === e.id}
+                    onEdit={() => { setEditingEvidence(e); setEditEvidenceCaption(e.caption ?? ''); }}
+                    onDelete={() => confirmDeleteEvidence(e)}
+                  />
                 ))}
 
                 {canAddEvidence && (
@@ -295,6 +356,25 @@ export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, curren
           </View>
         </View>
       )}
+
+      <Sheet
+        visible={editingEvidence !== null}
+        title="Edit caption"
+        subtitle="What this photo shows. Correcting it is recorded, not hidden."
+        submitLabel="Save caption"
+        onSubmit={saveEvidenceCaption}
+        submitting={savingEvidenceEdit}
+        onClose={() => setEditingEvidence(null)}
+      >
+        <TextInput
+          style={styles.input}
+          placeholder="Evidence caption"
+          placeholderTextColor={Colors.textMuted}
+          value={editEvidenceCaption}
+          onChangeText={setEditEvidenceCaption}
+          autoFocus
+        />
+      </Sheet>
     </>
   );
 }
@@ -309,19 +389,37 @@ function StatusPill({ verified, status, overdue }: { verified: boolean; status: 
   );
 }
 
-function EvidenceRow({ item }: { item: EvidenceItem }) {
+interface EvidenceRowProps {
+  item: EvidenceItem;
+  canChange: boolean;
+  busy: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+function EvidenceRow({ item, canChange, busy, onEdit, onDelete }: EvidenceRowProps) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (item.media_path) getEvidencePhotoUrl(item.media_path).then(setUrl);
   }, [item.media_path]);
   return (
-    <View style={styles.evidenceRow}>
+    <View style={[styles.evidenceRow, busy && styles.evidenceRowBusy]}>
       {url ? (
         <Icon name="image-outline" size="sm" color={Colors.textSecondary} />
       ) : (
         <Icon name="document-text-outline" size="sm" color={Colors.textMuted} />
       )}
       <Text style={styles.evidenceCaption} numberOfLines={1}>{item.caption || 'Evidence'}</Text>
+      {canChange && (
+        <TouchableOpacity style={styles.evidenceAction} onPress={onEdit} disabled={busy} accessibilityLabel="Edit caption" hitSlop={4}>
+          <Icon name="create-outline" size="sm" color={Colors.textSecondary} />
+        </TouchableOpacity>
+      )}
+      {canChange && (
+        <TouchableOpacity style={styles.evidenceAction} onPress={onDelete} disabled={busy} accessibilityLabel="Remove evidence" hitSlop={4}>
+          <Icon name="trash-outline" size="sm" color={Colors.danger} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -354,7 +452,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     backgroundColor: Colors.background, borderRadius: Radius.button, padding: Spacing.xs,
   },
+  evidenceRowBusy: { opacity: 0.5 },
   evidenceCaption: { flex: 1, fontSize: Typography.sm, color: Colors.textSecondary },
+  evidenceAction: {
+    width: MIN_TOUCH_TARGET - Spacing.md,
+    height: MIN_TOUCH_TARGET - Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   input: {
     minHeight: 44,

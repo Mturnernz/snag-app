@@ -28,6 +28,7 @@ import {
 } from './actions';
 import {
   completeChecklistStepAction, addWitnessStatementAction, addEvidenceAction, setRootCauseAction,
+  updateEvidenceCaptionAction, deleteEvidenceAction,
 } from './investigation-actions';
 import {
   assignRcaAction, saveRcaWhyAction, submitRcaAction, acceptRcaAction, rejectRcaAction,
@@ -424,34 +425,55 @@ export default async function SnagDetailPage({
           >
             <div className={styles.evidenceGrid}>
               {investigation.evidence.map((e, i) => (
-                evidenceUrls[i] && isImageEvidence(e.media_path) ? (
-                  <a key={e.id} data-evidence-item href={evidenceUrls[i]!} target="_blank" rel="noreferrer">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={evidenceUrls[i]!} alt={e.caption ?? 'Evidence'} className={styles.evidenceThumb} />
-                  </a>
-                ) : evidenceUrls[i] ? (
-                  // A document, not a picture. Rendering it as an <img> gave a
-                  // broken-image icon and no way to open what was attached.
-                  <a
-                    key={e.id}
-                    data-evidence-item
-                    className={styles.evidenceFile}
-                    href={evidenceUrls[i]!}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Icon name="FileText" size="sm" />
-                    {e.caption || e.media_path.split('/').pop()}
-                  </a>
-                ) : (
-                  // Caption-only evidence is a first-class record — the mobile
-                  // sheet accepts one, and add_evidence_item stores an empty
-                  // media path for it. Rendering only thumbnails dropped those
-                  // items silently, so the count said 1 and the grid was empty.
-                  <p key={e.id} data-evidence-item className={styles.evidenceNote}>
-                    {e.caption || 'Evidence (no caption)'}
-                  </p>
-                )
+                <div key={e.id} data-evidence-item className={styles.evidenceItem}>
+                  {evidenceUrls[i] && isImageEvidence(e.media_path) ? (
+                    <a href={evidenceUrls[i]!} target="_blank" rel="noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={evidenceUrls[i]!} alt={e.caption ?? 'Evidence'} className={styles.evidenceThumb} />
+                    </a>
+                  ) : evidenceUrls[i] ? (
+                    // A document, not a picture. Rendering it as an <img> gave a
+                    // broken-image icon and no way to open what was attached.
+                    <a
+                      className={styles.evidenceFile}
+                      href={evidenceUrls[i]!}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Icon name="FileText" size="sm" />
+                      {e.caption || e.media_path.split('/').pop()}
+                    </a>
+                  ) : (
+                    // Caption-only evidence is a first-class record — the mobile
+                    // sheet accepts one, and add_evidence_item stores an empty
+                    // media path for it. Rendering only thumbnails dropped those
+                    // items silently, so the count said 1 and the grid was empty.
+                    <p className={styles.evidenceNote}>
+                      {e.caption || 'Evidence (no caption)'}
+                    </p>
+                  )}
+
+                  {/* Correcting a caption and removing the item are separate
+                      submissions, so they are separate forms — nesting them
+                      isn't valid HTML and one submit button can't mean two
+                      things. */}
+                  <form action={updateEvidenceCaptionAction} className={styles.evidenceCaptionForm}>
+                    <input type="hidden" name="snagId" value={snag.id} />
+                    <input type="hidden" name="evidenceId" value={e.id} />
+                    <input
+                      name="caption"
+                      defaultValue={e.caption ?? ''}
+                      placeholder="What does this show?"
+                      aria-label="Evidence caption"
+                    />
+                    <Button type="submit" variant="ghost" size="sm">Save</Button>
+                  </form>
+                  <form action={deleteEvidenceAction}>
+                    <input type="hidden" name="snagId" value={snag.id} />
+                    <input type="hidden" name="evidenceId" value={e.id} />
+                    <Button type="submit" variant="danger" size="sm">Remove</Button>
+                  </form>
+                </div>
               ))}
             </div>
             <Card as="form" action={addEvidenceAction} padding="sm">

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   completeChecklistStep, addWitnessStatement, addEvidenceItem, setRootCause, uploadSnagEvidenceFile,
+  updateEvidenceCaption, deleteEvidenceItem,
 } from '@snag/supabase-queries';
 import { ChecklistStep } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
@@ -54,6 +55,40 @@ export async function addEvidenceAction(formData: FormData) {
   if (uploadError || !path) fail(snagId, `Upload failed: ${uploadError?.message ?? 'unknown error'}`);
 
   const { error } = await addEvidenceItem(supabase, snagId, path, caption);
+  if (error) fail(snagId, error.message);
+
+  revalidatePath(`/snags/${snagId}`);
+  redirect(`/snags/${snagId}`);
+}
+
+export async function updateEvidenceCaptionAction(formData: FormData) {
+  await requireSupervisorOrAdmin();
+  const supabase = await createClient();
+  const snagId = String(formData.get('snagId') ?? '');
+  const evidenceId = String(formData.get('evidenceId') ?? '');
+  // An empty caption is a legitimate value — clearing a wrong one is half of
+  // why this exists — so it is not validated away here.
+  const caption = String(formData.get('caption') ?? '').trim() || null;
+  if (!snagId || !evidenceId) fail(snagId, 'Could not tell which evidence to update.');
+
+  const { error } = await updateEvidenceCaption(supabase, evidenceId, caption);
+  if (error) fail(snagId, error.message);
+
+  revalidatePath(`/snags/${snagId}`);
+  redirect(`/snags/${snagId}`);
+}
+
+export async function deleteEvidenceAction(formData: FormData) {
+  await requireSupervisorOrAdmin();
+  const supabase = await createClient();
+  const snagId = String(formData.get('snagId') ?? '');
+  const evidenceId = String(formData.get('evidenceId') ?? '');
+  if (!snagId || !evidenceId) fail(snagId, 'Could not tell which evidence to remove.');
+
+  // Row first, then the storage object — see deleteEvidenceItem. The RPC also
+  // refuses to remove evidence from a resolved snag for anyone but an officer
+  // admin, and that message is worth showing verbatim.
+  const { error } = await deleteEvidenceItem(supabase, evidenceId);
   if (error) fail(snagId, error.message);
 
   revalidatePath(`/snags/${snagId}`);

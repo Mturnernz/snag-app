@@ -952,6 +952,33 @@ export async function addEvidenceItem(client: SupabaseClient, snagId: string, me
   });
 }
 
+export async function updateEvidenceCaption(client: SupabaseClient, evidenceId: string, caption: string | null) {
+  return client.rpc('update_evidence_caption', {
+    p_evidence_id: evidenceId,
+    p_caption: caption ?? null,
+  });
+}
+
+/**
+ * Removes an evidence item and, if it had one, the file behind it.
+ *
+ * Two steps in this order on purpose. `delete_evidence_item` owns the row and
+ * returns the media path; the storage object is dropped afterwards, gated by
+ * the bucket's own delete policy. If the second step fails we are left with an
+ * object nothing points at — invisible and harmless — rather than a row whose
+ * thumbnail 404s in the middle of an investigation. The same division of
+ * responsibility as delete_org_document, with the order that survives a
+ * partial failure.
+ */
+export async function deleteEvidenceItem(client: SupabaseClient, evidenceId: string) {
+  const { data, error } = await client.rpc('delete_evidence_item', { p_evidence_id: evidenceId });
+  if (error) return { error };
+  const mediaPath = data as string | null;
+  // Caption-only evidence stores an empty media path and has no object.
+  if (mediaPath) await client.storage.from('snag-evidence').remove([mediaPath]);
+  return { error: null };
+}
+
 export async function setRootCause(client: SupabaseClient, snagId: string, rootCauseText: string) {
   return client.rpc('set_root_cause', { p_snag_id: snagId, p_root_cause_text: rootCauseText });
 }

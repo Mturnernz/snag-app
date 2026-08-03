@@ -3,8 +3,12 @@ import { View, Text, TextInput, TouchableOpacity, Linking, StyleSheet } from 're
 import { Image } from 'expo-image';
 
 import { EvidenceItem } from '../types';
-import { InvestigationState, addEvidenceItem, getEvidencePhotoUrl, isImageEvidence } from '../lib/supabase';
+import {
+  InvestigationState, addEvidenceItem, deleteEvidenceItem, updateEvidenceCaption,
+  getEvidencePhotoUrl, isImageEvidence,
+} from '../lib/supabase';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { showAlert } from '../lib/alert';
 import { useToast } from '../hooks/useToast';
 import Button from './Button';
 import Icon from './Icon';
@@ -32,10 +36,60 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
   const [blocked, setBlocked] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Editing one item's caption. Its own sheet rather than an inline field on
+  // the row: the row is 48px tall and already carries a thumbnail.
+  const [editing, setEditing] = useState<EvidenceItem | null>(null);
+  const [editCaption, setEditCaption] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
   function close() {
     setOpen(false);
     setCaption('');
     pickerRef.current?.reset();
+  }
+
+  function startEdit(item: EvidenceItem) {
+    setEditing(item);
+    setEditCaption(item.caption ?? '');
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    setSavingEdit(true);
+    const { error } = await updateEvidenceCaption(editing.id, editCaption.trim() || null);
+    setSavingEdit(false);
+    if (error) {
+      showToast(error.message ?? 'Could not update the caption');
+      return;
+    }
+    setEditing(null);
+    onChanged();
+  }
+
+  function confirmDelete(item: EvidenceItem) {
+    // Two buttons, which is all showAlert can express — and all this needs.
+    showAlert(
+      'Remove this evidence?',
+      item.caption
+        ? `"${item.caption}" and the file behind it will be deleted.`
+        : 'The file and its record will be deleted.',
+      [
+        { text: 'Remove', style: 'destructive', onPress: () => { void doDelete(item); } },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }
+
+  async function doDelete(item: EvidenceItem) {
+    setBusyId(item.id);
+    const { error } = await deleteEvidenceItem(item.id);
+    setBusyId(null);
+    if (error) {
+      showToast(error.message ?? 'Could not remove this evidence');
+      return;
+    }
+    onChanged();
   }
 
   async function handleAdd() {
@@ -97,7 +151,15 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
           this happened.
         </Text>
       ) : (
-        state.evidence.map((e) => <EvidenceRow key={e.id} item={e} />)
+        state.evidence.map((e) => (
+          <EvidenceRow
+            key={e.id}
+            item={e}
+            busy={busyId === e.id}
+            onEdit={() => startEdit(e)}
+            onDelete={() => confirmDelete(e)}
+          />
+        ))
       )}
 
       <Button label="Add evidence" variant="outline" onPress={() => setOpen(true)} fullWidth />
@@ -129,11 +191,38 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
           onChangeText={setCaption}
         />
       </Sheet>
+
+      <Sheet
+        visible={editing !== null}
+        title="Edit caption"
+        subtitle="What this photo shows. Correcting it is recorded, not hidden."
+        submitLabel="Save caption"
+        onSubmit={saveEdit}
+        submitting={savingEdit}
+        onClose={() => setEditing(null)}
+      >
+        <Text style={styles.label}>What does this show?</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. Walkway markings worn away at the dock corner"
+          placeholderTextColor={Colors.textMuted}
+          value={editCaption}
+          onChangeText={setEditCaption}
+          autoFocus
+        />
+      </Sheet>
     </View>
   );
 }
 
-function EvidenceRow({ item }: { item: EvidenceItem }) {
+interface RowProps {
+  item: EvidenceItem;
+  busy: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+function EvidenceRow({ item, busy, onEdit, onDelete }: RowProps) {
   const [url, setUrl] = useState<string | null>(null);
   // Evidence uploaded from the portal can be any file, not just a photo.
   // Rendering a PDF through <Image> produced an empty box.
@@ -158,16 +247,40 @@ function EvidenceRow({ item }: { item: EvidenceItem }) {
     </>
   );
 
-  // A document is worth opening; a photo is already visible in the row.
-  if (url && !isPicture) {
-    return (
-      <TouchableOpacity style={styles.row} onPress={() => Linking.openURL(url)} activeOpacity={0.7}>
-        {body}
-        <Icon name="open-outline" size="sm" color={Colors.textMuted} />
+  return (
+    <View style={[styles.row, busy && styles.rowBusy]}>
+      {/* A document is worth opening; a photo is already visible in the row.
+          The actions sit outside whichever of the two the main area is, so a
+          tap meant for the bin can't open a PDF instead. */}
+      {url && !isPicture ? (
+        <TouchableOpacity style={styles.rowMain} onPress={() => Linking.openURL(url)} activeOpacity={0.7}>
+          {body}
+          <Icon name="open-outline" size="sm" color={Colors.textMuted} />
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.rowMain}>{body}</View>
+      )}
+
+      <TouchableOpacity
+        style={styles.action}
+        onPress={onEdit}
+        disabled={busy}
+        accessibilityLabel="Edit caption"
+        hitSlop={4}
+      >
+        <Icon name="create-outline" size="sm" color={Colors.textSecondary} />
       </TouchableOpacity>
-    );
-  }
-  return <View style={styles.row}>{body}</View>;
+      <TouchableOpacity
+        style={styles.action}
+        onPress={onDelete}
+        disabled={busy}
+        accessibilityLabel="Remove evidence"
+        hitSlop={4}
+      >
+        <Icon name="trash-outline" size="sm" color={Colors.danger} />
+      </TouchableOpacity>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -177,10 +290,18 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
+    gap: Spacing.xs,
     backgroundColor: Colors.background,
     borderRadius: Radius.button,
     padding: Spacing.xs,
+  },
+  rowBusy: { opacity: 0.5 },
+  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  action: {
+    width: MIN_TOUCH_TARGET - Spacing.sm,
+    height: MIN_TOUCH_TARGET - Spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   thumb: { width: 48, height: 48, borderRadius: Radius.button },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.surface },

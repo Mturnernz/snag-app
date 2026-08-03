@@ -853,6 +853,12 @@ export const addWitnessStatement = (snagId: string, witnessName: string, stateme
 export const addEvidenceItem = (snagId: string, mediaPath: string, caption?: string | null) =>
   queries.addEvidenceItem(supabase, snagId, mediaPath, caption);
 
+export const updateEvidenceCaption = (evidenceId: string, caption: string | null) =>
+  queries.updateEvidenceCaption(supabase, evidenceId, caption);
+
+export const deleteEvidenceItem = (evidenceId: string) =>
+  queries.deleteEvidenceItem(supabase, evidenceId);
+
 export const setRootCause = (snagId: string, rootCauseText: string) =>
   queries.setRootCause(supabase, snagId, rootCauseText);
 

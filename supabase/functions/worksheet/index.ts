@@ -11,6 +11,16 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Mirrors get_my_memberships() — the caller's org and role as org_memberships
+// records them. See packages/supabase-queries' Membership.
+interface Membership {
+  org_id: string;
+  org_name: string;
+  role: string;
+  is_active: boolean;
+  org_active: boolean;
+}
+
 const KIND_LABELS: Record<string, string> = { hazard: "Hazard", incident: "Incident" };
 const SEVERITY_LABELS: Record<string, string> = {
   minor: "Minor", moderate: "Moderate", injury: "Injury", critical: "Critical",
@@ -102,13 +112,17 @@ async function handle(req: Request): Promise<Response> {
     global: { headers: { Authorization: authHeader } },
   });
 
-  // Scoped to the caller: unfiltered, this is every profile RLS lets them see,
-  // and maybeSingle() then returns null for any org with more than one member.
   const { data: { user } } = await userClient.auth.getUser();
   if (!user) return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
-  const { data: profile } = await userClient
-    .from("profiles").select("*").eq("id", user.id).maybeSingle();
-  if (!profile) return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
+  // Role comes from the membership RPC, never from `profiles`. That table is
+  // self-writable by design (a user renames themselves), so its `role` column
+  // is not an authorisation input — org_memberships is, and get_my_memberships
+  // is what reads it. Gating on profiles.role here meant a worker could PATCH
+  // their own row and be treated as `supervisorish` below.
+  const { data: memberships } = await userClient.rpc("get_my_memberships");
+  const active = ((memberships ?? []) as Membership[])
+    .find((m) => m.is_active && m.org_active);
+  if (!active) return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
 
   const { data: snag } = await userClient.from("snags").select("*").eq("id", snag_id).maybeSingle();
   if (!snag) return new Response("Snag not found", { status: 404, headers: CORS_HEADERS });
@@ -116,12 +130,12 @@ async function handle(req: Request): Promise<Response> {
     return new Response("Only hazard/incident snags have worksheets", { status: 400, headers: CORS_HEADERS });
   }
 
-  const supervisorish = profile.role === "supervisor" || profile.role === "officer_admin";
+  const supervisorish = active.role === "supervisor" || active.role === "officer_admin";
   const { data: rca } = await userClient.from("snag_rca").select("*")
     .eq("snag_id", snag_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
 
   if (kind === "rca") {
-    if (rca?.assigned_to !== profile.id && !supervisorish) {
+    if (rca?.assigned_to !== user.id && !supervisorish) {
       return new Response("Only the RCA assignee, a supervisor or an admin can get this worksheet", { status: 403, headers: CORS_HEADERS });
     }
   } else if (!supervisorish) {
@@ -288,7 +302,7 @@ async function handle(req: Request): Promise<Response> {
   const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   await serviceClient.from("audit_log").insert({
     org_id: snag.org_id, entity: "snag", entity_id: snag.id,
-    action: "worksheet_generated_" + kind, actor_id: profile.id,
+    action: "worksheet_generated_" + kind, actor_id: user.id,
   });
 
   return new Response(

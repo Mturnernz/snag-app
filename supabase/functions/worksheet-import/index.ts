@@ -12,6 +12,16 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Mirrors get_my_memberships() — the caller's org and role as org_memberships
+// records them. See packages/supabase-queries' Membership.
+interface Membership {
+  org_id: string;
+  org_name: string;
+  role: string;
+  is_active: boolean;
+  org_active: boolean;
+}
+
 // CORS. See export-investigation: the browser preflights any invoke carrying an
 // Authorization header, and a function that answers OPTIONS with 405 never
 // receives the POST at all.
@@ -47,25 +57,31 @@ Deno.serve(async (req: Request) => {
     global: { headers: { Authorization: authHeader } },
   });
 
-  // Scoped to the caller. Unfiltered, this is every profile RLS lets the caller
-  // see; maybeSingle() then gets more than one row and returns null, so any
-  // organisation with more than one member failed the guard below.
   const { data: { user } } = await userClient.auth.getUser();
   if (!user) {
     return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
   }
-  const { data: profile } = await userClient
-    .from("profiles").select("*").eq("id", user.id).maybeSingle();
-  if (!profile) {
+  // Authorisation comes from the membership RPC, never from `profiles`. That
+  // table is self-writable by design (a user renames themselves), so its
+  // `role` column is not an authorisation input — org_memberships is, and
+  // get_my_memberships is what reads it. Gating on profiles.role here meant a
+  // worker could PATCH their own row and be treated as `supervisorish` below.
+  // The profiles read stays, but only for the display name on the caption.
+  const { data: memberships } = await userClient.rpc("get_my_memberships");
+  const active = ((memberships ?? []) as Membership[])
+    .find((m) => m.is_active && m.org_active);
+  if (!active) {
     return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
   }
+  const { data: profile } = await userClient
+    .from("profiles").select("name, email").eq("id", user.id).maybeSingle();
 
   const { data: snag } = await userClient.from("snags").select("*").eq("id", snag_id).maybeSingle();
   if (!snag) {
     return new Response("Snag not found", { status: 404, headers: CORS_HEADERS });
   }
 
-  const supervisorish = profile.role === "supervisor" || profile.role === "officer_admin";
+  const supervisorish = active.role === "supervisor" || active.role === "officer_admin";
   const { data: rca } = await userClient
     .from("snag_rca")
     .select("*")
@@ -75,7 +91,7 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (kind === "rca") {
-    const isAssignee = rca?.assigned_to === profile.id;
+    const isAssignee = rca?.assigned_to === user.id;
     if (!isAssignee && !supervisorish) {
       return new Response("Only the RCA assignee, a supervisor or an admin can upload this worksheet", { status: 403, headers: CORS_HEADERS });
     }
@@ -124,7 +140,7 @@ Deno.serve(async (req: Request) => {
   // RPC is supervisor-scoped, but an RCA-assignee worker must also be able
   // to return their worksheet, so the (already-verified) permission check
   // above stands in for it. Same rows the RPC would write.
-  const caption = `Completed ${kind === "rca" ? "RCA" : "debrief"} worksheet, uploaded by ${profile.name || profile.email}`;
+  const caption = `Completed ${kind === "rca" ? "RCA" : "debrief"} worksheet, uploaded by ${profile?.name || profile?.email || "a team member"}`;
   const { data: nextIndexRows } = await serviceClient
     .from("evidence_items")
     .select("sort_index")
@@ -137,7 +153,7 @@ Deno.serve(async (req: Request) => {
     .from("evidence_items")
     .insert({
       snag_id,
-      uploaded_by: profile.id,
+      uploaded_by: user.id,
       media_path: mediaPath,
       caption,
       sort_index: nextIndex,
@@ -154,14 +170,14 @@ Deno.serve(async (req: Request) => {
       entity: "snag",
       entity_id: snag.id,
       action: "evidence_added",
-      actor_id: profile.id,
+      actor_id: user.id,
     },
     {
       org_id: snag.org_id,
       entity: "snag",
       entity_id: snag.id,
       action: `worksheet_imported_${kind}:${evidence.id}`,
-      actor_id: profile.id,
+      actor_id: user.id,
     },
   ]);
 

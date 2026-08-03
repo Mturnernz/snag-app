@@ -50,11 +50,38 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
     }
     setSaving(true);
     try {
-      // add_evidence_item takes a single media_path; use the first photo (an
-      // empty string when this is a caption-only note).
-      const { error } = await addEvidenceItem(issueId, paths[0] ?? '', caption.trim() || null);
-      if (error) showToast(error.message ?? 'Could not add evidence');
-      else { close(); onChanged(); }
+      // One evidence item per photo.
+      //
+      // The picker takes several and uploads every one of them, but only
+      // paths[0] used to be recorded — so somebody who added four photos of a
+      // scene got one evidence item, and the other three sat in the bucket with
+      // no row pointing at them. Silent, because the upload genuinely
+      // succeeded; the record just never mentioned it.
+      //
+      // Sequential rather than Promise.all: add_evidence_item derives
+      // sort_index from max(sort_index) + 1, so parallel inserts race for the
+      // same number and lose the order the photos were chosen in.
+      //
+      // An empty media_path is the caption-only note.
+      const mediaPaths = paths.length > 0 ? paths : [''];
+      let saved = 0;
+      let firstError: string | null = null;
+      for (const mediaPath of mediaPaths) {
+        // Every photo in the batch carries the caption. Photos 2..n captioned
+        // with nothing would sit in a compliance record with no account of what
+        // they show — repetition is the lesser problem.
+        const { error } = await addEvidenceItem(issueId, mediaPath, caption.trim() || null);
+        if (error) firstError = firstError ?? (error.message ?? 'Could not add evidence');
+        else saved += 1;
+      }
+      // Anything that saved is worth keeping, so the sheet closes on a partial
+      // success rather than making someone re-pick the ones that worked.
+      if (saved > 0) { close(); onChanged(); }
+      if (firstError) {
+        showToast(saved > 0 ? `Added ${saved} of ${mediaPaths.length} — ${firstError}` : firstError);
+      } else if (saved > 1) {
+        showToast(`Added ${saved} evidence items`);
+      }
     } catch (err: any) {
       showToast(err?.message ?? 'Could not add evidence');
     } finally {

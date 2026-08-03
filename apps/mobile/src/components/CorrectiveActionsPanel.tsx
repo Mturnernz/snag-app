@@ -139,12 +139,28 @@ export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, curren
       return;
     }
     setAddingEvidence(true);
-    const { error } = await addCorrectiveActionEvidence(actionId, paths[0] ?? '', evidenceCaption.trim() || null);
+    // One evidence item per photo — same fix as EvidencePanel. The picker
+    // uploads every photo; recording only paths[0] left the rest in the bucket
+    // with no row pointing at them, which on a corrective action means the
+    // proof that the work was done is missing from the record it verifies.
+    //
+    // Sequential, not Promise.all: add_corrective_action_evidence derives
+    // sort_index from max(sort_index) + 1 per action.
+    const mediaPaths = paths.length > 0 ? paths : [''];
+    let saved = 0;
+    let firstError: string | null = null;
+    for (const mediaPath of mediaPaths) {
+      const { error } = await addCorrectiveActionEvidence(actionId, mediaPath, evidenceCaption.trim() || null);
+      if (error) firstError = firstError ?? (error.message ?? 'Could not add evidence');
+      else saved += 1;
+    }
     setAddingEvidence(false);
-    if (error) {
-      showToast(error.message ?? 'Could not add evidence');
+    if (saved === 0) {
+      showToast(firstError ?? 'Could not add evidence');
       return;
     }
+    if (firstError) showToast(`Added ${saved} of ${mediaPaths.length} — ${firstError}`);
+    else if (saved > 1) showToast(`Added ${saved} evidence items`);
     setEvidenceCaption('');
     evidencePickerRef.current?.reset();
     const items = await getCorrectiveActionEvidence(actionId);

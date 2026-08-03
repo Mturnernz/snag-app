@@ -19,3 +19,13 @@
 // snagv1.netlify.app in its prefix list rather than replacing it, and why the
 // old Netlify subdomain has to stay pointed at this site.
 export const APP_URL = 'https://app.snaghq.co.nz';
+
+// The other host — `apps/web`. Used for the one thing this app deliberately
+// hands off to a web page: setting a new password.
+//
+// Note this does not contradict the warning above. That is about `/go`, which
+// sends people *here* because the portal already refused them. A reset link is
+// the opposite case: it has to open in whatever browser the mail client hands
+// it to, so it needs a plain web page, and `/reset-password` sits outside the
+// portal's auth gate precisely so a worker can finish a reset there.
+export const PORTAL_URL = 'https://www.snaghq.co.nz';

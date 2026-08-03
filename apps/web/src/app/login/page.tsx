@@ -45,6 +45,10 @@ export default async function LoginPage({
             <input id="password" name="password" type="password" required autoComplete="current-password" />
           </div>
 
+          <p style={{ marginTop: 'calc(var(--space-sm) * -1)', marginBottom: 'var(--space-md)', fontSize: 'var(--text-sm)' }}>
+            <Link href="/forgot-password" style={{ color: 'var(--color-text-secondary)' }}>Forgot your password?</Link>
+          </p>
+
           {error && <p className="error-text">{error}</p>}
 
           <Button type="submit" variant="primary" style={{ width: '100%', marginTop: 8 }}>

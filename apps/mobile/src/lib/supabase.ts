@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as queries from '@snag/supabase-queries';
+import { PORTAL_URL } from './appUrl';
 import { readForUpload } from './uploadBody';
 import { withDeadline } from './deadline';
 import { ReportSite } from './reportSite';
@@ -82,6 +83,32 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 export async function signInWithEmail(email: string, password: string) {
   return supabase.auth.signInWithPassword({ email, password });
+}
+
+/**
+ * Sends the recovery email, pointing at the portal's /reset-password.
+ *
+ * The app has no screen of its own for this on purpose. The link has to survive
+ * being opened in whatever mail client the person uses — which on a phone means
+ * an in-app browser, not this app — so the landing page has to be a plain web
+ * page. The portal's is deliberately outside its (portal) group, so a worker
+ * can complete a reset there even though the portal proper refuses them.
+ *
+ * This client is on auth-js's default implicit flow, so the link carries its
+ * tokens in the URL fragment and works in any browser. Don't set
+ * `flowType: 'pkce'` on this client without moving the reset landing page:
+ * a PKCE link needs the code verifier stored by whichever client asked for it,
+ * and that is never the browser the mail was opened in.
+ */
+export async function sendPasswordReset(email: string) {
+  return supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${PORTAL_URL}/reset-password`,
+  });
+}
+
+/** Changes the password of the signed-in user. */
+export async function updatePassword(password: string) {
+  return supabase.auth.updateUser({ password });
 }
 
 export async function signUpWithEmail(email: string, password: string) {

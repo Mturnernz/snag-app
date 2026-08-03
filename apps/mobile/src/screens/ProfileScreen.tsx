@@ -11,8 +11,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Profile, Organisation, SnagStatus, STATUS_LABELS, ROLE_LABELS, RootStackParamList } from '../types';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
-import { supabase, signOut, getMemberships, getOrgSnagSummary, OrgSnagSummary, Membership } from '../lib/supabase';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { supabase, signOut, getMemberships, getOrgSnagSummary, updatePassword, OrgSnagSummary, Membership } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { failureReason } from '../lib/deadline';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -21,6 +21,7 @@ import Avatar from '../components/Avatar';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
+import Sheet from '../components/Sheet';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 import { useBadge } from '../context/BadgeContext';
 
@@ -52,6 +53,13 @@ export default function ProfileScreen() {
 
   // Snag stats
   const [snagCounts, setSnagCounts] = useState<SnagCounts | null>(null);
+
+  // Changing a password you still know — an existing session authorises it, so
+  // this never goes near the recovery-email round trip.
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
 
   // Organisations (multi-org) — read-only summary list; switching happens
   // via the header now.
@@ -132,6 +140,32 @@ export default function ProfileScreen() {
       }
     }
     setSavingName(false);
+  }
+
+  function closePasswordSheet() {
+    setPasswordOpen(false);
+    setNewPassword('');
+    setConfirmPassword('');
+  }
+
+  async function handleChangePassword() {
+    if (newPassword.length < 8) {
+      showAlert('Too short', 'Use at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showAlert("Those don't match", 'Type the same password in both fields.');
+      return;
+    }
+    setSavingPassword(true);
+    const { error } = await updatePassword(newPassword);
+    setSavingPassword(false);
+    if (error) {
+      showAlert('Could not change it', error.message ?? 'Please try again.');
+      return;
+    }
+    closePasswordSheet();
+    showAlert('Password changed', 'Use the new one next time you sign in.');
   }
 
   async function handleSignOut() {
@@ -294,6 +328,19 @@ export default function ProfileScreen() {
           </Card>
         </TouchableOpacity>
 
+        {/* Changing a password you still know. Forgetting one is handled at
+            sign-in, which has to go through the portal's reset page — this
+            doesn't, because there's already a session to authorise it. */}
+        <TouchableOpacity activeOpacity={0.7} onPress={() => setPasswordOpen(true)}>
+          <Card variant="elevated" style={styles.mentionsCard}>
+            <View style={styles.mentionsRow}>
+              <Icon name="key-outline" size="md" color={Colors.primary} />
+              <Text style={styles.mentionsTitle}>Change password</Text>
+              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+            </View>
+          </Card>
+        </TouchableOpacity>
+
         {/* Replay tutorial — all roles, not just workers. Opens the overview
             carousel as a modal; doesn't touch has_seen_onboarding. */}
         <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('OnboardingCarousel')}>
@@ -368,6 +415,39 @@ export default function ProfileScreen() {
           icon="log-out-outline"
         />
       </ScrollView>
+
+      <Sheet
+        visible={passwordOpen}
+        title="Change password"
+        subtitle="This is the same account as the supervisor portal — it changes both."
+        submitLabel="Save new password"
+        onSubmit={handleChangePassword}
+        submitting={savingPassword}
+        onClose={closePasswordSheet}
+      >
+        <Text style={styles.passwordLabel}>New password</Text>
+        <TextInput
+          style={styles.passwordInput}
+          placeholder="At least 8 characters"
+          placeholderTextColor={Colors.textMuted}
+          value={newPassword}
+          onChangeText={setNewPassword}
+          secureTextEntry
+          autoCapitalize="none"
+          textContentType="newPassword"
+        />
+        <Text style={styles.passwordLabel}>Type it again</Text>
+        <TextInput
+          style={styles.passwordInput}
+          placeholder="Same password"
+          placeholderTextColor={Colors.textMuted}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+          autoCapitalize="none"
+          textContentType="newPassword"
+        />
+      </Sheet>
     </View>
   );
 }
@@ -585,6 +665,19 @@ const styles = StyleSheet.create({
   },
 
   // Retention policy note
+  passwordLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  passwordInput: {
+    minHeight: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.input,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+
   retentionCard: {
     gap: Spacing.xs,
   },

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { signInWithEmail, signUpWithEmail } from '../lib/supabase';
+import { signInWithEmail, signUpWithEmail, sendPasswordReset } from '../lib/supabase';
 import {
   getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate,
 } from '../lib/pendingIntent';
@@ -67,6 +67,24 @@ export default function AuthScreen({ initialJoinCode, onClearJoinCode }: Props) 
       setOfferSignup(true);
     }
     // On success the auth listener in App.tsx takes over.
+  }
+
+  async function handleForgotPassword() {
+    if (!email.trim()) {
+      setMessage({ text: 'Enter your email address first, then tap this again.', error: true });
+      return;
+    }
+    setLoading(true);
+    setMessage(null);
+    setOfferSignup(false);
+    // The result is deliberately not inspected for "no such account": saying so
+    // would turn this into a way of finding out who has an account.
+    await sendPasswordReset(email.trim());
+    setLoading(false);
+    setMessage({
+      text: 'If that address has an account, a link to set a new password is on its way. It opens in your browser.',
+      error: false,
+    });
   }
 
   async function handleSignUp() {
@@ -226,6 +244,9 @@ export default function AuthScreen({ initialJoinCode, onClearJoinCode }: Props) 
           {offerSignup && (
             <Button label="Create an account" variant="outline" onPress={() => { setView('signup'); setMessage(null); }} fullWidth />
           )}
+          <TouchableOpacity onPress={handleForgotPassword} disabled={loading} style={styles.forgotButton}>
+            <Text style={styles.forgotText}>Forgot your password?</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Options 2 & 3: Scan QR / Create organisation */}
@@ -318,6 +339,8 @@ const styles = StyleSheet.create({
   messageSuccess: { color: Colors.success, backgroundColor: Colors.successBg },
   submitButton: { marginTop: Spacing.sm },
   switchText: { fontSize: Typography.sm, color: Colors.primary, textAlign: 'center' },
+  forgotButton: { alignSelf: 'center', minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  forgotText: { fontSize: Typography.sm, color: Colors.textSecondary },
   divider: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginTop: Spacing.sm },
   dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
   dividerText: { fontSize: Typography.sm, color: Colors.textMuted },

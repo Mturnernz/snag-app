@@ -53,19 +53,37 @@ function wrapLines(text: string, maxChars: number): string[] {
   return lines;
 }
 
+// CORS. The browser sends a preflight OPTIONS before any invoke that carries an
+// Authorization header, and this function used to answer it with the same 405
+// it gives any non-POST — so the preflight failed and the browser never sent
+// the POST at all. Nothing reached the handler, so there was nothing in the
+// logs but a run of `OPTIONS | 405`, and the client saw a bare network error.
+//
+// Invisible on native: React Native issues no preflight, so this worked on a
+// phone and failed in the browser, which is where the export is actually used.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: CORS_HEADERS });
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
   }
 
   const { snag_id } = (await req.json()) as { snag_id: string };
   if (!snag_id) {
-    return new Response("snag_id is required", { status: 400 });
+    return new Response("snag_id is required", { status: 400, headers: CORS_HEADERS });
   }
 
   const userClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -74,7 +92,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: profile } = await userClient.from("profiles").select("*").maybeSingle();
   if (!profile || (profile.role !== "officer_admin" && profile.role !== "supervisor")) {
-    return new Response("Only a supervisor or admin can export the investigation file", { status: 403 });
+    return new Response("Only a supervisor or admin can export the investigation file", { status: 403, headers: CORS_HEADERS });
   }
 
   const [
@@ -98,10 +116,10 @@ Deno.serve(async (req: Request) => {
 
   const snag = snagRes.data;
   if (!snag) {
-    return new Response("Snag not found", { status: 404 });
+    return new Response("Snag not found", { status: 404, headers: CORS_HEADERS });
   }
   if (snag.lane !== "serious") {
-    return new Response("Only serious snags have an investigation file", { status: 400 });
+    return new Response("Only serious snags have an investigation file", { status: 400, headers: CORS_HEADERS });
   }
 
   const members = profilesRes.data ?? [];
@@ -304,7 +322,7 @@ Deno.serve(async (req: Request) => {
     .from("investigation-files")
     .upload(filePath, bytes, { contentType: "application/pdf" });
   if (uploadError) {
-    return new Response(`Upload failed: ${uploadError.message}`, { status: 500 });
+    return new Response(`Upload failed: ${uploadError.message}`, { status: 500, headers: CORS_HEADERS });
   }
 
   const { error: recordError } = await userClient.rpc("record_investigation_export", {
@@ -312,7 +330,7 @@ Deno.serve(async (req: Request) => {
     p_file_path: filePath,
   });
   if (recordError) {
-    return new Response(`Could not record export: ${recordError.message}`, { status: 500 });
+    return new Response(`Could not record export: ${recordError.message}`, { status: 500, headers: CORS_HEADERS });
   }
 
   const { data: signed } = await serviceClient.storage
@@ -320,6 +338,6 @@ Deno.serve(async (req: Request) => {
     .createSignedUrl(filePath, 3600);
 
   return new Response(JSON.stringify({ path: filePath, signedUrl: signed?.signedUrl }), {
-    headers: { "Content-Type": "application/json" },
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 });

@@ -52,14 +52,32 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+// CORS. The browser sends a preflight OPTIONS before any invoke that carries an
+// Authorization header, and this function used to answer it with the same 405
+// it gives any non-POST — so the preflight failed and the browser never sent
+// the POST at all. Nothing reached the handler, so there was nothing in the
+// logs but a run of `OPTIONS | 405`, and the client saw a bare network error.
+//
+// Invisible on native: React Native issues no preflight, so this worked on a
+// phone and failed in the browser, which is where the export is actually used.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: CORS_HEADERS });
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
   }
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -73,7 +91,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: profile } = await userClient.from("profiles").select("*").maybeSingle();
   if (!profile || profile.role !== "officer_admin") {
-    return new Response("Only an admin can export the governance report", { status: 403 });
+    return new Response("Only an admin can export the governance report", { status: 403, headers: CORS_HEADERS });
   }
 
   // Default to the trailing quarter — matches the "quarterly" cadence the
@@ -113,7 +131,7 @@ Deno.serve(async (req: Request) => {
   const notifiableInPeriod = notifiableRes.count ?? 0;
 
   if (!stats) {
-    return new Response("Could not load organisation stats", { status: 500 });
+    return new Response("Could not load organisation stats", { status: 500, headers: CORS_HEADERS });
   }
 
   const pdf = await PDFDocument.create();
@@ -194,7 +212,7 @@ Deno.serve(async (req: Request) => {
     .from("governance-reports")
     .upload(filePath, bytes, { contentType: "application/pdf" });
   if (uploadError) {
-    return new Response(`Upload failed: ${uploadError.message}`, { status: 500 });
+    return new Response(`Upload failed: ${uploadError.message}`, { status: 500, headers: CORS_HEADERS });
   }
 
   const { error: recordError } = await userClient.rpc("record_governance_export", {
@@ -203,7 +221,7 @@ Deno.serve(async (req: Request) => {
     p_period_end: periodEnd,
   });
   if (recordError) {
-    return new Response(`Could not record export: ${recordError.message}`, { status: 500 });
+    return new Response(`Could not record export: ${recordError.message}`, { status: 500, headers: CORS_HEADERS });
   }
 
   const { data: signed } = await serviceClient.storage
@@ -211,6 +229,6 @@ Deno.serve(async (req: Request) => {
     .createSignedUrl(filePath, 3600);
 
   return new Response(JSON.stringify({ path: filePath, signedUrl: signed?.signedUrl }), {
-    headers: { "Content-Type": "application/json" },
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 });

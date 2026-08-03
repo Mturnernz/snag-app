@@ -10,6 +10,16 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Mirrors get_my_memberships() — the caller's org and role as org_memberships
+// records them. See packages/supabase-queries' Membership.
+interface Membership {
+  org_id: string;
+  org_name: string;
+  role: string;
+  is_active: boolean;
+  org_active: boolean;
+}
+
 const STATUS_LABELS: Record<string, string> = {
   flagged: "Flagged", in_progress: "In progress", resolved: "Resolved", rca_pending: "RCA pending",
 };
@@ -100,13 +110,21 @@ async function handle(req: Request): Promise<Response> {
     global: { headers: { Authorization: authHeader } },
   });
 
-  // Scoped to the caller: unfiltered, this is every profile RLS lets them see,
-  // and maybeSingle() then returns null for any org with more than one member.
   const { data: { user } } = await userClient.auth.getUser();
   if (!user) return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
-  const { data: profile } = await userClient
-    .from("profiles").select("*").eq("id", user.id).maybeSingle();
-  if (!profile || profile.role !== "officer_admin") {
+  // Role and org come from the membership RPC, never from `profiles`. That
+  // table is self-writable by design (a user renames themselves), and its
+  // `role`/`org_id` columns are the active-org mirror rather than the source
+  // of truth — get_my_memberships reads org_memberships, which is what
+  // current_role() and every RLS policy resolve through. Gating on
+  // profiles.role here meant a worker could PATCH their own row and pass this
+  // check; deriving the storage path from profiles.org_id meant they could
+  // land the PDF in another org's folder, since the upload below runs on the
+  // service-role client and RLS does not apply to it.
+  const { data: memberships } = await userClient.rpc("get_my_memberships");
+  const active = ((memberships ?? []) as Membership[])
+    .find((m) => m.is_active && m.org_active);
+  if (!active || active.role !== "officer_admin") {
     return new Response("Only an admin can export the governance report", { status: 403, headers: CORS_HEADERS });
   }
 
@@ -115,11 +133,11 @@ async function handle(req: Request): Promise<Response> {
   const periodStart = body.period_start ?? isoDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
 
   const [orgRes, statsRes, breakdownRes, notifiableRes] = await Promise.all([
-    userClient.from("organisations").select("name").eq("id", profile.org_id).maybeSingle(),
-    userClient.rpc("get_org_stats", { p_org_id: profile.org_id }),
-    userClient.rpc("get_site_breakdown", { p_org_id: profile.org_id }),
+    userClient.from("organisations").select("name").eq("id", active.org_id).maybeSingle(),
+    userClient.rpc("get_org_stats", { p_org_id: active.org_id }),
+    userClient.rpc("get_site_breakdown", { p_org_id: active.org_id }),
     userClient.from("snags").select("id", { count: "exact", head: true })
-      .eq("org_id", profile.org_id).eq("is_notifiable", true)
+      .eq("org_id", active.org_id).eq("is_notifiable", true)
       .gte("notifiable_marked_at", periodStart).lte("notifiable_marked_at", periodEnd),
   ]);
 
@@ -287,7 +305,7 @@ async function handle(req: Request): Promise<Response> {
 
   const bytes = await pdf.save();
   const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-  const filePath = profile.org_id + "/" + Date.now() + ".pdf";
+  const filePath = active.org_id + "/" + Date.now() + ".pdf";
   const { error: uploadError } = await serviceClient.storage
     .from("governance-reports").upload(filePath, bytes, { contentType: "application/pdf" });
   if (uploadError) return new Response("Upload failed: " + uploadError.message, { status: 500, headers: CORS_HEADERS });

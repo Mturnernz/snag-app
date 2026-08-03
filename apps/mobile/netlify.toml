@@ -12,3 +12,28 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Security headers for the Expo web export. apps/web sets the equivalent set in
+# next.config.js — these two hosts are separate Netlify sites, so neither
+# inherits the other's headers and both have to say it.
+#
+# Deliberately different from the portal's in two places:
+#
+#   * camera=(self). This is the app, and photographing a snag is the whole
+#     point of it. expo-camera has no web implementation today (see CLAUDE.md),
+#     so nothing uses it yet — but denying it here is how a future web capture
+#     path fails silently rather than loudly.
+#   * blob: and data: in img-src, which the photo picker's local previews need
+#     before anything is uploaded.
+#
+# frame-ancestors 'none' still applies: nothing should embed the app, and a
+# framed copy is how a QR-code landing page gets turned into a phishing shell.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"

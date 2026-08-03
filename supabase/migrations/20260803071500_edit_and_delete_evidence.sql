@@ -78,16 +78,16 @@ $$;
 grant execute on function public.update_evidence_caption(uuid, text) to authenticated;
 revoke execute on function public.update_evidence_caption(uuid, text) from public, anon;
 
--- Removal on a resolved snag is recorded, not refused.
+-- Removal is refused once the snag is resolved, except by an officer admin.
 --
 -- update_snag_status will not close a serious snag without evidence, so the
--- evidence on a resolved snag is part of what justified closing it — which is
--- an argument for making the removal visible, not for making it impossible. A
--- photo of the wrong site, or of somebody's face, does not stop being wrong
--- because the snag closed, and the person who most needs to take it down is
--- usually the supervisor who closed it. So the deletion goes through and the
--- audit action says when it happened: 'evidence_deleted_after_resolve' rather
--- than 'evidence_deleted'.
+-- evidence on a resolved snag is part of what justified closing it: delete it
+-- afterwards and the snag could no longer pass the gate that let it through.
+-- An officer admin may still do it — a photo of the wrong site, or of
+-- somebody's face, does not stop being wrong because the snag closed, and
+-- somebody has to be able to take it down — and that override is audited under
+-- its own action so it reads as a deliberate act on a closed record rather
+-- than ordinary tidying.
 --
 -- Returns the media_path so the caller can drop the storage object. This RPC
 -- owns the row; the object is the caller's to remove, the same division of
@@ -101,15 +101,23 @@ declare
   v_evidence public.evidence_items := public.require_evidence_access(p_evidence_id);
   v_snag public.snags;
   v_org_id uuid := public.current_org_id();
+  v_overridden boolean := false;
 begin
   select * into v_snag from public.snags where id = v_evidence.snag_id;
+
+  if v_snag.status = 'resolved' then
+    if public.current_role() <> 'officer_admin' then
+      raise exception 'This snag is resolved — its evidence is part of the record that closed it. An admin can remove it.';
+    end if;
+    v_overridden := true;
+  end if;
 
   delete from public.evidence_items where id = p_evidence_id;
 
   insert into public.audit_log (org_id, entity, entity_id, action, actor_id)
     values (
       v_org_id, 'snag', v_evidence.snag_id,
-      case when v_snag.status = 'resolved' then 'evidence_deleted_after_resolve' else 'evidence_deleted' end,
+      case when v_overridden then 'evidence_deleted_after_resolve' else 'evidence_deleted' end,
       auth.uid()
     );
 

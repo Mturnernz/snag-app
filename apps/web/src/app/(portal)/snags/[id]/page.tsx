@@ -169,6 +169,7 @@ export default async function SnagDetailPage({
   // server would refuse. Officer admins keep it, with a warning.
   const modeLocked = investigation ? investigationModeLocked(investigation) : false;
   const canOverrideMode = activeMembership.role === 'officer_admin';
+  const canRemoveEvidence = !isResolved || activeMembership.role === 'officer_admin';
   const [libraryDocuments, documentUrl]: [OrgDocument[], string | null] = investigation
     ? await Promise.all([
         getOrgDocuments(supabase, activeMembership.org_id),
@@ -507,11 +508,16 @@ export default async function SnagDetailPage({
                     />
                     <Button type="submit" variant="ghost" size="sm">Save</Button>
                   </form>
-                  <form action={deleteEvidenceAction}>
-                    <input type="hidden" name="snagId" value={snag.id} />
-                    <input type="hidden" name="evidenceId" value={e.id} />
-                    <Button type="submit" variant="danger" size="sm">Remove</Button>
-                  </form>
+                  {/* Mirrors delete_evidence_item: once resolved, the evidence
+                      is part of the record that closed the snag, and only an
+                      officer admin may remove it. */}
+                  {canRemoveEvidence && (
+                    <form action={deleteEvidenceAction}>
+                      <input type="hidden" name="snagId" value={snag.id} />
+                      <input type="hidden" name="evidenceId" value={e.id} />
+                      <Button type="submit" variant="danger" size="sm">Remove</Button>
+                    </form>
+                  )}
                 </div>
               ))}
             </div>

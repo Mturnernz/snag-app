@@ -310,6 +310,10 @@ export default function IssueDetailScreen() {
   // Only an officer admin can overturn a locked investigation mode — a
   // supervisor can allocate one but not re-decide it once work has started.
   const isOfficerAdmin = isOrgMember && userProfile?.role === 'officer_admin';
+  // Mirrors delete_evidence_item: a resolved snag's evidence is part of what
+  // closed it, so only an officer admin can take it back out. Gated on
+  // `resolved && !isOfficerAdmin`, never on resolved alone.
+  const canRemoveEvidence = issue?.status !== 'resolved' || isOfficerAdmin;
   const isSerious = issue?.lane === 'serious';
 
   // Comments and system activity entries merged into one chronological feed.
@@ -1256,6 +1260,7 @@ export default function IssueDetailScreen() {
                   issueId={issue.id}
                   orgId={issue.org_id}
                   state={investigation}
+                  canDelete={canRemoveEvidence}
                   onChanged={onInvestigationChanged}
                 />
               </StepCard>
@@ -1327,6 +1332,7 @@ export default function IssueDetailScreen() {
                 issueId={issue.id}
                 orgId={issue.org_id}
                 canEdit={canEdit}
+                canDelete={canRemoveEvidence}
                 currentUserId={currentUserId}
                 assignees={siteAssignees}
                 onChanged={() => { fetchInvestigation(); fetchIssue(); fetchActivity(); }}

@@ -25,6 +25,9 @@ interface Props {
    *  (verification excludes the action's own owner; see
    *  verify_corrective_action). */
   canEdit: boolean;
+  /** See EvidencePanel's own canDelete: resolved snags keep their evidence
+   *  unless an officer admin removes it. */
+  canDelete: boolean;
   currentUserId: string | null;
   assignees: SiteAssignee[];
   /** Called after any change so the parent can refetch investigation state
@@ -46,7 +49,7 @@ function isOverdue(action: CorrectiveAction): boolean {
   return action.status === 'open' && action.due_date < new Date().toISOString().slice(0, 10);
 }
 
-export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, currentUserId, assignees, onChanged, onStatusChange }: Props) {
+export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, canDelete, currentUserId, assignees, onChanged, onStatusChange }: Props) {
   const { showToast } = useToast();
 
   const [actions, setActions] = useState<CorrectiveAction[]>([]);
@@ -266,6 +269,7 @@ export default function CorrectiveActionsPanel({ issueId, orgId, canEdit, curren
                     item={e}
                     // Whoever may attach completion evidence may take it back.
                     canChange={canAddEvidence}
+                    canDelete={canAddEvidence && canDelete}
                     busy={busyEvidenceId === e.id}
                     onEdit={() => { setEditingEvidence(e); setEditEvidenceCaption(e.caption ?? ''); }}
                     onDelete={() => confirmDeleteEvidence(e)}
@@ -392,12 +396,13 @@ function StatusPill({ verified, status, overdue }: { verified: boolean; status: 
 interface EvidenceRowProps {
   item: EvidenceItem;
   canChange: boolean;
+  canDelete: boolean;
   busy: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-function EvidenceRow({ item, canChange, busy, onEdit, onDelete }: EvidenceRowProps) {
+function EvidenceRow({ item, canChange, canDelete, busy, onEdit, onDelete }: EvidenceRowProps) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (item.media_path) getEvidencePhotoUrl(item.media_path).then(setUrl);
@@ -415,7 +420,7 @@ function EvidenceRow({ item, canChange, busy, onEdit, onDelete }: EvidenceRowPro
           <Icon name="create-outline" size="sm" color={Colors.textSecondary} />
         </TouchableOpacity>
       )}
-      {canChange && (
+      {canDelete && (
         <TouchableOpacity style={styles.evidenceAction} onPress={onDelete} disabled={busy} accessibilityLabel="Remove evidence" hitSlop={4}>
           <Icon name="trash-outline" size="sm" color={Colors.danger} />
         </TouchableOpacity>

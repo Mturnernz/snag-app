@@ -21,6 +21,11 @@ interface Props {
   /** The evidence bucket is org-folder scoped. */
   orgId: string;
   state: InvestigationState;
+  /** Mirrors delete_evidence_item's own rule: once the snag is resolved its
+   *  evidence is part of the record that closed it, and only an officer admin
+   *  may remove it. Gated on `resolved && !isOfficerAdmin`, never on resolved
+   *  alone — same shape as investigationModeLocked's override. */
+  canDelete: boolean;
   onChanged: () => void;
 }
 
@@ -29,7 +34,7 @@ interface Props {
 // The picker and a caption field used to sit inline between the witness form
 // above and the root-cause form below, which is how you end up with three
 // look-alike inputs and no idea which one Save applies to.
-export default function EvidencePanel({ issueId, orgId, state, onChanged }: Props) {
+export default function EvidencePanel({ issueId, orgId, state, canDelete, onChanged }: Props) {
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const pickerRef = useRef<PhotoPickerHandle>(null);
@@ -164,6 +169,7 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
           <EvidenceRow
             key={e.id}
             item={e}
+            canDelete={canDelete}
             busy={busyId === e.id}
             onEdit={() => startEdit(e)}
             onDelete={() => confirmDelete(e)}
@@ -234,12 +240,13 @@ export default function EvidencePanel({ issueId, orgId, state, onChanged }: Prop
 
 interface RowProps {
   item: EvidenceItem;
+  canDelete: boolean;
   busy: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-function EvidenceRow({ item, busy, onEdit, onDelete }: RowProps) {
+function EvidenceRow({ item, canDelete, busy, onEdit, onDelete }: RowProps) {
   const [url, setUrl] = useState<string | null>(null);
   // Evidence uploaded from the portal can be any file, not just a photo.
   // Rendering a PDF through <Image> produced an empty box.
@@ -287,15 +294,17 @@ function EvidenceRow({ item, busy, onEdit, onDelete }: RowProps) {
       >
         <Icon name="create-outline" size="sm" color={Colors.textSecondary} />
       </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.action}
-        onPress={onDelete}
-        disabled={busy}
-        accessibilityLabel="Remove evidence"
-        hitSlop={4}
-      >
-        <Icon name="trash-outline" size="sm" color={Colors.danger} />
-      </TouchableOpacity>
+      {canDelete && (
+        <TouchableOpacity
+          style={styles.action}
+          onPress={onDelete}
+          disabled={busy}
+          accessibilityLabel="Remove evidence"
+          hitSlop={4}
+        >
+          <Icon name="trash-outline" size="sm" color={Colors.danger} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

@@ -79,6 +79,10 @@ function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserR
           tabBarBadge: openIssueCount > 0 ? openIssueCount : undefined,
         }}
       />
+      {isAdminOrManager && (
+        <Tab.Screen name="Admin" component={AdminDashboardScreen} options={{ tabBarLabel: 'Manager' }} />
+      )}
+      {/* Profile is declared last so it stays the right-most tab for every role. */}
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
@@ -86,9 +90,6 @@ function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserR
           tabBarBadge: mentionCount > 0 ? mentionCount : undefined,
         }}
       />
-      {isAdminOrManager && (
-        <Tab.Screen name="Admin" component={AdminDashboardScreen} options={{ tabBarLabel: 'Manager' }} />
-      )}
     </Tab.Navigator>
   );
 }

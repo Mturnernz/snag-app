@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -39,17 +39,18 @@ type ExpandMetric = 'unassigned' | 'rca' | 'overdue';
  *
  * The count is right — an RCA is owed on a serious snag until one is accepted
  * or waived, and resolving it doesn't discharge that — but the row alone reads
- * as a bug in it. So each row says which of the two it is: still owed an
- * analysis on a finished investigation, or closed over an unfinished one, with
- * or without somebody's reason on the record. The last of those is the only one
- * that needs chasing, and it's the only one styled to be chased.
+ * as a bug in it. So a resolved row says what is still owed on the snag.
+ *
+ * There is only one shape of that left. A snag closed with a supervisor's
+ * written reason is no longer in this list at all (`snag_rca_outstanding`
+ * filters on `resolution_exception_at`), so a resolved row with steps
+ * outstanding is one nobody has explained — which is exactly the one that needs
+ * chasing, and why it is styled to be chased.
  */
 function rcaOutstandingNote(row: RcaOutstandingRow): { note: string | null; noteWarn: boolean } {
   if (row.status !== 'resolved' || row.unmet_count === 0) return { note: null, noteWarn: false };
   const steps = `${row.unmet_count} step${row.unmet_count === 1 ? '' : 's'}`;
-  return row.resolution_exception_reason
-    ? { note: `Closed with ${steps} outstanding — ${row.resolution_exception_reason}`, noteWarn: false }
-    : { note: `Closed with ${steps} outstanding · no reason recorded`, noteWarn: true };
+  return { note: `Closed with ${steps} outstanding · no reason recorded`, noteWarn: true };
 }
 
 export default function AdminDashboardScreen() {
@@ -93,10 +94,42 @@ export default function AdminDashboardScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [sitesDetail, setSitesDetail] = useState<SiteDetail[]>([]);
 
+  // Read inside load(), which must not re-create itself when a panel opens —
+  // useFocusEffect re-runs on a new callback identity, so putting `expanded` in
+  // load's deps would reload the whole dashboard on every tap.
+  const expandedRef = useRef<{ siteId: string; metric: ExpandMetric } | null>(null);
+
   const canManageWorkGroups = role === 'officer_admin' || role === 'supervisor';
 
   const sitesWithoutLead = sitesDetail.filter((s) => s.supervisorIds.length === 0).map((s) => s.name);
   const sitesWithoutDefaultOwner = sitesDetail.filter((s) => !s.defaultOwnerId).map((s) => s.name);
+
+  /**
+   * Fetch whichever list is open beneath a site, unconditionally.
+   *
+   * The per-site maps are render caches, not a fetch-once store: load()
+   * refreshes the counts on focus and on pull-to-refresh, so a list left over
+   * from an earlier fetch is the exact drift the shared views exist to prevent
+   * — the number saying one thing and its own list saying another. Recording a
+   * resolution reason on a snag and coming back to this tab used to leave the
+   * row reading "no reason recorded" until the app was restarted.
+   */
+  const fetchExpanded = useCallback(async (pane: { siteId: string; metric: ExpandMetric }) => {
+    const { siteId, metric } = pane;
+    if (metric === 'unassigned') {
+      const [snags, assignees] = await Promise.all([getUnassignedSnags(siteId), getSiteAssignees(siteId)]);
+      setUnassignedBySite((prev) => ({ ...prev, [siteId]: snags }));
+      setSiteAssigneesCache((prev) => ({ ...prev, [siteId]: assignees.data }));
+      return;
+    }
+    if (metric === 'overdue') {
+      const rows = await getOverdueActions(siteId);
+      setOverdueBySite((prev) => ({ ...prev, [siteId]: rows }));
+      return;
+    }
+    const rows = await getRcaOutstanding(siteId);
+    setRcaBySite((prev) => ({ ...prev, [siteId]: rows }));
+  }, []);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -143,35 +176,28 @@ export default function AdminDashboardScreen() {
       setSitesDetail(sites);
     }
 
+    // The counts above have just been re-read; whatever list is open under one
+    // of them has to be re-read with them.
+    if (expandedRef.current) await fetchExpanded(expandedRef.current);
+
     setLoading(false);
-  }, []);
+  }, [fetchExpanded]);
 
   // Tapping the same number again closes it; tapping a different one swaps,
   // rather than opening two panels under one row.
   async function toggleExpand(siteId: string, metric: ExpandMetric) {
-    if (expanded?.siteId === siteId && expanded.metric === metric) { setExpanded(null); return; }
-    setExpanded({ siteId, metric });
-
-    if (metric === 'unassigned') {
-      if (!unassignedBySite[siteId]) {
-        const snags = await getUnassignedSnags(siteId);
-        setUnassignedBySite((prev) => ({ ...prev, [siteId]: snags }));
-      }
-      if (!siteAssigneesCache[siteId]) {
-        const { data } = await getSiteAssignees(siteId);
-        setSiteAssigneesCache((prev) => ({ ...prev, [siteId]: data }));
-      }
+    if (expanded?.siteId === siteId && expanded.metric === metric) {
+      expandedRef.current = null;
+      setExpanded(null);
       return;
     }
-    if (metric === 'overdue' && !overdueBySite[siteId]) {
-      const rows = await getOverdueActions(siteId);
-      setOverdueBySite((prev) => ({ ...prev, [siteId]: rows }));
-      return;
-    }
-    if (metric === 'rca' && !rcaBySite[siteId]) {
-      const rows = await getRcaOutstanding(siteId);
-      setRcaBySite((prev) => ({ ...prev, [siteId]: rows }));
-    }
+    const pane = { siteId, metric };
+    expandedRef.current = pane;
+    setExpanded(pane);
+    // Always refetch. Any cached rows render immediately underneath, so this
+    // costs a stale flash at worst — where fetching only on a cache miss cost
+    // a list that never caught up with the numbers above it.
+    await fetchExpanded(pane);
   }
 
   async function handleQuickAssign(siteId: string, snagId: string, ownerId: string) {

@@ -615,18 +615,21 @@ export interface OverdueActionRow {
   snag_description: string | null;
 }
 
+/**
+ * A serious snag still owed a root-cause analysis.
+ *
+ * Resolved snags belong here — resolving doesn't discharge the RCA — but a snag
+ * closed under `resolution_exception_reason` does not: that supervisor already
+ * wrote down why the investigation was left unfinished, so the view filters it
+ * out (`20260804190000`) and no row here carries a reason. What survives is
+ * `unmet_count` > 0 with nothing said, which is the state worth chasing.
+ */
 export interface RcaOutstandingRow {
   snag_id: string;
   reference: string;
   description: string | null;
   status: SnagStatus;
   severity: SnagSeverity | null;
-  /** Why it was closed with the investigation incomplete, or null — either
-   *  because it wasn't, or because nobody has said. `unmetCount` tells the two
-   *  apart, and the list has to: a resolved snag in this list looks like a bug
-   *  in the count until it says what is still owed on it. */
-  resolution_exception_reason: string | null;
-  resolution_exception_at: string | null;
   /** Resolve-gate conditions unmet *now*, not when it was closed. */
   unmet_count: number;
 }
@@ -650,7 +653,7 @@ export async function getRcaOutstanding(
 ): Promise<RcaOutstandingRow[]> {
   const { data, error } = await client
     .from('snag_rca_outstanding')
-    .select('snag_id, reference, description, status, severity, resolution_exception_reason, resolution_exception_at, unmet_count')
+    .select('snag_id, reference, description, status, severity, unmet_count')
     .eq('site_id', siteId)
     .order('reference', { ascending: true });
   if (error || !data) return [];

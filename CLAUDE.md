@@ -371,10 +371,17 @@ on counting as an open investigation until someone runs one.
 
 **"RCA outstanding" counting resolved snags is not that bug.** An RCA is owed on a serious snag
 until one is accepted or `waive_rca` records why it isn't needed, and resolving the snag doesn't
-discharge it — a resolved snag in that list is correct. What was missing is why, so
-`snag_rca_outstanding` carries the exception reason and a live `unmet_count`, and the mobile
-dashboard's expanded rows distinguish "still owed an analysis" from "closed with 4 steps
-outstanding · no reason recorded".
+discharge it — a resolved snag in that list is correct.
+
+**A snag closed with a written reason is the exception, and leaves the list.** A supervisor who
+recorded `resolution_exception_reason` has already answered the question the row would ask, and
+the only thing that would clear it otherwise is `waive_rca` — a second reason beside the first.
+So `snag_rca_outstanding` filters on `resolution_exception_at`
+(`20260804190000_rca_outstanding_excludes_exception.sql`), and `get_site_breakdown`'s figure
+follows because it counts the view rather than repeating the predicate. `record_resolution_exception`
+therefore clears a row rather than annotating it. What is left is what somebody can act on: an RCA
+in flight, one genuinely still owed on a complete investigation, and — the rows worth chasing,
+styled that way on the mobile dashboard — "closed with 4 steps outstanding · no reason recorded".
 
 ## The document library
 

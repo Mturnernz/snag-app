@@ -46,7 +46,9 @@ test.describe('worker journey', () => {
     await start.click();
 
     // Which org a report lands in is the thing a worker must never get wrong.
-    await expect(page.getByText('Reporting into')).toBeVisible({ timeout: 60_000 });
+    // It now sits on the title row as the org's name alone, so the assertion is
+    // on the accessible label rather than on visible "Reporting into" copy.
+    await expect(page.locator('[aria-label^="Reporting into"]')).toBeVisible({ timeout: 60_000 });
 
     await expect(page.getByText("What's wrong?")).toBeVisible();
     await expect(page.getByText('Add up to 5 photos')).toBeVisible();

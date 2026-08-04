@@ -184,6 +184,13 @@ export default function ReportIssueScreen() {
   }
 
   const isPublicSubmission = target !== null;
+  // Which org this report goes to rides on the title row rather than sitting
+  // in the form: it is context for everything below it, not a field, and the
+  // card it used to be pushed the first real field off the first screen.
+  // Tappable when there's a choice — a multi-org member switches, a public
+  // reporter re-picks the org they're reporting to.
+  const headerOrgName = isPublicSubmission ? target?.orgName ?? null : orgName;
+  const canChangeHeaderOrg = isPublicSubmission || memberships.length > 1;
   // What the confirmation says the report went to. The site is named because
   // it's now a choice — and because "which site did that land on?" was
   // unanswerable from anywhere in the app before it was one.
@@ -393,59 +400,58 @@ export default function ReportIssueScreen() {
     <ScreenEntrance style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Report a Snag</Text>
+        {headerOrgName && (
+          // Sized to the header rather than to MIN_TOUCH_TARGET — hitSlop
+          // takes the tap area back up to it without a 48pt pill setting the
+          // height of the title row.
+          <TouchableOpacity
+            style={[styles.headerOrg, canChangeHeaderOrg && styles.headerOrgTappable]}
+            onPress={() => {
+              if (isPublicSubmission) navigation.navigate('ChooseReportOrg');
+              else setShowOrgPicker(true);
+            }}
+            activeOpacity={canChangeHeaderOrg ? 0.7 : 1}
+            disabled={!canChangeHeaderOrg || switchingOrg}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole={canChangeHeaderOrg ? 'button' : undefined}
+            accessibilityLabel={
+              `Reporting into ${headerOrgName}${canChangeHeaderOrg ? '. Change organisation' : ''}`
+            }
+          >
+            <Icon
+              name="business-outline"
+              size="sm"
+              color={canChangeHeaderOrg ? Colors.primary : Colors.textMuted}
+            />
+            <Text
+              style={[styles.headerOrgName, canChangeHeaderOrg && styles.headerOrgNameTappable]}
+              numberOfLines={1}
+            >
+              {headerOrgName}
+            </Text>
+            {switchingOrg ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : canChangeHeaderOrg ? (
+              <Icon name="chevron-down" size="sm" color={Colors.primary} />
+            ) : null}
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: insets.bottom + 24 },
+          { paddingBottom: insets.bottom + Spacing.md },
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Cross-org submissions always show which org will receive this. */}
-        {isPublicSubmission && target && (
-          <View style={styles.targetPill}>
-            <Icon name="business-outline" size="sm" color={Colors.primary} />
-            <Text style={styles.targetPillText}>
-              Reporting to: <Text style={styles.targetPillOrg}>{target.orgName}</Text>
-            </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('ChooseReportOrg')} hitSlop={8}>
-              <Text style={styles.targetPillChange}>Change</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Member submissions show which org they're reporting into. With more
-            than one membership it's a tappable switcher; otherwise a label. */}
-        {!isPublicSubmission && orgName && (
-          <TouchableOpacity
-            style={styles.orgPill}
-            onPress={() => memberships.length > 1 && setShowOrgPicker(true)}
-            activeOpacity={memberships.length > 1 ? 0.7 : 1}
-            disabled={memberships.length <= 1 || switchingOrg}
-          >
-            <Icon name="business-outline" size="sm" color={Colors.primary} />
-            <View style={styles.orgPillText}>
-              <Text style={styles.orgPillLabel}>Reporting into</Text>
-              <Text style={styles.orgPillOrg} numberOfLines={1}>{orgName}</Text>
-            </View>
-            {switchingOrg ? (
-              <ActivityIndicator size="small" color={Colors.primary} />
-            ) : memberships.length > 1 ? (
-              <View style={styles.orgPillChangeRow}>
-                <Text style={styles.orgPillChange}>Change</Text>
-                <Icon name="chevron-down" size="sm" color={Colors.primary} />
-              </View>
-            ) : null}
-          </TouchableOpacity>
-        )}
-
-        {/* Site — only when there's more than one to choose between. */}
+        {/* Site — only when there's more than one to choose between. Inline,
+            so the label and the site it names read as one row. */}
         {!isPublicSubmission && sites.length > 1 && (
-          <SitePicker sites={sites} value={site} onChange={setSite} />
+          <SitePicker sites={sites} value={site} onChange={setSite} layout="inline" />
         )}
 
-        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} />
+        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} compact />
 
         {/* Description — the only required field on the fast path */}
         <View style={styles.fieldGroup}>
@@ -642,6 +648,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
     backgroundColor: Colors.surface,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
@@ -649,75 +659,37 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   headerTitle: {
+    flexShrink: 1,
     fontSize: Typography.xl,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
   },
-  scrollContent: {
-    padding: Spacing.lg,
-    gap: Spacing.lg,
-  },
-
-  targetPill: {
+  headerOrg: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Colors.primaryLight,
+    flexShrink: 1,
+    gap: Spacing.xs,
+    maxWidth: '50%',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
     borderRadius: Radius.button,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
   },
-  targetPillText: {
-    flex: 1,
-    fontSize: Typography.sm,
-    color: Colors.textPrimary,
+  headerOrgTappable: {
+    backgroundColor: Colors.primaryLight,
   },
-  targetPillOrg: {
-    fontWeight: Typography.bold,
-    color: Colors.primary,
-  },
-  targetPillChange: {
+  headerOrgName: {
+    flexShrink: 1,
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
+    color: Colors.textSecondary,
+  },
+  headerOrgNameTappable: {
     color: Colors.primary,
   },
-
-  orgPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  orgPillText: {
-    flex: 1,
-    gap: 1,
-    alignItems: 'center',
-  },
-  orgPillLabel: {
-    fontSize: Typography.xs,
-    color: Colors.textMuted,
-    textAlign: 'center',
-  },
-  orgPillOrg: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  orgPillChangeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  orgPillChange: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.primary,
+  scrollContent: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
   },
 
   modalBackdrop: {
@@ -814,7 +786,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   textArea: {
-    minHeight: 100,
+    minHeight: 88,
     paddingTop: Spacing.sm,
   },
 

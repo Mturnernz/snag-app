@@ -79,9 +79,12 @@ interface Props {
    *  from what gets submitted. */
   onBlockingChange?: (blocking: boolean) => void;
   onPhotosChange?: (count: number) => void;
+  /** Tightens the empty state's padding for a form that has to fit one
+   *  screen (the niggle report). Nothing else about it changes. */
+  compact?: boolean;
 }
 
-const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, deferUpload, initialUris, onBlockingChange, onPhotosChange }, ref) => {
+const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, deferUpload, initialUris, onBlockingChange, onPhotosChange, compact }, ref) => {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const seededRef = useRef(false);
 
@@ -260,8 +263,8 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
 
   if (photos.length === 0) {
     return (
-      <View style={styles.area}>
-        <Icon name="camera-outline" size="xl" color={Colors.textSecondary} />
+      <View style={[styles.area, compact && styles.areaCompact]}>
+        <Icon name="camera-outline" size={compact ? 'lg' : 'xl'} color={Colors.textSecondary} />
         <Text style={styles.label}>Add up to {MAX_PHOTOS} photos</Text>
         <View style={styles.buttonRow}>
           <TouchableOpacity style={styles.button} onPress={takePhoto} activeOpacity={0.7} disabled={!pathPrefix}>
@@ -326,6 +329,10 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     alignItems: 'center',
     gap: Spacing.md,
+  },
+  areaCompact: {
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
   },
   label: {
     fontSize: Typography.base,

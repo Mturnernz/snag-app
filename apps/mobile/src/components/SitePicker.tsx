@@ -9,8 +9,11 @@ interface Props {
   sites: ReportSite[];
   value: ReportSite | null;
   onChange: (site: ReportSite) => void;
-  /** Field label above the control. */
+  /** Field label above (or, inline, beside) the control. */
   label?: string;
+  /** 'inline' puts the label on the control's own row instead of above it —
+   *  a row of vertical space back on a form that has to fit one screen. */
+  layout?: 'stacked' | 'inline';
 }
 
 /**
@@ -27,50 +30,60 @@ interface Props {
  * Rendered by the caller only when there's a choice to make: a reporter on one
  * site has nothing to pick.
  */
-export default function SitePicker({ sites, value, onChange, label = 'Site' }: Props) {
+export default function SitePicker({ sites, value, onChange, label = 'Site', layout = 'stacked' }: Props) {
   const [open, setOpen] = useState(false);
+  const inline = layout === 'inline';
 
   return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={inline ? styles.fieldInline : styles.field}>
+      {/* Inline, the label is boxed to the control's own height so it stays
+          level with it rather than drifting to the centre of control + open
+          menu. */}
+      <View style={inline ? styles.labelBoxInline : undefined}>
+        <Text style={styles.label}>{label}</Text>
+      </View>
 
-      <TouchableOpacity
-        style={[styles.control, open && styles.controlOpen]}
-        onPress={() => setOpen((prev) => !prev)}
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${label}: ${value?.name ?? 'choose a site'}`}
-      >
-        <Icon name="location-outline" size="sm" color={Colors.textMuted} />
-        <Text style={[styles.controlText, !value && styles.placeholder]} numberOfLines={1}>
-          {value?.name ?? 'Choose a site'}
-        </Text>
-        <Icon name={open ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
-      </TouchableOpacity>
+      {/* The control and its menu are one column so the menu hangs off the
+          control's edges, whichever side of it the label is on. */}
+      <View style={inline ? styles.controlWrapInline : undefined}>
+        <TouchableOpacity
+          style={[styles.control, open && styles.controlOpen]}
+          onPress={() => setOpen((prev) => !prev)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={`${label}: ${value?.name ?? 'choose a site'}`}
+        >
+          <Icon name="location-outline" size="sm" color={Colors.textMuted} />
+          <Text style={[styles.controlText, !value && styles.placeholder]} numberOfLines={1}>
+            {value?.name ?? 'Choose a site'}
+          </Text>
+          <Icon name={open ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
+        </TouchableOpacity>
 
-      {open && (
-        <View style={styles.menu}>
-          {sites.map((site) => {
-            const selected = site.id === value?.id;
-            return (
-              <TouchableOpacity
-                key={site.id}
-                style={[styles.option, selected && styles.optionSelected]}
-                onPress={() => { setOpen(false); onChange(site); }}
-                activeOpacity={0.7}
-                accessibilityRole="radio"
-                accessibilityState={{ selected }}
-              >
-                <Text style={[styles.optionText, selected && styles.optionTextSelected]} numberOfLines={1}>
-                  {site.name}
-                </Text>
-                {selected && <Icon name="checkmark" size="sm" color={Colors.primary} />}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
+        {open && (
+          <View style={styles.menu}>
+            {sites.map((site) => {
+              const selected = site.id === value?.id;
+              return (
+                <TouchableOpacity
+                  key={site.id}
+                  style={[styles.option, selected && styles.optionSelected]}
+                  onPress={() => { setOpen(false); onChange(site); }}
+                  activeOpacity={0.7}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                >
+                  <Text style={[styles.optionText, selected && styles.optionTextSelected]} numberOfLines={1}>
+                    {site.name}
+                  </Text>
+                  {selected && <Icon name="checkmark" size="sm" color={Colors.primary} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -78,6 +91,18 @@ export default function SitePicker({ sites, value, onChange, label = 'Site' }: P
 const styles = StyleSheet.create({
   field: {
     gap: Spacing.sm,
+  },
+  fieldInline: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+  },
+  labelBoxInline: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+  },
+  controlWrapInline: {
+    flex: 1,
   },
   label: {
     fontSize: Typography.sm,
@@ -113,7 +138,6 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
   menu: {
-    marginTop: -Spacing.sm,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderTopWidth: 0,

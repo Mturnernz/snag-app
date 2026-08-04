@@ -491,6 +491,78 @@ A signed-out supervisor is sent to `/login?next=<portal path>` so the snag
 survives the login round trip. `next` is validated by `src/lib/nextPath.ts` —
 same-origin paths only, or it's an open redirect on a domain people trust.
 
+## Who actually sends the mail
+
+Two senders, not one, and they fail independently — so "email works" is never a
+single fact about this project:
+
+| Mail | Sent by | Configured in |
+|---|---|---|
+| Every per-snag notification + the overdue digest | `notify-snag` → Resend's **HTTP API** | `RESEND_API_KEY`, `SNAG_FROM_ADDRESS` (Supabase function secrets) |
+| Password recovery (and confirmation, if re-enabled) | **Supabase Auth → Resend's SMTP** | Supabase dashboard → Auth → SMTP Settings |
+
+Same Resend account, two entirely different paths into it, and neither one
+tells you when the other breaks.
+
+**The sender address has to be on a verified domain.** `SNAG_FROM_ADDRESS`
+defaults to `noreply@snaghq.co.nz` for that reason. It used to default to
+Resend's sandbox sender, `onboarding@resend.dev`, which delivers *only* to the
+Resend account's own address — so every notification to anybody else was
+rejected 403. Nothing said so: `sendEmail` logs the rejection, `notify-snag`
+returns 200 regardless, the DB dispatch ignores the response, and no test
+covers it. Mail stopped leaving the system on 13 July 2026 and was noticed
+three weeks later by reading Resend's dashboard. **If notifications go quiet,
+check Resend's Emails list before anything in this repo** — the app cannot tell
+you.
+
+**Auth mail is SMTP, and its failures are loud but elsewhere.** Supabase's
+built-in SMTP only delivers to members of the Supabase org and does a couple of
+messages an hour, so custom SMTP against Resend is what makes recovery real for
+an external tester. The credentials are `resend` (literally, lowercase) as the
+username and a Resend **API key** as the password. A wrong one gives
+`535 "Authentication credentials invalid"` in the **Auth logs** — not in
+Resend's, because a rejected SMTP login never creates an email to log.
+
+## Resetting a password
+
+**One landing page, `<portal>/reset-password`, and both clients point at it.**
+It sits outside the `(portal)` group deliberately: workers are most of the
+people who need it, and `requireSupervisorOrAdmin()` would bounce them to
+`/unauthorized`.
+
+The thing to understand before changing any of it is **why nothing here uses
+PKCE**:
+
+- `@supabase/ssr` forces `flowType: 'pkce'` on both its clients, and a PKCE
+  recovery link only works in the browser that asked for it — auth-js's
+  `_isPKCECallback` wants the `code` *and* a stored code verifier, and with the
+  verifier missing it returns false, so the link isn't recognised as a callback
+  at all. Nothing happens and nothing is said.
+- Asking on a laptop and opening the mail on a phone is the normal case, not
+  the edge case. And the app's own "Forgot password?" hands off from a
+  completely different origin, where the verifier could never exist.
+
+So `forgot-password/actions.ts` deliberately builds a **plain**
+`@supabase/supabase-js` client on the implicit flow rather than using
+`@/lib/supabase/server`, and `apps/mobile`'s `sendPasswordReset` points
+`redirectTo` at `<portal>/reset-password` rather than at the app. The tokens
+then arrive in the URL **fragment**, which is why the landing page is a client
+component — the server never sees a fragment and would call a valid link
+invalid. There is no `/auth/callback` route, and adding one would be a sign
+somebody had reintroduced the code-exchange flow.
+
+Mobile has **no recovery screen of its own**, on purpose, and `App.tsx` has no
+`PASSWORD_RECOVERY` gate. One consequence worth knowing: the Supabase
+dashboard's **Send password recovery** button sends no `redirectTo`, so it
+falls back to the project's Site URL. Point that at the app and the button
+produces a link that silently signs someone in without ever asking for a new
+password. Test recovery through `/forgot-password`, not through the dashboard.
+
+Every redirect target has to be on the allow-list at Supabase → Auth → URL
+Configuration → Redirect URLs — today that means `<portal>/reset-password`. An
+address that isn't on it doesn't error: Auth quietly substitutes the Site URL,
+and the link lands on a homepage instead of a password form.
+
 ## Deep links
 
 Both clients route **`/snags/:id`**, and both accept **`?step=`** naming one

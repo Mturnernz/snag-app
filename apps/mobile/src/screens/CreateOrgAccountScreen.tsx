@@ -45,7 +45,10 @@ export default function CreateOrgAccountScreen({ onDone, onBack }: Props) {
       setError(signUpError.message ?? 'Could not create your account.');
       return;
     }
-    onDone(`Account created for ${orgName.trim()}. Confirm your email, then sign in — we'll finish setting up your organisation.`);
+    // Confirmation is off — signUp hands back a live session, so the pending
+    // create intent set above is consumed immediately rather than waiting on a
+    // confirmation email that is never sent.
+    onDone(`Account created — setting up ${orgName.trim()}…`);
   }
 
   return (

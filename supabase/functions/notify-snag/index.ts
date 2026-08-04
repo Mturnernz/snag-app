@@ -17,7 +17,15 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const INTERNAL_SECRET = Deno.env.get("SNAG_INTERNAL_SECRET");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const FROM_ADDRESS = Deno.env.get("SNAG_FROM_ADDRESS") ?? "Snag <onboarding@resend.dev>";
+// The default has to be a sender on a *verified* domain, because an unset
+// secret is the case that actually happens. It was `onboarding@resend.dev` —
+// Resend's sandbox sender, which delivers only to the Resend account's own
+// address. Every notification to anybody else was rejected 403, and since
+// sendEmail() only logs that and this function returns 200 regardless, nothing
+// anywhere said so: not the app, not the DB, not CI. Mail stopped leaving the
+// system on 13 July 2026 and was found three weeks later by reading Resend's
+// own dashboard.
+const FROM_ADDRESS = Deno.env.get("SNAG_FROM_ADDRESS") ?? "SNAG <noreply@snaghq.co.nz>";
 // The portal (apps/web — it hosts the marketing site and the supervisor
 // portal in one Next.js app). Every link this function sends points at its
 // /go/snag/<id> handoff rather than at a client directly — see `go()` below.

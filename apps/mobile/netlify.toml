@@ -13,6 +13,16 @@
   to = "/index.html"
   status = 200
 
+# The web app manifest, which is what gives an "Add to Home screen" shortcut a
+# 192/512px icon instead of the 48px favicon Expo's export would otherwise leave
+# it to scale up (see public/index.html). Stated explicitly because a manifest
+# served as anything other than a JSON media type is rejected outright, and the
+# symptom of that is silent: the icon quietly falls back to the favicon again.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+
 # Security headers for the Expo web export. apps/web sets the equivalent set in
 # next.config.js — these two hosts are separate Netlify sites, so neither
 # inherits the other's headers and both have to say it.
@@ -20,9 +30,10 @@
 # Deliberately different from the portal's in three places:
 #
 #   * camera=(self). This is the app, and photographing a snag is the whole
-#     point of it. expo-camera has no web implementation today (see CLAUDE.md),
-#     so nothing uses it yet — but denying it here is how a future web capture
-#     path fails silently rather than loudly.
+#     point of it. Nothing uses it on web today — expo-camera does have a web
+#     implementation, but the app deliberately keeps it out of the web bundle
+#     (see CLAUDE.md and src/lib/camera.web.ts) — but denying it here is how a
+#     future web capture path fails silently rather than loudly.
 #   * blob: and data: in img-src, which the photo picker's local previews need
 #     before anything is uploaded.
 #   * blob: in connect-src, which is how a picked photo is *read*. On web,

@@ -198,9 +198,10 @@ onboarding, and the full report-a-snag screen (photo picker, type toggle, seriou
 
 Only 10 of the ~55 files under `src/` touch a native module, and 6 of those are
 `expo-haptics`, which no-ops harmlessly on web. The genuine gaps are
-`expo-camera` (QR scan) and `expo-file-system`, which have no web
-implementation at all — `expo-file-system`'s is a stub that warns and throws.
-Those still need a device via Expo Go.
+`expo-camera` (QR scan) and `expo-file-system`. `expo-file-system` has no web
+implementation at all — its is a stub that warns and throws. `expo-camera` has
+one, but the app keeps it out of the web bundle on purpose (see below), so it is
+a gap here for a different reason. Both still need a device via Expo Go.
 
 A stub is not always an error, and that is what makes this class of bug quiet.
 react-native-web's `Alert` is `static alert() {}` — it *succeeds* at doing
@@ -222,8 +223,24 @@ Note that rendering under react-native-web is real coverage but not equivalent
 coverage: layout, styling, navigation, and data flow transfer well; native
 modules and platform-specific behaviour do not.
 
-`ScanJoinCodeScreen` pulls `jsQR` from `cdn.jsdelivr.net` at runtime, so QR
-scanning needs that domain reachable.
+**QR scanning no longer reaches a CDN, and must not start again.** This page
+used to say `ScanJoinCodeScreen` pulls `jsQR` from `cdn.jsdelivr.net` at
+runtime, so scanning needed that domain reachable. The request was never the
+screen's: `expo-camera`'s web entry builds a QR-decoding Web Worker *at module
+scope*, from a `blob:` URL that `importScripts` jsQR off that CDN — so importing
+it was enough to fire it, on every page load, whether or not anything scanned.
+
+`netlify.toml`'s CSP allows neither a `blob:` worker nor that CDN, so on
+`app.snaghq.co.nz` the worker was refused before the fetch was even attempted:
+one console violation per load, for a scanner the web build never offers
+(`isManualOnly` is set on web). The screen now imports `../lib/camera`, which
+Metro resolves to a stub on web, and `expo-camera` is absent from the web bundle
+entirely — verified by grepping `dist/` for `jsdelivr`, and `camera.test.ts`
+fails if anything imports `expo-camera` directly again.
+
+The tempting fix was widening the CSP. Don't: it would put a third-party CDN
+inside the trust boundary of the domain people sign into, to enable a scanner
+that is deliberately unavailable there.
 
 ### Behind a TLS-terminating proxy (sandboxed agent sessions)
 

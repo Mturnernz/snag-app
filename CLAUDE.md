@@ -14,7 +14,7 @@ and file storage.
 
 | Layer | Choice |
 |---|---|
-| Mobile framework | Expo SDK 52 (React Native 0.76), `apps/mobile` |
+| Mobile framework | Expo SDK 54 (React Native 0.81, React 19), `apps/mobile` |
 | Web framework | Next.js (App Router), `apps/web` — see `SNAG_WEB_APP_PLAN.md` |
 | Language | TypeScript (strict mode) |
 | Navigation (mobile) | React Navigation v6 — bottom tabs + native stack |
@@ -482,8 +482,8 @@ unless it's a one-off simple `select`.
   buttons at most** — a choice between three things needs real UI, not a dialog.
 - The same trap applies to every native-only module. `apps/mobile` runs in the
   browser as well as on phones, so before using a platform API, check that it has
-  a web implementation — `expo-file-system` and `expo-camera` have none, and
-  `expo-file-system`'s stub throws rather than no-oping. See TESTING.md.
+  a web implementation — `expo-file-system` has none, and its stub throws rather
+  than no-oping. See TESTING.md.
 - **The web build runs under a CSP, and nothing local enforces it.** Both hosts
   send one (`apps/mobile/netlify.toml`, `apps/web/next.config.js`), so a URL the
   code fetches has to be in `connect-src` or the request never happens — and a
@@ -493,6 +493,17 @@ unless it's a one-off simple `select`.
   directive: `img-src` for a picked photo's preview, `connect-src` for reading
   its bytes, and `'self'` covers neither. `src/lib/csp.test.ts` pins the schemes
   the upload path depends on.
+- **`expo-camera` is the opposite trap: it has a web implementation, and that is
+  the problem.** Its web entry builds a QR-decoding Web Worker *at module scope*
+  from a `blob:` URL that `importScripts` jsQR off `cdn.jsdelivr.net` — so the
+  import alone fires it on every page load. The CSP refuses both, and a `blob:`
+  worker is governed by `worker-src` → `child-src` → **`script-src`**, so the
+  `blob:` in `connect-src` above does not cover it. Import it through
+  **`src/lib/camera.ts`**, which Metro resolves to a stub on web
+  (`camera.web.ts`); never from `expo-camera` directly. `camera.test.ts` enforces
+  that. Widening the CSP instead would put a third-party CDN inside the trust
+  boundary of the domain people sign into, for a scanner the web build
+  deliberately never offers.
 
 ## Hosts
 
@@ -658,3 +669,46 @@ trip) and `?report=<token>` (the QR landing). Deliberately not `INITIAL_SESSION`
 — reloading the page on a tab is not logging in, and staying put is what a
 browser is supposed to do. Unit-tested in `webLocation.test.ts`; it no-ops off
 web.
+
+### The home screen icon
+
+`apps/mobile` is installed from the browser, not a store — people add
+`app.snaghq.co.nz` to their home screen. The icon that ends up there came out
+visibly blurrier than every app beside it, and the reason was never the artwork:
+`assets/icon.png` has been a clean 1024x1024 the whole time.
+
+Expo's web export publishes **one** icon and no way to configure it.
+`getFaviconFromExpoConfigAsync` hardcodes `dims = [16, 32, 48]`, and its
+injector adds a single `<link rel="icon">` — no web app manifest, no
+`apple-touch-icon`. So the largest icon the app offered was 48px, and a launcher
+asking for ~192px had nothing to do but scale it up 4x.
+
+The fix is `apps/mobile/public/`, which `copyPublicFolderAsync` copies verbatim
+into `dist/`:
+
+- **`manifest.webmanifest`** — 192 and 512 PNGs, `display: standalone`,
+  `start_url: "/"`. The icons are `purpose: "any maskable"` on the same files
+  rather than a separate maskable set, because the source is full-bleed
+  `#2563EB` with the mark 29.5% out from centre, inside the 40% safe radius
+  Android masks to. Re-measure before changing the artwork.
+- **`index.html`** — overrides Expo's HTML shell (`getTemplateIndexHtmlAsync`
+  prefers `public/index.html` over the CLI's bundled template), adding the
+  manifest link, `apple-touch-icon` — iOS ignores the manifest and reads only
+  that, so both have to be stated — and the standalone metas.
+
+**Never name `%LANG_ISO_CODE%` or `%WEB_TITLE%` above the tags that use them.**
+`createTemplateHtmlAsync` substitutes with `String.replace`, which takes the
+first occurrence only — so a token mentioned in a comment absorbs the value and
+the real tag ships the literal placeholder. That exports cleanly, exits 0, and
+puts a browser tab reading `%WEB_TITLE%` into production. `webManifest.test.ts`
+asserts each token appears exactly once for that reason, alongside the icons
+existing at the sizes the manifest advertises and the manifest agreeing with
+app.json's `web` block.
+
+The manifest's `Content-Type` is pinned in `netlify.toml`: served as anything
+but a JSON media type it is rejected outright, and the symptom is the old blurry
+favicon quietly coming back.
+
+None of this is visible from inside the repo — the build succeeds and the app
+runs either way. It shows up on somebody's phone, which is why the guardrails
+are tests rather than a comment.

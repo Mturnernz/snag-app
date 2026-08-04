@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, StyleSheet } from 'react-native';
-import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CameraView, useCameraPermissions, BarcodeScanningResult } from '../lib/camera';
 import { getOrgByJoinCode, joinOrgViaCode, getMemberships, setActiveOrg, OrgJoinPreview } from '../lib/supabase';
 import { parseScannedJoinCode } from '../lib/joinLink';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -42,12 +42,17 @@ export default function ScanJoinCodeScreen({
   const [name, setName] = useState('');
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Always manual on web: `expo-camera` has no web implementation, so the
-  // scanner below renders a viewfinder that can never resolve a code. A
+  // Always manual on web. `expo-camera` does ship a web scanner, but it decodes
+  // by pulling jsQR off a CDN inside a `blob:` Web Worker, which the app's CSP
+  // refuses — so the viewfinder would render and never resolve a code. A
   // full-screen camera that cannot work is a worse door than a code field,
   // and manual entry is already an equal path — both converge on the same
   // `resolveCode`. `isManualOnly` below keeps the manual view's Back button
   // from "returning" to a camera this platform never had.
+  //
+  // That is also why the camera comes from `../lib/camera` rather than
+  // `expo-camera` directly: on web that resolves to a stub, so the module
+  // whose import alone spawns that worker is never pulled in.
   const isManualOnly = Boolean(startInManualEntry) || Platform.OS === 'web';
   const [manualEntry, setManualEntry] = useState(isManualOnly);
   const [manualCode, setManualCode] = useState('');

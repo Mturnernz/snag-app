@@ -257,7 +257,21 @@ test.describe('portal (supervisor/admin)', () => {
 
     // Sections are <details>, so their titles are in the accessibility tree
     // whether open or closed — a closed section is still findable.
-    await expect(page.getByText('Triage — allocating a serious snag')).toBeVisible();
+    //
+    // Scoped to the section itself, because the page also renders a contents
+    // nav that links to it by the same title: an unscoped getByText matches
+    // both the <a> and the <summary> and dies on Playwright's strict mode,
+    // which is what it did from the moment the nav was added. The section is
+    // the thing under test here — the nav has its own assertion below.
+    await expect(
+      page.locator('#triage').getByText('Triage — allocating a serious snag'),
+    ).toBeVisible();
+
+    // And the contents nav, now that it is load-bearing enough to have broken
+    // the assertion above.
+    await expect(
+      page.getByRole('link', { name: 'Triage — allocating a serious snag' }),
+    ).toBeVisible();
 
     // A Site Lead has no Manage Organisation screen, so the day-one setup
     // checklist is Manager-only. This is the role filter, not a rendering

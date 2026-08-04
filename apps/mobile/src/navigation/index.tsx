@@ -23,6 +23,7 @@ import ManageWorkGroupsScreen from '../screens/ManageWorkGroupsScreen';
 import MentionsScreen from '../screens/MentionsScreen';
 import DocumentLibraryScreen from '../screens/DocumentLibraryScreen';
 import OnboardingCarouselScreen from '../screens/OnboardingCarouselScreen';
+import HelpGuideScreen from '../screens/HelpGuideScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 import { ReportTargetProvider } from '../context/ReportTargetContext';
 import { BadgeProvider, useBadge } from '../context/BadgeContext';
@@ -166,6 +167,11 @@ export default function RootNavigator({ userRole, initialTab }: { userRole: User
         <Stack.Screen
           name="DocumentLibrary"
           component={DocumentLibraryScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="HelpGuide"
+          component={HelpGuideScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
         <Stack.Screen

@@ -13,6 +13,7 @@ const NAV_LINKS: { href: string; label: string; icon: IconName }[] = [
   { href: '/snags', label: 'Snags', icon: 'ListChecks' },
   { href: '/reports', label: 'Reports', icon: 'ChartColumn' },
   { href: '/documents', label: 'Documents', icon: 'FileText' },
+  { href: '/help', label: 'Help', icon: 'BookOpen' },
 ];
 
 export default function PortalNav({

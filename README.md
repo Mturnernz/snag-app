@@ -30,6 +30,21 @@ cp apps/web/.env.example apps/web/.env.local   # same Supabase project as mobile
 npm run web                                     # http://localhost:3000
 ```
 
+## The onboarding guide
+
+[`SNAG_ONBOARDING_GUIDE.md`](SNAG_ONBOARDING_GUIDE.md) — how the app works, written for the
+people using it rather than for the people building it. New customers use it to set their
+organisation up and to train their crew.
+
+It's generated, not written: the source is `packages/onboarding-guide`, which both clients also
+render in-app (Profile → Help & guide, and the portal's `/help`), filtered to the reader's role.
+
+```bash
+npm run guide     # regenerates the markdown and the PDFs in apps/web/public/
+```
+
+Printable handouts land at `apps/web/public/` — the full guide plus one per role.
+
 ## Tests
 
 ```bash

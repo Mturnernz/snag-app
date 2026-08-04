@@ -341,6 +341,19 @@ export default function ProfileScreen() {
           </Card>
         </TouchableOpacity>
 
+        {/* The full onboarding guide, filtered to this member's role. Sits
+            above Replay tutorial because it's the deeper of the two: the
+            carousel is a four-slide orientation, this is the manual. */}
+        <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('HelpGuide')}>
+          <Card variant="elevated" style={styles.mentionsCard}>
+            <View style={styles.mentionsRow}>
+              <Icon name="help-circle-outline" size="md" color={Colors.primary} />
+              <Text style={styles.mentionsTitle}>Help & guide</Text>
+              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+            </View>
+          </Card>
+        </TouchableOpacity>
+
         {/* Replay tutorial — all roles, not just workers. Opens the overview
             carousel as a modal; doesn't touch has_seen_onboarding. */}
         <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('OnboardingCarousel')}>

@@ -12,6 +12,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@snag/onboarding-guide": "*",
     "@snag/shared-types": "*",
     "@snag/supabase-queries": "*",
     "@supabase/ssr": "^0.12.3",

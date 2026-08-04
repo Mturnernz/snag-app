@@ -255,6 +255,9 @@ export type RootStackParamList = {
   Mentions: undefined;
   DocumentLibrary: undefined;
   OnboardingCarousel: undefined;
+  // The onboarding guide, filtered to the reader's role. Content lives in
+  // @snag/onboarding-guide, shared with the portal's /help page.
+  HelpGuide: undefined;
 };
 
 export type MainTabParamList = {

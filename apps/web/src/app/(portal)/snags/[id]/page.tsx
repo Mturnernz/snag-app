@@ -4,7 +4,8 @@ import {
   getSnagRca, getSnagDebriefs, getInvestigationState, getCorrectiveActions,
   getSnagAuditLog, describeAuditAction, getSiteAssignees, getOrgMembers, getEvidencePhotoUrl,
   isImageEvidence,
-  seriousResolveGate, investigationModeLocked,
+  seriousResolveGate, investigationModeLocked, describeUnmetConditions,
+  RESOLUTION_EXCEPTION_MIN_LENGTH,
   getOrgDocuments, getOrgDocumentUrl,
   type SiteAssignee, type ResolveGateKey, type SnagRca, type OrgDocument,
 } from '@snag/supabase-queries';
@@ -25,6 +26,7 @@ import TriageDialog from '@/components/TriageDialog';
 import {
   changeStatusAction, resolveNiggleAction, assignOwnerAction, recategoriseAction,
   addCommentAction, setNotifiableDecisionAction, unmergeAction, triageAction,
+  resolveWithExceptionAction, recordResolutionExceptionAction,
 } from './actions';
 import {
   completeChecklistStepAction, addWitnessStatementAction, addEvidenceAction, setRootCauseAction,
@@ -127,7 +129,7 @@ export default async function SnagDetailPage({
 
   const { data: snag } = await supabase
     .from('snags_with_details')
-    .select('id, reference, description, status, kind, lane, severity, site_id, site_name, owner_id, owner_name, reporter_name, created_at, is_notifiable, notifiable_marked_at, parent_snag_id, child_count')
+    .select('id, reference, description, status, kind, lane, severity, site_id, site_name, owner_id, owner_name, reporter_name, created_at, is_notifiable, notifiable_marked_at, parent_snag_id, child_count, resolution_exception_reason, resolution_exception_by_name, resolution_exception_at, resolution_exception_unmet')
     .eq('id', id)
     .maybeSingle();
 
@@ -217,6 +219,12 @@ export default async function SnagDetailPage({
   const gate = investigation ? seriousResolveGate(investigation, notifiableDecided) : [];
   const firstUnmet = gate.find((c) => c.unmet);
   const remaining = gate.filter((c) => c.unmet).length;
+  const unmetSummary = describeUnmetConditions(gate.filter((c) => c.unmet).map((c) => c.key));
+
+  // A serious snag that closed with its investigation unfinished. The reason is
+  // whatever was written at the time; the empty case is every snag resolved
+  // before the app asked for one, and it is the one that still needs an answer.
+  const closedEarly = Boolean(isSerious && isResolved && (remaining > 0 || snag.resolution_exception_at));
 
   // update_snag_status refuses `resolved` outright while an RCA is open —
   // "This snag has an RCA in progress — accept or reject it first" — and that
@@ -277,6 +285,55 @@ export default async function SnagDetailPage({
         </p>
         {error && <p className="error-text">{error}</p>}
       </header>
+
+      {/* Why a closed snag still has an unfinished investigation under it —
+          above the sections, because it explains the shape of all of them. */}
+      {closedEarly && (
+        <Card as="section">
+          <p className={styles.exceptionLead}>
+            <Icon name="TriangleAlert" size="sm" />
+            Closed with the investigation incomplete
+          </p>
+          {snag.resolution_exception_reason ? (
+            <>
+              {describeUnmetConditions(snag.resolution_exception_unmet) && (
+                <p className={styles.exceptionDetail}>
+                  Outstanding when it was closed: {describeUnmetConditions(snag.resolution_exception_unmet)}.
+                </p>
+              )}
+              <p className={styles.exceptionReason}>{snag.resolution_exception_reason}</p>
+              <p className={styles.exceptionMeta}>
+                {snag.resolution_exception_by_name ?? 'A supervisor'}
+                {snag.resolution_exception_at
+                  ? ` · ${new Date(snag.resolution_exception_at).toLocaleDateString()}`
+                  : ''}
+              </p>
+            </>
+          ) : (
+            <form action={recordResolutionExceptionAction}>
+              <input type="hidden" name="snagId" value={snag.id} />
+              {unmetSummary && (
+                <p className={styles.exceptionDetail}>
+                  Still outstanding: {unmetSummary}. No reason was recorded — this snag was closed
+                  before the app asked for one.
+                </p>
+              )}
+              <div className="field">
+                <label htmlFor="lateReason">Why was this closed?</label>
+                <textarea
+                  id="lateReason"
+                  name="reason"
+                  required
+                  minLength={RESOLUTION_EXCEPTION_MIN_LENGTH}
+                  rows={3}
+                  placeholder="Why was this closed here?"
+                />
+              </div>
+              <Button type="submit" variant="danger">Record why</Button>
+            </form>
+          )}
+        </Card>
+      )}
 
       {/* One answer to "what do I do now", above everything else. */}
       {isSerious && !isResolved && investigation && (
@@ -895,6 +952,34 @@ export default async function SnagDetailPage({
             <Icon name="Lock" size="sm" />
             Resolve is blocked — {rcaBlock ? rcaBlock.reason : firstUnmet!.reason.toLowerCase()}
           </p>
+        )}
+        {/* Closing anyway, with a written reason. Offered only where the block
+            is the gate: an RCA in flight is refused above it, and no reason
+            gets a snag past that one. */}
+        {!isResolved && isSerious && !rcaBlock && firstUnmet && (
+          <Card as="form" action={resolveWithExceptionAction}>
+            <input type="hidden" name="snagId" value={snag.id} />
+            <p className={styles.exceptionLead}>
+              <Icon name="TriangleAlert" size="sm" />
+              Close without finishing
+            </p>
+            <p className={styles.exceptionDetail}>
+              Still outstanding: {unmetSummary}. Your reason is recorded against this snag with your
+              name and today&rsquo;s date, and stays on it.
+            </p>
+            <div className="field">
+              <label htmlFor="exceptionReason">Why is this being closed now?</label>
+              <textarea
+                id="exceptionReason"
+                name="reason"
+                required
+                minLength={RESOLUTION_EXCEPTION_MIN_LENGTH}
+                rows={3}
+                placeholder="e.g. Contractor left the site and cannot be reached for a statement; hazard removed and area barricaded."
+              />
+            </div>
+            <Button type="submit" variant="danger">Record and close</Button>
+          </Card>
         )}
         {!isResolved && isSerious && !rcaBlock && !firstUnmet && investigation && (
           <StatusButton snagId={snag.id} status="resolved" label="Resolve" variant="primary" />

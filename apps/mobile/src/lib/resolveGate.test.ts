@@ -1,5 +1,6 @@
 import {
   seriousResolveGate, resolveBlockReason, investigationModeLocked,
+  describeUnmetConditions, RESOLVE_GATE_LABELS,
   type InvestigationState,
 } from '@snag/supabase-queries';
 
@@ -217,5 +218,55 @@ describe('investigationModeLocked', () => {
     expect(investigationModeLocked(allocated({
       ...bare('snag'), documentId: 'doc-1', documentAccepted: true,
     }))).toBe(false);
+  });
+});
+
+// ─── The unmet conditions, read back ────────────────────────────────────────
+//
+// A snag can now be resolved over an unmet gate with a supervisor's written
+// reason, and what was unmet at that moment is snapshotted onto the snag
+// (`resolution_exception_unmet`, written by serious_resolve_unmet in SQL).
+// describeUnmetConditions is what turns that snapshot back into a sentence, on
+// both clients and in two places on each — so these pin the vocabulary and the
+// one thing about it that isn't obvious: it is a record, not an instruction.
+describe('describeUnmetConditions', () => {
+  it('names every gate key', () => {
+    // A key with no label renders as nothing at all, which on this card would
+    // silently shorten the list of what was outstanding. If seriousResolveGate
+    // grows a condition, this is the test that should fail.
+    const everyKey = seriousResolveGate(bare('snag'), false).map((c) => c.key)
+      .concat(seriousResolveGate(bare('document'), false).map((c) => c.key));
+    for (const key of everyKey) {
+      expect(RESOLVE_GATE_LABELS[key]).toBeTruthy();
+    }
+  });
+
+  it('is silent on a complete investigation', () => {
+    expect(describeUnmetConditions([])).toBeNull();
+    expect(describeUnmetConditions(null)).toBeNull();
+    expect(describeUnmetConditions(undefined)).toBeNull();
+  });
+
+  it('reads as a list, not a checklist', () => {
+    expect(describeUnmetConditions(['evidence'])).toBe('evidence');
+    expect(describeUnmetConditions(['witnesses', 'evidence'])).toBe('witness statement and evidence');
+    expect(describeUnmetConditions(['notifiable', 'witnesses', 'rootCause']))
+      .toBe('notifiable decision, witness statement and root cause');
+  });
+
+  it('describes what is missing rather than telling anyone to go and do it', () => {
+    // The distinction the labels exist for: seriousResolveGate's own `reason`
+    // strings are imperative ("Add evidence"), which is right on an open snag
+    // and wrong on a closed one. Same key, different voice.
+    const gateReason = seriousResolveGate(bare('snag'), true).find((c) => c.key === 'evidence')!.reason;
+    expect(gateReason).toBe('Add evidence');
+    expect(describeUnmetConditions(['evidence'])).toBe('evidence');
+  });
+
+  it('drops a key it does not recognise instead of rendering it raw', () => {
+    // The snapshot is a text[] from the server; a value written by a future
+    // migration should read as absent here, not leak a camelCase identifier
+    // into a sentence a supervisor is reading.
+    expect(describeUnmetConditions(['evidence', 'somethingNew'])).toBe('evidence');
   });
 });

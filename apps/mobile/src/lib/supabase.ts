@@ -736,8 +736,12 @@ export async function createSnag(params: {
   return { data: data as { id: string; reference: string } | null, error };
 }
 
-export const updateSnagStatus = (snagId: string, status: SnagStatus, note?: string | null) =>
-  queries.updateSnagStatus(supabase, snagId, status, note);
+export const updateSnagStatus = (
+  snagId: string, status: SnagStatus, note?: string | null, exceptionReason?: string | null,
+) => queries.updateSnagStatus(supabase, snagId, status, note, exceptionReason);
+
+export const recordResolutionException = (snagId: string, reason: string) =>
+  queries.recordResolutionException(supabase, snagId, reason);
 
 export const recategoriseSnag = (snagId: string, kind: SnagKind, severity: SnagSeverity | null) =>
   queries.recategoriseSnag(supabase, snagId, kind, severity);

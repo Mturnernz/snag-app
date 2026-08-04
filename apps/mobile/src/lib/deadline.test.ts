@@ -41,10 +41,43 @@ describe('failureReason', () => {
     [Object.assign(new Error('signal is aborted without reason'), { name: 'AbortError' }), 'no reply from the server'],
     [new TypeError('Failed to fetch'), 'no connection'],
     [new Error('Network request failed'), 'no connection'],
+    [new Error("couldn't read the photo on this device"), "couldn't read the photo on this device"],
     [new Error('new row violates row-level security policy'), 'new row violates row-level security policy'],
     [new Error(''), 'unknown error'],
   ])('describes %p as "%s"', (err, expected) => {
     expect(failureReason(err)).toBe(expected);
+  });
+
+  // The blanket "no connection" is a guess at which of several identical-looking
+  // failures happened, and on the web build it was the wrong one: a CSP missing
+  // blob: in connect-src throws the same TypeError, so a header of ours was
+  // reported as the user's signal. Where the platform can say we are online,
+  // stop making the claim.
+  describe('when a TypeError could be the page blocking its own request', () => {
+    const setOnLine = (value: boolean | undefined) => {
+      if (value === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+      else (globalThis as { navigator?: unknown }).navigator = { onLine: value };
+    };
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    afterEach(() => {
+      delete (globalThis as { navigator?: unknown }).navigator;
+      if (original) Object.defineProperty(globalThis, 'navigator', original);
+    });
+
+    it('does not blame the connection when the browser says there is one', () => {
+      setOnLine(true);
+      expect(failureReason(new TypeError('Failed to fetch'))).toBe('blocked before it was sent');
+    });
+
+    it('still says no connection when the browser says there is none', () => {
+      setOnLine(false);
+      expect(failureReason(new TypeError('Failed to fetch'))).toBe('no connection');
+    });
+
+    it('keeps the old wording where nothing answers — native, which has no CSP', () => {
+      setOnLine(undefined);
+      expect(failureReason(new Error('Network request failed'))).toBe('no connection');
+    });
   });
 
   it('truncates a long message rather than filling the screen with it', () => {

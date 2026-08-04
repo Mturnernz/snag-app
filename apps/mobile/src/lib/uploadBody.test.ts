@@ -93,4 +93,18 @@ describe('readForUpload', () => {
     // zero-byte "photo" and report success.
     await expect(readForUpload('blob:http://localhost:8081/gone')).rejects.toThrow(/404/);
   });
+
+  it('names the read when the fetch itself is refused, rather than passing on a bare TypeError', async () => {
+    setPlatform('web');
+    // What a CSP block looks like from here: connect-src without blob: makes
+    // this exact call throw the same TypeError a dead network does, so an
+    // unwrapped one reaches the user as "no connection" — which is what it said
+    // for a day, on phones with full signal.
+    global.fetch = jest.fn(async () => {
+      throw new TypeError('Failed to fetch');
+    }) as unknown as typeof fetch;
+
+    await expect(readForUpload('blob:http://localhost:8081/abc', 'image/jpeg'))
+      .rejects.toThrow(/couldn't read the photo/i);
+  });
 });

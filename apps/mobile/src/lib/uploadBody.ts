@@ -26,7 +26,19 @@ export async function readForUpload(
   mimeType?: string | null,
 ): Promise<ArrayBuffer | Blob> {
   if (Platform.OS === 'web') {
-    const response = await fetch(localUri);
+    // Say which half failed. This fetch is the one thing between a picked file
+    // and the upload, and when it throws it throws the same opaque TypeError a
+    // dead network does — so the failure arrived on screen as "no connection",
+    // on a phone with full signal, with nothing in the Storage logs to correct
+    // it. The deployed CSP has to allow blob: in *connect-src* for this line to
+    // work at all (see netlify.toml); naming the stage is what stops the next
+    // reason it can't read the file from being read as a network problem.
+    let response: Response;
+    try {
+      response = await fetch(localUri);
+    } catch {
+      throw new Error("couldn't read the photo on this device");
+    }
     if (!response.ok) throw new Error(`Couldn't read the picked file (${response.status})`);
     const blob = await response.blob();
     // Multipart carries the Blob's own type, not storage-js's contentType

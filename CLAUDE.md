@@ -484,6 +484,15 @@ unless it's a one-off simple `select`.
   browser as well as on phones, so before using a platform API, check that it has
   a web implementation — `expo-file-system` and `expo-camera` have none, and
   `expo-file-system`'s stub throws rather than no-oping. See TESTING.md.
+- **The web build runs under a CSP, and nothing local enforces it.** Both hosts
+  send one (`apps/mobile/netlify.toml`, `apps/web/next.config.js`), so a URL the
+  code fetches has to be in `connect-src` or the request never happens — and a
+  browser reports that as the same opaque `TypeError` a dead network gives, which
+  the app then words as "no connection". `expo start`, jest and `tsc` all see
+  none of this; the header only exists on Netlify. Note `blob:` needs listing per
+  directive: `img-src` for a picked photo's preview, `connect-src` for reading
+  its bytes, and `'self'` covers neither. `src/lib/csp.test.ts` pins the schemes
+  the upload path depends on.
 
 ## Hosts
 

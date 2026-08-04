@@ -349,7 +349,12 @@ when upgrading.
   the wrong one throws before any request is made — "Couldn't upload a photo",
   Submit disabled, nothing in the Storage logs. `src/lib/uploadBody.test.ts`
   pins which reader each platform gets; the byte path beyond it (a real photo
-  reaching a real bucket) is still device- and browser-only.
+  reaching a real bucket) is still device- and browser-only. What the pinning
+  did not cover was the *environment* that reader runs in: on web it needs
+  `blob:` in the deployed `connect-src`, and shipping a CSP without it stopped
+  every upload on app.snaghq.co.nz for a day with the whole suite green.
+  `src/lib/csp.test.ts` now reads `netlify.toml` and asserts the schemes the
+  upload path depends on — still only what we deploy, not what Netlify serves.
 - Native mobile paths are untested: `expo-camera` (QR scan),
   `expo-image-picker`/`-manipulator` (`PhotoPicker`), `expo-document-picker`
   (the document library's upload and the investigation-document attach),

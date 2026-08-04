@@ -17,7 +17,7 @@
 # next.config.js — these two hosts are separate Netlify sites, so neither
 # inherits the other's headers and both have to say it.
 #
-# Deliberately different from the portal's in two places:
+# Deliberately different from the portal's in three places:
 #
 #   * camera=(self). This is the app, and photographing a snag is the whole
 #     point of it. expo-camera has no web implementation today (see CLAUDE.md),
@@ -25,13 +25,28 @@
 #     path fails silently rather than loudly.
 #   * blob: and data: in img-src, which the photo picker's local previews need
 #     before anything is uploaded.
+#   * blob: in connect-src, which is how a picked photo is *read*. On web,
+#     expo-image-manipulator hands back an object URL and `readForUpload`
+#     fetches it for its bytes (src/lib/uploadBody.ts) — a fetch, so connect-src
+#     governs it, and Chrome does not let 'self' cover blob:. The portal needs
+#     none of this: its uploads come off an <input type="file"> as real File
+#     objects and never touch an object URL.
+#
+#     Shipping this policy without it broke every upload on app.snaghq.co.nz for
+#     a day — photos, evidence, and both document paths — and said "no
+#     connection" while doing it, because a blocked fetch and an offline phone
+#     raise the identical TypeError. Nothing else could see it: the read fails
+#     before any request, so there is no failed request in the Storage logs, no
+#     4xx anywhere, and the thumbnails still render (img-src already had blob:).
+#     img-src and connect-src both need it, for two different reasons; adding
+#     one is not a hint that the other is covered.
 #
 # frame-ancestors 'none' still applies: nothing should embed the app, and a
 # framed copy is how a QR-code landing page gets turned into a phishing shell.
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co; font-src 'self' data:; connect-src 'self' blob: https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"

@@ -33,6 +33,11 @@ export function withDeadline<T>(promise: Promise<T>, ms: number, label: string):
   ]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
+/** True only where the platform actually answers the question — web. */
+function isDefinitelyOnline(): boolean {
+  return (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine === true;
+}
+
 /**
  * A short, plain-English reason for a failure, for showing next to the thing
  * that failed. The alternative — a generic "something went wrong" — is what
@@ -46,6 +51,8 @@ export function withDeadline<T>(promise: Promise<T>, ms: number, label: string):
  * - `sending timed out` — the whole send overran its backstop.
  * - `no reply from the server` — the request went out and nothing came back,
  *   which is what an aborted `fetch` means (see fetchWithTimeout).
+ * - `no connection` / `blocked before it was sent` — the request never went at
+ *   all. Which of the two we say is the most the browser lets us tell apart.
  */
 export function failureReason(err: unknown): string {
   if (err instanceof DeadlineError) return `${err.label.toLowerCase()} timed out`;
@@ -53,9 +60,19 @@ export function failureReason(err: unknown): string {
   const name = (err as { name?: string })?.name ?? '';
   if (name === 'AbortError' || /aborted/i.test(message)) return 'no reply from the server';
   // What fetch throws when the request never left the device: no connectivity,
-  // DNS, a blocked CORS preflight. Indistinguishable from each other by design.
+  // DNS, a blocked CORS preflight — and, on the web build, the page's own CSP
+  // refusing it. Indistinguishable from each other by design, so "no
+  // connection" is a guess at which one, and it was the wrong guess for a whole
+  // day of uploads: connect-src was missing blob:, and every failure read as
+  // the user's signal rather than our header.
+  //
+  // navigator.onLine is a weak signal — true only means there is an interface,
+  // not that anything is reachable — so it is used the one way it is sound: to
+  // withhold the strongest claim, never to make one. Undefined (native, where
+  // there is no CSP and a TypeError really is the network) keeps the old
+  // wording exactly.
   if (name === 'TypeError' || /failed to fetch|network request failed|load failed/i.test(message)) {
-    return 'no connection';
+    return isDefinitelyOnline() ? 'blocked before it was sent' : 'no connection';
   }
   if (!message) return 'unknown error';
   return message.length > 60 ? `${message.slice(0, 57)}…` : message;

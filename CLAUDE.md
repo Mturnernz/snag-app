@@ -14,7 +14,7 @@ and file storage.
 
 | Layer | Choice |
 |---|---|
-| Mobile framework | Expo SDK 52 (React Native 0.76), `apps/mobile` |
+| Mobile framework | Expo SDK 54 (React Native 0.81, React 19), `apps/mobile` |
 | Web framework | Next.js (App Router), `apps/web` — see `SNAG_WEB_APP_PLAN.md` |
 | Language | TypeScript (strict mode) |
 | Navigation (mobile) | React Navigation v6 — bottom tabs + native stack |
@@ -482,8 +482,17 @@ unless it's a one-off simple `select`.
   buttons at most** — a choice between three things needs real UI, not a dialog.
 - The same trap applies to every native-only module. `apps/mobile` runs in the
   browser as well as on phones, so before using a platform API, check that it has
-  a web implementation — `expo-file-system` and `expo-camera` have none, and
-  `expo-file-system`'s stub throws rather than no-oping. See TESTING.md.
+  a web implementation — `expo-file-system` has none, and its stub throws rather
+  than no-oping. See TESTING.md.
+- **`expo-camera` is the opposite trap: it has a web implementation, and that is
+  the problem.** Its web entry builds a QR-decoding Web Worker *at module scope*
+  from a `blob:` URL that `importScripts` jsQR off `cdn.jsdelivr.net` — so the
+  import alone fires it on every page load, and `netlify.toml`'s CSP refuses
+  both. Import it through **`src/lib/camera.ts`**, which Metro resolves to a stub
+  on web (`camera.web.ts`); never from `expo-camera` directly. `camera.test.ts`
+  enforces that. Widening the CSP instead would put a third-party CDN inside the
+  trust boundary of the domain people sign into, for a scanner the web build
+  deliberately never offers.
 
 ## Hosts
 

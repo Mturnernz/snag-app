@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, StyleSheet } from 'react-native';
-import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CameraView, useCameraPermissions, BarcodeScanningResult } from '../lib/camera';
 import { getOrgByJoinCode, joinOrgViaCode, getMemberships, setActiveOrg, OrgJoinPreview } from '../lib/supabase';
 import { parseScannedJoinCode } from '../lib/joinLink';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -48,6 +48,10 @@ export default function ScanJoinCodeScreen({
   // and manual entry is already an equal path — both converge on the same
   // `resolveCode`. `isManualOnly` below keeps the manual view's Back button
   // from "returning" to a camera this platform never had.
+  //
+  // This is also why the camera comes from `../lib/camera` rather than
+  // `expo-camera` directly: on web that resolves to a stub, so the module
+  // whose import alone spawns a CDN-fetching Web Worker is never pulled in.
   const isManualOnly = Boolean(startInManualEntry) || Platform.OS === 'web';
   const [manualEntry, setManualEntry] = useState(isManualOnly);
   const [manualCode, setManualCode] = useState('');

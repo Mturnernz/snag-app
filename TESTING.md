@@ -222,8 +222,24 @@ Note that rendering under react-native-web is real coverage but not equivalent
 coverage: layout, styling, navigation, and data flow transfer well; native
 modules and platform-specific behaviour do not.
 
-`ScanJoinCodeScreen` pulls `jsQR` from `cdn.jsdelivr.net` at runtime, so QR
-scanning needs that domain reachable.
+**QR scanning no longer reaches a CDN, and must not start again.** This page
+used to say `ScanJoinCodeScreen` pulls `jsQR` from `cdn.jsdelivr.net` at
+runtime, so scanning needed that domain reachable. The request was never the
+screen's: `expo-camera`'s web entry builds a QR-decoding Web Worker *at module
+scope*, from a `blob:` URL that `importScripts` jsQR off that CDN — so importing
+it was enough to fire it, on every page load, whether or not anything scanned.
+
+`netlify.toml`'s CSP allows neither a `blob:` worker nor that CDN, so on
+`app.snaghq.co.nz` the worker was refused before the fetch was even attempted:
+one console violation per load, for a scanner the web build never offers
+(`isManualOnly` is set on web). The screen now imports `../lib/camera`, which
+Metro resolves to a stub on web, and `expo-camera` is absent from the web bundle
+entirely — verified by grepping `dist/` for `jsdelivr`, and `camera.test.ts`
+fails if anything imports `expo-camera` directly again.
+
+The tempting fix was widening the CSP. Don't: it would put a third-party CDN
+inside the trust boundary of the domain people sign into, to enable a scanner
+that is deliberately unavailable there.
 
 ### Behind a TLS-terminating proxy (sandboxed agent sessions)
 

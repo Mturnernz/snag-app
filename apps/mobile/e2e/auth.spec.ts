@@ -25,13 +25,13 @@ test('the auth screen renders its sign-in form and both join paths', async ({ pa
 test('the bundle loads without JS errors', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  // No filter here on purpose. This used to skip jsqr/jsdelivr errors as "an
+  // environment condition" — expo-camera's web entry fetched jsQR from a CDN
+  // just by being imported. The import is gone (see src/lib/camera.web.ts), so
+  // that error reappearing means someone reintroduced it, which is exactly what
+  // this test should fail on rather than ignore.
   page.on('console', (m) => {
-    if (m.type() !== 'error') return;
-    const t = m.text();
-    // ScanJoinCodeScreen pulls jsQR from a CDN at runtime; a blocked CDN is an
-    // environment condition, not a defect in the app.
-    if (/jsqr|jsdelivr/i.test(t)) return;
-    errors.push(t);
+    if (m.type() === 'error') errors.push(m.text());
   });
 
   await waitForApp(page);

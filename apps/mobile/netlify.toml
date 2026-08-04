@@ -13,6 +13,16 @@
   to = "/index.html"
   status = 200
 
+# The web app manifest, which is what gives an "Add to Home screen" shortcut a
+# 192/512px icon instead of the 48px favicon Expo's export would otherwise leave
+# it to scale up (see public/index.html). Stated explicitly because a manifest
+# served as anything other than a JSON media type is rejected outright, and the
+# symptom of that is silent: the icon quietly falls back to the favicon again.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+
 # Security headers for the Expo web export. apps/web sets the equivalent set in
 # next.config.js — these two hosts are separate Netlify sites, so neither
 # inherits the other's headers and both have to say it.

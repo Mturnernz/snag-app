@@ -649,3 +649,46 @@ trip) and `?report=<token>` (the QR landing). Deliberately not `INITIAL_SESSION`
 — reloading the page on a tab is not logging in, and staying put is what a
 browser is supposed to do. Unit-tested in `webLocation.test.ts`; it no-ops off
 web.
+
+### The home screen icon
+
+`apps/mobile` is installed from the browser, not a store — people add
+`app.snaghq.co.nz` to their home screen. The icon that ends up there came out
+visibly blurrier than every app beside it, and the reason was never the artwork:
+`assets/icon.png` has been a clean 1024x1024 the whole time.
+
+Expo's web export publishes **one** icon and no way to configure it.
+`getFaviconFromExpoConfigAsync` hardcodes `dims = [16, 32, 48]`, and its
+injector adds a single `<link rel="icon">` — no web app manifest, no
+`apple-touch-icon`. So the largest icon the app offered was 48px, and a launcher
+asking for ~192px had nothing to do but scale it up 4x.
+
+The fix is `apps/mobile/public/`, which `copyPublicFolderAsync` copies verbatim
+into `dist/`:
+
+- **`manifest.webmanifest`** — 192 and 512 PNGs, `display: standalone`,
+  `start_url: "/"`. The icons are `purpose: "any maskable"` on the same files
+  rather than a separate maskable set, because the source is full-bleed
+  `#2563EB` with the mark 29.5% out from centre, inside the 40% safe radius
+  Android masks to. Re-measure before changing the artwork.
+- **`index.html`** — overrides Expo's HTML shell (`getTemplateIndexHtmlAsync`
+  prefers `public/index.html` over the CLI's bundled template), adding the
+  manifest link, `apple-touch-icon` — iOS ignores the manifest and reads only
+  that, so both have to be stated — and the standalone metas.
+
+**Never name `%LANG_ISO_CODE%` or `%WEB_TITLE%` above the tags that use them.**
+`createTemplateHtmlAsync` substitutes with `String.replace`, which takes the
+first occurrence only — so a token mentioned in a comment absorbs the value and
+the real tag ships the literal placeholder. That exports cleanly, exits 0, and
+puts a browser tab reading `%WEB_TITLE%` into production. `webManifest.test.ts`
+asserts each token appears exactly once for that reason, alongside the icons
+existing at the sizes the manifest advertises and the manifest agreeing with
+app.json's `web` block.
+
+The manifest's `Content-Type` is pinned in `netlify.toml`: served as anything
+but a JSON media type it is rejected outright, and the symptom is the old blurry
+favicon quietly coming back.
+
+None of this is visible from inside the repo — the build succeeds and the app
+runs either way. It shows up on somebody's phone, which is why the guardrails
+are tests rather than a comment.

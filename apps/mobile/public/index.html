@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  Overrides the HTML shell Expo generates for the web export, to add the home
+  screen icon links Expo emits no way to configure. See CLAUDE.md, "The home
+  screen icon", and src/lib/webManifest.test.ts. Three rules for editing it:
+
+  1. Never write either template placeholder token anywhere above the tags that
+     use them. Expo substitutes them with String.replace, which takes only the
+     first occurrence — so a token named in this comment is the one that gets
+     the value, and the real tag keeps the literal placeholder. That is how you
+     ship a page titled with the token itself.
+  2. No theme-color or description meta tags. Expo injects both from app.json's
+     web block, and a copy here duplicates them.
+  3. Keep everything the default template had: the expo-reset styles and the
+     root div are relied on downstream.
+
+  This comment is served to every visitor, so keep it short.
+-->
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>%WEB_TITLE%</title>
+
+    <!-- The home-screen icon. Android reads the manifest; iOS ignores it and
+         reads apple-touch-icon, so both have to be stated. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+
+    <!-- Launch standalone rather than in a browser tab with chrome around it.
+         iOS reads the apple-prefixed one; everyone else reads the first. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Snag" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>

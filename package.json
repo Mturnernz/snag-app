@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "mobile": "npm run start --workspace=apps/mobile",
+    "guide": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-onboarding-guide.mjs",
     "web": "npm run dev --workspace=apps/web",
     "typecheck": "npm run typecheck --workspace=apps/web && tsc --noEmit -p apps/mobile",
     "typecheck:functions": "bash scripts/check-edge-functions.sh",

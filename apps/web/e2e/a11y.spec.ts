@@ -49,7 +49,7 @@ test.describe('accessibility (portal)', () => {
   test.skip(!process.env.E2E_EMAIL || !process.env.E2E_PASSWORD, 'set E2E_EMAIL and E2E_PASSWORD');
   test.use({ storageState: SUPERVISOR_STATE });
 
-  for (const path of ['/dashboard', '/snags', '/reports'] as const) {
+  for (const path of ['/dashboard', '/snags', '/reports', '/help'] as const) {
     test(`${path} has no WCAG A/AA violations`, async ({ page }) => {
       await page.goto(path, { waitUntil: 'networkidle' });
       const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();

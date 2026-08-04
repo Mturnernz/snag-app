@@ -461,6 +461,25 @@ unless it's a one-off simple `select`.
 2. Reuse `requireSupervisorOrAdmin()` from `src/lib/auth.ts` if the page needs the caller's role/org
 3. Add a link to it in `(portal)/layout.tsx`'s `NAV_LINKS`
 
+### Change the onboarding guide
+The customer-facing manual lives in **`packages/onboarding-guide`** — one file, structured as
+data rather than prose. Three surfaces render it and none of them may disagree:
+`apps/mobile`'s `HelpGuideScreen` (Profile → Help & guide), the portal's `/help`, and the
+generated `SNAG_ONBOARDING_GUIDE.md` + the PDFs in `apps/web/public/`.
+
+1. Edit `packages/onboarding-guide/src/index.ts` — sections carry `roles`, and a role only ever
+   sees whole sections, never partial ones
+2. Run **`npm run guide`** to regenerate the markdown and the four PDFs, and commit them with
+   the change — the generated files are what a customer reads
+3. `apps/mobile/src/lib/onboardingGuide.test.ts` ties the mode/severity/gate tables to the
+   constants they describe, so adding a gate condition without documenting it fails there
+
+Two things about the package's shape are load-bearing. It's **one file** because the generator
+imports it with plain Node type-stripping and no bundler — split it and the extensionless
+relative import stops resolving. And it builds its tables from `INVESTIGATION_MODE_OPTIONS`,
+`SEVERITY_LABELS` and friends rather than re-typing the strings, so a label change in the app
+reaches the printed handout on the crib-room wall.
+
 ## Code Style
 
 - Use functional components + hooks only (no class components)

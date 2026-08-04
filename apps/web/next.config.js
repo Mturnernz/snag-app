@@ -30,7 +30,17 @@ const CSP = [
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
   "frame-ancestors 'none'",
   "base-uri 'self'",
-  "form-action 'self'",
+  // Supabase belongs here for the same reason it's in connect-src, and leaving
+  // it out broke both exports on /reports in a way that looked like a slow
+  // server rather than a policy.
+  //
+  // Both export routes are reached by <form method="post"> and finish with a
+  // 303 to a signed storage URL. `form-action` is checked against every
+  // redirect hop after a form submission, not just the initial target, so the
+  // browser did all the waiting — query, upload, audit row, signing — and then
+  // refused the last step. The file was written and recorded every time; only
+  // the person who asked for it never saw it.
+  "form-action 'self' https://*.supabase.co",
   "object-src 'none'",
   "upgrade-insecure-requests",
 ].join('; ');

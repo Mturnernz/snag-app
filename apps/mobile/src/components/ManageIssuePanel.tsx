@@ -8,6 +8,9 @@ import {
   SnagStatus, SnagKind, SnagSeverity, SnagLane,
   KIND_LABELS, SEVERITY_LABELS, INVESTIGATION_MODE_OPTIONS,
 } from '../types';
+import {
+  describeUnmetConditions, RESOLUTION_EXCEPTION_MIN_LENGTH, type ResolveGateKey,
+} from '@snag/supabase-queries';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   updateSnagStatus, recategoriseSnag, assignSnagOwner, blockPublicReporter, resolveSnag,
@@ -59,6 +62,12 @@ interface Props {
   /** Serious lane only: null = resolvable, otherwise the reason Resolve is
    *  blocked (e.g. "Checklist 2/5"). Ignored for niggles. */
   resolveBlockReason?: string | null;
+  /** Serious lane only: the resolve-gate conditions still unmet, in the
+   *  server's order. Empty means the gate is clear — or that the block is
+   *  something an exception can't cover, since update_snag_status refuses an
+   *  RCA in flight above the gate and no written reason gets past that. Only a
+   *  non-empty list offers "resolve with a reason". */
+  unmetConditions?: ResolveGateKey[];
   /** Public submissions expose a block-reporter action. */
   isPublicSubmission?: boolean;
   /** Called after a successful save/resolve so the parent can re-fetch the issue. */
@@ -68,7 +77,7 @@ interface Props {
 export default function ManageIssuePanel({
   issueId, status, lane, kind, severity, owner, assignees, investigationMode = 'snag',
   modeLocked = false, canOverrideMode = false,
-  resolveBlockReason = null, isPublicSubmission = false, onUpdated,
+  resolveBlockReason = null, unmetConditions = [], isPublicSubmission = false, onUpdated,
 }: Props) {
   const { showToast } = useToast();
 
@@ -92,22 +101,43 @@ export default function ManageIssuePanel({
   const [resolving, setResolving] = useState(false);
   // Transient "nice, sorted" beat — niggle lane only, cleared after it plays.
   const [justResolved, setJustResolved] = useState(false);
+  // The same modal, asking for a reason instead of a closing note. Closing an
+  // investigation that isn't finished is a different act from closing one that
+  // is, and the two shouldn't share a button — see the render.
+  const [exceptionMode, setExceptionMode] = useState(false);
 
   const resolveBlocked = isSerious && resolveBlockReason !== null;
+  /** Something a written reason can get past, as opposed to an RCA in flight. */
+  const canResolveWithException = isSerious && unmetConditions.length > 0;
+  const outstandingSummary = describeUnmetConditions(unmetConditions);
+
+  function openResolveModal(asException: boolean) {
+    setResolveNote('');
+    setExceptionMode(asException);
+    setResolveModalOpen(true);
+  }
 
   async function handleResolve() {
-    if (!isSerious && !resolveNote.trim()) {
+    const text = resolveNote.trim();
+    if (!isSerious && !text) {
       showToast('Add a note describing what was done');
+      return;
+    }
+    // Checked here as well as on the server so the modal can say so without a
+    // round trip; update_snag_status refuses a thin reason either way.
+    if (exceptionMode && text.length < RESOLUTION_EXCEPTION_MIN_LENGTH) {
+      showToast('Explain why this is being closed now');
       return;
     }
     setResolving(true);
     const { error } = isSerious
-      ? await updateSnagStatus(issueId, 'resolved', resolveNote.trim() || null)
-      : await resolveSnag(issueId, resolveNote.trim());
+      ? await updateSnagStatus(issueId, 'resolved', text || null, exceptionMode ? text : null)
+      : await resolveSnag(issueId, text);
     setResolving(false);
     if (!error) {
       setResolveModalOpen(false);
       setResolveNote('');
+      setExceptionMode(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (isSerious) {
         showToast('Resolved');
@@ -382,18 +412,33 @@ export default function ManageIssuePanel({
       )}
 
       {/* Resolve — the single terminal action for both lanes. Disabled with a
-          reason on serious snags until the investigation gate is satisfied. */}
+          reason on serious snags until the investigation gate is satisfied.
+
+          Below it, and only while the gate is what's blocking: closing anyway,
+          with a written reason. Deliberately a second, differently-named button
+          rather than the same one enabled — the gate is still the way out, and
+          this is a supervisor deciding to close an unfinished investigation and
+          putting their name to it. */}
       {isOpen && (
         <View style={styles.resolveSection}>
           <Button
             label="Resolve Snag"
             icon="checkmark-circle-outline"
-            onPress={() => { setResolveNote(''); setResolveModalOpen(true); }}
+            onPress={() => openResolveModal(false)}
             disabled={resolveBlocked}
             fullWidth
           />
           {resolveBlocked && (
             <Text style={styles.resolveBlockedText}>{resolveBlockReason}</Text>
+          )}
+          {resolveBlocked && canResolveWithException && (
+            <Button
+              label="Resolve with a reason"
+              variant="seriousOutline"
+              icon="alert-circle-outline"
+              onPress={() => openResolveModal(true)}
+              fullWidth
+            />
           )}
         </View>
       )}
@@ -414,15 +459,32 @@ export default function ManageIssuePanel({
       <Modal visible={resolveModalOpen} transparent animationType="fade" onRequestClose={() => setResolveModalOpen(false)}>
         <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Resolve snag</Text>
-            <Text style={styles.modalHint}>
-              {isSerious
-                ? 'Add an optional closing note for the record.'
-                : 'Add a note describing what was done to fix this.'}
+            <Text style={styles.modalTitle}>
+              {exceptionMode ? 'Close without finishing' : 'Resolve snag'}
             </Text>
+            {exceptionMode ? (
+              <>
+                <View style={styles.exceptionNotice}>
+                  <Icon name="alert-circle-outline" size="sm" color={Colors.serious} />
+                  <Text style={styles.exceptionNoticeText}>
+                    Still outstanding: {outstandingSummary}.
+                  </Text>
+                </View>
+                <Text style={styles.modalHint}>
+                  Your reason is recorded against this snag with your name and today&apos;s date, and
+                  stays on it. Anyone reading it later sees why it was closed here.
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.modalHint}>
+                {isSerious
+                  ? 'Add an optional closing note for the record.'
+                  : 'Add a note describing what was done to fix this.'}
+              </Text>
+            )}
             <TextInput
               style={styles.noteInput}
-              placeholder="What was done?"
+              placeholder={exceptionMode ? 'Why is this being closed now?' : 'What was done?'}
               placeholderTextColor={Colors.textMuted}
               value={resolveNote}
               onChangeText={setResolveNote}
@@ -430,8 +492,19 @@ export default function ManageIssuePanel({
               textAlignVertical="top"
             />
             <View style={styles.modalButtons}>
-              <Button label="Cancel" variant="outline" onPress={() => setResolveModalOpen(false)} style={styles.modalButton} />
-              <Button label="Resolve" onPress={handleResolve} loading={resolving} style={styles.modalButton} />
+              <Button
+                label="Cancel"
+                variant="outline"
+                onPress={() => { setResolveModalOpen(false); setExceptionMode(false); }}
+                style={styles.modalButton}
+              />
+              <Button
+                label={exceptionMode ? 'Record and close' : 'Resolve'}
+                variant={exceptionMode ? 'serious' : 'primary'}
+                onPress={handleResolve}
+                loading={resolving}
+                style={styles.modalButton}
+              />
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -555,6 +628,20 @@ const styles = StyleSheet.create({
     fontSize: Typography.xs,
     color: Colors.textMuted,
     textAlign: 'center',
+  },
+  exceptionNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    backgroundColor: Colors.seriousBg,
+    borderRadius: Radius.card,
+    padding: Spacing.sm,
+  },
+  exceptionNoticeText: {
+    flex: 1,
+    fontSize: Typography.sm,
+    color: Colors.serious,
+    lineHeight: 18,
   },
 
   modalBackdrop: {

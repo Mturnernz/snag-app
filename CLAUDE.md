@@ -333,6 +333,49 @@ refuses workers at the route level and `/go/snag/[id]` offers them the app inste
 correct rather than a gap — but it does mean mobile has to carry the whole investigator experience.
 Don't "fix" it by loosening `requireSupervisorOrAdmin`.
 
+## Closing a serious snag early
+
+A serious snag reaches `resolved` one of two ways, and there is no third: with every resolve-gate
+condition met, or with **a supervisor's written reason why not**. The second is recorded on the
+snag — `resolution_exception_reason`, `_by`, `_at`, and `_unmet`, the last a snapshot of which gate
+keys were outstanding at that moment — audited as `resolved_with_exception`, and shown on both
+clients above the investigation it closed over.
+
+`update_snag_status` takes the reason as `p_exception_reason`. Without one it refuses exactly as it
+always did, naming the first unmet condition, so a caller that knows nothing about exceptions is
+unaffected. With one it additionally requires `can_edit_site` — the plain owner can change a status
+but closing an unfinished investigation is a directing act — and a reason of real length.
+
+Three things follow:
+
+- **The gate rule now lives in `serious_resolve_unmet`**, which returns the unmet keys rather than
+  raising on the first. That is still one copy per layer: `update_snag_status` reads it, and
+  `seriousResolveGate` in `packages/supabase-queries` remains the clients'. The keys are the
+  clients' own `ResolveGateKey` values, so a snapshot renders without translation —
+  `describeUnmetConditions` turns one into a sentence, and `RESOLVE_GATE_LABELS` is deliberately a
+  second vocabulary from the gate's `reason` strings: those are instructions for an open snag
+  ("Add evidence"), these are a record of a closed one ("evidence").
+- **An RCA in flight is not exceptable.** `update_snag_status` refuses `rca_pending` above the gate
+  and no reason gets past it, so both clients offer the reason field only when the block is a gate
+  condition — `unmetConditions`/`unmetSummary`, never the general "resolve is blocked" state.
+- **`record_resolution_exception` supplies the reason after the fact**, for snags closed before any
+  of this existed. Reopening and re-resolving would also work but restamps `resolved_at`, losing
+  when the work actually finished.
+
+The reason none of this was needed before is that it was possible to get in without one.
+`resolve_snag` — the *niggle* path, no gate at all — cascaded `resolved` to every child of a merged
+parent, and `merge_snags` will put an incident under a fixit. Three incidents in Snagv1 were closed
+that way with no checklist, no witness, no evidence and no notifiable decision. It now cascades
+only to `lane = 'niggle'` children; a serious child keeps its own status and its own gate, and goes
+on counting as an open investigation until someone runs one.
+
+**"RCA outstanding" counting resolved snags is not that bug.** An RCA is owed on a serious snag
+until one is accepted or `waive_rca` records why it isn't needed, and resolving the snag doesn't
+discharge it — a resolved snag in that list is correct. What was missing is why, so
+`snag_rca_outstanding` carries the exception reason and a live `unmet_count`, and the mobile
+dashboard's expanded rows distinguish "still owed an analysis" from "closed with 4 steps
+outstanding · no reason recorded".
+
 ## The document library
 
 `org_documents` + the `org-documents` bucket: an org-wide register, distinct from snag-scoped

@@ -34,6 +34,24 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 /** Which of a site's numbers is expanded beneath it. */
 type ExpandMetric = 'unassigned' | 'rca' | 'overdue';
 
+/**
+ * Why a resolved snag is sitting in an outstanding list.
+ *
+ * The count is right — an RCA is owed on a serious snag until one is accepted
+ * or waived, and resolving it doesn't discharge that — but the row alone reads
+ * as a bug in it. So each row says which of the two it is: still owed an
+ * analysis on a finished investigation, or closed over an unfinished one, with
+ * or without somebody's reason on the record. The last of those is the only one
+ * that needs chasing, and it's the only one styled to be chased.
+ */
+function rcaOutstandingNote(row: RcaOutstandingRow): { note: string | null; noteWarn: boolean } {
+  if (row.status !== 'resolved' || row.unmet_count === 0) return { note: null, noteWarn: false };
+  const steps = `${row.unmet_count} step${row.unmet_count === 1 ? '' : 's'}`;
+  return row.resolution_exception_reason
+    ? { note: `Closed with ${steps} outstanding — ${row.resolution_exception_reason}`, noteWarn: false }
+    : { note: `Closed with ${steps} outstanding · no reason recorded`, noteWarn: true };
+}
+
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
@@ -305,6 +323,7 @@ export default function AdminDashboardScreen() {
                       rows={(rcaBySite[s.siteId] ?? []).map((r) => ({
                         key: r.snag_id, snagId: r.snag_id, reference: r.reference,
                         detail: r.description ?? 'No description',
+                        ...rcaOutstandingNote(r),
                       }))}
                       emptyLabel="No RCAs outstanding at this site."
                       onOpen={(snagId) => navigation.navigate('IssueDetail', { issueId: snagId, step: 'rca' })}
@@ -362,6 +381,7 @@ export default function AdminDashboardScreen() {
                       rows={(rcaBySite[s.siteId] ?? []).map((r) => ({
                         key: r.snag_id, snagId: r.snag_id, reference: r.reference,
                         detail: r.description ?? 'No description',
+                        ...rcaOutstandingNote(r),
                       }))}
                       emptyLabel="No RCAs outstanding at this site."
                       onOpen={(snagId) => navigation.navigate('IssueDetail', { issueId: snagId, step: 'rca' })}
@@ -549,7 +569,13 @@ function CoverRow({
 function OutstandingList({
   rows, emptyLabel, onOpen,
 }: {
-  rows: { key: string; snagId: string; reference: string; detail: string }[];
+  rows: {
+    key: string; snagId: string; reference: string; detail: string;
+    /** A second line under the detail — why a row that looks finished isn't. */
+    note?: string | null;
+    /** Warn styling for the one case that needs chasing rather than reading. */
+    noteWarn?: boolean;
+  }[];
   emptyLabel: string;
   onOpen: (snagId: string) => void;
 }) {
@@ -572,6 +598,14 @@ function OutstandingList({
           <View style={styles.outstandingText}>
             <Text style={styles.outstandingRef}>{r.reference}</Text>
             <Text style={styles.outstandingDetail} numberOfLines={2}>{r.detail}</Text>
+            {r.note && (
+              <Text
+                style={[styles.outstandingNote, r.noteWarn && styles.outstandingNoteWarn]}
+                numberOfLines={2}
+              >
+                {r.note}
+              </Text>
+            )}
           </View>
           <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
         </TouchableOpacity>
@@ -764,6 +798,14 @@ const styles = StyleSheet.create({
   outstandingDetail: {
     fontSize: Typography.sm,
     color: Colors.textPrimary,
+  },
+  outstandingNote: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    lineHeight: 16,
+  },
+  outstandingNoteWarn: {
+    color: Colors.serious,
   },
   outstandingEmpty: {
     fontSize: Typography.sm,

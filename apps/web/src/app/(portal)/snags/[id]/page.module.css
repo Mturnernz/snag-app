@@ -184,6 +184,38 @@
   border-radius: var(--radius-card);
 }
 
+/* ── Resolved with the investigation incomplete ─────────────────────────────
+   The serious identity colour rather than danger: this is the health & safety
+   lane saying something about itself, not an error. Paired with an icon, since
+   colour is never the only signal. */
+
+.exceptionLead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-sm);
+  font-weight: 600;
+  color: var(--color-serious-fg);
+}
+
+.exceptionDetail {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.exceptionReason {
+  margin: 0 0 var(--space-sm);
+  line-height: 1.6;
+}
+
+.exceptionMeta {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
 /* ── Investigation mode ─────────────────────────────────────────────────── */
 
 /* Two genuinely different ways to run an investigation, so each option carries

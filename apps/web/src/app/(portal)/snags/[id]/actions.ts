@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import {
   updateSnagStatus, resolveSnag, assignSnagOwner, recategoriseSnag, addComment,
   setNotifiableFlag, unmergeSnag, assignInvestigation,
+  recordResolutionException, RESOLUTION_EXCEPTION_MIN_LENGTH,
 } from '@snag/supabase-queries';
 import { SnagKind, SnagSeverity, SnagStatus } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
@@ -22,6 +23,51 @@ export async function changeStatusAction(formData: FormData) {
   if (!snagId || !status) return;
 
   const { error } = await updateSnagStatus(supabase, snagId, status);
+  if (error) fail(snagId, error.message);
+
+  revalidatePath(`/snags/${snagId}`);
+  redirect(`/snags/${snagId}`);
+}
+
+/**
+ * Resolving a serious snag whose investigation isn't finished.
+ *
+ * Separate from changeStatusAction rather than a flag on it: that action is
+ * reached from a button that means "this is done", and this one is reached from
+ * a form that makes somebody type why it isn't. The server enforces the reason
+ * either way — update_snag_status refuses `resolved` over an unmet gate without
+ * one — so the length check here is only to keep the round trip out of the way
+ * of an obvious mistake.
+ */
+export async function resolveWithExceptionAction(formData: FormData) {
+  await requireSupervisorOrAdmin();
+  const supabase = await createClient();
+  const snagId = String(formData.get('snagId') ?? '');
+  const reason = String(formData.get('reason') ?? '').trim();
+  if (!snagId) return;
+  if (reason.length < RESOLUTION_EXCEPTION_MIN_LENGTH) {
+    fail(snagId, 'Explain why this is being resolved with the investigation incomplete.');
+  }
+
+  const { error } = await updateSnagStatus(supabase, snagId, 'resolved', reason, reason);
+  if (error) fail(snagId, error.message);
+
+  revalidatePath(`/snags/${snagId}`);
+  redirect(`/snags/${snagId}`);
+}
+
+/** The same reason on a snag that was closed before the app asked for one. */
+export async function recordResolutionExceptionAction(formData: FormData) {
+  await requireSupervisorOrAdmin();
+  const supabase = await createClient();
+  const snagId = String(formData.get('snagId') ?? '');
+  const reason = String(formData.get('reason') ?? '').trim();
+  if (!snagId) return;
+  if (reason.length < RESOLUTION_EXCEPTION_MIN_LENGTH) {
+    fail(snagId, 'Explain why this was resolved with the investigation incomplete.');
+  }
+
+  const { error } = await recordResolutionException(supabase, snagId, reason);
   if (error) fail(snagId, error.message);
 
   revalidatePath(`/snags/${snagId}`);

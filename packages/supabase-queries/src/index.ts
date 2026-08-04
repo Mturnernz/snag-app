@@ -405,6 +405,36 @@ export type ResolveGateKey =
   | 'notifiable' | 'checklist' | 'witnesses' | 'evidence' | 'rootCause' | 'correctiveActions'
   | 'investigationDocument' | 'documentAccepted';
 
+/**
+ * A gate condition named in the fewest words that still say what is missing.
+ *
+ * `seriousResolveGate`'s own `reason` strings are instructions — "Add evidence",
+ * "Record a root cause" — which is right when the snag is still open and wrong
+ * on a snag that is already closed: the snapshot in
+ * `snags.resolution_exception_unmet` is a record of what was outstanding, not a
+ * list of things to go and do. Same keys, different voice.
+ */
+export const RESOLVE_GATE_LABELS: Record<ResolveGateKey, string> = {
+  notifiable: 'notifiable decision',
+  checklist: 'first-response checklist',
+  witnesses: 'witness statement',
+  evidence: 'evidence',
+  rootCause: 'root cause',
+  correctiveActions: 'corrective actions',
+  investigationDocument: 'investigation document',
+  documentAccepted: 'document acceptance',
+};
+
+/** The unmet snapshot as one readable clause, e.g. "evidence and root cause". */
+export function describeUnmetConditions(keys: string[] | null | undefined): string | null {
+  const labels = (keys ?? [])
+    .map((k) => RESOLVE_GATE_LABELS[k as ResolveGateKey])
+    .filter(Boolean);
+  if (labels.length === 0) return null;
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 export interface ResolveGateCondition {
   key: ResolveGateKey;
   unmet: boolean;
@@ -591,6 +621,14 @@ export interface RcaOutstandingRow {
   description: string | null;
   status: SnagStatus;
   severity: SnagSeverity | null;
+  /** Why it was closed with the investigation incomplete, or null — either
+   *  because it wasn't, or because nobody has said. `unmetCount` tells the two
+   *  apart, and the list has to: a resolved snag in this list looks like a bug
+   *  in the count until it says what is still owed on it. */
+  resolution_exception_reason: string | null;
+  resolution_exception_at: string | null;
+  /** Resolve-gate conditions unmet *now*, not when it was closed. */
+  unmet_count: number;
 }
 
 export async function getOverdueActions(
@@ -612,7 +650,7 @@ export async function getRcaOutstanding(
 ): Promise<RcaOutstandingRow[]> {
   const { data, error } = await client
     .from('snag_rca_outstanding')
-    .select('snag_id, reference, description, status, severity')
+    .select('snag_id, reference, description, status, severity, resolution_exception_reason, resolution_exception_at, unmet_count')
     .eq('site_id', siteId)
     .order('reference', { ascending: true });
   if (error || !data) return [];
@@ -866,9 +904,42 @@ export async function getOrgSnagTrend(
 // apps/mobile/src/lib/supabase.ts, which now re-exports these bound to its
 // own client instead of redefining them.
 
-export async function updateSnagStatus(client: SupabaseClient, snagId: string, status: SnagStatus, note?: string | null) {
-  return client.rpc('update_snag_status', { p_snag_id: snagId, p_status: status, p_note: note ?? null });
+/**
+ * `exceptionReason` is the only way past the serious-lane resolve gate with
+ * conditions still unmet, and the server treats it as such: without one it
+ * raises exactly as it always did, and with one it demands a site editor and
+ * records who wrote it, when, and what was outstanding at that moment. Passing
+ * it when the gate is already clear is a no-op — there is nothing to except.
+ */
+export async function updateSnagStatus(
+  client: SupabaseClient,
+  snagId: string,
+  status: SnagStatus,
+  note?: string | null,
+  exceptionReason?: string | null,
+) {
+  return client.rpc('update_snag_status', {
+    p_snag_id: snagId,
+    p_status: status,
+    p_note: note ?? null,
+    p_exception_reason: exceptionReason ?? null,
+  });
 }
+
+/**
+ * The same reason, supplied after the fact.
+ *
+ * For snags already closed with the gate unmet — the ones resolved before the
+ * gate existed, and the ones the niggle resolve path used to close by cascade.
+ * Reopening and re-resolving them would work, but it restamps `resolved_at` and
+ * so loses when the work actually finished; this only fills the empty field.
+ */
+export async function recordResolutionException(client: SupabaseClient, snagId: string, reason: string) {
+  return client.rpc('record_resolution_exception', { p_snag_id: snagId, p_reason: reason });
+}
+
+/** What the server demands of a resolution exception, so a client can say so first. */
+export const RESOLUTION_EXCEPTION_MIN_LENGTH = 10;
 
 // Niggles resolve via resolve_snag (a note is required server-side). Serious
 // snags resolve via updateSnagStatus('resolved'), which the server gates

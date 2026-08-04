@@ -50,6 +50,7 @@ import DebriefPanel from '../components/DebriefPanel';
 import TriageSheet from '../components/TriageSheet';
 import StepCard, { StepStatus } from '../components/StepCard';
 import NextStepCard, { NextStep } from '../components/NextStepCard';
+import ResolutionExceptionCard from '../components/ResolutionExceptionCard';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -84,6 +85,10 @@ interface IssueDetail {
   notifying_org_name?: string | null;
   rca_waived_at?: string | null;
   rca_waived_reason?: string | null;
+  resolution_exception_reason?: string | null;
+  resolution_exception_by_name?: string | null;
+  resolution_exception_at?: string | null;
+  resolution_exception_unmet?: string[] | null;
   escalated_at?: string | null;
   created_at: string;
   reporter?: { id: string; name: string };
@@ -245,6 +250,23 @@ function computeResolveBlockReason(
 ): string | null {
   return computeGate(status, inv, notifiableDecided, rcaStatus, rcaWithName)
     .find((c) => c.unmet)?.blockReason ?? null;
+}
+
+/**
+ * The unmet conditions a written reason could close this snag over.
+ *
+ * Deliberately not derived from computeGate: that folds in two states the
+ * server refuses regardless of any reason — an RCA in flight, and "not loaded
+ * yet" — and offering to override either would produce a button that can only
+ * fail. Straight from the shared gate, or empty.
+ */
+function computeUnmetGateKeys(
+  status: SnagStatus | undefined,
+  inv: InvestigationState | null,
+  notifiableDecided: boolean,
+): ResolveGateCondition['key'][] {
+  if (!inv || status === 'rca_pending') return [];
+  return seriousResolveGate(inv, notifiableDecided).filter((c) => c.unmet).map((c) => c.key);
 }
 
 function timeAgo(dateStr: string): string {
@@ -616,6 +638,8 @@ export default function IssueDetailScreen() {
   const gate = computeGate(issue?.status, investigation, notifiableDecided, rcaState?.status, rcaWithName);
   const gateRemaining = gate.filter((c) => c.unmet).length;
   const firstUnmet = gate.find((c) => c.unmet);
+  // The subset a supervisor could close this snag over with a written reason.
+  const unmetGateKeys = computeUnmetGateKeys(issue?.status, investigation, notifiableDecided);
   const nextStep: NextStep | null = firstUnmet
     ? {
         title: firstUnmet.title,
@@ -737,7 +761,7 @@ export default function IssueDetailScreen() {
   async function fetchIssue() {
     const { data } = await supabase
       .from('snags_with_details')
-      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count, is_notifiable, notifiable_marked_by, notifiable_marked_at, notifying_org_id, notifying_pcbu_note, notifying_org_name, rca_waived_at, rca_waived_reason, escalated_at')
+      .select('id, reference, description, status, kind, lane, severity, photo_path, photo_paths, occurred_at, created_at, reporter_id, reporter_name, owner_id, owner_name, comment_count, vote_score, upvote_count, downvote_count, org_id, site_id, site_name, is_public_submission, parent_snag_id, child_count, is_notifiable, notifiable_marked_by, notifiable_marked_at, notifying_org_id, notifying_pcbu_note, notifying_org_name, rca_waived_at, rca_waived_reason, resolution_exception_reason, resolution_exception_by_name, resolution_exception_at, resolution_exception_unmet, escalated_at')
       .eq('id', issueId)
       .single();
 
@@ -1109,6 +1133,7 @@ export default function IssueDetailScreen() {
                   modeLocked={modeLocked}
                   canOverrideMode={isOfficerAdmin}
                   resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
+                  unmetConditions={unmetGateKeys}
                   isPublicSubmission={issue.is_public_submission ?? false}
                   onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
                 />
@@ -1129,6 +1154,7 @@ export default function IssueDetailScreen() {
               modeLocked={modeLocked}
               canOverrideMode={isOfficerAdmin}
               resolveBlockReason={computeResolveBlockReason(issue.status, investigation, notifiableDecided, rcaState?.status, rcaWithName)}
+              unmetConditions={unmetGateKeys}
               isPublicSubmission={issue.is_public_submission ?? false}
               onUpdated={() => { fetchIssue(); fetchInvestigation(); fetchActivity(); }}
             />
@@ -1169,6 +1195,23 @@ export default function IssueDetailScreen() {
                 </View>
               ))}
             </Card>
+          )}
+
+          {/* Why a closed snag still has an investigation hanging off it.
+              Above the step cards rather than buried among them: it is the
+              first thing that explains the shape of everything below, and on a
+              snag with no reason recorded it is the one thing still to do. */}
+          {isSerious && issue.status === 'resolved' && (unmetGateKeys.length > 0 || issue.resolution_exception_at) && (
+            <ResolutionExceptionCard
+              issueId={issue.id}
+              unmetAtResolution={issue.resolution_exception_unmet}
+              reason={issue.resolution_exception_reason}
+              byName={issue.resolution_exception_by_name}
+              at={issue.resolution_exception_at}
+              unmetNow={unmetGateKeys}
+              canRecord={canEdit}
+              onRecorded={() => { fetchIssue(); fetchActivity(); }}
+            />
           )}
 
           {/* One answer to "what do I do now", above the fold. The collapsed

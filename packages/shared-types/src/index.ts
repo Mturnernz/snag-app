@@ -109,6 +109,16 @@ export interface Snag {
   rca_waived_by?: string | null;
   rca_waived_at?: string | null;
   rca_waived_reason?: string | null;
+  // A serious snag reaches `resolved` one of two ways: with every resolve-gate
+  // condition met, or with a supervisor's written reason why not. These record
+  // the second — who decided, when, and which conditions were outstanding at
+  // that moment (the keys of seriousResolveGate, snapshotted). Null on a snag
+  // closed the ordinary way, and cleared on reopen.
+  resolution_exception_reason?: string | null;
+  resolution_exception_by?: string | null;
+  resolution_exception_by_name?: string | null;
+  resolution_exception_at?: string | null;
+  resolution_exception_unmet?: string[] | null;
   // Merge (parent/child) — a status change on a parent cascades to every
   // child; a child otherwise behaves like an ordinary snag.
   parent_snag_id?: string | null;

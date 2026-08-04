@@ -941,6 +941,37 @@ export async function recordResolutionException(client: SupabaseClient, snagId: 
 /** What the server demands of a resolution exception, so a client can say so first. */
 export const RESOLUTION_EXCEPTION_MIN_LENGTH = 10;
 
+/**
+ * How many more characters the reason needs, or 0 once it is long enough.
+ *
+ * Trimmed, because both `update_snag_status` and `record_resolution_exception`
+ * `btrim` before measuring — a field of spaces is empty to them and has to be
+ * empty here too, or the client lets through what the server then refuses.
+ */
+export function resolutionExceptionShortfall(reason: string): number {
+  return Math.max(0, RESOLUTION_EXCEPTION_MIN_LENGTH - reason.trim().length);
+}
+
+/**
+ * What to say under the field while the reason is too short, or null when it
+ * isn't. Names the length, and that is the whole point of it.
+ *
+ * The rejection used to be worded "Explain why this was closed with the
+ * investigation incomplete" — the prompt above the field, restated. Somebody
+ * who *had* explained it, in eight characters, read that as the same
+ * instruction appearing again rather than a complaint about what they typed,
+ * and the minimum was stated nowhere on screen. Being short is the one thing
+ * this message has to say.
+ */
+export function describeReasonShortfall(reason: string): string | null {
+  const short = resolutionExceptionShortfall(reason);
+  if (short === 0) return null;
+  if (reason.trim().length === 0) {
+    return `At least ${RESOLUTION_EXCEPTION_MIN_LENGTH} characters.`;
+  }
+  return `${short} more character${short === 1 ? '' : 's'}.`;
+}
+
 // Niggles resolve via resolve_snag (a note is required server-side). Serious
 // snags resolve via updateSnagStatus('resolved'), which the server gates
 // behind a completed investigation.

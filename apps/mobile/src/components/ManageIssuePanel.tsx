@@ -9,7 +9,8 @@ import {
   KIND_LABELS, SEVERITY_LABELS, INVESTIGATION_MODE_OPTIONS,
 } from '../types';
 import {
-  describeUnmetConditions, RESOLUTION_EXCEPTION_MIN_LENGTH, type ResolveGateKey,
+  describeReasonShortfall, describeUnmetConditions, RESOLUTION_EXCEPTION_MIN_LENGTH,
+  type ResolveGateKey,
 } from '@snag/supabase-queries';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
@@ -110,6 +111,9 @@ export default function ManageIssuePanel({
   /** Something a written reason can get past, as opposed to an RCA in flight. */
   const canResolveWithException = isSerious && unmetConditions.length > 0;
   const outstandingSummary = describeUnmetConditions(unmetConditions);
+  /** Non-null while an exception reason is too short. Only exception mode has a
+   *  length rule — a niggle's closing note just has to be non-empty. */
+  const reasonShortfall = exceptionMode ? describeReasonShortfall(resolveNote) : null;
 
   function openResolveModal(asException: boolean) {
     setResolveNote('');
@@ -124,9 +128,11 @@ export default function ManageIssuePanel({
       return;
     }
     // Checked here as well as on the server so the modal can say so without a
-    // round trip; update_snag_status refuses a thin reason either way.
+    // round trip; update_snag_status refuses a thin reason either way. A
+    // backstop behind the disabled button, and it names the length for the
+    // same reason the hint under the field does.
     if (exceptionMode && text.length < RESOLUTION_EXCEPTION_MIN_LENGTH) {
-      showToast('Explain why this is being closed now');
+      showToast(`Say a bit more — at least ${RESOLUTION_EXCEPTION_MIN_LENGTH} characters`);
       return;
     }
     setResolving(true);
@@ -491,6 +497,7 @@ export default function ManageIssuePanel({
               multiline
               textAlignVertical="top"
             />
+            {exceptionMode && <Text style={styles.shortfall}>{reasonShortfall ?? ' '}</Text>}
             <View style={styles.modalButtons}>
               <Button
                 label="Cancel"
@@ -503,6 +510,7 @@ export default function ManageIssuePanel({
                 variant={exceptionMode ? 'serious' : 'primary'}
                 onPress={handleResolve}
                 loading={resolving}
+                disabled={reasonShortfall !== null}
                 style={styles.modalButton}
               />
             </View>
@@ -677,6 +685,13 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     fontSize: Typography.base,
     color: Colors.textPrimary,
+  },
+  // Held at a fixed height with a space when there's no shortfall, so the
+  // buttons don't shift up under the thumb as the tenth character lands.
+  shortfall: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    minHeight: 16,
   },
   modalButtons: {
     flexDirection: 'row',

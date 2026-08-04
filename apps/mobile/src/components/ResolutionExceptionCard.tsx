@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, Modal, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 
 import {
-  describeUnmetConditions, RESOLUTION_EXCEPTION_MIN_LENGTH, type ResolveGateKey,
+  describeReasonShortfall, describeUnmetConditions, RESOLUTION_EXCEPTION_MIN_LENGTH,
+  type ResolveGateKey,
 } from '@snag/supabase-queries';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { recordResolutionException } from '../lib/supabase';
@@ -50,11 +51,16 @@ export default function ResolutionExceptionCard({
   const outstanding = recorded
     ? describeUnmetConditions(unmetAtResolution)
     : describeUnmetConditions(unmetNow);
+  /** Non-null while the reason is too short — shown under the field, and the
+   *  reason Record is disabled, so the length is never a surprise. */
+  const shortfall = describeReasonShortfall(text);
 
   async function handleRecord() {
     const trimmed = text.trim();
+    // A backstop now that the button is disabled while `shortfall` is set: it
+    // should be unreachable, and it still has to name the length if it isn't.
     if (trimmed.length < RESOLUTION_EXCEPTION_MIN_LENGTH) {
-      showToast('Explain why this was closed with the investigation incomplete');
+      showToast(`Say a bit more — at least ${RESOLUTION_EXCEPTION_MIN_LENGTH} characters`);
       return;
     }
     setSaving(true);
@@ -126,9 +132,17 @@ export default function ResolutionExceptionCard({
               multiline
               textAlignVertical="top"
             />
+            <Text style={styles.shortfall}>{shortfall ?? ' '}</Text>
             <View style={styles.modalButtons}>
               <Button label="Cancel" variant="outline" onPress={() => setModalOpen(false)} style={styles.modalButton} />
-              <Button label="Record" variant="serious" onPress={handleRecord} loading={saving} style={styles.modalButton} />
+              <Button
+                label="Record"
+                variant="serious"
+                onPress={handleRecord}
+                loading={saving}
+                disabled={shortfall !== null}
+                style={styles.modalButton}
+              />
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -172,6 +186,9 @@ const styles = StyleSheet.create({
     fontSize: Typography.base,
     color: Colors.textPrimary,
   },
+  // Rendered with a space when there's no shortfall rather than unmounted, so
+  // the buttons don't shift up under the thumb as the tenth character lands.
+  shortfall: { fontSize: Typography.xs, color: Colors.textMuted, minHeight: 16 },
   modalButtons: { flexDirection: 'row', gap: Spacing.sm },
   modalButton: { flex: 1 },
 });

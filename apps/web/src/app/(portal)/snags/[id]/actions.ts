@@ -46,7 +46,7 @@ export async function resolveWithExceptionAction(formData: FormData) {
   const reason = String(formData.get('reason') ?? '').trim();
   if (!snagId) return;
   if (reason.length < RESOLUTION_EXCEPTION_MIN_LENGTH) {
-    fail(snagId, 'Explain why this is being resolved with the investigation incomplete.');
+    fail(snagId, `Say a bit more about why this is being closed now — at least ${RESOLUTION_EXCEPTION_MIN_LENGTH} characters.`);
   }
 
   const { error } = await updateSnagStatus(supabase, snagId, 'resolved', reason, reason);
@@ -64,7 +64,7 @@ export async function recordResolutionExceptionAction(formData: FormData) {
   const reason = String(formData.get('reason') ?? '').trim();
   if (!snagId) return;
   if (reason.length < RESOLUTION_EXCEPTION_MIN_LENGTH) {
-    fail(snagId, 'Explain why this was resolved with the investigation incomplete.');
+    fail(snagId, `Say a bit more about why this was closed — at least ${RESOLUTION_EXCEPTION_MIN_LENGTH} characters.`);
   }
 
   const { error } = await recordResolutionException(supabase, snagId, reason);

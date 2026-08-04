@@ -79,7 +79,10 @@ export default function SignUpScreen({ onDone, onBack, initialCode }: Props) {
         setError(signUpError.message ?? 'Could not create your account.');
         return;
       }
-      onDone(`Account created. Confirm your email, then sign in — we'll finish joining ${code!.orgName}.`);
+      // Confirmation is off, so the session is already live and the pending
+      // join set above is consumed on this side of the round trip rather than
+      // after a sign-in that never happens.
+      onDone(`Account created — finishing joining ${code!.orgName}…`);
     }
 
     return (

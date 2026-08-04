@@ -100,7 +100,12 @@ export default function AuthScreen({ initialJoinCode, onClearJoinCode }: Props) 
       setMessage({ text: error.message ?? 'Could not create your account.', error: true });
       return;
     }
-    setMessage({ text: 'Account created. Confirm your email, then sign in.', error: false });
+    // Email confirmation is off, so signUp returns a live session and App.tsx
+    // has already moved on by the time this renders. It stays as the fallback
+    // for confirmation being switched back on — but it no longer *asserts*
+    // that a confirmation email is coming, which is what it used to tell every
+    // new user while none was ever sent.
+    setMessage({ text: 'Account created. Signing you in…', error: false });
     setView('main');
   }
 

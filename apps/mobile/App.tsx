@@ -7,20 +7,20 @@ import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiveOrg, getMemberships, Membership, markOnboardingSeen, signInAnonymouslyForReport } from './src/lib/supabase';
+import { supabase, signOut, getProfile, createOrganisationAndOwner, resolveActiveOrg, getMemberships, Membership, signInAnonymouslyForReport } from './src/lib/supabase';
 import { getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate } from './src/lib/pendingIntent';
 import { createAuthEventQueue } from './src/lib/authEvents';
 import { resetWebPathIfStale } from './src/lib/webLocation';
 import { getInitialJoinCode } from './src/lib/joinLink';
+import { navigationRef } from './src/lib/navigationRef';
 import { Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import { linking } from './src/navigation/linking';
+import { TourProvider } from './src/context/TourContext';
 import AuthScreen from './src/screens/AuthScreen';
 import OrgSetupScreen from './src/screens/OrgSetupScreen';
 import AdminSetupScreen from './src/screens/AdminSetupScreen';
 import OrgInactiveScreen from './src/screens/OrgInactiveScreen';
-import OnboardingWelcomeScreen from './src/screens/OnboardingWelcomeScreen';
-import OnboardingCarouselScreen from './src/screens/OnboardingCarouselScreen';
 import PublicQrReportScreen from './src/screens/PublicQrReportScreen';
 import ScanJoinCodeScreen from './src/screens/ScanJoinCodeScreen';
 import { ToastProvider } from './src/hooks/useToast';
@@ -57,11 +57,6 @@ export default function App() {
   // right after sign-up instead of showing the generic chooser.
   const [pendingJoin, setPendingJoin] = useState<PendingJoin | null>(null);
   const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(null);
-  // First-time worker onboarding gate — shown once, before RootNavigator
-  // mounts, mirroring the AdminSetupScreen gate below. null once done (or
-  // never applicable), so the app falls through to the normal entry point.
-  const [onboardingStep, setOnboardingStep] = useState<'welcome' | 'carousel' | null>(null);
-  const [initialTab, setInitialTab] = useState<'Report' | 'Issues'>('Report');
 
   // QR public-report landing — resolved once on boot. A ref mirrors the
   // state so the auth-listener closure below (registered once, empty deps)
@@ -125,19 +120,27 @@ export default function App() {
     if (pendingJoin && joinCode) clearJoinCode();
   }, [pendingJoin, joinCode]);
 
-  useEffect(() => {
-    if (profile?.role === 'worker' && profile.has_seen_onboarding === false) {
-      setOnboardingStep((prev) => prev ?? 'welcome');
-    } else {
-      setOnboardingStep(null);
-    }
-  }, [profile?.id, profile?.role, profile?.has_seen_onboarding]);
-
-  async function finishOnboarding(nextTab: 'Report' | 'Issues') {
-    setInitialTab(nextTab);
-    setOnboardingStep(null);
-    await markOnboardingSeen();
-    setProfile((p) => (p ? { ...p, has_seen_onboarding: true } : p));
+  // First-run onboarding used to be two full-screen gates here — a welcome
+  // screen and a four-slide carousel, both worker-only. It is now the guided
+  // walkthrough, which runs *inside* the app rather than in front of it (see
+  // TourProvider below), so there is no gate: it starts itself for anyone whose
+  // `tour_status` is `not_started`, whatever their role. A Site Lead or Manager
+  // getting any first-run experience at all is new.
+  //
+  // The provider records progress; this keeps App's copy of the profile in step
+  // so a remount doesn't re-read a stale status and restart the walkthrough.
+  function handleTourStatus(status: NonNullable<Profile['tour_status']>, stepId: string | null) {
+    setProfile((p) =>
+      p
+        ? {
+            ...p,
+            tour_status: status,
+            tour_step: stepId,
+            tour_updated_at: new Date().toISOString(),
+            has_seen_onboarding: p.has_seen_onboarding || status === 'done',
+          }
+        : p,
+    );
   }
 
   useEffect(() => {
@@ -393,38 +396,21 @@ export default function App() {
     );
   }
 
-  // First-time worker onboarding — welcome screen, then optionally the
-  // overview carousel. Blocks the normal app the same way the gates above
-  // do; never shown to supervisor/officer_admin.
-  if (onboardingStep === 'welcome' && profile) {
-    return (
-      <SafeAreaProvider>
-        <StatusBar style="dark" backgroundColor="#F9FAFB" />
-        <OnboardingWelcomeScreen
-          onReport={() => finishOnboarding('Report')}
-          onShowMe={() => setOnboardingStep('carousel')}
-        />
-      </SafeAreaProvider>
-    );
-  }
-  if (onboardingStep === 'carousel' && profile) {
-    return (
-      <SafeAreaProvider>
-        <StatusBar style="dark" backgroundColor="#F9FAFB" />
-        <OnboardingCarouselScreen onFinish={() => finishOnboarding('Issues')} />
-      </SafeAreaProvider>
-    );
-  }
-
   // Fully set up — show the app
   return (
     <SafeAreaProvider>
-      <NavigationContainer linking={linking}>
+      <NavigationContainer ref={navigationRef} linking={linking}>
         <StatusBar style="dark" backgroundColor="#FFFFFF" />
         <ToastProvider>
-          {/* Public reporters may have no profile row yet — worker-level UI,
-              with the Admin tab role-gated away. */}
-          <RootNavigator userRole={profile?.role ?? 'worker'} initialTab={initialTab} />
+          {/* The walkthrough wraps the navigator rather than sitting inside a
+              screen: its first steps point at the tab bar, and an overlay
+              rendered inside a screen cannot draw over it. Inert without a
+              profile — a public reporter has no role to filter steps by. */}
+          <TourProvider profile={profile} onStatusChange={handleTourStatus}>
+            {/* Public reporters may have no profile row yet — worker-level UI,
+                with the Admin tab role-gated away. */}
+            <RootNavigator userRole={profile?.role ?? 'worker'} />
+          </TourProvider>
         </ToastProvider>
       </NavigationContainer>
     </SafeAreaProvider>

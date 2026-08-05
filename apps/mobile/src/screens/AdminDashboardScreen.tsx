@@ -28,6 +28,7 @@ import Button from '../components/Button';
 import Icon from '../components/Icon';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
 import OwnerPicker from '../components/OwnerPicker';
+import TourAnchor from '../components/TourAnchor';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -267,6 +268,7 @@ export default function AdminDashboardScreen() {
           </Card>
         )}
 
+        <TourAnchor id="manager-outstanding">
         <Card variant="elevated" style={styles.breakdownCard}>
           <Text style={styles.sectionLabel}>OUTSTANDING WORK</Text>
           {breakdownError ? (
@@ -402,6 +404,7 @@ export default function AdminDashboardScreen() {
             ))
           )}
         </Card>
+        </TourAnchor>
 
         {/* Cover — who a serious report reaches, and who can act on it.
             Read-only: every fix lives on a Manage screen, and putting the
@@ -457,37 +460,45 @@ export default function AdminDashboardScreen() {
         {/* Actions */}
         {isAdmin && (
           <>
-            <Button
-              label="Manage Organisation"
-              icon="business-outline"
-              onPress={() => navigation.navigate('ManageOrganisation')}
-              fullWidth
-            />
-            <Button
-              label="Manage Sites"
-              variant="outline"
-              icon="location-outline"
-              onPress={() => navigation.navigate('ManageSites')}
-              fullWidth
-            />
+            <TourAnchor id="manager-organisation">
+              <Button
+                label="Manage Organisation"
+                icon="business-outline"
+                onPress={() => navigation.navigate('ManageOrganisation')}
+                fullWidth
+              />
+            </TourAnchor>
+            <TourAnchor id="manager-sites">
+              <Button
+                label="Manage Sites"
+                variant="outline"
+                icon="location-outline"
+                onPress={() => navigation.navigate('ManageSites')}
+                fullWidth
+              />
+            </TourAnchor>
           </>
         )}
         {canManageWorkGroups && (
+          <TourAnchor id="manager-work-groups">
+            <Button
+              label="Manage Work Groups"
+              variant="outline"
+              icon="people-circle-outline"
+              onPress={() => navigation.navigate('ManageWorkGroups')}
+              fullWidth
+            />
+          </TourAnchor>
+        )}
+        <TourAnchor id="manager-reports">
           <Button
-            label="Manage Work Groups"
+            label="View Reports"
             variant="outline"
-            icon="people-circle-outline"
-            onPress={() => navigation.navigate('ManageWorkGroups')}
+            icon="bar-chart-outline"
+            onPress={() => navigation.navigate('Reports')}
             fullWidth
           />
-        )}
-        <Button
-          label="View Reports"
-          variant="outline"
-          icon="bar-chart-outline"
-          onPress={() => navigation.navigate('Reports')}
-          fullWidth
-        />
+        </TourAnchor>
 
         {!isAdmin && (
           <View style={styles.noteRow}>

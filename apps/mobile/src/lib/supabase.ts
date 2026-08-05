@@ -9,7 +9,7 @@ import { withDeadline } from './deadline';
 import { ReportSite } from './reportSite';
 import {
   Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
-  ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction,
+  ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction, TourStatus,
 } from '../types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -186,17 +186,33 @@ export async function getCurrentUser() {
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, org_id, name, email, role, created_at, has_seen_onboarding, organisation:organisations!profiles_org_id_fkey(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
+    .select('id, org_id, name, email, role, created_at, has_seen_onboarding, tour_status, tour_step, tour_updated_at, organisation:organisations!profiles_org_id_fkey(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
     .eq('id', userId)
     .maybeSingle();
   if (error) console.error('getProfile error:', error);
   return data as unknown as Profile | null;
 }
 
-// First-time worker onboarding gate — see OnboardingWelcomeScreen /
-// OnboardingCarouselScreen and the pre-NavigationContainer gate in App.tsx.
+// Retained for the older gate's flag, which `set_tour_progress('done')` now
+// also settles. Nothing calls this directly any more.
 export async function markOnboardingSeen() {
   return supabase.rpc('mark_onboarding_seen');
+}
+
+/**
+ * The guided walkthrough's resume point. `p_step` is only kept while running
+ * or paused — see the migration.
+ *
+ * Errors are swallowed the way `reportSite.ts` swallows its cache failures: a
+ * walkthrough that can't record where it got to should still run. The local
+ * mirror in `tourState.ts` covers the offline case.
+ */
+export async function setTourProgress(status: TourStatus, stepId?: string | null) {
+  const { error } = await supabase.rpc('set_tour_progress', {
+    p_status: status,
+    p_step: stepId ?? null,
+  });
+  if (error) console.warn('setTourProgress error:', error.message);
 }
 
 export async function updateProfile(userId: string, updates: Partial<Pick<Profile, 'name'>>) {

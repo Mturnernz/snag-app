@@ -23,7 +23,9 @@ import Button from '../components/Button';
 import Icon from '../components/Icon';
 import Sheet from '../components/Sheet';
 import OrgSwitcherHeader from '../components/OrgSwitcherHeader';
+import TourAnchor from '../components/TourAnchor';
 import { useBadge } from '../context/BadgeContext';
+import { useTour } from '../context/TourContext';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -42,6 +44,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { mentionCount } = useBadge();
+  const tour = useTour();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
@@ -300,33 +303,37 @@ export default function ProfileScreen() {
           </Card>
         )}
 
-        <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('Mentions')}>
-          <Card variant="elevated" style={styles.mentionsCard}>
-            <View style={styles.mentionsRow}>
-              <Icon name="at-outline" size="md" color={Colors.primary} />
-              <Text style={styles.mentionsTitle}>Mentions</Text>
-              {mentionCount > 0 && (
-                <View style={styles.mentionsBadge}>
-                  <Text style={styles.mentionsBadgeText}>{mentionCount}</Text>
-                </View>
-              )}
-              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
-            </View>
-          </Card>
-        </TouchableOpacity>
+        <TourAnchor id="profile-mentions">
+          <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('Mentions')}>
+            <Card variant="elevated" style={styles.mentionsCard}>
+              <View style={styles.mentionsRow}>
+                <Icon name="at-outline" size="md" color={Colors.primary} />
+                <Text style={styles.mentionsTitle}>Mentions</Text>
+                {mentionCount > 0 && (
+                  <View style={styles.mentionsBadge}>
+                    <Text style={styles.mentionsBadgeText}>{mentionCount}</Text>
+                  </View>
+                )}
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+              </View>
+            </Card>
+          </TouchableOpacity>
+        </TourAnchor>
 
         {/* The org's document register. All roles: the policies and procedures
             kept here are the ones workers are expected to follow, and until now
             they only existed in the portal, which workers can't reach. */}
-        <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('DocumentLibrary')}>
-          <Card variant="elevated" style={styles.mentionsCard}>
-            <View style={styles.mentionsRow}>
-              <Icon name="folder-open-outline" size="md" color={Colors.primary} />
-              <Text style={styles.mentionsTitle}>Documents</Text>
-              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
-            </View>
-          </Card>
-        </TouchableOpacity>
+        <TourAnchor id="profile-documents">
+          <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('DocumentLibrary')}>
+            <Card variant="elevated" style={styles.mentionsCard}>
+              <View style={styles.mentionsRow}>
+                <Icon name="folder-open-outline" size="md" color={Colors.primary} />
+                <Text style={styles.mentionsTitle}>Documents</Text>
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+              </View>
+            </Card>
+          </TouchableOpacity>
+        </TourAnchor>
 
         {/* Changing a password you still know. Forgetting one is handled at
             sign-in, which has to go through the portal's reset page — this
@@ -342,29 +349,44 @@ export default function ProfileScreen() {
         </TouchableOpacity>
 
         {/* The full onboarding guide, filtered to this member's role. Sits
-            above Replay tutorial because it's the deeper of the two: the
-            carousel is a four-slide orientation, this is the manual. */}
-        <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('HelpGuide')}>
-          <Card variant="elevated" style={styles.mentionsCard}>
-            <View style={styles.mentionsRow}>
-              <Icon name="help-circle-outline" size="md" color={Colors.primary} />
-              <Text style={styles.mentionsTitle}>Help & guide</Text>
-              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
-            </View>
-          </Card>
-        </TouchableOpacity>
+            above the walkthrough because it's the deeper of the two: the
+            walkthrough points at controls, this is the manual behind them. */}
+        <TourAnchor id="profile-help">
+          <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('HelpGuide')}>
+            <Card variant="elevated" style={styles.mentionsCard}>
+              <View style={styles.mentionsRow}>
+                <Icon name="help-circle-outline" size="md" color={Colors.primary} />
+                <Text style={styles.mentionsTitle}>Help & guide</Text>
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+              </View>
+            </Card>
+          </TouchableOpacity>
+        </TourAnchor>
 
-        {/* Replay tutorial — all roles, not just workers. Opens the overview
-            carousel as a modal; doesn't touch has_seen_onboarding. */}
-        <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('OnboardingCarousel')}>
-          <Card variant="elevated" style={styles.mentionsCard}>
-            <View style={styles.mentionsRow}>
-              <Icon name="school-outline" size="md" color={Colors.primary} />
-              <Text style={styles.mentionsTitle}>Replay tutorial</Text>
-              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
-            </View>
-          </Card>
-        </TouchableOpacity>
+        {/* The guided walkthrough — all roles. Its label follows its state, so
+            somebody who paused halfway is offered the thing they actually want
+            rather than being asked to start again. */}
+        <TourAnchor id="profile-walkthrough">
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => tour.start({ restart: tour.status !== 'paused' })}
+          >
+            <Card variant="elevated" style={styles.mentionsCard}>
+              <View style={styles.mentionsRow}>
+                <Icon name="school-outline" size="md" color={Colors.primary} />
+                <Text style={styles.mentionsTitle}>
+                  {tour.status === 'paused' ? 'Resume walkthrough' : 'Walkthrough'}
+                </Text>
+                {tour.status === 'paused' && (
+                  <Text style={styles.walkthroughProgress}>
+                    {tour.stepNumber} of {tour.stepCount}
+                  </Text>
+                )}
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+              </View>
+            </Card>
+          </TouchableOpacity>
+        </TourAnchor>
 
         {/* Organisations — a read-only summary of every org you belong to.
             Switch which one is active from the header above, or scan a QR
@@ -626,6 +648,10 @@ const styles = StyleSheet.create({
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
+  },
+  walkthroughProgress: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
   },
   mentionsBadge: {
     backgroundColor: Colors.primary,

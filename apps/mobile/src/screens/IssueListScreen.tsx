@@ -30,6 +30,7 @@ import {
 } from '../lib/supabase';
 import { snagGateSummary, SnagGateSummary } from '@snag/supabase-queries';
 import IssueCard from '../components/IssueCard';
+import TourAnchor from '../components/TourAnchor';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
 import EmptyState from '../components/EmptyState';
@@ -42,6 +43,7 @@ import { sortSnags as orderSnags, needsAttention, SortMode } from '../lib/snagOr
 import { isNewSince } from '../lib/snagFreshness';
 import { readLastSeen, markSeen } from '../lib/lastSeen';
 import { describeFilteredEmptyState } from '../lib/filterSummary';
+import { navigateToTab } from '../lib/navigationRef';
 import FilterBar, { FilterButtonSpec } from '../components/FilterBar';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -738,7 +740,9 @@ export default function IssueListScreen() {
           </View>
         </View>
       ) : (
-        <FilterBar buttons={filterButtons} />
+        <TourAnchor id="snags-filters">
+          <FilterBar buttons={filterButtons} />
+        </TourAnchor>
       )}
 
       <Modal visible={openDropdown !== null} transparent animationType="fade" onRequestClose={() => setOpenDropdown(null)}>
@@ -822,6 +826,10 @@ export default function IssueListScreen() {
           <ActivityIndicator color={Colors.primary} />
         </View>
       ) : (
+        // Wrapped as a whole rather than per-card: at numColumns={2} an extra
+        // View around the first card sits inside columnWrapperStyle and takes
+        // the column layout with it.
+        <TourAnchor id="snags-list" style={styles.flex1}>
         <FlatList
           data={issues}
           keyExtractor={(item) => item.id}
@@ -910,12 +918,13 @@ export default function IssueListScreen() {
               actionLabel={!hasActiveFilters ? 'Report a Snag' : undefined}
               onAction={
                 !hasActiveFilters
-                  ? () => navigation.navigate('Main' as any, { screen: 'Report' } as any)
+                  ? () => navigateToTab('Report')
                   : undefined
               }
             />
           }
         />
+        </TourAnchor>
       )}
 
       <MergeModal

@@ -482,9 +482,9 @@ unless it's a one-off simple `select`.
 
 ### Change the onboarding guide
 The customer-facing manual lives in **`packages/onboarding-guide`** — one file, structured as
-data rather than prose. Three surfaces render it and none of them may disagree:
-`apps/mobile`'s `HelpGuideScreen` (Profile → Help & guide), the portal's `/help`, and the
-generated `SNAG_ONBOARDING_GUIDE.md` + the PDFs in `apps/web/public/`.
+data rather than prose. Four surfaces render it and none of them may disagree:
+`apps/mobile`'s `HelpGuideScreen` (Profile → Help & guide), the portal's `/help`, the generated
+`SNAG_ONBOARDING_GUIDE.md` + the PDFs in `apps/web/public/`, and the in-app walkthrough below.
 
 1. Edit `packages/onboarding-guide/src/index.ts` — sections carry `roles`, and a role only ever
    sees whole sections, never partial ones
@@ -492,12 +492,66 @@ generated `SNAG_ONBOARDING_GUIDE.md` + the PDFs in `apps/web/public/`.
    the change — the generated files are what a customer reads
 3. `apps/mobile/src/lib/onboardingGuide.test.ts` ties the mode/severity/gate tables to the
    constants they describe, so adding a gate condition without documenting it fails there
+4. `apps/mobile/src/lib/tour.test.ts` fails until a **new section** is either given a
+   walkthrough step or named in `TOUR_EXEMPT_SECTIONS` with a reason
 
 Two things about the package's shape are load-bearing. It's **one file** because the generator
 imports it with plain Node type-stripping and no bundler — split it and the extensionless
 relative import stops resolving. And it builds its tables from `INVESTIGATION_MODE_OPTIONS`,
 `SEVERITY_LABELS` and friends rather than re-typing the strings, so a label change in the app
 reaches the printed handout on the crib-room wall.
+
+### The guided walkthrough
+
+The first time anyone opens `apps/mobile` it dims the screen, rings one control at a time and
+says what to do with it — Back/Next, a Pause, and a "Read more" into the matching guide section.
+It replaced a welcome screen and a four-slide carousel that were **worker-only**, so a Site Lead
+or Manager who signed up, created an organisation and landed on a four-tab app had never been
+told what any of it was.
+
+**Its content is the guide's content.** `TOUR_STEPS` lives in
+`packages/onboarding-guide/src/index.ts` next to `GUIDE_SECTIONS`, every step names the
+`sectionId` it is drawn from, and `tourStepsForRole` **derives step order from the guide's
+section order** rather than declaring it — move a section and its steps move. `npm run guide`
+prints the steps as an appendix in the markdown and in each role's PDF, so a trainer's handout
+and the phone in a crew member's hand say the same thing.
+
+`tour.test.ts` holds the joins that a type checker can't: section coverage (above), a step's
+roles being a subset of its section's, and **anchor liveness** — it scans `apps/mobile/src` for
+`<TourAnchor id="…">` and fails if `TOUR_ANCHORS` and the rendered set differ in either
+direction. That last one matters because a renamed control is not a type error: `TourAnchor`
+would simply never register, the spotlight would fall back to a centred card, and the
+walkthrough would go on confidently pointing at nothing.
+
+Three things about the runtime:
+
+- **It is not a `Modal`, and must not become one.** `TourProvider` wraps `RootNavigator` in
+  `App.tsx` and draws four scrim rects with a gap between them (`src/lib/tourGeometry.ts`).
+  A Modal stacks above the whole navigator — hiding the tab bar the first steps point at — and
+  takes every touch, so the control a step is telling somebody to press would be the one thing
+  they couldn't press. Being outside the navigator is also why tab switching goes through
+  `src/lib/navigationRef.ts` rather than `useNavigation`.
+- **The scrim dims but never blocks** (`pointerEvents="none"`). It used to swallow taps outside
+  the hole, and that survived exactly until the tab-bar step: the anchor wraps the tab *icon*,
+  so the hole stopped just above the word "Report" and the half of the tab people aim at was
+  dead. Blocking requires the hole to equal the hit area of every control anyone ever anchors,
+  it fails silently, and no test can hold that across future anchors — so it doesn't block.
+  `apps/mobile/e2e/tour.spec.ts` clicks the tab *label* to keep it that way.
+- **Three steps gate on a real action** (`photo-added`, `kind-chosen`, `snag-submitted`, reported
+  via `useTour().completeGate`). Each shows a **Skip this step**: a denied camera permission or an
+  org with no sites must not be able to deadlock somebody's first session.
+- **Progress is a server column** — `profiles.tour_status`/`tour_step`, written only through
+  `set_tour_progress` (`20260803120000` revoked direct profile updates). `src/lib/tourState.ts`
+  keeps a per-user AsyncStorage mirror that wins **only when it is newer**, for the one case that
+  needs it: paused on a site with no signal, where the server still says `not_started` and
+  believing it would restart a first-timer from step one. `done` is absorbing on either side.
+  Writes are **queued, not parallel** — they all hit one row and `record` runs on every step, so
+  racing them lost a `paused` to a straggling `running` and silently un-paused the walkthrough.
+- **Only `not_started` auto-starts.** An unfinished walkthrough comes back as the resume bar, not
+  as the overlay: opening the app isn't asking to continue, and re-dimming somebody who stopped
+  days ago is how an app gets closed. It also keeps the walkthrough from choosing which tab the
+  app opens on for a returning user, which was breaking every e2e spec that assumed Report —
+  a saved step on Snags left the Report screen mounted with `display: none`.
 
 ## Code Style
 

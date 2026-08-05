@@ -52,6 +52,17 @@ const MEASURE_INTERVAL_MS = 200;
  * so the control the walkthrough is telling somebody to press would be the one
  * thing they couldn't press. Four scrim rects with a gap between them leave the
  * spotlit control genuinely live.
+ *
+ * **The scrim dims but never blocks.** It started out swallowing taps outside
+ * the hole, on the theory that a walkthrough should keep you on its path. That
+ * lasted until the tab-bar step, where the anchor wraps the tab *icon* and the
+ * hole therefore stopped just above the word "Report" — so the step said "tap
+ * the Report tab" and the half of it people actually aim at was dead. The
+ * general form of that bug is worse than the thing blocking bought: it needs
+ * the hole to exactly equal the hit area of every control anyone ever anchors,
+ * it fails silently, and no test can hold the invariant across future anchors.
+ * `pointerEvents="none"` retires the whole class. Nothing is trapped by it
+ * either — the walkthrough already has Pause, Skip and Back.
  */
 export default function TourOverlay({
   getAnchorRef,
@@ -121,17 +132,12 @@ export default function TourOverlay({
         scrimRects(hole, viewport).map((r, i) => (
           <View
             key={i}
+            pointerEvents="none"
             style={[styles.scrim, { left: r.x, top: r.y, width: r.width, height: r.height }]}
-            // Explicit rather than relying on a plain View blocking by default:
-            // this is the whole reason the hole works, and it should say so.
-            onStartShouldSetResponder={() => true}
           />
         ))
       ) : (
-        <View
-          style={[styles.scrim, StyleSheet.absoluteFillObject]}
-          onStartShouldSetResponder={() => true}
-        />
+        <View pointerEvents="none" style={[styles.scrim, StyleSheet.absoluteFillObject]} />
       )}
 
       {hole && (

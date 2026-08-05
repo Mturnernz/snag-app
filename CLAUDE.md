@@ -512,6 +512,12 @@ Three things about the runtime:
   takes every touch, so the control a step is telling somebody to press would be the one thing
   they couldn't press. Being outside the navigator is also why tab switching goes through
   `src/lib/navigationRef.ts` rather than `useNavigation`.
+- **The scrim dims but never blocks** (`pointerEvents="none"`). It used to swallow taps outside
+  the hole, and that survived exactly until the tab-bar step: the anchor wraps the tab *icon*,
+  so the hole stopped just above the word "Report" and the half of the tab people aim at was
+  dead. Blocking requires the hole to equal the hit area of every control anyone ever anchors,
+  it fails silently, and no test can hold that across future anchors — so it doesn't block.
+  `apps/mobile/e2e/tour.spec.ts` clicks the tab *label* to keep it that way.
 - **Three steps gate on a real action** (`photo-added`, `kind-chosen`, `snag-submitted`, reported
   via `useTour().completeGate`). Each shows a **Skip this step**: a denied camera permission or an
   org with no sites must not be able to deadlock somebody's first session.

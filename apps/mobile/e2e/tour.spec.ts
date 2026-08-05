@@ -83,11 +83,24 @@ async function advanceToEnd(page: Page) {
   await expect(progress(page)).toBeHidden();
 }
 
-/** Reach the Profile tab. The scrim blocks the tab bar while a callout is up,
- *  so pause first — which is itself the behaviour the overlay is for. */
+/**
+ * Reach the Profile tab with nothing of the walkthrough's own on top of it.
+ *
+ * The scrim no longer blocks, but the callout card is a real interactive
+ * surface and can sit over the row we want — so pause, which takes it away.
+ * `isVisible()` resolves immediately rather than waiting, so a callout that
+ * hasn't rendered yet reads as absent; hence the second look.
+ */
 async function openProfile(page: Page) {
   const pause = page.getByText('Pause', { exact: true });
+  if (!(await pause.isVisible().catch(() => false))) await page.waitForTimeout(1500);
   if (await pause.isVisible().catch(() => false)) await pause.click();
+
+  // The resume bar takes the pause's place, low on the screen; dismiss it so it
+  // can't sit over the row either.
+  const dismiss = page.getByLabel('Hide until next time');
+  if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
+
   await page.getByText('Profile', { exact: true }).last().click();
 }
 
@@ -152,9 +165,13 @@ test.describe('the guided walkthrough', () => {
 
     // ── The spotlit control stays tappable ──────────────────────────────────
     //
-    // The reason the overlay is four scrim rects with a hole rather than a
-    // Modal or one full-screen layer: with either of those, the tab this step
-    // is pointing at would be the one thing you couldn't press.
+    // The reason the overlay is four scrim rects rather than a Modal or one
+    // full-screen layer: with either of those, the tab this step is pointing at
+    // would be the one thing you couldn't press.
+    //
+    // Clicks the tab *label*, not the icon, deliberately. The anchor wraps the
+    // icon, so a scrim that swallowed taps left the word "Report" dead — this
+    // test caught exactly that, and the scrim no longer blocks at all.
     while (!(await page.getByText('Reporting is the first tab').isVisible().catch(() => false))) {
       await page.getByText('Next', { exact: true }).click();
       expect(await stepNumber(page)).toBeLessThan(total);

@@ -31,12 +31,13 @@ test.describe('worker journey', () => {
   test('a worker can sign in', async ({ page }) => {
     await signIn(page);
 
-    // A first run opens the guided walkthrough over the Report tab; a returning
-    // account goes straight to it. Both are success — the assertion is that the
+    // Deliberately not asserting on any screen's content. Which tab the app
+    // opens on depends on the guided walkthrough's saved step (a server column
+    // on `profiles`), and React Navigation leaves the other tabs' screens
+    // mounted with `display: none` — so "Report a Snag" can be present and
+    // hidden at the same time. The only thing this test is about is that the
     // auth screen is behind us.
-    await expect(
-      page.getByText(/welcome to snag|report a snag/i).first()
-    ).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText('Sign In', { exact: true })).toBeHidden({ timeout: 90_000 });
   });
 
   test('the report screen offers both lanes and is scoped to the right org', async ({ page }) => {

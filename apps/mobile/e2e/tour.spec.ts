@@ -79,8 +79,22 @@ async function advanceToEnd(page: Page) {
     }
     await page.getByText('Next', { exact: true }).click();
   }
+
+  // Progress is written fire-and-forget — the app doesn't await the RPC, which
+  // is right for a user (a killed app costs them one step) and wrong for a
+  // shared test account: closing the page here cut the final `done` off, and
+  // the run before this one left QA Worker sitting mid-walkthrough for every
+  // spec that boots after it. Armed before the click, since the request goes
+  // out immediately.
+  const written = page
+    .waitForResponse((r) => r.url().includes('/rpc/set_tour_progress') && r.status() < 400, {
+      timeout: 15_000,
+    })
+    .catch(() => null);
+
   await page.getByText('Done', { exact: true }).click();
   await expect(progress(page)).toBeHidden();
+  await written;
 }
 
 /**

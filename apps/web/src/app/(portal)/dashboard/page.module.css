@@ -1,0 +1,29 @@
+/* The notification-delivery warning.
+   Uses the danger *foreground* token, not --color-danger: the icon sits on
+   the card surface, and the fg variant is the one carrying the contrast
+   ratio e2e/a11y.spec.ts holds every portal page to. */
+
+.mailAlert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  color: var(--color-text-primary);
+}
+
+.mailAlert svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-danger-fg);
+}
+
+.mailAlertTitle {
+  margin: 0 0 var(--space-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.mailAlertBody {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}

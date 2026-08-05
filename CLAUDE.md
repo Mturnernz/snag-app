@@ -150,6 +150,25 @@ Photos/evidence go to the `snag-photos` and `snag-evidence` Storage buckets (pri
 org-folder-scoped via RLS), not a public `issue-photos` bucket. Org-wide documents live in
 `org-documents` / `org_documents` — see "The document library" below.
 
+### Not every function is an API
+
+Trigger functions and the internal `dispatch_*` / `run_*` layer are callable by nobody:
+`20260805100000_relock_internal_functions.sql` revokes EXECUTE from `public`, `anon` **and
+`authenticated`**, as a sweep over return type and name rather than a list, so a trigger
+function added later is covered without anyone remembering.
+
+It is a re-lock, not a lock, and that is the part to know. `20260621051648` revoked the
+same functions in June; `20260803120200` swept the schema six weeks later granting
+`authenticated` everything outside a three-name anon allow-list, and handed all of them
+back. The allow-list answered *"may a signed-out visitor call this?"* — a different
+question from *"may a signed-in user call this?"* — and asking only the first put ten
+functions on `/rest/v1/rpc/`, including `run_retention_minimisation`, the scheduled
+data-deletion job. **A sweep that grants needs both lists; a sweep that only revokes needs
+neither.** Write the next one to revoke only.
+
+Revoking EXECUTE does not stop a trigger firing — the privilege is checked when the trigger
+is created, not when it fires. June through August is the proof.
+
 ## Which site a report goes to
 
 The reporter picks it, on both mobile report flows: `SitePicker`, a dropdown in the form's own
@@ -640,11 +659,45 @@ defaults to `noreply@snaghq.co.nz` for that reason. It used to default to
 Resend's sandbox sender, `onboarding@resend.dev`, which delivers *only* to the
 Resend account's own address — so every notification to anybody else was
 rejected 403. Nothing said so: `sendEmail` logs the rejection, `notify-snag`
-returns 200 regardless, the DB dispatch ignores the response, and no test
-covers it. Mail stopped leaving the system on 13 July 2026 and was noticed
-three weeks later by reading Resend's dashboard. **If notifications go quiet,
-check Resend's Emails list before anything in this repo** — the app cannot tell
-you.
+returns 200 regardless, and the DB dispatch ignores the response. Mail stopped
+leaving the system on 13 July 2026 and was noticed three weeks later by reading
+Resend's dashboard.
+
+**That blind spot is now instrumented, and the shape of the instrument
+matters.** `notification_deliveries` (20260805110000) takes one row per
+*attempt* — not per failure — with the event, org, recipient count, and
+Resend's status and error body when it refused. Attempts, because this system
+has failed in two shapes that are blind to each other: July was every send
+being refused, which a failure log catches; invites were no send ever being
+*attempted*, which a failure log reports as a clean sheet. `sendEmail` writes
+the row itself and swallows its own errors, so the diagnostic can never be the
+reason a notification fails.
+
+`email_delivery_health()` turns that into the two numbers a supervisor can act
+on — sends refused, and invites created without a matching send — scoped to
+their own org, and **the portal dashboard says so on the page**. Deliberately
+not an email alert: an alarm for broken email that travels by email is silent
+in exactly the case that matters, and would have been silent through all three
+weeks of July while looking like a working safety net. No recipient addresses
+are stored; the health signal needs a count, not a mailing list, and this is
+the one table that would otherwise hold every address the system has mailed
+across every org outside any org's RLS.
+
+**When notifications go quiet, the dashboard now names it — but Resend's
+Emails list is still where the *reason* lives.** The app can tell you that a
+send was refused and what the provider said; it cannot tell you why the
+provider said it.
+
+**Do not use `net._http_response` as the delivery signal.** It is tempting —
+pg_net already records a status per dispatch, for free. But pg_net times out
+at 5s and the edge function keeps running, so a cold start produces a row
+reading `Timeout of 5000 ms reached` for an email that was sent and
+*delivered*. That happened on the first invocation after the v20 deploy: the
+timeout is logged in `net._http_response`, the delivery is in Resend, and
+`notification_deliveries` — written by the function itself, after the send —
+correctly records `ok = true, status_code = 200`. A health check reading pg_net
+would raise a false alarm on every cold start and stay silent on a warm
+rejection, which is exactly backwards.
 
 **Auth mail is SMTP, and its failures are loud but elsewhere.** Supabase's
 built-in SMTP only delivers to members of the Supabase org and does a couple of

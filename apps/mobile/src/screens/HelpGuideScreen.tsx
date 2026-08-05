@@ -9,6 +9,7 @@ import {
   Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RouteProp, useRoute } from '@react-navigation/native';
 
 import {
   GUIDE_PDF_PATH_BY_ROLE,
@@ -18,7 +19,7 @@ import {
   type GuideSection,
 } from '@snag/onboarding-guide';
 
-import { UserRole, ROLE_LABELS } from '../types';
+import { UserRole, ROLE_LABELS, RootStackParamList } from '../types';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, Shadow } from '../constants/theme';
 import { PORTAL_URL } from '../lib/appUrl';
 import { supabase } from '../lib/supabase';
@@ -39,9 +40,13 @@ import Icon from '../components/Icon';
 // progress signal on something that never progresses.
 export default function HelpGuideScreen() {
   const insets = useSafeAreaInsets();
+  const route = useRoute<RouteProp<RootStackParamList, 'HelpGuide'>>();
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  // Opens on the section the caller asked for — the walkthrough's "Read more",
+  // and the same idea as the portal's `?section=`. Single-open, so naming one
+  // is enough to answer "which section" without also scrolling.
+  const [expanded, setExpanded] = useState<string | null>(route.params?.section ?? null);
 
   useEffect(() => {
     let cancelled = false;

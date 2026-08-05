@@ -103,6 +103,12 @@ export const Colors = {
   // text colour against, so anything sitting on one gets this behind it and
   // white on top.
   photoOverlay: 'rgba(17, 24, 39, 0.75)',
+
+  // Modal/overlay scrim. The sheets and dialogs had this value inline in four
+  // places before the walkthrough needed a fifth — and the walkthrough's is the
+  // one that has to match, since its scrim sits in four separate rects around
+  // the spotlight and any drift between them shows up as a visible seam.
+  scrim: 'rgba(17, 24, 39, 0.5)',
 };
 
 // Work group tile colours — a curated palette an admin/supervisor picks from

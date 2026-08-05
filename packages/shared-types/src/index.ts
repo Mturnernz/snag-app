@@ -49,8 +49,16 @@ export interface Profile {
   role: UserRole;
   created_at: string;
   has_seen_onboarding?: boolean;
+  /** The guided walkthrough's state. `tour_step` is a `TourStep['id']` from
+   *  `@snag/onboarding-guide` — the resume point, and null unless running or
+   *  paused. Written only through `set_tour_progress`. */
+  tour_status?: TourStatus;
+  tour_step?: string | null;
+  tour_updated_at?: string | null;
   organisation?: Organisation;
 }
+
+export type TourStatus = 'not_started' | 'running' | 'paused' | 'done';
 
 export interface Invite {
   id: string;
@@ -238,6 +246,11 @@ export const SNAG_STEP_KEYS: SnagStepKey[] = [
 ];
 
 export type RootStackParamList = {
+  // Nested tab selection (`{ screen: 'Report' }`) goes through
+  // `navigateToTab` in lib/navigationRef.ts rather than being typed here:
+  // expressing it needs React Navigation's `NavigatorScreenParams`, and this
+  // package is shared with apps/web, which has no business depending on a
+  // navigation library it doesn't use.
   Main: undefined;
   // `issueId` here refers to a snags.id — the param name is kept for
   // minimal navigation-call churn even though the underlying entity is a Snag.
@@ -254,10 +267,11 @@ export type RootStackParamList = {
   ManageWorkGroups: undefined;
   Mentions: undefined;
   DocumentLibrary: undefined;
-  OnboardingCarousel: undefined;
   // The onboarding guide, filtered to the reader's role. Content lives in
-  // @snag/onboarding-guide, shared with the portal's /help page.
-  HelpGuide: undefined;
+  // @snag/onboarding-guide, shared with the portal's /help page. `section` is a
+  // GuideSection['id'] and opens that section on arrival — the walkthrough's
+  // "Read more" uses it, and it mirrors the portal's `?section=`.
+  HelpGuide: { section?: string } | undefined;
 };
 
 export type MainTabParamList = {

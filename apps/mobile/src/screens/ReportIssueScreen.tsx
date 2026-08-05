@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   View,
@@ -39,6 +39,8 @@ import Button from '../components/Button';
 import Icon from '../components/Icon';
 import SitePicker from '../components/SitePicker';
 import ScreenEntrance from '../components/ScreenEntrance';
+import TourAnchor from '../components/TourAnchor';
+import { useTour } from '../context/TourContext';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -79,6 +81,17 @@ export default function ReportIssueScreen() {
   const { target, clearTarget } = useReportTarget();
   const { setDraft } = useIncidentDraft();
   const { isOffline, enqueue } = useOfflineQueue();
+  // Destructured rather than held as `tour`: the context value changes on every
+  // walkthrough step, and PhotoPicker keys an effect on the callback below.
+  // `completeGate` itself is stable.
+  const { completeGate } = useTour();
+
+  const handlePhotosChange = useCallback(
+    (count: number) => {
+      if (count > 0) completeGate('photo-added');
+    },
+    [completeGate],
+  );
 
   const [photosBlocked, setPhotosBlocked] = useState(false);
   const [description, setDescription] = useState('');
@@ -104,6 +117,13 @@ export default function ReportIssueScreen() {
   const reportSiteId = site?.id ?? null;
   // The custom group this reporter last submitted to, in this org.
   const [lastGroupId, setLastGroupId] = useState<string | null>(null);
+
+  // Watched rather than called at the two success points, because a report
+  // queued offline is still a report somebody filed — the walkthrough should
+  // not hold them on "Send it" because the site has no signal.
+  useEffect(() => {
+    if (submitted) completeGate('snag-submitted');
+  }, [submitted, completeGate]);
 
   // The sites this reporter can file into, and which of them the form opens
   // on: the site they last reported into here, else the first by name.
@@ -448,33 +468,46 @@ export default function ReportIssueScreen() {
         {/* Site — only when there's more than one to choose between. Inline,
             so the label and the site it names read as one row. */}
         {!isPublicSubmission && sites.length > 1 && (
-          <SitePicker sites={sites} value={site} onChange={setSite} layout="inline" />
+          <TourAnchor id="report-site">
+            <SitePicker sites={sites} value={site} onChange={setSite} layout="inline" />
+          </TourAnchor>
         )}
 
-        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} compact />
+        <TourAnchor id="report-photo">
+          <PhotoPicker
+            ref={photoPickerRef}
+            pathPrefix={photoPathPrefix}
+            deferUpload={isOffline}
+            onBlockingChange={setPhotosBlocked}
+            onPhotosChange={handlePhotosChange}
+            compact
+          />
+        </TourAnchor>
 
         {/* Description — the only required field on the fast path */}
-        <View style={styles.fieldGroup}>
-          <View style={styles.fieldLabelRow}>
-            <Text style={styles.fieldLabel}>
-              What's wrong? <Text style={styles.required}>*</Text>
-            </Text>
-            <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
-              {description.length} / 300
-            </Text>
+        <TourAnchor id="report-description">
+          <View style={styles.fieldGroup}>
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.fieldLabel}>
+                What's wrong? <Text style={styles.required}>*</Text>
+              </Text>
+              <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
+                {description.length} / 300
+              </Text>
+            </View>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="e.g. Broken fire exit door in the main warehouse"
+              placeholderTextColor={Colors.textMuted}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              maxLength={300}
+            />
           </View>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="e.g. Broken fire exit door in the main warehouse"
-            placeholderTextColor={Colors.textMuted}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            maxLength={300}
-          />
-        </View>
+        </TourAnchor>
 
         {isPublicSubmission ? (
           <>
@@ -508,10 +541,17 @@ export default function ReportIssueScreen() {
           </>
         ) : (
           // Type — members only
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Type</Text>
-            <Chip options={KIND_OPTIONS} value={kind} onChange={setKind} variant="segmented" />
-          </View>
+          <TourAnchor id="report-kind">
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Type</Text>
+              <Chip
+                options={KIND_OPTIONS}
+                value={kind}
+                onChange={(next) => { setKind(next); completeGate('kind-chosen'); }}
+                variant="segmented"
+              />
+            </View>
+          </TourAnchor>
         )}
 
         {isOffline && (
@@ -522,29 +562,33 @@ export default function ReportIssueScreen() {
         )}
 
         {/* Submit — one primary action */}
-        <Button
-          label="Submit Report"
-          onPress={handleSubmit}
-          loading={submitting}
-          disabled={photosBlocked}
-          fullWidth
-        />
+        <TourAnchor id="report-submit">
+          <Button
+            label="Submit Report"
+            onPress={handleSubmit}
+            loading={submitting}
+            disabled={photosBlocked}
+            fullWidth
+          />
+        </TourAnchor>
 
         {!isPublicSubmission && (
           // Serious lane — clearly clickable, but visually quieter than the primary CTA
-          <Button
-            label="Report a Serious Incident"
-            variant="seriousOutline"
-            icon="warning-outline"
-            onPress={() => {
-              setDraft({
-                description,
-                photoUris: photoPickerRef.current?.getLocalUris() ?? [],
-              });
-              navigation.navigate('ReportIncidentDetails');
-            }}
-            fullWidth
-          />
+          <TourAnchor id="report-serious">
+            <Button
+              label="Report a Serious Incident"
+              variant="seriousOutline"
+              icon="warning-outline"
+              onPress={() => {
+                setDraft({
+                  description,
+                  photoUris: photoPickerRef.current?.getLocalUris() ?? [],
+                });
+                navigation.navigate('ReportIncidentDetails');
+              }}
+              fullWidth
+            />
+          </TourAnchor>
         )}
       </ScrollView>
 

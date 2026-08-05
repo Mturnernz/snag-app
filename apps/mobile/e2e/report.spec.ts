@@ -31,8 +31,9 @@ test.describe('worker journey', () => {
   test('a worker can sign in', async ({ page }) => {
     await signIn(page);
 
-    // First run lands on onboarding; a returning account goes straight in. Both
-    // are success — the assertion is that the auth screen is behind us.
+    // A first run opens the guided walkthrough over the Report tab; a returning
+    // account goes straight to it. Both are success — the assertion is that the
+    // auth screen is behind us.
     await expect(
       page.getByText(/welcome to snag|report a snag/i).first()
     ).toBeVisible({ timeout: 90_000 });

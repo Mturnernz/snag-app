@@ -1,6 +1,6 @@
 # SNAG — Getting started
 
-Version 1.0 · generated 2026-08-04
+Version 1.0 · generated 2026-08-05
 
 > Generated from `packages/onboarding-guide`. Don't edit this file by hand —
 > edit the package and run `npm run guide`, or the app and the handout stop
@@ -26,6 +26,7 @@ Version 1.0 · generated 2026-08-04
 16. [Notifications — what lands in whose inbox](#notifications)
 17. [Records and retention](#records)
 18. [Training your crew](#training-your-crew)
+19. [Appendix — the in-app walkthrough](#the-walkthrough)
 
 <a id="what-snag-is"></a>
 
@@ -518,7 +519,41 @@ Run this at a toolbox meeting with everybody's phone out. Fifteen minutes, and p
 >
 > "If you can see it, report it — it takes a minute and somebody will get back to you." Reporting rates follow whether people believe the second half of that sentence, so make sure resolution notes actually get written in the first fortnight.
 
-Anyone can replay the app's own four-slide overview at any time from Profile → Replay tutorial, and this guide is always at Profile → Help & guide.
+Anyone can replay the app's own guided walkthrough at any time from Profile → Walkthrough — it points at each control in turn and can be paused and picked up later. This guide is always at Profile → Help & guide.
 
 Print the role handouts and leave them in the crib room — there is one each for Crew, Site Leads and Managers.
+
+<a id="the-walkthrough"></a>
+
+## Appendix — the in-app walkthrough
+
+*Every step the app walks a new starter through, in order.*
+
+**For:** Crew · Site Lead · Manager
+
+The first time somebody opens SNAG it dims the screen, puts a ring around one control at a time, and says what to do with it. It can be paused and picked up later, and replayed any time from Profile → Walkthrough. Each step is drawn from a section of this guide, so it is the same teaching in a shorter form — use this table to follow along, or to check what your crew have already been shown.
+
+| Step | What it points at | For | From |
+| --- | --- | --- | --- |
+| Welcome to SNAG | Anywhere — this one is about the app, not a control | Crew · Site Lead · Manager | What SNAG is |
+| Your role decides what you see | Look at the Profile tab | Crew · Site Lead · Manager | Getting in — accounts, joining, and roles |
+| Reporting is the first tab | Look at the Report tab | Crew · Site Lead · Manager | Reporting a snag |
+| Check the site | Choose from the site picker on the report form | Crew · Site Lead · Manager | Reporting a snag |
+| Add a photo | Tap the photo picker on the report form | Crew · Site Lead · Manager | Reporting a snag |
+| Say what’s wrong | Type in the description field on the report form | Crew · Site Lead · Manager | Reporting a snag |
+| Pick the type | Choose from the type chips on the report form | Crew · Site Lead · Manager | Reporting a snag |
+| Send it | Tap Submit Report | Crew · Site Lead · Manager | Reporting a snag |
+| Injuries and hazards go here instead | Look at Report a Serious Incident | Crew · Site Lead · Manager | Reporting a serious incident |
+| Everything you reported is here | Tap the Snags tab | Crew · Site Lead · Manager | Your snag list, comments and mentions |
+| Narrow it down | Tap the filter bar on the snag list | Crew · Site Lead · Manager | Your snag list, comments and mentions |
+| Open one to follow it | Tap the snag list | Crew · Site Lead · Manager | Your snag list, comments and mentions |
+| Where @-mentions land | Look at Mentions | Crew · Site Lead · Manager | Your snag list, comments and mentions |
+| Reports from people without an account | Look at Manage Organisation | Manager | Public and QR reporting |
+| What’s still open, by site | Look at Outstanding work by site | Site Lead · Manager | Running an investigation |
+| Queues for the everyday stuff | Look at Manage Work Groups | Site Lead · Manager | Working the niggle lane |
+| The document library | Look at Documents | Crew · Site Lead · Manager | The document library |
+| Day one: your organisation | Tap Manage Organisation | Manager | Day one — setting up your organisation |
+| Then your sites | Tap Manage Sites | Manager | Day one — setting up your organisation |
+| Getting the record out | Look at View Reports | Site Lead · Manager | Records and retention |
+| The full guide, and the handouts | Look at Help & guide | Site Lead · Manager | Training your crew |
 

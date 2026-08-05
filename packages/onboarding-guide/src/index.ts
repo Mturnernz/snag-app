@@ -740,7 +740,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         title: 'The message that makes it work',
         text: '"If you can see it, report it — it takes a minute and somebody will get back to you." Reporting rates follow whether people believe the second half of that sentence, so make sure resolution notes actually get written in the first fortnight.',
       },
-      { type: 'para', text: 'Anyone can replay the app\'s own four-slide overview at any time from Profile → Replay tutorial, and this guide is always at Profile → Help & guide.' },
+      { type: 'para', text: 'Anyone can replay the app\'s own guided walkthrough at any time from Profile → Walkthrough — it points at each control in turn and can be paused and picked up later. This guide is always at Profile → Help & guide.' },
       { type: 'para', text: 'Print the role handouts and leave them in the crib room — there is one each for Crew, Site Leads and Managers.' },
     ],
   },
@@ -783,4 +783,393 @@ export function sectionsForRole(role: UserRole): GuideSection[] {
 /** A section by id — what `?section=` and a deep link resolve through. */
 export function guideSection(id: string): GuideSection | undefined {
   return GUIDE_SECTIONS.find((s) => s.id === id);
+}
+
+// ─── The in-app walkthrough ──────────────────────────────────────────────────
+
+/**
+ * The guided walkthrough `apps/mobile` runs for somebody's first session: an
+ * overlay that dims the screen, cuts a hole around one control, and says what
+ * to do with it.
+ *
+ * It lives in this file rather than in the app because the walkthrough and the
+ * manual are the same teaching in two registers, and the failure mode of
+ * keeping them apart is silent — the manual gains a section, nobody thinks
+ * about the walkthrough, and the two start describing different apps. Three
+ * things stop that here:
+ *
+ *  - **Order is derived, not declared.** `tourStepsForRole` sorts by where a
+ *    step's section sits in `GUIDE_SECTIONS`, so re-ordering the guide
+ *    re-orders the walkthrough.
+ *  - **Every step names a section**, which is both the "Read more" target and
+ *    the ordering key — and every section must be either covered by a step or
+ *    named in `TOUR_EXEMPT_SECTIONS` with a reason. Adding a section fails
+ *    `apps/mobile/src/lib/tour.test.ts` until somebody decides which it is.
+ *  - **Copy is built from the shared constants**, like the guide's tables, so
+ *    a label change in the app reaches the spotlight card.
+ */
+
+/**
+ * Every control the walkthrough can point at, and where it is.
+ *
+ * The union is the contract with `apps/mobile`: a step cannot name an anchor
+ * that isn't here, `<TourAnchor>` cannot render one that isn't here, and
+ * `tour.test.ts` scans the app's source to check both directions — a renamed
+ * or deleted control fails the build rather than producing a spotlight over
+ * empty space.
+ */
+export const TOUR_ANCHORS = {
+  'tab-report': 'The Report tab',
+  'tab-snags': 'The Snags tab',
+  'tab-manager': 'The Manager tab',
+  'tab-profile': 'The Profile tab',
+  'report-site': 'The site picker on the report form',
+  'report-photo': 'The photo picker on the report form',
+  'report-description': 'The description field on the report form',
+  'report-kind': 'The type chips on the report form',
+  'report-submit': 'Submit Report',
+  'report-serious': 'Report a Serious Incident',
+  'snags-filters': 'The filter bar on the snag list',
+  'snags-list': 'The snag list',
+  'manager-outstanding': 'Outstanding work by site',
+  'manager-work-groups': 'Manage Work Groups',
+  'manager-organisation': 'Manage Organisation',
+  'manager-sites': 'Manage Sites',
+  'manager-reports': 'View Reports',
+  'profile-mentions': 'Mentions',
+  'profile-documents': 'Documents',
+  'profile-help': 'Help & guide',
+  'profile-walkthrough': 'Walkthrough',
+} as const;
+
+export type TourAnchorId = keyof typeof TOUR_ANCHORS;
+
+/**
+ * The steps that wait for the user to actually do the thing rather than for
+ * them to press Next.
+ *
+ * Deliberately three. A walkthrough that gates everything deadlocks the first
+ * time a step's action isn't available — no camera permission, no sites yet —
+ * and one that gates nothing can be pressed through without a finger ever
+ * landing on the app. These three are the report itself, which is the one
+ * thing everybody has to be able to do.
+ */
+export type TourGateId = 'photo-added' | 'kind-chosen' | 'snag-submitted';
+
+export const TOUR_GATE_IDS: TourGateId[] = ['photo-added', 'kind-chosen', 'snag-submitted'];
+
+export interface TourStep {
+  /** Stable — it is what gets persisted as the resume point. Don't rename. */
+  id: string;
+  /** Must be a subset of the section's roles: a step can't teach Crew from a
+   *  section Crew never see. */
+  roles: UserRole[];
+  /** The section this step is drawn from. "Read more" opens it, and its
+   *  position in `GUIDE_SECTIONS` is what orders the walkthrough. */
+  sectionId: string;
+  /** Which tab the step lives on. The walkthrough switches tabs itself, so a
+   *  step is never waiting behind a screen nobody navigated to. */
+  tab: 'Report' | 'Issues' | 'Admin' | 'Profile';
+  /** null renders a centred card with no spotlight — for the opening step,
+   *  which is about the app rather than about a control. */
+  anchor: TourAnchorId | null;
+  /** The verb. Drives the lead-in word and the icon on the callout. */
+  action: 'tap' | 'type' | 'choose' | 'look';
+  title: string;
+  /** One or two sentences. What to do, and why it matters. */
+  body: string;
+  /** Present on the few steps that wait for the action itself. */
+  gate?: TourGateId;
+}
+
+const KIND_LIST = `${KIND_LABELS.fixit} or ${KIND_LABELS.improvement}`;
+
+export const TOUR_STEPS: TourStep[] = [
+  // ── what-snag-is ───────────────────────────────────────────────────────────
+  {
+    id: 'welcome',
+    roles: [...ALL],
+    sectionId: 'what-snag-is',
+    tab: 'Report',
+    anchor: null,
+    action: 'look',
+    title: 'Welcome to SNAG',
+    body: `This is where your workplace records what's wrong and what was done about it. Everything runs down one of two lanes — everyday niggles (${KIND_LABELS.fixit}, ${KIND_LABELS.improvement}) and serious ones (${KIND_LABELS.hazard}, ${KIND_LABELS.incident}) — and they're kept apart because they fail differently. This takes about a minute; you can pause it any time.`,
+  },
+
+  // ── getting-in ─────────────────────────────────────────────────────────────
+  {
+    id: 'your-role',
+    roles: [...ALL],
+    sectionId: 'getting-in',
+    tab: 'Profile',
+    anchor: 'tab-profile',
+    action: 'look',
+    title: 'Your role decides what you see',
+    body: `Profile shows which organisation you're in and whether you're a ${ROLE_LABELS.worker}, a ${ROLE_LABELS.supervisor} or a ${ROLE_LABELS.officer_admin}. The tabs along the bottom change with it, so what you're being shown here is what your role can actually do.`,
+  },
+
+  // ── report-a-snag ──────────────────────────────────────────────────────────
+  {
+    id: 'report-tab',
+    roles: [...ALL],
+    sectionId: 'report-a-snag',
+    tab: 'Report',
+    anchor: 'tab-report',
+    action: 'look',
+    title: 'Reporting is the first tab',
+    body: "It's where the app opens, because it's the thing you'll do most. Most reports take under a minute. Let's file one now.",
+  },
+  {
+    id: 'report-site',
+    roles: [...ALL],
+    sectionId: 'report-a-snag',
+    tab: 'Report',
+    anchor: 'report-site',
+    action: 'choose',
+    title: 'Check the site',
+    body: "This is the site your report goes to. It defaults to wherever you last reported from, so it's usually already right — but change it if you're somewhere else today.",
+  },
+  {
+    id: 'report-photo',
+    roles: [...ALL],
+    sectionId: 'report-a-snag',
+    tab: 'Report',
+    anchor: 'report-photo',
+    action: 'tap',
+    title: 'Add a photo',
+    body: "Tap here and take one. A photo is the single most useful thing on a report — it saves whoever picks this up from having to go and look.",
+    gate: 'photo-added',
+  },
+  {
+    id: 'report-description',
+    roles: [...ALL],
+    sectionId: 'report-a-snag',
+    tab: 'Report',
+    anchor: 'report-description',
+    action: 'type',
+    title: 'Say what’s wrong',
+    body: "One line is enough — what it is and where. Write it the way you'd say it to someone standing next to you.",
+  },
+  {
+    id: 'report-kind',
+    roles: [...ALL],
+    sectionId: 'report-a-snag',
+    tab: 'Report',
+    anchor: 'report-kind',
+    action: 'choose',
+    title: 'Pick the type',
+    body: `${KIND_LIST}. This is the niggle lane — hazards and incidents have their own button below, and their own process.`,
+    gate: 'kind-chosen',
+  },
+  {
+    id: 'report-submit',
+    roles: [...ALL],
+    sectionId: 'report-a-snag',
+    tab: 'Report',
+    anchor: 'report-submit',
+    action: 'tap',
+    title: 'Send it',
+    body: "That's the whole report. It lands with whoever the site assigns it to, and you'll be able to follow what happens next. If you're offline it saves on your phone and sends itself when you're back.",
+    gate: 'snag-submitted',
+  },
+
+  // ── report-serious ─────────────────────────────────────────────────────────
+  {
+    id: 'report-serious',
+    roles: [...ALL],
+    sectionId: 'report-serious',
+    tab: 'Report',
+    anchor: 'report-serious',
+    action: 'look',
+    title: 'Injuries and hazards go here instead',
+    body: `This button starts the serious lane — ${KIND_LABELS.hazard} and ${KIND_LABELS.incident}. It asks a few more questions, including how bad it was (${Object.values(SEVERITY_LABELS).join(', ')}), and it starts an investigation that your health & safety owners are told about straight away. You don't run that investigation yourself unless you're asked to.`,
+  },
+
+  // ── snag-list ──────────────────────────────────────────────────────────────
+  {
+    id: 'snags-tab',
+    roles: [...ALL],
+    sectionId: 'snag-list',
+    tab: 'Issues',
+    anchor: 'tab-snags',
+    action: 'tap',
+    title: 'Everything you reported is here',
+    body: `The Snags tab is the running record — yours, and anything else you're involved in. The badge counts what's still open (${STATUS_LABELS.flagged} or ${STATUS_LABELS.in_progress}).`,
+  },
+  {
+    id: 'snags-filters',
+    roles: [...ALL],
+    sectionId: 'snag-list',
+    tab: 'Issues',
+    anchor: 'snags-filters',
+    action: 'tap',
+    title: 'Narrow it down',
+    body: 'Filter by status, by what you reported, or by what’s assigned to you. Your choices stick between sessions, so set it once to the view you want.',
+  },
+  {
+    id: 'snags-open',
+    roles: [...ALL],
+    sectionId: 'snag-list',
+    tab: 'Issues',
+    anchor: 'snags-list',
+    action: 'tap',
+    title: 'Open one to follow it',
+    body: 'A snag holds its photos, its comments and — on the serious lane — the whole investigation. Comment on it to ask a question, and @-mention someone to pull them in.',
+  },
+  {
+    id: 'snags-mentions',
+    roles: [...ALL],
+    sectionId: 'snag-list',
+    tab: 'Profile',
+    anchor: 'profile-mentions',
+    action: 'look',
+    title: 'Where @-mentions land',
+    body: "When someone @-mentions you in a comment it shows up here, with a badge on the tab. It's the one place you're expected to check rather than be told about.",
+  },
+
+  // ── public-reporting ───────────────────────────────────────────────────────
+  {
+    id: 'public-reporting',
+    roles: [...MANAGER],
+    sectionId: 'public-reporting',
+    tab: 'Admin',
+    anchor: 'manager-organisation',
+    action: 'look',
+    title: 'Reports from people without an account',
+    body: 'Manage Organisation is where you turn on public reporting, and Manage Sites prints a QR code per site. Anyone who scans it — a visitor, a subcontractor — can file a report without signing up. It arrives in your list like any other.',
+  },
+
+  // ── investigation ──────────────────────────────────────────────────────────
+  {
+    id: 'investigation-outstanding',
+    roles: [...STAFF],
+    sectionId: 'investigation',
+    tab: 'Admin',
+    anchor: 'manager-outstanding',
+    action: 'look',
+    title: 'What’s still open, by site',
+    body: 'Open investigations, unassigned reports, RCAs still owed and overdue corrective actions. Tap any number to see what it counts. This is the list that tells you an investigation has stalled before somebody asks you about it.',
+  },
+
+  // ── niggle-triage ──────────────────────────────────────────────────────────
+  {
+    id: 'niggle-queue',
+    roles: [...STAFF],
+    sectionId: 'niggle-triage',
+    tab: 'Admin',
+    anchor: 'manager-work-groups',
+    action: 'look',
+    title: 'Queues for the everyday stuff',
+    body: 'Work groups are the teams a niggle can be handed to — maintenance, cleaning, whoever you have. A report assigned to a group sits in that group’s queue instead of on one person, which is what stops niggles landing on whoever happened to be on shift.',
+  },
+
+  // ── documents ──────────────────────────────────────────────────────────────
+  {
+    id: 'documents',
+    roles: [...ALL],
+    sectionId: 'documents',
+    tab: 'Profile',
+    anchor: 'profile-documents',
+    action: 'look',
+    title: 'The document library',
+    body: "Your organisation's policies, procedures and completed investigation documents. Anyone can read and upload; only a Site Lead or Manager can delete. If you're asked to follow a procedure, this is where it lives.",
+  },
+
+  // ── setup ──────────────────────────────────────────────────────────────────
+  {
+    id: 'setup-organisation',
+    roles: [...MANAGER],
+    sectionId: 'setup',
+    tab: 'Admin',
+    anchor: 'manager-organisation',
+    action: 'tap',
+    title: 'Day one: your organisation',
+    body: 'Members, invites, the join code your crew scan, and your serious incident owners — the people every hazard and incident is mailed to and assigned to. There is always at least one, and it starts as you.',
+  },
+  {
+    id: 'setup-sites',
+    roles: [...MANAGER],
+    sectionId: 'setup',
+    tab: 'Admin',
+    anchor: 'manager-sites',
+    action: 'tap',
+    title: 'Then your sites',
+    body: 'A site is a place people report from. Give each one a site lead — without one, nobody there can triage a serious report or run the investigation.',
+  },
+
+  // ── records ────────────────────────────────────────────────────────────────
+  {
+    id: 'records-reports',
+    roles: [...STAFF],
+    sectionId: 'records',
+    tab: 'Admin',
+    anchor: 'manager-reports',
+    action: 'look',
+    title: 'Getting the record out',
+    body: 'Reports is the org-wide breakdown, and it exports. When somebody asks what you did about an incident two years ago, this is where the answer comes from — which is why the serious lane refuses to close without the evidence.',
+  },
+
+  // ── training-your-crew ─────────────────────────────────────────────────────
+  {
+    id: 'training-help',
+    roles: [...STAFF],
+    sectionId: 'training-your-crew',
+    tab: 'Profile',
+    anchor: 'profile-help',
+    action: 'look',
+    title: 'The full guide, and the handouts',
+    body: 'Help & guide is this walkthrough’s long form, filtered to whoever is reading it. There’s a printable handout per role on the portal — print them and leave them in the crib room.',
+  },
+];
+
+/**
+ * Sections the walkthrough deliberately doesn't cover, and why.
+ *
+ * Every section must be here or covered by a step — that is the whole point of
+ * the coverage test. Most of these are the serious lane's investigation
+ * screens: they only exist on a snag that has been reported and allocated, so
+ * there is nothing to point at during somebody's first session, and pointing
+ * at a snag detail you'd have to fabricate teaches less than the guide does.
+ */
+export const TOUR_EXEMPT_SECTIONS: Record<string, string> = {
+  'app-and-portal':
+    'Describes the phone app versus the web portal. Nothing on the phone is the thing being described.',
+  triage:
+    'The triage prompt appears by itself, and blocks, the first time a supervisor opens an unallocated serious snag. There is nothing to point at until one exists.',
+  'closing-serious':
+    'The resolve gate lives on a serious snag detail and names its own outstanding condition on screen. A first session has no such snag.',
+  'rca-and-debrief':
+    'The 5 Whys and the debrief open on a snag that has an investigation under way — later than a first session, and usually on an assignment somebody was notified about.',
+  portal: 'The portal is a different client. A walkthrough in this one cannot point at it.',
+  notifications:
+    'Notifications arrive in an inbox. The app is where the link lands, not where the behaviour is configured.',
+};
+
+/**
+ * Where the "you can run this again" pointer goes when the walkthrough
+ * finishes. Referenced from here rather than hardcoded in the app so the
+ * anchor liveness test covers it like any other.
+ */
+export const TOUR_FINISH_ANCHOR: TourAnchorId = 'profile-walkthrough';
+
+/**
+ * The walkthrough as one role sees it.
+ *
+ * Order comes from `GUIDE_SECTIONS`, not from the order steps are written in
+ * above — so moving a section in the guide moves its steps in the walkthrough,
+ * and the two can't tell the story in different orders.
+ */
+export function tourStepsForRole(role: UserRole): TourStep[] {
+  const sectionOrder = new Map(GUIDE_SECTIONS.map((s, i) => [s.id, i]));
+  return TOUR_STEPS.filter((step) => step.roles.includes(role)).sort(
+    (a, b) =>
+      (sectionOrder.get(a.sectionId) ?? Number.MAX_SAFE_INTEGER) -
+      (sectionOrder.get(b.sectionId) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+/** A step by id — what a persisted resume point resolves through. */
+export function tourStep(id: string): TourStep | undefined {
+  return TOUR_STEPS.find((s) => s.id === id);
 }

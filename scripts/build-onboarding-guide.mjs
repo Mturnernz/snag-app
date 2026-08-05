@@ -30,7 +30,10 @@ import {
   GUIDE_VERSION,
   GUIDE_PDF_PATH,
   GUIDE_PDF_PATH_BY_ROLE,
+  TOUR_ANCHORS,
+  TOUR_STEPS,
   sectionsForRole,
+  tourStepsForRole,
 } from '../packages/onboarding-guide/src/index.ts';
 import { ROLE_LABELS } from '../packages/shared-types/src/index.ts';
 
@@ -68,6 +71,49 @@ function markdownBlock(block) {
   }
 }
 
+// ─── The walkthrough appendix ────────────────────────────────────────────────
+//
+// The app's guided walkthrough, written out step by step. It is generated from
+// the same TOUR_STEPS the overlay runs, for the same reason the rest of this
+// file exists: a trainer standing in a crib room with the printed handout and a
+// crew member holding the phone should be looking at the same thing.
+
+const ACTION_VERB = { tap: 'Tap', type: 'Type in', choose: 'Choose from', look: 'Look at' };
+
+/** What a step points at, in words — for a page that has no spotlight. */
+function stepTarget(step) {
+  if (!step.anchor) return 'Anywhere — this one is about the app, not a control';
+  // The anchor descriptions are written as noun phrases ("The Report tab") so
+  // they read on their own; here they follow a verb, so the article drops case.
+  return `${ACTION_VERB[step.action]} ${TOUR_ANCHORS[step.anchor].replace(/^The /, 'the ')}`;
+}
+
+function walkthroughMarkdown() {
+  return [
+    '<a id="the-walkthrough"></a>',
+    '',
+    '## Appendix — the in-app walkthrough',
+    '',
+    '*Every step the app walks a new starter through, in order.*',
+    '',
+    `**For:** ${Object.values(ROLE_LABELS).join(' · ')}`,
+    '',
+    'The first time somebody opens SNAG it dims the screen, puts a ring around one control at a time, and says what to do with it. It can be paused and picked up later, and replayed any time from Profile → Walkthrough. Each step is drawn from a section of this guide, so it is the same teaching in a shorter form — use this table to follow along, or to check what your crew have already been shown.',
+    '',
+    markdownBlock({
+      type: 'table',
+      head: ['Step', 'What it points at', 'For', 'From'],
+      rows: TOUR_STEPS.map((step) => [
+        step.title,
+        stepTarget(step),
+        step.roles.map((r) => ROLE_LABELS[r]).join(' · '),
+        GUIDE_SECTIONS.find((s) => s.id === step.sectionId)?.title ?? step.sectionId,
+      ]),
+    }),
+    '',
+  ];
+}
+
 function toMarkdown(sections) {
   const out = [
     `# ${GUIDE_TITLE}`,
@@ -81,6 +127,7 @@ function toMarkdown(sections) {
     '## Contents',
     '',
     ...sections.map((s, i) => `${i + 1}. [${s.title}](#${s.id})`),
+    `${sections.length + 1}. [Appendix — the in-app walkthrough](#the-walkthrough)`,
     '',
   ];
 
@@ -100,6 +147,8 @@ function toMarkdown(sections) {
       out.push(markdownBlock(block), '');
     }
   }
+
+  out.push(...walkthroughMarkdown());
 
   return out.join('\n').replace(/\n{3,}/g, '\n\n') + '\n';
 }
@@ -146,7 +195,37 @@ function htmlBlock(block) {
   }
 }
 
-async function toHtml(sections, { audience }) {
+/**
+ * The walkthrough section of a PDF.
+ *
+ * Per role, and numbered, because the handout's job here is different from the
+ * markdown's: a Site Lead training somebody wants to know what step 7 is, not
+ * which roles see it.
+ */
+function walkthroughHtml(role, sectionNumber) {
+  const steps = role ? tourStepsForRole(role) : TOUR_STEPS;
+  const rows = steps
+    .map(
+      (step, i) =>
+        `<tr><td class="first">${i + 1}. ${escapeHtml(step.title)}</td>` +
+        `<td>${escapeHtml(stepTarget(step))}</td>` +
+        `<td>${escapeHtml(step.body)}</td></tr>`,
+    )
+    .join('');
+
+  return `
+      <section>
+        <p class="eyebrow">Section ${sectionNumber}</p>
+        <h2>Appendix — the in-app walkthrough</h2>
+        <p class="summary">The ${steps.length} steps the app walks ${
+          role ? ROLE_LABELS[role] : 'a new starter'
+        } through, in order.</p>
+        <p>The first time somebody opens SNAG it dims the screen, rings one control at a time and says what to do with it. It can be paused and picked up later, and replayed any time from Profile &rarr; Walkthrough.</p>
+        <table><thead><tr><th>Step</th><th>Points at</th><th>What it says</th></tr></thead><tbody>${rows}</tbody></table>
+      </section>`;
+}
+
+async function toHtml(sections, { audience, role }) {
   const faces = (
     await Promise.all([
       fontFace('Plex', 'IBMPlexSans-Regular.woff2', 400),
@@ -165,7 +244,8 @@ async function toHtml(sections, { audience }) {
         ${s.blocks.map(htmlBlock).join('\n')}
       </section>`,
     )
-    .join('\n');
+    .join('\n')
+    .concat('\n', walkthroughHtml(role, sections.length + 1));
 
   // Light-only by design: this is printed. A dark theme would put a solid
   // #111827 across every page of a document destined for a crib-room wall.
@@ -323,8 +403,11 @@ async function main() {
   const targets = [
     {
       file: path.basename(GUIDE_PDF_PATH),
-      label: `every section (${GUIDE_SECTIONS.length})`,
-      html: await toHtml(GUIDE_SECTIONS, { audience: 'The complete guide — every role' }),
+      label: `every section (${GUIDE_SECTIONS.length}) + ${TOUR_STEPS.length} walkthrough steps`,
+      html: await toHtml(GUIDE_SECTIONS, {
+        audience: 'The complete guide — every role',
+        role: null,
+      }),
     },
   ];
 
@@ -332,8 +415,8 @@ async function main() {
     const sections = sectionsForRole(role);
     targets.push({
       file: path.basename(pdfPath),
-      label: `${ROLE_LABELS[role]} — ${sections.length} sections`,
-      html: await toHtml(sections, { audience: `For ${ROLE_LABELS[role]}` }),
+      label: `${ROLE_LABELS[role]} — ${sections.length} sections, ${tourStepsForRole(role).length} steps`,
+      html: await toHtml(sections, { audience: `For ${ROLE_LABELS[role]}`, role }),
     });
   }
 

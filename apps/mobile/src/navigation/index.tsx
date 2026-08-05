@@ -3,9 +3,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StyleSheet } from 'react-native';
 
+import { TourAnchorId } from '@snag/onboarding-guide';
+
 import { RootStackParamList, MainTabParamList, UserRole } from '../types';
 import { Colors, Typography } from '../constants/theme';
 import Icon from '../components/Icon';
+import TourAnchor from '../components/TourAnchor';
 
 import IssueListScreen from '../screens/IssueListScreen';
 import ReportIssueScreen from '../screens/ReportIssueScreen';
@@ -22,7 +25,6 @@ import ManageSitesScreen from '../screens/ManageSitesScreen';
 import ManageWorkGroupsScreen from '../screens/ManageWorkGroupsScreen';
 import MentionsScreen from '../screens/MentionsScreen';
 import DocumentLibraryScreen from '../screens/DocumentLibraryScreen';
-import OnboardingCarouselScreen from '../screens/OnboardingCarouselScreen';
 import HelpGuideScreen from '../screens/HelpGuideScreen';
 import { IncidentDraftProvider } from '../context/IncidentDraftContext';
 import { ReportTargetProvider } from '../context/ReportTargetContext';
@@ -38,14 +40,26 @@ const TAB_ICONS: Record<string, { active: React.ComponentProps<typeof Icon>['nam
   Profile: { active: 'person-circle', inactive: 'person-circle-outline' },
 };
 
+/** The walkthrough's anchor for each tab. Wrapping the icon rather than the
+ *  whole tab button keeps the spotlight on something the size of a control:
+ *  the button is a quarter of the bar wide and mostly empty. */
+const TAB_ANCHORS: Record<string, TourAnchorId> = {
+  Report: 'tab-report',
+  Issues: 'tab-snags',
+  Admin: 'tab-manager',
+  Profile: 'tab-profile',
+};
+
 function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   const icons = TAB_ICONS[label];
   return (
-    <Icon
-      name={focused ? icons.active : icons.inactive}
-      size="lg"
-      color={focused ? Colors.primary : Colors.textMuted}
-    />
+    <TourAnchor id={TAB_ANCHORS[label]}>
+      <Icon
+        name={focused ? icons.active : icons.inactive}
+        size="lg"
+        color={focused ? Colors.primary : Colors.textMuted}
+      />
+    </TourAnchor>
   );
 }
 
@@ -53,13 +67,17 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserRole; initialTab?: keyof MainTabParamList }) {
+function MainTabNavigator({ userRole }: { userRole: UserRole }) {
   const isAdminOrManager = userRole === 'officer_admin' || userRole === 'supervisor';
   const { openIssueCount, mentionCount } = useBadge();
 
   return (
     <Tab.Navigator
-      initialRouteName={initialTab}
+      // `Report` is where the app opens, and it is deliberately not a prop any
+      // more: it used to be, so the retired onboarding carousel could land
+      // somebody on Snags when it finished. The walkthrough navigates by step
+      // instead, which means it can move somebody more than once.
+      initialRouteName="Report"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: styles.tabBar,
@@ -99,7 +117,7 @@ function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserR
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export default function RootNavigator({ userRole, initialTab }: { userRole: UserRole; initialTab?: keyof MainTabParamList }) {
+export default function RootNavigator({ userRole }: { userRole: UserRole }) {
   return (
     <BadgeProvider>
     <OfflineQueueProvider>
@@ -107,7 +125,7 @@ export default function RootNavigator({ userRole, initialTab }: { userRole: User
       <ReportTargetProvider>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main">
-          {() => <MainTabNavigator userRole={userRole} initialTab={initialTab} />}
+          {() => <MainTabNavigator userRole={userRole} />}
         </Stack.Screen>
         <Stack.Screen
           name="IssueDetail"
@@ -175,14 +193,6 @@ export default function RootNavigator({ userRole, initialTab }: { userRole: User
           component={HelpGuideScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
-        <Stack.Screen
-          name="OnboardingCarousel"
-          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-        >
-          {({ navigation }) => (
-            <OnboardingCarouselScreen onFinish={() => navigation.goBack()} />
-          )}
-        </Stack.Screen>
       </Stack.Navigator>
       </ReportTargetProvider>
     </IncidentDraftProvider>

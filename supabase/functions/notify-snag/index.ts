@@ -65,11 +65,68 @@ const ROLE_LABELS: Record<string, string> = {
   officer_admin: "Manager",
 };
 
-async function sendEmail(to: string[], subject: string, text: string) {
+// Every attempt is written to notification_deliveries, including the ones that
+// never reach Resend. See 20260805110000 for why attempts rather than only
+// failures: a failure log shows a clean sheet when the bug is that nothing was
+// ever sent, which is exactly how invites stayed silent for the life of the
+// feature.
+//
+// This must never be the reason a notification fails. It is a diagnostic, so
+// its own errors are swallowed after logging — the same trade-off
+// dispatch_snag_notification makes on the DB side.
+async function recordDelivery(record: {
+  event: string;
+  orgId: string | null;
+  subject: string;
+  recipientCount: number;
+  ok: boolean;
+  statusCode?: number;
+  errorBody?: string;
+}) {
+  try {
+    await supabase.from("notification_deliveries").insert({
+      event: record.event,
+      org_id: record.orgId,
+      subject: record.subject,
+      recipient_count: record.recipientCount,
+      ok: record.ok,
+      status_code: record.statusCode ?? null,
+      // Bounded: Resend's error bodies are short, but an upstream HTML error
+      // page is not, and this column is read by a dashboard.
+      error_body: record.errorBody ? record.errorBody.slice(0, 2000) : null,
+    });
+  } catch (err) {
+    console.error("notify-snag: could not record the delivery attempt", err);
+  }
+}
+
+// `event` and `orgId` are threaded through every call site rather than held in
+// a module-scoped variable: the edge runtime serves concurrent requests from
+// one isolate, so a mutable "current event" would be attributed to whichever
+// request happened to write it last.
+async function sendEmail(
+  event: string,
+  orgId: string | null,
+  to: string[],
+  subject: string,
+  text: string
+) {
   if (!RESEND_API_KEY || to.length === 0) {
     console.log("notify-snag: skipping send (no RESEND_API_KEY or no recipients)", {
       to,
       subject,
+    });
+    // Recorded as a failure, because from the outside it is one: somebody was
+    // supposed to be told and wasn't. A missing API key and an empty recipient
+    // list are both real outages — the second is how `serious_created` reached
+    // nobody on a site whose members had no email address.
+    await recordDelivery({
+      event,
+      orgId,
+      subject,
+      recipientCount: to.length,
+      ok: false,
+      errorBody: !RESEND_API_KEY ? "no RESEND_API_KEY" : "no recipients",
     });
     return;
   }
@@ -81,13 +138,23 @@ async function sendEmail(to: string[], subject: string, text: string) {
     },
     body: JSON.stringify({ from: FROM_ADDRESS, to, subject, text }),
   });
+  const errorBody = res.ok ? undefined : await res.text();
   if (!res.ok) {
     console.error("notify-snag: Resend rejected the email", {
       status: res.status,
-      body: await res.text(),
+      body: errorBody,
       to,
     });
   }
+  await recordDelivery({
+    event,
+    orgId,
+    subject,
+    recipientCount: to.length,
+    ok: res.ok,
+    statusCode: res.status,
+    errorBody,
+  });
 }
 
 async function emailOf(profileId: string | null): Promise<string | null> {
@@ -130,6 +197,8 @@ async function sendOverdueActionsDigest(orgId: string) {
     .join("\n");
 
   await sendEmail(
+    "overdue_actions_digest",
+    orgId,
     emails,
     `${overdue.length} overdue corrective action${overdue.length === 1 ? "" : "s"}`,
     `The following corrective action${
@@ -177,6 +246,8 @@ async function sendInviteEmail(inviteId: string) {
   });
 
   await sendEmail(
+    "invite_created",
+    invite.org_id,
     [invite.email],
     `${invitedBy} to join ${orgName} on SNAG`,
     `${invitedBy} to join ${orgName}${at} on SNAG as ${roleLabel}.\n\n` +
@@ -276,6 +347,8 @@ Deno.serve(async (req: Request) => {
     }
 
     await sendEmail(
+      event,
+      snag.org_id,
       emails,
       `Heads up — ${snag.kind} reported (${snag.reference})`,
       `A ${snag.kind} was just reported.\n\n${snag.description ?? ""}\n\nSee it here: ${seriousLink}`
@@ -301,6 +374,8 @@ Deno.serve(async (req: Request) => {
         : "SNAG's guided process: a root cause, then corrective actions completed and verified.";
 
       await sendEmail(
+        event,
+        snag.org_id,
         [email],
         `You're leading the investigation — ${snag.reference}`,
         `You've been assigned the investigation into ${snag.reference}: ${
@@ -309,6 +384,8 @@ Deno.serve(async (req: Request) => {
       );
     } else if (email) {
       await sendEmail(
+        event,
+        snag.org_id,
         [email],
         `You've been assigned a snag (${snag.reference})`,
         `You're the owner of ${snag.reference}: ${snag.description ?? "(see photo)"}\n\nSort it here: ${link}`
@@ -327,6 +404,8 @@ Deno.serve(async (req: Request) => {
       )
       .map((p) => p.email);
     await sendEmail(
+      event,
+      snag.org_id,
       emails,
       `Flagged for attention — ${snag.reference}`,
       `${snag.reference} was reported as a niggle but the reporter thinks it needs more attention.\n\n${
@@ -337,6 +416,8 @@ Deno.serve(async (req: Request) => {
     const email = await emailOf(snag.reporter_id);
     if (email) {
       await sendEmail(
+        event,
+        snag.org_id,
         [email],
         `Resolved — ${snag.reference}`,
         `The thing you flagged (${snag.reference}) is resolved.${
@@ -353,6 +434,8 @@ Deno.serve(async (req: Request) => {
       const email = await emailOf(rca.assigned_to);
       if (email) {
         await sendEmail(
+          event,
+          snag.org_id,
           [email],
           `You've been asked to complete a Root Cause Analysis (${snag.reference})`,
           `A 5-Whys Root Cause Analysis on ${snag.reference} has been delegated to you.\n\n${
@@ -364,6 +447,8 @@ Deno.serve(async (req: Request) => {
       const email = await emailOf(rca.assigned_by);
       if (email) {
         await sendEmail(
+          event,
+          snag.org_id,
           [email],
           `RCA submitted for review (${snag.reference})`,
           `The Root Cause Analysis on ${snag.reference} has been submitted and is waiting for your review.\n\nReview it here: ${rcaLink}`
@@ -373,6 +458,8 @@ Deno.serve(async (req: Request) => {
       const email = await emailOf(rca.assigned_to);
       if (email) {
         await sendEmail(
+          event,
+          snag.org_id,
           [email],
           `RCA sent back for another look (${snag.reference})`,
           `Your Root Cause Analysis on ${snag.reference} was sent back.${

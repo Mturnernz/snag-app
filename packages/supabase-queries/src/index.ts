@@ -1280,3 +1280,43 @@ export async function recordGovernanceExport(client: SupabaseClient, filePath: s
   });
   return { id: data as string | null, error };
 }
+
+// ─── Notification delivery health ──────────────────────────────────────────
+
+/**
+ * Whether this org's notification email is actually going out.
+ *
+ * Two numbers because there are two ways it has failed here, and a check for
+ * one is blind to the other. `sends_failed` catches a send Resend refused —
+ * July 2026, when the sandbox sender rejected every notification for three
+ * weeks. The invite pair catches a dispatch that never fired at all: invites
+ * were never emailed for the whole life of the feature, and a failure count
+ * would have read zero throughout, because nothing was ever attempted.
+ *
+ * Backed by `notification_deliveries` (20260805110000), which records
+ * attempts rather than only failures for exactly that reason.
+ */
+export interface EmailDeliveryHealth {
+  window_hours: number;
+  sends_attempted: number;
+  sends_failed: number;
+  invites_created: number;
+  invite_emails_attempted: number;
+}
+
+export async function getEmailDeliveryHealth(client: SupabaseClient, hours = 24) {
+  const { data, error } = await client
+    .rpc('email_delivery_health', { p_hours: hours })
+    .single();
+  return { data: data as EmailDeliveryHealth | null, error };
+}
+
+/** The invites this window created that no send was even attempted for. */
+export function undeliveredInviteCount(health: EmailDeliveryHealth): number {
+  return Math.max(0, health.invites_created - health.invite_emails_attempted);
+}
+
+/** Whether the dashboard should say something. */
+export function hasDeliveryProblem(health: EmailDeliveryHealth): boolean {
+  return health.sends_failed > 0 || undeliveredInviteCount(health) > 0;
+}

@@ -1,11 +1,19 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { getOrgStats, getSiteBreakdown } from '@snag/supabase-queries';
+import {
+  getOrgStats,
+  getSiteBreakdown,
+  getEmailDeliveryHealth,
+  hasDeliveryProblem,
+  undeliveredInviteCount,
+} from '@snag/supabase-queries';
 import { STATUS_LABELS, type SnagStatus } from '@snag/shared-types';
 import { requireSupervisorOrAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
-import { PageHeader, StatGrid, StatTile, EmptyState } from '@/components/Card';
+import { Card, PageHeader, StatGrid, StatTile, EmptyState } from '@/components/Card';
+import Icon from '@/components/Icon';
 import tableStyles from '@/components/Table.module.css';
+import styles from './page.module.css';
 
 export const metadata: Metadata = {
   title: 'Dashboard',
@@ -15,10 +23,24 @@ export default async function DashboardPage() {
   const { activeMembership } = await requireSupervisorOrAdmin();
   const supabase = await createClient();
 
-  const [{ data: stats, error: statsError }, { data: siteBreakdown, error: breakdownError }] = await Promise.all([
+  const [
+    { data: stats, error: statsError },
+    { data: siteBreakdown, error: breakdownError },
+    { data: mailHealth },
+  ] = await Promise.all([
     getOrgStats(supabase, activeMembership.org_id),
     getSiteBreakdown(supabase, activeMembership.org_id),
+    // Errors deliberately ignored: this is a diagnostic strip, and a dashboard
+    // that fails to render because its health check failed is a worse outcome
+    // than one that quietly omits it.
+    getEmailDeliveryHealth(supabase),
   ]);
+
+  // Said on the page rather than emailed, because an alarm for broken email
+  // that travels by email is silent in precisely the case that matters — see
+  // 20260805110000. This is where an officer admin already is.
+  const mailProblem = mailHealth && hasDeliveryProblem(mailHealth);
+  const undeliveredInvites = mailHealth ? undeliveredInviteCount(mailHealth) : 0;
 
   return (
     <div>
@@ -26,6 +48,33 @@ export default async function DashboardPage() {
         title={activeMembership.org_name}
         subtitle={statsError ? undefined : `${stats.totalSnags} snags · ${stats.totalMembers} members`}
       />
+
+      {mailProblem && mailHealth && (
+        <Card elevated style={{ marginBottom: 'var(--space-2xl)' }}>
+          <div className={styles.mailAlert}>
+            <Icon name="MailWarning" size="md" />
+            <div>
+              <p className={styles.mailAlertTitle}>Notification email needs checking</p>
+              <p className={styles.mailAlertBody}>
+                {undeliveredInvites > 0 && (
+                  <>
+                    {undeliveredInvites} invite{undeliveredInvites === 1 ? '' : 's'} in the last{' '}
+                    {mailHealth.window_hours} hours had no email even attempted.{' '}
+                  </>
+                )}
+                {mailHealth.sends_failed > 0 && (
+                  <>
+                    {mailHealth.sends_failed} of {mailHealth.sends_attempted} notification
+                    {mailHealth.sends_attempted === 1 ? '' : 's'} were refused by the mail
+                    provider.{' '}
+                  </>
+                )}
+                Check Resend&apos;s dashboard — the app cannot tell you why.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {statsError ? (
         <p className="error-text" style={{ marginBottom: 'var(--space-4xl)' }}>

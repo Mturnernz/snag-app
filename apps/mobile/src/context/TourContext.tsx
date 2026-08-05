@@ -183,8 +183,19 @@ export function TourProvider({ profile, onStatusChange, children }: Props) {
         // that somebody who wasn't going to read the manual gets shown the app.
         record('running', steps[0].id);
       } else if (resolved.status === 'running') {
-        // The app was closed mid-walkthrough. Pick up where it stopped.
-        setStatus('running');
+        // The app was closed mid-walkthrough. Offer to pick up where it
+        // stopped; don't just put the overlay back up.
+        //
+        // Opening the app is not the same as asking to continue, and somebody
+        // who stopped three days ago being dimmed out again unbidden is the
+        // behaviour that makes people close an app. The resume bar already
+        // exists for exactly this and is one tap away.
+        //
+        // It also keeps the walkthrough from deciding which tab the app opens
+        // on for a returning user. That was silently breaking the rest of the
+        // e2e suite: a saved step on the Snags tab meant `report.spec.ts` found
+        // the Report screen mounted with `display: none` and gave up.
+        record('paused', resolved.stepId);
       } else {
         setStatus(resolved.status);
       }

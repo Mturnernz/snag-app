@@ -24,6 +24,11 @@ import { test, expect, type Page } from '@playwright/test';
 //     land on step 1. A *paused* walkthrough resumes where it stopped — which
 //     is the whole point of it — so from test four onward they began mid-way.
 //
+// A saved step no longer decides which tab the app opens on: an unfinished
+// walkthrough now comes back as the resume bar rather than putting the overlay
+// straight up (see TourContext). So this is the only spec that has to know the
+// walkthrough exists.
+//
 // So: one serial journey rather than six independent tests, `resetToStepOne`
 // to get a known starting point out of any prior state, and the run ends by
 // finishing the walkthrough so the shared account is left in `done` — a clean,

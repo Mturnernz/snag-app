@@ -526,6 +526,13 @@ Three things about the runtime:
   keeps a per-user AsyncStorage mirror that wins **only when it is newer**, for the one case that
   needs it: paused on a site with no signal, where the server still says `not_started` and
   believing it would restart a first-timer from step one. `done` is absorbing on either side.
+  Writes are **queued, not parallel** — they all hit one row and `record` runs on every step, so
+  racing them lost a `paused` to a straggling `running` and silently un-paused the walkthrough.
+- **Only `not_started` auto-starts.** An unfinished walkthrough comes back as the resume bar, not
+  as the overlay: opening the app isn't asking to continue, and re-dimming somebody who stopped
+  days ago is how an app gets closed. It also keeps the walkthrough from choosing which tab the
+  app opens on for a returning user, which was breaking every e2e spec that assumed Report —
+  a saved step on Snags left the Report screen mounted with `display: none`.
 
 ## Code Style
 

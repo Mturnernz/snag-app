@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getInvitePreview, acceptInvite, InvitePreview } from '../lib/supabase';
+import { parseInviteToken } from '../lib/inviteLink';
 import { ROLE_LABELS } from '../types';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
@@ -17,6 +18,9 @@ interface Props {
 export default function OrgJoinScreen({ onComplete, onBack }: Props) {
   const insets = useSafeAreaInsets();
   const [token, setToken] = useState('');
+  // What handleLookUp resolved the pasted text down to — a link and a bare code
+  // both reduce to this, so accepting doesn't have to re-parse.
+  const [resolvedToken, setResolvedToken] = useState('');
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [name, setName] = useState('');
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -25,12 +29,21 @@ export default function OrgJoinScreen({ onComplete, onBack }: Props) {
 
   async function handleLookUp() {
     if (!token.trim()) {
-      setError('Please paste the invite code from your email.');
+      setError('Please paste the invite code or link from your email.');
       return;
     }
+    // The invite email leads with a link, and people paste what they were
+    // given. Accepting only the bare token would reject the thing the mail put
+    // in front of them.
+    const code = parseInviteToken(token);
+    if (!code) {
+      setError('That doesn’t look like an invite code or link. Paste the whole thing from your email.');
+      return;
+    }
+    setResolvedToken(code);
     setLoadingPreview(true);
     setError(null);
-    const { data, error } = await getInvitePreview(token.trim());
+    const { data, error } = await getInvitePreview(code);
     setLoadingPreview(false);
 
     if (error || !data) {
@@ -51,7 +64,7 @@ export default function OrgJoinScreen({ onComplete, onBack }: Props) {
     }
     setAccepting(true);
     setError(null);
-    const { error } = await acceptInvite(token.trim(), name.trim());
+    const { error } = await acceptInvite(resolvedToken, name.trim());
     setAccepting(false);
     if (error) {
       setError(error.message);
@@ -69,11 +82,11 @@ export default function OrgJoinScreen({ onComplete, onBack }: Props) {
         {!preview ? (
           <>
             <Text style={styles.heading}>Enter your invite code</Text>
-            <Text style={styles.subheading}>Paste the code your admin or supervisor emailed you.</Text>
+            <Text style={styles.subheading}>Paste the code or link your admin or supervisor emailed you.</Text>
 
             <TextInput
               style={styles.input}
-              placeholder="Invite code"
+              placeholder="Invite code or link"
               placeholderTextColor={Colors.textMuted}
               value={token}
               onChangeText={setToken}

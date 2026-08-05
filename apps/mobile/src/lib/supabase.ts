@@ -239,10 +239,17 @@ export async function inviteUser(email: string, role: UserRole, siteId: string |
   return { inviteId: data as string | null, error };
 }
 
+// `token` is selected deliberately. It is the invite code, and without it the
+// admin screen could list a pending invite but not tell anyone what it was —
+// while OrgJoinScreen asked the invitee to "paste the code your admin or
+// supervisor emailed you". For the whole life of the feature nothing emailed
+// it, so that code existed only in the database and every invite was a dead
+// end. The RLS policy here already limits this to admins and supervisors of
+// the invite's own org.
 export async function getPendingInvites(orgId: string) {
   const { data } = await supabase
     .from('invites')
-    .select('id, email, role, status, created_at, expires_at')
+    .select('id, email, role, status, created_at, expires_at, token')
     .eq('org_id', orgId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
@@ -251,6 +258,11 @@ export async function getPendingInvites(orgId: string) {
 
 export async function cancelInvite(inviteId: string) {
   return supabase.rpc('cancel_invite', { p_invite_id: inviteId });
+}
+
+/** Send the invite email again — same token, so any link already sent stays valid. */
+export async function resendInvite(inviteId: string) {
+  return supabase.rpc('resend_invite', { p_invite_id: inviteId });
 }
 
 // ─── QR join code ─────────────────────────────────────────────────────────────

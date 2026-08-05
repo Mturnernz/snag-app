@@ -1,0 +1,124 @@
+/* Same shell as /go/snag/[id] — both are single-purpose landings reached from
+   an inbox, and they should read as the same product doing the same kind of
+   handoff. */
+
+.wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-2xl);
+  text-align: center;
+}
+
+.mark {
+  display: block;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.12em;
+  font-size: var(--text-sm);
+  color: var(--color-primary);
+  margin-bottom: var(--space-xl);
+}
+
+.title {
+  font-size: var(--text-2xl);
+  margin: 0 0 var(--space-sm);
+}
+
+.lead {
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-xl);
+}
+
+/* Which address the invite is tied to. Stated plainly because it's the one
+   thing that makes accept_invite refuse, and the reader is the only person who
+   can spot that it's the wrong mailbox. */
+.inviteFor {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-family: var(--font-mono-family);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-background);
+  border-radius: var(--radius-chip);
+  padding: var(--space-xs) var(--space-sm);
+  margin-bottom: var(--space-xl);
+}
+
+.form {
+  text-align: left;
+  margin-bottom: var(--space-xl);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+
+.secondaryAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--space-lg);
+  border-radius: var(--radius-button);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.secondaryAction:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.scheme {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.scheme:hover {
+  color: var(--color-primary);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0;
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.link {
+  color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+}

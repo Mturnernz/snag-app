@@ -22,6 +22,7 @@ import {
   getOrgMembers,
   getPendingInvites,
   cancelInvite,
+  resendInvite,
   updateMemberRole,
   removeOrgMember,
   inviteUser,
@@ -36,6 +37,7 @@ import {
   SeriousIncidentOwner,
 } from '../lib/supabase';
 import { buildJoinLink } from '../lib/joinLink';
+import { buildInviteLink } from '../lib/inviteLink';
 
 // The QR always encodes the web export's URL, so it works with or without the
 // native app installed; see PublicQrReportScreen.tsx / App.tsx for the landing
@@ -64,6 +66,7 @@ interface PendingInvite {
   status: string;
   created_at: string;
   expires_at: string;
+  token: string;
 }
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -97,6 +100,7 @@ export default function ManageOrganisationScreen() {
   const [removingMember, setRemovingMember] = useState<string | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<Profile | null>(null);
   const [cancellingInvite, setCancellingInvite] = useState<string | null>(null);
+  const [resendingInvite, setResendingInvite] = useState<string | null>(null);
   const [showAllInvites, setShowAllInvites] = useState(false);
 
   // Serious incident owners
@@ -221,6 +225,22 @@ export default function ManageOrganisationScreen() {
     } else {
       showToast(error.message ?? 'Could not send invite');
     }
+  }
+
+  // The manual path, kept even though invites now email themselves. Mail gets
+  // filtered, mistyped and sat on, and an admin standing next to the person
+  // they just invited shouldn't have to wait for an inbox — this is the same
+  // link the email carries, so either route lands in the same place.
+  async function handleCopyInviteLink(invite: PendingInvite) {
+    await Clipboard.setStringAsync(buildInviteLink(invite.token));
+    showToast('Invite link copied');
+  }
+
+  async function handleResendInvite(invite: PendingInvite) {
+    setResendingInvite(invite.id);
+    const { error } = await resendInvite(invite.id);
+    setResendingInvite(null);
+    showToast(error ? error.message ?? 'Could not resend the invite' : `Invite re-sent to ${invite.email}`);
   }
 
   async function handleCancelInvite(invite: PendingInvite) {
@@ -548,6 +568,30 @@ export default function ManageOrganisationScreen() {
                   )}
                 </TouchableOpacity>
               </View>
+
+              <View style={styles.inviteActions}>
+                <TouchableOpacity
+                  style={styles.inviteAction}
+                  onPress={() => handleCopyInviteLink(invite)}
+                  activeOpacity={0.7}
+                >
+                  <Icon name="copy-outline" size="sm" color={Colors.primary} />
+                  <Text style={styles.inviteActionText}>Copy link</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.inviteAction}
+                  onPress={() => handleResendInvite(invite)}
+                  disabled={resendingInvite === invite.id}
+                  activeOpacity={0.7}
+                >
+                  {resendingInvite === invite.id ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <Icon name="mail-outline" size="sm" color={Colors.primary} />
+                  )}
+                  <Text style={styles.inviteActionText}>Resend email</Text>
+                </TouchableOpacity>
+              </View>
             </Card>
           ))}
 
@@ -731,6 +775,25 @@ const styles = StyleSheet.create({
   },
   pendingPill: { backgroundColor: Colors.status.inProgressBg, borderRadius: Radius.chip, paddingHorizontal: 6, paddingVertical: 1 },
   pendingPillText: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.status.inProgress },
+
+  // A nested row inside an already-elevated card, so it takes the border
+  // treatment rather than a second shadow.
+  inviteActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    paddingTop: Spacing.xs,
+  },
+  inviteAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    flex: 1,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  inviteActionText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.primary },
   showMoreRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs,
     paddingVertical: Spacing.sm,

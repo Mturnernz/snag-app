@@ -2,12 +2,14 @@
 // (dispatch_snag_notification / dispatch_rca_notification) with an internal
 // secret header. Source of truth is this file — redeploy via Supabase MCP.
 //
-// DEPLOY ORDER MATTERS. Every link below points at /go/snag/<id> on the
-// portal. Deploying this function before a portal build containing that route
-// is live sends every notification to a 404 — and because these links are only
-// ever followed from someone's inbox, nothing in the app or CI will tell you.
-// Check the route answers on the target host first:
+// DEPLOY ORDER MATTERS. Every link below points at the portal — /go/snag/<id>
+// for the per-snag mails, /join/<token> for invites. Deploying this function
+// before a portal build containing those routes is live sends every
+// notification to a 404 — and because these links are only ever followed from
+// someone's inbox, nothing in the app or CI will tell you.
+// Check the routes answer on the target host first:
 //   curl -o /dev/null -w '%{http_code}\n' "$SNAG_PORTAL_URL/go/snag/<any-uuid>"
+//   curl -o /dev/null -w '%{http_code}\n' "$SNAG_PORTAL_URL/join/<any-uuid>"
 // Expect 200 (the handoff) or 307 (a signed-in supervisor being passed
 // through). A 404 means the portal hasn't caught up — deploy that first.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -50,7 +52,18 @@ type Event =
   | "rca_assigned"
   | "rca_submitted"
   | "rca_rejected"
-  | "overdue_actions_digest";
+  | "overdue_actions_digest"
+  | "invite_created";
+
+// Mirrors ROLE_LABELS in packages/shared-types. Re-typed rather than imported
+// because this function runs on Deno with no bundler and no access to the npm
+// workspace — the same reason every other shared string here is duplicated.
+// Keep in step with that map; it is what the invitee is told they're joining as.
+const ROLE_LABELS: Record<string, string> = {
+  worker: "Crew",
+  supervisor: "Site Lead",
+  officer_admin: "Manager",
+};
 
 async function sendEmail(to: string[], subject: string, text: string) {
   if (!RESEND_API_KEY || to.length === 0) {
@@ -125,17 +138,77 @@ async function sendOverdueActionsDigest(orgId: string) {
   );
 }
 
+// Someone has been invited into an organisation. Unlike every other mail here
+// this one goes to a person with no account, so it can't route by role the way
+// /go/snag/<id> does — their role is a fact about the invite, not yet about
+// them. It points at /join/<token>, which makes that decision after they've
+// accepted and it's actually knowable.
+//
+// The code is spelled out in the body as well as being in the link. The app's
+// own join screen takes a pasted code, so a mail client that mangles the URL,
+// or a phone that already has SNAG installed, still has a way through.
+async function sendInviteEmail(inviteId: string) {
+  const { data: invite } = await supabase
+    .from("invites")
+    .select("email, role, token, status, expires_at, org_id, site_id, invited_by")
+    .eq("id", inviteId)
+    .maybeSingle();
+
+  // Cancelled between the write and this call, or already taken up. Both are
+  // races rather than errors — say nothing and send nothing.
+  if (!invite || invite.status !== "pending") return;
+
+  const [{ data: org }, { data: site }, { data: inviter }] = await Promise.all([
+    supabase.from("organisations").select("name").eq("id", invite.org_id).maybeSingle(),
+    invite.site_id
+      ? supabase.from("sites").select("name").eq("id", invite.site_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase.from("profiles").select("name").eq("id", invite.invited_by).maybeSingle(),
+  ]);
+
+  const orgName = org?.name ?? "your organisation";
+  const roleLabel = ROLE_LABELS[invite.role] ?? invite.role;
+  const invitedBy = inviter?.name ? `${inviter.name} has invited you` : "You've been invited";
+  const at = site?.name ? ` at ${site.name}` : "";
+  const expires = new Date(invite.expires_at).toLocaleDateString("en-NZ", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  await sendEmail(
+    [invite.email],
+    `${invitedBy} to join ${orgName} on SNAG`,
+    `${invitedBy} to join ${orgName}${at} on SNAG as ${roleLabel}.\n\n` +
+      `SNAG is where your team reports and tracks workplace problems — broken kit, hazards, ` +
+      `near misses — so they get to the right person instead of being mentioned once and forgotten.\n\n` +
+      `Accept your invite: ${PORTAL_URL}/join/${invite.token}\n\n` +
+      `If that link doesn't work, open the SNAG app, choose "Join with invite code" and paste this:\n\n` +
+      `${invite.token}\n\n` +
+      `This invite is for ${invite.email} and expires on ${expires}.`
+  );
+}
+
 Deno.serve(async (req: Request) => {
   if (!INTERNAL_SECRET || req.headers.get("x-snag-internal-secret") !== INTERNAL_SECRET) {
     return new Response("Forbidden", { status: 403 });
   }
 
-  const { event, snag_id, rca_id, org_id } = (await req.json()) as {
+  const { event, snag_id, rca_id, org_id, invite_id } = (await req.json()) as {
     event: Event;
     snag_id?: string;
     rca_id?: string;
     org_id?: string;
+    invite_id?: string;
   };
+
+  // Not about a snag at all — branches before the per-snag lookup below, the
+  // same way the digest does.
+  if (event === "invite_created") {
+    if (!invite_id) return new Response("ok");
+    await sendInviteEmail(invite_id);
+    return new Response("ok");
+  }
 
   // Org-scoped digest — no single snag_id, so this branches before the
   // generic per-snag lookup every other event relies on.

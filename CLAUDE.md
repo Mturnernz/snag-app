@@ -573,6 +573,55 @@ A signed-out supervisor is sent to `/login?next=<portal path>` so the snag
 survives the login round trip. `next` is validated by `src/lib/nextPath.ts` —
 same-origin paths only, or it's an open redirect on a domain people trust.
 
+## Inviting someone into an organisation
+
+`invite_user` writes an `invites` row and then calls
+**`dispatch_invite_notification`**, which fires `invite_created` at
+`notify-snag`, which mails the invitee a link to
+**`<portal>/join/<token>`**.
+
+The dispatch is the part that didn't exist. From M1 until
+`20260805090000_invite_email_delivery.sql`, `invite_user` wrote the row and
+returned — the migration that created it says `Email delivery (Resend) lands in
+M3`, and M3 built the *snag* pipeline only (`dispatch_snag_notification` takes a
+snag id; its triggers are on `snags`). **No invite was ever emailed, for the
+entire life of the feature.** Nothing said so: the RPC succeeds, so the app
+toasts "Invite sent"; the invite lists as pending, which is true; and
+`getPendingInvites` didn't select `token`, so the code existed nowhere a human
+could see it while `OrgJoinScreen` asked people to "paste the code your admin or
+supervisor emailed you". Every invite was a dead end and the only symptom was
+silence.
+
+Three things follow:
+
+- **`/join/[token]` is not `/go/snag/[id]` with a different noun.** That page
+  routes by the visitor's role because they already have one. An invitee has no
+  account and no membership — their role is a property of the invite, not of
+  them — so the handoff can only happen *after* accepting. The page accepts
+  first, then sends a supervisor to `/dashboard` and a worker to
+  `/join/<token>/welcome`, which offers the app. Reading the role from
+  memberships rather than from the invite row is deliberate: memberships are
+  what `requireSupervisorOrAdmin` consults a moment later.
+- **The email carries the bare code as well as the link.** The app's own join
+  screen takes a pasted code, so a mangled URL or an already-installed app still
+  has a way through. `parseInviteToken` (`apps/mobile/src/lib/inviteLink.ts`)
+  accepts both forms, because people paste whatever the mail gave them.
+- **Deploy the portal before the function**, exactly as for `/go/snag/[id]`, and
+  for the same reason — these links are only ever followed from an inbox, so a
+  mismatch is invisible everywhere else. `/join/<any-uuid>` must answer 200 on
+  `$SNAG_PORTAL_URL` first.
+
+`resend_invite` re-sends the same token (so a link already delivered stays
+valid) and pushes `expires_at` out, since an admin pressing resend means this
+person should still be able to join. Manage Organisation also offers **Copy
+link** per pending invite — the manual path, for when mail is filtered or sat
+on.
+
+No org opts into any of this: `invite_user` is one shared RPC, and
+`create_organisation_and_owner` makes every org's creator an `officer_admin`,
+which is one of the two roles it admits. Every organisation, past and future,
+invites by email the moment the migration is applied.
+
 ## Who actually sends the mail
 
 Two senders, not one, and they fail independently — so "email works" is never a
@@ -580,7 +629,7 @@ single fact about this project:
 
 | Mail | Sent by | Configured in |
 |---|---|---|
-| Every per-snag notification + the overdue digest | `notify-snag` → Resend's **HTTP API** | `RESEND_API_KEY`, `SNAG_FROM_ADDRESS` (Supabase function secrets) |
+| Every per-snag notification + the overdue digest + invites | `notify-snag` → Resend's **HTTP API** | `RESEND_API_KEY`, `SNAG_FROM_ADDRESS` (Supabase function secrets) |
 | Password recovery (and confirmation, if re-enabled) | **Supabase Auth → Resend's SMTP** | Supabase dashboard → Auth → SMTP Settings |
 
 Same Resend account, two entirely different paths into it, and neither one

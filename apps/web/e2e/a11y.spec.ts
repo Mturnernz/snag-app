@@ -43,6 +43,19 @@ test.describe('accessibility (public)', () => {
     const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
     expect(violations, `/go/snag/[id]:\n${describe(violations)}`).toEqual([]);
   });
+
+  test('the invite landing has no WCAG A/AA violations', async ({ page }) => {
+    // Someone's first contact with SNAG, and the only page in the product a
+    // person reaches before they have an account at all — an unusable one here
+    // costs the whole signup rather than one navigation.
+    //
+    // An unknown token deliberately: the dead-end state is the one every
+    // expired and cancelled invite renders, so it's the copy most likely to be
+    // read by someone already confused.
+    await page.goto('/join/00000000-0000-4000-8000-000000000000', { waitUntil: 'networkidle' });
+    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
+    expect(violations, `/join/[token]:\n${describe(violations)}`).toEqual([]);
+  });
 });
 
 test.describe('accessibility (portal)', () => {

@@ -82,14 +82,22 @@ async function advanceToEnd(page: Page) {
 
   // Progress is written fire-and-forget — the app doesn't await the RPC, which
   // is right for a user (a killed app costs them one step) and wrong for a
-  // shared test account: closing the page here cut the final `done` off, and
-  // the run before this one left QA Worker sitting mid-walkthrough for every
-  // spec that boots after it. Armed before the click, since the request goes
-  // out immediately.
+  // shared test account: closing the page cuts the final `done` off, and the
+  // next run then boots every earlier spec inside a live walkthrough. That is
+  // what produced the first three failures here.
+  //
+  // Matched on the body rather than just the URL. The first attempt waited for
+  // any `set_tour_progress` response and still left the account mid-way: the
+  // writes are queued now, so several are in flight behind this one, and it
+  // resolved on the wrong one.
   const written = page
-    .waitForResponse((r) => r.url().includes('/rpc/set_tour_progress') && r.status() < 400, {
-      timeout: 15_000,
-    })
+    .waitForResponse(
+      (r) =>
+        r.url().includes('/rpc/set_tour_progress') &&
+        (r.request().postData() ?? '').includes('"done"') &&
+        r.status() < 400,
+      { timeout: 15_000 },
+    )
     .catch(() => null);
 
   await page.getByText('Done', { exact: true }).click();

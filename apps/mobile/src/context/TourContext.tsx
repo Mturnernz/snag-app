@@ -114,12 +114,32 @@ export function TourProvider({ profile, onStatusChange, children }: Props) {
 
   // ─── Persistence ───────────────────────────────────────────────────────────
 
+  /**
+   * Progress writes are queued, not fired in parallel.
+   *
+   * They all target one row, and `record` runs on every step change — so
+   * pressing Next a few times quickly used to put several updates in flight at
+   * once, landing in whatever order the network chose. The e2e run caught the
+   * harmless version (the account left a few steps back from where it ended),
+   * but the one that matters is Next-Next-Pause: a straggling `running` write
+   * landing after `paused` loses the pause, and the walkthrough silently
+   * resumes on next launch instead of waiting.
+   *
+   * Still fire-and-forget to the caller — nothing awaits a tap — but serialised
+   * so the last thing somebody did is the last thing written.
+   */
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
+
   const record = useCallback(
     (nextStatus: TourStatus, stepId: string | null) => {
       setStatus(nextStatus);
       onStatusChange?.(nextStatus, stepId);
-      void writeTourState(userId, nextStatus, stepId);
-      void setTourProgress(nextStatus, stepId);
+      writeQueue.current = writeQueue.current
+        .then(() => writeTourState(userId, nextStatus, stepId))
+        .then(() => setTourProgress(nextStatus, stepId))
+        // A failed write must not wedge the queue for the rest of the session;
+        // setTourProgress already logs, and the next step overwrites this one.
+        .catch(() => {});
     },
     [onStatusChange, userId],
   );

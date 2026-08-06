@@ -162,6 +162,202 @@
   border-radius: var(--radius-button);
 }
 
+/* ---- Two lanes, one system ----
+   The section that carries the product's central claim, so the two cards are
+   deliberately uneven in height: a niggle closes in one line, a serious snag
+   closes only after a five-step gate, and equalising them would flatten the
+   only thing this section says. `align-items: start` keeps that difference
+   visible instead of stretching the short card to match. ---- */
+.lanes {
+  padding: var(--space-4xl) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.lanesHead {
+  max-width: 60ch;
+  margin-bottom: var(--space-3xl);
+}
+
+.lanesHeadline {
+  font-size: var(--text-2xl);
+  margin-bottom: var(--space-md);
+}
+
+.lanesIntro {
+  color: var(--color-text-secondary);
+  margin: 0;
+  max-width: 56ch;
+}
+
+.laneGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+/* Standalone card: shadow, no border — combining both is what the design
+   system explicitly rules out. */
+.laneCard {
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.laneEdge {
+  height: 3px;
+}
+
+.laneCard[data-lane='niggle'] .laneEdge {
+  background: var(--color-category-niggle);
+}
+
+.laneCard[data-lane='serious'] .laneEdge {
+  background: var(--color-serious);
+}
+
+.laneInner {
+  padding: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.laneLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.laneLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono-family);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.laneCard[data-lane='niggle'] .laneLabel {
+  color: var(--color-text-secondary);
+}
+
+.laneCard[data-lane='serious'] .laneLabel {
+  color: var(--color-serious-fg);
+}
+
+.laneRef {
+  font-family: var(--font-mono-family);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.laneTitle {
+  font-size: var(--text-lg);
+  margin: 0;
+}
+
+.laneMeta {
+  font-family: var(--font-mono-family);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 6px 0 0;
+}
+
+.laneBody {
+  color: var(--color-text-secondary);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.laneDivider {
+  height: 1px;
+  background: var(--color-border);
+}
+
+.laneChecklist {
+  composes: checklist;
+  margin-bottom: 0;
+  gap: 7px;
+}
+
+.laneGate {
+  composes: gateBanner;
+}
+
+/* The niggle lane's counterpart to .gateBanner — same shape, opposite verdict,
+   so the two cards' closing states read as one comparison. */
+.laneResolved {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-success-bg);
+  color: var(--color-success-fg);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  padding: 8px 10px;
+  border-radius: var(--radius-button);
+}
+
+/* ---- Why Snag ---- */
+.whySnag {
+  padding: var(--space-4xl) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.whySnagHeadline {
+  font-size: var(--text-2xl);
+  max-width: 20ch;
+  margin-bottom: var(--space-xl);
+}
+
+.whySnagGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4xl);
+  align-items: start;
+}
+
+.whySnagProse p {
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-lg);
+  max-width: 52ch;
+  line-height: 1.65;
+}
+
+.whySnagProse p:last-child {
+  margin-bottom: 0;
+}
+
+.pullQuote {
+  margin: 0;
+  padding-left: var(--space-xl);
+  border-left: 3px solid var(--color-primary);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+/* ---- Principles ---- */
+.principles {
+  padding: var(--space-4xl) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.principlesHeadline {
+  font-size: var(--text-2xl);
+  max-width: 24ch;
+  margin-bottom: var(--space-xl);
+}
+
 .features {
   padding: var(--space-4xl) 0;
 }
@@ -379,6 +575,18 @@
 
   .whyCard {
     flex-direction: column;
+  }
+
+  /* Both new two-column grids collapse here. Neither overflows the viewport
+     without this — they just crush into unreadable columns, which is why the
+     overflow assertion in e2e/public.spec.ts stays green either way. */
+  .laneGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .whySnagGrid {
+    grid-template-columns: 1fr;
+    gap: var(--space-2xl);
   }
 
   .pricingTeaser {

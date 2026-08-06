@@ -3,7 +3,7 @@ import { test, expect, type Page } from '@playwright/test';
 // Every route a visitor can reach without an account. These run with no
 // credentials and write nothing, so they are safe against any environment.
 const PUBLIC_ROUTES = [
-  { path: '/', heading: /every workplace hazard/i },
+  { path: '/', heading: /stop passing the buck/i },
   { path: '/pricing', heading: /pricing|plan/i },
   { path: '/privacy', heading: /privacy/i },
   { path: '/terms', heading: /terms/i },

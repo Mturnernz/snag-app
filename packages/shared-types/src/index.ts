@@ -237,6 +237,20 @@ export const SNAG_STEP_KEYS: SnagStepKey[] = [
   'rootCause', 'correctiveActions', 'investigationDocument', 'rca', 'debrief',
 ];
 
+// The three panels of the single Manage screen. Site *configuration* is not
+// among them on purpose: a site is a thing with an address of its own
+// (`SiteDetail`), which is what lets the admin dashboard point at the site that
+// has no Site Lead rather than at a list the reader has to search.
+export type ManageTab = 'organisation' | 'sites' | 'teams';
+
+export const MANAGE_TABS: ManageTab[] = ['organisation', 'sites', 'teams'];
+
+export const MANAGE_TAB_LABELS: Record<ManageTab, string> = {
+  organisation: 'Organisation',
+  sites: 'Sites',
+  teams: 'Teams',
+};
+
 export type RootStackParamList = {
   Main: undefined;
   // `issueId` here refers to a snags.id — the param name is kept for
@@ -249,9 +263,10 @@ export type RootStackParamList = {
   ReportIncidentReview: undefined;
   ScanOrgCode: undefined;
   ChooseReportOrg: undefined;
-  ManageOrganisation: undefined;
-  ManageSites: undefined;
-  ManageWorkGroups: undefined;
+  // One screen for organisation, sites and teams. `tab` opens a specific
+  // panel so a caller can point at the part it means.
+  Manage: { tab?: ManageTab } | undefined;
+  SiteDetail: { siteId: string };
   Mentions: undefined;
   DocumentLibrary: undefined;
   OnboardingCarousel: undefined;

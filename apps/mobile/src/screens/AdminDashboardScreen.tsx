@@ -95,8 +95,19 @@ export default function AdminDashboardScreen() {
 
   const canManageWorkGroups = role === 'officer_admin' || role === 'supervisor';
 
-  const sitesWithoutLead = sitesDetail.filter((s) => s.supervisorIds.length === 0).map((s) => s.name);
-  const sitesWithoutDefaultOwner = sitesDetail.filter((s) => !s.defaultOwnerId).map((s) => s.name);
+  const sitesWithoutLead = sitesDetail.filter((s) => s.supervisorIds.length === 0);
+  const sitesWithoutDefaultOwner = sitesDetail.filter((s) => !s.defaultOwnerId);
+
+  // A cover row names a problem; tapping it should land on the thing that has
+  // it. With one offending site that is the site itself — with several there is
+  // no single answer, so the list is the honest destination.
+  function openSites(offenders: SiteDetail[]) {
+    if (offenders.length === 1) {
+      navigation.navigate('SiteDetail', { siteId: offenders[0].id });
+    } else {
+      navigation.navigate('Manage', { tab: 'sites' });
+    }
+  }
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -419,7 +430,7 @@ export default function AdminDashboardScreen() {
               // lands nowhere anybody is watching.
               warn={incidentOwnerCount <= 1}
               hint={incidentOwnerCount <= 1 ? 'Every serious report goes to one person' : undefined}
-              onPress={isAdmin ? () => navigation.navigate('ManageOrganisation') : undefined}
+              onPress={isAdmin ? () => navigation.navigate('Manage', { tab: 'organisation' }) : undefined}
             />
 
             <CoverRow
@@ -429,8 +440,8 @@ export default function AdminDashboardScreen() {
               // writes require, and it needs a real site_supervisors row. A site
               // with none has nobody who can run an investigation at it.
               warn={sitesWithoutLead.length > 0}
-              hint={sitesWithoutLead.length > 0 ? sitesWithoutLead.join(', ') : undefined}
-              onPress={isAdmin ? () => navigation.navigate('ManageSites') : undefined}
+              hint={sitesWithoutLead.length > 0 ? sitesWithoutLead.map((s) => s.name).join(', ') : undefined}
+              onPress={isAdmin ? () => openSites(sitesWithoutLead) : undefined}
             />
 
             <CoverRow
@@ -439,8 +450,8 @@ export default function AdminDashboardScreen() {
               // Not an alert: apply_default_owner still names the earliest
               // serious incident owner, so nothing arrives ownerless on the
               // serious lane. It does mean niggles land unassigned.
-              hint={sitesWithoutDefaultOwner.length > 0 ? sitesWithoutDefaultOwner.join(', ') : undefined}
-              onPress={isAdmin ? () => navigation.navigate('ManageSites') : undefined}
+              hint={sitesWithoutDefaultOwner.length > 0 ? sitesWithoutDefaultOwner.map((s) => s.name).join(', ') : undefined}
+              onPress={isAdmin ? () => openSites(sitesWithoutDefaultOwner) : undefined}
             />
 
             {org?.is_public && (
@@ -448,36 +459,21 @@ export default function AdminDashboardScreen() {
                 label="Public reporting"
                 value="On"
                 hint="Anyone with a site QR code can file a report"
-                onPress={isAdmin ? () => navigation.navigate('ManageOrganisation') : undefined}
+                onPress={isAdmin ? () => navigation.navigate('Manage', { tab: 'organisation' }) : undefined}
               />
             )}
           </Card>
         )}
 
-        {/* Actions */}
-        {isAdmin && (
-          <>
-            <Button
-              label="Manage Organisation"
-              icon="business-outline"
-              onPress={() => navigation.navigate('ManageOrganisation')}
-              fullWidth
-            />
-            <Button
-              label="Manage Sites"
-              variant="outline"
-              icon="location-outline"
-              onPress={() => navigation.navigate('ManageSites')}
-              fullWidth
-            />
-          </>
-        )}
+        {/* Actions — one door. Organisation, sites and teams were three buttons
+            to three screens that each linked to the others; they are three tabs
+            of one screen now. A supervisor lands on the only tab they can use,
+            so the single button is honest for both roles. */}
         {canManageWorkGroups && (
           <Button
-            label="Manage Work Groups"
-            variant="outline"
-            icon="people-circle-outline"
-            onPress={() => navigation.navigate('ManageWorkGroups')}
+            label="Manage"
+            icon="settings-outline"
+            onPress={() => navigation.navigate('Manage')}
             fullWidth
           />
         )}

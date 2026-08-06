@@ -14,20 +14,27 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Profile, UserRole } from '../types';
+import { Profile, UserRole } from '../../types';
 import {
-  supabase, getOrgMembers, getOrgSites, createSite, getWorkGroupsWithDetail, createWorkGroup,
+  supabase, getOrgMembers, getOrgSites, getWorkGroupsWithDetail, createWorkGroup,
   updateWorkGroup, assignWorkGroupSupervisor, removeWorkGroupSupervisor, deleteWorkGroup, WorkGroupDetail,
-} from '../lib/supabase';
-import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../constants/theme';
-import { showAlert } from '../lib/alert';
-import ScreenHeader from '../components/ScreenHeader';
-import Card from '../components/Card';
-import Button from '../components/Button';
-import Icon from '../components/Icon';
-import EmptyState from '../components/EmptyState';
+} from '../../lib/supabase';
+import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET, WorkGroupPalette } from '../../constants/theme';
+import { showAlert } from '../../lib/alert';
+import Card from '../../components/Card';
+import Button from '../../components/Button';
+import Icon from '../../components/Icon';
+import EmptyState from '../../components/EmptyState';
 
-export default function ManageWorkGroupsScreen() {
+// Work groups: the teams a snag can be routed to after it is reported.
+//
+// This tab used to carry its own "+ New site" box, in two places — the create
+// form and the per-group modal — because scoping a group to a site is useless
+// without a site to scope it to. That made three creation paths for one act,
+// and a site created here arrived with no members, no Site Lead and no default
+// owner, which is a site that cannot do anything. Sites are created on the
+// Sites tab now, where the next question is asked.
+export default function TeamsTab() {
   const insets = useSafeAreaInsets();
 
   const [role, setRole] = useState<UserRole | null>(null);
@@ -46,9 +53,6 @@ export default function ManageWorkGroupsScreen() {
 
   // Sites — for scoping a work group to one site, or leaving it for all.
   const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
-  const [showNewSiteInput, setShowNewSiteInput] = useState(false);
-  const [newSiteName, setNewSiteName] = useState('');
-  const [creatingSite, setCreatingSite] = useState(false);
 
   const canManageWorkGroups = role === 'officer_admin' || role === 'supervisor';
 
@@ -106,59 +110,28 @@ export default function ManageWorkGroupsScreen() {
     }
   }
 
-  async function handleCreateSiteInline() {
-    if (!newSiteName.trim()) return;
-    setCreatingSite(true);
-    const { error } = await createSite(newSiteName.trim());
-    setCreatingSite(false);
-    if (error) {
-      showAlert('Error', error.message ?? 'Could not create site');
-      return;
-    }
-    setNewSiteName('');
-    setShowNewSiteInput(false);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: profile } = await supabase.from('profiles').select('org_id').eq('id', user.id).single();
-      if (profile?.org_id) {
-        const fresh = await getOrgSites(profile.org_id);
-        setSites(fresh);
-        const created = fresh.find((s) => !sites.some((existing) => existing.id === s.id));
-        if (created) setNewGroupSiteIds((prev) => [...prev, created.id]);
-      }
-    }
-  }
-
   if (loading) {
     return (
-      <View style={styles.container}>
-        <ScreenHeader title="Manage Work Groups" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={Colors.primary} />
-        </View>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color={Colors.primary} />
       </View>
     );
   }
 
   if (!canManageWorkGroups) {
     return (
-      <View style={styles.container}>
-        <ScreenHeader title="Manage Work Groups" />
-        <View style={styles.loadingContainer}>
-          <EmptyState
-            icon="lock-closed-outline"
-            title="Managers and Site Leads only"
-            message="Only a manager or Site Lead can manage work groups."
-          />
-        </View>
+      <View style={styles.loadingContainer}>
+        <EmptyState
+          icon="lock-closed-outline"
+          title="Managers and Site Leads only"
+          message="Only a manager or Site Lead can manage work groups."
+        />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <ScreenHeader title="Manage Work Groups" />
-
+    <>
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
@@ -198,23 +171,10 @@ export default function ManageWorkGroupsScreen() {
 
           <Text style={styles.fieldLabel}>Sites</Text>
           <SiteMultiSelect sites={sites} selectedIds={newGroupSiteIds} onChange={setNewGroupSiteIds} />
-          {isAdmin && (
-            showNewSiteInput ? (
-              <View style={styles.rowButtons}>
-                <TextInput
-                  style={[styles.input, styles.flex1]}
-                  placeholder="New site name"
-                  placeholderTextColor={Colors.textMuted}
-                  value={newSiteName}
-                  onChangeText={setNewSiteName}
-                />
-                <Button label="Add" onPress={handleCreateSiteInline} loading={creatingSite} />
-              </View>
-            ) : (
-              <TouchableOpacity onPress={() => setShowNewSiteInput(true)}>
-                <Text style={styles.linkText}>+ New site</Text>
-              </TouchableOpacity>
-            )
+          {sites.length === 0 && (
+            <Text style={styles.hintMuted}>
+              No sites yet — a manager adds them under Sites. Until then a work group applies everywhere.
+            </Text>
           )}
 
           <Text style={styles.fieldLabel}>Colour</Text>
@@ -245,11 +205,10 @@ export default function ManageWorkGroupsScreen() {
         isAdmin={isAdmin}
         currentUserId={currentUserId}
         sites={sites}
-        onSitesChanged={setSites}
         onClose={() => setManagingGroup(null)}
         onChanged={refreshWorkGroups}
       />
-    </View>
+    </>
   );
 }
 
@@ -262,7 +221,6 @@ function WorkGroupSupervisorModal({
   isAdmin,
   currentUserId,
   sites,
-  onSitesChanged,
   onClose,
   onChanged,
 }: {
@@ -271,7 +229,6 @@ function WorkGroupSupervisorModal({
   isAdmin: boolean;
   currentUserId: string | null;
   sites: { id: string; name: string }[];
-  onSitesChanged: (sites: { id: string; name: string }[]) => void;
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
@@ -282,9 +239,6 @@ function WorkGroupSupervisorModal({
   const [editColor, setEditColor] = useState<string>(WorkGroupPalette[0]);
   const [editSiteIds, setEditSiteIds] = useState<string[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [showNewSiteInput, setShowNewSiteInput] = useState(false);
-  const [newSiteName, setNewSiteName] = useState('');
-  const [creatingSite, setCreatingSite] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
@@ -292,8 +246,6 @@ function WorkGroupSupervisorModal({
     setEditName(group.name);
     setEditColor(group.color ?? WorkGroupPalette[0]);
     setEditSiteIds(group.siteIds);
-    setShowNewSiteInput(false);
-    setNewSiteName('');
   }, [group?.id]);
 
   if (!group) return null;
@@ -307,29 +259,6 @@ function WorkGroupSupervisorModal({
       showAlert('Error', error.message ?? 'Could not update work group');
     } else {
       await onChanged();
-    }
-  }
-
-  async function handleCreateSiteInline() {
-    if (!newSiteName.trim()) return;
-    setCreatingSite(true);
-    const { error } = await createSite(newSiteName.trim());
-    setCreatingSite(false);
-    if (error) {
-      showAlert('Error', error.message ?? 'Could not create site');
-      return;
-    }
-    setNewSiteName('');
-    setShowNewSiteInput(false);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: profile } = await supabase.from('profiles').select('org_id').eq('id', user.id).single();
-      if (profile?.org_id) {
-        const fresh = await getOrgSites(profile.org_id);
-        const created = fresh.find((s) => !sites.some((existing) => existing.id === s.id));
-        onSitesChanged(fresh);
-        if (created) setEditSiteIds((prev) => [...prev, created.id]);
-      }
     }
   }
 
@@ -398,24 +327,6 @@ function WorkGroupSupervisorModal({
 
             <Text style={styles.fieldLabel}>Sites</Text>
             <SiteMultiSelect sites={sites} selectedIds={editSiteIds} onChange={setEditSiteIds} />
-            {isAdmin && (
-              showNewSiteInput ? (
-                <View style={styles.rowButtons}>
-                  <TextInput
-                    style={[styles.input, styles.flex1]}
-                    placeholder="New site name"
-                    placeholderTextColor={Colors.textMuted}
-                    value={newSiteName}
-                    onChangeText={setNewSiteName}
-                  />
-                  <Button label="Add" onPress={handleCreateSiteInline} loading={creatingSite} />
-                </View>
-              ) : (
-                <TouchableOpacity onPress={() => setShowNewSiteInput(true)}>
-                  <Text style={styles.linkText}>+ New site</Text>
-                </TouchableOpacity>
-              )
-            )}
 
             <Text style={styles.fieldLabel}>Colour</Text>
             <View style={styles.paletteRow}>
@@ -537,7 +448,6 @@ function SiteMultiSelect({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background, padding: Spacing.xl },
 
   scroll: { padding: Spacing.lg, gap: Spacing.lg },
@@ -548,8 +458,6 @@ const styles = StyleSheet.create({
   hintMuted: { fontSize: Typography.sm, color: Colors.textMuted, fontStyle: 'italic' },
   fieldLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary, marginTop: Spacing.xs },
   topGap: { marginTop: Spacing.sm },
-  rowButtons: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  flex1: { flex: 1 },
   input: {
     minHeight: MIN_TOUCH_TARGET,
     backgroundColor: Colors.background,
@@ -577,7 +485,6 @@ const styles = StyleSheet.create({
   siteChipActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
   siteChipText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   siteChipTextActive: { color: Colors.primary, fontWeight: Typography.semibold },
-  linkText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.primary, marginTop: Spacing.xs },
 
   // Work group supervisor modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },

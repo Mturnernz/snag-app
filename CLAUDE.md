@@ -211,6 +211,42 @@ fixed copy rather than the default group's name. That group is the reserved lite
 (`create_work_group` seeds it and refuses the name to anyone else), so rendering its name put a
 button reading "Submit" on a sheet asking which team should handle the snag.
 
+## Where site setup lives
+
+One route. **`Manage`** (`ManageScreen.tsx`) is a shell with three tabs — Organisation, Sites,
+Teams (`ManageTab` in `packages/shared-types`) — over `src/screens/manage/*Tab.tsx`, and the Sites
+tab drills into **`SiteDetail`** (`{ siteId }`), which holds everything about one site: its name
+and location, its people, its public QR, and the work groups that apply there.
+
+This replaced `ManageOrganisationScreen` / `ManageSitesScreen` / `ManageWorkGroupsScreen`, three
+stack routes reached from three buttons that each linked to the others. What the split cost was
+never navigation depth — it was that the seams ran through single decisions:
+
+- **Site creation existed in three places** (the sites list, and twice in the work-groups screen,
+  which needed a site to scope a group to). A site created from a work-group sheet had a name and
+  nothing else — no members, no Site Lead, no default owner — which is a site that cannot receive
+  a report anybody can act on. Creation lives on the Sites tab now and drops you straight into the
+  new site, because naming it was only the first of those decisions.
+- **A site's QR code and the switch that makes it work were on different screens.** The QR modal
+  literally read *"Turn on 'Accept public reports' on Manage Organisation first"*. The org-wide
+  switch still lives on the Organisation tab — it is genuinely org-wide — but `SiteDetail` offers
+  the same call in place, so the instruction to go elsewhere is gone.
+- **`can_edit_site` had no address.** The admin dashboard's "Sites with no site lead" could only
+  link to a *list*, leaving the reader to re-find the site the row had just named. It links to the
+  site when exactly one is offending, and to the list when several are — with no single answer,
+  the list is the honest destination.
+
+Two things to keep in mind when changing it. **The tabs are role-gated, not decorative**: sites
+and the organisation are `officer_admin`, work groups are admin-or-supervisor, so a supervisor
+gets one tab rather than a screen with two locked doors — and the tab bar hides itself entirely
+at one tab. And **each tab loads its own data**, which is why there is no shared loader to
+invalidate; every tab has pull-to-refresh, and `SitesTab` additionally reloads on focus because
+its counts go stale the moment someone comes back from `SiteDetail`.
+
+`update_site` (20260806090000) exists because of this screen. `create_site` had accepted a
+location since M1 that no client ever passed, and a site's name was permanent once set — neither
+gap was conspicuous until a site had a detail screen with nothing editable on it.
+
 ## Who owns a serious incident
 
 `serious_incident_owners` (org_id, profile_id) is the set of supervisors an organisation
@@ -234,7 +270,7 @@ Two things follow from the table, and both matter:
 `remove_serious_incident_owner` refuses to remove the last one. Only supervisors and admins are
 eligible, because owning a serious incident means running the investigation and
 `require_investigation_access` refuses anyone else — nominating a worker would name an owner the
-RPCs then reject. Managed at Manage Organisation → Serious incident owners.
+RPCs then reject. Managed at Manage → Organisation → Serious incident owners.
 
 ## Triage: the moment a serious snag is allocated
 
@@ -632,7 +668,7 @@ Three things follow:
 
 `resend_invite` re-sends the same token (so a link already delivered stays
 valid) and pushes `expires_at` out, since an admin pressing resend means this
-person should still be able to join. Manage Organisation also offers **Copy
+person should still be able to join. Manage → Organisation also offers **Copy
 link** per pending invite — the manual path, for when mail is filtered or sat
 on.
 

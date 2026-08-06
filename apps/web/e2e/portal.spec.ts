@@ -273,7 +273,7 @@ test.describe('portal (supervisor/admin)', () => {
       page.getByRole('link', { name: 'Triage — allocating a serious snag' }),
     ).toBeVisible();
 
-    // A Site Lead has no Manage Organisation screen, so the day-one setup
+    // A Site Lead has no Organisation tab under Manage, so the day-one setup
     // checklist is Manager-only. This is the role filter, not a rendering
     // detail: it's the whole reason the guide is data rather than a document.
     const role = await page.getByText(/you're a (Site Lead|Manager)/i).textContent();

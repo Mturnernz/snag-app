@@ -11,8 +11,8 @@
 // looks:
 //
 //   1. Deep-link prefixes (navigation/linking.ts).
-//   2. The URL encoded into site QR codes (ManageSitesScreen,
-//      ManageOrganisationScreen) — which get **printed and put up on walls**.
+//   2. The URL encoded into site QR codes (SiteDetailScreen,
+//      manage/OrganisationTab) — which get **printed and put up on walls**.
 //
 // So changing this only affects codes generated from here on. Anything already
 // printed still carries the old host, which is why linking.ts keeps

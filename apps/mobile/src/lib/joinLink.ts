@@ -9,7 +9,7 @@ import { APP_URL } from './appUrl';
 // "VDJQFNEM" and nothing to tap. That is exactly backwards for a sheet of paper
 // on a wall whose whole audience is people who don't have the app yet.
 //
-// Site QR codes never had this problem: ManageSitesScreen has always encoded
+// Site QR codes never had this problem: SiteDetailScreen has always encoded
 // `${APP_URL}/?report=<token>`, a real URL. This is the same shape for joining.
 //
 // Bare-code posters are already printed and on walls, so the scanner still

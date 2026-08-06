@@ -144,7 +144,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       },
       {
         type: 'para',
-        text: 'Roles are set by a Manager, from Manage Organisation. A person can be promoted or demoted at any time, and the change takes effect the next time they open the app.',
+        text: 'Roles are set by a Manager, from Manage → Organisation. A person can be promoted or demoted at any time, and the change takes effect the next time they open the app.',
       },
       {
         type: 'callout',
@@ -333,7 +333,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         type: 'para',
         text: 'A site can have a QR code printed and put on a wall. Anyone who scans it — a contractor, a delivery driver, a member of the public — gets a stripped-back report form: a photo, a description, their name if they want to give it, and a “This is a safety hazard” switch. They do not pick internal categories, and they do not need an account.',
       },
-      { type: 'steps', items: ['Manage Sites → the site → Public QR → Enable Public QR.', 'Print the code and put it where people are.', 'Manage Organisation → Public Reports → Accept public reports, and choose which site those reports land at.'] },
+      { type: 'steps', items: ['Manage → Sites → the site → Public reporting → Enable Public QR.', 'Print the code and put it where people are.', 'Manage → Organisation → Public Reports → Accept public reports, and choose which site those reports land at. You can also switch this on from the site itself.'] },
       { type: 'para', text: 'Public reports arrive in your list marked as public submissions, so you can tell them apart from your own crew\'s. Filter for them when you want to triage that queue on its own.' },
       {
         type: 'callout',
@@ -639,13 +639,13 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         type: 'steps',
         items: [
           'Create the organisation and name it. Get started → Create organisation. The name is how your workplace appears to everyone who joins, so use the name people would recognise. You are automatically its first Manager.',
-          'Add your sites. Manage Sites → Add a site. Add every physical location you want reports separated by. If you have one location, add one site — do not skip this, because reports need somewhere to land.',
-          'Invite your team. Manage Organisation → Invite a team member. Enter their email, choose their role, and optionally assign them to a site. For a large crew, share the 8-character join code or the Scan to Join QR code instead — faster than typing 40 email addresses.',
-          'Appoint Site Leads. Manage Sites → the site → Assign People, and set the right people to Site Lead. Every site needs at least one, or nobody can triage what gets reported there.',
-          'Set a default owner per site. Assign People → Owner. This is who unassigned snags at that site fall to. Without one, reports sit in a queue nobody feels responsible for.',
-          'Nominate your serious incident owners. Manage Organisation → Serious incident owners. These are the people emailed the moment a hazard or an incident is reported — your health & safety team. You are one by default because you created the organisation; add the people who should actually get that call.',
-          'Set up work groups, if you use them. Manage Work Groups → Add a work group. These are the teams that snags get queued to — Maintenance, Electrical, Cleaning. You can scope a group to one site or leave it across all of them. Skip this if a single queue suits you; you can add them later.',
-          'Turn on public reporting, if you want it. Manage Organisation → Public Reports, then Manage Sites → Public QR per site. Print the codes. See “Public and QR reporting”.',
+          'Add your sites. Manage → Sites → Add a site. Add every physical location you want reports separated by. If you have one location, add one site — do not skip this, because reports need somewhere to land.',
+          'Invite your team. Manage → Organisation → Invite a team member. Enter their email, choose their role, and optionally assign them to a site. For a large crew, share the 8-character join code or the Scan to Join QR code instead — faster than typing 40 email addresses.',
+          'Appoint Site Leads. Manage → Sites → the site → People, and set the right people to Site Lead. Every site needs at least one, or nobody can triage what gets reported there.',
+          'Set a default owner per site. Manage → Sites → the site → People → Owner. This is who unassigned snags at that site fall to. Without one, reports sit in a queue nobody feels responsible for.',
+          'Nominate your serious incident owners. Manage → Organisation → Serious incident owners. These are the people emailed the moment a hazard or an incident is reported — your health & safety team. You are one by default because you created the organisation; add the people who should actually get that call.',
+          'Set up work groups, if you use them. Manage → Teams → Add a work group. These are the teams that snags get queued to — Maintenance, Electrical, Cleaning. You can scope a group to one site or leave it across all of them. Skip this if a single queue suits you; you can add them later.',
+          'Turn on public reporting, if you want it. Manage → Organisation → Public Reports, then Manage → Sites → the site → Public reporting, per site. Print the codes. See “Public and QR reporting”.',
           'Check your work. Open the Manager tab. The tiles for “Sites with no site lead” and “Sites with no default owner” should both be empty. If they are not, go back to steps 4 and 5.',
         ],
       },

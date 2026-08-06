@@ -68,7 +68,7 @@ function DeadEnd({ title, message }: { title: string; message: string }) {
       <p className={styles.note}>
         <Icon name="Info" size="sm" />
         <span>
-          Ask whoever invited you to send a new one — they can do that from Manage Organisation.
+          Ask whoever invited you to send a new one — they can do that from Manage → Organisation.
         </span>
       </p>
     </Shell>

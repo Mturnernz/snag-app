@@ -602,6 +602,14 @@ export async function createSite(name: string, location?: string | null) {
   return supabase.rpc('create_site', { p_name: name, p_location: location ?? null });
 }
 
+// Renames a site and sets the location create_site has always accepted but no
+// UI ever captured. Admin-only server-side, same as creating one.
+export async function updateSite(siteId: string, name: string, location?: string | null) {
+  return supabase.rpc('update_site', {
+    p_site_id: siteId, p_name: name, p_location: location ?? null,
+  });
+}
+
 // Toggles a site's QR public-reporting token on/off, returning the new
 // token (or null when disabling). Calling again while already enabled
 // rotates it, invalidating any previously printed/shared QR code.

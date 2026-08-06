@@ -29,7 +29,14 @@ export default function Chip<T extends string>({ options, value, onChange, varia
               onPress={() => onChange(opt.key)}
               activeOpacity={0.7}
             >
-              <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>{opt.label}</Text>
+              {/* Segments are equal-share, so a label longer than a third of the
+                  screen wraps — and the row's fixed height clips the second line
+                  rather than growing. Site names go in here (the invite form's
+                  site picker, Manage's own tab bar), and they are as long as
+                  somebody typed. */}
+              <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]} numberOfLines={1}>
+                {opt.label}
+              </Text>
             </TouchableOpacity>
           );
         })}

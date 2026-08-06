@@ -35,7 +35,7 @@ Three roles, defined by the live `user_role` enum and surfaced in `ROLE_LABELS`:
 |---|---|---|
 | `worker` | Worker | Report snags, view/list, comment & vote on own-org snags, earn points. |
 | `supervisor` | Supervisor | Everything a worker can do **+** the Admin tab, triage panel (status/type/severity/owner) on IssueDetail, view Reports. |
-| `officer_admin` | Officer Admin | Everything a supervisor can do **+** Manage Organisation (rename, invite, members/roles, sites, QR, public mode). |
+| `officer_admin` | Officer Admin | Everything a supervisor can do **+** the Organisation and Sites tabs of Manage (rename, invite, members/roles, sites, QR, public mode). |
 
 Roles come from **`org_memberships`** (multi-org). The **active** org's role is mirrored onto
 `profiles.org_id` / `profiles.role`; `current_org_id()` / `current_role()` read the active
@@ -105,7 +105,8 @@ Initial route = **Report**.
 | `ReportIncidentReview` | `ReportIncidentReviewScreen` | all org members | ReportIncidentDetails → "Next: Review" |
 | `ScanOrgCode` | `ScanJoinCodeScreen` (post-auth) | all | Profile → "Scan QR to join or switch" |
 | `ChooseReportOrg` | `ChooseReportOrgScreen` | all | Report → "Submit to another organisation…" / org pill / no-org CTA |
-| `ManageOrganisation` | `ManageOrganisationScreen` | **officer_admin** (screen self-gates) | AdminDashboard → "Manage Organisation" |
+| `Manage` | `ManageScreen` (tabs: Organisation \| Sites \| Teams) | **officer_admin** all tabs; **supervisor** Teams only | AdminDashboard → "Manage" |
+| `SiteDetail` | `SiteDetailScreen` | **officer_admin** (screen self-gates) | Manage → Sites → a site; AdminDashboard cover rows |
 
 ---
 
@@ -153,13 +154,14 @@ Legend for **completeness**: ✅ fully built · 🟡 partial · ⛔ server-suppo
 
 ### Admin Dashboard (`AdminDashboardScreen`) — ✅
 - **Purpose:** at-a-glance org snapshot + jump-off to management and reports.
-- **Primary action:** "Manage Organisation" (officer_admin only) → `ManageOrganisation`.
+- **Primary action:** "Manage" (officer_admin and supervisor) → `Manage`.
+- **Cover rows** deep-link: one offending site → `SiteDetail`, several → `Manage` (Sites tab).
 - **Secondary:** "View Reports" → `Reports`.
 - **Reads:** `profiles` (+organisation), `getOrgStats`.
 - **States:** loading spinner; non-admins see stats + a note that settings are admin-managed; pull-to-refresh; refetches on focus.
 
-### Manage Organisation (`ManageOrganisationScreen`) — ✅
-- **Purpose:** the single admin console — rename org, invite, members, sites, QR, public mode.
+### Manage → Organisation (`manage/OrganisationTab`) — ✅
+- **Purpose:** the organisation itself — rename, invite, members, join QR, public mode. Sites moved to their own tab.
 - **Primary actions / RPCs:**
   - Org name inline edit → `rename_organisation`.
   - Invite (email + role + optional site) → `invite_user`.
@@ -298,12 +300,12 @@ Legend for **completeness**: ✅ fully built · 🟡 partial · ⛔ server-suppo
 | Job | Flow / screens | Status |
 |---|---|---|
 | Stand up the org | Create-org onboarding (auto default site) | ✅ |
-| Invite the team (optionally to a site) | Manage Organisation → Invite | ✅ |
-| Manage members & roles | Manage Organisation → Members | ✅ |
-| Structure sites & assign people | Manage Organisation → Sites | ✅ |
-| Distribute a join QR | Manage Organisation → Scan to Join | ✅ |
-| Accept public reports | Manage Organisation → Public Reports | ✅ |
-| Rename the org | Manage Organisation → name | ✅ |
+| Invite the team (optionally to a site) | Manage → Organisation → Invite | ✅ |
+| Manage members & roles | Manage → Organisation → Members | ✅ |
+| Structure sites & assign people | Manage → Sites → a site → People | ✅ |
+| Distribute a join QR | Manage → Organisation → Scan to Join | ✅ |
+| Accept public reports | Manage → Organisation → Public Reports (or from a site) | ✅ |
+| Rename the org | Manage → Organisation → name | ✅ |
 | Close out serious incidents defensibly | — | ⛔ no mobile UI |
 
 ---
@@ -386,7 +388,7 @@ Legend for **completeness**: ✅ fully built · 🟡 partial · ⛔ server-suppo
 
 **Bottom-sheet org pickers are hand-rolled per screen.** ReportIssue, IssueList (sort), and ManageOrganisation each implement their own `Modal` + backdrop + sheet rather than a shared component, with slightly different styling.
 
-**Role gating is layered and occasionally redundant.** The Admin **tab** shows for supervisor+admin; the "Manage Organisation" **button** shows for admin only; the `ManageOrganisationScreen` **also** self-gates to admin ("Admins only"). A supervisor thus sees an Admin tab whose primary management action is absent, and the screen defends a route they can't reach anyway.
+**Role gating is layered, and one layer of it used to be a dead end.** The Admin **tab** shows for supervisor+admin, but the "Manage Organisation" button under it showed for admin only — so a supervisor saw an Admin tab whose primary management action was simply absent, and the screen behind it self-gated against a route they could not reach anyway. The `Manage` consolidation resolved that: the button shows for both roles, and the screen offers a supervisor the one tab they can use (Teams) rather than three with two locked. `SiteDetail` still self-gates to admin. Nothing offers a supervisor that route today — the Sites tab is admin-only and the dashboard's cover rows are gated the same way — so the gate is defence in depth rather than a door anyone is standing at. Keep it: the RPCs behind the screen are admin-only regardless, and a screen that renders every member of the org has no business deciding it is unreachable.
 
 **Severity semantics differ by lane.** Niggles submit with `severity: null`; the serious lane forces a severity. In the triage panel severity is a free-form field ("Not assessed" + 4 levels) independent of lane, so the same control means different things depending on how the snag was created.
 

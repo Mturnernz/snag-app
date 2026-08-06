@@ -13,10 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-
-import { Profile, Organisation, UserRole, RootStackParamList, ROLE_LABELS } from '../types';
+import { Profile, Organisation, UserRole, ROLE_LABELS } from '../../types';
 import {
   supabase,
   getOrgMembers,
@@ -35,25 +32,24 @@ import {
   addSeriousIncidentOwner,
   removeSeriousIncidentOwner,
   SeriousIncidentOwner,
-} from '../lib/supabase';
-import { buildJoinLink } from '../lib/joinLink';
-import { buildInviteLink } from '../lib/inviteLink';
+} from '../../lib/supabase';
+import { buildJoinLink } from '../../lib/joinLink';
+import { buildInviteLink } from '../../lib/inviteLink';
 
 // The QR always encodes the web export's URL, so it works with or without the
 // native app installed; see PublicQrReportScreen.tsx / App.tsx for the landing
 // side of this link. The host lives in one place because these codes get
 // printed — see lib/appUrl.
-import { APP_URL } from '../lib/appUrl';
-import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
-import ScreenHeader from '../components/ScreenHeader';
-import Card from '../components/Card';
-import Avatar from '../components/Avatar';
-import Chip from '../components/Chip';
-import Button from '../components/Button';
-import Icon from '../components/Icon';
-import EmptyState from '../components/EmptyState';
-import ConfirmDialog from '../components/ConfirmDialog';
-import { useToast } from '../hooks/useToast';
+import { APP_URL } from '../../lib/appUrl';
+import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../../constants/theme';
+import Card from '../../components/Card';
+import Avatar from '../../components/Avatar';
+import Chip from '../../components/Chip';
+import Button from '../../components/Button';
+import Icon from '../../components/Icon';
+import EmptyState from '../../components/EmptyState';
+import ConfirmDialog from '../../components/ConfirmDialog';
+import { useToast } from '../../hooks/useToast';
 
 const ROLES: UserRole[] = ['worker', 'supervisor', 'officer_admin'];
 const ROLE_OPTIONS = ROLES.map((r) => ({ key: r, label: ROLE_LABELS[r] }));
@@ -69,11 +65,15 @@ interface PendingInvite {
   token: string;
 }
 
-type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-export default function ManageOrganisationScreen() {
+// The organisation itself: its name, who is in it, who owns a serious
+// incident, and whether the public can report into it at all.
+//
+// Sites are deliberately not here beyond the two places a site id is a *field*
+// on something else — the invite form's "assign to site", and which site
+// receives org-wide public reports. Configuring a site happens on the Sites
+// tab, which is the whole point of the split.
+export default function OrganisationTab() {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<Nav>();
   const { showToast } = useToast();
 
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
@@ -321,28 +321,8 @@ export default function ManageOrganisationScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <ScreenHeader title="Manage Organisation" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={Colors.primary} />
-        </View>
-      </View>
-    );
-  }
-
-  const isAdmin = currentUser?.role === 'officer_admin';
-
-  if (!isAdmin) {
-    return (
-      <View style={styles.container}>
-        <ScreenHeader title="Manage Organisation" />
-        <View style={styles.loadingContainer}>
-          <EmptyState
-            icon="lock-closed-outline"
-            title="Managers only"
-            message="Only an organisation manager can manage sites, members and settings."
-          />
-        </View>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color={Colors.primary} />
       </View>
     );
   }
@@ -359,9 +339,7 @@ export default function ManageOrganisationScreen() {
   ];
 
   return (
-    <View style={styles.container}>
-      <ScreenHeader title="Manage Organisation" />
-
+    <>
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
@@ -478,14 +456,6 @@ export default function ManageOrganisationScreen() {
           )}
           <Button label="Send Invite" onPress={handleSendInvite} loading={sendingInvite} fullWidth style={styles.topGap} />
         </Card>
-
-        <Button
-          label="Manage Sites"
-          variant="outline"
-          icon="location-outline"
-          onPress={() => navigation.navigate('ManageSites')}
-          fullWidth
-        />
 
         {/* Members */}
         <View style={styles.section}>
@@ -647,13 +617,21 @@ export default function ManageOrganisationScreen() {
           </TouchableOpacity>
 
           {org?.is_public ? (
-            <Text style={styles.hint}>
-              Anyone can find {orgName} in the app and submit a report
-              {sites.find((s) => s.id === org.public_intake_site_id)
-                ? ` — reports land in ${sites.find((s) => s.id === org.public_intake_site_id)!.name}`
-                : ''}
-              . They only ever see their own submissions.
-            </Text>
+            <>
+              <Text style={styles.hint}>
+                Anyone can find {orgName} in the app and submit a report
+                {sites.find((s) => s.id === org.public_intake_site_id)
+                  ? ` — reports land in ${sites.find((s) => s.id === org.public_intake_site_id)!.name}`
+                  : ''}
+                . They only ever see their own submissions.
+              </Text>
+              {/* This switch is also what makes every per-site QR code work, and
+                  a reader turning it on here has no way to know that. */}
+              <Text style={styles.hintMuted}>
+                Each site can also have its own QR code, which skips the search and lands straight on
+                a report form for that site — set one up under Sites.
+              </Text>
+            </>
           ) : (
             <>
               <Text style={styles.hint}>
@@ -667,7 +645,9 @@ export default function ManageOrganisationScreen() {
                   variant="segmented"
                 />
               ) : (
-                <Text style={styles.hintMuted}>Your organisation has no sites yet — add one above first.</Text>
+                <Text style={styles.hintMuted}>
+                  Your organisation has no sites yet — add one under Sites first.
+                </Text>
               )}
             </>
           )}
@@ -695,12 +675,11 @@ export default function ManageOrganisationScreen() {
         onConfirm={handleRegenerateCode}
         onCancel={() => setConfirmRegenerate(false)}
       />
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
   scroll: { padding: Spacing.lg, gap: Spacing.lg },
 

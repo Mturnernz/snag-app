@@ -46,21 +46,28 @@ both clients' cards and detail views. Decide up front whether it is required or 
 
 ---
 
-## 3. One management screen
+## 3. One management screen — ✅ mostly done
 
-Manage Organisation, Manage Sites and Manage Work Groups all answer *"who works where, on
-what"*, across three stack routes and two modals. Merge into one screen with sections, using a
-**members × sites matrix** as the assignment surface in place of the current per-site modal that
-lists every member.
+Merged. `Manage` is one route with three tabs (Organisation | Sites | Teams) and a real
+`SiteDetail` route under the Sites tab. Site creation is down from three call sites to one, and
+the per-site QR now sits with the org switch that makes it work instead of a sentence telling
+the reader to go to another screen.
 
-Plan these as one piece of work — the matrix *is* the sites/people section of the merged screen.
+**The members × sites matrix was not built**, and the decision is worth recording rather than
+re-taking. A matrix is one surface for *n* sites × *m* people; master–detail is *n* surfaces of
+*m* rows. Master–detail won because a site needed to be addressable for its own sake — the admin
+dashboard's "Sites with no site lead" can now link to the site, which is the fix that row was
+always missing. A matrix would still be the better assignment surface for an org with twenty
+sites and one person to place; if that org shows up, it belongs *inside* the Sites tab as a
+second view, not as a replacement for the detail screen.
 
-Two smaller items fold into it rather than being done separately:
+Still open:
 
-- **Site creation exists in two places.** `createSite` is called from `ManageSitesScreen` and
-  twice from `ManageWorkGroupsScreen`. The merge collapses this by construction.
 - **"All sites" is a cleared selection, not a value.** A work group with no sites applies to
-  every site, so "applies everywhere" and "nobody has configured this" look identical.
+  every site, so "applies everywhere" and "nobody has configured this" look identical. Untouched
+  by the merge — `SiteMultiSelect` still clears the selection to mean "all".
+- **No site archive or delete.** `update_site` (20260806090000) closed the rename gap. A site
+  that closes still has to stay in every picker forever, because nothing can retire it.
 
 ---
 

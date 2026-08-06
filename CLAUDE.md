@@ -247,6 +247,42 @@ its counts go stale the moment someone comes back from `SiteDetail`.
 location since M1 that no client ever passed, and a site's name was permanent once set — neither
 gap was conspicuous until a site had a detail screen with nothing editable on it.
 
+### Retiring a site is two verbs, and the data picks which
+
+`archive_site` and `delete_site` (20260806120000). Which one `SiteDetail` offers is decided by
+the site's snag count, not by the reader.
+
+**A site with any snag on it cannot be deleted at all** — this is not a policy, it is arithmetic.
+`snags.site_id` is `ON DELETE CASCADE`, and the cascade runs into
+`block_snag_delete_within_retention`, a BEFORE DELETE trigger on `snags` that raises
+*unconditionally*. Despite the name there is no date test in it; MVP-SPEC golden rule #4 says so
+outright ("the delete block is unconditional beyond even that"). So the transaction aborts.
+
+`delete_site` therefore counts snags itself rather than letting the cascade decide, because the
+cascade's refusal is useless to the person reading it: they asked to delete a *site* and got
+"Snags can never be deleted — see CLAUDE.md golden rule #4" from a trigger about a table they
+never mentioned. Counting first turns that into the number and the alternative. The client mirrors
+it by hiding the button, the same way it mirrors the resolve gate.
+
+**Archiving is the route for everything else**, and it is a real state rather than a hidden flag:
+
+- `sites.archived_at`. `getReportableSites` and `getOrgSites` filter it out; `getSitesWithDetail`
+  deliberately returns archived sites because the Sites tab has to list them to offer a restore,
+  so **every other caller of it filters `archivedAt` itself** — the invite picker, the
+  public-intake picker, and the admin dashboard's "sites with no site lead" (a closed site having
+  no lead is not a gap to chase, and counting it would put a warning on the dashboard with no way
+  to clear it).
+- A **trigger** (`refuse_snag_at_archived_site`), not a check inside `create_snag`. There are three
+  insert paths — two `create_snag` overloads and `create_public_snag` — each validating the site
+  separately, and a fourth would eventually be written. It is BEFORE INSERT only: archiving must
+  not stop anyone resolving or investigating a snag already filed there.
+- Archiving **clears `public_report_token`** and switches off org public intake if it pointed here.
+  Restoring does not revive the token — a site coming back into use gets a fresh code rather than
+  silently re-enabling posters that were on a wall throughout the closure.
+- Both refuse to leave an org with **no active site**, the same shape as
+  `remove_serious_incident_owner`'s last-owner refusal: `getReportableSites` falls back to every
+  site in the org, so zero active sites is a report form with nothing to submit against.
+
 ## Who owns a serious incident
 
 `serious_incident_owners` (org_id, profile_id) is the set of supervisors an organisation

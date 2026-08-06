@@ -66,8 +66,9 @@ Still open:
 - **"All sites" is a cleared selection, not a value.** A work group with no sites applies to
   every site, so "applies everywhere" and "nobody has configured this" look identical. Untouched
   by the merge — `SiteMultiSelect` still clears the selection to mean "all".
-- **No site archive or delete.** `update_site` (20260806090000) closed the rename gap. A site
-  that closes still has to stay in every picker forever, because nothing can retire it.
+*(Site archive/delete is done — `archive_site` / `delete_site`, 20260806120000. Delete is only
+possible for a site with no snags, because the cascade into `snags` hits the unconditional delete
+block; archive is the route for everything else.)*
 
 ---
 

@@ -354,7 +354,10 @@ export async function getLastReportedSiteId(orgId: string): Promise<string | nul
 
 export async function getReportableSites(orgId: string): Promise<ReportSite[]> {
   const { data: memberSiteIds } = await supabase.rpc('my_member_site_ids');
-  const query = supabase.from('sites').select('id, name');
+  // `is('archived_at', null)`: a retired site takes no new reports (a trigger
+  // on snags enforces it server-side), so offering it in the picker would only
+  // produce a refusal at submit — after the photo and the description.
+  const query = supabase.from('sites').select('id, name').is('archived_at', null);
   const { data } = memberSiteIds && memberSiteIds.length > 0
     ? await query.in('id', memberSiteIds as string[]).order('name')
     : await query.eq('org_id', orgId).order('name');
@@ -510,11 +513,17 @@ export async function blockPublicReporter(snagId: string) {
   return supabase.rpc('block_public_reporter', { p_snag_id: snagId });
 }
 
+// Active sites only — this feeds work-group scoping and the snag list's site
+// filter. A retired site keeps its snags, so filtering the *list* by it would
+// still be meaningful; it is excluded anyway because scoping a new work group
+// to a closed site is not, and one function serving both is worth more than
+// the edge case.
 export async function getOrgSites(orgId: string): Promise<{ id: string; name: string }[]> {
   const { data } = await supabase
     .from('sites')
     .select('id, name')
     .eq('org_id', orgId)
+    .is('archived_at', null)
     .order('created_at', { ascending: true });
   return data ?? [];
 }
@@ -566,14 +575,23 @@ export interface SiteDetail {
   supervisorIds: string[];
   defaultOwnerId: string | null;
   publicReportToken: string | null;
+  /** Set once a site is retired. Archived sites keep every snag but take no
+   *  new ones — see 20260806120000_archive_and_delete_site.sql. */
+  archivedAt: string | null;
 }
 
 // Sites for the active org, each with its member/supervisor/default-owner ids.
 // Everything is org-scoped by RLS via current_org_id().
+//
+// Returns archived sites too, because the Manage → Sites tab has to list them
+// to offer a restore. Every *other* caller wants active sites only and filters
+// on `archivedAt` — an archived site must not appear in the invite form's site
+// picker, the public-intake picker, or the admin dashboard's "sites with no
+// site lead" (a closed site having no lead is not a gap to chase).
 export async function getSitesWithDetail(): Promise<SiteDetail[]> {
   const { data: sites } = await supabase
     .from('sites')
-    .select('id, name, location, public_report_token')
+    .select('id, name, location, public_report_token, archived_at')
     .order('created_at', { ascending: true });
   if (!sites || sites.length === 0) return [];
 
@@ -595,7 +613,32 @@ export async function getSitesWithDetail(): Promise<SiteDetail[]> {
     supervisorIds: sups.filter((m: any) => m.site_id === s.id).map((m: any) => m.user_id),
     defaultOwnerId: owners.find((o: any) => o.site_id === s.id)?.owner_id ?? null,
     publicReportToken: s.public_report_token,
+    archivedAt: s.archived_at ?? null,
   }));
+}
+
+// How many reports are on a site. The only thing standing between delete_site
+// and an unrecoverable cascade through snags → investigations, so the client
+// asks before offering the button rather than letting the server refuse.
+export async function getSiteSnagCount(siteId: string): Promise<number> {
+  const { count } = await supabase
+    .from('snags')
+    .select('id', { count: 'exact', head: true })
+    .eq('site_id', siteId);
+  return count ?? 0;
+}
+
+// Retire a site that has history. Everything on it stays; it just stops being
+// somewhere a new report can be aimed. Pass false to bring it back.
+export async function archiveSite(siteId: string, archived = true) {
+  return supabase.rpc('archive_site', { p_site_id: siteId, p_archived: archived });
+}
+
+// Only for a site with no snags — the server refuses otherwise, naming the
+// count. Cascades through site_members / site_supervisors / site_default_owners
+// / work_group_sites, all of which describe the site rather than being records.
+export async function deleteSite(siteId: string) {
+  return supabase.rpc('delete_site', { p_site_id: siteId });
 }
 
 export async function createSite(name: string, location?: string | null) {

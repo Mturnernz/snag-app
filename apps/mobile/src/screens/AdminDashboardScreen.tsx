@@ -95,8 +95,12 @@ export default function AdminDashboardScreen() {
 
   const canManageWorkGroups = role === 'officer_admin' || role === 'supervisor';
 
-  const sitesWithoutLead = sitesDetail.filter((s) => s.supervisorIds.length === 0);
-  const sitesWithoutDefaultOwner = sitesDetail.filter((s) => !s.defaultOwnerId);
+  // Active sites only. An archived site has no Site Lead and no default owner
+  // by design — counting it here would put a permanent warning on the
+  // dashboard for a site nobody works at, with no way to clear it.
+  const activeSites = sitesDetail.filter((s) => !s.archivedAt);
+  const sitesWithoutLead = activeSites.filter((s) => s.supervisorIds.length === 0);
+  const sitesWithoutDefaultOwner = activeSites.filter((s) => !s.defaultOwnerId);
 
   // A cover row names a problem; tapping it should land on the thing that has
   // it. With one offending site that is the site itself — with several there is

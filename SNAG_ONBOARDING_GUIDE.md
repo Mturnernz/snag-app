@@ -456,6 +456,12 @@ Work through this in order. It takes about half an hour, and it is the differenc
 >
 > SNAG is priced per organisation, not per seat — adding people never costs more. See the pricing page if you are growing past one site.
 
+When a site closes down, archive it rather than looking for a delete button. Manage → Sites → the site → Retire this site → Archive. It stops accepting reports, disappears from everyone's site picker, and any QR code printed for it stops working — but every report ever filed there stays on record and still counts in Reports. You can restore it if the site reopens, though it will need a fresh QR code.
+
+> **A site with reports on it cannot be deleted**
+>
+> Deleting is only offered for a site nothing was ever reported at — a duplicate, or one added by mistake. Once a single report exists, the site can only be archived, because deleting it would have to delete those reports and SNAG never deletes a report. That is deliberate: your snag history is the record you would be asked for after an incident, and it should not be removable by tidying up the site list.
+
 <a id="notifications"></a>
 
 ## Notifications — what lands in whose inbox

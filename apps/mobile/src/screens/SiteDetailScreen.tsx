@@ -21,7 +21,10 @@ import {
   getOrgMembers,
   getSitesWithDetail,
   getWorkGroupsWithDetail,
+  getSiteSnagCount,
   updateSite,
+  archiveSite,
+  deleteSite,
   addSiteMember,
   removeSiteMember,
   assignSiteSupervisor,
@@ -89,6 +92,13 @@ export default function SiteDetailScreen() {
   const [confirmRotate, setConfirmRotate] = useState(false);
   const [confirmDisable, setConfirmDisable] = useState(false);
 
+  // Retiring the site. `snagCount` decides which of the two verbs is even
+  // offered — see the danger zone below.
+  const [snagCount, setSnagCount] = useState<number | null>(null);
+  const [retiring, setRetiring] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
@@ -105,15 +115,17 @@ export default function SiteDetailScreen() {
       setOrg((profile.organisation as Organisation | undefined) ?? null);
 
       if (profile.org_id) {
-        const [sites, orgMembers, groups] = await Promise.all([
+        const [sites, orgMembers, groups, count] = await Promise.all([
           getSitesWithDetail(),
           getOrgMembers(profile.org_id),
           getWorkGroupsWithDetail(),
+          getSiteSnagCount(siteId),
         ]);
         const found = sites.find((s) => s.id === siteId) ?? null;
         setSite(found);
         setMembers(orgMembers);
         setWorkGroups(groups);
+        setSnagCount(count);
         if (found) {
           setNameDraft(found.name);
           setLocationDraft(found.location ?? '');
@@ -191,6 +203,37 @@ export default function SiteDetailScreen() {
     await load();
   }
 
+  async function handleArchive(archived: boolean) {
+    if (!site) return;
+    setConfirmArchive(false);
+    setRetiring(true);
+    const { error } = await archiveSite(site.id, archived);
+    setRetiring(false);
+    if (error) {
+      // Includes the last-active-site refusal, whose message names the fix.
+      showToast(error.message ?? 'Could not archive this site');
+      return;
+    }
+    showToast(archived ? `${site.name} archived` : `${site.name} restored`);
+    await load();
+  }
+
+  async function handleDelete() {
+    if (!site) return;
+    setConfirmDelete(false);
+    setRetiring(true);
+    const { error } = await deleteSite(site.id);
+    setRetiring(false);
+    if (error) {
+      showToast(error.message ?? 'Could not delete this site');
+      return;
+    }
+    showToast(`${site.name} deleted`);
+    // The site this screen is about no longer exists, so there is nothing to
+    // reload into — go back to the list rather than render a "not found".
+    navigation.goBack();
+  }
+
   async function handleCopyLink() {
     if (!site?.publicReportToken) return;
     await Clipboard.setStringAsync(`${APP_URL}/?report=${site.publicReportToken}`);
@@ -243,6 +286,7 @@ export default function SiteDetailScreen() {
   const sortedMembers = [...members].sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
   const link = site.publicReportToken ? `${APP_URL}/?report=${site.publicReportToken}` : null;
   const orgIsPublic = !!org?.is_public;
+  const isArchived = !!site.archivedAt;
 
   // Empty siteIds means the group applies everywhere — see SiteMultiSelect's
   // "All sites", which clears the selection rather than naming every site.
@@ -259,6 +303,16 @@ export default function SiteDetailScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         keyboardShouldPersistTaps="handled"
       >
+        {isArchived && (
+          <Card variant="elevated" style={styles.archivedBanner}>
+            <Icon name="archive-outline" size="md" color={Colors.textSecondary} />
+            <Text style={styles.archivedText}>
+              This site is archived. It takes no new reports, and its people and public QR are
+              inactive — everything already filed here is untouched.
+            </Text>
+          </Card>
+        )}
+
         {/* ── Details ─────────────────────────────────────────────────────── */}
         <Card variant="elevated" style={styles.card}>
           <Text style={styles.sectionLabel}>DETAILS</Text>
@@ -390,7 +444,19 @@ export default function SiteDetailScreen() {
         <Card variant="elevated" style={styles.card}>
           <Text style={styles.sectionLabel}>PUBLIC REPORTING</Text>
 
-          {!orgIsPublic ? (
+          {/* Archiving clears the token, so the only way to reach a live QR on
+              a closed site is to switch one on here afterwards. That code would
+              scan fine and fail at submit — the snags trigger refuses an
+              archived site — i.e. after somebody has taken a photo and typed a
+              description. Note set_site_public_intake itself does not check
+              archived_at, so this is the control being withheld rather than the
+              server refusing it. */}
+          {isArchived ? (
+            <Text style={styles.hint}>
+              Unavailable while this site is archived — it accepts no reports, public or otherwise.
+              Restore it first if you need a QR code here again.
+            </Text>
+          ) : !orgIsPublic ? (
             <>
               <Text style={styles.hint}>
                 A site QR code only works while {org?.name ?? 'your organisation'} is accepting public
@@ -485,6 +551,76 @@ export default function SiteDetailScreen() {
             style={styles.topGap}
           />
         </Card>
+
+        {/* ── Retiring the site ───────────────────────────────────────────── */}
+        {/* Two verbs, and which one is offered is decided by the data rather
+            than by the reader. Deleting a site with snags on it is impossible,
+            not merely unwise: the cascade hits the unconditional delete block
+            on snags (golden rule #4) and aborts. So for a used site "delete"
+            is not a stronger "archive" — it is an operation that cannot
+            succeed, and offering it would only produce a baffling error about
+            a table nobody mentioned. `delete_site` refuses it server-side with
+            the count; this hides the button and says why. */}
+        <Card variant="elevated" style={styles.card}>
+          <Text style={styles.sectionLabel}>RETIRE THIS SITE</Text>
+
+          {isArchived ? (
+            <>
+              <Text style={styles.hint}>
+                Archived{site.archivedAt ? ` on ${new Date(site.archivedAt).toLocaleDateString()}` : ''}.
+                It takes no new reports and appears in no picker. Everything filed here is still on
+                record, and still counts in Reports.
+              </Text>
+              <Button
+                label="Restore this site"
+                variant="outline"
+                icon="refresh-outline"
+                onPress={() => handleArchive(false)}
+                loading={retiring}
+                fullWidth
+              />
+            </>
+          ) : (
+            <>
+              <Text style={styles.hint}>
+                Archiving closes {site.name} to new reports and takes it out of every picker.
+                {snagCount !== null && snagCount > 0
+                  ? ` The ${snagCount} report${snagCount !== 1 ? 's' : ''} already filed here stay on record.`
+                  : ''}
+              </Text>
+              <Button
+                label="Archive this site"
+                variant="outline"
+                icon="archive-outline"
+                onPress={() => setConfirmArchive(true)}
+                loading={retiring}
+                fullWidth
+              />
+
+              {snagCount === 0 ? (
+                <>
+                  <Text style={styles.hintMuted}>
+                    Nothing has ever been reported here, so this site can also be deleted outright.
+                  </Text>
+                  <Button
+                    label="Delete this site"
+                    variant="dangerOutline"
+                    icon="trash-outline"
+                    onPress={() => setConfirmDelete(true)}
+                    loading={retiring}
+                    fullWidth
+                  />
+                </>
+              ) : snagCount !== null ? (
+                <Text style={styles.hintMuted}>
+                  This site can't be deleted: {snagCount} report{snagCount !== 1 ? 's' : ''} would go
+                  with it, along with every investigation, witness statement and piece of evidence on
+                  them. Archive it instead.
+                </Text>
+              ) : null}
+            </>
+          )}
+        </Card>
       </ScrollView>
 
       <ConfirmDialog
@@ -507,6 +643,37 @@ export default function SiteDetailScreen() {
         destructive
         onConfirm={() => { setConfirmDisable(false); handleToggleQr(false); }}
         onCancel={() => setConfirmDisable(false)}
+      />
+
+      <ConfirmDialog
+        visible={confirmArchive}
+        title={`Archive ${site.name}?`}
+        message={
+          `It stops accepting reports and disappears from every picker. ` +
+          (snagCount && snagCount > 0
+            ? `The ${snagCount} report${snagCount !== 1 ? 's' : ''} already filed here stay on record and in Reports. `
+            : '') +
+          `Any printed QR code for this site stops working. You can restore it later.`
+        }
+        confirmLabel="Archive"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => handleArchive(true)}
+        onCancel={() => setConfirmArchive(false)}
+      />
+
+      <ConfirmDialog
+        visible={confirmDelete}
+        title={`Delete ${site.name}?`}
+        message={
+          `This site has never had a report filed on it, so nothing is lost but the site itself — ` +
+          `its members, Site Leads, default owner and work-group scoping go with it. This cannot be undone.`
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
       />
     </View>
   );
@@ -601,6 +768,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md, marginBottom: Spacing.sm,
   },
   codeText: { flex: 1, fontSize: Typography.sm, color: Colors.textSecondary },
+
+  archivedBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md },
+  archivedText: { flex: 1, fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 18 },
 
   groupRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.xs },
   groupSwatch: { width: 32, height: 32, borderRadius: Radius.button },

@@ -82,6 +82,9 @@ export default function SitesTab() {
     );
   }
 
+  const active = sites.filter((s) => !s.archivedAt);
+  const archived = sites.filter((s) => s.archivedAt);
+
   return (
     <ScrollView
       contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing.xl }]}
@@ -91,40 +94,14 @@ export default function SitesTab() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionLabel}>SITES</Text>
-          <Text style={styles.sectionCount}>{sites.length} site{sites.length !== 1 ? 's' : ''}</Text>
+          <Text style={styles.sectionCount}>{active.length} site{active.length !== 1 ? 's' : ''}</Text>
         </View>
 
-        {sites.map((site) => {
-          const noLead = site.supervisorIds.length === 0;
-          return (
-            <TouchableOpacity
-              key={site.id}
-              onPress={() => navigation.navigate('SiteDetail', { siteId: site.id })}
-              activeOpacity={0.7}
-            >
-              <Card variant="elevated" style={styles.siteCard}>
-                <Icon name="location-outline" size="md" color={Colors.primary} />
-                <View style={styles.siteInfo}>
-                  <Text style={styles.siteName} numberOfLines={1}>{site.name}</Text>
-                  <Text style={styles.siteMeta} numberOfLines={1}>
-                    {site.memberIds.length} member{site.memberIds.length !== 1 ? 's' : ''}
-                    {' · '}
-                    {site.supervisorIds.length} Site Lead{site.supervisorIds.length !== 1 ? 's' : ''}
-                    {site.publicReportToken ? ' · Public QR' : ''}
-                  </Text>
-                  {noLead && (
-                    <Text style={styles.siteWarn} numberOfLines={1}>
-                      No Site Lead — nobody can investigate here
-                    </Text>
-                  )}
-                </View>
-                <Icon name="chevron-forward" size="md" color={Colors.textMuted} />
-              </Card>
-            </TouchableOpacity>
-          );
-        })}
+        {active.map((site) => (
+          <SiteRow key={site.id} site={site} onPress={() => navigation.navigate('SiteDetail', { siteId: site.id })} />
+        ))}
 
-        {sites.length === 0 && (
+        {active.length === 0 && (
           <EmptyState
             icon="location-outline"
             title="No sites yet"
@@ -147,8 +124,67 @@ export default function SitesTab() {
             <Button label="Add" onPress={handleCreate} loading={creating} disabled={!newSiteName.trim()} />
           </View>
         </Card>
+
+        {/* Archived sites stay listed — a closed site is the one thing an admin
+            comes back for, either to read its history or to reopen it. Kept in
+            their own group so they never pad the count above. */}
+        {archived.length > 0 && (
+          <>
+            <View style={[styles.sectionHeader, styles.archivedHeader]}>
+              <Text style={styles.sectionLabel}>ARCHIVED</Text>
+              <Text style={styles.sectionCount}>{archived.length}</Text>
+            </View>
+            {archived.map((site) => (
+              <SiteRow
+                key={site.id}
+                site={site}
+                archived
+                onPress={() => navigation.navigate('SiteDetail', { siteId: site.id })}
+              />
+            ))}
+          </>
+        )}
       </View>
     </ScrollView>
+  );
+}
+
+function SiteRow({
+  site, archived, onPress,
+}: { site: SiteDetail; archived?: boolean; onPress: () => void }) {
+  // Only for an active site: an archived one having no Site Lead is not a gap
+  // to chase, it is a site nobody works at.
+  const noLead = !archived && site.supervisorIds.length === 0;
+
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+      <Card variant="elevated" style={[styles.siteCard, archived && styles.siteCardArchived]}>
+        <Icon
+          name={archived ? 'archive-outline' : 'location-outline'}
+          size="md"
+          color={archived ? Colors.textMuted : Colors.primary}
+        />
+        <View style={styles.siteInfo}>
+          <Text style={styles.siteName} numberOfLines={1}>{site.name}</Text>
+          <Text style={styles.siteMeta} numberOfLines={1}>
+            {archived ? 'Archived · no new reports' : (
+              <>
+                {site.memberIds.length} member{site.memberIds.length !== 1 ? 's' : ''}
+                {' · '}
+                {site.supervisorIds.length} Site Lead{site.supervisorIds.length !== 1 ? 's' : ''}
+                {site.publicReportToken ? ' · Public QR' : ''}
+              </>
+            )}
+          </Text>
+          {noLead && (
+            <Text style={styles.siteWarn} numberOfLines={1}>
+              No Site Lead — nobody can investigate here
+            </Text>
+          )}
+        </View>
+        <Icon name="chevron-forward" size="md" color={Colors.textMuted} />
+      </Card>
+    </TouchableOpacity>
   );
 }
 
@@ -177,7 +213,9 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 
+  archivedHeader: { marginTop: Spacing.md },
   siteCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  siteCardArchived: { opacity: 0.65 },
   siteInfo: { flex: 1, gap: 2 },
   siteName: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
   siteMeta: { fontSize: Typography.sm, color: Colors.textMuted },

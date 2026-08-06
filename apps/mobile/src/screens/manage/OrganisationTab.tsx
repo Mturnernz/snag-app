@@ -141,7 +141,9 @@ export default function OrganisationTab() {
         ]);
         setMembers(list);
         setPendingInvites(invites as PendingInvite[]);
-        setSites(siteDetails);
+        // Active only: this list feeds the invite form's "assign to site" and
+        // the public-intake picker, and neither can point at a retired site.
+        setSites(siteDetails.filter((s) => !s.archivedAt));
         setSeriousOwners(owners);
         setIntakeSiteId(organisation?.public_intake_site_id ?? siteDetails[0]?.id ?? null);
       }

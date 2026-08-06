@@ -80,6 +80,10 @@ There are three roles. SNAG uses these names on screen, so this guide does too:
 
 Roles are set by a Manager, from Manage → Organisation. A person can be promoted or demoted at any time, and the change takes effect the next time they open the app.
 
+> **Demoting someone to Crew hands their work back**
+>
+> They stop leading any site or work group, they come off the serious incident owners list, and every open snag assigned to them moves to the Manager who demoted them — so nothing is left owned by somebody who can no longer act on it. Snags they already resolved stay in their name: that is a record of who did the work. If they are part-way through an investigation they were assigned, they keep it and can finish it.
+
 > **Being a Site Lead means belonging to the site**
 >
 > Making someone a Site Lead at a site also makes them a member of it — they see what the crew standing next to them sees, plus the controls to act on it. You do not need to add them twice.
@@ -441,7 +445,7 @@ Work through this in order. It takes about half an hour, and it is the differenc
 1. Create the organisation and name it. Get started → Create organisation. The name is how your workplace appears to everyone who joins, so use the name people would recognise. You are automatically its first Manager.
 2. Add your sites. Manage → Sites → Add a site. Add every physical location you want reports separated by. If you have one location, add one site — do not skip this, because reports need somewhere to land.
 3. Invite your team. Manage → Organisation → Invite a team member. Enter their email, choose their role, and optionally assign them to a site. For a large crew, share the 8-character join code or the Scan to Join QR code instead — faster than typing 40 email addresses.
-4. Appoint Site Leads. Manage → Sites → the site → People, and set the right people to Site Lead. Every site needs at least one, or nobody can triage what gets reported there.
+4. Appoint Site Leads. Manage → Sites → the site → People, and set the right people to Site Lead. Every site needs at least one. If you are the only person here so far, name yourself — a Manager can lead a site, and it is what clears the warning on the site and on your Manager tab.
 5. Set a default owner per site. Manage → Sites → the site → People → Owner. This is who unassigned snags at that site fall to. Without one, reports sit in a queue nobody feels responsible for.
 6. Nominate your serious incident owners. Manage → Organisation → Serious incident owners. These are the people emailed the moment a hazard or an incident is reported — your health & safety team. You are one by default because you created the organisation; add the people who should actually get that call.
 7. Set up work groups, if you use them. Manage → Teams → Add a work group. These are the teams that snags get queued to — Maintenance, Electrical, Cleaning. You can scope a group to one site or leave it across all of them. Skip this if a single queue suits you; you can add them later.

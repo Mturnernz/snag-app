@@ -97,6 +97,7 @@ export default function OrganisationTab() {
 
   // Members
   const [updatingRole, setUpdatingRole] = useState<string | null>(null);
+  const [pendingDemotion, setPendingDemotion] = useState<{ member: Profile; newRole: UserRole } | null>(null);
   const [removingMember, setRemovingMember] = useState<string | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<Profile | null>(null);
   const [cancellingInvite, setCancellingInvite] = useState<string | null>(null);
@@ -258,12 +259,31 @@ export default function OrganisationTab() {
   }
 
   // ── Members ──────────────────────────────────────────────────────────────
+  // Demoting someone to Crew is the one role change that takes things away
+  // beyond the title: their Site Lead and work-group rows go, and their open
+  // snags come to you. Confirm it rather than letting a tap on a segmented
+  // control do all that silently.
+  function requestRoleChange(member: Profile, newRole: UserRole) {
+    if (newRole === 'worker' && member.role !== 'worker') {
+      setPendingDemotion({ member, newRole });
+      return;
+    }
+    handleRoleChange(member, newRole);
+  }
+
   async function handleRoleChange(member: Profile, newRole: UserRole) {
+    setPendingDemotion(null);
     setUpdatingRole(member.id);
-    const { error } = await updateMemberRole(member.id, newRole);
+    const { data, error } = await updateMemberRole(member.id, newRole);
     setUpdatingRole(null);
     if (!error) {
       setMembers((prev) => prev.map((m) => (m.id === member.id ? { ...m, role: newRole } : m)));
+      // The server hands the demoted member's open snags to whoever made the
+      // call, and that is invisible from this screen — so say how many.
+      const moved = typeof data === 'number' ? data : 0;
+      if (moved > 0) {
+        showToast(`${moved} open snag${moved === 1 ? '' : 's'} moved to you`);
+      }
     } else {
       showToast(error.message ?? 'Could not update role');
     }
@@ -492,7 +512,7 @@ export default function OrganisationTab() {
                         <Text style={styles.roleReadoutText}>{ROLE_LABELS[member.role]}</Text>
                       </View>
                     ) : (
-                      <Chip options={ROLE_OPTIONS} value={member.role} onChange={(role) => handleRoleChange(member, role)} variant="segmented" />
+                      <Chip options={ROLE_OPTIONS} value={member.role} onChange={(role) => requestRoleChange(member, role)} variant="segmented" />
                     )}
                   </View>
                   {!isSelf && (
@@ -665,6 +685,20 @@ export default function OrganisationTab() {
         destructive
         onConfirm={handleRemoveMember}
         onCancel={() => setMemberToRemove(null)}
+      />
+
+      <ConfirmDialog
+        visible={!!pendingDemotion}
+        title={`Demote to ${ROLE_LABELS.worker}?`}
+        message={
+          `${pendingDemotion?.member.name || pendingDemotion?.member.email} will stop leading any site or work group, `
+          + `and any open snags assigned to them move to you. Snags they have already resolved stay in their name.`
+        }
+        confirmLabel="Demote"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => pendingDemotion && handleRoleChange(pendingDemotion.member, pendingDemotion.newRole)}
+        onCancel={() => setPendingDemotion(null)}
       />
 
       <ConfirmDialog

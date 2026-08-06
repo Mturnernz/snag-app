@@ -71,7 +71,12 @@ export default function TeamsTab() {
         if (data.org_id) getOrgSites(data.org_id).then(setSites);
         const groups = await getWorkGroupsWithDetail();
         setWorkGroups(groups);
-        getOrgMembers().then((members) => setSupervisors(members.filter((m) => m.role === 'supervisor')));
+        // Managers as well as Site Leads: a Manager can hold a lead row
+        // (20260806140000), and filtering them out here offered a list that
+        // silently excluded the person most likely to be running the group.
+        getOrgMembers().then((members) => setSupervisors(
+          members.filter((m) => m.role === 'supervisor' || m.role === 'officer_admin')
+        ));
       }
     }
     setLoading(false);
@@ -380,7 +385,7 @@ function WorkGroupSupervisorModal({
               );
             })}
             {supervisors.length === 0 && (
-              <Text style={styles.hintMuted}>No Site Leads in this organisation yet.</Text>
+              <Text style={styles.hintMuted}>No Site Leads or Managers in this organisation yet.</Text>
             )}
 
             {isAdmin && !group.isDefault && (

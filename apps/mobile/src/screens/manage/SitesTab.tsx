@@ -178,7 +178,7 @@ function SiteRow({
           </Text>
           {noLead && (
             <Text style={styles.siteWarn} numberOfLines={1}>
-              No Site Lead — nobody can investigate here
+              No Site Lead — only a Manager can investigate here
             </Text>
           )}
         </View>

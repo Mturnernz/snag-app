@@ -283,6 +283,49 @@ it by hiding the button, the same way it mirrors the resolve gate.
   `remove_serious_incident_owner`'s last-owner refusal: `getReportableSites` falls back to every
   site in the org, so zero active sites is a report form with nothing to submit against.
 
+## A Manager can lead a site, and a demotion takes the rows back
+
+`assign_site_supervisor` and `assign_work_group_supervisor` tested `profiles.role = 'supervisor'`
+exactly, so naming a Manager as a site's lead raised *"That person is not a supervisor in your
+organisation"*. `20260806140000` widened both to `supervisor | officer_admin`, read from
+`org_memberships` for the org being edited rather than from `profiles.role` — which mirrors only
+the caller's **active** org, so for a multi-org member the old test answered about the wrong one.
+
+The row was never about privilege. `can_edit_site` short-circuits on `officer_admin`, as do
+`get_site_assignees` and `assign_snag_owner`, so it grants a Manager nothing they didn't hold
+org-wide. It is the **claim** — this named person leads this site — which is what SiteDetail's
+banner and the dashboard's "Sites with no site lead" tile ask about. In a one-Manager org both
+were unclearable *and false*: the person reading them could do everything they said nobody could.
+`create_organisation_and_owner` has been writing exactly this row for every org's creator since
+M1, so the RPC was refusing to create a state the schema creates by default. The banners now say
+"only a Manager can …" rather than "nobody can", which is the true statement when a site has no
+lead of its own.
+
+**Demotion to Crew is the only role change that takes anything beyond the title**, and until
+`20260806140000` it took nothing at all — `update_member_role` wrote `org_memberships` and
+`profiles` and stopped, so a demoted Site Lead kept every `site_supervisors` row, and
+`can_edit_site` consults that table without ever looking at the person's role. It now, in the
+acting org only:
+
+- deletes their `site_supervisors` and `work_group_supervisors` rows — but **keeps
+  `site_members`**, the weaker claim, exactly as `remove_site_supervisor` has since 20260623183200;
+- **transfers** their `serious_incident_owners` row to the actor rather than deleting it (the
+  last-owner refusal means the actor goes in before they come out). Being left there is worse than
+  useless: `apply_default_owner` would keep handing them incidents that
+  `require_investigation_access` then refuses;
+- moves their `site_default_owners` rows and their **open** snags to the actor, and returns the
+  snag count so the client can say so. **Resolved snags keep their owner** — who closed a snag is a
+  record, not a job, and rewriting it falsifies the file. So is `lead_investigator_id`: doing
+  survives a demotion, directing does not.
+
+Two traps worth remembering from writing it. `update_member_role` had to be dropped and recreated
+to change its return type, and a **created** function takes Supabase's default privileges — EXECUTE
+to `PUBLIC` and `anon` — where a *replaced* one keeps its ACL. That silently put a role-change RPC
+on `/rest/v1/rpc/` for signed-out callers, the same accident as `20260803120200`; the migration
+revokes explicitly. And `notify_after_snag_update` now skips the assignment mail when
+`new.owner_id = auth.uid()`, or one demotion would have mailed the Manager once per snag to tell
+them what they had just done.
+
 ## Who owns a serious incident
 
 `serious_incident_owners` (org_id, profile_id) is the set of supervisors an organisation

@@ -374,6 +374,11 @@ export async function getOrgMembers(_orgId?: string): Promise<Profile[]> {
   return data as Profile[];
 }
 
+// `data` is the number of open snags handed to the caller. Demoting someone out
+// of a directing role strips their Site Lead / work-group / serious-incident-owner
+// rows and moves their open work to whoever made the call (20260806140000), so
+// the count is the one part of that the caller can't see from this screen.
+// Zero for every other role change.
 export async function updateMemberRole(memberId: string, role: UserRole) {
   return supabase.rpc('update_member_role', { p_member_id: memberId, p_role: role });
 }

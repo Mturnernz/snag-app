@@ -390,7 +390,8 @@ export default function SiteDetailScreen() {
             <View style={styles.warnRow}>
               <Icon name="warning-outline" size="sm" color={Colors.serious} />
               <Text style={styles.warnText}>
-                No Site Lead — nobody here can triage a serious report or run its investigation.
+                No Site Lead — only a Manager can triage a serious report or run an investigation
+                here.
               </Text>
             </View>
           )}

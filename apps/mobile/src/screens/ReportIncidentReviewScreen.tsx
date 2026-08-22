@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -79,7 +78,6 @@ function SeriousSuccessBlock({ reference, onDone }: { reference: string | null; 
 }
 
 export default function ReportIncidentReviewScreen() {
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { draft, reset, submit } = useIncidentDraft();
 

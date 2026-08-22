@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -34,7 +33,6 @@ const KIND_OPTIONS: { key: SnagKind; label: string }[] = [
 ];
 
 export default function ReportIncidentDetailsScreen() {
-  const insets = useSafeAreaInsets();
   // Shown once, on somebody's first serious report. The onboarding carousel
   // describes the lane split before anyone has filed anything; this is the
   // moment it actually means something.

@@ -491,25 +491,33 @@ export default function ReportIssueScreen() {
 
         {/* Description — the only required field on the fast path */}
         <View style={styles.fieldGroup}>
-          <View style={styles.fieldLabelRow}>
-            <Text style={styles.fieldLabel}>
-              What's wrong? <Text style={styles.required}>*</Text>
-            </Text>
-            <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
+          <Text style={styles.fieldLabel}>
+            What's wrong? <Text style={styles.required}>*</Text>
+          </Text>
+          {/* The counter sits in the field's bottom-right rather than up in the
+              label row, which is the far corner from the text being typed.
+              pointerEvents none so it can't steal a tap meant for the input,
+              and the input carries matching padding so a 300th character never
+              runs under it. */}
+          <View>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="e.g. Broken fire exit door in the main warehouse"
+              placeholderTextColor={Colors.textMuted}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              maxLength={300}
+            />
+            <Text
+              style={[styles.charCount, description.length > 270 && styles.charCountWarn]}
+              pointerEvents="none"
+            >
               {description.length} / 300
             </Text>
           </View>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="e.g. Broken fire exit door in the main warehouse"
-            placeholderTextColor={Colors.textMuted}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            maxLength={300}
-          />
         </View>
 
         {isPublicSubmission ? (
@@ -780,11 +788,6 @@ const styles = StyleSheet.create({
   fieldGroup: {
     gap: Spacing.sm,
   },
-  fieldLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
   fieldLabel: {
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
@@ -794,8 +797,13 @@ const styles = StyleSheet.create({
     color: Colors.danger,
   },
   charCount: {
+    position: 'absolute',
+    right: Spacing.sm,
+    bottom: Spacing.xs,
     fontSize: Typography.xs,
     color: Colors.textMuted,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.xs,
   },
   charCountWarn: {
     color: Colors.danger,
@@ -814,6 +822,8 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 88,
     paddingTop: Spacing.sm,
+    // Room for the counter sitting in the bottom-right corner.
+    paddingBottom: Spacing.xl,
   },
 
   hazardRow: {

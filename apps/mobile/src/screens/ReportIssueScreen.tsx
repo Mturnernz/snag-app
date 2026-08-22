@@ -561,7 +561,7 @@ export default function ReportIssueScreen() {
 
       {/* Submit — one primary action, always within thumb reach */}
       <StickyActionBar
-        withinTabs
+        stacked
         hint={photosBlocked ? 'A photo is still uploading, or failed to upload.' : undefined}
         hintTone="warn"
       >

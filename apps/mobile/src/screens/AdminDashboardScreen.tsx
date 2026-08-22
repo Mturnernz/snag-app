@@ -762,15 +762,18 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
   coverHintWarn: {
-    color: Colors.serious,
+    color: Colors.status.inProgressFg,
   },
   coverValue: {
     fontSize: Typography.lg,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
   },
+  // Amber, not red: a single incident owner and a site without a lead are
+  // gaps to close. Spending the lane's red on them is what stops it meaning
+  // anything where it is used for an obligation actually outstanding.
   coverValueWarn: {
-    color: Colors.serious,
+    color: Colors.status.inProgressFg,
   },
   outstandingWrap: {
     borderTopWidth: 1,
@@ -816,7 +819,7 @@ const styles = StyleSheet.create({
   },
   tappableCell: { minHeight: MIN_TOUCH_TARGET },
   siteCountText: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
-  siteCountTextAlert: { color: Colors.danger },
+  siteCountTextAlert: { color: Colors.seriousFg },
   siteCountTextTappable: { color: Colors.primary, textDecorationLine: 'underline' },
 
   quickAssignBlock: { gap: Spacing.sm, paddingVertical: Spacing.sm, paddingLeft: Spacing.sm },

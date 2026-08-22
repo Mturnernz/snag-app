@@ -4,8 +4,9 @@ import { render, flattenStyle } from '../test/render';
 import { Spacing } from '../constants/theme';
 import StickyActionBar from './StickyActionBar';
 
-// The bar sits above a tab bar on some screens and against the device edge on
-// others, and that is one prop rather than two components. Getting it wrong is
+// The bar sits above other fixed chrome on some screens — a tab bar, the snag
+// detail screen's comment bar — and against the device edge on others, and that
+// is one prop rather than two components. Getting it wrong is
 // invisible in a simulator with no home indicator and obvious on a real phone,
 // which is why it is pinned here rather than eyeballed.
 
@@ -34,8 +35,8 @@ describe('StickyActionBar', () => {
     expect(innerPad(r)).toBe(BOTTOM_INSET + Spacing.md);
   });
 
-  it('leaves the inset to the tab bar on a tab screen', () => {
-    const r = render(<StickyActionBar withinTabs><Text>Go</Text></StickyActionBar>);
+  it('leaves the inset to whatever fixed bar sits below it', () => {
+    const r = render(<StickyActionBar stacked><Text>Go</Text></StickyActionBar>);
     expect(innerPad(r)).toBe(Spacing.md);
   });
 

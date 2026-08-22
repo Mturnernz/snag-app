@@ -12,10 +12,11 @@ interface Props {
   hint?: string;
   /** 'warn' for an unmet condition, 'muted' for plain context. */
   hintTone?: 'muted' | 'warn';
-  /** True on a tab screen: the tab bar already occupies the bottom inset, so
-   *  adding it again pads the bar away from the tab bar by a whole home
-   *  indicator. Stack screens sit against the device edge and do need it. */
-  withinTabs?: boolean;
+  /** True when another fixed bar sits below this one and already occupies the
+   *  bottom inset — a tab bar, or the snag detail screen's comment bar. Adding
+   *  the inset again would pad this bar away from that one by a whole home
+   *  indicator. A bar that is itself the bottom-most chrome needs it. */
+  stacked?: boolean;
 }
 
 // A pinned footer for a screen's primary action. Render it as the last flex
@@ -26,7 +27,7 @@ interface Props {
 // a web implementation and a native one, but neither is guaranteed to render
 // on an old Android, so the bar carries its own near-opaque ground and stays
 // legible with the blur removed entirely.
-export default function StickyActionBar({ children, hint, hintTone = 'muted', withinTabs }: Props) {
+export default function StickyActionBar({ children, hint, hintTone = 'muted', stacked }: Props) {
   const insets = useSafeAreaInsets();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
@@ -48,7 +49,7 @@ export default function StickyActionBar({ children, hint, hintTone = 'muted', wi
 
   // The keyboard covers the inset it would otherwise clear, so the two are
   // alternatives rather than additive.
-  const bottomPad = keyboardHeight > 0 ? Spacing.md : (withinTabs ? 0 : insets.bottom) + Spacing.md;
+  const bottomPad = keyboardHeight > 0 ? Spacing.md : (stacked ? 0 : insets.bottom) + Spacing.md;
 
   return (
     <View style={[styles.wrap, { marginBottom: keyboardHeight }]}>

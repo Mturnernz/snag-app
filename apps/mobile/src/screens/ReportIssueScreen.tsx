@@ -451,7 +451,7 @@ export default function ReportIssueScreen() {
           <SitePicker sites={sites} value={site} onChange={setSite} layout="inline" />
         )}
 
-        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} compact />
+        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} />
 
         {/* Description — the only required field on the fast path */}
         <View style={styles.fieldGroup}>

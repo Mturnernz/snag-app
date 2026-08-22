@@ -101,13 +101,13 @@ export default function DocumentAttach({ orgId, value, onChange, onBusyChange }:
         <TouchableOpacity style={styles.button} onPress={pickFromFiles} disabled={busy} activeOpacity={0.7}>
           {busy ? <ActivityIndicator size="small" color={Colors.textSecondary} /> : (
             <>
-              <Icon name="folder-open-outline" size="sm" color={Colors.textSecondary} />
+              <Icon name="folder-open-outline" size="sm" color={Colors.primary} />
               <Text style={styles.buttonText}>From my files</Text>
             </>
           )}
         </TouchableOpacity>
         <TouchableOpacity style={styles.button} onPress={openLibrary} disabled={busy} activeOpacity={0.7}>
-          <Icon name="library-outline" size="sm" color={Colors.textSecondary} />
+          <Icon name="library-outline" size="sm" color={Colors.primary} />
           <Text style={styles.buttonText}>From the library</Text>
         </TouchableOpacity>
       </View>
@@ -154,14 +154,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.xs,
     minHeight: MIN_TOUCH_TARGET,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.surface,
     borderRadius: Radius.button,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderStyle: 'dashed',
     paddingHorizontal: Spacing.sm,
   },
-  buttonText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textPrimary },
+  buttonText: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
 
   attached: {
     flexDirection: 'row',

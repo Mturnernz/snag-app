@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { uploadSnagPhoto } from '../lib/supabase';
 import { withDeadline, failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
@@ -81,10 +81,9 @@ interface Props {
   onPhotosChange?: (count: number) => void;
   /** Tightens the empty state's padding for a form that has to fit one
    *  screen (the niggle report). Nothing else about it changes. */
-  compact?: boolean;
 }
 
-const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, deferUpload, initialUris, onBlockingChange, onPhotosChange, compact }, ref) => {
+const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, deferUpload, initialUris, onBlockingChange, onPhotosChange }, ref) => {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const seededRef = useRef(false);
 
@@ -261,26 +260,22 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     reset: () => setPhotos([]),
   }));
 
-  if (photos.length === 0) {
-    return (
-      <View style={[styles.area, compact && styles.areaCompact]}>
-        <Icon name="camera-outline" size={compact ? 'lg' : 'xl'} color={Colors.textSecondary} />
-        <Text style={styles.label}>Add up to {MAX_PHOTOS} photos</Text>
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.button} onPress={takePhoto} activeOpacity={0.7} disabled={!pathPrefix}>
-            <Text style={styles.buttonText}>Take Photo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.button} onPress={pickFromLibrary} activeOpacity={0.7} disabled={!pathPrefix}>
-            <Text style={styles.buttonText}>Choose from Library</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.wrap}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
+        {photos.length < MAX_PHOTOS && (
+          <TouchableOpacity
+            style={styles.addTile}
+            onPress={offerSource}
+            activeOpacity={0.7}
+            disabled={!pathPrefix}
+            accessibilityRole="button"
+            accessibilityLabel={photos.length === 0 ? `Add photos, up to ${MAX_PHOTOS}` : `Add another photo, ${photos.length} of ${MAX_PHOTOS} added`}
+          >
+            <Icon name="camera-outline" size="lg" color={Colors.primary} />
+            <Text style={styles.addTileLabel}>Add</Text>
+          </TouchableOpacity>
+        )}
         {photos.map((photo) => (
           <View key={photo.id} style={[styles.thumbWrap, photo.status === 'failed' && styles.thumbWrapFailed]}>
             <Image source={{ uri: photo.uri }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" />
@@ -300,12 +295,10 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
             </TouchableOpacity>
           </View>
         ))}
-        {photos.length < MAX_PHOTOS && (
-          <TouchableOpacity style={styles.addTile} onPress={offerSource} activeOpacity={0.7}>
-            <Icon name="add" size="lg" color={Colors.textSecondary} />
-          </TouchableOpacity>
-        )}
       </ScrollView>
+      <Text style={styles.countHint}>
+        {photos.length === 0 ? `Add up to ${MAX_PHOTOS} photos` : `${photos.length} of ${MAX_PHOTOS} photos`}
+      </Text>
       {hasFailed && (
         <Text style={styles.failedHint}>
           {failedReason
@@ -320,47 +313,6 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
 export default PhotoPicker;
 
 const styles = StyleSheet.create({
-  area: {
-    paddingVertical: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  areaCompact: {
-    paddingVertical: Spacing.md,
-    gap: Spacing.sm,
-  },
-  label: {
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    width: '100%',
-  },
-  button: {
-    flex: 1,
-    height: MIN_TOUCH_TARGET,
-    backgroundColor: Colors.background,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.sm,
-  },
-  buttonText: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textPrimary,
-  },
   wrap: {
     gap: Spacing.xs,
   },
@@ -431,9 +383,18 @@ const styles = StyleSheet.create({
     borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderStyle: 'dashed',
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.xs,
+  },
+  addTileLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
+  },
+  countHint: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
   },
 });

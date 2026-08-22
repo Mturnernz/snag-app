@@ -63,6 +63,7 @@ function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserR
         headerShown: false,
         tabBarStyle: styles.tabBar,
         tabBarLabelStyle: styles.tabBarLabel,
+        tabBarBadgeStyle: styles.tabBarBadge,
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarIcon: ({ focused }) => (
@@ -87,7 +88,8 @@ function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserR
         name="Profile"
         component={ProfileScreen}
         options={{
-          tabBarBadge: mentionCount > 0 ? mentionCount : undefined,
+          tabBarBadge: mentionCount > 0 ? '' : undefined,
+          tabBarBadgeStyle: styles.tabBarDot,
         }}
       />
     </Tab.Navigator>
@@ -199,5 +201,30 @@ const styles = StyleSheet.create({
   tabBarLabel: {
     fontSize: Typography.xs,
     fontWeight: Typography.medium,
+  },
+  // A count is a workload figure, so it reads in the brand accent rather than
+  // an alert colour. Nestled at the icon's corner instead of floating clear of
+  // it, which is what made the default read as an alarm.
+  tabBarBadge: {
+    backgroundColor: Colors.primary,
+    color: Colors.white,
+    fontSize: 10,
+    fontWeight: Typography.semibold,
+    minWidth: 16,
+    height: 16,
+    lineHeight: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+  },
+  // Mentions and RCAs keep the alert colour, but as a bare dot: an empty label
+  // with no width of its own, so the pill collapses to a disc.
+  tabBarDot: {
+    backgroundColor: Colors.serious,
+    minWidth: 8,
+    maxWidth: 8,
+    height: 8,
+    borderRadius: 4,
+    paddingHorizontal: 0,
+    lineHeight: 8,
   },
 });

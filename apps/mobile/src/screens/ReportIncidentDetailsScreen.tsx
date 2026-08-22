@@ -16,6 +16,7 @@ import { useIncidentDraft } from '../context/IncidentDraftContext';
 import ScreenHeader from '../components/ScreenHeader';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Chip from '../components/Chip';
+import StickyActionBar from '../components/StickyActionBar';
 import Button from '../components/Button';
 import SitePicker from '../components/SitePicker';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -158,7 +159,7 @@ export default function ReportIncidentDetailsScreen() {
       <ScreenHeader title="Report a Serious Incident" tone="serious" onBack={handleBack} />
 
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 }]}
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.intro}>
@@ -229,6 +230,12 @@ export default function ReportIncidentDetailsScreen() {
           <Chip options={SEVERITY_OPTIONS} value={severity} onChange={setSeverity} variant="segmented" />
         </View>
 
+      </ScrollView>
+
+      <StickyActionBar
+        hint={photosBlocked ? 'A photo is still uploading, or failed to upload.' : undefined}
+        hintTone="warn"
+      >
         <Button
           label="Next: Review"
           variant="serious"
@@ -236,7 +243,7 @@ export default function ReportIncidentDetailsScreen() {
           disabled={photosBlocked}
           fullWidth
         />
-      </ScrollView>
+      </StickyActionBar>
 
       <ConfirmDialog
         visible={confirmDiscard}

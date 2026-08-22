@@ -34,6 +34,7 @@ import { useOfflineQueue } from '../context/OfflineQueueContext';
 import { showAlert } from '../lib/alert';
 import { ReportSite, resolveReportSite, cacheReportSiteId } from '../lib/reportSite';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
+import StickyActionBar from '../components/StickyActionBar';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -441,7 +442,7 @@ export default function ReportIssueScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: insets.bottom + Spacing.md },
+          { paddingBottom: Spacing.md },
         ]}
         keyboardShouldPersistTaps="handled"
       >
@@ -521,15 +522,6 @@ export default function ReportIssueScreen() {
           </View>
         )}
 
-        {/* Submit — one primary action */}
-        <Button
-          label="Submit Report"
-          onPress={handleSubmit}
-          loading={submitting}
-          disabled={photosBlocked}
-          fullWidth
-        />
-
         {!isPublicSubmission && (
           // Serious lane — clearly clickable, but visually quieter than the primary CTA
           <Button
@@ -547,6 +539,21 @@ export default function ReportIssueScreen() {
           />
         )}
       </ScrollView>
+
+      {/* Submit — one primary action, always within thumb reach */}
+      <StickyActionBar
+        withinTabs
+        hint={photosBlocked ? 'A photo is still uploading, or failed to upload.' : undefined}
+        hintTone="warn"
+      >
+        <Button
+          label="Submit Report"
+          onPress={handleSubmit}
+          loading={submitting}
+          disabled={photosBlocked}
+          fullWidth
+        />
+      </StickyActionBar>
 
       {/* Org switcher — only reachable for multi-org members */}
       <Modal

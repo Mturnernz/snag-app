@@ -16,6 +16,7 @@ import { getSiteByPublicToken, createPublicSnagByToken, PublicIntakeSite } from 
 import { showAlert } from '../lib/alert';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
 import Button from '../components/Button';
+import StickyActionBar from '../components/StickyActionBar';
 import Icon from '../components/Icon';
 
 interface Props {
@@ -131,7 +132,7 @@ export default function PublicQrReportScreen({ token, userId }: Props) {
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 }]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.targetPill}>
@@ -189,6 +190,14 @@ export default function PublicQrReportScreen({ token, userId }: Props) {
           />
         </View>
 
+      </ScrollView>
+
+      {/* No lane banner here: a public reporter has no incident flow to fork
+          into, so the hazard switch above stays the whole of that decision. */}
+      <StickyActionBar
+        hint={photosBlocked ? 'A photo is still uploading, or failed to upload.' : undefined}
+        hintTone="warn"
+      >
         <Button
           label="Submit Report"
           onPress={handleSubmit}
@@ -196,7 +205,7 @@ export default function PublicQrReportScreen({ token, userId }: Props) {
           disabled={photosBlocked}
           fullWidth
         />
-      </ScrollView>
+      </StickyActionBar>
     </View>
   );
 }

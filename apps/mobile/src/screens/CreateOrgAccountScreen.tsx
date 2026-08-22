@@ -8,6 +8,7 @@ import { signUpWithEmail } from '../lib/supabase';
 import { setPendingCreate } from '../lib/pendingIntent';
 import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
+import StickyActionBar from '../components/StickyActionBar';
 import Icon from '../components/Icon';
 
 interface Props {
@@ -104,7 +105,6 @@ export default function CreateOrgAccountScreen({ onDone, onBack }: Props) {
 
           {error && <Text style={styles.errorText}>{error}</Text>}
 
-          <Button label="Create Organisation & Account" onPress={handleSubmit} loading={loading} fullWidth />
         </View>
 
         <TouchableOpacity onPress={onBack} style={styles.backRow}>
@@ -112,6 +112,10 @@ export default function CreateOrgAccountScreen({ onDone, onBack }: Props) {
           <Text style={styles.backText}>Back to sign in</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <StickyActionBar>
+        <Button label="Create Organisation & Account" onPress={handleSubmit} loading={loading} fullWidth />
+      </StickyActionBar>
     </KeyboardAvoidingView>
   );
 }

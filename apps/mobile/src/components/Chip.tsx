@@ -1,5 +1,6 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, LayoutChangeEvent } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing, ReduceMotion } from 'react-native-reanimated';
 import { Colors, Spacing, Typography, Radius, Shadow } from '../constants/theme';
 
 interface Option<T extends string> {
@@ -16,17 +17,86 @@ interface Props<T extends string> {
   variant?: 'chip' | 'segmented';
 }
 
+// Track padding, mirrored in styles.segmentedRow. The thumb is positioned
+// against the track's padding box, which is where an absolutely positioned
+// child starts and where onLayout measures a flex child from — so the two
+// share one coordinate space and the thumb can be placed from measurements
+// alone, with no arithmetic over borders and gaps.
+const TRACK_PADDING = 3;
+const SEGMENT_HEIGHT = 38;
+
+interface Rect {
+  x: number;
+  width: number;
+}
+
 export default function Chip<T extends string>({ options, value, onChange, variant = 'chip' }: Props<T>) {
+  const [rects, setRects] = useState<Record<string, Rect>>({});
+  // The first measurement places the thumb; every later change slides it.
+  // Without this the control would animate in from the left edge on mount.
+  const placed = useRef(false);
+  const x = useSharedValue(0);
+  const width = useSharedValue(0);
+
+  const moveTo = useCallback(
+    (rect: Rect) => {
+      if (placed.current) {
+        const opts = { duration: 180, easing: Easing.out(Easing.quad), reduceMotion: ReduceMotion.System };
+        x.value = withTiming(rect.x, opts);
+        width.value = withTiming(rect.width, opts);
+      } else {
+        x.value = rect.x;
+        width.value = rect.width;
+        placed.current = true;
+      }
+    },
+    [x, width]
+  );
+
+  const onSegmentLayout = useCallback(
+    (key: string) => (e: LayoutChangeEvent) => {
+      const { x: nx, width: nw } = e.nativeEvent.layout;
+      setRects((prev) => {
+        const cur = prev[key];
+        if (cur && cur.x === nx && cur.width === nw) return prev;
+        const next = { ...prev, [key]: { x: nx, width: nw } };
+        // A re-layout (rotation, a font scale change) must move the thumb even
+        // though `value` hasn't changed.
+        if (key === value) moveTo(next[key]);
+        return next;
+      });
+    },
+    [value, moveTo]
+  );
+
+  const select = useCallback(
+    (key: T) => {
+      const rect = rects[key];
+      if (rect) moveTo(rect);
+      onChange(key);
+    },
+    [rects, moveTo, onChange]
+  );
+
+  const thumbStyle = useAnimatedStyle(() => ({
+    width: width.value,
+    transform: [{ translateX: x.value }],
+  }));
+
   if (variant === 'segmented') {
     return (
       <View style={styles.segmentedRow}>
+        {/* Drawn under the labels, so a label never fades with the thumb. Hidden
+            until the first measurement lands, which is why width starts at 0. */}
+        <Animated.View style={[styles.thumb, thumbStyle]} pointerEvents="none" />
         {options.map((opt) => {
           const active = opt.key === value;
           return (
             <TouchableOpacity
               key={opt.key}
-              style={[styles.segment, active && styles.segmentActive]}
-              onPress={() => onChange(opt.key)}
+              style={styles.segment}
+              onLayout={onSegmentLayout(opt.key)}
+              onPress={() => select(opt.key)}
               activeOpacity={0.7}
             >
               {/* Segments are equal-share, so a label longer than a third of the
@@ -97,19 +167,24 @@ const styles = StyleSheet.create({
     borderRadius: Radius.button,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 3,
+    padding: TRACK_PADDING,
     gap: 3,
+  },
+  thumb: {
+    position: 'absolute',
+    left: 0,
+    top: TRACK_PADDING,
+    height: SEGMENT_HEIGHT,
+    borderRadius: Radius.button - 2,
+    backgroundColor: Colors.surface,
+    ...Shadow.sm,
   },
   segment: {
     flex: 1,
-    height: 38,
+    height: SEGMENT_HEIGHT,
     borderRadius: Radius.button - 2,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  segmentActive: {
-    backgroundColor: Colors.surface,
-    ...Shadow.sm,
   },
   segmentLabel: {
     fontSize: Typography.sm,

@@ -34,6 +34,7 @@ import { useOfflineQueue } from '../context/OfflineQueueContext';
 import { showAlert } from '../lib/alert';
 import { ReportSite, resolveReportSite, cacheReportSiteId } from '../lib/reportSite';
 import PhotoPicker, { PhotoPickerHandle } from '../components/PhotoPicker';
+import StickyActionBar from '../components/StickyActionBar';
 import Chip from '../components/Chip';
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -441,39 +442,82 @@ export default function ReportIssueScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: insets.bottom + Spacing.md },
+          { paddingBottom: Spacing.md },
         ]}
         keyboardShouldPersistTaps="handled"
       >
+        {/* The serious lane is a different report flow, not an alert and not a
+            second CTA — a different form, different notifications, a different
+            resolve gate. It reads as a fork in the road here, before anyone
+            starts typing; underneath Submit it was a full-width button
+            adjacent to the one that files an ordinary snag. Sitting above the
+            description also makes the draft handoff make sense: what has been
+            typed so far carries into the incident flow, which was impossible
+            to guess from a control that only appeared after you'd finished. */}
+        {!isPublicSubmission && (
+          <TouchableOpacity
+            style={styles.seriousBanner}
+            onPress={() => {
+              setDraft({
+                description,
+                photoUris: photoPickerRef.current?.getLocalUris() ?? [],
+              });
+              navigation.navigate('ReportIncidentDetails');
+            }}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Report a serious incident instead. Notifies the health and safety team now."
+          >
+            <View style={styles.seriousBannerIcon}>
+              <Icon name="warning" size="md" color={Colors.white} />
+            </View>
+            <View style={styles.seriousBannerText}>
+              <Text style={styles.seriousBannerTitle}>Someone hurt, or a serious hazard?</Text>
+              <Text style={styles.seriousBannerHint}>
+                Start the incident report instead — notifies the H&amp;S team now
+              </Text>
+            </View>
+            <Icon name="chevron-forward" size="sm" color={Colors.seriousFg} />
+          </TouchableOpacity>
+        )}
+
         {/* Site — only when there's more than one to choose between. Inline,
             so the label and the site it names read as one row. */}
         {!isPublicSubmission && sites.length > 1 && (
           <SitePicker sites={sites} value={site} onChange={setSite} layout="inline" />
         )}
 
-        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} compact />
+        <PhotoPicker ref={photoPickerRef} pathPrefix={photoPathPrefix} deferUpload={isOffline} onBlockingChange={setPhotosBlocked} />
 
         {/* Description — the only required field on the fast path */}
         <View style={styles.fieldGroup}>
-          <View style={styles.fieldLabelRow}>
-            <Text style={styles.fieldLabel}>
-              What's wrong? <Text style={styles.required}>*</Text>
-            </Text>
-            <Text style={[styles.charCount, description.length > 270 && styles.charCountWarn]}>
+          <Text style={styles.fieldLabel}>
+            What's wrong? <Text style={styles.required}>*</Text>
+          </Text>
+          {/* The counter sits in the field's bottom-right rather than up in the
+              label row, which is the far corner from the text being typed.
+              pointerEvents none so it can't steal a tap meant for the input,
+              and the input carries matching padding so a 300th character never
+              runs under it. */}
+          <View>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="e.g. Broken fire exit door in the main warehouse"
+              placeholderTextColor={Colors.textMuted}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              maxLength={300}
+            />
+            <Text
+              style={[styles.charCount, description.length > 270 && styles.charCountWarn]}
+              pointerEvents="none"
+            >
               {description.length} / 300
             </Text>
           </View>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="e.g. Broken fire exit door in the main warehouse"
-            placeholderTextColor={Colors.textMuted}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            maxLength={300}
-          />
         </View>
 
         {isPublicSubmission ? (
@@ -521,7 +565,14 @@ export default function ReportIssueScreen() {
           </View>
         )}
 
-        {/* Submit — one primary action */}
+      </ScrollView>
+
+      {/* Submit — one primary action, always within thumb reach */}
+      <StickyActionBar
+        stacked
+        hint={photosBlocked ? 'A photo is still uploading, or failed to upload.' : undefined}
+        hintTone="warn"
+      >
         <Button
           label="Submit Report"
           onPress={handleSubmit}
@@ -529,24 +580,7 @@ export default function ReportIssueScreen() {
           disabled={photosBlocked}
           fullWidth
         />
-
-        {!isPublicSubmission && (
-          // Serious lane — clearly clickable, but visually quieter than the primary CTA
-          <Button
-            label="Report a Serious Incident"
-            variant="seriousOutline"
-            icon="warning-outline"
-            onPress={() => {
-              setDraft({
-                description,
-                photoUris: photoPickerRef.current?.getLocalUris() ?? [],
-              });
-              navigation.navigate('ReportIncidentDetails');
-            }}
-            fullWidth
-          />
-        )}
-      </ScrollView>
+      </StickyActionBar>
 
       {/* Org switcher — only reachable for multi-org members */}
       <Modal
@@ -754,11 +788,6 @@ const styles = StyleSheet.create({
   fieldGroup: {
     gap: Spacing.sm,
   },
-  fieldLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
   fieldLabel: {
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
@@ -768,8 +797,13 @@ const styles = StyleSheet.create({
     color: Colors.danger,
   },
   charCount: {
+    position: 'absolute',
+    right: Spacing.sm,
+    bottom: Spacing.xs,
     fontSize: Typography.xs,
     color: Colors.textMuted,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.xs,
   },
   charCountWarn: {
     color: Colors.danger,
@@ -788,6 +822,8 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 88,
     paddingTop: Spacing.sm,
+    // Room for the counter sitting in the bottom-right corner.
+    paddingBottom: Spacing.xl,
   },
 
   hazardRow: {
@@ -808,6 +844,42 @@ const styles = StyleSheet.create({
   hazardHint: {
     fontSize: Typography.xs,
     color: Colors.textMuted,
+  },
+  // Colors.seriousBg with a Colors.serious rail — both already reserved for
+  // the hazard and incident lane, so this introduces no colour.
+  seriousBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.seriousBg,
+    borderRadius: Radius.card,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.serious,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+  },
+  seriousBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.serious,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  seriousBannerText: {
+    flex: 1,
+    gap: 2,
+  },
+  seriousBannerTitle: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.bold,
+    color: Colors.seriousFg,
+  },
+  seriousBannerHint: {
+    fontSize: Typography.xs,
+    color: Colors.seriousFg,
+    lineHeight: 15,
   },
   offlineHint: {
     flexDirection: 'row',

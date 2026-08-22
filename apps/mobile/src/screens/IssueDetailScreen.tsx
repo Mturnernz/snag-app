@@ -50,6 +50,7 @@ import DebriefPanel from '../components/DebriefPanel';
 import TriageSheet from '../components/TriageSheet';
 import StepCard, { StepStatus } from '../components/StepCard';
 import NextStepCard, { NextStep } from '../components/NextStepCard';
+import StickyActionBar from '../components/StickyActionBar';
 import ResolutionExceptionCard from '../components/ResolutionExceptionCard';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -1531,6 +1532,34 @@ export default function IssueDetailScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* The next action, pinned. NextStepCard names the same thing and is the
+          source of truth for what it is — this only makes it reachable without
+          scrolling back to it. Its comment calls it "above the fold", and on a
+          niggle it nearly is; on a serious snag it sits under the hero photo,
+          the description, the badges and, for a supervisor, the whole Manage
+          panel. No new rule is computed here: cta, step and count all come from
+          the same gate the server enforces.
+
+          Hidden while the composer is open — someone writing a comment is doing
+          something else, and the keyboard is already claiming the bottom half. */}
+      {canInvestigate && isSerious && investigation && issue.status !== 'resolved' && !composerOpen && (
+        firstUnmet ? (
+          <StickyActionBar
+            stacked
+            hintTone="warn"
+            hint={`Resolve — blocked, ${gateRemaining} ${gateRemaining === 1 ? 'step' : 'steps'} remaining`}
+          >
+            <Button label={firstUnmet.cta} onPress={() => openStep(nextStepKey)} fullWidth />
+          </StickyActionBar>
+        ) : canEdit ? (
+          // Gate clear. Resolving is a directing act, so an assigned worker
+          // investigator gets no bar here rather than a button Manage refuses.
+          <StickyActionBar stacked>
+            <Button label="Resolve this snag" onPress={() => setManageOpen(true)} fullWidth />
+          </StickyActionBar>
+        ) : null
+      )}
 
       {/* Mention picker */}
       {isOrgMember && mentionSuggestions.length > 0 && (

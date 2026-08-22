@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -14,6 +13,7 @@ import { showAlert } from '../lib/alert';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Button from '../components/Button';
+import StickyActionBar from '../components/StickyActionBar';
 import CategoryBadge from '../components/CategoryBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import Icon from '../components/Icon';
@@ -78,7 +78,6 @@ function SeriousSuccessBlock({ reference, onDone }: { reference: string | null; 
 }
 
 export default function ReportIncidentReviewScreen() {
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { draft, reset, submit } = useIncidentDraft();
 
@@ -120,7 +119,7 @@ export default function ReportIncidentReviewScreen() {
     <View style={styles.container}>
       <ScreenHeader title="Review Report" tone="serious" />
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing.xl }]}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Spacing.xl }]}>
         <Text style={styles.intro}>
           Check the details below before submitting. This will create a formal, timestamped record.
         </Text>
@@ -153,10 +152,15 @@ export default function ReportIncidentReviewScreen() {
           </View>
         </Card>
 
-        <Button label="Submit Incident Report" variant="serious" onPress={handleSubmit} loading={submitting} fullWidth />
         <Button label="Back to Edit" variant="outline" onPress={() => navigation.goBack()} fullWidth />
         <Button label="Discard" variant="ghost" onPress={() => setConfirmDiscard(true)} fullWidth />
       </ScrollView>
+
+      {/* Only the submit pins. Back to Edit and Discard stay in the scroll —
+          a discard within thumb reach of a submit is a tap nobody meant. */}
+      <StickyActionBar>
+        <Button label="Submit Incident Report" variant="serious" onPress={handleSubmit} loading={submitting} fullWidth />
+      </StickyActionBar>
 
       <ConfirmDialog
         visible={confirmDiscard}

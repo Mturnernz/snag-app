@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Spacing, Typography, IconSize } from '../constants/theme';
 import Icon from '../components/Icon';
 import Button from '../components/Button';
+import StickyActionBar from '../components/StickyActionBar';
 
 interface Slide {
   icon: React.ComponentProps<typeof Icon>['name'];
@@ -99,7 +100,7 @@ export default function OnboardingCarouselScreen({ onFinish }: Props) {
         ))}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.lg }]}>
+      <StickyActionBar>
         <View style={styles.dots}>
           {SLIDES.map((slide, i) => (
             <View key={slide.title} style={[styles.dot, i === index && styles.dotActive]} />
@@ -110,7 +111,7 @@ export default function OnboardingCarouselScreen({ onFinish }: Props) {
           onPress={goToNext}
           fullWidth
         />
-      </View>
+      </StickyActionBar>
     </View>
   );
 }
@@ -160,11 +161,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
-  },
-  footer: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    gap: Spacing.lg,
   },
   dots: {
     flexDirection: 'row',

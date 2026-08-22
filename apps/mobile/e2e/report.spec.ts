@@ -57,7 +57,7 @@ test.describe('worker journey', () => {
     // path. Collapsing them would let a hazard be filed as a fixit.
     await expect(page.getByText('Fixit', { exact: true })).toBeVisible();
     await expect(page.getByText('Improvement', { exact: true })).toBeVisible();
-    await expect(page.getByText(/report a serious incident/i)).toBeVisible();
+    await expect(page.locator('[aria-label^="Report a serious incident"]')).toBeVisible();
   });
 
   test('the description field enforces its character limit', async ({ page }) => {

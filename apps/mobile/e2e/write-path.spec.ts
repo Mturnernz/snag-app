@@ -115,7 +115,10 @@ test.describe('write path: report → investigate → resolve', () => {
     ).toBeVisible({ timeout: 30_000 });
 
     // ── Report ───────────────────────────────────────────────────────────────
-    await visible(page, 'Report a Serious Incident').first().click();
+    // The serious lane is a banner at the top of the form now, not a button
+    // under Submit. Its accessible name is the stable handle — the visible copy
+    // is two lines and neither of them is a control name.
+    await page.locator('[aria-label^="Report a serious incident"]').first().click();
     await expect(page.getByText(/Use this for anything involving injury/)).toBeVisible({ timeout: 60_000 });
 
     await visible(page, 'Incident').first().click();

@@ -446,6 +446,41 @@ export default function ReportIssueScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
+        {/* The serious lane is a different report flow, not an alert and not a
+            second CTA — a different form, different notifications, a different
+            resolve gate. It reads as a fork in the road here, before anyone
+            starts typing; underneath Submit it was a full-width button
+            adjacent to the one that files an ordinary snag. Sitting above the
+            description also makes the draft handoff make sense: what has been
+            typed so far carries into the incident flow, which was impossible
+            to guess from a control that only appeared after you'd finished. */}
+        {!isPublicSubmission && (
+          <TouchableOpacity
+            style={styles.seriousBanner}
+            onPress={() => {
+              setDraft({
+                description,
+                photoUris: photoPickerRef.current?.getLocalUris() ?? [],
+              });
+              navigation.navigate('ReportIncidentDetails');
+            }}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Report a serious incident instead. Notifies the health and safety team now."
+          >
+            <View style={styles.seriousBannerIcon}>
+              <Icon name="warning" size="md" color={Colors.white} />
+            </View>
+            <View style={styles.seriousBannerText}>
+              <Text style={styles.seriousBannerTitle}>Someone hurt, or a serious hazard?</Text>
+              <Text style={styles.seriousBannerHint}>
+                Start the incident report instead — notifies the H&amp;S team now
+              </Text>
+            </View>
+            <Icon name="chevron-forward" size="sm" color={Colors.seriousFg} />
+          </TouchableOpacity>
+        )}
+
         {/* Site — only when there's more than one to choose between. Inline,
             so the label and the site it names read as one row. */}
         {!isPublicSubmission && sites.length > 1 && (
@@ -522,22 +557,6 @@ export default function ReportIssueScreen() {
           </View>
         )}
 
-        {!isPublicSubmission && (
-          // Serious lane — clearly clickable, but visually quieter than the primary CTA
-          <Button
-            label="Report a Serious Incident"
-            variant="seriousOutline"
-            icon="warning-outline"
-            onPress={() => {
-              setDraft({
-                description,
-                photoUris: photoPickerRef.current?.getLocalUris() ?? [],
-              });
-              navigation.navigate('ReportIncidentDetails');
-            }}
-            fullWidth
-          />
-        )}
       </ScrollView>
 
       {/* Submit — one primary action, always within thumb reach */}
@@ -815,6 +834,42 @@ const styles = StyleSheet.create({
   hazardHint: {
     fontSize: Typography.xs,
     color: Colors.textMuted,
+  },
+  // Colors.seriousBg with a Colors.serious rail — both already reserved for
+  // the hazard and incident lane, so this introduces no colour.
+  seriousBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.seriousBg,
+    borderRadius: Radius.card,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.serious,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+  },
+  seriousBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.serious,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  seriousBannerText: {
+    flex: 1,
+    gap: 2,
+  },
+  seriousBannerTitle: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.bold,
+    color: Colors.seriousFg,
+  },
+  seriousBannerHint: {
+    fontSize: Typography.xs,
+    color: Colors.seriousFg,
+    lineHeight: 15,
   },
   offlineHint: {
     flexDirection: 'row',

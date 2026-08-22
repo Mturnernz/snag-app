@@ -20,9 +20,10 @@ async function openFirstSeriousSnag(page: Page) {
 
   await page.getByText('Snags', { exact: true }).first().click();
 
-  // Exact match on the category badge, not a loose regex: the Report tab keeps
-  // "Report a Serious Incident" mounted but hidden, and a substring match finds
-  // that first and then waits forever for it to become visible.
+  // Exact match on the category badge, not a loose regex: several screens carry
+  // the words "incident" and "hazard" in body copy — the Report tab's serious-lane
+  // banner among them — and a substring match finds one of those first and then
+  // waits forever for it to become visible.
   const badge = page
     .getByText('Incident', { exact: true })
     .or(page.getByText('Hazard', { exact: true }))

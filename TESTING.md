@@ -157,6 +157,13 @@ PR and on `main`. It needs these repository secrets:
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — required
 - `E2E_EMAIL`, `E2E_PASSWORD`, `E2E_WORKER_EMAIL`, `E2E_WORKER_PASSWORD` — optional
 
+**Both e2e jobs need all four.** A spec whose credentials are missing skips
+itself, which is the right behaviour on a fork PR and a trap everywhere else:
+the job still reports success. The mobile job was passing `E2E_WORKER_*` but not
+`E2E_EMAIL`/`E2E_PASSWORD`, so it reported green at 16 of 30 skipped on every
+run and the serious-incident screen had never been exercised in CI at all. When
+a job's pass count looks low, read the skip count before believing it.
+
 The anon key is safe as a repository secret but is not actually a secret: it is
 shipped to every browser and is only as strong as the RLS policies behind it.
 Never put the service-role key in CI.

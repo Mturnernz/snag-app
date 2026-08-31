@@ -60,14 +60,23 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: apps/mobile
 
-      # Metro needs the public Supabase config to boot the bundle. The
-      # authenticated specs skip themselves without E2E_WORKER_*, so this job
-      # stays green on a fork PR where secrets are unavailable.
+      # Metro needs the public Supabase config to boot the bundle. Each spec
+      # skips itself when its own credentials are absent, so this job stays
+      # green on a fork PR where secrets are unavailable.
+      #
+      # E2E_EMAIL/E2E_PASSWORD (a supervisor) were missing here while the web
+      # job had them, and the effect was invisible: the job reported success
+      # with 16 of 30 skipped, every run, because incident.spec.ts,
+      # deep-link.spec.ts, stalled-network.spec.ts and half of
+      # documents.spec.ts gate on those two. The serious-incident screen — the
+      # densest in the app — had never been exercised in CI at all.
       - name: Run Playwright
         working-directory: apps/mobile
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
           E2E_WORKER_EMAIL: ${{ secrets.E2E_WORKER_EMAIL }}
           E2E_WORKER_PASSWORD: ${{ secrets.E2E_WORKER_PASSWORD }}
         run: npm run test:e2e

@@ -27,6 +27,7 @@ import type {
   Comment,
   Household,
   HouseholdMember,
+  Location,
   Profile,
   Property,
   Snag,
@@ -49,7 +50,6 @@ function mapSnag(row: Row): Snag {
     reference: row.reference,
     householdId: row.household_id,
     propertyId: row.property_id,
-    title: row.title,
     room: row.room ?? null,
     photoPaths: row.photo_paths ?? [],
     description: row.description ?? null,
@@ -281,23 +281,35 @@ export async function getSnag(client: SupabaseClient, snagId: string): Promise<S
   return mapSnag(row);
 }
 
+/**
+ * What the list and the detail screen put at the top of a snag.
+ *
+ * There is no title field, so a photo-only snag has no words of its own. Naming
+ * it by where it is beats "Untitled": on a list that is mostly photographs, the
+ * picture carries the what and this only has to carry the where.
+ */
+export function snagHeadline(snag: Snag): string {
+  if (snag.description) return snag.description;
+  return snag.room ? `Something in the ${snag.room.toLowerCase()}` : 'Something to sort out';
+}
+
 /** Capture. Everything else about a snag is set later, in triage. */
 export async function createSnag(
   client: SupabaseClient,
   input: {
     propertyId: string;
-    title: string;
     room?: string | null;
-    photoPaths?: string[];
     description?: string | null;
+    photoPaths?: string[];
+    priority?: SnagPriority | null;
   }
 ): Promise<Snag> {
   const { data, error } = await client.rpc('create_snag', {
     p_property_id: input.propertyId,
-    p_title: input.title,
     p_room: input.room ?? null,
-    p_photo_paths: input.photoPaths ?? [],
     p_description: input.description ?? null,
+    p_photo_paths: input.photoPaths ?? [],
+    p_priority: input.priority ?? null,
   });
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_snag returns the base row, not the joined view.
@@ -305,7 +317,6 @@ export async function createSnag(
 }
 
 export interface SnagUpdate {
-  title?: string;
   room?: string | null;
   description?: string | null;
   priority?: SnagPriority | null;
@@ -344,7 +355,6 @@ export async function updateSnag(
 
   const { error } = await client.rpc('update_snag', {
     p_snag_id: snagId,
-    p_title: update.title ?? null,
     p_room: update.room ?? null,
     p_description: update.description ?? null,
     p_priority: update.priority ?? null,
@@ -406,34 +416,33 @@ export async function addComment(
   if (error) throw asError(error, "That didn’t save");
 }
 
-// ---------------------------------------------------------------- rooms
+// ---------------------------------------------------------------- locations
 
 /**
- * The rooms already used in this household, most-used first.
+ * The location tags offered at capture, in the order they were seeded.
  *
- * Rooms are free text on the snag rather than a table, so this is the whole of
- * the "room registry" — nobody administers a list of rooms before they can log
- * a dripping tap. It powers the suggestions under the capture field.
+ * This replaced a list derived from rooms already used. Derived suggestions
+ * read well in a mockup and are empty in real life on the one day that
+ * matters — the day the app is installed and someone decides whether logging
+ * something is quicker than saying it out loud.
  */
-export async function getKnownRooms(
+export async function getLocations(
   client: SupabaseClient,
   householdId: string
-): Promise<string[]> {
+): Promise<Location[]> {
   const { data, error } = await client
-    .from('snags')
-    .select('room')
+    .from('locations')
+    .select('id, household_id, name, sort_order')
     .eq('household_id', householdId)
-    .not('room', 'is', null);
+    .order('sort_order');
 
-  if (error) throw asError(error, "Couldn't load rooms");
-
-  const counts = new Map<string, number>();
-  for (const row of (data ?? []) as Row[]) {
-    counts.set(row.room, (counts.get(row.room) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([room]) => room);
+  if (error) throw asError(error, "Couldn't load the location tags");
+  return (data ?? []).map((row: Row) => ({
+    id: row.id,
+    householdId: row.household_id,
+    name: row.name,
+    sortOrder: row.sort_order,
+  }));
 }
 
 // ---------------------------------------------------------------- weekend

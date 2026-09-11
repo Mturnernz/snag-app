@@ -12,30 +12,47 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { createSnag } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { SnagPriority } from '../types';
 
 /**
- * Capture: a photo, a title, a room. Nothing else.
+ * A photo, a tag, a priority — and a line of description only if there is
+ * something a photo can't say.
  *
- * This is the screen someone uses standing in the bathroom holding a broken
- * toilet seat, with about ten seconds of patience. Priority, effort, whether
- * it needs parts, when it's due and who's doing it are all real and all
- * useful — and every one of them is friction here. They're set later, from the
- * list, by someone sitting down. Two moments, two screens.
+ * Three taps and no keyboard, in the common case. This is used standing in the
+ * bathroom holding a broken toilet seat, so everything here is chosen to be
+ * reachable with a thumb:
  *
- * Resist adding a field to this form. The place for it is triage.
+ * - **No title.** A photo of the thing says what a title would, and requiring
+ *   one put a keyboard between someone and the problem in front of them. The
+ *   snag needs a photo *or* a description — one with neither is nothing, and
+ *   the server says so in words rather than through a constraint name.
+ * - **Location is a tag, not a field.** The chips are seeded per household, so
+ *   they're full on the day the app is installed. A list derived from past use
+ *   is empty exactly then, which is the day someone decides whether this is
+ *   quicker than saying it out loud.
+ * - **Priority is here, not in triage.** It is the one judgement only the
+ *   person standing there can make — whether this is a today problem or a
+ *   someday one. Two values, because a third would need thinking about.
+ *
+ * Everything else — effort, needs-parts, due date, repeat, who's doing it —
+ * still belongs on the detail screen. Resist adding a fifth thing here.
  */
 export default function CaptureScreen() {
-  const { household, property, rooms, refresh } = useHousehold();
+  const { household, property, locations, refresh } = useHousehold();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
 
-  const [title, setTitle] = useState('');
-  const [room, setRoom] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [room, setRoom] = useState<string | null>(null);
+  const [description, setDescription] = useState('');
+  const [priority, setPriority] = useState<SnagPriority>('low');
+  const [photoCount, setPhotoCount] = useState(0);
   const [photosBlocking, setPhotosBlocking] = useState(false);
+  const [saving, setSaving] = useState(false);
   const photoPicker = useRef<PhotoPickerHandle>(null);
 
-  const canSave = title.trim().length > 0 && !!property && !photosBlocking && !saving;
+  // Mirrors the server's rule so the button explains itself before it refuses.
+  const hasSomething = photoCount > 0 || description.trim().length > 0;
+  const canSave = hasSomething && !!property && !photosBlocking && !saving;
 
   async function handleSave() {
     if (!property) return;
@@ -44,15 +61,16 @@ export default function CaptureScreen() {
       const photoPaths = (await photoPicker.current?.getPhotoUrls()) ?? [];
       await createSnag({
         propertyId: property.id,
-        title: title.trim(),
-        room: room.trim() || null,
+        room,
+        description: description.trim() || null,
         photoPaths,
+        priority,
       });
 
-      setTitle('');
-      setRoom('');
+      setRoom(null);
+      setDescription('');
+      setPriority('low');
       photoPicker.current?.reset();
-      // A newly used room should be offered as a suggestion next time.
       refresh();
       showToast('Added to the list');
     } catch (err: any) {
@@ -74,61 +92,78 @@ export default function CaptureScreen() {
       >
         <Text style={styles.heading}>What needs doing?</Text>
 
-        <TextInput
-          style={styles.titleInput}
-          value={title}
-          onChangeText={setTitle}
-          placeholder="Toilet seat is broken"
-          placeholderTextColor={Colors.textMuted}
-          maxLength={120}
-          returnKeyType="done"
-          autoFocus={false}
+        {/* The photo leads, because it is usually the whole report. */}
+        <PhotoPicker
+          ref={photoPicker}
+          pathPrefix={household.id}
+          onBlockingChange={setPhotosBlocking}
+          onPhotosChange={setPhotoCount}
         />
 
         <Text style={styles.label}>Where is it?</Text>
-        <TextInput
-          style={styles.roomInput}
-          value={room}
-          onChangeText={setRoom}
-          placeholder="Bathroom"
-          placeholderTextColor={Colors.textMuted}
-          maxLength={60}
-        />
-
-        {/*
-          Rooms are free text, and these are simply the ones already used here.
-          Nobody administers a list of rooms before they can log a dripping tap
-          — but typing "Bathroom" for the twentieth time is friction too.
-        */}
-        {rooms.length > 0 ? (
-          <View style={styles.suggestions}>
-            {rooms.slice(0, 8).map((name) => {
-              const active = room.trim().toLowerCase() === name.toLowerCase();
-              return (
-                <Pressable
-                  key={name}
-                  onPress={() => setRoom(active ? '' : name)}
-                  style={[styles.suggestion, active && styles.suggestionActive]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                >
-                  <Text style={[styles.suggestionText, active && styles.suggestionTextActive]}>
-                    {name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-
-        <View style={styles.photoSection}>
-          <Text style={styles.label}>Photo</Text>
-          <PhotoPicker
-            ref={photoPicker}
-            pathPrefix={household.id}
-            onBlockingChange={setPhotosBlocking}
-          />
+        <View style={styles.tags}>
+          {locations.map((location) => {
+            const active = room === location.name;
+            return (
+              <Pressable
+                key={location.id}
+                onPress={() => setRoom(active ? null : location.name)}
+                style={[styles.tag, active && styles.tagActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[styles.tagLabel, active && styles.tagLabelActive]}>
+                  {location.name}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
+
+        <Text style={styles.label}>How urgent?</Text>
+        <View style={styles.priorityRow}>
+          <Pressable
+            onPress={() => setPriority('high')}
+            style={[styles.priority, priority === 'high' && styles.priorityHighActive]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: priority === 'high' }}
+          >
+            <Icon
+              name="alert-circle-outline"
+              size="md"
+              color={priority === 'high' ? Colors.white : Colors.textSecondary}
+            />
+            <Text style={[styles.priorityLabel, priority === 'high' && styles.priorityLabelActive]}>
+              High
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setPriority('low')}
+            style={[styles.priority, priority === 'low' && styles.priorityLowActive]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: priority === 'low' }}
+          >
+            <Icon
+              name="time-outline"
+              size="md"
+              color={priority === 'low' ? Colors.white : Colors.textSecondary}
+            />
+            <Text style={[styles.priorityLabel, priority === 'low' && styles.priorityLabelActive]}>
+              Low
+            </Text>
+          </Pressable>
+        </View>
+
+        <Text style={styles.label}>Anything to add? <Text style={styles.optional}>Optional</Text></Text>
+        <TextInput
+          style={styles.description}
+          value={description}
+          onChangeText={setDescription}
+          placeholder="Hinge has sheared off"
+          placeholderTextColor={Colors.textMuted}
+          maxLength={200}
+          multiline
+        />
       </ScrollView>
 
       <View style={[styles.actionBar, { paddingBottom: insets.bottom + Spacing.md }]}>
@@ -142,7 +177,9 @@ export default function CaptureScreen() {
         />
         <View style={styles.hintRow}>
           <Icon name="information-circle-outline" size="sm" color={Colors.textMuted} />
-          <Text style={styles.hint}>Sort out priority and timing later</Text>
+          <Text style={styles.hint}>
+            {hasSomething ? 'Sort out timing and effort later' : 'A photo or a few words is enough'}
+          </Text>
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -156,18 +193,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.xxl,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
-    marginBottom: Spacing.sm,
-  },
-  titleInput: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.input,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    fontSize: Typography.lg,
-    color: Colors.textPrimary,
-    minHeight: MIN_TOUCH_TARGET,
+    marginBottom: Spacing.md,
   },
   label: {
     fontSize: Typography.sm,
@@ -175,7 +201,41 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: Spacing.lg,
   },
-  roomInput: {
+  optional: { fontWeight: Typography.regular, color: Colors.textMuted },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.xs },
+  tag: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  tagActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  tagLabel: { fontSize: Typography.base, color: Colors.textSecondary },
+  tagLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
+  priorityRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.xs },
+  priority: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  priorityHighActive: { backgroundColor: Colors.priority.high, borderColor: Colors.priority.high },
+  priorityLowActive: { backgroundColor: Colors.textSecondary, borderColor: Colors.textSecondary },
+  priorityLabel: {
+    fontSize: Typography.base,
+    fontWeight: Typography.medium,
+    color: Colors.textSecondary,
+  },
+  priorityLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
+  description: {
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -184,21 +244,10 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     fontSize: Typography.base,
     color: Colors.textPrimary,
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET + Spacing.lg,
+    marginTop: Spacing.xs,
+    textAlignVertical: 'top',
   },
-  suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
-  suggestion: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.chip,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  suggestionActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  suggestionText: { fontSize: Typography.sm, color: Colors.textSecondary },
-  suggestionTextActive: { color: Colors.primary, fontWeight: Typography.semibold },
-  photoSection: { marginTop: Spacing.xs },
   actionBar: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,

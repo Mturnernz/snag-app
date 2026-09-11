@@ -8,14 +8,17 @@ interface Props {
 }
 
 /**
- * Only `now` carries an alert colour. `soon` and `someday` render as neutral
- * dots, for the same reason the retired product did it: a second saturated hue
- * on the same card collides with the status badge and neither reads.
+ * Only `high` carries an alert colour; `low` is a neutral dot. Same reason the
+ * retired product only coloured its top severity: a second saturated hue on the
+ * same card collides with the status badge and neither reads.
+ *
+ * `low` still renders rather than hiding. Priority is set at capture on every
+ * snag, so a missing badge would mean "nobody has looked at this", not "this
+ * can wait" — and those are different things.
  */
 const STYLES: Record<SnagPriority, { color: string; bg: string }> = {
-  now: { color: Colors.priority.now, bg: Colors.priority.nowBg },
-  soon: { color: Colors.priority.soon, bg: Colors.priority.soonBg },
-  someday: { color: Colors.priority.someday, bg: Colors.priority.somedayBg },
+  high: { color: Colors.priority.high, bg: Colors.priority.highBg },
+  low: { color: Colors.priority.low, bg: Colors.priority.lowBg },
 };
 
 export default function PriorityBadge({ priority }: Props) {

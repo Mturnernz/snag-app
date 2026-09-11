@@ -33,7 +33,7 @@ const LENSES: { key: Lens; label: string; icon: React.ComponentProps<typeof Icon
 export default function SnagListScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { profile, rooms } = useHousehold();
+  const { profile, locations } = useHousehold();
 
   const [lens, setLens] = useState<Lens>('open');
   const [room, setRoom] = useState<string | null>(null);
@@ -110,7 +110,7 @@ export default function SnagListScreen() {
         })}
       </ScrollView>
 
-      {rooms.length > 1 ? (
+      {locations.length > 1 ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -122,15 +122,19 @@ export default function SnagListScreen() {
           >
             <Text style={[styles.roomLabel, !room && styles.roomLabelActive]}>Everywhere</Text>
           </Pressable>
-          {rooms.map((name) => {
-            const active = room === name;
+          {locations.map((location) => {
+            const active = room === location.name;
             return (
               <Pressable
-                key={name}
-                onPress={() => setRoom(active ? null : name)}
+                key={location.id}
+                onPress={() => setRoom(active ? null : location.name)}
                 style={[styles.roomChip, active && styles.roomChipActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
               >
-                <Text style={[styles.roomLabel, active && styles.roomLabelActive]}>{name}</Text>
+                <Text style={[styles.roomLabel, active && styles.roomLabelActive]}>
+                  {location.name}
+                </Text>
               </Pressable>
             );
           })}

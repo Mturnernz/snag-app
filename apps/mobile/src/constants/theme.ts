@@ -62,12 +62,10 @@ export const Colors = {
   // Priority colours — only "high" carries an alert colour; low/medium are
   // rendered as neutral dots so they never collide with status badge hues.
   priority: {
-    now: '#EF4444',
-    nowBg: '#FEF2F2',
-    soon: '#6B7280',
-    soonBg: '#F3F4F6',
-    someday: '#9CA3AF',
-    somedayBg: '#F3F4F6',
+    high: '#EF4444',
+    highBg: '#FEF2F2',
+    low: '#6B7280',
+    lowBg: '#F3F4F6',
   },
 
   // Success — save confirmations, positive vote state, "copied" feedback

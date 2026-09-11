@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------- enums
 
 export type SnagStatus = 'open' | 'doing' | 'done';
-export type SnagPriority = 'now' | 'soon' | 'someday';
+export type SnagPriority = 'high' | 'low';
 export type SnagEffort = 'quick' | 'half_day' | 'big_job';
 
 /**
@@ -33,9 +33,8 @@ export const STATUS_LABELS: Record<SnagStatus, string> = {
 };
 
 export const PRIORITY_LABELS: Record<SnagPriority, string> = {
-  now: 'Now',
-  soon: 'Soon',
-  someday: 'Someday',
+  high: 'High',
+  low: 'Low',
 };
 
 /**
@@ -55,7 +54,7 @@ export const EFFORT_SHORT_LABELS: Record<SnagEffort, string> = {
 };
 
 export const STATUS_ORDER: SnagStatus[] = ['open', 'doing', 'done'];
-export const PRIORITY_ORDER: SnagPriority[] = ['now', 'soon', 'someday'];
+export const PRIORITY_ORDER: SnagPriority[] = ['high', 'low'];
 export const EFFORT_ORDER: SnagEffort[] = ['quick', 'half_day', 'big_job'];
 
 /**
@@ -100,21 +99,41 @@ export interface Property {
   name: string;
 }
 
+/**
+ * A location tag offered at capture.
+ *
+ * Seeded per household so the chips are full the moment the app is opened —
+ * which is the day someone decides whether it's worth using. A list derived
+ * from past use is empty exactly then.
+ */
+export interface Location {
+  id: string;
+  householdId: string;
+  name: string;
+  sortOrder: number;
+}
+
 export interface Snag {
   id: string;
   reference: string;
   householdId: string;
   propertyId: string;
 
-  /** Capture — all anyone provides standing in the room. */
-  title: string;
+  /**
+   * Capture — four taps and, at most, one short line.
+   *
+   * There is no title: a photo of a broken toilet seat says what a title would,
+   * and requiring one put a keyboard between someone and the thing in front of
+   * them. A snag needs a photo OR a description; one with neither is nothing.
+   */
   room: string | null;
   photoPaths: string[];
   description: string | null;
+  /** Set at capture — the one judgement only the person standing there can make. */
+  priority: SnagPriority | null;
 
   /** Triage — added later, from the list. */
   status: SnagStatus;
-  priority: SnagPriority | null;
   effort: SnagEffort | null;
   needsParts: boolean;
   dueAt: string | null;

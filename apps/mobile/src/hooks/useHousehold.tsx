@@ -1,10 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Household, HouseholdMember, Profile, Property } from '../types';
-import { getDefaultProperty, getMembers, getKnownRooms } from '../lib/supabase';
+import { Household, HouseholdMember, Location, Profile, Property } from '../types';
+import { getDefaultProperty, getMembers, getLocations } from '../lib/supabase';
 
 /**
  * The household, the people in it, the property every snag hangs off, and the
- * rooms already in use.
+ * location tags offered at capture.
  *
  * These are loaded once rather than per screen because they change roughly
  * never — a two-person household adds a member once and then not again — and
@@ -18,9 +18,9 @@ interface HouseholdContextValue {
   members: HouseholdMember[];
   /** Null only in the moment before the first load finishes. */
   property: Property | null;
-  /** Rooms already used in this household, most-used first. */
-  rooms: string[];
-  /** Re-reads members, property and rooms. */
+  /** The location tags, in seeded order. */
+  locations: Location[];
+  /** Re-reads members, property and locations. */
   refresh: () => Promise<void>;
   /** Re-reads the household itself from App.tsx — after adding a member. */
   reloadAccount: () => Promise<void>;
@@ -41,18 +41,18 @@ export function HouseholdProvider({
 }) {
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [property, setProperty] = useState<Property | null>(null);
-  const [rooms, setRooms] = useState<string[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextMembers, nextProperty, nextRooms] = await Promise.all([
+      const [nextMembers, nextProperty, nextLocations] = await Promise.all([
         getMembers(household.id),
         getDefaultProperty(household.id),
-        getKnownRooms(household.id),
+        getLocations(household.id),
       ]);
       setMembers(nextMembers);
       setProperty(nextProperty);
-      setRooms(nextRooms);
+      setLocations(nextLocations);
     } catch (err) {
       console.error('Failed to load household:', err);
     }
@@ -63,8 +63,8 @@ export function HouseholdProvider({
   }, [refresh]);
 
   const value = useMemo(
-    () => ({ household, profile, members, property, rooms, refresh, reloadAccount: onReload }),
-    [household, profile, members, property, rooms, refresh, onReload]
+    () => ({ household, profile, members, property, locations, refresh, reloadAccount: onReload }),
+    [household, profile, members, property, locations, refresh, onReload]
   );
 
   return <HouseholdContext.Provider value={value}>{children}</HouseholdContext.Provider>;

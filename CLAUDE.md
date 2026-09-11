@@ -68,9 +68,9 @@ is blank", this is the first thing to check.
 
 The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
 
-- **`home`** — this product. Six tables: `households`, `profiles`, `household_members`,
-  `properties`, `snags`, `comments`. Plus `snags_with_details`, the view every list and detail
-  screen reads.
+- **`home`** — this product. Seven tables: `households`, `profiles`, `household_members`,
+  `properties`, `locations`, `snags`, `comments`. Plus `snags_with_details`, the view every list
+  and detail screen reads.
 - **`public`** — the retired B2B product, **frozen**. 35 tables, 112 migrations, 6 pilot orgs and
   57 snags. Not migrated, not dropped, not read from. Leaving it intact *is* the archive, which
   is why the pivot needed no destructive migration and why there's no schema dump anywhere.
@@ -106,16 +106,33 @@ owner and the caller's EXECUTE is never consulted.
 
 This is the load-bearing product decision and the easiest one to erode.
 
-**Capture** (`CaptureScreen`) takes a photo, a title and a room. Nothing else. It is used standing
-in the bathroom holding a broken toilet seat, with about ten seconds of patience.
+**Capture** (`CaptureScreen`) is a photo, a location tag, high-or-low, and one optional line.
+Three taps and no keyboard in the common case. It is used standing in the bathroom holding a
+broken toilet seat, with about ten seconds of patience.
 
-**Triage** (`SnagDetailScreen`) is everything else — priority, effort, needs-parts, due date,
-repeat, assignee — done later, sitting down, from the list. Each control writes immediately
-rather than collecting into a form with a Save button, because triage is a series of small
-independent decisions and a Save button turns sorting twelve items into forty taps.
+Three things about it are load-bearing:
 
-**Do not add a field to the capture form.** Every field there is friction at the exact moment
-friction costs most. The place for it is triage.
+- **There is no title column.** A photo says what a title would, and requiring one put a keyboard
+  between someone and the problem in front of them. A snag needs a photo *or* a description
+  (`snags_has_something`), and `create_snag` refuses the empty case in words rather than letting
+  the constraint name surface. `snagHeadline` supplies what the list shows for a photo-only snag.
+- **Locations are a seeded pick-list** (`home.locations`, twelve rows written by
+  `seed_locations` at household creation), not free text. A suggestion list derived from past use
+  is empty on the one day that matters — the day the app is installed. `snags.room` stays TEXT
+  rather than a foreign key, so the list query needs no join and renaming a location later
+  doesn't rewrite the history of snags filed under the old name.
+- **Priority is set at capture**, and is the one deliberate exception to the split below. It is
+  the single judgement only the person standing there can make. Two values; a third would need
+  thinking about.
+
+**Triage** (`SnagDetailScreen`) is everything else — effort, needs-parts, due date, repeat,
+assignee, and changing priority afterwards — done later, sitting down, from the list. Each
+control writes immediately rather than collecting into a form with a Save button, because triage
+is a series of small independent decisions and a Save button turns sorting twelve items into
+forty taps.
+
+**Do not add a fifth thing to the capture form.** Everything there is friction at the exact
+moment friction costs most. The place for it is triage.
 
 ## Why the app exists at all
 
@@ -154,11 +171,17 @@ Both are there so the **shared bach** — a family reports, the owner fixes — 
 - **`household_members.role`** exists with nothing reading it. Everyone in a household sees and
   does everything, and there are **no role checks in the UI at all**. Don't add one.
 
-## Rooms are free text
+## Locations are seeded, not administered and not derived
 
-`snags.room`, not a table. Nobody administers a room registry before they can log a dripping tap.
-`getKnownRooms` derives the suggestion list from rooms already used in the household, most-used
-first, and feeds both the capture chips and the list filter.
+`home.locations` holds the tags offered at capture, seeded per household by `seed_locations`:
+Kitchen, Bathroom, Bedroom, Living room, Laundry, Hallway, Garage, Outside, Deck, Roof, Under the
+house, Elsewhere. `getLocations` reads them in seeded order and feeds both the capture chips and
+the list filter.
+
+Nobody sets this up, and nobody has to earn it by logging something first. There is no UI for
+adding a thirteenth — `Elsewhere` is the escape hatch, and a household that genuinely needs
+"Sleepout" gets one RPC and one row. That is the obvious next thing here, not a gap to work
+around.
 
 ## Adding someone to a household
 

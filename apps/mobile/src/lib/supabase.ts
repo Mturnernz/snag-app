@@ -232,7 +232,7 @@ export const getComments = (snagId: string) => queries.getComments(supabase, sna
 export const addComment = (snagId: string, body: string) =>
   queries.addComment(supabase, snagId, body);
 
-export const getKnownRooms = (householdId: string) => queries.getKnownRooms(supabase, householdId);
+export const getLocations = (householdId: string) => queries.getLocations(supabase, householdId);
 
 // ─── Photos ───────────────────────────────────────────────────────────────────
 //

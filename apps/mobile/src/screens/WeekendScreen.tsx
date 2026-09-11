@@ -10,7 +10,7 @@ import Icon from '../components/Icon';
 import Card from '../components/Card';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { getSnags, getSnagPhotoUrls } from '../lib/supabase';
-import { planWeekend, WeekendPlan } from '@snag/supabase-queries';
+import { planWeekend, snagHeadline, WeekendPlan } from '@snag/supabase-queries';
 import { EFFORT_ORDER, RootStackParamList, SnagEffort, EFFORT_LABELS } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -128,7 +128,7 @@ export default function WeekendScreen() {
             >
               <Icon name="ellipse-outline" size="sm" color={Colors.textMuted} />
               <Text style={styles.shoppingText} numberOfLines={1}>
-                {snag.title}
+                {snagHeadline(snag)}
               </Text>
               {snag.room ? <Text style={styles.shoppingRoom}>{snag.room}</Text> : null}
             </Pressable>

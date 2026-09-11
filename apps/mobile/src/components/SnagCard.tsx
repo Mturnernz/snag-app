@@ -7,6 +7,7 @@ import EffortBadge from './EffortBadge';
 import DueBadge from './DueBadge';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Snag } from '../types';
+import { snagHeadline } from '@snag/supabase-queries';
 
 interface Props {
   snag: Snag;
@@ -24,13 +25,15 @@ interface Props {
  */
 export default function SnagCard({ snag, photoUrl, onPress }: Props) {
   const done = snag.status === 'done';
+  // No title field exists: a photo-only snag is named by where it is.
+  const headline = snagHeadline(snag);
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed, done && styles.doneCard]}
       accessibilityRole="button"
-      accessibilityLabel={`${snag.title}${snag.room ? `, ${snag.room}` : ''}`}
+      accessibilityLabel={`${headline}${snag.room ? `, ${snag.room}` : ''}`}
     >
       <View style={styles.thumb}>
         {photoUrl ? (
@@ -43,8 +46,15 @@ export default function SnagCard({ snag, photoUrl, onPress }: Props) {
       </View>
 
       <View style={styles.body}>
-        <Text style={[styles.title, done && styles.doneTitle]} numberOfLines={2}>
-          {snag.title}
+        <Text
+          style={[
+            styles.title,
+            done && styles.doneTitle,
+            !snag.description && styles.titleImplied,
+          ]}
+          numberOfLines={2}
+        >
+          {headline}
         </Text>
 
         {snag.room ? (
@@ -110,6 +120,9 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   doneTitle: { textDecorationLine: 'line-through', color: Colors.textSecondary },
+  // A headline the app supplied rather than one somebody wrote. Lighter, so
+  // the eye goes to the photograph — which is the actual report.
+  titleImplied: { fontWeight: Typography.medium, color: Colors.textSecondary },
   roomRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   room: { fontSize: Typography.sm, color: Colors.textMuted },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginTop: Spacing.xs / 2 },

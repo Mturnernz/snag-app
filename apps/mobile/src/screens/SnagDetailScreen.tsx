@@ -21,8 +21,9 @@ import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getSnagPhotoUrls,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { snagHeadline } from '@snag/supabase-queries';
 import {
-  Comment, RootStackParamList, Snag, SnagEffort, SnagPriority,
+  Comment, RootStackParamList, Snag,
   EFFORT_ORDER, EFFORT_SHORT_LABELS, PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
 } from '../types';
 
@@ -175,7 +176,7 @@ export default function SnagDetailScreen() {
           </ScrollView>
         ) : null}
 
-        <Text style={styles.title}>{snag.title}</Text>
+        <Text style={styles.title}>{snagHeadline(snag)}</Text>
 
         <View style={styles.metaRow}>
           <StatusBadge status={snag.status} />
@@ -193,7 +194,7 @@ export default function SnagDetailScreen() {
           {snag.lastDoneAt ? ` · last done ${new Date(snag.lastDoneAt).toLocaleDateString()}` : ''}
         </Text>
 
-        {snag.description ? <Text style={styles.description}>{snag.description}</Text> : null}
+
 
         {/* ── Status ── */}
         <View style={styles.statusRow}>
@@ -229,7 +230,7 @@ export default function SnagDetailScreen() {
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Sort it out</Text>
 
-          <Text style={styles.fieldLabel}>How much does it matter?</Text>
+          <Text style={styles.fieldLabel}>How urgent?</Text>
           <View style={styles.optionRow}>
             {PRIORITY_ORDER.map((value) => (
               <Option

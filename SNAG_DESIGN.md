@@ -53,7 +53,7 @@ Four, each with one job. Nothing else gets a hue.
 | Token | Value | Tint | Means |
 |---|---|---|---|
 | `fern` | `#2E6A4F` | `#E4EFE7` | Every primary action, and the active tab. |
-| `clay` | `#A63D29` | `#F9E7E1` | Overdue, and priority **now**. |
+| `clay` | `#A63D29` | `#F9E7E1` | Overdue, and priority **high**. |
 | `brass` | `#8F6117` | `#F7EEDC` | In progress, and due soon. |
 | `slate` | `#35526E` | `#E9EFF6` | Open. A state, not a warning. |
 
@@ -156,8 +156,10 @@ The colour budget is the design. Four badge families sit on the same card, so on
 may raise its voice.
 
 - **Status** — `Open` (slate) · `Doing` (brass) · `Done` (neutral). Done recedes, per above.
-- **Priority** — only **now** takes a hue (clay). `Soon` and `Someday` are neutral pills with a
-  grey dot. A second saturated colour on the same card and neither one reads.
+- **Priority** — `High` (clay) and `Low` (neutral pill with a grey dot). Only high takes a hue: a
+  second saturated colour on the same card and neither one reads. `Low` still renders rather than
+  hiding, because priority is set at capture on every snag — a missing badge would mean *nobody
+  has looked at this*, which is a different thing.
 - **Effort** — `Quick` / `Half day` / `Big job`, entirely colourless. Effort answers *can I finish
   this today*, which is not an alarm.
 - **Due** — neutral when scheduled, brass when within a week, clay when overdue. Overdue earns red
@@ -173,12 +175,25 @@ Weekend screen.
 
 ### Add
 
-A title field, a room field with suggestions, a photo. One green button and one line of
-reassurance: *Sort out priority and timing later.*
+A photo, a location tag, high or low, and one optional line. Three taps and no keyboard, in the
+common case.
 
-The emptiness below the photo row is the design, not an unfinished layout. This screen is used
-standing in a bathroom holding a broken toilet seat, and the promise it makes is that it will
-never grow. `CLAUDE.md` states the rule; the visual restraint is how someone feels it before
+**There is no title.** A photo of the thing says what a title would, and requiring one put a
+keyboard between someone and the problem in front of them. A snag needs a photo *or* a
+description; one with neither is nothing, and the server refuses it in words rather than through
+a constraint name.
+
+**Location is a tag, not a field.** Twelve chips, seeded per household, so they are full on the
+day the app is installed — which is the day someone decides whether this is quicker than saying
+it out loud. A list derived from past use is empty exactly then. `Elsewhere` sits last and is the
+escape hatch that stops a fixed list being a dead end.
+
+**Priority is here rather than in triage**, and it is the one exception to the capture/triage
+split. It's the single judgement only the person standing there can make: is this a today problem
+or not. Two values, because a third would need thinking about.
+
+Everything else — effort, needs-parts, due date, repeat, who's doing it — still belongs on the
+detail screen. `CLAUDE.md` states the rule; the visual restraint is how someone feels it before
 reading it.
 
 ### The list
@@ -239,7 +254,7 @@ Everything above lives in one file. `apps/mobile/src/constants/theme.ts`:
 - `Colors.textPrimary/Secondary/Muted` → `#2B2724` / `#5C554C` / `#736A5F`
 - `Colors.primary` → `#2E6A4F`, `primaryLight` → `#E4EFE7`, plus `primaryPressed` `#24543E`
 - `Colors.status` → open/doing/done on slate / brass / neutral
-- `Colors.priority` → now/soon/someday on clay / neutral / neutral
+- `Colors.priority` → high/low on clay / neutral
 - `Colors.due` → scheduled/soon/overdue on neutral / brass / clay
 - `Radius` → card 18, button 13, input 13, chip 999
 - `Shadow` → the warm-tinted scale above

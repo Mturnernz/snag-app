@@ -3,36 +3,25 @@ import { plexSans, plexMono } from '@/lib/fonts';
 import { SITE_URL } from '@/lib/seo';
 import './globals.css';
 
-// SnagHQ is this app — the marketing site and the supervisor portal. Snag is
-// the mobile app, and stays "Snag"/"SNAG" wherever the copy means the phone.
-// The distinction lives in metadata only; the rendered wordmark is unchanged.
+// What remains of the web app.
 //
-// metadataBase is what every relative canonical and OpenGraph URL on a child
-// page is resolved against. Without it Next emits localhost URLs into social
-// cards and warns at build. See @/lib/seo for why the origin is a constant.
+// The marketing site and the supervisor portal went with the B2B product. This
+// deploy exists for one reason: password recovery has to land on a plain web
+// page. `@supabase/ssr` forces PKCE, and a PKCE recovery link only works in
+// the browser that asked for it — which is never the browser someone opens
+// their mail in. So the tokens arrive in the URL fragment, the landing page is
+// a client component, and it cannot live inside the app.
+//
+// apps/mobile's sendPasswordReset points at `<this host>/reset-password`. If
+// this deploy goes away, account recovery goes with it and nothing in the app
+// will say so.
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: {
-    default: 'SnagHQ — workplace health & safety reporting',
-    template: '%s | SnagHQ',
-  },
-  description:
-    'Report hazards from your phone. Investigate, verify, and close them with a record that holds up. Built for New Zealand HSWA 2015.',
-  applicationName: 'SnagHQ',
-  // No `url` here on purpose: a default og:url is inherited verbatim by every
-  // child, so each page would claim to be the homepage. Pages set their own
-  // via canonical() in @/lib/seo.
-  openGraph: {
-    siteName: 'SnagHQ',
-    type: 'website',
-    locale: 'en_NZ',
-  },
-  twitter: {
-    card: 'summary_large_image',
-  },
-  // No opengraph-image yet. A share graphic is design work, not an SEO fix,
-  // and a metadata entry pointing at a file that doesn't exist ships a 404 on
-  // every page — which e2e/public.spec.ts would (correctly) fail on.
+  title: 'Snag',
+  description: 'Reset your Snag password.',
+  applicationName: 'Snag',
+  // Nothing here should be indexed — it is two account pages, not a site.
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

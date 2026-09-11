@@ -60,16 +60,17 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: apps/mobile
 
-      # Metro needs the public Supabase config to boot the bundle. The
-      # authenticated specs skip themselves without E2E_WORKER_*, so this job
-      # stays green on a fork PR where secrets are unavailable.
+      # Metro needs the public Supabase config to boot the bundle at all —
+      # without it lib/supabase.ts throws at module load and every spec fails on
+      # a blank page. The one authenticated spec skips itself without E2E_EMAIL,
+      # so this job stays green on a fork PR where secrets are unavailable.
       - name: Run Playwright
         working-directory: apps/mobile
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          E2E_WORKER_EMAIL: ${{ secrets.E2E_WORKER_EMAIL }}
-          E2E_WORKER_PASSWORD: ${{ secrets.E2E_WORKER_PASSWORD }}
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
         run: npm run test:e2e
 
       - uses: actions/upload-artifact@v4
@@ -94,10 +95,9 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
 
-      # The public + auth-gate specs only need the Supabase URL and anon key to
-      # boot the app; they never sign in. The authenticated portal specs skip
-      # themselves unless E2E_EMAIL/E2E_PASSWORD are also present, so this job
-      # stays green on a fork PR where secrets are unavailable.
+      # What's left of this app is the root page and password recovery, and
+      # none of its specs sign in — but the build still needs the Supabase
+      # config to compile the recovery client.
       - name: Run Playwright
         working-directory: apps/web
         env:
@@ -105,8 +105,6 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
           E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
-          E2E_WORKER_EMAIL: ${{ secrets.E2E_WORKER_EMAIL }}
-          E2E_WORKER_PASSWORD: ${{ secrets.E2E_WORKER_PASSWORD }}
         run: npx playwright test
 
       - uses: actions/upload-artifact@v4

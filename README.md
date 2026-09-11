@@ -1,70 +1,44 @@
-# SNAG
+# Snag
 
-A workplace issue-reporting platform, in two parts on one Supabase project:
+A shared list of the things that need doing around the house. Photograph a problem, and it goes
+on a list the household works through — with the jobs you'd otherwise forget (gutters, filters,
+smoke alarm batteries) coming back round on their own.
 
-- **`apps/mobile`** — an Expo / React Native app. Where snags are reported and worked on.
-- **`apps/web`** — a Next.js marketing site and supervisor portal. Where snags are managed
-  and reviewed. It does not report; that's the app's job.
+Built for two people, on the infrastructure of a retired workplace health-and-safety product of
+the same name. See `SNAG_HOME_PIVOT_REVIEW.md` for why, and `CLAUDE.md` for how.
 
-This is an npm-workspaces monorepo — run `npm install` once at the root, never inside a
-workspace.
+## What it does
 
-## Quick Start (mobile app)
+- **Add** — a photo, a title, a room. Ten seconds, standing up.
+- **Sort it out** — priority, effort, whether it needs a trip to the shop, when it's due, who's
+  doing it. Later, sitting down.
+- **Free weekend?** — what fits the time you've got, grouped by room, with everything waiting on
+  a hardware-store trip collected into one list at the top.
 
-```bash
-# 1. Install dependencies (from the repo root — installs every workspace)
-npm install
-
-# 2. Configure environment
-cp apps/mobile/.env.example apps/mobile/.env
-# Edit apps/mobile/.env and add your Supabase URL and anon key
-
-# 3. Start the app
-npm run mobile
-```
-
-## The portal
+## Running it
 
 ```bash
-cp apps/web/.env.example apps/web/.env.local   # same Supabase project as mobile
-npm run web                                     # http://localhost:3000
+npm install     # repo root
+npm run mobile  # Expo — scan the QR code with Expo Go, or press w for the browser
 ```
 
-## The onboarding guide
+Copy `apps/mobile/.env.example` to `apps/mobile/.env` and fill in the Supabase URL and anon key
+first.
 
-[`SNAG_ONBOARDING_GUIDE.md`](SNAG_ONBOARDING_GUIDE.md) — how the app works, written for the
-people using it rather than for the people building it. New customers use it to set their
-organisation up and to train their crew.
+## Layout
 
-It's generated, not written: the source is `packages/onboarding-guide`, which both clients also
-render in-app (Profile → Help & guide, and the portal's `/help`), filtered to the reader's role.
-
-```bash
-npm run guide     # regenerates the markdown and the PDFs in apps/web/public/
-```
-
-Printable handouts land at `apps/web/public/` — the full guide plus one per role.
+| | |
+|---|---|
+| `apps/mobile` | the app |
+| `apps/web` | password recovery, and nothing else — see CLAUDE.md for why it can't live in the app |
+| `packages/shared-types` | enums, row types, labels, navigation params |
+| `packages/supabase-queries` | every read and write |
+| `supabase/migrations` | `20260911*` is the current schema; everything before it is the archive |
 
 ## Tests
 
 ```bash
 npm run typecheck
-npm test          # units, then web e2e, then mobile e2e
+npm run test:mobile        # jest
+npm run test:e2e:mobile    # Playwright against the Expo web build
 ```
-
-See `TESTING.md` for the tiers, what each needs, and the write-path suite's safety fences.
-
-## Database
-
-The database is a **live Supabase project** (Snagv1), not something you stand up locally. The
-real schema history is `supabase/migrations/` — snapshots, not to be re-applied. Read
-`CLAUDE.md`'s "Database" section before changing anything.
-
-## Where to read next
-
-| Document | What it covers |
-|---|---|
-| `CLAUDE.md` | Developer guide: structure, design systems, deep links, common tasks |
-| `TESTING.md` | Test tiers, running them, the QA org, network caveats |
-| `PRODUCTION_READINESS.md` | What's production-ready, what isn't, and the decisions still open |
-| `SNAG_WEB_APP_PLAN.md` | How `apps/web` came to exist |

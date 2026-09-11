@@ -83,8 +83,35 @@ function mapComment(row: Row): Comment {
   };
 }
 
-function unwrap<T>(data: T | null, error: { message: string } | null, what: string): T {
-  if (error) throw new Error(`${what}: ${error.message}`);
+/**
+ * The `home` schema has to be listed under Settings → API → Exposed schemas in
+ * the Supabase dashboard. That setting lives in the platform, not in the
+ * database, so no migration can create it and no test in this repo can check
+ * it — and when it's missing PostgREST answers *every* call with PGRST106.
+ *
+ * Left alone that reads as an app with no data: empty lists, no household, no
+ * error. So it's named here instead, once, on the way through.
+ */
+export class SchemaNotExposedError extends Error {
+  constructor() {
+    super(
+      "Snag can't reach its data. The `home` schema isn't exposed in Supabase — " +
+        'add it under Settings → API → Exposed schemas.'
+    );
+    this.name = 'SchemaNotExposedError';
+  }
+}
+
+type QueryError = { message: string; code?: string } | null;
+
+/** Turns a Supabase error into one worth showing someone. */
+export function asError(error: NonNullable<QueryError>, what: string): Error {
+  if (error.code === 'PGRST106') return new SchemaNotExposedError();
+  return new Error(`${what}: ${error.message}`);
+}
+
+function unwrap<T>(data: T | null, error: QueryError, what: string): T {
+  if (error) throw asError(error, what);
   if (data === null) throw new Error(`${what}: no data returned`);
   return data;
 }
@@ -101,7 +128,7 @@ export async function getMyProfile(client: SupabaseClient): Promise<Profile | nu
     .eq('id', auth.user.id)
     .maybeSingle();
 
-  if (error) throw new Error(`Couldn't load your profile: ${error.message}`);
+  if (error) throw asError(error, "Couldn't load your profile");
   if (!data) return null;
   return { id: data.id, displayName: data.display_name, createdAt: data.created_at };
 }
@@ -127,7 +154,7 @@ export async function getMyHousehold(client: SupabaseClient): Promise<Household 
     .limit(1)
     .maybeSingle();
 
-  if (error) throw new Error(`Couldn't load your household: ${error.message}`);
+  if (error) throw asError(error, "Couldn't load your household");
   if (!data) return null;
   return { id: data.id, name: data.name, createdAt: data.created_at };
 }
@@ -155,7 +182,7 @@ export async function getMembers(
     .eq('household_id', householdId)
     .order('created_at');
 
-  if (error) throw new Error(`Couldn't load the household: ${error.message}`);
+  if (error) throw asError(error, "Couldn't load the household");
   return (data ?? []).map((row: Row) => ({
     householdId: row.household_id,
     profileId: row.profile_id,
@@ -178,7 +205,7 @@ export async function addMemberByEmail(
     p_household_id: householdId,
     p_email: email,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw asError(error, "That didn’t save");
 }
 
 /** One row per household in v1; the UI never shows it. */
@@ -194,7 +221,7 @@ export async function getDefaultProperty(
     .limit(1)
     .maybeSingle();
 
-  if (error) throw new Error(`Couldn't load the property: ${error.message}`);
+  if (error) throw asError(error, "Couldn't load the property");
   if (!data) return null;
   return { id: data.id, householdId: data.household_id, name: data.name };
 }
@@ -239,7 +266,7 @@ export async function getSnags(
   }
 
   const { data, error } = await query;
-  if (error) throw new Error(`Couldn't load the list: ${error.message}`);
+  if (error) throw asError(error, "Couldn't load the list");
   return (data ?? []).map(mapSnag);
 }
 
@@ -330,7 +357,7 @@ export async function updateSnag(
     p_clear: clear,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) throw asError(error, "That didn’t save");
   return getSnag(client, snagId);
 }
 
@@ -348,13 +375,13 @@ export async function setSnagStatus(
     p_snag_id: snagId,
     p_status: status,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw asError(error, "That didn’t save");
   return getSnag(client, snagId);
 }
 
 export async function deleteSnag(client: SupabaseClient, snagId: string): Promise<void> {
   const { error } = await client.rpc('delete_snag', { p_snag_id: snagId });
-  if (error) throw new Error(error.message);
+  if (error) throw asError(error, "That didn’t save");
 }
 
 // ---------------------------------------------------------------- comments
@@ -366,7 +393,7 @@ export async function getComments(client: SupabaseClient, snagId: string): Promi
     .eq('snag_id', snagId)
     .order('created_at');
 
-  if (error) throw new Error(`Couldn't load the comments: ${error.message}`);
+  if (error) throw asError(error, "Couldn't load the comments");
   return (data ?? []).map(mapComment);
 }
 
@@ -376,7 +403,7 @@ export async function addComment(
   body: string
 ): Promise<void> {
   const { error } = await client.rpc('add_comment', { p_snag_id: snagId, p_body: body });
-  if (error) throw new Error(error.message);
+  if (error) throw asError(error, "That didn’t save");
 }
 
 // ---------------------------------------------------------------- rooms
@@ -398,7 +425,7 @@ export async function getKnownRooms(
     .eq('household_id', householdId)
     .not('room', 'is', null);
 
-  if (error) throw new Error(`Couldn't load rooms: ${error.message}`);
+  if (error) throw asError(error, "Couldn't load rooms");
 
   const counts = new Map<string, number>();
   for (const row of (data ?? []) as Row[]) {

@@ -7,13 +7,12 @@
   ],
   "scripts": {
     "mobile": "npm run start --workspace=apps/mobile",
-    "guide": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-onboarding-guide.mjs",
     "web": "npm run dev --workspace=apps/web",
     "typecheck": "npm run typecheck --workspace=apps/web && tsc --noEmit -p apps/mobile",
     "typecheck:functions": "bash scripts/check-edge-functions.sh",
-    "test:e2e": "npm run test:e2e --workspace=apps/web",
-    "test:mobile": "npm run test --workspace=apps/mobile",
     "test": "npm run test:mobile && npm run test:e2e && npm run test:e2e:mobile",
+    "test:mobile": "npm run test --workspace=apps/mobile",
+    "test:e2e": "npm run test:e2e --workspace=apps/web",
     "test:e2e:mobile": "npm run test:e2e --workspace=apps/mobile"
   },
   "overrides": {

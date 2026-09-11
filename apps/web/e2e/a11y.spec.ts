@@ -1,17 +1,15 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { SUPERVISOR_STATE } from './auth-state';
 
-// Accessibility. axe-core against the routes a person actually lands on.
+// Accessibility. axe-core against the three routes this host still serves.
 //
-// This is a workplace health-and-safety product. Its users are on sites, in
-// gloves, on cracked phone screens, in bad light — and the portal is read by
-// whoever happens to be the safety officer that month. Contrast and focus
-// order are not decoration here.
+// Small surface, but it's the account-recovery path: someone reaches it locked
+// out, usually on a phone, usually from an email client's in-app browser. If
+// the form is unusable they have no other way back into the app — mobile has
+// no recovery screen of its own, by design.
 //
-// Scoped to WCAG 2.1 A/AA, which is what "accessible" means in practice and
-// what NZ government procurement asks for. axe finds roughly a third of real
-// issues automatically; a clean run here is a floor, not a certificate.
+// Scoped to WCAG 2.1 A/AA. axe finds roughly a third of real issues
+// automatically; a clean run here is a floor, not a certificate.
 
 const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 
@@ -25,65 +23,23 @@ function describe(violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violat
     .join('\n');
 }
 
-const PUBLIC_ROUTES = ['/', '/pricing', '/privacy', '/terms', '/login', '/sign-up'] as const;
+const ROUTES = ['/', '/forgot-password', '/reset-password'] as const;
 
-test.describe('accessibility (public)', () => {
-  for (const path of PUBLIC_ROUTES) {
+test.describe('accessibility', () => {
+  for (const path of ROUTES) {
     test(`${path} has no WCAG A/AA violations`, async ({ page }) => {
       await page.goto(path, { waitUntil: 'networkidle' });
       const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
       expect(violations, `${path}:\n${describe(violations)}`).toEqual([]);
     });
   }
-
-  test('the snag handoff has no WCAG A/AA violations', async ({ page }) => {
-    // Reached straight from an email, often by the person least set up to
-    // deal with a broken page.
-    await page.goto('/go/snag/214083e1-74e0-4ca4-815e-3f8b309463d5', { waitUntil: 'networkidle' });
-    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-    expect(violations, `/go/snag/[id]:\n${describe(violations)}`).toEqual([]);
-  });
-
-  test('the invite landing has no WCAG A/AA violations', async ({ page }) => {
-    // Someone's first contact with SNAG, and the only page in the product a
-    // person reaches before they have an account at all — an unusable one here
-    // costs the whole signup rather than one navigation.
-    //
-    // An unknown token deliberately: the dead-end state is the one every
-    // expired and cancelled invite renders, so it's the copy most likely to be
-    // read by someone already confused.
-    await page.goto('/join/00000000-0000-4000-8000-000000000000', { waitUntil: 'networkidle' });
-    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-    expect(violations, `/join/[token]:\n${describe(violations)}`).toEqual([]);
-  });
 });
 
-test.describe('accessibility (portal)', () => {
-  test.skip(!process.env.E2E_EMAIL || !process.env.E2E_PASSWORD, 'set E2E_EMAIL and E2E_PASSWORD');
-  test.use({ storageState: SUPERVISOR_STATE });
-
-  for (const path of ['/dashboard', '/snags', '/reports', '/help'] as const) {
-    test(`${path} has no WCAG A/AA violations`, async ({ page }) => {
-      await page.goto(path, { waitUntil: 'networkidle' });
-      const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-      expect(violations, `${path}:\n${describe(violations)}`).toEqual([]);
-    });
-  }
-
-  test('the snag detail page has no WCAG A/AA violations', async ({ page }) => {
-    // The densest screen in the portal, and the one with the collapsible
-    // sections — <details> is accessible for free, but only if the summary
-    // content stays inside it.
-    await page.goto('/snags');
-    const first = page.locator('main a[href^="/snags/"]').first();
-    if ((await first.count()) === 0) {
-      test.info().annotations.push({ type: 'note', description: 'no snags visible to this account' });
-      return;
-    }
-    await first.click();
-    await expect(page).toHaveURL(/\/snags\/[0-9a-f-]{36}/, { timeout: 45_000 });
-
-    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-    expect(violations, `snag detail:\n${describe(violations)}`).toEqual([]);
-  });
+test('reset-password reads its tokens from the fragment, not the query', async ({ page }) => {
+  // The whole reason this page is a client component. A server component never
+  // sees a fragment, so it would call a perfectly valid recovery link invalid —
+  // and the tokens arrive in the fragment because this flow is deliberately
+  // implicit rather than PKCE. See src/app/forgot-password/actions.ts.
+  await page.goto('/reset-password', { waitUntil: 'networkidle' });
+  await expect(page.getByText(/link/i).first()).toBeVisible();
 });

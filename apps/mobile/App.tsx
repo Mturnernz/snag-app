@@ -1,12 +1,13 @@
 import 'react-native-url-polyfill/auto';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 
 import { supabase, getMyProfile, getMyHousehold } from './src/lib/supabase';
+import { SchemaNotExposedError } from '@snag/supabase-queries';
 import { createAuthEventQueue } from './src/lib/authEvents';
 import { resetWebPathIfStale } from './src/lib/webLocation';
 import { Colors } from './src/constants/theme';
@@ -32,6 +33,8 @@ export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
   const [loading, setLoading] = useState(true);
+  // A configuration failure, not a data one — see loadAccount.
+  const [fatal, setFatal] = useState<string | null>(null);
 
   // Anything touching Supabase from the auth callback goes through here.
   const queueAuthWork = useRef(createAuthEventQueue()).current;
@@ -44,8 +47,13 @@ export default function App() {
       ]);
       setProfile(nextProfile);
       setHousehold(nextHousehold);
+      setFatal(null);
     } catch (err) {
       console.error('Failed to load account:', err);
+      // Everything else can retry on the next pull-to-refresh. This one can't:
+      // if the `home` schema isn't exposed, no call will ever succeed, and the
+      // app would otherwise render as a working account with nothing in it.
+      if (err instanceof SchemaNotExposedError) setFatal(err.message);
     } finally {
       setLoading(false);
     }
@@ -92,6 +100,18 @@ export default function App() {
     );
   }
 
+  if (fatal) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <View style={styles.fatal}>
+          <Text style={styles.fatalTitle}>Can't reach your data</Text>
+          <Text style={styles.fatalBody}>{fatal}</Text>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
+
   if (!session) {
     return (
       <SafeAreaProvider>
@@ -134,5 +154,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: Colors.background,
+  },
+  fatal: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    gap: 12,
+    backgroundColor: Colors.background,
+  },
+  fatalTitle: { fontSize: 22, fontWeight: '700', color: Colors.textPrimary },
+  fatalBody: {
+    fontSize: 15,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });

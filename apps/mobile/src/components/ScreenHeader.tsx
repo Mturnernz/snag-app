@@ -7,22 +7,20 @@ import Icon from './Icon';
 
 interface Props {
   title: string;
-  tone?: 'default' | 'serious';
   onBack?: () => void;
   rightSlot?: React.ReactNode;
 }
 
-export default function ScreenHeader({ title, tone = 'default', onBack, rightSlot }: Props) {
+export default function ScreenHeader({ title, onBack, rightSlot }: Props) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const serious = tone === 'serious';
 
   return (
     <View
       style={[
         styles.container,
         { paddingTop: insets.top + Spacing.sm },
-        serious ? styles.seriousContainer : styles.defaultContainer,
+        styles.defaultContainer,
       ]}
     >
       <TouchableOpacity
@@ -30,9 +28,9 @@ export default function ScreenHeader({ title, tone = 'default', onBack, rightSlo
         onPress={onBack ?? (() => navigation.goBack())}
         hitSlop={8}
       >
-        <Icon name="arrow-back" size="lg" color={serious ? Colors.white : Colors.textPrimary} />
+        <Icon name="arrow-back" size="lg" color={Colors.textPrimary} />
       </TouchableOpacity>
-      <Text style={[styles.title, serious && styles.seriousTitle]} numberOfLines={1}>
+      <Text style={styles.title} numberOfLines={1}>
         {title}
       </Text>
       <View style={styles.rightSlot}>{rightSlot}</View>
@@ -52,10 +50,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderBottomColor: Colors.border,
   },
-  seriousContainer: {
-    backgroundColor: Colors.serious,
-    borderBottomColor: Colors.serious,
-  },
   backButton: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
@@ -67,9 +61,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.lg,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
-  },
-  seriousTitle: {
-    color: Colors.white,
   },
   rightSlot: {
     minWidth: MIN_TOUCH_TARGET,

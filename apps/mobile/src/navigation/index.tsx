@@ -1,230 +1,73 @@
 import React from 'react';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { StyleSheet } from 'react-native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 
-import { RootStackParamList, MainTabParamList, UserRole } from '../types';
-import { Colors, Typography } from '../constants/theme';
-import Icon from '../components/Icon';
-
-import IssueListScreen from '../screens/IssueListScreen';
-import ReportIssueScreen from '../screens/ReportIssueScreen';
+import { Colors, IconSize, Typography } from '../constants/theme';
+import { MainTabParamList, RootStackParamList } from '../types';
+import CaptureScreen from '../screens/CaptureScreen';
+import SnagListScreen from '../screens/SnagListScreen';
+import WeekendScreen from '../screens/WeekendScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import IssueDetailScreen from '../screens/IssueDetailScreen';
-import AdminDashboardScreen from '../screens/AdminDashboardScreen';
-import ReportsScreen from '../screens/ReportsScreen';
-import ReportIncidentDetailsScreen from '../screens/ReportIncidentDetailsScreen';
-import ReportIncidentReviewScreen from '../screens/ReportIncidentReviewScreen';
-import ScanJoinCodeScreen from '../screens/ScanJoinCodeScreen';
-import ChooseReportOrgScreen from '../screens/ChooseReportOrgScreen';
-import ManageScreen from '../screens/ManageScreen';
-import SiteDetailScreen from '../screens/SiteDetailScreen';
-import MentionsScreen from '../screens/MentionsScreen';
-import DocumentLibraryScreen from '../screens/DocumentLibraryScreen';
-import OnboardingCarouselScreen from '../screens/OnboardingCarouselScreen';
-import HelpGuideScreen from '../screens/HelpGuideScreen';
-import { IncidentDraftProvider } from '../context/IncidentDraftContext';
-import { ReportTargetProvider } from '../context/ReportTargetContext';
-import { BadgeProvider, useBadge } from '../context/BadgeContext';
-import { OfflineQueueProvider } from '../context/OfflineQueueContext';
-
-// ─── Tab bar icons ────────────────────────────────────────────────────────────
-
-const TAB_ICONS: Record<string, { active: React.ComponentProps<typeof Icon>['name']; inactive: React.ComponentProps<typeof Icon>['name'] }> = {
-  Report: { active: 'add-circle', inactive: 'add-circle-outline' },
-  Issues: { active: 'list', inactive: 'list-outline' },
-  Admin: { active: 'settings', inactive: 'settings-outline' },
-  Profile: { active: 'person-circle', inactive: 'person-circle-outline' },
-};
-
-function TabIcon({ label, focused }: { label: string; focused: boolean }) {
-  const icons = TAB_ICONS[label];
-  return (
-    <Icon
-      name={focused ? icons.active : icons.inactive}
-      size="lg"
-      color={focused ? Colors.primary : Colors.textMuted}
-    />
-  );
-}
-
-// ─── Bottom Tab Navigator ────────────────────────────────────────────────────
+import SnagDetailScreen from '../screens/SnagDetailScreen';
+import HouseholdScreen from '../screens/HouseholdScreen';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
-function MainTabNavigator({ userRole, initialTab = 'Report' }: { userRole: UserRole; initialTab?: keyof MainTabParamList }) {
-  const isAdminOrManager = userRole === 'officer_admin' || userRole === 'supervisor';
-  const { openIssueCount, mentionCount } = useBadge();
+const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
+  // [inactive, active] — filled is reserved for the active tab.
+  Capture: ['camera-outline', 'camera'],
+  Snags: ['list-outline', 'list'],
+  Weekend: ['hammer-outline', 'hammer'],
+  Profile: ['person-circle-outline', 'person-circle'],
+};
 
+function MainTabs() {
   return (
     <Tab.Navigator
-      initialRouteName={initialTab}
+      // Capture, not the list. Logging something is the thing done most often
+      // and the thing most sensitive to friction; reading the list is a
+      // deliberate act someone taps through to.
+      initialRouteName="Capture"
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarLabelStyle: styles.tabBarLabel,
-        tabBarBadgeStyle: styles.tabBarBadge,
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
-        tabBarIcon: ({ focused }) => (
-          <TabIcon label={route.name} focused={focused} />
-        ),
+        tabBarStyle: {
+          backgroundColor: Colors.surface,
+          borderTopColor: Colors.border,
+        },
+        tabBarLabelStyle: {
+          fontSize: Typography.xs,
+          fontWeight: Typography.medium,
+        },
+        tabBarIcon: ({ focused, color }) => {
+          const [inactive, active] = TAB_ICONS[route.name];
+          return (
+            <Ionicons
+              name={focused ? active : inactive}
+              size={IconSize.lg}
+              color={color}
+            />
+          );
+        },
       })}
     >
-      <Tab.Screen name="Report" component={ReportIssueScreen} />
-      <Tab.Screen
-        name="Issues"
-        component={IssueListScreen}
-        options={{
-          tabBarLabel: 'Snags',
-          tabBarBadge: openIssueCount > 0 ? openIssueCount : undefined,
-        }}
-      />
-      {isAdminOrManager && (
-        <Tab.Screen name="Admin" component={AdminDashboardScreen} options={{ tabBarLabel: 'Manager' }} />
-      )}
-      {/* Profile is declared last so it stays the right-most tab for every role. */}
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          tabBarBadge: mentionCount > 0 ? '' : undefined,
-          tabBarBadgeStyle: styles.tabBarDot,
-        }}
-      />
+      <Tab.Screen name="Capture" component={CaptureScreen} options={{ tabBarLabel: 'Add' }} />
+      <Tab.Screen name="Snags" component={SnagListScreen} options={{ tabBarLabel: 'List' }} />
+      <Tab.Screen name="Weekend" component={WeekendScreen} options={{ tabBarLabel: 'Weekend' }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'You' }} />
     </Tab.Navigator>
   );
 }
 
-// ─── Root Stack ───────────────────────────────────────────────────────────────
-
-const Stack = createNativeStackNavigator<RootStackParamList>();
-
-export default function RootNavigator({ userRole, initialTab }: { userRole: UserRole; initialTab?: keyof MainTabParamList }) {
+export default function RootNavigator() {
   return (
-    <BadgeProvider>
-    <OfflineQueueProvider>
-    <IncidentDraftProvider>
-      <ReportTargetProvider>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Main">
-          {() => <MainTabNavigator userRole={userRole} initialTab={initialTab} />}
-        </Stack.Screen>
-        <Stack.Screen
-          name="IssueDetail"
-          component={IssueDetailScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="Reports"
-          component={ReportsScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="ReportIncidentDetails"
-          component={ReportIncidentDetailsScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="ReportIncidentReview"
-          component={ReportIncidentReviewScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="ScanOrgCode"
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        >
-          {({ navigation }) => (
-            <ScanJoinCodeScreen
-              onComplete={() => navigation.goBack()}
-              onBack={() => navigation.goBack()}
-            />
-          )}
-        </Stack.Screen>
-        <Stack.Screen
-          name="ChooseReportOrg"
-          component={ChooseReportOrgScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="Manage"
-          component={ManageScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="SiteDetail"
-          component={SiteDetailScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="Mentions"
-          component={MentionsScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="DocumentLibrary"
-          component={DocumentLibraryScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="HelpGuide"
-          component={HelpGuideScreen}
-          options={{ presentation: 'card', animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="OnboardingCarousel"
-          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-        >
-          {({ navigation }) => (
-            <OnboardingCarouselScreen onFinish={() => navigation.goBack()} />
-          )}
-        </Stack.Screen>
-      </Stack.Navigator>
-      </ReportTargetProvider>
-    </IncidentDraftProvider>
-    </OfflineQueueProvider>
-    </BadgeProvider>
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Main" component={MainTabs} />
+      <Stack.Screen name="SnagDetail" component={SnagDetailScreen} />
+      <Stack.Screen name="Household" component={HouseholdScreen} />
+    </Stack.Navigator>
   );
 }
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  tabBar: {
-    backgroundColor: Colors.surface,
-    borderTopColor: Colors.border,
-    borderTopWidth: 1,
-    height: 60,
-    paddingBottom: 8,
-    paddingTop: 6,
-  },
-  tabBarLabel: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.medium,
-  },
-  // A count is a workload figure, so it reads in the brand accent rather than
-  // an alert colour. Nestled at the icon's corner instead of floating clear of
-  // it, which is what made the default read as an alarm.
-  tabBarBadge: {
-    backgroundColor: Colors.primary,
-    color: Colors.white,
-    fontSize: 10,
-    fontWeight: Typography.semibold,
-    minWidth: 16,
-    height: 16,
-    lineHeight: 16,
-    borderRadius: 8,
-    paddingHorizontal: 4,
-  },
-  // Mentions and RCAs keep the alert colour, but as a bare dot: an empty label
-  // with no width of its own, so the pill collapses to a disc.
-  tabBarDot: {
-    backgroundColor: Colors.serious,
-    minWidth: 8,
-    maxWidth: 8,
-    height: 8,
-    borderRadius: 4,
-    paddingHorizontal: 0,
-    lineHeight: 8,
-  },
-});

@@ -6,11 +6,7 @@ import * as queries from '@snag/supabase-queries';
 import { PORTAL_URL } from './appUrl';
 import { readForUpload } from './uploadBody';
 import { withDeadline } from './deadline';
-import { ReportSite } from './reportSite';
-import {
-  Profile, UserRole, Snag, SnagStatus, SnagKind, SnagSeverity, VoteValue,
-  ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction,
-} from '../types';
+import type { SnagStatus } from '../types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
@@ -63,6 +59,15 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  // Snag Home lives in its own schema, beside the frozen `public` one that
+  // holds the retired B2B product. Without this every table read goes to
+  // `public` and finds a schema that knows nothing about households.
+  //
+  // `home` must also be listed under Settings → API → Exposed schemas in the
+  // Supabase dashboard. It isn't in any migration, so nothing in this repo can
+  // check it: if it's missing, every call 404s and the app looks like it has
+  // no data rather than no permission.
+  db: { schema: 'home' },
   global: { fetch: fetchWithTimeout },
   auth: {
     storage: Platform.OS === 'web' ? undefined : AsyncStorage,
@@ -177,1053 +182,76 @@ export async function getCurrentUser() {
   return user;
 }
 
-// ─── Profile helpers ──────────────────────────────────────────────────────────
-
-// profiles.org_id/role mirror the user's ACTIVE membership (kept in sync by
-// set_active_org and the membership RPCs), so this shape stays correct across
-// org switches. Org-membership lockout is enforced server-side by RLS, not by
-// the deprecated profiles.removed_at column.
-export async function getProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, org_id, name, email, role, created_at, has_seen_onboarding, organisation:organisations!profiles_org_id_fkey(id, name, industry, plan_tier, join_code, is_public, public_intake_site_id, created_at)')
-    .eq('id', userId)
-    .maybeSingle();
-  if (error) console.error('getProfile error:', error);
-  return data as unknown as Profile | null;
-}
-
-// First-time worker onboarding gate — see OnboardingWelcomeScreen /
-// OnboardingCarouselScreen and the pre-NavigationContainer gate in App.tsx.
-export async function markOnboardingSeen() {
-  return supabase.rpc('mark_onboarding_seen');
-}
-
-export async function updateProfile(userId: string, updates: Partial<Pick<Profile, 'name'>>) {
-  return supabase.from('profiles').update(updates).eq('id', userId);
-}
-
-// ─── Organisation / site / invite helpers ────────────────────────────────────
-
-export const createOrganisationAndOwner = (orgName: string, ownerName: string) =>
-  queries.createOrganisationAndOwner(supabase, orgName, ownerName);
-
-export interface InvitePreview {
-  org_name: string;
-  site_name: string | null;
-  role: UserRole;
-  email: string;
-  status: string;
-  expires_at: string;
-}
-
-export async function getInvitePreview(token: string) {
-  const { data, error } = await supabase.rpc('get_invite_preview', { p_token: token }).single();
-  return { data: data as InvitePreview | null, error };
-}
-
-export async function acceptInvite(token: string, name: string) {
-  const { error } = await supabase.rpc('accept_invite', { p_token: token, p_name: name });
-  if (error) {
-    return { error: { message: 'This invite is invalid or has expired.' } };
-  }
-  return { error: null };
-}
-
-export async function inviteUser(email: string, role: UserRole, siteId: string | null) {
-  const { data, error } = await supabase.rpc('invite_user', {
-    p_email: email,
-    p_role: role,
-    p_site_id: siteId,
-  });
-  return { inviteId: data as string | null, error };
-}
-
-// `token` is selected deliberately. It is the invite code, and without it the
-// admin screen could list a pending invite but not tell anyone what it was —
-// while OrgJoinScreen asked the invitee to "paste the code your admin or
-// supervisor emailed you". For the whole life of the feature nothing emailed
-// it, so that code existed only in the database and every invite was a dead
-// end. The RLS policy here already limits this to admins and supervisors of
-// the invite's own org.
-export async function getPendingInvites(orgId: string) {
-  const { data } = await supabase
-    .from('invites')
-    .select('id, email, role, status, created_at, expires_at, token')
-    .eq('org_id', orgId)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false });
-  return data ?? [];
-}
-
-export async function cancelInvite(inviteId: string) {
-  return supabase.rpc('cancel_invite', { p_invite_id: inviteId });
-}
-
-/** Send the invite email again — same token, so any link already sent stays valid. */
-export async function resendInvite(inviteId: string) {
-  return supabase.rpc('resend_invite', { p_invite_id: inviteId });
-}
-
-// ─── QR join code ─────────────────────────────────────────────────────────────
-
-export async function regenerateOrgJoinCode() {
-  const { data, error } = await supabase.rpc('regenerate_org_join_code');
-  return { code: data as string | null, error };
-}
-
-export interface OrgJoinPreview {
-  org_id: string;
-  org_name: string;
-}
-
-export interface JoinCodeLookup {
-  org: OrgJoinPreview | null;
-  /** The exact string that matched, to hand to joinOrgViaCode — see the case
-   *  retry below. Null when nothing matched. */
-  code: string | null;
-  /** The call itself failed (permission, network, server) rather than the code
-   *  simply not existing. The two need different words: collapsing them is how
-   *  a missing anon grant on get_org_by_join_code read to every new user as
-   *  "that code is invalid" for three weeks. */
-  failed: boolean;
-}
-
-export async function getOrgByJoinCode(code: string): Promise<JoinCodeLookup> {
-  // Codes are compared as opaque strings server-side, and the two live formats
-  // differ in case: the current charset is uppercase, while orgs that haven't
-  // regenerated since 20260711140000 still carry 10-char lowercase hex. The
-  // manual-entry field uppercases as you type, which is right for the current
-  // format and made a legacy code unenterable — so try what was typed or
-  // scanned, then both cases. Whichever matched is what we return;
-  // join_org_via_code has to be given the same exact string.
-  const typed = code.trim();
-  const attempts = [typed, typed.toUpperCase(), typed.toLowerCase()]
-    .filter((v, i, all) => all.indexOf(v) === i);
-
-  for (const attempt of attempts) {
-    // maybeSingle, not single: `single` turns "no rows" into an error object,
-    // which makes an unknown code indistinguishable from a failed call.
-    const { data, error } = await supabase
-      .rpc('get_org_by_join_code', { p_code: attempt })
-      .maybeSingle();
-    if (error) {
-      console.error('Join code lookup failed', error);
-      return { org: null, code: null, failed: true };
-    }
-    if (data) return { org: data as OrgJoinPreview, code: attempt, failed: false };
-  }
-
-  return { org: null, code: null, failed: false };
-}
-
-export async function joinOrgViaCode(code: string, name: string) {
-  const { error } = await supabase.rpc('join_org_via_code', { p_code: code, p_name: name });
-  return { error };
-}
-
-// The sites a reporter may file into, named, for the report screens' picker:
-// their own site memberships, or — for someone who has none, typically an
-// admin — every site in the org. That second branch is the long-standing
-// fallback; the first used to be `my_member_site_ids()[0]` with no picker and
-// no ORDER BY behind it, which is how a member of three sites reported into
-// one of them forever.
+// ─── Household ────────────────────────────────────────────────────────────────
 //
-// create_snag accepts any site in the org, so this list is about relevance
-// rather than permission — it deliberately doesn't offer a worker sites they
-// aren't on. Ordered by name so the fallback choice is at least stable.
-// The site this person last actually filed a report into, in this org — what
-// the picker defaults to. Server-side rather than a local preference so it
-// holds on a new device and on the web build, and so it follows what was
-// reported rather than what was merely tapped.
+// Every domain function is a thin binding of the shared query package to this
+// client, so `apps/web` can call the same code with its own. Nothing below
+// should contain logic — if it needs any, it belongs in
+// packages/supabase-queries where both clients get it.
+
+export const getMyProfile = () => queries.getMyProfile(supabase);
+
+export const upsertProfile = (displayName: string) =>
+  queries.upsertProfile(supabase, displayName);
+
+export const getMyHousehold = () => queries.getMyHousehold(supabase);
+
+export const createHousehold = (name: string, propertyName?: string) =>
+  queries.createHousehold(supabase, name, propertyName);
+
+export const getMembers = (householdId: string) => queries.getMembers(supabase, householdId);
+
+export const addMemberByEmail = (householdId: string, email: string) =>
+  queries.addMemberByEmail(supabase, householdId, email);
+
+export const getDefaultProperty = (householdId: string) =>
+  queries.getDefaultProperty(supabase, householdId);
+
+// ─── Snags ────────────────────────────────────────────────────────────────────
+
+export const getSnags = (
+  filter?: Parameters<typeof queries.getSnags>[1],
+  sort?: Parameters<typeof queries.getSnags>[2],
+) => queries.getSnags(supabase, filter, sort);
+
+export const getSnag = (snagId: string) => queries.getSnag(supabase, snagId);
+
+export const createSnag = (input: Parameters<typeof queries.createSnag>[1]) =>
+  queries.createSnag(supabase, input);
+
+export const updateSnag = (snagId: string, update: queries.SnagUpdate) =>
+  queries.updateSnag(supabase, snagId, update);
+
+export const setSnagStatus = (snagId: string, status: SnagStatus) =>
+  queries.setSnagStatus(supabase, snagId, status);
+
+export const deleteSnag = (snagId: string) => queries.deleteSnag(supabase, snagId);
+
+export const getComments = (snagId: string) => queries.getComments(supabase, snagId);
+
+export const addComment = (snagId: string, body: string) =>
+  queries.addComment(supabase, snagId, body);
+
+export const getKnownRooms = (householdId: string) => queries.getKnownRooms(supabase, householdId);
+
+// ─── Photos ───────────────────────────────────────────────────────────────────
 //
-// Null when they've never reported here, and null offline; resolveReportSite
-// falls back to the cached value and then to the first site by name.
-export async function getLastReportedSiteId(orgId: string): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data } = await supabase
-    .from('snags')
-    .select('site_id')
-    .eq('reporter_id', user.id)
-    .eq('org_id', orgId)
-    .order('created_at', { ascending: false })
-    .limit(1);
-  return (data?.[0]?.site_id as string | undefined) ?? null;
-}
-
-export async function getReportableSites(orgId: string): Promise<ReportSite[]> {
-  const { data: memberSiteIds } = await supabase.rpc('my_member_site_ids');
-  // `is('archived_at', null)`: a retired site takes no new reports (a trigger
-  // on snags enforces it server-side), so offering it in the picker would only
-  // produce a refusal at submit — after the photo and the description.
-  const query = supabase.from('sites').select('id, name').is('archived_at', null);
-  const { data } = memberSiteIds && memberSiteIds.length > 0
-    ? await query.in('id', memberSiteIds as string[]).order('name')
-    : await query.eq('org_id', orgId).order('name');
-  return (data ?? []) as ReportSite[];
-}
-
-// ─── Admin helpers ────────────────────────────────────────────────────────────
-
-// Member lists come from org_memberships (via RPC), not profiles.org_id —
-// that column mirrors each user's *active* org, which for multi-org members
-// may be a different organisation right now.
-export async function getOrgMembers(_orgId?: string): Promise<Profile[]> {
-  const data = await queries.getOrgMembers(supabase);
-  return data as Profile[];
-}
-
-export async function updateMemberRole(memberId: string, role: UserRole) {
-  return supabase.rpc('update_member_role', { p_member_id: memberId, p_role: role });
-}
-
-export async function removeOrgMember(memberId: string) {
-  return supabase.rpc('remove_org_member', { p_member_id: memberId });
-}
-
-// ─── Serious incident owners ──────────────────────────────────────────────────
-// Who a serious incident goes to: notified when one is filed, and the first of
-// them is assigned it on the way in. See the migration for why there is always
-// at least one.
-export type SeriousIncidentOwner = queries.SeriousIncidentOwner;
-
-export const getSeriousIncidentOwners = (orgId: string) =>
-  queries.getSeriousIncidentOwners(supabase, orgId);
-
-export const addSeriousIncidentOwner = (profileId: string) =>
-  queries.addSeriousIncidentOwner(supabase, profileId);
-
-export const removeSeriousIncidentOwner = (profileId: string) =>
-  queries.removeSeriousIncidentOwner(supabase, profileId);
-
-// ─── Multi-org membership helpers ─────────────────────────────────────────────
-
-export type Membership = queries.Membership;
-
-export const getMemberships = () => queries.getMemberships(supabase);
-
-export const setActiveOrg = (orgId: string) => queries.setActiveOrg(supabase, orgId);
-
-export async function setOrganisationActive(orgId: string, active: boolean) {
-  return supabase.rpc('set_organisation_active', { p_org_id: orgId, p_active: active });
-}
-
-// Resolve which org the user reports into, driven by the membership RPC rather
-// than the (embed-heavy, occasionally-null) profiles read. Returns the active
-// org; if none is active but the user belongs to exactly one (active) org,
-// defaults to it (set_active_org). Returns null if the user has no usable
-// (active-org) membership at all — either genuinely no membership, or every
-// org they belong to has been deactivated.
-export async function resolveActiveOrg(): Promise<{ orgId: string; orgName: string } | null> {
-  const memberships = await getMemberships();
-  const usable = memberships.filter((m) => m.org_active);
-  if (usable.length === 0) return null;
-
-  const active = usable.find((m) => m.is_active);
-  if (active) return { orgId: active.org_id, orgName: active.org_name };
-
-  if (usable.length === 1) {
-    await setActiveOrg(usable[0].org_id);
-    return { orgId: usable[0].org_id, orgName: usable[0].org_name };
-  }
-  return null; // multi-org, none active — let the user choose
-}
-
-// ─── Public organisations ─────────────────────────────────────────────────────
-
-export interface PublicOrg {
-  org_id: string;
-  org_name: string;
-}
-
-export async function searchPublicOrgs(query?: string): Promise<PublicOrg[]> {
-  const { data } = await supabase.rpc('search_public_orgs', { p_query: query ?? null });
-  return (data ?? []) as PublicOrg[];
-}
-
-export async function createPublicSnag(params: {
-  orgId: string;
-  description: string;
-  photoPaths: string[];
-  isHazard: boolean;
-  reporterName?: string | null;
-}) {
-  const { data, error } = await supabase.rpc('create_public_snag', {
-    p_org_id: params.orgId,
-    p_description: params.description,
-    p_photo_paths: params.photoPaths,
-    p_is_hazard: params.isHazard,
-    p_reporter_name: params.reporterName ?? null,
-  }).single();
-  return { data: data as { id: string; reference: string } | null, error };
-}
-
-export async function setOrgPublicMode(enabled: boolean, intakeSiteId?: string | null) {
-  return supabase.rpc('set_org_public_mode', {
-    p_enabled: enabled,
-    p_intake_site_id: intakeSiteId ?? null,
-  });
-}
-
-export interface PublicIntakeSite {
-  orgId: string;
-  orgName: string;
-  siteId: string;
-  siteName: string;
-}
-
-// Resolves a QR code's token to the org/site it reports into — callable
-// with no session at all (the RPC is anon-executable), so a scan can show
-// "Reporting at <site>" before signing the reporter in anonymously.
-export async function getSiteByPublicToken(token: string): Promise<PublicIntakeSite | null> {
-  const { data, error } = await supabase.rpc('get_site_by_public_token', { p_token: token }).maybeSingle();
-  const row = data as { org_id: string; org_name: string; site_id: string; site_name: string } | null;
-  if (error || !row) return null;
-  return { orgId: row.org_id, orgName: row.org_name, siteId: row.site_id, siteName: row.site_name };
-}
-
-export async function createPublicSnagByToken(params: {
-  token: string;
-  description: string;
-  photoPaths: string[];
-  isHazard: boolean;
-  reporterName?: string | null;
-}) {
-  const { data, error } = await supabase.rpc('create_public_snag_by_token', {
-    p_token: params.token,
-    p_description: params.description,
-    p_photo_paths: params.photoPaths,
-    p_is_hazard: params.isHazard,
-    p_reporter_name: params.reporterName ?? null,
-  }).single();
-  return { data: data as { id: string; reference: string } | null, error };
-}
-
-// Used only for the QR-scan report flow — a real account-free session so
-// create_public_snag_by_token's auth.uid() check is satisfied without ever
-// showing AuthScreen. Requires "Allow anonymous sign-ins" to be enabled in
-// the Supabase project's Auth settings (a dashboard-only toggle, not
-// something a migration can set).
-export async function signInAnonymouslyForReport() {
-  return supabase.auth.signInAnonymously();
-}
-
-export async function blockPublicReporter(snagId: string) {
-  return supabase.rpc('block_public_reporter', { p_snag_id: snagId });
-}
-
-// Active sites only — this feeds work-group scoping and the snag list's site
-// filter. A retired site keeps its snags, so filtering the *list* by it would
-// still be meaningful; it is excluded anyway because scoping a new work group
-// to a closed site is not, and one function serving both is worth more than
-// the edge case.
-export async function getOrgSites(orgId: string): Promise<{ id: string; name: string }[]> {
-  const { data } = await supabase
-    .from('sites')
-    .select('id, name')
-    .eq('org_id', orgId)
-    .is('archived_at', null)
-    .order('created_at', { ascending: true });
-  return data ?? [];
-}
-
-// The sites a worker is personally assigned to (as opposed to every site in
-// the org, which officer_admin/supervisor see) — used to scope the Snags
-// list's Site filter for non-staff.
-export async function getMySiteIds(): Promise<string[]> {
-  const { data } = await supabase.rpc('my_member_site_ids');
-  return (data ?? []) as string[];
-}
-
-// Work groups the current user supervises — used to scope the Snags list's
-// "Unassigned in my work groups" option for supervisors. RLS on
-// work_group_supervisors already scopes reads to the active org, so a plain
-// eq('user_id', ...) is sufficient (no RPC needed).
-export async function getMySupervisedWorkGroupIds(): Promise<string[]> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
-  const { data } = await supabase
-    .from('work_group_supervisors')
-    .select('work_group_id')
-    .eq('user_id', user.id);
-  return (data ?? []).map((r: any) => r.work_group_id);
-}
-
-// Snags the current user has been @mentioned on in this org — powers the
-// Snags list's "Mentioned" scope option. comment_mentions carries its own
-// org_id, so this stays scoped to the active org the same way get_my_mentions
-// (the RPC behind the separate Mentions inbox) does.
-export async function getMyMentionedSnagIds(orgId: string): Promise<string[]> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
-  const { data } = await supabase
-    .from('comment_mentions')
-    .select('snag_id')
-    .eq('mentioned_user_id', user.id)
-    .eq('org_id', orgId);
-  return [...new Set((data ?? []).map((r: any) => r.snag_id as string))];
-}
-
-// ─── Site & organisation management (admin) ───────────────────────────────────
-
-export interface SiteDetail {
-  id: string;
-  name: string;
-  location: string | null;
-  memberIds: string[];
-  supervisorIds: string[];
-  defaultOwnerId: string | null;
-  publicReportToken: string | null;
-  /** Set once a site is retired. Archived sites keep every snag but take no
-   *  new ones — see 20260806120000_archive_and_delete_site.sql. */
-  archivedAt: string | null;
-}
-
-// Sites for the active org, each with its member/supervisor/default-owner ids.
-// Everything is org-scoped by RLS via current_org_id().
-//
-// Returns archived sites too, because the Manage → Sites tab has to list them
-// to offer a restore. Every *other* caller wants active sites only and filters
-// on `archivedAt` — an archived site must not appear in the invite form's site
-// picker, the public-intake picker, or the admin dashboard's "sites with no
-// site lead" (a closed site having no lead is not a gap to chase).
-export async function getSitesWithDetail(): Promise<SiteDetail[]> {
-  const { data: sites } = await supabase
-    .from('sites')
-    .select('id, name, location, public_report_token, archived_at')
-    .order('created_at', { ascending: true });
-  if (!sites || sites.length === 0) return [];
-
-  const siteIds = sites.map((s) => s.id);
-  const [membersRes, supsRes, ownersRes] = await Promise.all([
-    supabase.from('site_members').select('site_id, user_id').in('site_id', siteIds),
-    supabase.from('site_supervisors').select('site_id, user_id').in('site_id', siteIds),
-    supabase.from('site_default_owners').select('site_id, owner_id').in('site_id', siteIds),
-  ]);
-  const members = membersRes.data ?? [];
-  const sups = supsRes.data ?? [];
-  const owners = ownersRes.data ?? [];
-
-  return sites.map((s: any) => ({
-    id: s.id,
-    name: s.name,
-    location: s.location,
-    memberIds: members.filter((m: any) => m.site_id === s.id).map((m: any) => m.user_id),
-    supervisorIds: sups.filter((m: any) => m.site_id === s.id).map((m: any) => m.user_id),
-    defaultOwnerId: owners.find((o: any) => o.site_id === s.id)?.owner_id ?? null,
-    publicReportToken: s.public_report_token,
-    archivedAt: s.archived_at ?? null,
-  }));
-}
-
-// How many reports are on a site. The only thing standing between delete_site
-// and an unrecoverable cascade through snags → investigations, so the client
-// asks before offering the button rather than letting the server refuse.
-export async function getSiteSnagCount(siteId: string): Promise<number> {
-  const { count } = await supabase
-    .from('snags')
-    .select('id', { count: 'exact', head: true })
-    .eq('site_id', siteId);
-  return count ?? 0;
-}
-
-// Retire a site that has history. Everything on it stays; it just stops being
-// somewhere a new report can be aimed. Pass false to bring it back.
-export async function archiveSite(siteId: string, archived = true) {
-  return supabase.rpc('archive_site', { p_site_id: siteId, p_archived: archived });
-}
-
-// Only for a site with no snags — the server refuses otherwise, naming the
-// count. Cascades through site_members / site_supervisors / site_default_owners
-// / work_group_sites, all of which describe the site rather than being records.
-export async function deleteSite(siteId: string) {
-  return supabase.rpc('delete_site', { p_site_id: siteId });
-}
-
-export async function createSite(name: string, location?: string | null) {
-  return supabase.rpc('create_site', { p_name: name, p_location: location ?? null });
-}
-
-// Renames a site and sets the location create_site has always accepted but no
-// UI ever captured. Admin-only server-side, same as creating one.
-export async function updateSite(siteId: string, name: string, location?: string | null) {
-  return supabase.rpc('update_site', {
-    p_site_id: siteId, p_name: name, p_location: location ?? null,
-  });
-}
-
-// Toggles a site's QR public-reporting token on/off, returning the new
-// token (or null when disabling). Calling again while already enabled
-// rotates it, invalidating any previously printed/shared QR code.
-export async function setSitePublicIntake(
-  siteId: string,
-  enabled: boolean
-): Promise<{ token: string | null; error: any }> {
-  const { data, error } = await supabase.rpc('set_site_public_intake', {
-    p_site_id: siteId,
-    p_enabled: enabled,
-  });
-  return { token: error ? null : (data as string | null), error };
-}
-
-export async function addSiteMember(siteId: string, userId: string) {
-  return supabase.rpc('add_site_member', { p_site_id: siteId, p_user_id: userId });
-}
-
-export async function removeSiteMember(siteId: string, userId: string) {
-  return supabase.rpc('remove_site_member', { p_site_id: siteId, p_user_id: userId });
-}
-
-export async function assignSiteSupervisor(siteId: string, userId: string) {
-  return supabase.rpc('assign_site_supervisor', { p_site_id: siteId, p_user_id: userId });
-}
-
-export async function removeSiteSupervisor(siteId: string, userId: string) {
-  return supabase.rpc('remove_site_supervisor', { p_site_id: siteId, p_user_id: userId });
-}
-
-export async function setSiteDefaultOwner(siteId: string, ownerId: string) {
-  return supabase.rpc('set_site_default_owner', { p_site_id: siteId, p_owner_id: ownerId });
-}
-
-// ─── Work groups ────────────────────────────────────────────────────────────
-// Org-defined sub-teams a worker can route a snag to at report time. Mirrors
-// getSitesWithDetail's shape: work groups + their supervisor ids, read
-// directly (RLS-scoped) rather than through an RPC.
-
-export interface WorkGroupDetail {
-  id: string;
-  name: string;
-  color: string | null;
-  isDefault: boolean;
-  supervisorIds: string[];
-  // Empty = the group applies to every site in the org.
-  siteIds: string[];
-  siteNames: string[];
-}
-
-export async function getWorkGroupsWithDetail(): Promise<WorkGroupDetail[]> {
-  const { data: groups } = await supabase
-    .from('work_groups')
-    .select('id, name, color, is_default')
-    .is('deleted_at', null)
-    .order('is_default', { ascending: true })
-    .order('created_at', { ascending: true });
-  if (!groups || groups.length === 0) return [];
-
-  const ids = groups.map((g) => g.id);
-  const [{ data: sups }, { data: groupSites }] = await Promise.all([
-    supabase.from('work_group_supervisors').select('work_group_id, user_id').in('work_group_id', ids),
-    supabase.from('work_group_sites').select('work_group_id, site_id, site:sites(name)').in('work_group_id', ids),
-  ]);
-
-  return groups.map((g: any) => ({
-    id: g.id,
-    name: g.name,
-    color: g.color,
-    isDefault: g.is_default,
-    supervisorIds: (sups ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.user_id),
-    siteIds: (groupSites ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.site_id),
-    siteNames: (groupSites ?? []).filter((s: any) => s.work_group_id === g.id).map((s: any) => s.site?.name).filter(Boolean),
-  }));
-}
-
-export async function createWorkGroup(name: string, color?: string | null, siteIds?: string[]) {
-  return supabase.rpc('create_work_group', {
-    p_name: name, p_color: color ?? null, p_site_ids: siteIds ?? [],
-  });
-}
-
-export async function updateWorkGroup(
-  workGroupId: string, name: string, color?: string | null, siteIds?: string[]
-) {
-  return supabase.rpc('update_work_group', {
-    p_work_group_id: workGroupId, p_name: name, p_color: color ?? null, p_site_ids: siteIds ?? [],
-  });
-}
-
-export async function assignWorkGroupSupervisor(workGroupId: string, userId: string) {
-  return supabase.rpc('assign_work_group_supervisor', { p_work_group_id: workGroupId, p_user_id: userId });
-}
-
-export async function removeWorkGroupSupervisor(workGroupId: string, userId: string) {
-  return supabase.rpc('remove_work_group_supervisor', { p_work_group_id: workGroupId, p_user_id: userId });
-}
-
-// Soft-deletes the group. Open (non-resolved) snags assigned to it are
-// unassigned server-side; resolved snags keep the historical link.
-export async function deleteWorkGroup(workGroupId: string) {
-  return supabase.rpc('delete_work_group', { p_work_group_id: workGroupId });
-}
-
-
-export async function renameOrganisation(name: string) {
-  return supabase.rpc('rename_organisation', { p_name: name });
-}
-
-export type OrgStats = queries.OrgStats;
-
-export const getOrgStats = (orgId: string) => queries.getOrgStats(supabase, orgId);
-
-export type SiteBreakdown = queries.SiteBreakdown;
-
-export const getSiteBreakdown = (orgId: string) => queries.getSiteBreakdown(supabase, orgId);
-
-export type OrgSnagSummary = queries.OrgSnagSummary;
-
-export const getOrgSnagSummary = (orgId: string) => queries.getOrgSnagSummary(supabase, orgId);
-
-// ─── Snag helpers ─────────────────────────────────────────────────────────────
-
-export async function createSnag(params: {
-  kind: SnagKind;
-  description: string | null;
-  severity: SnagSeverity | null;
-  photoPaths: string[];
-  latitude: number | null;
-  longitude: number | null;
-  siteId: string;
-  workGroupId?: string | null;
-}) {
-  const { data, error } = await supabase.rpc('create_snag', {
-    p_kind: params.kind,
-    p_description: params.description,
-    p_severity: params.severity,
-    p_photo_paths: params.photoPaths,
-    p_latitude: params.latitude,
-    p_longitude: params.longitude,
-    p_site_id: params.siteId,
-    p_work_group_id: params.workGroupId ?? null,
-  }).single();
-  return { data: data as { id: string; reference: string } | null, error };
-}
-
-export const updateSnagStatus = (
-  snagId: string, status: SnagStatus, note?: string | null, exceptionReason?: string | null,
-) => queries.updateSnagStatus(supabase, snagId, status, note, exceptionReason);
-
-export const recordResolutionException = (snagId: string, reason: string) =>
-  queries.recordResolutionException(supabase, snagId, reason);
-
-export const recategoriseSnag = (snagId: string, kind: SnagKind, severity: SnagSeverity | null) =>
-  queries.recategoriseSnag(supabase, snagId, kind, severity);
-
-export const assignSnagOwner = (snagId: string, ownerId: string | null) =>
-  queries.assignSnagOwner(supabase, snagId, ownerId);
-
-export const assignSnagWorkGroup = (snagId: string, workGroupId: string | null) =>
-  queries.assignSnagWorkGroup(supabase, snagId, workGroupId);
-
-export type SiteAssignee = queries.SiteAssignee;
-
-export const getSiteAssignees = (siteId: string) => queries.getSiteAssignees(supabase, siteId);
-
-// The rows behind the dashboard's two alert numbers — same views
-// get_site_breakdown counts, so the list always matches the figure.
-export const getOverdueActions = (siteId: string) => queries.getOverdueActions(supabase, siteId);
-export const getRcaOutstanding = (siteId: string) => queries.getRcaOutstanding(supabase, siteId);
-
-export interface UnassignedSnag {
-  id: string;
-  reference: string;
-  description: string | null;
-  kind: SnagKind;
-}
-
-// Backing the dashboard's one-click assign — the same shape of query as
-// IssueListScreen's "Unassigned in my sites" scope filter, scoped to one
-// site instead of the whole org.
-export async function getUnassignedSnags(siteId: string): Promise<UnassignedSnag[]> {
-  const { data } = await supabase
-    .from('snags_with_details')
-    .select('id, reference, description, kind')
-    .eq('site_id', siteId)
-    .is('owner_id', null)
-    .in('status', ['flagged', 'in_progress'])
-    .is('parent_snag_id', null)
-    .order('created_at', { ascending: true });
-  return (data ?? []) as UnassignedSnag[];
-}
-
-// ─── Activity trail ────────────────────────────────────────────────────────────
-// Every RPC that mutates a snag writes an audit_log row (actor + action +
-// timestamp). Surfaced in the snag detail screen as system entries alongside
-// comments, so "who changed what, when" doesn't rely on someone leaving a note.
-
-export type AuditLogEntry = queries.AuditLogEntry;
-
-export const describeAuditAction = queries.describeAuditAction;
-
-export const getSnagAuditLog = (snagId: string) => queries.getSnagAuditLog(supabase, snagId);
-
-// ─── Resolution & investigation ───────────────────────────────────────────────
-// Niggles resolve via resolve_snag (a note is required server-side). Serious
-// snags resolve via update_snag_status('resolved'), which the server gates behind
-// a completed investigation (see getInvestigationState / update_snag_status).
-
-export const resolveSnag = (snagId: string, note: string) => queries.resolveSnag(supabase, snagId, note);
-
-// ─── Root cause analysis (5 Whys) ──────────────────────────────────────────────
-// A supervisor/admin can delegate a formal RCA on a resolved serious snag to
-// any site assignee (moves it to rca_pending, emails the assignee). The
-// assignee answers 5 Whys and submits; a supervisor/admin then accepts
-// (returns the snag to resolved) or rejects (reopens it for edits).
-
-export type RcaStatus = queries.RcaStatus;
-export type RcaWhyStep = queries.RcaWhyStep;
-export type SnagRca = queries.SnagRca;
-
-// The most recent RCA round for a snag (a new one can be assigned after an
-// earlier one was accepted, so this is never assumed to be the only row).
-export const getSnagRca = (snagId: string) => queries.getSnagRca(supabase, snagId);
-
-// Snags with an active RCA assignment for the current user — powers the
-// Snags list's "Relevant to me" default scope and its "RCA Pending" reason
-// tag. "Active" means still on the assignee's plate (assigned or
-// in_progress); submitted/accepted/rejected rounds no longer need them here.
-export async function getMyActiveRcaSnagIds(): Promise<string[]> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
-  const { data } = await supabase
-    .from('snag_rca')
-    .select('snag_id')
-    .eq('assigned_to', user.id)
-    .in('status', ['assigned', 'in_progress']);
-  return (data ?? []).map((r: any) => r.snag_id as string);
-}
-
-export const assignRca = (snagId: string, assigneeId: string) => queries.assignRca(supabase, snagId, assigneeId);
-
-export const saveRcaWhy = (rcaId: string, whyIndex: number, whyText: string, answerText: string) =>
-  queries.saveRcaWhy(supabase, rcaId, whyIndex, whyText, answerText);
-
-export const submitRca = (rcaId: string) => queries.submitRca(supabase, rcaId);
-
-export const acceptRca = (rcaId: string) => queries.acceptRca(supabase, rcaId);
-
-export const rejectRca = (rcaId: string, rejectionNote: string) => queries.rejectRca(supabase, rcaId, rejectionNote);
-
-// Recovery for an RCA an assignee can't finish — e.g. they've left or gone
-// quiet. Both are supervisor/admin actions; reassign hands the unfinished
-// RCA to someone else, cancel abandons it and returns the snag to resolved.
-export const reassignRca = (rcaId: string, newAssigneeId: string) => queries.reassignRca(supabase, rcaId, newAssigneeId);
-
-export const cancelRca = (rcaId: string) => queries.cancelRca(supabase, rcaId);
-
-export const isRcaClosed = queries.isRcaClosed;
-
-// Records that no formal RCA is needed on a resolved serious snag, so it stops
-// counting as outstanding analysis work on the Admin dashboard.
-export const waiveRca = (snagId: string, reason: string) => queries.waiveRca(supabase, snagId, reason);
-
-export const unwaiveRca = (snagId: string) => queries.unwaiveRca(supabase, snagId);
-
-// ─── Escalation (niggle lane) ──────────────────────────────────────────────
-// Reporter-only — the person who raised a fixit/improvement flagging that it's
-// actually a safety issue. Server-enforced (escalate_snag checks reporter_id).
-export const escalateSnag = (snagId: string) => queries.escalateSnag(supabase, snagId);
-
-// ─── Merge (parent/child) ───────────────────────────────────────────────────
-// Creates (or reuses) a parent snag and attaches the rest of the selection as
-// its children — see merge_snags for the disambiguation rules around
-// kind/severity/site when the selection doesn't already agree.
-export const mergeSnags = (params: {
-  snagIds: string[];
-  description?: string | null;
-  kind?: SnagKind | null;
-  severity?: SnagSeverity | null;
-  siteId?: string | null;
-}) => queries.mergeSnags(supabase, params);
-
-export const unmergeSnag = (snagId: string) => queries.unmergeSnag(supabase, snagId);
-
-export const completeChecklistStep = (snagId: string, step: ChecklistStep) =>
-  queries.completeChecklistStep(supabase, snagId, step);
-
-export const addWitnessStatement = (
-  snagId: string, witnessName: string, statementText: string, mediaPath?: string | null,
-) => queries.addWitnessStatement(supabase, snagId, witnessName, statementText, mediaPath);
-
-export const addEvidenceItem = (snagId: string, mediaPath: string, caption?: string | null) =>
-  queries.addEvidenceItem(supabase, snagId, mediaPath, caption);
-
-export const updateEvidenceCaption = (evidenceId: string, caption: string | null) =>
-  queries.updateEvidenceCaption(supabase, evidenceId, caption);
-
-export const deleteEvidenceItem = (evidenceId: string) =>
-  queries.deleteEvidenceItem(supabase, evidenceId);
-
-export const setRootCause = (snagId: string, rootCauseText: string) =>
-  queries.setRootCause(supabase, snagId, rootCauseText);
-
-// ─── Notifiable-event decision support ─────────────────────────────────────────
-export const setNotifiableFlag = (snagId: string, value: boolean) =>
-  queries.setNotifiableFlag(supabase, snagId, value);
-
-export type InvestigationState = queries.InvestigationState;
-
-/** Photo vs. document — evidence accepts both. */
-export const isImageEvidence = queries.isImageEvidence;
-
-// Reads the five investigation tables for a serious snag — all org-scoped by RLS.
-// Drives the live progress display and the serious-lane resolve gate.
-export const getInvestigationState = (snagId: string) => queries.getInvestigationState(supabase, snagId);
-
-// Gate inputs for a page of serious snags — what the list needs to say which
-// of them are actually blocked. See snagGateSummary.
-export const getSnagGateInputs = (snagIds: string[]) => queries.getSnagGateInputs(supabase, snagIds);
-
-// The gate itself is pure and shared with apps/web, so the two clients can't
-// disagree about what's outstanding or what order to do it in.
-export type ResolveGateCondition = queries.ResolveGateCondition;
-export const seriousResolveGate = queries.seriousResolveGate;
-export const investigationModeLocked = queries.investigationModeLocked;
-
-// ─── Corrective actions (CAPA) ────────────────────────────────────────────────
-// create_corrective_action/complete_corrective_action are supervisor/admin-or-
-// owner actions on a serious snag; verify_corrective_action is deliberately
-// restricted to a supervisor/admin excluding the action's own owner — closure
-// requires independent sign-off, not a second tap by whoever completed it.
-
-export const getCorrectiveActions = (snagId: string) => queries.getCorrectiveActions(supabase, snagId);
-
-export const createCorrectiveAction = (snagId: string, description: string, ownerId: string, dueDate: string) =>
-  queries.createCorrectiveAction(supabase, snagId, description, ownerId, dueDate);
-
-export const completeCorrectiveAction = (actionId: string) => queries.completeCorrectiveAction(supabase, actionId);
-
-export const verifyCorrectiveAction = (actionId: string) => queries.verifyCorrectiveAction(supabase, actionId);
-
-export const addCorrectiveActionEvidence = (actionId: string, mediaPath: string, caption?: string | null) =>
-  queries.addCorrectiveActionEvidence(supabase, actionId, mediaPath, caption);
-
-// Completion-evidence photos for one corrective action, resolved to
-// signed-URL rows for display — mirrors getEvidencePhotoUrl's bucket/RLS.
-export const getCorrectiveActionEvidence = (actionId: string) => queries.getCorrectiveActionEvidence(supabase, actionId);
-
-export async function markSnagSeen(snagId: string) {
-  return supabase.rpc('mark_snag_seen', { p_snag_id: snagId });
-}
-
-// Builds the investigation-file PDF via the export-investigation edge
-// function and returns a 1-hour signed URL to it. The function re-checks
-// supervisor/officer_admin + serious-lane itself, so a failed check surfaces
-// here as `error` rather than a thrown exception.
-export const exportInvestigation = (snagId: string) => queries.exportInvestigation(supabase, snagId);
-
-// Builds the quarterly governance-report PDF via the export-governance-report
-// edge function and returns a 1-hour signed URL to it. Defaults to the
-// trailing 90 days when no period is given. The function re-checks
-// officer_admin itself, so a failed check surfaces here as `error`.
-export const exportGovernanceReport = (periodStart?: string, periodEnd?: string) =>
-  queries.exportGovernanceReport(supabase, periodStart, periodEnd);
-
-// ─── Investigation mode ────────────────────────────────────────────────────
-// A serious snag is investigated one of two ways: SNAG's guided process, or the
-// organisation's own — evidenced by a document a second supervisor signs off.
-// The mode is chosen when the snag is allocated, and it swaps the last two
-// resolve-gate conditions rather than removing them.
-
-export type InvestigationMode = queries.InvestigationMode;
-
-export const assignInvestigation = (snagId: string, assigneeId: string, mode: InvestigationMode) =>
-  queries.assignInvestigation(supabase, snagId, assigneeId, mode);
-
-export const attachInvestigationDocument = (snagId: string, documentId: string) =>
-  queries.attachInvestigationDocument(supabase, snagId, documentId);
-
-// Refused server-side for whoever attached the document — attaching a file and
-// signing the investigation off are two different acts by two different people.
-export const acceptInvestigationDocument = (snagId: string) =>
-  queries.acceptInvestigationDocument(supabase, snagId);
-
-// ─── Org document library ──────────────────────────────────────────────────
-// Org-wide, not snag-scoped. Any member can read and upload; only a supervisor
-// or admin can delete.
-
-export type OrgDocument = queries.OrgDocument;
-
-export const getOrgDocuments = (orgId: string) => queries.getOrgDocuments(supabase, orgId);
-
-export const createOrgDocument = (filePath: string, title: string, category?: string | null) =>
-  queries.createOrgDocument(supabase, filePath, title, category);
-
-export const deleteOrgDocument = (documentId: string) => queries.deleteOrgDocument(supabase, documentId);
+// home-photos is a PRIVATE bucket laid out as `<household_id>/<file>` — the
+// storage policies read that first path segment, so the prefix is not
+// cosmetic. Store the path, never a URL, and resolve a short-lived signed URL
+// whenever a photo is displayed.
+
+const PHOTOS_BUCKET = 'home-photos';
 
 /**
- * Uploads a document the user picked from their device.
- *
- * The shared `uploadOrgDocumentFile` takes a browser `File`/`Blob`; here the
- * picker hands back a local URI, which `readForUpload` turns into whatever this
- * platform can upload — exactly as uploadSnagPhoto does. The mime type goes to
- * the reader too, because on web it travels on the body rather than in the
- * options.
+ * Returns `{ path, error }` rather than throwing or swallowing, because
+ * PhotoPicker has to tell "no photo" apart from "upload failed" — the second
+ * needs showing and retrying rather than being silently dropped.
  */
-export async function uploadOrgDocumentFromUri(
-  orgId: string,
-  localUri: string,
-  fileName: string,
-  mimeType?: string | null,
-): Promise<{ path: string | null; error: any }> {
-  try {
-    const body = await readForUpload(localUri, mimeType || 'application/octet-stream');
-    const path = `${orgId}/${Date.now()}-${fileName}`;
-    const { data, error } = await supabase.storage
-      .from('org-documents')
-      .upload(path, body, {
-        contentType: mimeType || 'application/octet-stream',
-        upsert: false,
-      });
-    if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
-    return { path: data.path, error: null };
-  } catch (err) {
-    return { path: null, error: err };
-  }
-}
-
-export const getOrgDocumentUrl = (path: string) => queries.getOrgDocumentUrl(supabase, path);
-
-// ─── Multi-PCBU notification nomination ────────────────────────────────────────
-export const nominateNotifyingPcbu = (snagId: string, orgId: string | null, note: string | null) =>
-  queries.nominateNotifyingPcbu(supabase, snagId, orgId, note);
-
-// ─── Debriefs ───────────────────────────────────────────────────────────────────
-export const startDebrief = (snagId: string) => queries.startDebrief(supabase, snagId);
-
-export const addDebriefFinding = (debriefId: string, findingText: string) =>
-  queries.addDebriefFinding(supabase, debriefId, findingText);
-
-export const addDebriefAttendee = (debriefId: string, profileId: string) =>
-  queries.addDebriefAttendee(supabase, debriefId, profileId);
-
-export const addDebriefLesson = (debriefId: string, lessonText: string) =>
-  queries.addDebriefLesson(supabase, debriefId, lessonText);
-
-export const completeDebrief = (debriefId: string) => queries.completeDebrief(supabase, debriefId);
-
-export type DebriefFinding = queries.DebriefFinding;
-export type DebriefLesson = queries.DebriefLesson;
-export type SnagDebrief = queries.SnagDebrief;
-
-// Reads every debrief on a snag (any number allowed, any status), newest
-// first — mirrors getSnagRca's read-and-shape pattern.
-export const getSnagDebriefs = (snagId: string) => queries.getSnagDebriefs(supabase, snagId);
-
-// ─── Comment helpers ──────────────────────────────────────────────────────────
-
-export const addComment = (snagId: string, body: string, mentionedUserIds: string[] = []) =>
-  queries.addComment(supabase, snagId, body, mentionedUserIds);
-
-// ─── Mentions ─────────────────────────────────────────────────────────────────
-// "Comments that tag me" — @mentions are resolved to real profile IDs
-// client-side (see addComment) and recorded in comment_mentions, so they can
-// be surfaced here instead of requiring someone to read every thread.
-
-export interface MentionEntry {
-  mentionId: string;
-  commentId: string;
-  commentBody: string;
-  commentCreatedAt: string;
-  snagId: string;
-  snagReference: string;
-  authorId: string;
-  authorName: string;
-  seenAt: string | null;
-}
-
-export async function getMyMentions(): Promise<MentionEntry[]> {
-  const { data, error } = await supabase.rpc('get_my_mentions');
-  if (error || !data) return [];
-  return (data as any[]).map((row) => ({
-    mentionId: row.mention_id,
-    commentId: row.comment_id,
-    commentBody: row.comment_body,
-    commentCreatedAt: row.comment_created_at,
-    snagId: row.snag_id,
-    snagReference: row.snag_reference,
-    authorId: row.author_id,
-    authorName: row.author_name,
-    seenAt: row.seen_at,
-  }));
-}
-
-export async function getUnseenMentionCount(): Promise<number> {
-  const { data, error } = await supabase.rpc('get_unseen_mention_count');
-  if (error || data == null) return 0;
-  return data as number;
-}
-
-export async function markAllMentionsSeen() {
-  return supabase.rpc('mark_all_mentions_seen');
-}
-
-// ─── Vote helpers ─────────────────────────────────────────────────────────────
-
-export async function upsertVote(snagId: string, _userId: string, value: VoteValue) {
-  return supabase.rpc('cast_vote', { p_snag_id: snagId, p_value: value });
-}
-
-export async function deleteVote(snagId: string, _userId: string) {
-  return supabase.rpc('remove_vote', { p_snag_id: snagId });
-}
-
-export async function getUserVote(snagId: string, userId: string): Promise<VoteValue | null> {
-  const { data } = await supabase
-    .from('votes')
-    .select('value')
-    .eq('snag_id', snagId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  return data ? (data.value as VoteValue) : null;
-}
-
-// ─── Storage helpers ──────────────────────────────────────────────────────────
-// snag-photos is a PRIVATE bucket — store the storage path (not a public URL)
-// and resolve a short-lived signed URL whenever a photo needs to be displayed.
-
-const SNAG_PHOTOS_BUCKET = 'snag-photos';
-const SNAG_EVIDENCE_BUCKET = 'snag-evidence';
-
-// Returns { path, error } rather than throwing or swallowing failures —
-// callers (PhotoPicker) need to distinguish "no photo" from "upload failed"
-// so a failure can be shown and retried instead of silently dropped.
-/**
- * Uploads a picked document (not a photo) into the snag-evidence bucket.
- *
- * Same shape as uploadOrgDocumentFromUri, different bucket: a statement or a
- * report attached to a snag belongs with the snag's own files, so the record
- * survives whatever happens to the document library.
- */
-export async function uploadSnagDocumentFromUri(
-  orgId: string,
-  localUri: string,
-  fileName: string,
-  mimeType?: string | null,
-): Promise<{ path: string | null; error: any }> {
-  try {
-    const body = await readForUpload(localUri, mimeType || 'application/octet-stream');
-    const path = `${orgId}/${Date.now()}-${fileName}`;
-    const { data, error } = await supabase.storage
-      .from(SNAG_EVIDENCE_BUCKET)
-      .upload(path, body, { contentType: mimeType || 'application/octet-stream', upsert: false });
-    if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
-    return { path: data.path, error: null };
-  } catch (err) {
-    return { path: null, error: err };
-  }
-}
-
-export const copyOrgDocumentToSnagEvidence = (orgId: string, documentPath: string) =>
-  queries.copyOrgDocumentToSnagEvidence(supabase, orgId, documentPath);
-
-export const attachWitnessDocument = (statementId: string, mediaPath: string | null) =>
-  queries.attachWitnessDocument(supabase, statementId, mediaPath);
-
 export async function uploadSnagPhoto(
   localUri: string,
   fileName: string,
-  bucket: string = SNAG_PHOTOS_BUCKET,
+  bucket: string = PHOTOS_BUCKET,
 ): Promise<{ path: string | null; error: any }> {
   try {
     // Reading the picked file is platform-specific — and a wrong read fails
@@ -1233,16 +261,12 @@ export async function uploadSnagPhoto(
 
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, body, {
-        contentType: 'image/jpeg',
-        upsert: false,
-      });
+      .upload(fileName, body, { contentType: 'image/jpeg', upsert: false });
 
     if (error || !data) {
       console.error('Photo upload error:', error);
       return { path: null, error: error ?? new Error('Upload failed') };
     }
-
     return { path: data.path, error: null };
   } catch (err) {
     console.error('Photo upload error:', err);
@@ -1252,22 +276,28 @@ export async function uploadSnagPhoto(
 
 export async function getSnagPhotoUrl(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage
-    .from(SNAG_PHOTOS_BUCKET)
+    .from(PHOTOS_BUCKET)
     .createSignedUrl(path, 60 * 60);
   if (error) console.error('getSnagPhotoUrl error:', path, error);
   if (error || !data) return null;
   return data.signedUrl;
 }
 
-// Batched sibling of getSnagPhotoUrl for list views — one request for every
-// visible card's cover photo instead of one signed-URL call per card, which
-// was cheap to trip up (a slow/rate-limited response for any single card
-// silently left it on the "No photo" placeholder forever).
+/**
+ * Batched sibling of getSnagPhotoUrl for list views — one request for every
+ * visible card's cover photo instead of one signed-URL call per card, which was
+ * cheap to trip up: a slow or rate-limited response for any single card left it
+ * on the "No photo" placeholder forever.
+ *
+ * This matters more here than it did in the workplace app. A household list is
+ * mostly photos — twelve thumbnails is a Saturday you can act on, twelve lines
+ * of text is a list you skim and close.
+ */
 export async function getSnagPhotoUrls(paths: string[]): Promise<Record<string, string>> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return {};
   const { data, error } = await supabase.storage
-    .from(SNAG_PHOTOS_BUCKET)
+    .from(PHOTOS_BUCKET)
     .createSignedUrls(unique, 60 * 60);
   if (error) console.error('getSnagPhotoUrls error:', error);
   const map: Record<string, string> = {};
@@ -1275,13 +305,4 @@ export async function getSnagPhotoUrls(paths: string[]): Promise<Record<string, 
     if (row.signedUrl && !row.error) map[row.path ?? ''] = row.signedUrl;
   }
   return map;
-}
-
-// Evidence photos live in the private snag-evidence bucket (org-folder scoped).
-export async function getEvidencePhotoUrl(path: string): Promise<string | null> {
-  const { data, error } = await supabase.storage
-    .from(SNAG_EVIDENCE_BUCKET)
-    .createSignedUrl(path, 60 * 60);
-  if (error || !data) return null;
-  return data.signedUrl;
 }

@@ -1,10 +1,10 @@
 import { Platform } from 'react-native';
 import { isPreservedUrl, resetWebPathIfStale } from './webLocation';
 
-// Signing out from the Profile tab leaves `/profile` in the address bar, and
-// React Navigation reads it back on the next mount — so signing in landed the
-// user on Profile instead of the Report tab. What matters here is that the
-// reset happens, and that the two URLs somebody meant to arrive at survive it.
+// Signing out from the Profile tab leaves `/you` in the address bar, and React
+// Navigation reads it back on the next mount — so signing in landed the user on
+// Profile instead of the Capture tab. What matters here is that the reset
+// happens, and that a snag deep link still survives it.
 
 jest.mock('react-native', () => ({ Platform: { OS: 'web' } }));
 
@@ -51,16 +51,12 @@ describe('resetWebPathIfStale', () => {
     expect(replaceState).not.toHaveBeenCalled();
   });
 
-  it('keeps the QR public-report landing', () => {
-    atUrl('/', '?report=abc123');
+  it('clears a retired QR landing rather than preserving it', () => {
+    // `?report=` was the site-QR intake and `?join=` an org invite. Both went
+    // with the B2B product, so these are now just stale query strings.
+    atUrl('/snags', '?report=abc123');
     resetWebPathIfStale();
-    expect(replaceState).not.toHaveBeenCalled();
-  });
-
-  it('keeps the org join QR landing', () => {
-    atUrl('/', '?join=VDJQFNEM');
-    resetWebPathIfStale();
-    expect(replaceState).not.toHaveBeenCalled();
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/');
   });
 
   it('does nothing when already at the root', () => {
@@ -85,8 +81,8 @@ describe('isPreservedUrl', () => {
     ['/report', '', false],
     ['/admin', '', false],
     ['/mentions', '', false],
-    ['/', '?report=tok', true],
-    ['/', '?join=VDJQFNEM', true],
+    ['/', '?report=tok', false],
+    ['/', '?join=VDJQFNEM', false],
   ])('%s%s -> %s', (pathname, search, expected) => {
     expect(isPreservedUrl(pathname, search)).toBe(expected);
   });

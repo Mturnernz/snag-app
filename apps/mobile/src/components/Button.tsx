@@ -17,12 +17,12 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const DISABLED_OPACITY = 0.5;
 const PRESSED_OPACITY = 0.85;
 
-type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerOutline' | 'serious' | 'seriousOutline';
+type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerOutline';
 
-// Only the two filled CTA variants get the press-scale + haptic treatment —
+// Only the filled CTA gets the press-scale + haptic treatment —
 // outline/ghost/secondary/danger read as secondary actions, not the primary
 // "this responds to you" moment the warmth pass is after.
-const CTA_VARIANTS = new Set<Variant>(['primary', 'serious']);
+const CTA_VARIANTS = new Set<Variant>(['primary']);
 
 interface Props {
   label: string;
@@ -42,8 +42,6 @@ const VARIANT_STYLES: Record<Variant, { bg: string; text: string; border?: strin
   ghost: { bg: 'transparent', text: Colors.primary },
   danger: { bg: Colors.danger, text: Colors.white, shadow: true },
   dangerOutline: { bg: 'transparent', text: Colors.danger, border: Colors.danger },
-  serious: { bg: Colors.serious, text: Colors.white, shadow: true },
-  seriousOutline: { bg: 'transparent', text: Colors.serious, border: Colors.serious },
 };
 
 export default function Button({

@@ -1,21 +1,36 @@
 import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 import { SnagStatus, STATUS_LABELS } from '../types';
-import { Colors } from '../constants/theme';
-import Badge from './Badge';
 
 interface Props {
   status: SnagStatus;
 }
 
-const statusConfig: Record<SnagStatus, { color: string; bg: string }> = {
-  // *Fg, not the base hue: this is label text on the tint. See theme.ts.
-  flagged: { color: Colors.status.flaggedFg, bg: Colors.status.flaggedBg },
-  in_progress: { color: Colors.status.inProgressFg, bg: Colors.status.inProgressBg },
-  resolved: { color: Colors.status.resolvedFg, bg: Colors.status.resolvedBg },
-  rca_pending: { color: Colors.status.rcaPendingFg, bg: Colors.status.rcaPendingBg },
+const STYLES: Record<SnagStatus, { color: string; bg: string }> = {
+  open: { color: Colors.status.openFg, bg: Colors.status.openBg },
+  doing: { color: Colors.status.doingFg, bg: Colors.status.doingBg },
+  done: { color: Colors.status.doneFg, bg: Colors.status.doneBg },
 };
 
 export default function StatusBadge({ status }: Props) {
-  const cfg = statusConfig[status];
-  return <Badge label={STATUS_LABELS[status]} color={cfg.color} bg={cfg.bg} variant="solid" />;
+  const tone = STYLES[status];
+  return (
+    <View style={[styles.badge, { backgroundColor: tone.bg }]}>
+      <Text style={[styles.label, { color: tone.color }]}>{STATUS_LABELS[status]}</Text>
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  badge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs / 2,
+    borderRadius: Radius.chip,
+    alignSelf: 'flex-start',
+  },
+  label: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+  },
+});

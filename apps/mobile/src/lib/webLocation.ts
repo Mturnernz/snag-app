@@ -45,11 +45,11 @@ export function resetWebPathIfStale(): void {
 }
 
 /** Exported for the unit test — the rules above, without the browser. */
-export function isPreservedUrl(pathname: string, search: string): boolean {
+export function isPreservedUrl(pathname: string, _search = ''): boolean {
   // A specific snag, not the `/snags` list tab: only the former names a record.
   if (/^\/snags\/[^/]+/.test(pathname)) return true;
-  const params = new URLSearchParams(search);
-  if (params.has('report')) return true;
-  if (params.has('join')) return true;
+  // `?report=` (the site QR landing) and `?join=` (an org invite) retired with
+  // the B2B product. A specific snag is the only URL left worth preserving
+  // across a sign-in round trip.
   return false;
 }

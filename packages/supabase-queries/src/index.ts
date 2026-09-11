@@ -1,1322 +1,486 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { UserRole, SnagStatus, SnagKind, SnagSeverity, ChecklistStep, WitnessStatement, EvidenceItem, CorrectiveAction } from '@snag/shared-types';
+/**
+ * Every read and write against the `home` schema, in one place.
+ *
+ * Each function takes its own `SupabaseClient` so both apps can call it with
+ * their own — `apps/mobile` re-exports these bound to its client.
+ *
+ * **The client must be created with `db: { schema: 'home' }`.** Snag Home lives
+ * in its own schema beside the frozen `public` one (the retired B2B product),
+ * and `home` has to be listed under Settings → API → Exposed schemas or
+ * PostgREST serves none of it and every call here 404s.
+ *
+ * Writes go through SECURITY DEFINER RPCs rather than table writes — there are
+ * deliberately no insert/update/delete policies — so the shape of a write can
+ * change in one migration without hunting through client code.
+ */
 
-// Platform-agnostic Supabase RPC/query wrappers, shared between apps/mobile
-// and apps/web — see SNAG_WEB_APP_PLAN.md §1. Each function takes the
-// caller's own SupabaseClient rather than closing over a singleton, since
-// the two apps construct their clients differently (AsyncStorage vs.
-// @supabase/ssr cookies). Everything here is a direct port of the matching
-// function that used to live in apps/mobile/src/lib/supabase.ts — mobile
-// now re-exports these bound to its own client instead of redefining them.
+import type { SupabaseClient as TypedSupabaseClient } from '@supabase/supabase-js';
 
-// ─── Multi-org membership ──────────────────────────────────────────────────
+/**
+ * Deliberately loose in the schema parameter. These functions are called with a
+ * client bound to the `home` schema, and supabase-js encodes the schema name in
+ * the client's type — so the default `SupabaseClient` (which means `public`)
+ * rejects it. Nothing here depends on generated database types.
+ */
+type SupabaseClient = TypedSupabaseClient<any, any, any>;
+import type {
+  Comment,
+  Household,
+  HouseholdMember,
+  Profile,
+  Property,
+  Snag,
+  SnagEffort,
+  SnagFilter,
+  SnagPriority,
+  SnagSort,
+  SnagStatus,
+} from '@snag/shared-types';
+import { EFFORT_ORDER, PRIORITY_ORDER } from '@snag/shared-types';
 
-export interface Membership {
-  org_id: string;
-  org_name: string;
-  role: UserRole;
-  /** This is the user's current active-org pick — NOT whether the org itself
-   *  is enabled. See org_active for that. */
-  is_active: boolean;
-  /** Whether the organisation itself is active (not deactivated by its
-   *  officer_admin). Deactivated orgs are excluded from pickers/switchers
-   *  everywhere except the admin tab's own management list. */
-  org_active: boolean;
+/** Supabase row shapes are snake_case `any`; this is the one place that's true. */
+type Row = Record<string, any>;
+
+// ---------------------------------------------------------------- mapping
+
+function mapSnag(row: Row): Snag {
+  return {
+    id: row.id,
+    reference: row.reference,
+    householdId: row.household_id,
+    propertyId: row.property_id,
+    title: row.title,
+    room: row.room ?? null,
+    photoPaths: row.photo_paths ?? [],
+    description: row.description ?? null,
+    status: row.status,
+    priority: row.priority ?? null,
+    effort: row.effort ?? null,
+    needsParts: !!row.needs_parts,
+    dueAt: row.due_at ?? null,
+    repeatDays: row.repeat_days ?? null,
+    assigneeId: row.assignee_id ?? null,
+    reporterId: row.reporter_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastDoneAt: row.last_done_at ?? null,
+    doneAt: row.done_at ?? null,
+    propertyName: row.property_name,
+    reporterName: row.reporter_name,
+    assigneeName: row.assignee_name ?? null,
+    commentCount: row.comment_count ?? 0,
+  };
 }
 
-export async function getMemberships(client: SupabaseClient): Promise<Membership[]> {
-  const { data } = await client.rpc('get_my_memberships');
-  return (data ?? []) as Membership[];
+function mapComment(row: Row): Comment {
+  return {
+    id: row.id,
+    snagId: row.snag_id,
+    authorId: row.author_id,
+    authorName: row.author?.display_name ?? 'Someone',
+    body: row.body,
+    createdAt: row.created_at,
+  };
 }
 
-export async function setActiveOrg(client: SupabaseClient, orgId: string) {
-  return client.rpc('set_active_org', { p_org_id: orgId });
+function unwrap<T>(data: T | null, error: { message: string } | null, what: string): T {
+  if (error) throw new Error(`${what}: ${error.message}`);
+  if (data === null) throw new Error(`${what}: no data returned`);
+  return data;
 }
 
-export async function createOrganisationAndOwner(client: SupabaseClient, orgName: string, ownerName: string) {
-  const { data, error } = await client.rpc('create_organisation_and_owner', {
-    p_org_name: orgName,
-    p_name: ownerName,
-  });
-  return { orgId: data as string | null, error };
-}
+// ---------------------------------------------------------------- household
 
-// ─── Org members ───────────────────────────────────────────────────────────
+export async function getMyProfile(client: SupabaseClient): Promise<Profile | null> {
+  const { data: auth } = await client.auth.getUser();
+  if (!auth.user) return null;
 
-// Member lists come from org_memberships (via RPC), not profiles.org_id —
-// that column mirrors each user's *active* org, which for multi-org members
-// may be a different organisation right now.
-export async function getOrgMembers(client: SupabaseClient) {
-  const { data } = await client.rpc('get_org_members');
-  return data ?? [];
-}
-
-// ─── Serious incident owners ───────────────────────────────────────────────
-
-// The supervisors an organisation nominates to own serious incidents: the ones
-// notify-snag mails when one is filed, and the first of whom the snag is
-// assigned to on the way in (apply_default_owner).
-//
-// Readable by every member on purpose — the app tells a reporter their incident
-// reached the health & safety team, and the person who filed it should be able
-// to see who that is.
-export interface SeriousIncidentOwner {
-  profile_id: string;
-  name: string | null;
-  email: string | null;
-  created_at: string;
-}
-
-export async function getSeriousIncidentOwners(
-  client: SupabaseClient, orgId: string,
-): Promise<SeriousIncidentOwner[]> {
   const { data, error } = await client
-    .from('serious_incident_owners')
-    .select('profile_id, created_at, profile:profiles!serious_incident_owners_profile_id_fkey(name, email)')
-    .eq('org_id', orgId)
-    // Oldest first, because the first of them is the one a new incident is
-    // assigned to — the list reads in the order it takes effect.
-    .order('created_at', { ascending: true });
-  if (error || !data) return [];
-  return (data as any[]).map((row) => ({
-    profile_id: row.profile_id,
-    name: row.profile?.name ?? null,
-    email: row.profile?.email ?? null,
-    created_at: row.created_at,
-  }));
+    .from('profiles')
+    .select('id, display_name, created_at')
+    .eq('id', auth.user.id)
+    .maybeSingle();
+
+  if (error) throw new Error(`Couldn't load your profile: ${error.message}`);
+  if (!data) return null;
+  return { id: data.id, displayName: data.display_name, createdAt: data.created_at };
 }
 
-export async function addSeriousIncidentOwner(client: SupabaseClient, profileId: string) {
-  return client.rpc('add_serious_incident_owner', { p_profile_id: profileId });
-}
-
-// Refuses to remove the last one — an org with nobody nominated is the state
-// this feature exists to prevent, so it can't be reached one removal at a time.
-export async function removeSeriousIncidentOwner(client: SupabaseClient, profileId: string) {
-  return client.rpc('remove_serious_incident_owner', { p_profile_id: profileId });
-}
-
-// ─── Org/site snapshot stats ───────────────────────────────────────────────
-
-export interface OrgStats {
-  totalMembers: number;
-  totalSnags: number;
-  byStatus: Record<SnagStatus, number>;
-  byKind: Record<SnagKind, number>;
-  bySeverity: Record<SnagSeverity, number>;
-}
-
-export const EMPTY_ORG_STATS: OrgStats = {
-  totalMembers: 0,
-  totalSnags: 0,
-  byStatus: { flagged: 0, in_progress: 0, resolved: 0, rca_pending: 0 },
-  byKind: { fixit: 0, improvement: 0, hazard: 0, incident: 0 },
-  bySeverity: { minor: 0, moderate: 0, injury: 0, critical: 0 },
-};
-
-// Aggregated server-side in one pass (get_org_stats) rather than selecting
-// every snag row in the org and counting client-side.
-//
-// Returns { data, error } rather than swallowing failures into zeros. The RPC
-// throws hard when p_org_id isn't the caller's active org, and a screen that
-// can't tell "no snags" from "the call failed" renders a confidently wrong
-// dashboard — see PRODUCT_REVIEW.md §3.4.
-export async function getOrgStats(
+export async function upsertProfile(
   client: SupabaseClient,
-  orgId: string
-): Promise<{ data: OrgStats; error: any }> {
-  const { data, error } = await client.rpc('get_org_stats', { p_org_id: orgId });
-  if (error || !data) {
-    return { data: EMPTY_ORG_STATS, error: error ?? new Error('No stats returned') };
-  }
-  return {
-    data: {
-      totalMembers: data.total_members ?? 0,
-      totalSnags: data.total_snags ?? 0,
-      byStatus: { ...EMPTY_ORG_STATS.byStatus, ...data.by_status },
-      byKind: { ...EMPTY_ORG_STATS.byKind, ...data.by_kind },
-      bySeverity: { ...EMPTY_ORG_STATS.bySeverity, ...data.by_severity },
-    },
-    error: null,
-  };
+  displayName: string
+): Promise<Profile> {
+  const { data, error } = await client.rpc('upsert_profile', { p_display_name: displayName });
+  const row = unwrap<Row>(data, error, "Couldn't save your name");
+  return { id: row.id, displayName: row.display_name, createdAt: row.created_at };
 }
 
-export interface SiteBreakdown {
-  siteId: string;
-  siteName: string;
-  openInvestigations: number;
-  unassigned: number;
-  overdueActions: number;
-  /** Serious snags resolved (or mid-RCA) with no accepted analysis and no
-   *  waiver. RCA is post-resolution work by design, so this is the only
-   *  column that catches it — see PRODUCT_REVIEW.md §3.1. */
-  rcaOutstanding: number;
-}
-
-// Per-site counts for the supervisor "outstanding work" dashboard —
-// get_org_stats is org-wide only, this is the site-grouped sibling.
-// Same { data, error } contract as getOrgStats, and for the same reason: this
-// RPC raising was being rendered as "No sites yet."
-export async function getSiteBreakdown(
-  client: SupabaseClient,
-  orgId: string
-): Promise<{ data: SiteBreakdown[]; error: any }> {
-  const { data, error } = await client.rpc('get_site_breakdown', { p_org_id: orgId });
-  if (error || !data) return { data: [], error: error ?? null };
-  return {
-    data: (data as any[]).map((row) => ({
-      siteId: row.site_id,
-      siteName: row.site_name,
-      openInvestigations: row.open_investigations ?? 0,
-      unassigned: row.unassigned ?? 0,
-      overdueActions: row.overdue_actions ?? 0,
-      rcaOutstanding: row.rca_outstanding ?? 0,
-    })),
-    error: null,
-  };
-}
-
-export interface OrgSnagSummary {
-  total: number;
-  flagged: number;
-  in_progress: number;
-  resolved: number;
-  rca_pending: number;
-}
-
-// snags' RLS only exposes the active org's rows, so this RPC is needed to
-// summarise a non-active org you belong to — it re-checks real membership
-// itself rather than relying on RLS.
-export async function getOrgSnagSummary(client: SupabaseClient, orgId: string): Promise<OrgSnagSummary | null> {
-  const { data, error } = await client.rpc('get_org_snag_summary', { p_org_id: orgId }).maybeSingle();
-  if (error) {
-    console.error('getOrgSnagSummary error:', error);
-    return null;
-  }
-  return data as OrgSnagSummary | null;
-}
-
-// ─── Assignment ─────────────────────────────────────────────────────────────
-
-// People who can own a snag at a given site: the site's members + supervisors,
-// plus the org's admins. Used to scope the owner picker to the snag's site.
-export interface SiteAssignee {
-  id: string;
-  name: string;
-  role: UserRole;
-}
-
-export async function getSiteAssignees(client: SupabaseClient, siteId: string): Promise<{ data: SiteAssignee[]; error: any }> {
-  const { data, error } = await client.rpc('get_site_assignees', { p_site_id: siteId });
-  return { data: (data ?? []) as SiteAssignee[], error };
-}
-
-// ─── Root cause analysis (5 Whys) ──────────────────────────────────────────
-
-// Mirrors the rca_status Postgres enum exactly. 'cancelled' was added by
-// 20260703000100_rca_cancelled_enum.sql — omitting it here meant TypeScript
-// believed a state that occurs in production was impossible, so RcaPanel had no
-// branch for it and cancelled rounds rendered as "Not started" with the
-// abandoned analysis invisible (PRODUCT_REVIEW.md §3.3).
-export type RcaStatus = 'assigned' | 'in_progress' | 'submitted' | 'accepted' | 'rejected' | 'cancelled';
-
-/** An RCA round that is over: no further action is possible on it. */
-export function isRcaClosed(status: RcaStatus): boolean {
-  return status === 'accepted' || status === 'cancelled';
-}
-
-export interface RcaWhyStep {
-  whyIndex: number;
-  whyText: string;
-  answerText: string;
-}
-
-export interface SnagRca {
-  id: string;
-  status: RcaStatus;
-  assignedTo: string;
-  assignedBy: string;
-  rejectionNote: string | null;
-  submittedAt: string | null;
-  acceptedAt: string | null;
-  whys: RcaWhyStep[];
-}
-
-// The most recent RCA round for a snag (a new one can be assigned after an
-// earlier one was accepted, so this is never assumed to be the only row).
-export async function getSnagRca(client: SupabaseClient, snagId: string): Promise<SnagRca | null> {
-  const { data: rca } = await client
-    .from('snag_rca')
-    .select('id, status, assigned_to, assigned_by, rejection_note, submitted_at, accepted_at')
-    .eq('snag_id', snagId)
-    .order('created_at', { ascending: false })
+/**
+ * Returns null for someone who has signed up but isn't in a household yet —
+ * the only branch the onboarding flow needs.
+ */
+export async function getMyHousehold(client: SupabaseClient): Promise<Household | null> {
+  const { data, error } = await client
+    .from('households')
+    .select('id, name, created_at')
+    .order('created_at')
     .limit(1)
     .maybeSingle();
-  if (!rca) return null;
 
-  const { data: whys } = await client
-    .from('rca_why_steps')
-    .select('why_index, why_text, answer_text')
-    .eq('rca_id', rca.id)
-    .order('why_index', { ascending: true });
-
-  return {
-    id: rca.id,
-    status: rca.status,
-    assignedTo: rca.assigned_to,
-    assignedBy: rca.assigned_by,
-    rejectionNote: rca.rejection_note,
-    submittedAt: rca.submitted_at,
-    acceptedAt: rca.accepted_at,
-    whys: (whys ?? []).map((w: any) => ({ whyIndex: w.why_index, whyText: w.why_text, answerText: w.answer_text })),
-  };
+  if (error) throw new Error(`Couldn't load your household: ${error.message}`);
+  if (!data) return null;
+  return { id: data.id, name: data.name, createdAt: data.created_at };
 }
 
-// ─── Debriefs ───────────────────────────────────────────────────────────────
-
-export interface DebriefFinding {
-  id: string;
-  finding_text: string;
-  created_by: string;
-  created_at: string;
+export async function createHousehold(
+  client: SupabaseClient,
+  name: string,
+  propertyName = 'Home'
+): Promise<Household> {
+  const { data, error } = await client.rpc('create_household', {
+    p_name: name,
+    p_property_name: propertyName,
+  });
+  const row = unwrap<Row>(data, error, "Couldn't create the household");
+  return { id: row.id, name: row.name, createdAt: row.created_at };
 }
 
-export interface DebriefLesson {
-  id: string;
-  lesson_text: string;
-  created_by: string;
-  created_at: string;
-}
+export async function getMembers(
+  client: SupabaseClient,
+  householdId: string
+): Promise<HouseholdMember[]> {
+  const { data, error } = await client
+    .from('household_members')
+    .select('household_id, profile_id, role, profile:profiles!inner(display_name)')
+    .eq('household_id', householdId)
+    .order('created_at');
 
-export interface SnagDebrief {
-  id: string;
-  /** Historic only: debriefs used to be hot or formal. New ones don't ask. */
-  format: 'hot' | 'formal';
-  status: 'in_progress' | 'completed';
-  startedBy: string;
-  startedAt: string;
-  completedAt: string | null;
-  findings: DebriefFinding[];
-  attendeeIds: string[];
-  lessons: DebriefLesson[];
-}
-
-// Reads every debrief on a snag (any number allowed, any status), newest first.
-export async function getSnagDebriefs(client: SupabaseClient, snagId: string): Promise<SnagDebrief[]> {
-  const { data } = await client
-    .from('snag_debriefs')
-    .select('id, format, status, started_by, started_at, completed_at, debrief_findings(id, finding_text, created_by, created_at), debrief_attendees(profile_id), debrief_lessons(id, lesson_text, created_by, created_at)')
-    .eq('snag_id', snagId)
-    .order('started_at', { ascending: false });
-
-  return (data ?? []).map((d: any) => ({
-    id: d.id,
-    format: d.format,
-    status: d.status,
-    startedBy: d.started_by,
-    startedAt: d.started_at,
-    completedAt: d.completed_at,
-    findings: d.debrief_findings ?? [],
-    attendeeIds: (d.debrief_attendees ?? []).map((a: any) => a.profile_id),
-    lessons: d.debrief_lessons ?? [],
+  if (error) throw new Error(`Couldn't load the household: ${error.message}`);
+  return (data ?? []).map((row: Row) => ({
+    householdId: row.household_id,
+    profileId: row.profile_id,
+    displayName: row.profile?.display_name ?? 'Someone',
+    role: row.role,
   }));
 }
 
-// ─── Investigation (serious lane) ──────────────────────────────────────────
-
-export type InvestigationMode = 'snag' | 'document';
-
-export interface InvestigationState {
-  completedSteps: ChecklistStep[];
-  witnesses: WitnessStatement[];
-  evidence: EvidenceItem[];
-  rootCause: string | null;
-  openCorrectiveActions: number;
-  /**
-   * Every corrective action, not just the blocking ones. `openCorrectiveActions`
-   * answers "can this resolve"; this answers "has anyone done snag-mode work
-   * here", which stays true once they're all complete and verified — and that
-   * is what investigationModeLocked has to know.
-   */
-  correctiveActionCount: number;
-  /** 'document' = the org runs its own process and evidences it with a file. */
-  mode: InvestigationMode;
-  leadInvestigatorId: string | null;
-  documentId: string | null;
-  documentTitle: string | null;
-  documentPath: string | null;
-  /**
-   * Who attached it. The server refuses to let that person accept it too, so
-   * both clients read this to hide the Accept button rather than offer a button
-   * that can only fail.
-   */
-  documentAttachedBy: string | null;
-  documentAccepted: boolean;
-  documentAcceptedBy: string | null;
-}
-
-// Reads the five investigation tables for a serious snag — all org-scoped by
-// RLS. Drives the live progress display and the serious-lane resolve gate.
-export async function getInvestigationState(client: SupabaseClient, snagId: string): Promise<InvestigationState> {
-  const [stepsRes, witnessRes, evidenceRes, investigationRes, actionsRes] = await Promise.all([
-    client.from('checklist_completions').select('step').eq('snag_id', snagId),
-    client.from('witness_statements').select('*').eq('snag_id', snagId).order('taken_at', { ascending: true }),
-    client.from('evidence_items').select('*').eq('snag_id', snagId).is('corrective_action_id', null).order('sort_index', { ascending: true }),
-    client.from('investigations')
-      .select(`
-        root_cause_text, mode, lead_investigator_id,
-        document_id, document_attached_by, document_accepted_by, document_accepted_at,
-        document:org_documents!investigations_document_id_fkey ( title, file_path )
-      `)
-      .eq('snag_id', snagId).maybeSingle(),
-    // Rows rather than a filtered count, because two different questions are
-    // asked of this table and they have different answers once everything is
-    // done: how many still block resolve (none), and whether any exist at all
-    // (yes — which is what locks the investigation mode).
-    client.from('corrective_actions').select('id, status, verified_by').eq('snag_id', snagId),
-  ]);
-
-  const correctiveActions = (actionsRes.data ?? []) as { status: string; verified_by: string | null }[];
-
-  return {
-    completedSteps: (stepsRes.data ?? []).map((r: any) => r.step as ChecklistStep),
-    witnesses: (witnessRes.data ?? []) as WitnessStatement[],
-    evidence: (evidenceRes.data ?? []) as EvidenceItem[],
-    rootCause: (investigationRes.data as any)?.root_cause_text ?? null,
-    // Mirrors update_snag_status's resolve gate exactly — `not (status = 'done'
-    // and verified_by is not null)` — so this pill can't show 0 while resolve is
-    // still blocked.
-    openCorrectiveActions: correctiveActions.filter(
-      (a) => !(a.status === 'done' && a.verified_by !== null)
-    ).length,
-    correctiveActionCount: correctiveActions.length,
-    mode: ((investigationRes.data as any)?.mode ?? 'snag') as InvestigationMode,
-    leadInvestigatorId: (investigationRes.data as any)?.lead_investigator_id ?? null,
-    documentId: (investigationRes.data as any)?.document_id ?? null,
-    documentTitle: (investigationRes.data as any)?.document?.title ?? null,
-    documentPath: (investigationRes.data as any)?.document?.file_path ?? null,
-    documentAttachedBy: (investigationRes.data as any)?.document_attached_by ?? null,
-    documentAccepted: Boolean((investigationRes.data as any)?.document_accepted_at),
-    documentAcceptedBy: (investigationRes.data as any)?.document_accepted_by ?? null,
-  };
-}
-
-export type ResolveGateKey =
-  | 'notifiable' | 'checklist' | 'witnesses' | 'evidence' | 'rootCause' | 'correctiveActions'
-  | 'investigationDocument' | 'documentAccepted';
-
 /**
- * A gate condition named in the fewest words that still say what is missing.
- *
- * `seriousResolveGate`'s own `reason` strings are instructions — "Add evidence",
- * "Record a root cause" — which is right when the snag is still open and wrong
- * on a snag that is already closed: the snapshot in
- * `snags.resolution_exception_unmet` is a record of what was outstanding, not a
- * list of things to go and do. Same keys, different voice.
+ * v1's entire "invite" flow: the other person signs up, then you add them by
+ * the address they used. No tokens and no email delivery — which is also why
+ * none of the ways the old invite pipeline failed silently can happen here.
  */
-export const RESOLVE_GATE_LABELS: Record<ResolveGateKey, string> = {
-  notifiable: 'notifiable decision',
-  checklist: 'first-response checklist',
-  witnesses: 'witness statement',
-  evidence: 'evidence',
-  rootCause: 'root cause',
-  correctiveActions: 'corrective actions',
-  investigationDocument: 'investigation document',
-  documentAccepted: 'document acceptance',
-};
-
-/** The unmet snapshot as one readable clause, e.g. "evidence and root cause". */
-export function describeUnmetConditions(keys: string[] | null | undefined): string | null {
-  const labels = (keys ?? [])
-    .map((k) => RESOLVE_GATE_LABELS[k as ResolveGateKey])
-    .filter(Boolean);
-  if (labels.length === 0) return null;
-  if (labels.length === 1) return labels[0];
-  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+export async function addMemberByEmail(
+  client: SupabaseClient,
+  householdId: string,
+  email: string
+): Promise<void> {
+  const { error } = await client.rpc('add_member_by_email', {
+    p_household_id: householdId,
+    p_email: email,
+  });
+  if (error) throw new Error(error.message);
 }
 
-export interface ResolveGateCondition {
-  key: ResolveGateKey;
-  unmet: boolean;
-  /** Why Resolve is refused while this is outstanding, in the user's terms. */
-  reason: string;
+/** One row per household in v1; the UI never shows it. */
+export async function getDefaultProperty(
+  client: SupabaseClient,
+  householdId: string
+): Promise<Property | null> {
+  const { data, error } = await client
+    .from('properties')
+    .select('id, household_id, name')
+    .eq('household_id', householdId)
+    .order('created_at')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(`Couldn't load the property: ${error.message}`);
+  if (!data) return null;
+  return { id: data.id, householdId: data.household_id, name: data.name };
 }
 
-/**
- * The serious-lane resolve gate, in `update_snag_status`'s own order.
- *
- * The server refuses `resolved` until every one of these is satisfied and
- * raises on the first it finds, so a client that guesses a different order
- * tells people to do the wrong thing next. It lives here rather than in either
- * app because both of them need it and they were drifting: mobile disabled
- * Resolve and named the blocking condition, while the portal offered a live
- * button annotated "(requires completed investigation)" and surfaced the raw
- * Postgres exception when the server refused.
- *
- * The notifiable decision leads. It isn't enforced by the older conditions'
- * logic — it's a separate check added later — but it's first in the server
- * function and it's the one with a statutory clock on it.
- */
-/**
- * Can this investigation still be re-triaged into the other mode?
- *
- * Mirrors `assign_investigation`'s guard and `investigation_mode_has_work` in
- * SQL, so the clients hide a control the server would refuse rather than
- * offering one that can only fail. The server is still the enforcement — this
- * is the same relationship `seriousResolveGate` has with `update_snag_status`.
- *
- * Only work belonging to the *current* mode counts, because that is what a
- * switch would strand. The checklist, witnesses and evidence are required by
- * both modes, survive a switch, and are deliberately no reason to refuse one.
- *
- * Officer admins can override a locked mode (audited under its own action), so
- * callers gate on `locked && !isOfficerAdmin`, not on `locked` alone.
- */
-export function investigationModeLocked(inv: InvestigationState): boolean {
-  // Never allocated, so this is still triage rather than re-triage.
-  if (!inv.leadInvestigatorId) return false;
-  return inv.mode === 'document'
-    ? inv.documentId !== null
-    : inv.rootCause !== null || inv.correctiveActionCount > 0;
-}
+// ---------------------------------------------------------------- snags
 
-export function seriousResolveGate(
-  inv: InvestigationState,
-  notifiableDecided: boolean,
-): ResolveGateCondition[] {
-  const shared: ResolveGateCondition[] = [
-    { key: 'notifiable', unmet: !notifiableDecided, reason: 'Decide if this is a notifiable event' },
-    { key: 'checklist', unmet: inv.completedSteps.length < 5, reason: `Finish the checklist (${inv.completedSteps.length}/5)` },
-    { key: 'witnesses', unmet: inv.witnesses.length === 0, reason: 'Add a witness statement' },
-    { key: 'evidence', unmet: inv.evidence.length === 0, reason: 'Add evidence' },
-  ];
+export async function getSnags(
+  client: SupabaseClient,
+  filter: SnagFilter = {},
+  sort: SnagSort = 'newest'
+): Promise<Snag[]> {
+  let query = client.from('snags_with_details').select('*');
 
-  // An organisation running its own investigation process substitutes two
-  // conditions for the last two — it does not get fewer. Everything above is
-  // required either way.
-  if (inv.mode === 'document') {
-    return [
-      ...shared,
-      { key: 'investigationDocument', unmet: !inv.documentId, reason: 'Attach the investigation document' },
-      { key: 'documentAccepted', unmet: !inv.documentAccepted, reason: 'A supervisor must accept the investigation document' },
-    ];
+  if (filter.status?.length) query = query.in('status', filter.status);
+  if (filter.room) query = query.eq('room', filter.room);
+  if (filter.assigneeId) query = query.eq('assignee_id', filter.assigneeId);
+  if (filter.priority?.length) query = query.in('priority', filter.priority);
+  if (filter.needsParts !== undefined) query = query.eq('needs_parts', filter.needsParts);
+  if (filter.dueOnly) query = query.not('due_at', 'is', null).lte('due_at', new Date().toISOString());
+  if (filter.maxEffort) {
+    // "Everything I could finish in half a day" means quick *and* half_day, so
+    // this is a ceiling rather than an equality — and an item nobody has sized
+    // yet is included, because excluding it hides work behind a missing field.
+    const allowed = EFFORT_ORDER.slice(0, EFFORT_ORDER.indexOf(filter.maxEffort) + 1);
+    query = query.or(`effort.in.(${allowed.join(',')}),effort.is.null`);
   }
 
-  return [
-    ...shared,
-    { key: 'rootCause', unmet: !inv.rootCause?.trim(), reason: 'Record a root cause' },
-    { key: 'correctiveActions', unmet: inv.openCorrectiveActions > 0, reason: 'Close corrective actions' },
-  ];
+  switch (sort) {
+    case 'oldest':
+      query = query.order('created_at', { ascending: true });
+      break;
+    case 'due':
+      query = query.order('due_at', { ascending: true, nullsFirst: false });
+      break;
+    case 'priority':
+      // Postgres orders enums by declaration order, which is now → soon →
+      // someday. Unset priority sorts last rather than first.
+      query = query.order('priority', { ascending: true, nullsFirst: false });
+      break;
+    default:
+      query = query.order('created_at', { ascending: false });
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`Couldn't load the list: ${error.message}`);
+  return (data ?? []).map(mapSnag);
 }
 
-/** The first unmet condition's reason — why Resolve is refused, or null. */
-export function resolveBlockReason(
-  inv: InvestigationState,
-  notifiableDecided: boolean,
-): string | null {
-  return seriousResolveGate(inv, notifiableDecided).find((c) => c.unmet)?.reason ?? null;
+export async function getSnag(client: SupabaseClient, snagId: string): Promise<Snag> {
+  const { data, error } = await client
+    .from('snags_with_details')
+    .select('*')
+    .eq('id', snagId)
+    .single();
+
+  const row = unwrap<Row>(data, error, "Couldn't load that item");
+  return mapSnag(row);
 }
 
-// ─── The gate, from a list row ──────────────────────────────────────────────
-
-/**
- * One row of `snag_gate_inputs` — the facts the gate consumes, for a serious
- * snag, cheap enough to fetch for a whole page of them.
- */
-export interface SnagGateInputs {
-  snag_id: string;
-  status: SnagStatus;
-  is_notifiable: boolean | null;
-  checklist_completed_count: number;
-  witness_count: number;
-  evidence_count: number;
-  open_corrective_action_count: number;
-  investigation_mode: InvestigationMode | null;
-  has_root_cause: boolean;
-  has_document: boolean;
-  document_accepted: boolean;
-}
-
-export interface SnagGateSummary {
-  /** How many conditions are still unmet. 0 means Resolve would be accepted. */
-  outstanding: number;
-  /** The first unmet condition's reason, in the same order the gate applies. */
-  firstBlocker: string | null;
-}
-
-/**
- * What a serious snag is still waiting on, for a list.
- *
- * Deliberately routed through `seriousResolveGate` rather than reimplemented:
- * the mode fork is the thing most likely to drift, and a list that disagreed
- * with the detail screen about whether a snag can close would be worse than a
- * list that says nothing. The only work here is shaping a view row into the
- * `InvestigationState` the gate already reads — the counts stand in for the
- * arrays, since the gate only ever asks for their length.
- *
- * A snag with no investigation row reads as `snag` mode, matching
- * `assign_investigation`'s default and `update_snag_status`'s own fallback.
- */
-export function snagGateSummary(row: SnagGateInputs): SnagGateSummary {
-  const inv: InvestigationState = {
-    completedSteps: new Array(row.checklist_completed_count).fill('make_safe') as ChecklistStep[],
-    witnesses: new Array(row.witness_count).fill(null) as unknown as WitnessStatement[],
-    evidence: new Array(row.evidence_count).fill(null) as unknown as EvidenceItem[],
-    rootCause: row.has_root_cause ? 'set' : null,
-    openCorrectiveActions: row.open_corrective_action_count,
-    correctiveActionCount: row.open_corrective_action_count,
-    mode: row.investigation_mode ?? 'snag',
-    leadInvestigatorId: null,
-    documentId: row.has_document ? 'set' : null,
-    documentTitle: null,
-    documentPath: null,
-    documentAttachedBy: null,
-    documentAccepted: row.document_accepted,
-    documentAcceptedBy: null,
-  };
-  const conditions = seriousResolveGate(inv, row.is_notifiable !== null);
-  return {
-    outstanding: conditions.filter((c) => c.unmet).length,
-    firstBlocker: conditions.find((c) => c.unmet)?.reason ?? null,
-  };
-}
-
-/**
- * Gate inputs for a page of snags, keyed by snag id. Serious lane only — the
- * view holds nothing else — so a niggle simply won't appear in the result.
- */
-export async function getSnagGateInputs(
+/** Capture. Everything else about a snag is set later, in triage. */
+export async function createSnag(
   client: SupabaseClient,
-  snagIds: string[],
-): Promise<Record<string, SnagGateInputs>> {
-  if (snagIds.length === 0) return {};
-  const { data, error } = await client
-    .from('snag_gate_inputs')
-    .select('snag_id, status, is_notifiable, checklist_completed_count, witness_count, evidence_count, open_corrective_action_count, investigation_mode, has_root_cause, has_document, document_accepted')
-    .in('snag_id', snagIds);
-  if (error || !data) return {};
-  const map: Record<string, SnagGateInputs> = {};
-  for (const row of data as unknown as SnagGateInputs[]) map[row.snag_id] = row;
-  return map;
+  input: {
+    propertyId: string;
+    title: string;
+    room?: string | null;
+    photoPaths?: string[];
+    description?: string | null;
+  }
+): Promise<Snag> {
+  const { data, error } = await client.rpc('create_snag', {
+    p_property_id: input.propertyId,
+    p_title: input.title,
+    p_room: input.room ?? null,
+    p_photo_paths: input.photoPaths ?? [],
+    p_description: input.description ?? null,
+  });
+  const row = unwrap<Row>(data, error, "Couldn't save that");
+  // create_snag returns the base row, not the joined view.
+  return getSnag(client, row.id);
 }
 
-// ─── Outstanding work, per site ────────────────────────────────────────────
-//
-// The rows behind the dashboard's two alert numbers. Both read the same views
-// `get_site_breakdown` counts, so a list can never disagree with the figure
-// that led someone to open it.
-
-export interface OverdueActionRow {
-  action_id: string;
-  snag_id: string;
-  action_description: string;
-  due_date: string;
-  reference: string;
-  snag_description: string | null;
+export interface SnagUpdate {
+  title?: string;
+  room?: string | null;
+  description?: string | null;
+  priority?: SnagPriority | null;
+  effort?: SnagEffort | null;
+  needsParts?: boolean;
+  dueAt?: string | null;
+  repeatDays?: number | null;
+  assigneeId?: string | null;
+  photoPaths?: string[];
 }
 
-export interface RcaOutstandingRow {
-  snag_id: string;
-  reference: string;
-  description: string | null;
-  status: SnagStatus;
-  severity: SnagSeverity | null;
-  /** Why it was closed with the investigation incomplete, or null — either
-   *  because it wasn't, or because nobody has said. `unmetCount` tells the two
-   *  apart, and the list has to: a resolved snag in this list looks like a bug
-   *  in the count until it says what is still owed on it. */
-  resolution_exception_reason: string | null;
-  resolution_exception_at: string | null;
-  /** Resolve-gate conditions unmet *now*, not when it was closed. */
-  unmet_count: number;
-}
-
-export async function getOverdueActions(
-  client: SupabaseClient,
-  siteId: string,
-): Promise<OverdueActionRow[]> {
-  const { data, error } = await client
-    .from('snag_overdue_actions')
-    .select('action_id, snag_id, action_description, due_date, reference, snag_description')
-    .eq('site_id', siteId)
-    .order('due_date', { ascending: true });
-  if (error || !data) return [];
-  return data as unknown as OverdueActionRow[];
-}
-
-export async function getRcaOutstanding(
-  client: SupabaseClient,
-  siteId: string,
-): Promise<RcaOutstandingRow[]> {
-  const { data, error } = await client
-    .from('snag_rca_outstanding')
-    .select('snag_id, reference, description, status, severity, resolution_exception_reason, resolution_exception_at, unmet_count')
-    .eq('site_id', siteId)
-    .order('reference', { ascending: true });
-  if (error || !data) return [];
-  return data as unknown as RcaOutstandingRow[];
-}
-
-// ─── Corrective actions (CAPA) ─────────────────────────────────────────────
-
-export async function getCorrectiveActions(client: SupabaseClient, snagId: string): Promise<CorrectiveAction[]> {
-  const { data, error } = await client
-    .from('corrective_actions')
-    .select(`
-      id, snag_id, description, owner_id, due_date, status, created_at, completed_at, verified_by, verified_at,
-      owner:profiles!corrective_actions_owner_id_fkey(name),
-      verifier:profiles!corrective_actions_verified_by_fkey(name)
-    `)
-    .eq('snag_id', snagId)
-    .order('due_date', { ascending: true });
-  if (error || !data) return [];
-  return (data as any[]).map((row) => ({
-    id: row.id,
-    snag_id: row.snag_id,
-    description: row.description,
-    owner_id: row.owner_id,
-    owner_name: row.owner?.name,
-    due_date: row.due_date,
-    status: row.status,
-    created_at: row.created_at,
-    completed_at: row.completed_at,
-    verified_by: row.verified_by,
-    verifier_name: row.verifier?.name,
-    verified_at: row.verified_at,
-  }));
-}
-
-// ─── Activity trail ─────────────────────────────────────────────────────────
-
-export interface AuditLogEntry {
-  id: string;
-  action: string;
-  actor_id: string | null;
-  actor_name: string | null;
-  created_at: string;
-}
-
-// Human-readable text for the action strings RPCs write against entity='snag'.
-// Falls back to the raw action string for anything unmapped — new actions
-// still show up, just less prettily, instead of disappearing.
-const AUDIT_ACTION_LABELS: Record<string, string> = {
-  created: 'reported this snag',
-  created_public: 'submitted this as a public report',
-  status_flagged: 'reopened this snag',
-  status_in_progress: 'marked this In Progress',
-  status_resolved: 'resolved this snag',
-  status_rca_pending: 'marked this RCA Pending',
-  status_sorted: 'marked this sorted', // retired status; kept for historical entries
-  owner_assigned: 'assigned an owner',
-  owner_unassigned: 'unassigned the owner',
-  recategorised_to_fixit: 'recategorised this as a Fixit',
-  recategorised_to_improvement: 'recategorised this as an Improvement',
-  recategorised_to_hazard: 'recategorised this as a Hazard',
-  recategorised_to_incident: 'recategorised this as an Incident',
-  merge_created: 'merged snags into this one',
-  merge_children_added: 'merged another snag into this one',
-  merged_into_parent: 'merged this into another snag',
-  work_group_assigned: 'assigned this to a work group',
-  work_group_unassigned: 'removed this from its work group',
-  marked_notifiable: 'marked this as notifiable',
-  unmarked_notifiable: 'removed the notifiable flag',
-  checklist_make_safe: "completed the 'Make Safe' step",
-  checklist_preserve_scene: "completed the 'Preserve Scene' step",
-  checklist_identify_witnesses: "completed the 'Identify Witnesses' step",
-  checklist_capture_evidence: "completed the 'Capture Evidence' step",
-  checklist_find_root_cause: "completed the 'Find Root Cause' step",
-  witness_statement_added: 'added a witness statement',
-  evidence_added: 'added evidence',
-  root_cause_set: 'recorded the root cause',
-  corrective_action_created: 'created a corrective action',
-  rca_assigned: 'assigned the root cause analysis',
-  investigation_assigned_snag: 'set this to the SNAG investigation',
-  investigation_assigned_document: "set this to the organisation's own process",
-  investigation_document_attached: 'attached the investigation document',
-  investigation_document_accepted: 'accepted the investigation document',
-  // Overriding a locked mode is an admin overturning a decision, not making
-  // one — named differently in the log so the two never read alike.
-  investigation_mode_overridden_snag: 'overrode this to the SNAG investigation',
-  investigation_mode_overridden_document: "overrode this to the organisation's own process",
+const CLEARABLE: Record<string, string> = {
+  room: 'room',
+  description: 'description',
+  priority: 'priority',
+  effort: 'effort',
+  dueAt: 'due_at',
+  repeatDays: 'repeat_days',
+  assigneeId: 'assignee_id',
 };
 
-export function describeAuditAction(action: string): string {
-  return AUDIT_ACTION_LABELS[action] ?? action.replace(/_/g, ' ');
-}
-
-export async function getSnagAuditLog(client: SupabaseClient, snagId: string): Promise<AuditLogEntry[]> {
-  const { data, error } = await client
-    .from('audit_log')
-    .select('id, action, actor_id, created_at, actor:profiles!audit_log_actor_id_fkey(name)')
-    .eq('entity', 'snag')
-    .eq('entity_id', snagId)
-    .order('created_at', { ascending: true });
-
-  if (error || !data) return [];
-  return data.map((row: any) => ({
-    id: row.id,
-    action: row.action,
-    actor_id: row.actor_id,
-    actor_name: row.actor?.name ?? null,
-    created_at: row.created_at,
-  }));
-}
-
-// ─── Reports / exports ──────────────────────────────────────────────────────
-// Builds a report PDF via the matching edge function and returns a 1-hour
-// signed URL to it. The edge function re-checks the caller's role itself, so
-// a failed permission check surfaces here as `error` rather than a thrown
-// exception — same contract on both apps.
-
-export async function exportInvestigation(
-  client: SupabaseClient,
-  snagId: string
-): Promise<{ signedUrl: string | null; error: any }> {
-  const { data, error } = await client.functions.invoke('export-investigation', {
-    body: { snag_id: snagId },
-  });
-  if (error) return { signedUrl: null, error };
-  return { signedUrl: data?.signedUrl ?? null, error: null };
-}
-
-// Defaults to the trailing 90 days when no period is given.
-export async function exportGovernanceReport(
-  client: SupabaseClient,
-  periodStart?: string,
-  periodEnd?: string
-): Promise<{ signedUrl: string | null; error: any }> {
-  const { data, error } = await client.functions.invoke('export-governance-report', {
-    body: { period_start: periodStart, period_end: periodEnd },
-  });
-  if (error) return { signedUrl: null, error };
-  return { signedUrl: data?.signedUrl ?? null, error: null };
-}
-
-// ─── Org document library ──────────────────────────────────────────────────
-// Added for SNAG_WEB_APP_PLAN.md decision D2 — a general org-wide document
-// library, distinct from snag-scoped evidence. Migration:
-// supabase/migrations/20260722200000_org_documents.sql.
-//
-// Read and upload are any org member; delete is supervisor/officer_admin only.
-// Workers were opened up in 20260729000000 so someone running an investigation
-// under their organisation's own process can file the completed document —
-// removing an org record stays a supervisor's call. Enforced by the
-// create_org_document/delete_org_document RPCs and mirrored in the
-// org-documents storage bucket's own policies.
-
-export interface OrgDocument {
-  id: string;
-  file_path: string;
-  title: string;
-  category: string | null;
-  uploaded_by: string;
-  uploader_name?: string;
-  created_at: string;
-}
-
-export async function getOrgDocuments(client: SupabaseClient, orgId: string): Promise<OrgDocument[]> {
-  const { data, error } = await client
-    .from('org_documents')
-    .select('id, file_path, title, category, uploaded_by, created_at, uploader:profiles!org_documents_uploaded_by_fkey(name)')
-    .eq('org_id', orgId)
-    .order('created_at', { ascending: false });
-  if (error || !data) return [];
-  return (data as any[]).map((row) => ({
-    id: row.id,
-    file_path: row.file_path,
-    title: row.title,
-    category: row.category,
-    uploaded_by: row.uploaded_by,
-    uploader_name: row.uploader?.name,
-    created_at: row.created_at,
-  }));
-}
-
-export async function createOrgDocument(client: SupabaseClient, filePath: string, title: string, category?: string | null) {
-  const { data, error } = await client.rpc('create_org_document', {
-    p_file_path: filePath, p_title: title, p_category: category ?? null,
-  });
-  return { id: data as string | null, error };
-}
-
-export async function deleteOrgDocument(client: SupabaseClient, documentId: string) {
-  return client.rpc('delete_org_document', { p_document_id: documentId });
-}
-
-const ORG_DOCUMENTS_BUCKET = 'org-documents';
-
-export async function uploadOrgDocumentFile(
-  client: SupabaseClient,
-  orgId: string,
-  fileName: string,
-  file: File | Blob,
-): Promise<{ path: string | null; error: any }> {
-  const path = `${orgId}/${Date.now()}-${fileName}`;
-  const { data, error } = await client.storage.from(ORG_DOCUMENTS_BUCKET).upload(path, file, { upsert: false });
-  if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
-  return { path: data.path, error: null };
-}
-
-export async function getOrgDocumentUrl(client: SupabaseClient, path: string): Promise<string | null> {
-  const { data, error } = await client.storage.from(ORG_DOCUMENTS_BUCKET).createSignedUrl(path, 60 * 60);
-  if (error || !data) return null;
-  return data.signedUrl;
-}
-
-// ─── Snag trend (reporting) ────────────────────────────────────────────────
-// Added for SNAG_WEB_APP_PLAN.md decision D3. Migration:
-// supabase/migrations/20260722210000_org_snag_trend_rpc.sql.
-
-export interface SnagTrendPoint {
-  period: string;
-  total: number;
-  flagged: number;
-  inProgress: number;
-  resolved: number;
-  rcaPending: number;
-}
-
-export async function getOrgSnagTrend(
-  client: SupabaseClient,
-  orgId: string,
-  startDate: string,
-  endDate: string,
-  bucket: 'week' | 'month' = 'week',
-): Promise<SnagTrendPoint[]> {
-  const { data, error } = await client.rpc('get_org_snag_trend', {
-    p_org_id: orgId, p_start_date: startDate, p_end_date: endDate, p_bucket: bucket,
-  });
-  if (error || !data) return [];
-  return (data as any[]).map((row) => ({
-    period: row.period,
-    total: row.total ?? 0,
-    flagged: row.flagged ?? 0,
-    inProgress: row.in_progress ?? 0,
-    resolved: row.resolved ?? 0,
-    rcaPending: row.rca_pending ?? 0,
-  }));
-}
-
-// ─── Snag mutations ─────────────────────────────────────────────────────────
-// Write-side counterparts to the read functions above, added when apps/web's
-// portal grew mutation actions on the snag detail page (not just read-only
-// review). Same client-param pattern; ported as-is from
-// apps/mobile/src/lib/supabase.ts, which now re-exports these bound to its
-// own client instead of redefining them.
-
 /**
- * `exceptionReason` is the only way past the serious-lane resolve gate with
- * conditions still unmet, and the server treats it as such: without one it
- * raises exactly as it always did, and with one it demands a site editor and
- * records who wrote it, when, and what was outstanding at that moment. Passing
- * it when the gate is already clear is a no-op — there is nothing to except.
+ * Send only what changed. `null` means "clear this field" and absent means
+ * "leave it alone" — the RPC can't tell those apart from the value, so an
+ * explicit null is translated into its `p_clear` list here.
  */
-export async function updateSnagStatus(
+export async function updateSnag(
   client: SupabaseClient,
   snagId: string,
-  status: SnagStatus,
-  note?: string | null,
-  exceptionReason?: string | null,
-) {
-  return client.rpc('update_snag_status', {
+  update: SnagUpdate
+): Promise<Snag> {
+  const clear: string[] = [];
+  for (const [key, column] of Object.entries(CLEARABLE)) {
+    if (key in update && update[key as keyof SnagUpdate] === null) clear.push(column);
+  }
+
+  const { error } = await client.rpc('update_snag', {
+    p_snag_id: snagId,
+    p_title: update.title ?? null,
+    p_room: update.room ?? null,
+    p_description: update.description ?? null,
+    p_priority: update.priority ?? null,
+    p_effort: update.effort ?? null,
+    p_needs_parts: update.needsParts ?? null,
+    p_due_at: update.dueAt ?? null,
+    p_repeat_days: update.repeatDays ?? null,
+    p_assignee_id: update.assigneeId ?? null,
+    p_photo_paths: update.photoPaths ?? null,
+    p_clear: clear,
+  });
+
+  if (error) throw new Error(error.message);
+  return getSnag(client, snagId);
+}
+
+/**
+ * Marking a repeating snag done doesn't close it — the RPC rolls `due_at`
+ * forward, records `last_done_at`, and leaves it open. Callers should re-read
+ * the returned snag rather than assuming the status they asked for.
+ */
+export async function setSnagStatus(
+  client: SupabaseClient,
+  snagId: string,
+  status: SnagStatus
+): Promise<Snag> {
+  const { error } = await client.rpc('set_snag_status', {
     p_snag_id: snagId,
     p_status: status,
-    p_note: note ?? null,
-    p_exception_reason: exceptionReason ?? null,
   });
+  if (error) throw new Error(error.message);
+  return getSnag(client, snagId);
 }
 
-/**
- * The same reason, supplied after the fact.
- *
- * For snags already closed with the gate unmet — the ones resolved before the
- * gate existed, and the ones the niggle resolve path used to close by cascade.
- * Reopening and re-resolving them would work, but it restamps `resolved_at` and
- * so loses when the work actually finished; this only fills the empty field.
- */
-export async function recordResolutionException(client: SupabaseClient, snagId: string, reason: string) {
-  return client.rpc('record_resolution_exception', { p_snag_id: snagId, p_reason: reason });
+export async function deleteSnag(client: SupabaseClient, snagId: string): Promise<void> {
+  const { error } = await client.rpc('delete_snag', { p_snag_id: snagId });
+  if (error) throw new Error(error.message);
 }
 
-/** What the server demands of a resolution exception, so a client can say so first. */
-export const RESOLUTION_EXCEPTION_MIN_LENGTH = 10;
+// ---------------------------------------------------------------- comments
 
-// Niggles resolve via resolve_snag (a note is required server-side). Serious
-// snags resolve via updateSnagStatus('resolved'), which the server gates
-// behind a completed investigation.
-export async function resolveSnag(client: SupabaseClient, snagId: string, note: string) {
-  return client.rpc('resolve_snag', { p_snag_id: snagId, p_note: note });
-}
-
-export async function recategoriseSnag(client: SupabaseClient, snagId: string, kind: SnagKind, severity: SnagSeverity | null) {
-  return client.rpc('recategorise_snag', { p_snag_id: snagId, p_kind: kind, p_severity: severity });
-}
-
-export async function assignSnagOwner(client: SupabaseClient, snagId: string, ownerId: string | null) {
-  return client.rpc('assign_snag_owner', { p_snag_id: snagId, p_owner_id: ownerId });
-}
-
-export async function assignSnagWorkGroup(client: SupabaseClient, snagId: string, workGroupId: string | null) {
-  return client.rpc('assign_snag_work_group', { p_snag_id: snagId, p_work_group_id: workGroupId });
-}
-
-// Creates (or reuses) a parent snag and attaches the rest of the selection as
-// its children — see merge_snags for the disambiguation rules around
-// kind/severity/site when the selection doesn't already agree.
-export async function mergeSnags(client: SupabaseClient, params: {
-  snagIds: string[];
-  description?: string | null;
-  kind?: SnagKind | null;
-  severity?: SnagSeverity | null;
-  siteId?: string | null;
-}) {
-  const { data, error } = await client.rpc('merge_snags', {
-    p_snag_ids: params.snagIds,
-    p_description: params.description ?? null,
-    p_kind: params.kind ?? null,
-    p_severity: params.severity ?? null,
-    p_site_id: params.siteId ?? null,
-  }).single();
-  return { data: data as { id: string; reference: string } | null, error };
-}
-
-export async function unmergeSnag(client: SupabaseClient, snagId: string) {
-  return client.rpc('unmerge_snag', { p_snag_id: snagId });
-}
-
-export async function setNotifiableFlag(client: SupabaseClient, snagId: string, value: boolean) {
-  return client.rpc('set_notifiable_flag', { p_snag_id: snagId, p_value: value });
-}
-
-export async function nominateNotifyingPcbu(client: SupabaseClient, snagId: string, orgId: string | null, note: string | null) {
-  return client.rpc('nominate_notifying_pcbu', { p_snag_id: snagId, p_org_id: orgId, p_note: note });
-}
-
-export async function addComment(client: SupabaseClient, snagId: string, body: string, mentionedUserIds: string[] = []) {
-  const { data, error } = await client.rpc('add_comment', {
-    p_snag_id: snagId,
-    p_body: body,
-    p_mentioned_user_ids: mentionedUserIds,
-  });
-  return { commentId: data as string | null, error };
-}
-
-// ─── Investigation mutations (serious lane) ────────────────────────────────
-
-export async function completeChecklistStep(client: SupabaseClient, snagId: string, step: ChecklistStep) {
-  return client.rpc('complete_checklist_step', { p_snag_id: snagId, p_step: step });
-}
-
-export async function addWitnessStatement(
-  client: SupabaseClient, snagId: string, witnessName: string, statementText: string, mediaPath?: string | null,
-) {
-  return client.rpc('add_witness_statement', {
-    p_snag_id: snagId,
-    p_witness_name: witnessName,
-    p_statement_text: statementText,
-    p_media_path: mediaPath ?? null,
-  });
-}
-
-export async function addEvidenceItem(client: SupabaseClient, snagId: string, mediaPath: string, caption?: string | null) {
-  return client.rpc('add_evidence_item', {
-    p_snag_id: snagId,
-    p_media_path: mediaPath,
-    p_caption: caption ?? null,
-  });
-}
-
-export async function updateEvidenceCaption(client: SupabaseClient, evidenceId: string, caption: string | null) {
-  return client.rpc('update_evidence_caption', {
-    p_evidence_id: evidenceId,
-    p_caption: caption ?? null,
-  });
-}
-
-/**
- * Removes an evidence item and, if it had one, the file behind it.
- *
- * Two steps in this order on purpose. `delete_evidence_item` owns the row and
- * returns the media path; the storage object is dropped afterwards, gated by
- * the bucket's own delete policy. If the second step fails we are left with an
- * object nothing points at — invisible and harmless — rather than a row whose
- * thumbnail 404s in the middle of an investigation. The same division of
- * responsibility as delete_org_document, with the order that survives a
- * partial failure.
- */
-export async function deleteEvidenceItem(client: SupabaseClient, evidenceId: string) {
-  const { data, error } = await client.rpc('delete_evidence_item', { p_evidence_id: evidenceId });
-  if (error) return { error };
-  const mediaPath = data as string | null;
-  // Caption-only evidence stores an empty media path and has no object.
-  if (mediaPath) await client.storage.from('snag-evidence').remove([mediaPath]);
-  return { error: null };
-}
-
-export async function setRootCause(client: SupabaseClient, snagId: string, rootCauseText: string) {
-  return client.rpc('set_root_cause', { p_snag_id: snagId, p_root_cause_text: rootCauseText });
-}
-
-const SNAG_EVIDENCE_BUCKET = 'snag-evidence';
-
-// Mirrors uploadOrgDocumentFile's shape — {org_id}/... path convention,
-// matching apps/mobile's PhotoPicker (which builds fileName as
-// `${pathPrefix}/${id}.jpg` with pathPrefix = org_id).
-export async function uploadSnagEvidenceFile(
-  client: SupabaseClient,
-  orgId: string,
-  fileName: string,
-  file: File | Blob,
-): Promise<{ path: string | null; error: any }> {
-  const path = `${orgId}/${Date.now()}-${fileName}`;
-  const { data, error } = await client.storage.from(SNAG_EVIDENCE_BUCKET).upload(path, file, { upsert: false });
-  if (error || !data) return { path: null, error: error ?? new Error('Upload failed') };
-  return { path: data.path, error: null };
-}
-
-/**
- * Copies a document out of the org library and into the snag's own bucket,
- * returning the new path.
- *
- * A copy, deliberately, not a reference. `investigations.document_id` points at
- * an org_documents row, which is fine for a document whose whole purpose is to
- * live in the library — but evidence and witness statements are the record of
- * what happened, and someone tidying the library two years from now must not be
- * able to empty them. The duplicate storage is the price of a record that
- * stands on its own.
- *
- * The copy happens inside Storage (`destinationBucket`), so the bytes never
- * travel to the client — which matters when the client is a phone on site
- * data. RLS still applies at both ends: read on org-documents, write into the
- * caller's own org folder in snag-evidence.
- */
-export async function copyOrgDocumentToSnagEvidence(
-  client: SupabaseClient,
-  orgId: string,
-  documentPath: string,
-): Promise<{ path: string | null; error: any }> {
-  const fileName = documentPath.split('/').pop() ?? 'document';
-  const destination = `${orgId}/${Date.now()}-${fileName}`;
-  const { error } = await client.storage
-    .from(ORG_DOCUMENTS_BUCKET)
-    .copy(documentPath, destination, { destinationBucket: SNAG_EVIDENCE_BUCKET });
-  if (error) return { path: null, error };
-  return { path: destination, error: null };
-}
-
-export async function attachWitnessDocument(client: SupabaseClient, statementId: string, mediaPath: string | null) {
-  return client.rpc('attach_witness_document', {
-    p_statement_id: statementId,
-    p_media_path: mediaPath ?? null,
-  });
-}
-
-/**
- * Whether an evidence item should render as a picture or as a file to open.
- *
- * Evidence has always accepted any file the storage bucket would take — the
- * portal's upload is a plain file input — but both clients rendered every item
- * with a URL as an <img>. A PDF therefore appeared as a broken image icon, and
- * the thing someone had attached as proof was unopenable.
- */
-export function isImageEvidence(path: string | null | undefined): boolean {
-  if (!path) return false;
-  return /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(path.split('?')[0]);
-}
-
-export async function getEvidencePhotoUrl(client: SupabaseClient, path: string): Promise<string | null> {
-  const { data, error } = await client.storage.from(SNAG_EVIDENCE_BUCKET).createSignedUrl(path, 60 * 60);
-  if (error || !data) return null;
-  return data.signedUrl;
-}
-
-// ─── RCA mutations ──────────────────────────────────────────────────────────
-
-export async function assignRca(client: SupabaseClient, snagId: string, assigneeId: string) {
-  return client.rpc('assign_rca', { p_snag_id: snagId, p_assignee_id: assigneeId });
-}
-
-export async function saveRcaWhy(client: SupabaseClient, rcaId: string, whyIndex: number, whyText: string, answerText: string) {
-  return client.rpc('save_rca_why', {
-    p_rca_id: rcaId, p_why_index: whyIndex, p_why_text: whyText, p_answer_text: answerText,
-  });
-}
-
-export async function submitRca(client: SupabaseClient, rcaId: string) {
-  return client.rpc('submit_rca', { p_rca_id: rcaId });
-}
-
-export async function acceptRca(client: SupabaseClient, rcaId: string) {
-  return client.rpc('accept_rca', { p_rca_id: rcaId });
-}
-
-export async function rejectRca(client: SupabaseClient, rcaId: string, rejectionNote: string) {
-  return client.rpc('reject_rca', { p_rca_id: rcaId, p_rejection_note: rejectionNote });
-}
-
-// Recovery for an RCA an assignee can't finish — e.g. they've left or gone
-// quiet. Both are supervisor/admin actions; reassign hands the unfinished
-// RCA to someone else, cancel abandons it and returns the snag to resolved.
-export async function reassignRca(client: SupabaseClient, rcaId: string, newAssigneeId: string) {
-  return client.rpc('reassign_rca', { p_rca_id: rcaId, p_new_assignee_id: newAssigneeId });
-}
-
-export async function cancelRca(client: SupabaseClient, rcaId: string) {
-  return client.rpc('cancel_rca', { p_rca_id: rcaId });
-}
-
-// "No formal 5-Whys needed here" as an explicit, attributed decision. Without
-// it, every serious snag ever resolved counts as outstanding analysis forever
-// and the dashboard column becomes noise — see PRODUCT_REVIEW.md §3.1.
-// Supervisor/admin only, resolved snags only, and refused while an RCA is in
-// flight (cancel it first, so the abandonment is on the record).
-export async function waiveRca(client: SupabaseClient, snagId: string, reason: string) {
-  return client.rpc('waive_rca', { p_snag_id: snagId, p_reason: reason });
-}
-
-export async function unwaiveRca(client: SupabaseClient, snagId: string) {
-  return client.rpc('unwaive_rca', { p_snag_id: snagId });
-}
-
-// ─── Escalation (niggle lane) ──────────────────────────────────────────────
-// Reporter-only, by design: escalate_snag checks `reporter_id = auth.uid()`,
-// so this is the person who raised a fixit/improvement saying "this is
-// actually unsafe" — not a supervisor action. Open niggles only, once each.
-export async function escalateSnag(client: SupabaseClient, snagId: string) {
-  return client.rpc('escalate_snag', { p_snag_id: snagId });
-}
-
-// ─── Investigation assignment and mode ──────────────────────────────────────
-
-export async function assignInvestigation(
-  client: SupabaseClient, snagId: string, assigneeId: string, mode: InvestigationMode
-) {
-  return client.rpc('assign_investigation', {
-    p_snag_id: snagId, p_assignee_id: assigneeId, p_mode: mode,
-  });
-}
-
-/** Always an org_documents row, whether it was already in the library or
- *  uploaded for this investigation — one register, discoverable later. */
-export async function attachInvestigationDocument(client: SupabaseClient, snagId: string, documentId: string) {
-  return client.rpc('attach_investigation_document', { p_snag_id: snagId, p_document_id: documentId });
-}
-
-export async function acceptInvestigationDocument(client: SupabaseClient, snagId: string) {
-  return client.rpc('accept_investigation_document', { p_snag_id: snagId });
-}
-
-// ─── Debrief mutations ──────────────────────────────────────────────────────
-
-// Idempotent: returns the existing debrief if there is one. A snag has at most
-// one, enforced by a unique index — the old two-argument form let each tap of
-// the hot/formal selector start another, and one snag reached 13.
-export async function startDebrief(client: SupabaseClient, snagId: string) {
-  return client.rpc('start_debrief', { p_snag_id: snagId });
-}
-
-export async function addDebriefFinding(client: SupabaseClient, debriefId: string, findingText: string) {
-  return client.rpc('add_debrief_finding', { p_debrief_id: debriefId, p_finding_text: findingText });
-}
-
-export async function addDebriefAttendee(client: SupabaseClient, debriefId: string, profileId: string) {
-  return client.rpc('add_debrief_attendee', { p_debrief_id: debriefId, p_profile_id: profileId });
-}
-
-export async function addDebriefLesson(client: SupabaseClient, debriefId: string, lessonText: string) {
-  return client.rpc('add_debrief_lesson', { p_debrief_id: debriefId, p_lesson_text: lessonText });
-}
-
-export async function completeDebrief(client: SupabaseClient, debriefId: string) {
-  return client.rpc('complete_debrief', { p_debrief_id: debriefId });
-}
-
-// ─── Corrective actions (CAPA) mutations ───────────────────────────────────
-
-export async function createCorrectiveAction(
-  client: SupabaseClient, snagId: string, description: string, ownerId: string, dueDate: string
-) {
-  const { data, error } = await client.rpc('create_corrective_action', {
-    p_snag_id: snagId, p_description: description, p_owner_id: ownerId, p_due_date: dueDate,
-  });
-  return { id: data as string | null, error };
-}
-
-export async function completeCorrectiveAction(client: SupabaseClient, actionId: string) {
-  return client.rpc('complete_corrective_action', { p_action_id: actionId });
-}
-
-export async function verifyCorrectiveAction(client: SupabaseClient, actionId: string) {
-  return client.rpc('verify_corrective_action', { p_action_id: actionId });
-}
-
-export async function addCorrectiveActionEvidence(client: SupabaseClient, actionId: string, mediaPath: string, caption?: string | null) {
-  return client.rpc('add_corrective_action_evidence', {
-    p_action_id: actionId, p_media_path: mediaPath, p_caption: caption ?? null,
-  });
-}
-
-// Completion-evidence photos for one corrective action, resolved to
-// signed-URL rows for display — mirrors getEvidencePhotoUrl's bucket/RLS.
-export async function getCorrectiveActionEvidence(client: SupabaseClient, actionId: string): Promise<EvidenceItem[]> {
+export async function getComments(client: SupabaseClient, snagId: string): Promise<Comment[]> {
   const { data, error } = await client
-    .from('evidence_items')
-    .select('*')
-    .eq('corrective_action_id', actionId)
-    .order('sort_index', { ascending: true });
-  if (error || !data) return [];
-  return data as EvidenceItem[];
+    .from('comments')
+    .select('id, snag_id, author_id, body, created_at, author:profiles!inner(display_name)')
+    .eq('snag_id', snagId)
+    .order('created_at');
+
+  if (error) throw new Error(`Couldn't load the comments: ${error.message}`);
+  return (data ?? []).map(mapComment);
 }
 
-// Logs a governance-artefact export (officer_admin only, server-side
-// checked) — the established "generate file, upload it, then log it"
-// pattern (SNAG_WEB_APP_PLAN.md §4). The PDF export goes through the
-// export-governance-report edge function, which calls this internally;
-// the CSV export has no edge function, so apps/web calls it directly after
-// uploading the CSV to the governance-reports bucket itself.
-export async function recordGovernanceExport(client: SupabaseClient, filePath: string, periodStart: string, periodEnd: string) {
-  const { data, error } = await client.rpc('record_governance_export', {
-    p_file_path: filePath, p_period_start: periodStart, p_period_end: periodEnd,
-  });
-  return { id: data as string | null, error };
+export async function addComment(
+  client: SupabaseClient,
+  snagId: string,
+  body: string
+): Promise<void> {
+  const { error } = await client.rpc('add_comment', { p_snag_id: snagId, p_body: body });
+  if (error) throw new Error(error.message);
 }
 
-// ─── Notification delivery health ──────────────────────────────────────────
+// ---------------------------------------------------------------- rooms
 
 /**
- * Whether this org's notification email is actually going out.
+ * The rooms already used in this household, most-used first.
  *
- * Two numbers because there are two ways it has failed here, and a check for
- * one is blind to the other. `sends_failed` catches a send Resend refused —
- * July 2026, when the sandbox sender rejected every notification for three
- * weeks. The invite pair catches a dispatch that never fired at all: invites
- * were never emailed for the whole life of the feature, and a failure count
- * would have read zero throughout, because nothing was ever attempted.
- *
- * Backed by `notification_deliveries` (20260805110000), which records
- * attempts rather than only failures for exactly that reason.
+ * Rooms are free text on the snag rather than a table, so this is the whole of
+ * the "room registry" — nobody administers a list of rooms before they can log
+ * a dripping tap. It powers the suggestions under the capture field.
  */
-export interface EmailDeliveryHealth {
-  window_hours: number;
-  sends_attempted: number;
-  sends_failed: number;
-  invites_created: number;
-  invite_emails_attempted: number;
-}
-
-export async function getEmailDeliveryHealth(client: SupabaseClient, hours = 24) {
+export async function getKnownRooms(
+  client: SupabaseClient,
+  householdId: string
+): Promise<string[]> {
   const { data, error } = await client
-    .rpc('email_delivery_health', { p_hours: hours })
-    .single();
-  return { data: data as EmailDeliveryHealth | null, error };
+    .from('snags')
+    .select('room')
+    .eq('household_id', householdId)
+    .not('room', 'is', null);
+
+  if (error) throw new Error(`Couldn't load rooms: ${error.message}`);
+
+  const counts = new Map<string, number>();
+  for (const row of (data ?? []) as Row[]) {
+    counts.set(row.room, (counts.get(row.room) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([room]) => room);
 }
 
-/** The invites this window created that no send was even attempted for. */
-export function undeliveredInviteCount(health: EmailDeliveryHealth): number {
-  return Math.max(0, health.invites_created - health.invite_emails_attempted);
+// ---------------------------------------------------------------- weekend
+
+export interface WeekendPlan {
+  /** Everything that fits, grouped so one room's jobs get done together. */
+  byRoom: { room: string; snags: Snag[] }[];
+  /** Pulled to the top: one hardware-store trip clears all of these. */
+  shoppingList: Snag[];
+  total: number;
 }
 
-/** Whether the dashboard should say something. */
-export function hasDeliveryProblem(health: EmailDeliveryHealth): boolean {
-  return health.sends_failed > 0 || undeliveredInviteCount(health) > 0;
+/**
+ * The answer to "what can I get done today", which is a different question from
+ * "what's outstanding" and the reason the plain list isn't enough.
+ *
+ * Grouping is by room because that's how the work is actually batched — you do
+ * the garage once. The parts list is separate because the trip to the hardware
+ * store is the thing that blocks a small job for weeks.
+ */
+export function planWeekend(snags: Snag[]): WeekendPlan {
+  const open = snags.filter((s) => s.status !== 'done');
+
+  const rooms = new Map<string, Snag[]>();
+  for (const snag of open) {
+    const room = snag.room ?? 'Everywhere else';
+    if (!rooms.has(room)) rooms.set(room, []);
+    rooms.get(room)!.push(snag);
+  }
+
+  const priorityRank = (s: Snag) =>
+    s.priority ? PRIORITY_ORDER.indexOf(s.priority) : PRIORITY_ORDER.length;
+
+  const byRoom = [...rooms.entries()]
+    .map(([room, items]) => ({
+      room,
+      snags: items.sort((a, b) => priorityRank(a) - priorityRank(b)),
+    }))
+    // Most work first: a room with four jobs is the one worth starting in.
+    .sort((a, b) => b.snags.length - a.snags.length || a.room.localeCompare(b.room));
+
+  return {
+    byRoom,
+    shoppingList: open.filter((s) => s.needsParts).sort((a, b) => priorityRank(a) - priorityRank(b)),
+    total: open.length,
+  };
+}
+
+// ---------------------------------------------------------------- due dates
+
+export type DueState = 'overdue' | 'due-soon' | 'scheduled' | 'none';
+
+export function dueState(snag: Snag, now = new Date()): DueState {
+  if (!snag.dueAt) return 'none';
+  const due = new Date(snag.dueAt).getTime();
+  const days = (due - now.getTime()) / 86_400_000;
+  if (days < 0) return 'overdue';
+  if (days <= 7) return 'due-soon';
+  return 'scheduled';
+}
+
+/**
+ * Phrased the way someone would say it out loud. Precision past "in 3 weeks"
+ * is noise on a list of household chores.
+ */
+export function describeDue(snag: Snag, now = new Date()): string | null {
+  if (!snag.dueAt) return null;
+  const days = Math.round((new Date(snag.dueAt).getTime() - now.getTime()) / 86_400_000);
+
+  if (days < -1) return `${Math.abs(days)} days overdue`;
+  if (days === -1) return 'Due yesterday';
+  if (days === 0) return 'Due today';
+  if (days === 1) return 'Due tomorrow';
+  if (days <= 13) return `Due in ${days} days`;
+  if (days <= 60) return `Due in ${Math.round(days / 7)} weeks`;
+  return `Due in ${Math.round(days / 30)} months`;
 }

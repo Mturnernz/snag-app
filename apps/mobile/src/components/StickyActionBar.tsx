@@ -61,7 +61,7 @@ export default function StickyActionBar({ children, hint, hintTone = 'muted', st
             <Icon
               name={hintTone === 'warn' ? 'alert-circle-outline' : 'information-circle-outline'}
               size="sm"
-              color={hintTone === 'warn' ? Colors.status.inProgressFg : Colors.textMuted}
+              color={hintTone === 'warn' ? Colors.status.doingFg : Colors.textMuted}
             />
             <Text style={[styles.hint, hintTone === 'warn' && styles.hintWarn]}>{hint}</Text>
           </View>
@@ -100,6 +100,6 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   hintWarn: {
-    color: Colors.status.inProgressFg,
+    color: Colors.status.doingFg,
   },
 });

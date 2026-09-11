@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: "Hanken Grotesk", system-ui, "Segoe UI", Helvetica, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #2E6A4F; } a:hover { color: #24543E; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; background: #FAF7F2; color: #2B2724; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="flex-grow: 1; padding: 56px 20px 0 20px; display: flex; flex-direction: column; gap: 10px;">
+
+    <div style="font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 6px;">What needs doing?</div>
+
+    <!-- The one field that matters. Deliberately large: this is typed one-handed. -->
+    <div style="background: #FFFFFF; border: 1px solid #E7DFD3; border-radius: 14px; padding: 16px 16px; box-shadow: 0 1px 2px rgba(43,39,36,0.03);">
+      <div style="font-size: 18px; color: #A99E90;">Toilet seat is broken</div>
+    </div>
+
+    <div style="font-size: 13px; font-weight: 600; color: #5C554C; margin-top: 14px;">Where is it?</div>
+    <div style="background: #FFFFFF; border: 1.5px solid #2E6A4F; border-radius: 14px; padding: 14px 16px; box-shadow: 0 0 0 3px rgba(46,106,79,0.10);">
+      <div style="font-size: 16px; color: #2B2724;">Bathroom<span style="color: #2E6A4F; font-weight: 300;">|</span></div>
+    </div>
+
+    <!-- Rooms already used here. Not a registry anyone has to set up. -->
+    <div style="display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px;">
+      <div style="padding: 7px 13px; border-radius: 999px; background: #E4EFE7; border: 1px solid #CBDFD2; color: #2E6A4F; font-size: 13.5px; font-weight: 600;">Bathroom</div>
+      <div style="padding: 7px 13px; border-radius: 999px; background: #FFFFFF; border: 1px solid #E7DFD3; color: #5C554C; font-size: 13.5px;">Kitchen</div>
+      <div style="padding: 7px 13px; border-radius: 999px; background: #FFFFFF; border: 1px solid #E7DFD3; color: #5C554C; font-size: 13.5px;">Outside</div>
+      <div style="padding: 7px 13px; border-radius: 999px; background: #FFFFFF; border: 1px solid #E7DFD3; color: #5C554C; font-size: 13.5px;">Garage</div>
+      <div style="padding: 7px 13px; border-radius: 999px; background: #FFFFFF; border: 1px solid #E7DFD3; color: #5C554C; font-size: 13.5px;">Hallway</div>
+    </div>
+
+    <div style="font-size: 13px; font-weight: 600; color: #5C554C; margin-top: 20px;">Photo</div>
+
+    <div style="display: flex; gap: 10px;">
+      <!-- One taken -->
+      <div style="width: 104px; height: 104px; border-radius: 14px; overflow: hidden; position: relative; flex-shrink: 0;">
+        <svg width="104" height="104" viewBox="0 0 104 104" fill="none"><rect width="104" height="104" fill="#EBE8E0"/><rect x="16" y="22" width="72" height="46" rx="22" fill="#D5D0C3"/><rect x="36" y="62" width="32" height="36" rx="8" fill="#C2BCAC"/><circle cx="52" cy="42" r="12" fill="#F3F1EB" opacity="0.85"/></svg>
+        <div style="position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 11px; background: rgba(43,39,36,0.62); display: flex; align-items: center; justify-content: center;">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </div>
+      </div>
+      <!-- Add another -->
+      <div style="width: 104px; height: 104px; border-radius: 14px; border: 1.5px dashed #D8CEC0; background: #FFFFFF; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #736A5F;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5h2.6l1.5-2h7.8l1.5 2H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5Z"/><circle cx="12" cy="13.5" r="3.4"/></svg>
+        <span style="font-size: 12.5px; font-weight: 500;">Add photo</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Action bar. The hint is the promise that this form stays short. -->
+  <div style="background: #FFFFFF; border-top: 1px solid #E7DFD3; padding: 16px 20px 14px 20px; display: flex; flex-direction: column; gap: 10px;">
+    <div style="height: 52px; border-radius: 14px; background: #2E6A4F; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 2px 8px rgba(46,106,79,0.22);">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8.2v7.6M8.2 12h7.6"/></svg>
+      <span style="color: #FFFFFF; font-size: 16.5px; font-weight: 600;">Add to the list</span>
+    </div>
+    <div style="display: flex; align-items: center; justify-content: center; gap: 6px; color: #736A5F;">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.4v3.4M8 5.2h.01"/></svg>
+      <span style="font-size: 13px;">Sort out priority and timing later</span>
+    </div>
+  </div>
+
+  <div style="background: #FFFFFF; border-top: 1px solid #E7DFD3; padding: 10px 12px 0 12px; display: flex;">
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #2E6A4F;">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5h2.6l1.5-2h7.8l1.5 2H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5Z"/><circle cx="12" cy="13.5" r="3.4"/></svg>
+      <span style="font-size: 11px; font-weight: 700;">Add</span>
+    </div>
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #736A5F;">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12M3.5 6.5h.01M3.5 12h.01M3.5 17.5h.01"/></svg>
+      <span style="font-size: 11px; font-weight: 500;">List</span>
+    </div>
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #736A5F;">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.6 5.4 18.6 9.4"/><path d="M11.8 8.2 3.6 16.4a2 2 0 0 0 0 2.8l1.2 1.2a2 2 0 0 0 2.8 0l8.2-8.2"/><path d="M16.2 3.8a2.6 2.6 0 0 1 3.7 0l.3.3a2.6 2.6 0 0 1 0 3.7l-1.4 1.4-4-4Z"/></svg>
+      <span style="font-size: 11px; font-weight: 500;">Weekend</span>
+    </div>
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #736A5F;">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><circle cx="12" cy="9.8" r="3.1"/><path d="M5.8 19.4c1.1-2.9 3.5-4.3 6.2-4.3s5.1 1.4 6.2 4.3"/></svg>
+      <span style="font-size: 11px; font-weight: 500;">You</span>
+    </div>
+  </div>
+  <div style="height: 22px; background: #FFFFFF;"></div>
+
+</div>
+</x-dc>
+</body>
+</html>

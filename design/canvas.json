@@ -1,0 +1,25 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Screens" },
+    { "id": "page-2", "name": "Foundations" }
+  ],
+  "artboards": [
+    { "file": "Add.dc.html",         "x": 0,    "y": 0, "w": 390, "h": 844, "page": "page-1", "title": "Add" },
+    { "file": "Main.dc.html",        "x": 470,  "y": 0, "w": 390, "h": 844, "page": "page-1", "title": "The list" },
+    { "file": "Weekend.dc.html",     "x": 940,  "y": 0, "w": 390, "h": 844, "page": "page-1", "title": "Free weekend" },
+    { "file": "Detail.dc.html",      "x": 1410, "y": 0, "w": 390, "h": 844, "page": "page-1", "title": "Snag detail" },
+    { "file": "Foundations.dc.html", "x": 0,    "y": 0, "w": 900, "h": 1180, "page": "page-2", "title": "Foundations" },
+    { "file": "DirectionB.dc.html",  "x": 980,  "y": 0, "w": 390, "h": 844, "page": "page-2", "title": "Direction B — Ink" }
+  ],
+  "annotations": [
+    { "id": "note-capture", "x": 0, "y": -150, "w": 390, "page": "page-1",
+      "text": "Capture takes a photo, a title and a room. Nothing else.\n\nThis is used standing in the bathroom holding a broken toilet seat, with about ten seconds of patience. Every extra field is friction at the exact moment friction costs most." },
+    { "id": "note-weekend", "x": 940, "y": -150, "w": 390, "page": "page-1",
+      "text": "The screen a filtered list can't be.\n\nBounded by time available rather than importance; grouped by room because that is how work is batched; needs-parts pulled to the top, because one trip to the shop clears a fortnight of small jobs." },
+    { "id": "note-detail", "x": 1410, "y": -150, "w": 390, "page": "page-1",
+      "text": "Triage — everything capture deliberately didn't ask for.\n\nEvery control writes on tap. There is no Save button: triage is a series of small independent decisions, and confirming each one turns sorting twelve items into forty taps." },
+    { "id": "note-direction", "x": 980, "y": -190, "w": 390, "page": "page-2",
+      "text": "Direction B — Ink\n\nSame system, charcoal instead of Fern for the primary. More conventionally professional, and it lets the photographs carry the only colour in the chrome.\n\nThe tradeoff: it gives up the warmth in the chrome that the brief asked for, and a household tool has no logo to carry an identity instead." }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}

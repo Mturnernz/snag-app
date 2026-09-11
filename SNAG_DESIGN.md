@@ -183,14 +183,18 @@ keyboard between someone and the problem in front of them. A snag needs a photo 
 description; one with neither is nothing, and the server refuses it in words rather than through
 a constraint name.
 
-**Location is a tag, not a field.** Twelve chips, seeded per household, so they are full on the
-day the app is installed — which is the day someone decides whether this is quicker than saying
+**Location is a tag, not a field.** Twelve chips, seeded per property, so they are full on the
+day a place exists — which is the day someone decides whether this is quicker than saying
 it out loud. A list derived from past use is empty exactly then. `Elsewhere` sits last and is the
 escape hatch that stops a fixed list being a dead end.
 
 **Priority is here rather than in triage**, and it is the one exception to the capture/triage
 split. It's the single judgement only the person standing there can make: is this a today problem
 or not. Two values, because a third would need thinking about.
+
+**The place is a picker, and only when there is one to make.** A bach is a property — its own
+people, its own tag list — not a tag. With one place the row isn't rendered at all, so a
+single-property household never meets the concept.
 
 Everything else — effort, needs-parts, due date, repeat, who's doing it — still belongs on the
 detail screen. `CLAUDE.md` states the rule; the visual restraint is how someone feels it before

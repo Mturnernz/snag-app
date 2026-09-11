@@ -199,31 +199,118 @@ export async function getMembers(
 export async function addMemberByEmail(
   client: SupabaseClient,
   householdId: string,
-  email: string
+  email: string,
+  propertyIds?: string[]
 ): Promise<void> {
   const { error } = await client.rpc('add_member_by_email', {
     p_household_id: householdId,
     p_email: email,
+    // Omitted means every property in the household, which is right while
+    // there is one place and wrong the moment there is a bach — so the caller
+    // passes an explicit list once there is more than one to choose between.
+    p_property_ids: propertyIds ?? null,
   });
   if (error) throw asError(error, "That didn’t save");
 }
 
-/** One row per household in v1; the UI never shows it. */
-export async function getDefaultProperty(
-  client: SupabaseClient,
-  householdId: string
-): Promise<Property | null> {
+/**
+ * The properties this person is linked to, in creation order.
+ *
+ * RLS already scopes this to their own links, so there is no household filter:
+ * a member of the household who isn't linked to the bach simply doesn't see it.
+ */
+export async function getMyProperties(client: SupabaseClient): Promise<Property[]> {
   const { data, error } = await client
     .from('properties')
-    .select('id, household_id, name')
-    .eq('household_id', householdId)
-    .order('created_at')
-    .limit(1)
-    .maybeSingle();
+    .select('id, household_id, name, property_members(count)')
+    .order('created_at');
 
-  if (error) throw asError(error, "Couldn't load the property");
-  if (!data) return null;
-  return { id: data.id, householdId: data.household_id, name: data.name };
+  if (error) throw asError(error, "Couldn't load your properties");
+  return (data ?? []).map((row: Row) => ({
+    id: row.id,
+    householdId: row.household_id,
+    name: row.name,
+    memberCount: row.property_members?.[0]?.count ?? 0,
+  }));
+}
+
+/**
+ * Which property capture should start on.
+ *
+ * Deliberately the one they last actually filed against, not the one they last
+ * tapped — and a server read, so it holds on a new device. The retired product
+ * learned this expensively: its equivalent took the first row of an RPC with no
+ * ORDER BY, so a member of three sites sent every report to whichever row
+ * Postgres happened to return first, forever, with nothing in the UI naming the
+ * site. It looked like a permissions problem to the person hitting it.
+ *
+ * Falls back to the first property rather than to nothing: a capture screen
+ * with no property selected cannot save.
+ */
+export async function getDefaultPropertyId(
+  client: SupabaseClient,
+  properties: Property[]
+): Promise<string | null> {
+  if (properties.length === 0) return null;
+  if (properties.length === 1) return properties[0].id;
+
+  const { data, error } = await client.rpc('last_reported_property');
+  if (error) throw asError(error, "Couldn't work out which place to start on");
+
+  const last = data as string | null;
+  return last && properties.some((p) => p.id === last) ? last : properties[0].id;
+}
+
+export async function createProperty(
+  client: SupabaseClient,
+  householdId: string,
+  name: string
+): Promise<Property> {
+  const { data, error } = await client.rpc('create_property', {
+    p_household_id: householdId,
+    p_name: name,
+  });
+  const row = unwrap<Row>(data, error, "Couldn't add that place");
+  return { id: row.id, householdId: row.household_id, name: row.name, memberCount: 1 };
+}
+
+export async function renameProperty(
+  client: SupabaseClient,
+  propertyId: string,
+  name: string
+): Promise<void> {
+  const { error } = await client.rpc('rename_property', {
+    p_property_id: propertyId,
+    p_name: name,
+  });
+  if (error) throw asError(error, "Couldn't rename that place");
+}
+
+/** Who can see and file against a property. */
+export async function getPropertyMemberIds(
+  client: SupabaseClient,
+  propertyId: string
+): Promise<string[]> {
+  const { data, error } = await client
+    .from('property_members')
+    .select('profile_id')
+    .eq('property_id', propertyId);
+
+  if (error) throw asError(error, "Couldn't load who's linked");
+  return (data ?? []).map((row: Row) => row.profile_id);
+}
+
+export async function setPropertyMember(
+  client: SupabaseClient,
+  propertyId: string,
+  profileId: string,
+  linked: boolean
+): Promise<void> {
+  const { error } = await client.rpc(
+    linked ? 'link_property_member' : 'unlink_property_member',
+    { p_property_id: propertyId, p_profile_id: profileId }
+  );
+  if (error) throw asError(error, "Couldn't change who's linked");
 }
 
 // ---------------------------------------------------------------- snags
@@ -235,6 +322,7 @@ export async function getSnags(
 ): Promise<Snag[]> {
   let query = client.from('snags_with_details').select('*');
 
+  if (filter.propertyId) query = query.eq('property_id', filter.propertyId);
   if (filter.status?.length) query = query.in('status', filter.status);
   if (filter.room) query = query.eq('room', filter.room);
   if (filter.assigneeId) query = query.eq('assignee_id', filter.assigneeId);
@@ -428,18 +516,18 @@ export async function addComment(
  */
 export async function getLocations(
   client: SupabaseClient,
-  householdId: string
+  propertyId: string
 ): Promise<Location[]> {
   const { data, error } = await client
     .from('locations')
-    .select('id, household_id, name, sort_order')
-    .eq('household_id', householdId)
+    .select('id, property_id, name, sort_order')
+    .eq('property_id', propertyId)
     .order('sort_order');
 
   if (error) throw asError(error, "Couldn't load the location tags");
   return (data ?? []).map((row: Row) => ({
     id: row.id,
-    householdId: row.household_id,
+    propertyId: row.property_id,
     name: row.name,
     sortOrder: row.sort_order,
   }));

@@ -90,25 +90,32 @@ export interface HouseholdMember {
 }
 
 /**
- * There is exactly one of these per household in v1 and the UI never shows it.
- * It is a real row because `snags.property_id` is not-null.
+ * A place — the house, and later the bach.
+ *
+ * A property is not a location tag. Tags say where in a place something is;
+ * a property is the place, has its own people, and its own tag list. The
+ * picker renders only when someone is linked to more than one, so a
+ * single-property household never sees the concept at all.
  */
 export interface Property {
   id: string;
   householdId: string;
   name: string;
+  /** How many people are linked to it. Only shown when there's a choice. */
+  memberCount?: number;
 }
 
 /**
- * A location tag offered at capture.
+ * A location tag offered at capture, scoped to one property.
  *
- * Seeded per household so the chips are full the moment the app is opened —
- * which is the day someone decides whether it's worth using. A list derived
- * from past use is empty exactly then.
+ * Seeded per property so the chips are full the moment a place exists — which
+ * is the day someone decides whether it's worth using. A list derived from
+ * past use is empty exactly then. Per property rather than per household
+ * because a bach has a boatshed and a house has a laundry.
  */
 export interface Location {
   id: string;
-  householdId: string;
+  propertyId: string;
   name: string;
   sortOrder: number;
 }
@@ -166,6 +173,8 @@ export interface Comment {
 // ---------------------------------------------------------------- filtering
 
 export interface SnagFilter {
+  /** Which place. Omitted means every property you're linked to. */
+  propertyId?: string | null;
   status?: SnagStatus[];
   room?: string | null;
   assigneeId?: string | null;

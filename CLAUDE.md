@@ -68,9 +68,9 @@ is blank", this is the first thing to check.
 
 The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
 
-- **`home`** — this product. Seven tables: `households`, `profiles`, `household_members`,
-  `properties`, `locations`, `snags`, `comments`. Plus `snags_with_details`, the view every list
-  and detail screen reads.
+- **`home`** — this product. Eight tables: `households`, `profiles`, `household_members`,
+  `properties`, `property_members`, `locations`, `snags`, `comments`. Plus `snags_with_details`,
+  the view every list and detail screen reads.
 - **`public`** — the retired B2B product, **frozen**. 35 tables, 112 migrations, 6 pilot orgs and
   57 snags. Not migrated, not dropped, not read from. Leaving it intact *is* the archive, which
   is why the pivot needed no destructive migration and why there's no schema dump anywhere.
@@ -117,10 +117,11 @@ Three things about it are load-bearing:
   (`snags_has_something`), and `create_snag` refuses the empty case in words rather than letting
   the constraint name surface. `snagHeadline` supplies what the list shows for a photo-only snag.
 - **Locations are a seeded pick-list** (`home.locations`, twelve rows written by
-  `seed_locations` at household creation), not free text. A suggestion list derived from past use
-  is empty on the one day that matters — the day the app is installed. `snags.room` stays TEXT
-  rather than a foreign key, so the list query needs no join and renaming a location later
-  doesn't rewrite the history of snags filed under the old name.
+  `seed_locations` per property), not free text. A suggestion list derived from past use is empty
+  on the one day that matters — the day the app is installed. `snags.room` stays TEXT rather than
+  a foreign key, so the list query needs no join and renaming a location later doesn't rewrite the
+  history of snags filed under the old name.
+- **The place is a picker, shown only when there is a choice.** See "Properties" below.
 - **Priority is set at capture**, and is the one deliberate exception to the split below. It is
   the single judgement only the person standing there can make. Two values; a third would need
   thinking about.
@@ -160,33 +161,62 @@ Two consequences: `done_at` alone would lose the fact a repeating job was ever c
 is why `last_done_at` exists; and callers must re-read the returned snag rather than assuming the
 status they asked for. `SnagDetailScreen` says what actually happened rather than "Done".
 
-## Two things in the schema the UI never touches
+## Properties: the house, and later the bach
 
-Both are there so the **shared bach** — a family reports, the owner fixes — isn't a rewrite. See
-`SNAG_HOME_PIVOT_REVIEW.md` for the full argument. Neither costs a screen.
+**A bach is a property, not a location tag.** This is the distinction to hold on to, because it
+is the one that was got wrong first: tags say *where in a place* something is; a property *is* the
+place, has its own people, and has its own tag list.
 
-- **`snags.property_id`** is `not null` against a single auto-created `Home`, and the concept is
-  hidden in the UI. Adding a not-null FK to a populated table later means a migration, a backfill
-  and a change to every query. A room is not a property: rooms are free text, properties are rows.
-- **`household_members.role`** exists with nothing reading it. Everyone in a household sees and
-  does everything, and there are **no role checks in the UI at all**. Don't add one.
+`snags.property_id` has been not-null since the schema was stood up, so surfacing this was a
+migration rather than a rewrite. Three rules:
+
+- **`property_members` decides who sees what.** Household membership does not imply seeing every
+  property — a family can share a bach without seeing the snags in each other's houses, which is
+  the whole reason the case is interesting. Every read policy on `properties`, `locations`,
+  `snags` and `comments` goes through `home.is_property_member`, and so does every snag write.
+- **Locations belong to a property**, not a household. `seed_locations` runs per property, so a
+  new bach arrives with its own twelve tags that can then diverge.
+- **The picker renders only when there is more than one place.** A one-property household never
+  meets the concept. `getDefaultPropertyId` starts capture on the place they *last actually filed
+  against* (`home.last_reported_property`), not the one they last tapped — a server read, so it
+  holds on a new device. The retired product's equivalent took the first row of an RPC with no
+  `ORDER BY`, so a member of three sites sent every report to whichever row Postgres happened to
+  return first, forever, with nothing in the UI naming the site. It looked like a permissions
+  problem to whoever hit it.
+
+Two smaller rules that follow. `unlink_property_member` refuses to remove the last person — a
+property nobody is linked to is invisible to everyone, including whoever would link someone back.
+And `update_snag` requires an assignee to be linked to the *property*, not merely in the
+household: assigning the bach's gutters to someone who cannot see the bach is a job that silently
+never gets done.
+
+**`household_members.role`** still exists with nothing reading it. Everyone linked to a place can
+do everything at that place, and there are **no role checks in the UI at all**. Don't add one —
+the only permission here is which places someone is on.
 
 ## Locations are seeded, not administered and not derived
 
-`home.locations` holds the tags offered at capture, seeded per household by `seed_locations`:
+`home.locations` holds the tags offered at capture, seeded **per property** by `seed_locations`:
 Kitchen, Bathroom, Bedroom, Living room, Laundry, Hallway, Garage, Outside, Deck, Roof, Under the
-house, Elsewhere. `getLocations` reads them in seeded order and feeds both the capture chips and
-the list filter.
+house, Elsewhere. `getLocations(propertyId)` reads them in seeded order and feeds both the capture
+chips and the list filter.
 
 Nobody sets this up, and nobody has to earn it by logging something first. There is no UI for
-adding a thirteenth — `Elsewhere` is the escape hatch, and a household that genuinely needs
-"Sleepout" gets one RPC and one row. That is the obvious next thing here, not a gap to work
+adding a thirteenth — `Elsewhere` is the escape hatch, and a property that genuinely needs
+"Boatshed" gets one RPC and one row. That is the obvious next thing here, not a gap to work
 around.
+
+**A second place is never a tag.** If someone asks for a "Bach" tag, the answer is
+`create_property`.
 
 ## Adding someone to a household
 
 `home.add_member_by_email`, against an account that already exists. No tokens, no email delivery,
 no pending state.
+
+It takes an optional `p_property_ids`. Omitted means every property in the household — right
+while there is one place, and wrong the moment there is a bach, so the client passes an explicit
+list once there is more than one.
 
 That's deliberate, not lazy. The retired product's `invite_user` wrote the invite row and
 returned — the RPC succeeded, the app toasted "Invite sent", the invite listed as pending, and

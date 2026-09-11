@@ -1,26 +1,30 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Household, HouseholdMember, Location, Profile, Property } from '../types';
-import { getDefaultProperty, getMembers, getLocations } from '../lib/supabase';
+import {
+  getDefaultPropertyId, getLocations, getMembers, getMyProperties,
+} from '../lib/supabase';
 
 /**
- * The household, the people in it, the property every snag hangs off, and the
- * location tags offered at capture.
+ * The household, the people in it, the places, and the tags for the place
+ * currently selected.
  *
- * These are loaded once rather than per screen because they change roughly
- * never — a two-person household adds a member once and then not again — and
- * because the capture screen needs the property id before it can save
- * anything. Waiting on a round trip at the moment someone is holding a broken
- * toilet seat is the one place latency actually costs something.
+ * Loaded once rather than per screen because none of it changes often, and
+ * because capture needs the property id before it can save anything. Waiting on
+ * a round trip at the moment someone is holding a broken toilet seat is the one
+ * place latency actually costs something.
  */
 interface HouseholdContextValue {
   household: Household;
   profile: Profile;
   members: HouseholdMember[];
-  /** Null only in the moment before the first load finishes. */
-  property: Property | null;
-  /** The location tags, in seeded order. */
+  /** Every place this person is linked to. One, until there's a bach. */
+  properties: Property[];
+  /** The place capture files against. Null only before the first load lands. */
+  activeProperty: Property | null;
+  /** Ignored when there is only one place to choose between. */
+  setActiveProperty: (propertyId: string) => void;
+  /** Tags for the active property, in seeded order. */
   locations: Location[];
-  /** Re-reads members, property and locations. */
   refresh: () => Promise<void>;
   /** Re-reads the household itself from App.tsx — after adding a member. */
   reloadAccount: () => Promise<void>;
@@ -40,19 +44,26 @@ export function HouseholdProvider({
   children: React.ReactNode;
 }) {
   const [members, setMembers] = useState<HouseholdMember[]>([]);
-  const [property, setProperty] = useState<Property | null>(null);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [activePropertyId, setActivePropertyId] = useState<string | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextMembers, nextProperty, nextLocations] = await Promise.all([
+      const [nextMembers, nextProperties] = await Promise.all([
         getMembers(household.id),
-        getDefaultProperty(household.id),
-        getLocations(household.id),
+        getMyProperties(),
       ]);
       setMembers(nextMembers);
-      setProperty(nextProperty);
-      setLocations(nextLocations);
+      setProperties(nextProperties);
+
+      // Keep the current selection if it survived; otherwise ask the server
+      // which place this person last actually filed against.
+      setActivePropertyId((current) =>
+        current && nextProperties.some((p) => p.id === current) ? current : null
+      );
+      const fallback = await getDefaultPropertyId(nextProperties);
+      setActivePropertyId((current) => current ?? fallback);
     } catch (err) {
       console.error('Failed to load household:', err);
     }
@@ -62,9 +73,41 @@ export function HouseholdProvider({
     refresh();
   }, [refresh]);
 
+  // Tags follow the selected place: a bach's are not a house's.
+  useEffect(() => {
+    if (!activePropertyId) {
+      setLocations([]);
+      return;
+    }
+    let cancelled = false;
+    getLocations(activePropertyId)
+      .then((next) => {
+        if (!cancelled) setLocations(next);
+      })
+      .catch((err) => console.error('Failed to load location tags:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [activePropertyId]);
+
+  const activeProperty = useMemo(
+    () => properties.find((p) => p.id === activePropertyId) ?? null,
+    [properties, activePropertyId]
+  );
+
   const value = useMemo(
-    () => ({ household, profile, members, property, locations, refresh, reloadAccount: onReload }),
-    [household, profile, members, property, locations, refresh, onReload]
+    () => ({
+      household,
+      profile,
+      members,
+      properties,
+      activeProperty,
+      setActiveProperty: setActivePropertyId,
+      locations,
+      refresh,
+      reloadAccount: onReload,
+    }),
+    [household, profile, members, properties, activeProperty, locations, refresh, onReload]
   );
 
   return <HouseholdContext.Provider value={value}>{children}</HouseholdContext.Provider>;

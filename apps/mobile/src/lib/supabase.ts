@@ -201,11 +201,25 @@ export const createHousehold = (name: string, propertyName?: string) =>
 
 export const getMembers = (householdId: string) => queries.getMembers(supabase, householdId);
 
-export const addMemberByEmail = (householdId: string, email: string) =>
-  queries.addMemberByEmail(supabase, householdId, email);
+export const addMemberByEmail = (householdId: string, email: string, propertyIds?: string[]) =>
+  queries.addMemberByEmail(supabase, householdId, email, propertyIds);
 
-export const getDefaultProperty = (householdId: string) =>
-  queries.getDefaultProperty(supabase, householdId);
+export const getMyProperties = () => queries.getMyProperties(supabase);
+
+export const getDefaultPropertyId = (properties: Parameters<typeof queries.getDefaultPropertyId>[1]) =>
+  queries.getDefaultPropertyId(supabase, properties);
+
+export const createProperty = (householdId: string, name: string) =>
+  queries.createProperty(supabase, householdId, name);
+
+export const renameProperty = (propertyId: string, name: string) =>
+  queries.renameProperty(supabase, propertyId, name);
+
+export const getPropertyMemberIds = (propertyId: string) =>
+  queries.getPropertyMemberIds(supabase, propertyId);
+
+export const setPropertyMember = (propertyId: string, profileId: string, linked: boolean) =>
+  queries.setPropertyMember(supabase, propertyId, profileId, linked);
 
 // ─── Snags ────────────────────────────────────────────────────────────────────
 
@@ -232,7 +246,7 @@ export const getComments = (snagId: string) => queries.getComments(supabase, sna
 export const addComment = (snagId: string, body: string) =>
   queries.addComment(supabase, snagId, body);
 
-export const getLocations = (householdId: string) => queries.getLocations(supabase, householdId);
+export const getLocations = (propertyId: string) => queries.getLocations(supabase, propertyId);
 
 // ─── Photos ───────────────────────────────────────────────────────────────────
 //

@@ -26,10 +26,12 @@ import { SnagPriority } from '../types';
  *   one put a keyboard between someone and the problem in front of them. The
  *   snag needs a photo *or* a description — one with neither is nothing, and
  *   the server says so in words rather than through a constraint name.
- * - **Location is a tag, not a field.** The chips are seeded per household, so
- *   they're full on the day the app is installed. A list derived from past use
- *   is empty exactly then, which is the day someone decides whether this is
+ * - **Location is a tag, not a field.** The chips are seeded per property, so
+ *   they're full on the day a place exists. A list derived from past use is
+ *   empty exactly then, which is the day someone decides whether this is
  *   quicker than saying it out loud.
+ * - **The place is a picker, and only when there is one to make.** A bach is a
+ *   property, not a tag: it has its own people and its own tags.
  * - **Priority is here, not in triage.** It is the one judgement only the
  *   person standing there can make — whether this is a today problem or a
  *   someday one. Two values, because a third would need thinking about.
@@ -38,7 +40,7 @@ import { SnagPriority } from '../types';
  * still belongs on the detail screen. Resist adding a fifth thing here.
  */
 export default function CaptureScreen() {
-  const { household, property, locations, refresh } = useHousehold();
+  const { household, properties, activeProperty, setActiveProperty, locations, refresh } = useHousehold();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
 
@@ -52,15 +54,15 @@ export default function CaptureScreen() {
 
   // Mirrors the server's rule so the button explains itself before it refuses.
   const hasSomething = photoCount > 0 || description.trim().length > 0;
-  const canSave = hasSomething && !!property && !photosBlocking && !saving;
+  const canSave = hasSomething && !!activeProperty && !photosBlocking && !saving;
 
   async function handleSave() {
-    if (!property) return;
+    if (!activeProperty) return;
     setSaving(true);
     try {
       const photoPaths = (await photoPicker.current?.getPhotoUrls()) ?? [];
       await createSnag({
-        propertyId: property.id,
+        propertyId: activeProperty.id,
         room,
         description: description.trim() || null,
         photoPaths,
@@ -91,6 +93,39 @@ export default function CaptureScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.heading}>What needs doing?</Text>
+
+        {/*
+          Only when there is somewhere else it could go. A picker offering one
+          option is a question with one answer, and the retired product's
+          equivalent taught the other half of this lesson: when it silently
+          picked for you, a report filed against the wrong place looked like a
+          permissions problem to whoever hit it.
+        */}
+        {properties.length > 1 ? (
+          <View style={styles.properties}>
+            {properties.map((candidate) => {
+              const active = activeProperty?.id === candidate.id;
+              return (
+                <Pressable
+                  key={candidate.id}
+                  onPress={() => setActiveProperty(candidate.id)}
+                  style={[styles.property, active && styles.propertyActive]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Icon
+                    name={active ? 'home' : 'home-outline'}
+                    size="sm"
+                    color={active ? Colors.white : Colors.textSecondary}
+                  />
+                  <Text style={[styles.propertyLabel, active && styles.propertyLabelActive]}>
+                    {candidate.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
 
         {/* The photo leads, because it is usually the whole report. */}
         <PhotoPicker
@@ -202,6 +237,25 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
   },
   optional: { fontWeight: Typography.regular, color: Colors.textMuted },
+  properties: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.lg },
+  property: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  propertyActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  propertyLabel: {
+    fontSize: Typography.base,
+    fontWeight: Typography.medium,
+    color: Colors.textSecondary,
+  },
+  propertyLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.xs },
   tag: {
     paddingHorizontal: Spacing.lg,

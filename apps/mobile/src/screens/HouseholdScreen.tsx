@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, ScrollView, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View, Text, TextInput, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,7 +13,9 @@ import Icon from '../components/Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
-import { addMemberByEmail } from '../lib/supabase';
+import {
+  addMemberByEmail, createProperty, getPropertyMemberIds, setPropertyMember,
+} from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 
 /**
@@ -27,18 +31,77 @@ import { showAlert } from '../lib/alert';
 export default function HouseholdScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { household, members, profile, refresh, reloadAccount } = useHousehold();
+  const { household, members, profile, properties, refresh, reloadAccount } = useHousehold();
   const { showToast } = useToast();
 
   const [email, setEmail] = useState('');
   const [adding, setAdding] = useState(false);
+  const [newPlace, setNewPlace] = useState('');
+  const [addingPlace, setAddingPlace] = useState(false);
+  /** property id -> the profile ids linked to it. */
+  const [links, setLinks] = useState<Record<string, string[]>>({});
+  const [busyLink, setBusyLink] = useState(false);
+
+  // Only meaningful once there is more than one place: with one, everybody in
+  // the household is on it and there is nothing to show.
+  const loadLinks = useCallback(async () => {
+    if (properties.length < 2) return;
+    try {
+      const pairs = await Promise.all(
+        properties.map(async (p) => [p.id, await getPropertyMemberIds(p.id)] as const)
+      );
+      setLinks(Object.fromEntries(pairs));
+    } catch (err) {
+      console.error('Failed to load property links:', err);
+    }
+  }, [properties]);
+
+  useEffect(() => {
+    loadLinks();
+  }, [loadLinks]);
+
+  async function handleAddPlace() {
+    const name = newPlace.trim();
+    if (!name) return;
+    setAddingPlace(true);
+    try {
+      await createProperty(household.id, name);
+      setNewPlace('');
+      await refresh();
+      showToast(`${name} added`);
+    } catch (err: any) {
+      showAlert("Couldn't add that place", err?.message ?? 'Please try again.');
+    } finally {
+      setAddingPlace(false);
+    }
+  }
+
+  async function handleToggleLink(propertyId: string, profileId: string, linked: boolean) {
+    setBusyLink(true);
+    try {
+      await setPropertyMember(propertyId, profileId, linked);
+      await loadLinks();
+      await refresh();
+    } catch (err: any) {
+      showAlert("Couldn't change that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusyLink(false);
+    }
+  }
 
   async function handleAdd() {
     const address = email.trim();
     if (!address) return;
     setAdding(true);
     try {
-      await addMemberByEmail(household.id, address);
+      // With one place everyone shares it, so the default (all properties) is
+      // right. With a bach it is not: someone added to the household should
+      // not silently land on every place, so the caller names them.
+      await addMemberByEmail(
+        household.id,
+        address,
+        properties.length > 1 ? properties.slice(0, 1).map((p) => p.id) : undefined
+      );
       setEmail('');
       await refresh();
       await reloadAccount();
@@ -71,9 +134,72 @@ export default function HouseholdScreen() {
         </Card>
 
         <Card elevation="md" style={styles.section}>
+          <Text style={styles.sectionTitle}>Places</Text>
+          <Text style={styles.sectionHint}>
+            A second place — a bach, a rental — keeps its own list, its own tags and its own
+            people.
+          </Text>
+          {properties.map((place) => (
+            <View key={place.id} style={styles.placeRow}>
+              <View style={styles.placeHeader}>
+                <Icon name="home-outline" size="md" color={Colors.primary} />
+                <Text style={styles.placeName}>{place.name}</Text>
+              </View>
+              {properties.length > 1 ? (
+                <View style={styles.linkRow}>
+                  {members.map((member) => {
+                    const linked = (links[place.id] ?? []).includes(member.profileId);
+                    return (
+                      <Pressable
+                        key={member.profileId}
+                        onPress={() => handleToggleLink(place.id, member.profileId, !linked)}
+                        disabled={busyLink}
+                        style={[styles.linkChip, linked && styles.linkChipOn]}
+                        accessibilityRole="switch"
+                        accessibilityState={{ checked: linked }}
+                      >
+                        <Icon
+                          name={linked ? 'checkmark-circle' : 'ellipse-outline'}
+                          size="sm"
+                          color={linked ? Colors.white : Colors.textMuted}
+                        />
+                        <Text style={[styles.linkLabel, linked && styles.linkLabelOn]}>
+                          {member.profileId === profile.id ? 'You' : member.displayName}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
+          ))}
+          <TextInput
+            style={styles.input}
+            value={newPlace}
+            onChangeText={setNewPlace}
+            placeholder="The bach"
+            placeholderTextColor={Colors.textMuted}
+            maxLength={80}
+            autoCapitalize="words"
+          />
+          <Button
+            label="Add a place"
+            variant="outline"
+            onPress={handleAddPlace}
+            loading={addingPlace}
+            disabled={!newPlace.trim() || addingPlace}
+            fullWidth
+            icon="add-outline"
+          />
+        </Card>
+
+        <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Add someone</Text>
           <Text style={styles.sectionHint}>
             They need to sign up first. Then add them with the address they used.
+            {properties.length > 1
+              ? ` They'll start on ${properties[0].name}; link them to anywhere else above.`
+              : ''}
           </Text>
           <View style={styles.addRow}>
             <TextInput
@@ -101,8 +227,9 @@ export default function HouseholdScreen() {
         <View style={styles.note}>
           <Icon name="information-circle-outline" size="sm" color={Colors.textMuted} />
           <Text style={styles.noteText}>
-            Everyone in a household can see and change everything. There are no permissions to
-            manage.
+            {properties.length > 1
+              ? 'Everyone linked to a place can see and change everything at that place. The only permission here is which places someone is on.'
+              : 'Everyone in a household can see and change everything. There are no permissions to manage.'}
           </Text>
         </View>
       </ScrollView>
@@ -129,6 +256,33 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
   },
   memberName: { fontSize: Typography.base, color: Colors.textPrimary },
+  placeRow: {
+    paddingVertical: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    gap: Spacing.sm,
+  },
+  placeHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  placeName: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  linkRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  linkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  linkChipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  linkLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
+  linkLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   addRow: { marginTop: Spacing.xs },
   input: {
     backgroundColor: Colors.background,

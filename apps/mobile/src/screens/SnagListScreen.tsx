@@ -33,7 +33,7 @@ const LENSES: { key: Lens; label: string; icon: React.ComponentProps<typeof Icon
 export default function SnagListScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { profile, locations } = useHousehold();
+  const { profile, properties, activeProperty, setActiveProperty, locations } = useHousehold();
 
   const [lens, setLens] = useState<Lens>('open');
   const [room, setRoom] = useState<string | null>(null);
@@ -43,7 +43,9 @@ export default function SnagListScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const { filter, sort } = useMemo<{ filter: SnagFilter; sort: SnagSort }>(() => {
-    const base: SnagFilter = { room };
+    // Scoped to one place when there is more than one; RLS already limits the
+    // set to places this person is linked to.
+    const base: SnagFilter = { room, propertyId: properties.length > 1 ? activeProperty?.id : null };
     switch (lens) {
       case 'mine':
         return { filter: { ...base, status: ['open', 'doing'], assigneeId: profile.id }, sort: 'priority' };
@@ -54,7 +56,7 @@ export default function SnagListScreen() {
       default:
         return { filter: { ...base, status: ['open', 'doing'] }, sort: 'priority' };
     }
-  }, [lens, room, profile.id]);
+  }, [lens, room, profile.id, properties.length, activeProperty?.id]);
 
   const load = useCallback(async () => {
     try {
@@ -82,11 +84,41 @@ export default function SnagListScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>The list</Text>
+        <Text style={styles.title}>{properties.length > 1 ? activeProperty?.name ?? 'The list' : 'The list'}</Text>
         <Text style={styles.count}>
           {snags.length} {snags.length === 1 ? 'item' : 'items'}
         </Text>
       </View>
+
+      {properties.length > 1 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+        >
+          {properties.map((candidate) => {
+            const active = activeProperty?.id === candidate.id;
+            return (
+              <Pressable
+                key={candidate.id}
+                onPress={() => setActiveProperty(candidate.id)}
+                style={[styles.chip, active && styles.chipActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <Icon
+                  name={active ? 'home' : 'home-outline'}
+                  size="sm"
+                  color={active ? Colors.white : Colors.textSecondary}
+                />
+                <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
+                  {candidate.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
 
       <ScrollView
         horizontal

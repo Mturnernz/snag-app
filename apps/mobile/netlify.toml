@@ -30,10 +30,13 @@
 # Deliberately different from the portal's in three places:
 #
 #   * camera=(self). This is the app, and photographing a snag is the whole
-#     point of it. Nothing uses it on web today — expo-camera does have a web
-#     implementation, but the app deliberately keeps it out of the web bundle
-#     (see CLAUDE.md and src/lib/camera.web.ts) — but denying it here is how a
-#     future web capture path fails silently rather than loudly.
+#     point of it. The web path doesn't actually need the directive —
+#     `launchCameraAsync` sets `capture="environment"` on a file input, which
+#     hands off to the OS camera rather than opening a getUserMedia stream — but
+#     denying it here is how a future in-page capture path would fail silently
+#     rather than loudly. `expo-camera` is deliberately absent: its module scope
+#     builds a blob: worker that pulls jsQR off a CDN, which this policy blocks,
+#     and a blocked import is not a runtime error you get told about.
 #   * blob: and data: in img-src, which the photo picker's local previews need
 #     before anything is uploaded.
 #   * blob: in connect-src, which is how a picked photo is *read*. On web,

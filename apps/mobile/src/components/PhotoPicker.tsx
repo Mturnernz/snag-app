@@ -1,5 +1,5 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -169,22 +169,6 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathPrefix, initialUris]);
 
-  function offerSource() {
-    // Three choices is more than a browser dialog can offer, and on web it
-    // doesn't need to: the file picker a library pick opens already includes
-    // the camera as a source. Asking first would be a dialog whose options the
-    // next dialog repeats.
-    if (Platform.OS === 'web') {
-      pickFromLibrary();
-      return;
-    }
-    showAlert('Add a photo', undefined, [
-      { text: 'Take Photo', onPress: takePhoto },
-      { text: 'Choose from Library', onPress: pickFromLibrary },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }
-
   async function pickFromLibrary() {
     const remaining = MAX_PHOTOS - photos.length;
     if (remaining <= 0) return;
@@ -223,14 +207,24 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
   }
 
   async function takePhoto() {
+    if (MAX_PHOTOS - photos.length <= 0) return;
+
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      showAlert('Permission required', 'Camera access is needed to take photos.');
+      showAlert('Camera access needed', 'Allow camera access to take a photo, or choose one from your library instead.');
       return;
     }
     // No allowsEditing — the camera's own retake/use-photo confirmation is
     // enough; a forced crop step after every shot was extra friction.
+    //
+    // `cameraType` is what makes this work in the browser, which is where the
+    // app is actually installed. expo-image-picker's web path renders a file
+    // input, and only `launchCameraAsync` sets `capture` on it — `back` maps to
+    // capture="environment", so a phone browser opens the rear camera instead
+    // of a file browser. Without it you get the gallery, which is the bug this
+    // replaced.
     const result = await ImagePicker.launchCameraAsync({
+      cameraType: ImagePicker.CameraType.back,
       quality: 1,
       exif: false,
     });
@@ -257,17 +251,36 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     <View style={styles.wrap}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
         {photos.length < MAX_PHOTOS && (
-          <TouchableOpacity
-            style={styles.addTile}
-            onPress={offerSource}
-            activeOpacity={0.7}
-            disabled={!pathPrefix}
-            accessibilityRole="button"
-            accessibilityLabel={photos.length === 0 ? `Add photos, up to ${MAX_PHOTOS}` : `Add another photo, ${photos.length} of ${MAX_PHOTOS} added`}
-          >
-            <Icon name="camera-outline" size="lg" color={Colors.primary} />
-            <Text style={styles.addTileLabel}>Add</Text>
-          </TouchableOpacity>
+          <>
+            {/*
+              Two tiles, not one behind a dialog. The camera is the common case
+              — you are standing in front of the thing — so it should not be a
+              second tap behind a question, and `showAlert` cannot offer a
+              three-way choice anyway (see lib/alert.ts).
+            */}
+            <TouchableOpacity
+              style={styles.addTile}
+              onPress={takePhoto}
+              activeOpacity={0.7}
+              disabled={!pathPrefix}
+              accessibilityRole="button"
+              accessibilityLabel={`Take a photo${photos.length > 0 ? `, ${photos.length} of ${MAX_PHOTOS} added` : ''}`}
+            >
+              <Icon name="camera-outline" size="lg" color={Colors.primary} />
+              <Text style={styles.addTileLabel}>Camera</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.addTile}
+              onPress={pickFromLibrary}
+              activeOpacity={0.7}
+              disabled={!pathPrefix}
+              accessibilityRole="button"
+              accessibilityLabel={`Choose from your library${photos.length > 0 ? `, ${photos.length} of ${MAX_PHOTOS} added` : ''}`}
+            >
+              <Icon name="images-outline" size="lg" color={Colors.primary} />
+              <Text style={styles.addTileLabel}>Library</Text>
+            </TouchableOpacity>
+          </>
         )}
         {photos.map((photo) => (
           <View key={photo.id} style={[styles.thumbWrap, photo.status === 'failed' && styles.thumbWrapFailed]}>

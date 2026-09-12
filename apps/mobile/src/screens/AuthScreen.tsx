@@ -1,356 +1,152 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  ScrollView,
-  Platform,
-  StyleSheet,
+  View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { signInWithEmail, signUpWithEmail, sendPasswordReset } from '../lib/supabase';
-import {
-  getPendingIntent, clearPendingIntent, PendingJoin, PendingCreate,
-} from '../lib/pendingIntent';
-import { Colors, Spacing, Typography, Radius, MIN_TOUCH_TARGET } from '../constants/theme';
 import Button from '../components/Button';
-import Card from '../components/Card';
 import Icon from '../components/Icon';
-import SignUpScreen from './SignUpScreen';
-import CreateOrgAccountScreen from './CreateOrgAccountScreen';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { signInWithEmail, signUpWithEmail, sendPasswordReset } from '../lib/supabase';
+import { showAlert } from '../lib/alert';
 
-type View_ = 'main' | 'signup' | 'signUpFlow' | 'createOrg';
+type Mode = 'signIn' | 'signUp';
 
-interface Props {
-  /** A join code from the `?join=` link on an org's QR poster. Opens the
-   *  sign-up stepper on that organisation instead of the sign-in form. */
-  initialJoinCode?: string | null;
-  onClearJoinCode?: () => void;
-}
-
-export default function AuthScreen({ initialJoinCode, onClearJoinCode }: Props) {
+export default function AuthScreen() {
   const insets = useSafeAreaInsets();
-  const [view, setView] = useState<View_>(initialJoinCode ? 'signUpFlow' : 'main');
+  const [mode, setMode] = useState<Mode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
-  const [offerSignup, setOfferSignup] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const [pendingJoin, setPendingJoinState] = useState<PendingJoin | null>(null);
-  const [pendingCreate, setPendingCreateState] = useState<PendingCreate | null>(null);
+  const canSubmit = email.trim().length > 0 && password.length >= 6 && !busy;
 
-  useEffect(() => {
-    getPendingIntent().then(({ join, create }) => {
-      setPendingJoinState(join);
-      setPendingCreateState(create);
-    });
-  }, []);
+  async function handleSubmit() {
+    setBusy(true);
+    try {
+      const { error } =
+        mode === 'signIn'
+          ? await signInWithEmail(email.trim(), password)
+          : await signUpWithEmail(email.trim(), password);
 
-  async function handleSignIn() {
-    if (!email.trim() || !password) {
-      setMessage({ text: 'Please enter your email and password.', error: true });
-      return;
+      if (error) {
+        showAlert(mode === 'signIn' ? "Couldn't sign in" : "Couldn't sign up", error.message);
+      }
+      // On success App.tsx's auth listener takes over — nothing to do here.
+    } finally {
+      setBusy(false);
     }
-    setLoading(true);
-    setMessage(null);
-    setOfferSignup(false);
-    const { error } = await signInWithEmail(email.trim(), password);
-    setLoading(false);
-    if (error) {
-      // Supabase returns a generic "Invalid login credentials" whether the
-      // password is wrong or no account exists — offer sign-up either way.
-      setMessage({ text: "We couldn't sign you in. Check your details, or create an account.", error: true });
-      setOfferSignup(true);
-    }
-    // On success the auth listener in App.tsx takes over.
   }
 
   async function handleForgotPassword() {
-    if (!email.trim()) {
-      setMessage({ text: 'Enter your email address first, then tap this again.', error: true });
+    const address = email.trim();
+    if (!address) {
+      showAlert('Your email first', 'Enter your email address and we’ll send you a reset link.');
       return;
     }
-    setLoading(true);
-    setMessage(null);
-    setOfferSignup(false);
-    // The result is deliberately not inspected for "no such account": saying so
-    // would turn this into a way of finding out who has an account.
-    await sendPasswordReset(email.trim());
-    setLoading(false);
-    setMessage({
-      text: 'If that address has an account, a link to set a new password is on its way. It opens in your browser.',
-      error: false,
-    });
-  }
-
-  async function handleSignUp() {
-    if (!email.trim() || !password) {
-      setMessage({ text: 'Please enter your email and a password.', error: true });
-      return;
+    setBusy(true);
+    try {
+      // The link lands on the portal's /reset-password, not in this app — see
+      // sendPasswordReset in lib/supabase.ts for why it has to be a plain web
+      // page rather than a screen here.
+      const { error } = await sendPasswordReset(address);
+      if (error) showAlert("Couldn't send that", error.message);
+      else showAlert('Check your email', `We've sent a reset link to ${address}.`);
+    } finally {
+      setBusy(false);
     }
-    setLoading(true);
-    setMessage(null);
-    const { error } = await signUpWithEmail(email.trim(), password);
-    setLoading(false);
-    if (error) {
-      setMessage({ text: error.message ?? 'Could not create your account.', error: true });
-      return;
-    }
-    // Email confirmation is off, so signUp returns a live session and App.tsx
-    // has already moved on by the time this renders. It stays as the fallback
-    // for confirmation being switched back on — but it no longer *asserts*
-    // that a confirmation email is coming, which is what it used to tell every
-    // new user while none was ever sent.
-    setMessage({ text: 'Account created. Signing you in…', error: false });
-    setView('main');
   }
-
-  function handleClearIntent() {
-    clearPendingIntent();
-    setPendingJoinState(null);
-    setPendingCreateState(null);
-  }
-
-  // ── Sub-views ────────────────────────────────────────────────────────────
-
-  if (view === 'signUpFlow') {
-    return (
-      <SignUpScreen
-        initialCode={initialJoinCode ?? undefined}
-        onBack={() => { onClearJoinCode?.(); setView('main'); }}
-        onDone={(msg) => {
-          onClearJoinCode?.();
-          getPendingIntent().then(({ join }) => setPendingJoinState(join));
-          setMessage({ text: msg, error: false });
-          setView('main');
-        }}
-      />
-    );
-  }
-
-  if (view === 'createOrg') {
-    return (
-      <CreateOrgAccountScreen
-        onBack={() => setView('main')}
-        onDone={(msg) => {
-          getPendingIntent().then(({ create }) => setPendingCreateState(create));
-          setMessage({ text: msg, error: false });
-          setView('main');
-        }}
-      />
-    );
-  }
-
-  // Plain sign-up (no org context) — offered after a failed sign-in attempt.
-  if (view === 'signup') {
-    return (
-      <KeyboardAvoidingView
-        style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
-          <Text style={styles.appName}>Snag</Text>
-          <Text style={styles.heading}>Create your account</Text>
-
-          <View style={styles.form}>
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              placeholderTextColor={Colors.textMuted}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor={Colors.textMuted}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={handleSignUp}
-            />
-            {message && (
-              <Text style={[styles.message, message.error ? styles.messageError : styles.messageSuccess]}>
-                {message.text}
-              </Text>
-            )}
-            <Button label="Create Account" onPress={handleSignUp} loading={loading} fullWidth style={styles.submitButton} />
-          </View>
-
-          <TouchableOpacity onPress={() => { setView('main'); setMessage(null); }}>
-            <Text style={styles.switchText}>Already have an account? Sign in</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    );
-  }
-
-  // ── Main sign-in view ────────────────────────────────────────────────────
-
-  const intentBanner = pendingJoin
-    ? `You're joining ${pendingJoin.orgName} — sign in to continue.`
-    : pendingCreate
-      ? `Sign in to finish setting up ${pendingCreate.orgName}.`
-      : null;
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
-        <Text style={styles.appName}>Snag</Text>
-        <Text style={styles.tagline}>Workplace issue reporting</Text>
-
-        {intentBanner && (
-          <View style={styles.intentBanner}>
-            <Icon name={pendingJoin ? 'business-outline' : 'sparkles-outline'} size="sm" color={Colors.primary} />
-            <Text style={styles.intentBannerText}>{intentBanner}</Text>
-            <TouchableOpacity onPress={handleClearIntent} hitSlop={8}>
-              <Icon name="close" size="sm" color={Colors.textMuted} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Option 1: Sign in */}
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor={Colors.textMuted}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor={Colors.textMuted}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            returnKeyType="done"
-            onSubmitEditing={handleSignIn}
-          />
-          {message && (
-            <Text style={[styles.message, message.error ? styles.messageError : styles.messageSuccess]}>
-              {message.text}
-            </Text>
-          )}
-          <Button label="Sign In" onPress={handleSignIn} loading={loading} fullWidth style={styles.submitButton} />
-          {offerSignup && (
-            <Button label="Create an account" variant="outline" onPress={() => { setView('signup'); setMessage(null); }} fullWidth />
-          )}
-          <TouchableOpacity onPress={handleForgotPassword} disabled={loading} style={styles.forgotButton}>
-            <Text style={styles.forgotText}>Forgot your password?</Text>
-          </TouchableOpacity>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.xxxl }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.brand}>
+          <Icon name="home" size="xxl" color={Colors.primary} />
+          <Text style={styles.title}>Snag</Text>
+          <Text style={styles.tagline}>The list of things that need doing</Text>
         </View>
 
-        {/* Options 2 & 3: Scan QR / Create organisation */}
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>New to Snag?</Text>
-          <View style={styles.dividerLine} />
-        </View>
+        <TextInput
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+          placeholder="Email"
+          placeholderTextColor={Colors.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          inputMode="email"
+          textContentType="emailAddress"
+        />
 
-        <TouchableOpacity onPress={() => setView('signUpFlow')} activeOpacity={0.85}>
-          <Card variant="elevated" style={styles.optionCard}>
-            <Icon name="person-add-outline" size="xl" color={Colors.primary} />
-            <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Sign Up</Text>
-              <Text style={styles.optionDesc}>Join your workplace with a company code or QR scan</Text>
-            </View>
-          </Card>
-        </TouchableOpacity>
+        <TextInput
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+          placeholder="Password"
+          placeholderTextColor={Colors.textMuted}
+          secureTextEntry
+          autoCapitalize="none"
+          textContentType={mode === 'signIn' ? 'password' : 'newPassword'}
+        />
 
-        <TouchableOpacity onPress={() => setView('createOrg')} activeOpacity={0.85}>
-          <Card variant="elevated" style={styles.optionCard}>
-            <Icon name="business-outline" size="xl" color={Colors.primary} />
-            <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Create an organisation</Text>
-              <Text style={styles.optionDesc}>Set up Snag for your workplace</Text>
-            </View>
-          </Card>
-        </TouchableOpacity>
+        <Button
+          label={mode === 'signIn' ? 'Sign in' : 'Create account'}
+          onPress={handleSubmit}
+          loading={busy}
+          disabled={!canSubmit}
+          fullWidth
+          style={styles.submit}
+        />
+
+        {mode === 'signIn' ? (
+          <Pressable onPress={handleForgotPassword} style={styles.link} disabled={busy}>
+            <Text style={styles.linkText}>Forgot your password?</Text>
+          </Pressable>
+        ) : null}
+
+        <Pressable
+          onPress={() => setMode(mode === 'signIn' ? 'signUp' : 'signIn')}
+          style={styles.link}
+          disabled={busy}
+        >
+          <Text style={styles.linkText}>
+            {mode === 'signIn' ? 'No account yet? Create one' : 'Already have an account? Sign in'}
+          </Text>
+        </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  inner: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.xl,
-    gap: Spacing.lg,
-  },
-  appName: {
-    fontSize: Typography.xxxl + 8,
-    fontWeight: Typography.bold,
-    color: Colors.primary,
-    textAlign: 'center',
-  },
-  tagline: {
-    fontSize: Typography.base,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    marginTop: -Spacing.md,
-  },
-  heading: {
-    fontSize: Typography.xl,
+  flex: { flex: 1, backgroundColor: Colors.background },
+  content: { padding: Spacing.xl, gap: Spacing.md },
+  brand: { alignItems: 'center', gap: Spacing.xs, marginBottom: Spacing.xxl },
+  title: {
+    fontSize: Typography.xxxl,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
-    textAlign: 'center',
   },
-  intentBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Colors.primaryLight,
-    borderRadius: Radius.button,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  intentBannerText: { flex: 1, fontSize: Typography.sm, color: Colors.textPrimary },
-  form: { gap: Spacing.md },
+  tagline: { fontSize: Typography.base, color: Colors.textSecondary },
   input: {
-    height: MIN_TOUCH_TARGET,
     backgroundColor: Colors.surface,
-    borderRadius: Radius.input,
     borderWidth: 1,
     borderColor: Colors.border,
-    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.input,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     fontSize: Typography.base,
     color: Colors.textPrimary,
+    minHeight: MIN_TOUCH_TARGET,
   },
-  message: {
-    fontSize: Typography.sm,
-    textAlign: 'center',
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.button,
-  },
-  messageError: { color: Colors.danger, backgroundColor: Colors.priority.highBg },
-  messageSuccess: { color: Colors.success, backgroundColor: Colors.successBg },
-  submitButton: { marginTop: Spacing.sm },
-  switchText: { fontSize: Typography.sm, color: Colors.primary, textAlign: 'center' },
-  forgotButton: { alignSelf: 'center', minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
-  forgotText: { fontSize: Typography.sm, color: Colors.textSecondary },
-  divider: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginTop: Spacing.sm },
-  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
-  dividerText: { fontSize: Typography.sm, color: Colors.textMuted },
-  optionCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  optionText: { flex: 1, gap: 2 },
-  optionTitle: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
-  optionDesc: { fontSize: Typography.sm, color: Colors.textSecondary },
+  submit: { marginTop: Spacing.sm },
+  link: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignItems: 'center' },
+  linkText: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.medium },
 });

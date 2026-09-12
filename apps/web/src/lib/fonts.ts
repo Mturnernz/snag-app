@@ -1,6 +1,6 @@
 import localFont from 'next/font/local';
 
-// Self-hosted IBM Plex — same identity as SNAG_WEB_APP_PLAN.md's own
+// Self-hosted IBM Plex.
 // artifact (a technical, legible face pair that fits a compliance/H&S
 // product; deliberately shared across SNAG's internal and external
 // surfaces rather than picked twice). next/font/local subsets and

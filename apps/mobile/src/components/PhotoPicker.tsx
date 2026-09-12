@@ -49,29 +49,24 @@ export interface PhotoPickerHandle {
    *  onBlockingChange), so every remaining photo here has already
    *  succeeded. */
   getPhotoUrls: () => Promise<string[]>;
-  /** Raw local URIs of the current picks, independent of upload state — used
-   *  to carry photos over to another PhotoPicker instance (e.g. switching
-   *  from the niggle form into the serious-incident flow). */
+  /** Raw local URIs of the current picks, independent of upload state. */
   getLocalUris: () => string[];
   reset: () => void;
 }
 
 interface Props {
-  /** Storage folder prefix required by the bucket's RLS policies: the org id
-   *  for members, or the user's own id for public submissions. Uploads wait
-   *  until this is known. */
+  /** Storage folder prefix required by the bucket's RLS policies: the
+   *  household id. `home-photos` is laid out as `<household_id>/<file>` and
+   *  the policy reads that first segment, so this is not cosmetic. Uploads
+   *  wait until it is known. */
   pathPrefix: string | null;
-  /** Storage bucket to upload into. Defaults to snag-photos; the investigation
-   *  evidence picker passes 'snag-evidence'. */
+  /** Storage bucket to upload into. Defaults to home-photos. */
   bucket?: string;
-  /** True while offline — skip the eager upload and just stage the local
-   *  URI (status 'success', no path yet) so a picked photo doesn't sit
-   *  permanently 'failed' with no connectivity to retry against. The
-   *  offline queue re-reads these via getLocalUris() and uploads them
-   *  itself once connectivity returns. */
+  /** True while offline — skip the eager upload and just stage the local URI
+   *  (status 'success', no path yet) so a picked photo doesn't sit permanently
+   *  'failed' with no connectivity to retry against. */
   deferUpload?: boolean;
-  /** Local URIs to pre-load on mount (once pathPrefix is known), e.g. photos
-   *  carried over from another report flow. Only seeded once. */
+  /** Local URIs to pre-load on mount, once pathPrefix is known. Seeded once. */
   initialUris?: string[];
   /** True while any photo is uploading OR sits in a failed state needing the
    *  user's attention (retry or remove) — callers should disable Submit
@@ -79,8 +74,6 @@ interface Props {
    *  from what gets submitted. */
   onBlockingChange?: (blocking: boolean) => void;
   onPhotosChange?: (count: number) => void;
-  /** Tightens the empty state's padding for a form that has to fit one
-   *  screen (the niggle report). Nothing else about it changes. */
 }
 
 const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, deferUpload, initialUris, onBlockingChange, onPhotosChange }, ref) => {

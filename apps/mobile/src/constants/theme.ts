@@ -29,18 +29,34 @@ export const Colors = {
   // is not a rounding error. apps/web mirrors these and its axe suite fails
   // if either regresses.
   status: {
-    flagged: '#3B82F6',
-    flaggedFg: '#1D4ED8',
-    flaggedBg: '#EFF6FF',
-    inProgress: '#F59E0B',
-    inProgressFg: '#B45309',
-    inProgressBg: '#FFFBEB',
-    resolved: '#10B981',
-    resolvedFg: '#047857',
-    resolvedBg: '#ECFDF5',
-    rcaPending: '#DC2626',
-    rcaPendingFg: '#B91C1C',
-    rcaPendingBg: '#FEE2E2',
+    open: '#3B82F6',
+    openFg: '#1D4ED8',
+    openBg: '#EFF6FF',
+    doing: '#F59E0B',
+    doingFg: '#B45309',
+    doingBg: '#FFFBEB',
+    done: '#10B981',
+    doneFg: '#047857',
+    doneBg: '#ECFDF5',
+  },
+
+  // Effort — deliberately neutral. Effort answers "can I finish this today",
+  // which is not an alarm, so it must never compete with priority or due
+  // state for attention on the same card.
+  effort: {
+    fg: '#4B5563',
+    bg: '#F3F4F6',
+  },
+
+  // Due state. Overdue is the one thing on a household list that has actually
+  // earned red — it is a fact, not a judgement about importance.
+  due: {
+    overdueFg: '#B91C1C',
+    overdueBg: '#FEE2E2',
+    soonFg: '#B45309',
+    soonBg: '#FFFBEB',
+    scheduledFg: '#4B5563',
+    scheduledBg: '#F3F4F6',
   },
 
   // Priority colours — only "high" carries an alert colour; low/medium are
@@ -48,36 +64,8 @@ export const Colors = {
   priority: {
     high: '#EF4444',
     highBg: '#FEF2F2',
-    medium: '#6B7280',
-    mediumBg: '#F3F4F6',
-    low: '#9CA3AF',
+    low: '#6B7280',
     lowBg: '#F3F4F6',
-  },
-
-  // Category pill — muted background tones
-  category: {
-    niggle: '#6B7280',
-    niggleBg: '#F3F4F6',
-    brokenEquipment: '#B45309',
-    brokenEquipmentBg: '#FEF3C7',
-    healthAndSafety: '#DC2626',
-    healthAndSafetyBg: '#FEE2E2',
-    other: '#7C3AED',
-    otherBg: '#EDE9FE',
-  },
-
-  // Relevance reasons — why a snag surfaced in a member's default "Relevant
-  // to me" feed (IssueListScreen). Distinct from status/category colours
-  // since they answer "why is this here" rather than describing the snag.
-  relevance: {
-    rcaPending: '#DC2626',
-    rcaPendingBg: '#FEE2E2',
-    assigned: '#2563EB',
-    assignedBg: '#DBEAFE',
-    tagged: '#7C3AED',
-    taggedBg: '#EDE9FE',
-    reported: '#6B7280',
-    reportedBg: '#F3F4F6',
   },
 
   // Success — save confirmations, positive vote state, "copied" feedback
@@ -85,13 +73,6 @@ export const Colors = {
   successFg: '#15803D',
   successBg: '#F0FDF4',
   successBorder: '#BBF7D0',
-
-  // Serious / incident lane identity colour — reserved exclusively for the
-  // health & safety category and the incident report flow. Never reused for
-  // "priority" so it can't collide with priority.high.
-  serious: '#DC2626',
-  seriousFg: '#B91C1C',
-  seriousBg: '#FEE2E2',
 
   white: '#FFFFFF',
   black: '#000000',
@@ -103,42 +84,6 @@ export const Colors = {
   // text colour against, so anything sitting on one gets this behind it and
   // white on top.
   photoOverlay: 'rgba(17, 24, 39, 0.75)',
-};
-
-// Work group tile colours — a curated palette an admin/supervisor picks from
-// rather than a freeform colour picker, so tiles always stay legible with
-// white icon/label text on top.
-export const WorkGroupPalette = [
-  '#2563EB', // blue
-  '#DC2626', // red
-  '#16A34A', // green
-  '#D97706', // amber
-  '#7C3AED', // purple
-  '#0891B2', // cyan
-  '#DB2777', // pink
-  '#4B5563', // slate
-];
-
-// Card alert borders — a deliberate, narrow exception to "elevated cards
-// drop their border": severity/kind-driven borders that make injury,
-// critical, and improvement snags immediately scannable in the list, layered
-// on top of the card's normal shadow rather than replacing it.
-export const CardAlertBorder = {
-  injury: Colors.black,
-  critical: Colors.priority.high,
-  improvement: Colors.category.other,
-};
-
-// The other half of the alert border. The border alone is the one place on the
-// card where colour is the only signal — which the rest of the design system
-// forbids — so each border colour also gets a glyph, sat on the photo's
-// bottom-left corner where nothing else on the card is competing for space.
-// The icons have to be distinguishable from each other in monochrome; that is
-// the whole point of them.
-export const CardAlertGlyph: Record<keyof typeof CardAlertBorder, 'medkit-outline' | 'alert-circle-outline' | 'bulb-outline'> = {
-  injury: 'medkit-outline',
-  critical: 'alert-circle-outline',
-  improvement: 'bulb-outline',
 };
 
 export const Radius = {

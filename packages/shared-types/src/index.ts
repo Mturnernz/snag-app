@@ -1,370 +1,205 @@
-// ─── Enums (mirroring Snagv1's real Postgres enums) ──────────────────────────
+/**
+ * The canonical types for Snag, shared by every client.
+ *
+ * These mirror the `home` schema (supabase/migrations/20260911090000_home_schema.sql).
+ * `apps/mobile/src/types/index.ts` re-exports this package; don't add types there.
+ *
+ * The retired B2B model — lanes, severities, investigations, work groups, sites,
+ * roles — is gone. It is recoverable from git at 604a62c if ever needed.
+ */
 
-export type SnagKind = 'fixit' | 'improvement' | 'hazard' | 'incident';
-export type SnagLane = 'niggle' | 'serious'; // generated column, read-only
-export type SnagSeverity = 'minor' | 'moderate' | 'injury' | 'critical';
-export type SnagStatus = 'flagged' | 'in_progress' | 'resolved' | 'rca_pending';
-export type ChecklistStep =
-  | 'make_safe'
-  | 'preserve_scene'
-  | 'capture_evidence'
-  | 'identify_witnesses'
-  | 'find_root_cause';
-export type UserRole = 'worker' | 'supervisor' | 'officer_admin';
-// Why a snag surfaced in the signed-in member's default "Relevant to me"
-// feed — computed client-side (IssueListScreen), not a real DB column.
-// Ordered most to least actionable; a snag matching more than one reason
-// shows only the first that applies.
-export type SnagRelevanceReason = 'rca_pending' | 'assigned' | 'tagged' | 'reported';
-export type InviteStatus = 'pending' | 'accepted' | 'revoked';
-export type VoteValue = 1 | -1;
+// ---------------------------------------------------------------- enums
 
-// ─── Database row types ──────────────────────────────────────────────────────
+export type SnagStatus = 'open' | 'doing' | 'done';
+export type SnagPriority = 'high' | 'low';
+export type SnagEffort = 'quick' | 'half_day' | 'big_job';
 
-export interface Organisation {
+/**
+ * Unused by the UI in v1 — both members are owners and nothing gates on this.
+ * It exists so a shared bach (a family reports, the owner fixes) doesn't need a
+ * backfill later. See SNAG_HOME_PIVOT_REVIEW.md.
+ */
+export type MemberRole = 'owner' | 'member';
+
+// ---------------------------------------------------------------- labels
+//
+// One vocabulary, so a label can't drift between the list, the detail screen
+// and the filter bar.
+
+export const STATUS_LABELS: Record<SnagStatus, string> = {
+  open: 'Open',
+  doing: 'Doing',
+  done: 'Done',
+};
+
+export const PRIORITY_LABELS: Record<SnagPriority, string> = {
+  high: 'High',
+  low: 'Low',
+};
+
+/**
+ * Deliberately phrased as time, not size: the question these answer is "can I
+ * finish this today", which is what the weekend view is filtering on.
+ */
+export const EFFORT_LABELS: Record<SnagEffort, string> = {
+  quick: 'Under an hour',
+  half_day: 'Half a day',
+  big_job: 'Big job',
+};
+
+export const EFFORT_SHORT_LABELS: Record<SnagEffort, string> = {
+  quick: 'Quick',
+  half_day: 'Half day',
+  big_job: 'Big job',
+};
+
+export const STATUS_ORDER: SnagStatus[] = ['open', 'doing', 'done'];
+export const PRIORITY_ORDER: SnagPriority[] = ['high', 'low'];
+export const EFFORT_ORDER: SnagEffort[] = ['quick', 'half_day', 'big_job'];
+
+/**
+ * Offered when someone sets a repeat. Free-form days are still accepted by the
+ * RPC; these are just the intervals a house actually runs on.
+ */
+export const REPEAT_PRESETS: { days: number; label: string }[] = [
+  { days: 30, label: 'Monthly' },
+  { days: 90, label: 'Every 3 months' },
+  { days: 182, label: 'Every 6 months' },
+  { days: 365, label: 'Yearly' },
+];
+
+// ---------------------------------------------------------------- rows
+
+export interface Household {
   id: string;
   name: string;
-  industry: string | null;
-  plan_tier: string;
-  join_code: string;
-  is_public: boolean;
-  public_intake_site_id: string | null;
-  created_at: string;
-  is_active: boolean;
-}
-
-export interface Site {
-  id: string;
-  org_id: string;
-  name: string;
-  location: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 export interface Profile {
   id: string;
-  org_id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  created_at: string;
-  has_seen_onboarding?: boolean;
-  organisation?: Organisation;
+  displayName: string;
+  createdAt: string;
 }
 
-export interface Invite {
+export interface HouseholdMember {
+  householdId: string;
+  profileId: string;
+  displayName: string;
+  role: MemberRole;
+}
+
+/**
+ * A place — the house, and later the bach.
+ *
+ * A property is not a location tag. Tags say where in a place something is;
+ * a property is the place, has its own people, and its own tag list. The
+ * picker renders only when someone is linked to more than one, so a
+ * single-property household never sees the concept at all.
+ */
+export interface Property {
   id: string;
-  org_id: string;
-  site_id: string | null;
-  email: string;
-  role: UserRole;
-  token: string;
-  invited_by: string;
-  status: InviteStatus;
-  created_at: string;
-  accepted_at: string | null;
-  expires_at: string;
+  householdId: string;
+  name: string;
+  /** How many people are linked to it. Only shown when there's a choice. */
+  memberCount?: number;
+}
+
+/**
+ * A location tag offered at capture, scoped to one property.
+ *
+ * Seeded per property so the chips are full the moment a place exists — which
+ * is the day someone decides whether it's worth using. A list derived from
+ * past use is empty exactly then. Per property rather than per household
+ * because a bach has a boatshed and a house has a laundry.
+ */
+export interface Location {
+  id: string;
+  propertyId: string;
+  name: string;
+  sortOrder: number;
 }
 
 export interface Snag {
   id: string;
   reference: string;
-  org_id: string;
-  site_id: string;
-  reporter_id: string;
-  kind: SnagKind;
-  lane: SnagLane;
-  severity: SnagSeverity | null;
+  householdId: string;
+  propertyId: string;
+
+  /**
+   * Capture — four taps and, at most, one short line.
+   *
+   * There is no title: a photo of a broken toilet seat says what a title would,
+   * and requiring one put a keyboard between someone and the thing in front of
+   * them. A snag needs a photo OR a description; one with neither is nothing.
+   */
+  room: string | null;
+  photoPaths: string[];
   description: string | null;
-  photo_path: string | null;
-  photo_paths: string[];
-  occurred_at: string;
-  latitude: number | null;
-  longitude: number | null;
+  /** Set at capture — the one judgement only the person standing there can make. */
+  priority: SnagPriority | null;
+
+  /** Triage — added later, from the list. */
   status: SnagStatus;
-  created_at: string;
-  owner_id: string | null;
-  assigned_at: string | null;
-  resolution_note: string | null;
-  retained_until: string;
-  is_notifiable: boolean;
-  notifiable_marked_by: string | null;
-  notifiable_marked_at: string | null;
-  notifying_org_id: string | null;
-  notifying_pcbu_note: string | null;
-  notifying_org_name?: string | null;
-  is_public_submission?: boolean;
-  resolved_by: string | null;
-  resolved_at: string | null;
-  confirmed_by: string | null;
-  confirmed_at: string | null;
-  escalated_by: string | null;
-  escalated_at: string | null;
-  approver_id: string | null;
-  // Root-cause analysis is post-resolution work (assign_rca requires
-  // status = 'resolved'), so "resolved with no RCA" is an open obligation, not
-  // a finished snag. A waiver is how a supervisor records that no formal
-  // 5-Whys is needed — without it, every resolved serious snag would count as
-  // outstanding forever. Cleared by assign_rca and on reopen.
-  rca_waived_by?: string | null;
-  rca_waived_at?: string | null;
-  rca_waived_reason?: string | null;
-  // A serious snag reaches `resolved` one of two ways: with every resolve-gate
-  // condition met, or with a supervisor's written reason why not. These record
-  // the second — who decided, when, and which conditions were outstanding at
-  // that moment (the keys of seriousResolveGate, snapshotted). Null on a snag
-  // closed the ordinary way, and cleared on reopen.
-  resolution_exception_reason?: string | null;
-  resolution_exception_by?: string | null;
-  resolution_exception_by_name?: string | null;
-  resolution_exception_at?: string | null;
-  resolution_exception_unmet?: string[] | null;
-  // Merge (parent/child) — a status change on a parent cascades to every
-  // child; a child otherwise behaves like an ordinary snag.
-  parent_snag_id?: string | null;
-  merged_by?: string | null;
-  merged_at?: string | null;
-  child_count?: number;
-  // Computed client-side (IssueListScreen) — why this snag appears in the
-  // "Relevant to me" feed. See SnagRelevanceReason.
-  relevance_reason?: SnagRelevanceReason | null;
-  // Joined relations (populated when read via the frontend's own queries)
-  reporter?: Pick<Profile, 'id' | 'name'>;
-  owner?: Pick<Profile, 'id' | 'name'> | null;
-  site?: Pick<Site, 'id' | 'name'>;
-  // From snags_with_details
-  reporter_name?: string;
-  reporter_email?: string;
-  owner_name?: string | null;
-  site_name?: string;
-  checklist_completed_count?: number;
-  evidence_count?: number;
-  open_corrective_action_count?: number;
-  comment_count?: number;
-  vote_score?: number;
-  upvote_count?: number;
-  downvote_count?: number;
+  effort: SnagEffort | null;
+  needsParts: boolean;
+  dueAt: string | null;
+  repeatDays: number | null;
+  assigneeId: string | null;
+
+  reporterId: string;
+  createdAt: string;
+  updatedAt: string;
+  /** A repeating snag never reaches 'done', so this is where completion lands. */
+  lastDoneAt: string | null;
+  doneAt: string | null;
+
+  /** Joined in by `home.snags_with_details`. */
+  propertyName: string;
+  reporterName: string;
+  assigneeName: string | null;
+  commentCount: number;
 }
 
 export interface Comment {
   id: string;
-  snag_id: string;
-  author_id: string;
+  snagId: string;
+  authorId: string;
+  authorName: string;
   body: string;
-  created_at: string;
-  author?: Pick<Profile, 'id' | 'name'>;
+  createdAt: string;
 }
 
-export interface Vote {
-  id: string;
-  snag_id: string;
-  user_id: string;
-  value: VoteValue;
-  created_at: string;
+// ---------------------------------------------------------------- filtering
+
+export interface SnagFilter {
+  /** Which place. Omitted means every property you're linked to. */
+  propertyId?: string | null;
+  status?: SnagStatus[];
+  room?: string | null;
+  assigneeId?: string | null;
+  priority?: SnagPriority[];
+  /** Only items with a due date at or before now. */
+  dueOnly?: boolean;
+  /** Ceiling for the weekend view: everything at or under this effort. */
+  maxEffort?: SnagEffort;
+  needsParts?: boolean;
 }
 
-// ─── Investigation (serious lane) ────────────────────────────────────────────
+export type SnagSort = 'newest' | 'oldest' | 'due' | 'priority';
 
-export interface WitnessStatement {
-  id: string;
-  snag_id: string;
-  witness_name: string;
-  statement_text: string;
-  taken_by: string;
-  taken_at: string;
-  /** Signed sheet, scan, or a copy taken from the org document library — an
-   *  object in snag-evidence, alongside the typed statement rather than
-   *  instead of it. */
-  media_path?: string | null;
-  locked?: boolean;
-}
-
-export interface EvidenceItem {
-  id: string;
-  snag_id: string;
-  corrective_action_id?: string | null;
-  uploaded_by: string;
-  media_path: string;
-  caption: string | null;
-  captured_at: string;
-  sort_index: number;
-}
-
-export type CorrectiveActionStatus = 'open' | 'done';
-
-// "Closed" for the purposes of the resolve gate means done AND verified —
-// see update_snag_status. A done-but-unverified action still blocks resolve.
-export interface CorrectiveAction {
-  id: string;
-  snag_id: string;
-  description: string;
-  owner_id: string;
-  owner_name?: string;
-  due_date: string;
-  status: CorrectiveActionStatus;
-  created_at: string;
-  completed_at: string | null;
-  verified_by: string | null;
-  verifier_name?: string;
-  verified_at: string | null;
-}
-
-// ─── Navigation param lists ──────────────────────────────────────────────────
-
-/**
- * The collapsible sections of a serious snag, in the order they're worked.
- *
- * Shared rather than local to the screen because it is also a deep-link
- * target: a notification about an RCA has to be able to say *which* part of
- * the snag it is about, and apps/web's portal accepts the same values as its
- * `?step=` query param. One vocabulary, both clients.
- */
-export type SnagStepKey =
-  | 'notifiable'
-  | 'checklist'
-  | 'witnesses'
-  | 'evidence'
-  | 'rootCause'
-  | 'correctiveActions'
-  // Document mode only: shown in place of rootCause/correctiveActions when the
-  // organisation runs its own investigation process.
-  | 'investigationDocument'
-  | 'rca'
-  | 'debrief';
-
-export const SNAG_STEP_KEYS: SnagStepKey[] = [
-  'notifiable', 'checklist', 'witnesses', 'evidence',
-  'rootCause', 'correctiveActions', 'investigationDocument', 'rca', 'debrief',
-];
-
-// The three panels of the single Manage screen. Site *configuration* is not
-// among them on purpose: a site is a thing with an address of its own
-// (`SiteDetail`), which is what lets the admin dashboard point at the site that
-// has no Site Lead rather than at a list the reader has to search.
-export type ManageTab = 'organisation' | 'sites' | 'teams';
-
-export const MANAGE_TABS: ManageTab[] = ['organisation', 'sites', 'teams'];
-
-export const MANAGE_TAB_LABELS: Record<ManageTab, string> = {
-  organisation: 'Organisation',
-  sites: 'Sites',
-  teams: 'Teams',
-};
+// ---------------------------------------------------------------- navigation
 
 export type RootStackParamList = {
   Main: undefined;
-  // `issueId` here refers to a snags.id — the param name is kept for
-  // minimal navigation-call churn even though the underlying entity is a Snag.
-  // `step` opens one section on arrival, so a link can point at the work
-  // rather than at the snag it happens to live on.
-  IssueDetail: { issueId: string; step?: SnagStepKey };
-  Reports: undefined;
-  ReportIncidentDetails: undefined;
-  ReportIncidentReview: undefined;
-  ScanOrgCode: undefined;
-  ChooseReportOrg: undefined;
-  // One screen for organisation, sites and teams. `tab` opens a specific
-  // panel so a caller can point at the part it means.
-  Manage: { tab?: ManageTab } | undefined;
-  SiteDetail: { siteId: string };
-  Mentions: undefined;
-  DocumentLibrary: undefined;
-  OnboardingCarousel: undefined;
-  // The onboarding guide, filtered to the reader's role. Content lives in
-  // @snag/onboarding-guide, shared with the portal's /help page.
-  HelpGuide: undefined;
+  SnagDetail: { snagId: string };
+  Household: undefined;
 };
 
 export type MainTabParamList = {
-  Issues: undefined;
-  Report: undefined;
-  Admin: undefined;
+  /** Quick capture. The app opens here — it's the thing done most often. */
+  Capture: undefined;
+  Snags: undefined;
+  Weekend: undefined;
   Profile: undefined;
 };
-
-// ─── Display helpers ─────────────────────────────────────────────────────────
-
-export const STATUS_LABELS: Record<SnagStatus, string> = {
-  flagged: 'Flagged',
-  in_progress: 'In Progress',
-  resolved: 'Resolved',
-  rca_pending: 'RCA Pending',
-};
-
-export const SEVERITY_LABELS: Record<SnagSeverity, string> = {
-  minor: 'Minor',
-  moderate: 'Moderate',
-  injury: 'Injury',
-  critical: 'Critical',
-};
-
-export const KIND_LABELS: Record<SnagKind, string> = {
-  fixit: 'Fixit',
-  improvement: 'Improvement',
-  hazard: 'Hazard',
-  incident: 'Incident',
-};
-
-export const ROLE_LABELS: Record<UserRole, string> = {
-  worker: 'Crew',
-  supervisor: 'Site Lead',
-  officer_admin: 'Manager',
-};
-
-export const RELEVANCE_REASON_LABELS: Record<SnagRelevanceReason, string> = {
-  rca_pending: 'RCA Pending',
-  assigned: 'Assigned',
-  tagged: 'Tagged',
-  reported: 'Reported',
-};
-
-// Ordered to match the server's checklist_step enum — the first-response steps
-// a supervisor works through before a serious snag can be resolved.
-export const CHECKLIST_STEP_LABELS: Record<ChecklistStep, string> = {
-  make_safe: 'Make the area safe',
-  preserve_scene: 'Preserve the scene',
-  capture_evidence: 'Capture evidence',
-  identify_witnesses: 'Identify witnesses',
-  find_root_cause: 'Find the root cause',
-};
-
-export const CHECKLIST_STEPS: ChecklistStep[] = [
-  'make_safe', 'preserve_scene', 'capture_evidence', 'identify_witnesses', 'find_root_cause',
-];
-
-/**
- * How a serious snag is investigated — the choice made when it is allocated.
- *
- * Mirrors the `investigation_mode` Postgres enum. Duplicated as a value here
- * (rather than only in @snag/supabase-queries) because the two apps' triage UI
- * needs the labels, not just the type.
- */
-export type InvestigationModeValue = 'snag' | 'document';
-
-/**
- * The wording offered when allocating. Each option carries its consequence,
- * because picking the second one changes what closes the snag: document mode
- * substitutes "attach the investigation document" and "a supervisor accepts it"
- * for the root cause and corrective actions. It is not a shortcut, and the copy
- * has to say so — a supervisor choosing between two unlabelled radio buttons is
- * choosing at random.
- *
- * Shared so the triage prompt and the re-allocate controls in both clients read
- * identically; they were three separate copies of nearly-the-same sentence.
- */
-export const INVESTIGATION_MODE_OPTIONS: {
-  value: InvestigationModeValue;
-  title: string;
-  detail: string;
-}[] = [
-  {
-    value: 'snag',
-    title: "SNAG's guided investigation",
-    detail: 'Root cause, then corrective actions, tracked in the app.',
-  },
-  {
-    value: 'document',
-    title: 'Our own process',
-    detail: 'Attach the completed investigation document. A supervisor has to accept it before this snag can be resolved.',
-  },
-];

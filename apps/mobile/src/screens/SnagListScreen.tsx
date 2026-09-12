@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, SectionList, RefreshControl, Pressable, Modal, StyleSheet } from 'react-native';
+import {
+  View, Text, SectionList, ScrollView, RefreshControl, Pressable, Modal, StyleSheet,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -212,10 +214,23 @@ export default function SnagListScreen() {
     await load();
   }
 
+  /**
+   * The prompt after a photo.
+   *
+   * A photo on its own is the weakest thing this app can hold: with no words
+   * and no room, `snagHeadline` has nothing to work with and the list shows
+   * "Something to sort out" — which is unreadable a fortnight later, to the
+   * person who filed it as much as to anyone else. So the moment after a photo
+   * is the moment to ask, while the thing is still in front of you.
+   *
+   * It asks *after* the save, never before it. The snag is already on the list;
+   * every one of these controls edits something that exists, so none of them
+   * can block anybody and walking away leaves a perfectly good entry.
+   */
   async function amend(update: Parameters<typeof updateSnag>[1], toast: string) {
     if (!justAdded) return;
     try {
-      await updateSnag(justAdded.id, update);
+      setJustAdded(await updateSnag(justAdded.id, update));
       showToast(toast);
       await load();
     } catch (err: any) {
@@ -225,7 +240,8 @@ export default function SnagListScreen() {
 
   const since = describeSince(seenBefore);
   const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
-  const activeRoom = justAdded?.room ?? null;
+  // A photo with no words and no room shows as "Something to sort out".
+  const needsNote = !!justAdded && !justAdded.description;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -321,14 +337,36 @@ export default function SnagListScreen() {
       {justAdded ? (
         <AmendRow>
           <View style={styles.amendHead}>
-            <AmendLabel text="On the list. Anything else?" />
-            <Pressable onPress={() => setJustAdded(null)} accessibilityRole="button">
+            <AmendLabel
+              text={
+                needsNote
+                  ? 'On the list. What is it, and where?'
+                  : justAdded.room
+                    ? 'On the list.'
+                    : 'On the list. Where is it?'
+              }
+            />
+            <Pressable
+              onPress={() => setJustAdded(null)}
+              style={styles.amendDoneTap}
+              accessibilityRole="button"
+              accessibilityLabel="Finished adding"
+            >
               <Text style={styles.amendDone}>Done</Text>
             </Pressable>
           </View>
-          <View style={styles.chips}>
-            {locations.slice(0, 3).map((location) => {
-              const on = activeRoom === location.name;
+
+          {/* Every room, not the first three: the one you want is the one you
+              are standing in, and it is as likely to be the Roof as the
+              Kitchen. Horizontal so twelve of them cost one row. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.chips}
+          >
+            {locations.map((location) => {
+              const on = justAdded.room === location.name;
               return (
                 <Pressable
                   key={location.id}
@@ -342,9 +380,10 @@ export default function SnagListScreen() {
               );
             })}
             <Pressable
-              onPress={() => amend({ priority: 'high' }, 'Marked urgent')}
+              onPress={() => amend({ priority: justAdded.priority === 'high' ? null : 'high' }, 'Marked urgent')}
               style={[styles.chip, justAdded.priority === 'high' && styles.chipAlert]}
               accessibilityRole="button"
+              accessibilityState={{ selected: justAdded.priority === 'high' }}
             >
               <Text style={[styles.chipLabel, justAdded.priority === 'high' && styles.chipAlertLabel]}>
                 Urgent
@@ -357,11 +396,19 @@ export default function SnagListScreen() {
             >
               <Text style={styles.chipLabel}>More…</Text>
             </Pressable>
-          </View>
+          </ScrollView>
         </AmendRow>
       ) : null}
 
-      <ComposeBar pathPrefix={household.id} onAdd={handleAdd} stacked />
+      <ComposeBar
+        pathPrefix={household.id}
+        onAdd={handleAdd}
+        // Only while the thing just added has no words of its own. A photo
+        // taken after typing already carries them, and a typed snag is its own
+        // description — asking again would be asking twice.
+        note={needsNote ? { onSave: (text) => amend({ description: text }, 'Saved') } : undefined}
+        stacked
+      />
 
       {/* ─────────────────────────────────────────────── show me */}
       <Modal visible={filterOpen} transparent animationType="slide" onRequestClose={() => setFilterOpen(false)}>
@@ -466,11 +513,15 @@ const styles = StyleSheet.create({
   doneLine: { paddingVertical: Spacing.lg, alignItems: 'center' },
   doneText: { fontSize: Typography.sm, color: Colors.textMuted },
   amendHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  amendDoneTap: {
+    minHeight: MIN_TOUCH_TARGET - Spacing.md,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.sm,
+  },
   amendDone: {
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
     color: Colors.primary,
-    paddingHorizontal: Spacing.sm,
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   chip: {

@@ -139,9 +139,23 @@ Four things about capture are load-bearing:
   the constraint name surface. `snagHeadline` supplies what the list shows for a photo-only snag.
 - **A line of text is a complete snag.** "Gutters" typed into the bar is a perfectly good entry,
   and making that the same gesture as sending a message is the point of the bar existing.
-- **Nothing is asked before it is filed.** Room and urgency are offered *afterwards*, as the
-  amend row above the bar, editing a snag that already exists. Nothing there can block anyone, and
-  walking away without touching it leaves a perfectly good snag.
+- **Nothing is asked before it is filed, and everything is asked straight after.** Taking a photo
+  saves the snag and *then* prompts: what is it, and where. The amend row offers every room tag
+  (not a shortlist — the one you want is the one you're standing in, and that is as likely to be
+  the Roof as the Kitchen) plus Urgent and a way into triage, and the compose bar's field switches
+  to writing a note onto the snag just added rather than filing another.
+
+  The prompt exists because **a photo with no words and no room is the weakest thing this app can
+  hold**: `snagHeadline` has nothing to work with and the list reads "Something to sort out",
+  which is unreadable a fortnight later to the person who filed it as much as to anyone else. The
+  moment after the shutter is the moment to ask, while the thing is still in front of you.
+
+  It asks *after* the save and never before it, which is the part not to erode. Every control
+  there edits a snag that already exists, so none of them can block anybody and walking away
+  without touching one leaves a perfectly good entry. The note is only asked for when the snag has
+  no words of its own — a photo taken after typing already carries them, and a typed snag is its
+  own description. The camera keeps exactly one meaning throughout: it starts a new snag, never
+  amends the last one.
 - **Priority is not a capture decision any more.** It used to be, defended as the one judgement
   only the person standing there can make — but nearly everything was filed Low, which is the
   premise of the product, and urgency is *comparative*. It belongs where a dozen things are

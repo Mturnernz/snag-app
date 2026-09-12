@@ -14,6 +14,12 @@ interface Props {
   pathPrefix: string | null;
   /** Files a snag with a photo, a line of text, or both. */
   onAdd: (input: { photoPath: string | null; description: string | null }) => Promise<void>;
+  /**
+   * When set, the text field writes a note onto the snag that was *just* added
+   * rather than filing a new one — the prompt after a photo. The camera still
+   * starts a new snag either way, which is the only reading of pressing it.
+   */
+  note?: { onSave: (text: string) => Promise<void> };
   /** Stacked above a tab bar, which already clears the home indicator. */
   stacked?: boolean;
 }
@@ -40,7 +46,7 @@ interface Props {
  *   bar is the exact case that breaks. This is the one component in the app
  *   that could not exist without that fix.
  */
-export default function ComposeBar({ pathPrefix, onAdd, stacked }: Props) {
+export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
 
@@ -50,18 +56,19 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked }: Props) {
   const canSend = draft.trim().length > 0 && !busy;
 
   async function handleText() {
-    const description = draft.trim();
-    if (!description || busy) return;
+    const text = draft.trim();
+    if (!text || busy) return;
     setBusy(true);
     try {
       // Cleared first. The row appears at the top of the list within the same
       // tick, and a bar still holding the words that are now on screen reads
       // as "that didn't send".
       setDraft('');
-      await onAdd({ photoPath: null, description });
+      if (note) await note.onSave(text);
+      else await onAdd({ photoPath: null, description: text });
     } catch (err: any) {
-      setDraft(description);
-      showAlert("Couldn't add that", err?.message ?? 'Please try again.');
+      setDraft(text);
+      showAlert(note ? "Couldn't save that note" : "Couldn't add that", err?.message ?? 'Please try again.');
     } finally {
       setBusy(false);
     }
@@ -118,13 +125,14 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked }: Props) {
         style={styles.field}
         value={draft}
         onChangeText={setDraft}
-        placeholder="Add something…"
+        placeholder={note ? 'Say what it is…' : 'Add something…'}
         placeholderTextColor={Colors.textMuted}
         maxLength={200}
         returnKeyType="send"
         onSubmitEditing={handleText}
         blurOnSubmit={false}
-        accessibilityLabel="Add something"
+        accessibilityLabel={note ? 'Say what it is' : 'Add something'}
+        autoFocus={!!note}
       />
 
       {draft.trim().length > 0 ? (
@@ -133,7 +141,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked }: Props) {
           disabled={!canSend}
           style={[styles.send, !canSend && styles.sendOff]}
           accessibilityRole="button"
-          accessibilityLabel="Add to the list"
+          accessibilityLabel={note ? 'Save what it is' : 'Add to the list'}
         >
           <Icon name="arrow-up" size="md" color={Colors.white} />
         </Pressable>

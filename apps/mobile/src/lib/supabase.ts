@@ -268,6 +268,14 @@ export const updateThing = (thingId: string, update: queries.ThingUpdate) =>
 
 export const deleteThing = (thingId: string) => queries.deleteThing(supabase, thingId);
 
+export const getAbsentThings = (propertyId: string) => queries.getAbsentThings(supabase, propertyId);
+
+export const markThingAbsent = (propertyId: string, room: string, name: string) =>
+  queries.markThingAbsent(supabase, propertyId, room, name);
+
+export const restoreAbsentThings = (propertyId: string, room?: string) =>
+  queries.restoreAbsentThings(supabase, propertyId, room);
+
 // ─── Photos ───────────────────────────────────────────────────────────────────
 //
 // home-photos is a PRIVATE bucket laid out as `<household_id>/<file>` — the

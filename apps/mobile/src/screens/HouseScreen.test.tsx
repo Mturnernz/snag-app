@@ -3,10 +3,10 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import HouseScreen from './HouseScreen';
 
-// Two rules carry this screen, and both are invisible until they are wrong:
-// the record has to describe the house in the same words and the same order the
-// list does, and a search has to be a flat answer rather than a filing system
-// with three headings and one row under each.
+// The House tab arrives furnished, and the rule the whole design rests on is
+// that a ghost is never a row. These pin the three places that distinction can
+// silently blur — the counts, the search, and the by-kind grouping — plus the
+// seeded room order the List tab shares.
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -14,23 +14,23 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: jest.fn(), addListener: () => () => {} }),
 }));
-jest.mock('../components/ComposeBar', () => {
+jest.mock('../components/AddThingSheet', () => {
   const React = require('react');
   const { Text } = require('react-native');
-  return {
-    __esModule: true,
-    default: () => React.createElement(Text, null, 'compose bar'),
-    AmendRow: ({ children }: { children: React.ReactNode }) => children,
-    AmendLabel: ({ text }: { text: string }) => React.createElement(Text, null, text),
-  };
+  return { __esModule: true, default: () => React.createElement(Text, null, 'add sheet') };
 });
 
 const mock_getThings = jest.fn();
+const mock_getAbsentThings = jest.fn();
+const mock_markThingAbsent = jest.fn();
+const mock_restoreAbsentThings = jest.fn();
 jest.mock('../lib/supabase', () => ({
   getThings: (...a: unknown[]) => mock_getThings(...a),
+  getAbsentThings: (...a: unknown[]) => mock_getAbsentThings(...a),
+  markThingAbsent: (...a: unknown[]) => mock_markThingAbsent(...a),
+  restoreAbsentThings: (...a: unknown[]) => mock_restoreAbsentThings(...a),
   getSnagPhotoUrls: jest.fn().mockResolvedValue({}),
   createThing: jest.fn(),
-  updateThing: jest.fn(),
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
@@ -46,7 +46,8 @@ const thing = (over: Partial<any>): any => ({
   ...over,
 });
 
-function arrange(locations = ['Kitchen', 'Bathroom', 'Garage']) {
+/** Laundry and Deck keep the catalogue small enough to assert on exactly. */
+function arrange(locations = ['Laundry', 'Deck', 'Elsewhere']) {
   (global as any).__household = {
     household: { id: 'h', name: 'Home', createdAt: '2026-01-01T00:00:00Z' },
     profile: { id: 'me', displayName: 'Me' },
@@ -63,99 +64,120 @@ function arrange(locations = ['Kitchen', 'Bathroom', 'Garage']) {
 
 const settle = () => TestRenderer.act(async () => {});
 
-const texts = (r: ReturnType<typeof render>) =>
-  r.getAllByType('Text').map((n) => {
-    const walk = (node: any): string =>
-      (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : walk(c))).join('');
-    return walk(n);
-  });
+const walk = (node: any): string =>
+  (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : walk(c))).join('');
 
-/** Types into the one search field on the screen. */
+const texts = (r: ReturnType<typeof render>) => r.getAllByType('Text').map(walk);
+
 async function search(r: ReturnType<typeof render>, query: string) {
   const field = r.root.findAll(
-    (n: any) =>
-      typeof n.type === 'string' &&
-      n.props?.accessibilityLabel === 'Search the house record',
+    (n: any) => typeof n.type === 'string' && n.props?.accessibilityLabel === 'Search the house record',
     { deep: true }
   )[0];
-  await TestRenderer.act(async () => {
-    field.props.onChangeText(query);
-  });
+  await TestRenderer.act(async () => field.props.onChangeText(query));
 }
+
+const pressable = (r: ReturnType<typeof render>, label: string) =>
+  r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label && !!n.props?.onPress,
+    { deep: true }
+  )[0];
 
 beforeEach(() => {
   jest.clearAllMocks();
   arrange();
   mock_getThings.mockResolvedValue([]);
+  mock_getAbsentThings.mockResolvedValue([]);
+  mock_markThingAbsent.mockResolvedValue(undefined);
+  mock_restoreAbsentThings.mockResolvedValue(undefined);
 });
 
 describe('HouseScreen', () => {
-  it('groups by room in the seeded order, with the whole house last', async () => {
-    // The same order the list groups snags in, from the same `locations`. If
-    // these two ever diverge, the room a snag is in and the room a thing is in
-    // stop reading as the same place.
-    mock_getThings.mockResolvedValue([
-      thing({ id: '1', name: 'Mower', room: 'Garage' }),
-      thing({ id: '2', name: 'Dishwasher', room: 'Kitchen' }),
-      thing({ id: '3', name: 'Meter box', room: null }),
-      thing({ id: '4', name: 'Oven', room: 'Kitchen' }),
-    ]);
+  it('arrives furnished rather than empty, in the seeded room order', async () => {
+    // Day one, before anybody has typed a model number. An empty state here is
+    // the failure this whole design exists to avoid: a tab that answers nothing
+    // on the day it ships never gets opened again.
     const result = render(<HouseScreen />);
     await settle();
-
-    const headings = texts(result).filter((t) => t.includes(' · '));
-    expect(headings).toEqual(['Kitchen · 2', 'Garage · 1', 'Whole house · 1']);
-  });
-
-  it('answers a search flat, without the room headings', async () => {
-    // A result of three split across three headings buries the answer under
-    // its own filing — and the person reading it is in a shop.
-    mock_getThings.mockResolvedValue([
-      thing({ id: '1', name: 'Downlights', room: 'Kitchen', consumables: ['GU10 2700K'] }),
-      thing({ id: '2', name: 'Wall lights', room: 'Garage', consumables: ['GU10 2700K'] }),
-      thing({ id: '3', name: 'Dishwasher', room: 'Kitchen' }),
-    ]);
-    const result = render(<HouseScreen />);
-    await settle();
-    await search(result, 'gu10');
 
     const all = texts(result);
-    expect(all).toContain('2 found');
-    expect(all).toContain('Downlights');
-    expect(all).toContain('Wall lights');
-    expect(all).not.toContain('Dishwasher');
-    // No grouping, and no By room / By kind rail competing with the answer.
-    expect(all).not.toContain('Kitchen · 1');
+    expect(all).not.toContain('Nothing recorded yet');
+    expect(all).toContain('Laundry · 0 of 4');
+    expect(all).toContain('Deck · 0 of 1');
+    // Elsewhere is the location seed's escape hatch — suggesting its contents
+    // would be nonsense, so it gets no section at all.
+    expect(all.some((t) => t.startsWith('Elsewhere'))).toBe(false);
+    expect(all).toContain('Washing machine');
+    expect(all).toContain('Not recorded yet');
+  });
+
+  it('counts what is recorded against what the room still offers', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
+      thing({ id: '2', name: 'Dryer', room: 'Laundry' }),
+    ]);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    const all = texts(result);
+    expect(all).toContain('Laundry · 2 of 4');
+    // The header counts records, never ghosts — the first place the two would
+    // blur is a number that includes both.
+    expect(all).toContain('2 recorded');
+  });
+
+  it('puts things with no room under Whole house, last and unfurnished', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Meter box', room: null }),
+      thing({ id: '2', name: 'Dryer', room: 'Laundry' }),
+    ]);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    const headings = texts(result).filter((t) => t.includes(' · ') || t.startsWith('Whole house'));
+    expect(headings[headings.length - 1]).toBe('Whole house · 1');
+  });
+
+  it('answers a search flat, with no ghosts in the result', async () => {
+    // A ghost in a search result is the app offering something it does not
+    // have, to somebody standing in a shop.
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Washing machine', room: 'Laundry', make: 'Fisher & Paykel' }),
+    ]);
+    const result = render(<HouseScreen />);
+    await settle();
+    await search(result, 'wash');
+
+    const all = texts(result);
+    expect(all).toContain('1 found');
+    expect(all).not.toContain('Not recorded yet');
     expect(all).not.toContain('By room');
   });
 
-  it('says what to do rather than that there is nothing, when empty', async () => {
-    // The one screen in the app that is empty on the day it ships. "No items"
-    // is how an inventory stays at 0%.
-    const result = render(<HouseScreen />);
-    await settle();
-    const all = texts(result);
-    expect(all).toContain('Nothing recorded yet');
-    expect(all.some((t) => t.includes('Photograph a rating plate'))).toBe(true);
-  });
-
-  it('groups by kind when asked, in the order the enum declares', async () => {
+  it('keeps ghosts out of By kind, which answers what you have', async () => {
     mock_getThings.mockResolvedValue([
-      thing({ id: '1', name: 'Walls', kind: 'finish', room: 'Hallway' }),
-      thing({ id: '2', name: 'Heat pump', kind: 'appliance', room: 'Living room' }),
-      thing({ id: '3', name: 'Trim', kind: 'finish', room: 'Hallway' }),
+      thing({ id: '1', name: 'Dryer', room: 'Laundry' }),
+      thing({ id: '2', name: 'Deck stain', room: 'Deck', kind: 'finish' }),
     ]);
     const result = render(<HouseScreen />);
     await settle();
+    await TestRenderer.act(async () => pressable(result, 'By kind').props.onPress());
 
-    const byKind = result.root.findAll(
-      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'By kind' && !!n.props?.onPress,
-      { deep: true }
-    )[0];
-    await TestRenderer.act(async () => byKind.props.onPress());
+    const all = texts(result);
+    expect(all).toEqual(expect.arrayContaining(['Appliances · 1', 'Paint · 1']));
+    expect(all).not.toContain('Not recorded yet');
+  });
 
-    const headings = texts(result).filter((t) => t.includes(' · '));
-    // Plural over a group. "Appliance · 6" reads as a typo.
-    expect(headings).toEqual(['Appliances · 1', 'Paint · 2']);
+  it('hides what this house has not got, and offers a way back', async () => {
+    const result = render(<HouseScreen />);
+    await settle();
+    await TestRenderer.act(async () => pressable(result, 'No dryer here').props.onPress());
+
+    expect(mock_markThingAbsent).toHaveBeenCalledWith('p', 'Laundry', 'Dryer');
+    const all = texts(result);
+    expect(all).toContain('Laundry · 0 of 3');
+    // Dismissing is a tap; undoing it is a rescue, and a rescue with no door is
+    // a dead end — the same reason `Elsewhere` is in the location seed.
+    expect(all).toContain('1 not here · bring it back');
   });
 });

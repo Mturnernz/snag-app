@@ -1,6 +1,6 @@
 import {
-  describeCycle, formatLooseDate, parseLooseDate, searchThings, thingDetailLine, thingHeadline,
-  thingSearchText,
+  describeCycle, formatLooseDate, ghostsForRoom, parseLooseDate, searchThings, thingDetailLine,
+  thingHeadline, thingSearchText,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -132,6 +132,62 @@ describe('dates off a rating plate', () => {
   it('round-trips what it accepted', () => {
     for (const typed of ['Nov 2019', '11/2019', '2019-11']) {
       expect(formatLooseDate(parseLooseDate(typed) as string)).toBe('Nov 2019');
+    }
+  });
+});
+
+describe('what a room still shows', () => {
+  // The furniture the House tab arrives holding. The rule these protect is the
+  // one the whole design rests on: a ghost is never a row, so it must vanish
+  // the moment a real one exists — an app that keeps nagging about the
+  // dishwasher you just recorded is an app that gets ignored.
+  const inRoom = (room: string, name: string) => thing({ id: name, room, name });
+
+  it('offers what a New Zealand kitchen has, and stops offering what is recorded', () => {
+    const ghosts = ghostsForRoom('Kitchen', [inRoom('Kitchen', 'Dishwasher')], []);
+    const names = ghosts.map((g) => g.name);
+    expect(names).toContain('Rangehood');
+    expect(names).toContain('Oven');
+    expect(names).not.toContain('Dishwasher');
+  });
+
+  it('counts a thing filed under a longer name as having answered the prompt', () => {
+    // Somebody who files it as "Bosch dishwasher" has plainly dealt with the
+    // Dishwasher prompt. Leaving the ghost up is the app failing to notice work
+    // that was done, which is worse than the occasional early hide — that costs
+    // one tap on the +, and a permanent nag costs the screen.
+    const ghosts = ghostsForRoom('Kitchen', [inRoom('Kitchen', 'Bosch dishwasher')], []);
+    expect(ghosts.map((g) => g.name)).not.toContain('Dishwasher');
+  });
+
+  it('does not let a thing in one room answer another room\'s prompt', () => {
+    const ghosts = ghostsForRoom('Kitchen', [inRoom('Laundry', 'Dishwasher')], []);
+    expect(ghosts.map((g) => g.name)).toContain('Dishwasher');
+  });
+
+  it('drops what this house hasn\'t got, case and spacing aside', () => {
+    const ghosts = ghostsForRoom('Laundry', [], [
+      { propertyId: 'p', room: 'Laundry', name: '  dryer  ' },
+    ]);
+    expect(ghosts.map((g) => g.name)).not.toContain('Dryer');
+    expect(ghosts.map((g) => g.name)).toContain('Washing machine');
+  });
+
+  it('offers nothing for a room with no catalogue, rather than guessing', () => {
+    // `Elsewhere` is the escape hatch in the location seed. Suggesting the
+    // contents of a room whose whole point is "somewhere else" is nonsense.
+    expect(ghostsForRoom('Elsewhere', [], [])).toEqual([]);
+    expect(ghostsForRoom('Sleepout', [], [])).toEqual([]);
+  });
+
+  it('only ever suggests kinds the app can actually describe', () => {
+    // Suggesting a toby or a bulb fitting before `fabric` and `fitting` are
+    // built would open a walkthrough that ends on a spec sheet with the wrong
+    // words on it — a prompt that becomes a dead end.
+    for (const room of ['Kitchen', 'Bathroom', 'Living room', 'Garage', 'Outside']) {
+      for (const suggestion of ghostsForRoom(room, [], [])) {
+        expect(['appliance', 'finish']).toContain(suggestion.kind);
+      }
     }
   });
 });

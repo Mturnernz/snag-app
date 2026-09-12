@@ -315,6 +315,104 @@ export interface Thing {
  */
 export type ThingGrouping = 'room' | 'kind';
 
+/**
+ * What a New Zealand house probably has, room by room.
+ *
+ * This is the furniture the House tab arrives holding: every room shows a
+ * greyed, dashed entry for each of these until somebody records the real one.
+ * **A suggestion is never a row.** It lives here, in a constant, and it never
+ * reaches `home.things`, never appears in search, and can never be pointed at
+ * by a snag — because a record full of entries nobody has confirmed looks full
+ * and answers nothing, which is worse than an empty one. You believe it, check
+ * it in the shop, and find nothing there.
+ *
+ * A constant rather than a table, for the same reason the seeded order of
+ * `home.locations` is one: it is an interface, not data. "What a house has"
+ * changes far less often than "what this house calls its rooms", and changing
+ * it should cost nothing.
+ *
+ * **Only `appliance` and `finish` appear here**, because those are the two
+ * kinds the app can actually record properly. The obvious absentees — the toby,
+ * the switchboard, the meter numbers, bathroom tapware, bulb fittings — are
+ * `fabric` and `fitting`, and suggesting something the spec sheet cannot then
+ * describe is how a prompt becomes a dead end. They arrive with those kinds.
+ *
+ * Keyed by the seeded room names exactly. A room with no entry here simply
+ * arrives empty, which is the right answer for `Elsewhere`.
+ */
+export interface ThingSuggestion {
+  name: string;
+  kind: ThingKind;
+}
+
+export const ROOM_SUGGESTIONS: Record<string, ThingSuggestion[]> = {
+  Kitchen: [
+    { name: 'Oven', kind: 'appliance' },
+    { name: 'Cooktop', kind: 'appliance' },
+    { name: 'Rangehood', kind: 'appliance' },
+    { name: 'Dishwasher', kind: 'appliance' },
+    { name: 'Fridge/freezer', kind: 'appliance' },
+    { name: 'Waste disposal', kind: 'appliance' },
+    { name: 'Walls and cabinetry', kind: 'finish' },
+  ],
+  Bathroom: [
+    { name: 'Extractor fan', kind: 'appliance' },
+    { name: 'Heated towel rail', kind: 'appliance' },
+    { name: 'Walls and ceiling', kind: 'finish' },
+  ],
+  Bedroom: [
+    { name: 'Heat pump head', kind: 'appliance' },
+    { name: 'Smoke alarm', kind: 'appliance' },
+    { name: 'Walls and trim', kind: 'finish' },
+  ],
+  'Living room': [
+    { name: 'Heat pump · indoor', kind: 'appliance' },
+    { name: 'Wood burner', kind: 'appliance' },
+    { name: 'Walls and trim', kind: 'finish' },
+  ],
+  Laundry: [
+    { name: 'Washing machine', kind: 'appliance' },
+    { name: 'Dryer', kind: 'appliance' },
+    { name: 'Water filter', kind: 'appliance' },
+    { name: 'Walls', kind: 'finish' },
+  ],
+  Hallway: [
+    { name: 'Smoke alarm', kind: 'appliance' },
+    { name: 'Heat pump controller', kind: 'appliance' },
+    { name: 'Walls and trim', kind: 'finish' },
+  ],
+  Garage: [
+    { name: 'Garage door opener', kind: 'appliance' },
+    { name: 'Hot water cylinder', kind: 'appliance' },
+    { name: 'Lawnmower', kind: 'appliance' },
+    { name: 'Water blaster', kind: 'appliance' },
+    { name: 'Spare paint and tiles', kind: 'finish' },
+  ],
+  Outside: [
+    { name: 'Gas water heater', kind: 'appliance' },
+    { name: 'Heat pump · outdoor unit', kind: 'appliance' },
+    { name: 'Fence or gate stain', kind: 'finish' },
+  ],
+  Deck: [
+    { name: 'Deck stain', kind: 'finish' },
+  ],
+};
+
+/**
+ * What this particular place hasn't got.
+ *
+ * The only thing the server remembers about suggestions, and it is the
+ * negative: a flat with no dryer should stop being asked about a dryer. Per
+ * property rather than per person — there is one house, and two people
+ * disagreeing about whether there is a dryer is not a state worth modelling.
+ */
+export interface AbsentThing {
+  propertyId: string;
+  room: string;
+  name: string;
+}
+
+
 
 // ---------------------------------------------------------------- navigation
 

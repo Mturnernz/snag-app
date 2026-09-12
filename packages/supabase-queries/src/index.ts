@@ -38,8 +38,10 @@ import type {
   Thing,
   ThingKind,
   ThingSpec,
+  ThingSuggestion,
+  AbsentThing,
 } from '@snag/shared-types';
-import { PRIORITY_ORDER } from '@snag/shared-types';
+import { PRIORITY_ORDER, ROOM_SUGGESTIONS } from '@snag/shared-types';
 
 /** Supabase row shapes are snake_case `any`; this is the one place that's true. */
 type Row = Record<string, any>;
@@ -837,6 +839,93 @@ export async function updateThing(
 export async function deleteThing(client: SupabaseClient, thingId: string): Promise<void> {
   const { error } = await client.rpc('delete_thing', { p_thing_id: thingId });
   if (error) throw asError(error, "Couldn't remove that");
+}
+
+// ------------------------------------------------------- what isn't there yet
+
+/**
+ * The greyed entries a room still shows: what a house of this kind probably
+ * has, minus what has actually been recorded, minus what this place hasn't got.
+ *
+ * A recorded thing counts as answering a suggestion when its name **is** the
+ * suggestion or **contains** it — somebody who files the dishwasher as "Bosch
+ * dishwasher" has plainly dealt with the Dishwasher prompt, and leaving the
+ * ghost up would be the app failing to notice work that was done. The cost of
+ * the looser match is the occasional suggestion hidden early, which is one tap
+ * on the + to put right; the cost of the stricter one is a permanent nag, which
+ * is how a screen gets ignored.
+ */
+export function ghostsForRoom(
+  room: string,
+  things: Thing[],
+  absent: AbsentThing[]
+): ThingSuggestion[] {
+  const suggestions = ROOM_SUGGESTIONS[room] ?? [];
+  if (suggestions.length === 0) return [];
+
+  const normal = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+  const recorded = things
+    .filter((thing) => thing.room === room)
+    .map((thing) => normal(thing.name ?? ''))
+    .filter(Boolean);
+  const dismissed = new Set(
+    absent.filter((a) => a.room === room).map((a) => normal(a.name))
+  );
+
+  return suggestions.filter((suggestion) => {
+    const wanted = normal(suggestion.name);
+    if (dismissed.has(wanted)) return false;
+    return !recorded.some((name) => name === wanted || name.includes(wanted));
+  });
+}
+
+export async function getAbsentThings(
+  client: SupabaseClient,
+  propertyId: string
+): Promise<AbsentThing[]> {
+  const { data, error } = await client
+    .from('absent_things')
+    .select('property_id, room, name')
+    .eq('property_id', propertyId);
+
+  if (error) throw asError(error, "Couldn't load the house record");
+  return (data ?? []).map((row: Row) => ({
+    propertyId: row.property_id,
+    room: row.room,
+    name: row.name,
+  }));
+}
+
+/** "No dryer here." Idempotent, because the card may still be on screen. */
+export async function markThingAbsent(
+  client: SupabaseClient,
+  propertyId: string,
+  room: string,
+  name: string
+): Promise<void> {
+  const { error } = await client.rpc('mark_thing_absent', {
+    p_property_id: propertyId,
+    p_room: room,
+    p_name: name,
+  });
+  if (error) throw asError(error, "Couldn't hide that");
+}
+
+/**
+ * Bring a room's dismissed suggestions back — all of them, not one at a time.
+ * Dismissing is a tap; undoing it is a rescue, and a rescue that costs six taps
+ * is a dead end.
+ */
+export async function restoreAbsentThings(
+  client: SupabaseClient,
+  propertyId: string,
+  room?: string
+): Promise<void> {
+  const { error } = await client.rpc('restore_absent_things', {
+    p_property_id: propertyId,
+    p_room: room ?? null,
+  });
+  if (error) throw asError(error, "Couldn't bring those back");
 }
 
 // ---------------------------------------------------------------- due dates

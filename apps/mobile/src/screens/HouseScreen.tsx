@@ -1,24 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, SectionList, ScrollView, TextInput, RefreshControl, Pressable, Modal, StyleSheet,
+  View, Text, SectionList, TextInput, RefreshControl, Pressable, Modal, StyleSheet,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import ThingCard from '../components/ThingCard';
+import { ghostsForRoom, searchThings, type ThingInput } from '@snag/supabase-queries';
+import ThingCard, { GhostCard } from '../components/ThingCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
-import ComposeBar, { AmendLabel, AmendRow } from '../components/ComposeBar';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import AddThingSheet from '../components/AddThingSheet';
+import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
-import { searchThings } from '@snag/supabase-queries';
-import { createThing, getSnagPhotoUrls, getThings, updateThing } from '../lib/supabase';
+import {
+  createThing, getAbsentThings, getSnagPhotoUrls, getThings, markThingAbsent, restoreAbsentThings,
+} from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import {
-  RootStackParamList, Thing, ThingGrouping, THING_KINDS, THING_KIND_GROUP_LABELS,
-  THING_KIND_LABELS,
+  AbsentThing, RootStackParamList, Thing, ThingGrouping, ThingKind, ThingSuggestion,
+  THING_KINDS, THING_KIND_GROUP_LABELS,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -26,34 +28,37 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 /**
  * The house record — what's *there*, beside the list of what's wrong.
  *
- * The whole tab rests on one asymmetry, and every decision on this screen
- * follows from it: **writing happens rarely and by accident; reading happens
- * under mild pressure, almost never in the room the thing is in.** You record
- * the heat pump because a repairer happened to read its model number out loud.
- * You read it back eight months later, standing in a hardware aisle, needing
- * one exact string.
+ * **The tab arrives furnished.** Every room holds a greyed, dashed entry for
+ * what a house of this kind probably has, until somebody records the real one.
+ * That is the answer to the thing that kills every inventory product: an empty
+ * record answers nothing, and a tab that answers nothing on the day it ships
+ * never gets opened again.
  *
- * So:
+ * The rule the whole arrangement rests on, and the easiest one to erode: **a
+ * ghost is not a row.** It comes from `ROOM_SUGGESTIONS`, a constant; it never
+ * reaches `home.things`, never appears in a search result, and can never be
+ * pointed at by a snag. A record full of entries nobody has confirmed *looks*
+ * full and answers nothing, and that is worse than an empty one — you believe
+ * it, check it in the shop, and find nothing there. If the ghost/real
+ * distinction ever blurs, the furniture has to go rather than the distinction.
  *
- * - **Search is the primary control**, above everything and always visible.
- *   Every read moment starts with a half-remembered noun — "filter", "the
- *   green in the hallway" — and nobody in an aisle navigates a tree. It matches
- *   consumables too, so typing `GU10` lists every fitting that takes one.
- * - **Search runs on the list already in hand.** A house holds tens of things,
- *   not thousands; a round trip per keystroke would make the one moment this
- *   tab exists for the moment it is slowest, on the worst connection it will
- *   ever see.
- * - **Capture is the compose bar, unchanged.** Same camera in the same
- *   bottom-left corner, same save-then-ask amend row, same room chips in the
- *   same seeded order. A thing is a photograph of its label — the rating plate
- *   and the tin lid already *are* the record — so the photo files it and every
- *   question comes afterwards.
+ * Three consequences worth keeping:
  *
- * What this screen is built against is specific: every house-inventory product
- * ever shipped opens on an empty thirty-field form, a house has four hundred
- * things in it, and the record ends up 8% complete. An 8% record is worse than
- * none, because you check it once, find nothing, and never check again. Hence
- * no required fields, and deliberately no completeness meter.
+ * - **Progress is per room, never a percentage.** "Kitchen · 2 of 8" is a unit
+ *   of work somebody can finish on a Saturday. A global completeness meter is
+ *   the shaming number that gets an app closed and not reopened.
+ * - **Ghosts appear under *By room* only.** By kind answers "what appliances do
+ *   we have", and a thing nobody has confirmed is not one of them.
+ * - **Dismissing is a tap; undoing it is a rescue.** The × means "no dryer
+ *   here", and each room that has dismissals carries one line to bring them all
+ *   back. A rescue that costs six taps is a dead end, which is the same reason
+ *   `Elsewhere` is in the location seed.
+ *
+ * Adding is a **+** and a four-step walkthrough rather than the compose bar
+ * capture uses. A snag is filed in ten seconds standing in front of the
+ * problem; a thing is recorded at a workbench, or while a repairer reads a
+ * model number out. The camera is still one tap — it is just step three now,
+ * where it captures make, model, serial and date of manufacture at once.
  */
 
 const GROUPINGS: { key: ThingGrouping; label: string }[] = [
@@ -63,6 +68,18 @@ const GROUPINGS: { key: ThingGrouping; label: string }[] = [
 
 /** Things that belong to the place rather than to a room in it. */
 const NO_ROOM = 'Whole house';
+
+type Row =
+  | { row: 'thing'; key: string; thing: Thing }
+  | { row: 'ghost'; key: string; room: string; suggestion: ThingSuggestion };
+
+interface Section {
+  title: string;
+  room?: string;
+  hidden?: number;
+  isNew?: boolean;
+  data: Row[];
+}
 
 export default function HouseScreen() {
   const navigation = useNavigation<Nav>();
@@ -75,23 +92,31 @@ export default function HouseScreen() {
   const [placesOpen, setPlacesOpen] = useState(false);
 
   const [things, setThings] = useState<Thing[]>([]);
+  const [absent, setAbsent] = useState<AbsentThing[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [justAdded, setJustAdded] = useState<Thing | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetStart, setSheetStart] =
+    useState<{ room?: string | null; name?: string | null; kind?: ThingKind } | null>(null);
 
   const propertyId = activeProperty?.id ?? null;
 
   const load = useCallback(async () => {
     if (!propertyId) {
       setThings([]);
+      setAbsent([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
     try {
-      const rows = await getThings(propertyId);
+      const [rows, hidden] = await Promise.all([
+        getThings(propertyId),
+        getAbsentThings(propertyId),
+      ]);
       setThings(rows);
+      setAbsent(hidden);
       const covers = rows.map((t) => t.photoPaths[0]).filter(Boolean) as string[];
       setPhotoUrls(await getSnagPhotoUrls(covers));
     } catch (err) {
@@ -113,29 +138,37 @@ export default function HouseScreen() {
   const visible = useMemo(() => searchThings(things, query), [things, query]);
   const searching = query.trim().length > 0;
 
-  const sections = useMemo<{ title: string; isNew?: boolean; data: Thing[] }[]>(() => {
-    // A search is a flat answer. Grouping a result of three across three
-    // headings buries the answer under its own filing.
+  const sections = useMemo<Section[]>(() => {
+    // A search is a flat answer over real records only. Grouping three results
+    // across three headings buries the answer under its own filing, and a ghost
+    // in a search result is the app offering something it does not have.
     if (searching) {
-      return visible.length > 0 ? [{ title: `${visible.length} found`, data: visible }] : [];
+      return visible.length > 0
+        ? [{
+            title: `${visible.length} found`,
+            data: visible.map((thing) => ({ row: 'thing' as const, key: thing.id, thing })),
+          }]
+        : [];
     }
 
-    const pinned = justAdded ? visible.filter((t) => t.id === justAdded.id) : [];
-    const pinnedId = pinned[0]?.id;
-    const rest = visible.filter((t) => t.id !== pinnedId);
-    const out: { title: string; isNew?: boolean; data: Thing[] }[] = [];
-
-    if (pinned.length > 0) out.push({ title: 'Just added', isNew: true, data: pinned });
-
     if (grouping === 'kind') {
+      const out: Section[] = [];
       for (const kind of THING_KINDS) {
-        const group = rest.filter((t) => t.kind === kind);
+        const group = visible.filter((t) => t.kind === kind);
         if (group.length > 0) {
-          out.push({ title: `${THING_KIND_GROUP_LABELS[kind]} · ${group.length}`, data: group });
+          out.push({
+            title: `${THING_KIND_GROUP_LABELS[kind]} · ${group.length}`,
+            data: group.map((thing) => ({ row: 'thing' as const, key: thing.id, thing })),
+          });
         }
       }
-      const other = rest.filter((t) => !THING_KINDS.includes(t.kind));
-      if (other.length > 0) out.push({ title: `Everything else · ${other.length}`, data: other });
+      const other = visible.filter((t) => !THING_KINDS.includes(t.kind));
+      if (other.length > 0) {
+        out.push({
+          title: `Everything else · ${other.length}`,
+          data: other.map((thing) => ({ row: 'thing' as const, key: thing.id, thing })),
+        });
+      }
       return out;
     }
 
@@ -144,57 +177,89 @@ export default function HouseScreen() {
     // snag is in and the room a thing is in stop reading as the same place.
     const order = locations.map((l) => l.name);
     const byRoom = new Map<string, Thing[]>();
-    for (const thing of rest) {
+    for (const thing of visible) {
       const room = thing.room ?? NO_ROOM;
       if (!byRoom.has(room)) byRoom.set(room, []);
       byRoom.get(room)!.push(thing);
     }
-    const known = order.filter((name) => byRoom.has(name));
-    const extra = [...byRoom.keys()].filter((n) => !order.includes(n) && n !== NO_ROOM).sort();
-    for (const name of [...known, ...extra, ...(byRoom.has(NO_ROOM) ? [NO_ROOM] : [])]) {
-      out.push({ title: `${name} · ${byRoom.get(name)!.length}`, data: byRoom.get(name)! });
-    }
-    return out;
-  }, [visible, searching, grouping, locations, justAdded]);
 
-  /**
-   * Capture. The photo is the record; the kind is a guess this row lets you
-   * correct in one tap.
-   *
-   * `appliance` rather than asking first, because asking first is the thing
-   * this whole arrangement exists to avoid — and because the amend row is
-   * already up, already in front of you, and already editing something that is
-   * safely saved.
-   */
-  async function handleAdd(input: { photoPath: string | null; description: string | null }) {
+    const out: Section[] = [];
+    const addRoom = (room: string) => {
+      const recorded = byRoom.get(room) ?? [];
+      const ghosts = ghostsForRoom(room, things, absent);
+      if (recorded.length === 0 && ghosts.length === 0) return;
+
+      const rows: Row[] = [
+        ...recorded.map((thing) => ({ row: 'thing' as const, key: thing.id, thing })),
+        ...ghosts.map((suggestion) => ({
+          row: 'ghost' as const,
+          key: `${room}:${suggestion.name}`,
+          room,
+          suggestion,
+        })),
+      ];
+      const total = recorded.length + ghosts.length;
+      out.push({
+        // "2 of 8" and never a percentage: a per-room count is a unit of work
+        // somebody can finish, and the denominator shrinks honestly as things
+        // are dismissed rather than pretending the house is bigger than it is.
+        title: ghosts.length > 0 ? `${room} · ${recorded.length} of ${total}` : `${room} · ${total}`,
+        room,
+        hidden: absent.filter((a) => a.room === room).length,
+        data: rows,
+      });
+    };
+
+    for (const room of order) addRoom(room);
+    const extra = [...byRoom.keys()].filter((n) => !order.includes(n) && n !== NO_ROOM).sort();
+    for (const room of extra) addRoom(room);
+    if (byRoom.has(NO_ROOM)) addRoom(NO_ROOM);
+    return out;
+  }, [visible, things, absent, searching, grouping, locations]);
+
+  const recorded = things.length;
+
+  async function handleAdd(input: Omit<ThingInput, 'propertyId'>) {
     if (!activeProperty) {
       showAlert('No place yet', 'Add a place before adding to the house record.');
       return;
     }
-    const thing = await createThing({
-      propertyId: activeProperty.id,
-      kind: 'appliance',
-      name: input.description,
-      photoPaths: input.photoPath ? [input.photoPath] : [],
-    });
-    setJustAdded(thing);
-    await load();
-  }
-
-  async function amend(update: Parameters<typeof updateThing>[1], toast: string) {
-    if (!justAdded) return;
     try {
-      setJustAdded(await updateThing(justAdded.id, update));
-      showToast(toast);
+      await createThing({ ...input, propertyId: activeProperty.id });
+      setSheetOpen(false);
+      showToast('In the record');
       await load();
     } catch (err: any) {
-      showAlert("Couldn't change that", err?.message ?? 'Please try again.');
+      // The sheet stays open on a failure: everything typed is still in it, and
+      // the retry is the same button.
+      showAlert("Couldn't add that", err?.message ?? 'Please try again.');
+    }
+  }
+
+  async function dismiss(room: string, suggestion: ThingSuggestion) {
+    if (!propertyId) return;
+    // Optimistic: the × is a small, certain, reversible act, and a card that
+    // waits a round trip to disappear reads as a tap that did not land.
+    setAbsent((current) => [...current, { propertyId, room, name: suggestion.name }]);
+    try {
+      await markThingAbsent(propertyId, room, suggestion.name);
+    } catch (err: any) {
+      setAbsent((current) => current.filter((a) => !(a.room === room && a.name === suggestion.name)));
+      showAlert("Couldn't hide that", err?.message ?? 'Please try again.');
+    }
+  }
+
+  async function restore(room: string) {
+    if (!propertyId) return;
+    try {
+      await restoreAbsentThings(propertyId, room);
+      setAbsent((current) => current.filter((a) => a.room !== room));
+    } catch (err: any) {
+      showAlert("Couldn't bring those back", err?.message ?? 'Please try again.');
     }
   }
 
   const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
-  // A photo of a plate with no words is findable only by scrolling to it.
-  const needsName = !!justAdded && !justAdded.name && !justAdded.model;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -213,8 +278,7 @@ export default function HouseScreen() {
       </View>
 
       {/* Above the grouping rail, not behind a magnifier: the moment this tab
-          is opened for is a moment someone already knows what they are looking
-          for. */}
+          is opened for is a moment someone already knows what they want. */}
       <View style={styles.searchRow}>
         <Icon name="search" size="md" color={Colors.textMuted} />
         <TextInput
@@ -248,9 +312,6 @@ export default function HouseScreen() {
               onPress={() => setGrouping(key)}
               style={styles.chipTap}
               accessibilityRole="button"
-              // Named on the Pressable rather than left to the nested Text: the
-              // pill is a View wrapping a Text inside a tap target, and only
-              // the outer node is what a screen reader lands on.
               accessibilityLabel={label}
               accessibilityState={{ selected: grouping === key }}
             >
@@ -261,31 +322,61 @@ export default function HouseScreen() {
               </View>
             </Pressable>
           ))}
-          <Text style={styles.count}>
-            {things.length} {things.length === 1 ? 'thing' : 'things'}
-          </Text>
+          {/* "Recorded", not "things": the ghosts on this screen are not things
+              and counting them here would be the first place the two blur. */}
+          <Text style={styles.count}>{recorded} recorded</Text>
         </View>
       ) : null}
 
       <SectionList
         sections={sections}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.key}
         contentContainerStyle={[styles.listContent, sections.length === 0 && styles.listEmpty]}
         keyboardShouldPersistTaps="handled"
         stickySectionHeadersEnabled={false}
         renderSectionHeader={({ section }) => (
           <View style={styles.groupRow}>
-            <Text style={[styles.group, section.isNew && styles.groupNew]}>{section.title}</Text>
+            <Text style={styles.group}>{section.title}</Text>
             <View style={styles.groupRule} />
           </View>
         )}
-        renderItem={({ item }) => (
-          <ThingCard
-            thing={item}
-            photoUrl={item.photoPaths[0] ? photoUrls[item.photoPaths[0]] : null}
-            onPress={() => navigation.navigate('ThingDetail', { thingId: item.id })}
-          />
-        )}
+        renderSectionFooter={({ section }) =>
+          section.hidden ? (
+            <Pressable
+              onPress={() => section.room && restore(section.room)}
+              style={styles.restore}
+              accessibilityRole="button"
+            >
+              <Text style={styles.restoreLabel}>
+                {section.hidden} not here · bring {section.hidden === 1 ? 'it' : 'them'} back
+              </Text>
+            </Pressable>
+          ) : null
+        }
+        renderItem={({ item }) =>
+          item.row === 'thing' ? (
+            <ThingCard
+              thing={item.thing}
+              photoUrl={item.thing.photoPaths[0] ? photoUrls[item.thing.photoPaths[0]] : null}
+              onPress={() => navigation.navigate('ThingDetail', { thingId: item.thing.id })}
+            />
+          ) : (
+            <GhostCard
+              suggestion={item.suggestion}
+              onPress={() => {
+                // Tapping a ghost has already answered "which room" and "what
+                // is it", so the walkthrough opens on the label.
+                setSheetStart({
+                  room: item.room === NO_ROOM ? null : item.room,
+                  name: item.suggestion.name,
+                  kind: item.suggestion.kind,
+                });
+                setSheetOpen(true);
+              }}
+              onDismiss={() => dismiss(item.room, item.suggestion)}
+            />
+          )
+        }
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -307,106 +398,31 @@ export default function HouseScreen() {
             <EmptyState
               icon="home-outline"
               title="Nothing recorded yet"
-              message="Photograph a rating plate or a paint tin lid. That is the whole record — the rest is optional."
+              message="Add the heat pump, or the hallway paint. It is the thing you'll want in the shop."
             />
           )
         }
       />
 
-      {justAdded ? (
-        <AmendRow>
-          <View style={styles.amendHead}>
-            <AmendLabel
-              text={
-                needsName && !justAdded.room
-                  ? 'In the record. What is it, and where?'
-                  : needsName
-                    ? 'In the record. What is it?'
-                    : justAdded.room
-                      ? 'In the record.'
-                      : 'In the record. Where is it?'
-              }
-            />
-            <Pressable
-              onPress={() => navigation.navigate('ThingDetail', { thingId: justAdded.id })}
-              style={styles.amendDoneTap}
-              accessibilityRole="button"
-            >
-              <Text style={styles.amendDone}>Details</Text>
-            </Pressable>
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.chips}
-          >
-            {/* Capture guessed `appliance` rather than stopping to ask. One
-                tap corrects it, on something already saved. */}
-            {THING_KINDS.map((kind) => {
-              const on = justAdded.kind === kind;
-              return (
-                <Pressable
-                  key={kind}
-                  onPress={() => !on && amend({ kind }, THING_KIND_LABELS[kind])}
-                  style={[styles.chip, on && styles.chipOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                >
-                  <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                    {THING_KIND_LABELS[kind]}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.chips}
-          >
-            {locations.map((location) => {
-              const on = justAdded.room === location.name;
-              return (
-                <Pressable
-                  key={location.id}
-                  onPress={() =>
-                    amend({ room: on ? null : location.name }, on ? 'Tag removed' : location.name)
-                  }
-                  style={[styles.chip, on && styles.chipOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                >
-                  <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>{location.name}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Pressable
-            onPress={() => setJustAdded(null)}
-            style={styles.amendClose}
-            accessibilityRole="button"
-          >
-            <Text style={styles.amendDone}>Done</Text>
-          </Pressable>
-        </AmendRow>
-      ) : null}
-
-      <ComposeBar
-        pathPrefix={household.id}
-        onAdd={handleAdd}
-        note={needsName ? { onSave: (text) => amend({ name: text }, 'Named') } : undefined}
-        stacked
-        words={{
-          placeholder: 'Name it — “gas water heater”…',
-          notePlaceholder: 'What is it?',
-          cameraLabel: 'Photograph the label',
-          sendLabel: 'Add to the record',
+      <Pressable
+        onPress={() => {
+          setSheetStart(null);
+          setSheetOpen(true);
         }}
+        style={[styles.fab, { bottom: Spacing.lg }]}
+        accessibilityRole="button"
+        accessibilityLabel="Add something to the house"
+      >
+        <Icon name="add" size="xl" color={Colors.white} />
+      </Pressable>
+
+      <AddThingSheet
+        visible={sheetOpen}
+        locations={locations}
+        pathPrefix={household.id}
+        start={sheetStart}
+        onCancel={() => setSheetOpen(false)}
+        onAdd={handleAdd}
       />
 
       <Modal visible={placesOpen} transparent animationType="slide" onRequestClose={() => setPlacesOpen(false)}>
@@ -480,7 +496,8 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
   },
   count: { marginLeft: 'auto', fontSize: Typography.sm, color: Colors.textMuted },
-  listContent: { padding: Spacing.lg, gap: Spacing.md },
+  // Room for the + to float over without covering the last card.
+  listContent: { padding: Spacing.lg, paddingBottom: Spacing.xxxl * 2, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
   groupRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingTop: Spacing.sm },
   group: {
@@ -490,25 +507,10 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: Colors.textMuted,
   },
-  groupNew: { color: Colors.primary },
   groupRule: { flex: 1, height: 1, backgroundColor: Colors.border },
-  amendHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  amendDoneTap: {
-    minHeight: MIN_TOUCH_TARGET,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.sm,
-  },
-  amendClose: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignItems: 'flex-end' },
-  amendDone: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.primary,
-  },
-  // A chip's tap area and its visible pill are different sizes on purpose: a
-  // rail of 48px lozenges outweighs the list it filters, so the pill stays
-  // ~34px and the Pressable around it carries the touch target.
+  restore: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  restoreLabel: { fontSize: Typography.sm, color: Colors.textMuted },
   chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
-  chips: { flexDirection: 'row', gap: Spacing.sm, paddingRight: Spacing.lg },
   chip: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
@@ -518,6 +520,17 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: Colors.primary },
   chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
+  fab: {
+    position: 'absolute',
+    right: Spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadow.lg,
+  },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
   sheet: {
     position: 'absolute',

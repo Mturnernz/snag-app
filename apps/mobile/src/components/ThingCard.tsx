@@ -3,7 +3,7 @@ import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 
 import Icon from './Icon';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { Thing, ThingKind } from '../types';
+import { Thing, ThingKind, ThingSuggestion } from '../types';
 import { describeCycle, thingDetailLine, thingHeadline } from '@snag/supabase-queries';
 
 /**
@@ -92,6 +92,10 @@ export default function ThingCard({ thing, photoUrl, onPress }: Props) {
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
+    // Centred, not stretched: a thing recorded from the walkthrough with no
+    // model yet is a single line of text, and top-aligning it against a 44px
+    // thumbnail leaves it floating above a gap.
+    alignItems: 'center',
     gap: Spacing.md,
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
@@ -120,7 +124,87 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   meta: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: 2 },
+  ghost: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Radius.card,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.border,
+    // No surface and no shadow. On a plaster ground a white card is an object;
+    // a ghost is the absence of one.
+    backgroundColor: 'transparent',
+    paddingLeft: Spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  ghostTap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  // Deliberately lighter than a ThingCard, not merely different from one: a
+  // room with six unrecorded things was six full-size dashed cards, and a
+  // tab-length wall of grey is the "reads as homework" failure this design's
+  // whole argument has to survive. A ghost has no thumbnail and no second line
+  // of its own weight, so it is about two-thirds the height of a record — the
+  // distinction is carried by size as well as by style and words.
+  ghostTitle: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
+  ghostNote: { fontSize: Typography.xs, color: Colors.textMuted },
+  ghostDismiss: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   service: { fontSize: Typography.xs, color: Colors.status.doing },
   consumable: { fontSize: Typography.xs, color: Colors.textMuted, flexShrink: 1 },
   snags: { fontSize: Typography.xs, color: Colors.status.open },
 });
+
+
+/**
+ * What a room probably has, and hasn't got recorded yet.
+ *
+ * Deliberately built from the same measurements as `ThingCard` and deliberately
+ * not mistakable for one. Dashed rather than solid, transparent rather than
+ * white, and it says *Not recorded yet* in words — because the entire argument
+ * for putting these on screen collapses the moment somebody reads one as a
+ * record. The × is a second control, not a corner of the first: dismissing
+ * "no dryer here" and opening the walkthrough are opposite intentions and must
+ * not share a tap target.
+ */
+export function GhostCard({
+  suggestion, onPress, onDismiss,
+}: {
+  suggestion: ThingSuggestion;
+  onPress: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <View style={styles.ghost}>
+      <Pressable
+        onPress={onPress}
+        style={styles.ghostTap}
+        accessibilityRole="button"
+        accessibilityLabel={`Add the ${suggestion.name.toLowerCase()}`}
+      >
+        <Icon name="add" size="sm" color={Colors.textMuted} />
+        <View style={styles.body}>
+          <Text style={styles.ghostTitle} numberOfLines={1}>{suggestion.name}</Text>
+          <Text style={styles.ghostNote}>Not recorded yet</Text>
+        </View>
+      </Pressable>
+      <Pressable
+        onPress={onDismiss}
+        style={styles.ghostDismiss}
+        accessibilityRole="button"
+        accessibilityLabel={`No ${suggestion.name.toLowerCase()} here`}
+      >
+        <Icon name="close" size="sm" color={Colors.textMuted} />
+      </Pressable>
+    </View>
+  );
+}

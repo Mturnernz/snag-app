@@ -84,9 +84,10 @@ answer and is *not* the same failure as `PGRST106`.
 
 The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
 
-- **`home`** — this product. Eight tables: `households`, `profiles`, `household_members`,
-  `properties`, `property_members`, `locations`, `snags`, `comments`. Plus `snags_with_details`,
-  the view every list and detail screen reads.
+- **`home`** — this product. Ten tables: `households`, `profiles`, `household_members`,
+  `properties`, `property_members`, `locations`, `snags`, `comments`, `things` (the house record)
+  and `absent_things` (what a place hasn't got). Plus `snags_with_details` and
+  `things_with_details`, the views every list, record and detail screen reads.
 - **`public`** — the retired B2B product, **frozen**. 35 tables, 112 migrations, 6 pilot orgs and
   57 snags. Not migrated, not dropped, not read from. Leaving it intact *is* the archive, which
   is why the pivot needed no destructive migration and why there's no schema dump anywhere.
@@ -223,19 +224,67 @@ always about a thing — the heat pump, the hallway paint, the toilet cistern �
 knew that, so "which filter", "which green", "which model" got answered from scratch every time
 someone stood in a shop.
 
-**A thing is a photograph of its label.** That is the whole design, and it is capture's design
-reused: the rating plate on the back of the heat pump and the lid of the paint tin already *are*
-the record, because somebody printed them so you could read them later. One tap captures make,
-model, serial, refrigerant charge and date of manufacture without typing a character. So
-`things_has_something` mirrors `snags_has_something` — a photo, a name, **or** a model number —
-and everything else is asked afterwards on the same amend row a snag gets, with the same room
-chips in the same seeded order.
+**The tab arrives furnished.** Every room holds greyed, dashed entries for what a house of this
+kind probably has — a rangehood in the kitchen, a dryer in the laundry — until somebody records
+the real one. This is the answer to the thing that kills every inventory product: an empty record
+answers nothing, and a tab that answers nothing on the day it ships never gets opened again.
 
-The failure mode this is built against is specific, and it is the reason there are no required
-fields and **deliberately no completeness meter**: every house-inventory product ever shipped
-opens on an empty thirty-field form, a house has four hundred things in it, and the record ends up
-8% complete. An 8% record is worse than none — you check it once, find nothing, and never check
-again.
+**The rule the whole arrangement rests on, and the easiest one to erode: a ghost is not a row.**
+It comes from `ROOM_SUGGESTIONS`, a constant in `shared-types`; it never reaches `home.things`,
+never appears in a search result, and can never be pointed at by a snag. A record full of entries
+nobody has confirmed *looks* full and answers nothing, and that is worse than an empty one — you
+believe it, check it in the shop, and find nothing there. **If the ghost/real distinction ever
+blurs, the furniture goes rather than the distinction.** Three places it would blur first, all
+pinned by `HouseScreen.test.tsx`: the header count says "recorded" and counts only real things;
+search returns real things only; *By kind* answers "what do we have" and shows no ghosts.
+
+Three consequences:
+
+- **Progress is per room, never a percentage.** "Kitchen · 2 of 8" is a unit of work somebody can
+  finish on a Saturday. A global completeness meter is the shaming number that gets an app closed
+  and not reopened — there is deliberately no such meter anywhere.
+- **A ghost weighs less than a record**, and not only differently: no thumbnail, smaller type,
+  about two-thirds the height. Six full-size dashed cards in one room was a tab-length wall of
+  grey, which is the "reads as homework" failure the whole argument has to survive. Found by
+  rendering, not by reading.
+- **Dismissing is a tap; undoing it is a rescue.** The × means "no dryer here" and writes to
+  `home.absent_things` — the only thing the server remembers about suggestions, and it is the
+  negative. Per property, not per person: there is one house, and two people disagreeing about
+  whether there is a dryer is not a state worth modelling. Every room with dismissals carries one
+  line that brings them all back, because a rescue costing six taps is a dead end — the same
+  reason `Elsewhere` is in the location seed.
+
+**The catalogue only ever suggests `appliance` and `finish`**, the two kinds the app can actually
+describe. The obvious absentees — the toby, the switchboard, meter numbers, bathroom tapware, bulb
+fittings — are `fabric` and `fitting`, and suggesting something the spec sheet cannot then word
+properly is how a prompt becomes a dead end. They arrive with those kinds.
+
+### Adding is a + and a walkthrough, not the compose bar
+
+`AddThingSheet` — four steps, and **only the first is required**. Which room · what is it · the
+label · what it takes.
+
+**This is deliberately slower than capture, because it is a different moment.** A snag is filed in
+ten seconds standing in front of the problem; a thing is recorded at a workbench, or while a
+repairer reads a model number out. The compose bar was answering the wrong one here: one tap, no
+questions, and what came out was a photograph of a plate with no room, no kind and no name — the
+weakest thing the record can hold. **Do not put the compose bar back on this tab.**
+
+- The room is pre-filled whenever the + was pressed inside a room, and **tapping a ghost opens on
+  step three**, because it has already answered the first two questions.
+- **The camera is still one tap** — it is just step three now, where a photograph of the rating
+  plate still captures make, model, serial and date of manufacture at once.
+- **Nothing is written until the last step**, which is the one real difference from the snag amend
+  row and is forced: `create_thing` needs a kind, and a row half-created by somebody who walked
+  away mid-flow is exactly the unconfirmed entry the ghost design exists to keep out.
+- Step three asks for nothing, so its button reads **"Skip for now"** until something is entered
+  and **"Next"** after. It used to be a Next and a Skip side by side, which was two controls with
+  one outcome.
+
+The failure mode all of this is built against is specific, and it is the reason there are no
+required fields past the room: every house-inventory product ever shipped opens on an empty
+thirty-field form, a house has four hundred things in it, and the record ends up 8% complete. An
+8% record is worse than none — you check it once, find nothing, and never check again.
 
 ### Writing is rare and accidental; reading is under pressure, somewhere else
 
@@ -304,9 +353,12 @@ place. Things with no room fall under **Whole house**. Photos reuse `home-photos
 name for half of what it holds; the property name goes in the screen header instead, through the
 same picker capture has.
 
-`HouseScreen.test.tsx` pins the seeded room order, Whole house last, a search answering flat
-rather than re-grouped, and the by-kind order. `houseRecord.test.ts` pins the consumables search
-(the `GU10` case), the headline rules and `describeCycle`.
+`HouseScreen.test.tsx` pins the furnished day-one screen, the per-room counts, Whole house last
+and unfurnished, a search answering flat with no ghosts in it, ghosts staying out of *By kind*,
+and the dismiss-and-restore round trip. `houseRecord.test.ts` pins the consumables search (the
+`GU10` case), the headline rules, `describeCycle`, the loose dates, and `ghostsForRoom` — including
+the case where a thing filed as "Bosch dishwasher" counts as having answered the Dishwasher
+prompt, because an app that keeps nagging about work already done is an app that gets ignored.
 
 ## Why the app exists at all
 

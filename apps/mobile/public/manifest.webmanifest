@@ -2,13 +2,13 @@
   "id": "/",
   "name": "Snag",
   "short_name": "Snag",
-  "description": "Workplace issue reporting",
+  "description": "A shared list of things that need doing around the house.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#F9FAFB",
-  "theme_color": "#2563EB",
+  "background_color": "#FAF7F2",
+  "theme_color": "#FAF7F2",
   "icons": [
     {
       "src": "/icons/icon-192.png",

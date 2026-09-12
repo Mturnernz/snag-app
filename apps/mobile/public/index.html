@@ -28,6 +28,11 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
 
+    <!-- The tab icon. Expo emits a favicon.ico from app.json's web.favicon,
+         capped at 48px; browsers that understand an SVG icon prefer this one
+         and scale it cleanly. Both ship — Safari reads only the .ico. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
     <!-- Launch standalone rather than in a browser tab with chrome around it.
          iOS reads the apple-prefixed one; everyone else reads the first. -->
     <meta name="mobile-web-app-capable" content="yes" />

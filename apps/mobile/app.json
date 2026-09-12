@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F9FAFB"
+      "backgroundColor": "#FAF7F2"
     },
     "ios": {
       "supportsTablet": false,
@@ -20,7 +20,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#2563EB"
+        "backgroundColor": "#2E6A4F"
       },
       "package": "com.snag.app"
     },
@@ -52,9 +52,9 @@
       "output": "single",
       "name": "Snag",
       "shortName": "Snag",
-      "description": "Workplace issue reporting",
-      "themeColor": "#2563EB",
-      "backgroundColor": "#F9FAFB",
+      "description": "A shared list of things that need doing around the house.",
+      "themeColor": "#FAF7F2",
+      "backgroundColor": "#FAF7F2",
       "favicon": "./assets/icon.png"
     },
     "extra": {

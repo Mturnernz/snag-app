@@ -3,9 +3,16 @@
 The visual language for the household app, and the reasoning behind it. The screens are drawn
 up as a canvas (see "The mockups" at the end); the working files are in `design/`.
 
-**This document is a proposal, not the shipped state.** `apps/mobile/src/constants/theme.ts`
-still carries the workplace product's palette — near-white `#F9FAFB`, Tailwind blue `#2563EB`.
-Everything below is ready to drop into it; nothing has been applied yet.
+**Status: the colour system and the brand assets are shipped; the shape and type proposals are
+not.** `apps/mobile/src/constants/theme.ts` and `apps/web/src/app/globals.css` now carry the warm
+palette, and the icon, favicon and wordmark are in `apps/mobile/public/`. What is still only
+proposed here is the softer radius scale (18 / 13 / pill) and the two-typeface pairing — the
+shipped app keeps 12 / 8 / 4 and the system face.
+
+Three hues were darkened slightly against the table below when the identity was finalised, so the
+shipped values win where they differ: **muted `#6A6156`** (was `#736A5F`), **clay `#9E3522`** (was
+`#A63D29`), **brass `#825611`** (was `#8F6117`). Every pair was re-measured; the tightest shipped
+pair is muted-on-sunken at 5.31:1.
 
 ---
 

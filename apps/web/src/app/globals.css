@@ -2,7 +2,13 @@
    exactly (same brand across both clients) — see that file's header comment
    before changing any light value here without changing it there too. Dark
    values are a deliberate design (mobile is light-only, so there was no
-   dark system to inherit), not a mechanical inversion. */
+   dark system to inherit), not a mechanical inversion.
+
+   The light set is the warm household palette: plaster ground, fern accent,
+   warm ink. The status and category hues further down still belong to the
+   retired B2B product — this app is now the root page and password recovery,
+   which render none of them — so they are left as they were rather than
+   re-pitched for a UI nothing serves. */
 
 :root {
   --font-sans-family: var(--font-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -41,36 +47,40 @@
   --weight-semibold: 600;
   --weight-bold: 700;
 
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 2px 6px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.12);
+  --shadow-sm: 0 1px 2px rgba(43, 39, 36, 0.06);
+  --shadow-md: 0 2px 6px rgba(43, 39, 36, 0.08);
+  --shadow-lg: 0 8px 24px rgba(43, 39, 36, 0.12);
 
-  --focus-ring: 0 0 0 3px var(--color-primary-light);
+  /* The accent itself, not its tint. A tint ring was already weak on the old
+     near-white ground and is effectively invisible on plaster — #E4EFE7 against
+     #FAF7F2 is 1.09:1, and a focus indicator nobody can see is the same as not
+     having one. Fern measures 5.97:1 there. */
+  --focus-ring: 0 0 0 3px var(--color-primary);
 }
 
 /* ---------- Light (default) ---------- */
 :root,
 :root[data-theme='light'] {
-  --color-background: #F9FAFB;
+  --color-background: #FAF7F2;
   --color-surface: #FFFFFF;
   --color-surface-raised: #FFFFFF;
-  --color-border: #E5E7EB;
-  --color-border-strong: #D1D5DB;
+  --color-border: #E7DFD3;
+  --color-border-strong: #D8CEC0;
 
-  --color-primary: #2563EB;
-  --color-primary-hover: #1D4ED8;
-  --color-primary-light: #DBEAFE;
+  --color-primary: #2E6A4F;
+  --color-primary-hover: #245741;
+  --color-primary-light: #E4EFE7;
   --color-on-primary: #FFFFFF;
 
-  --color-text-primary: #111827;
-  /* Both tiers are darker than the Tailwind greys they started as, because
-     WCAG AA (4.5:1) leaves no room for a lighter one on a near-white ground:
-     the old muted #9CA3AF measured 2.43:1 on --color-background, and #6B7280
-     — the previous *secondary* — is about the lightest grey that passes at
-     all. So the scale shifted down one step rather than collapsing to a
-     single tier. Verified by e2e/a11y.spec.ts. */
-  --color-text-secondary: #4B5563;
-  --color-text-muted: #6B7280;
+  /* Warm ink rather than blue-black: a blue-black on a warm ground looks like
+     two palettes stapled together. Measured on --color-background — 13.85,
+     6.87 and 5.68 — because a warm ground reads lighter than a cool one while
+     doing nothing at all to its measured luminance, which is how an earlier
+     pass of this palette failed three pairings that looked fine.
+     e2e/a11y.spec.ts holds the line. */
+  --color-text-primary: #2B2724;
+  --color-text-secondary: #5C554C;
+  --color-text-muted: #6A6156;
 
   --color-status-flagged: #3B82F6;
   --color-status-flagged-bg: #EFF6FF;
@@ -81,14 +91,14 @@
   --color-status-rca-pending: #DC2626;
   --color-status-rca-pending-bg: #FEE2E2;
 
-  --color-success: #16A34A;
-  --color-success-bg: #F0FDF4;
-  --color-success-border: #BBF7D0;
+  --color-success: #2E6A4F;
+  --color-success-bg: #E4EFE7;
+  --color-success-border: #C6DDD0;
 
-  --color-serious: #DC2626;
-  --color-serious-bg: #FEE2E2;
-  --color-danger: #EF4444;
-  --color-danger-bg: #FEF2F2;
+  --color-serious: #9E3522;
+  --color-serious-bg: #F9E7E1;
+  --color-danger: #9E3522;
+  --color-danger-bg: #F9E7E1;
 
   --color-category-niggle: #6B7280;
   --color-category-niggle-bg: #F3F4F6;
@@ -110,10 +120,10 @@
   --color-status-in-progress-fg: #B45309;
   --color-status-resolved-fg: #047857;
   --color-status-rca-pending-fg: #B91C1C;
-  --color-success-fg: #15803D;
-  --color-danger-fg: #B91C1C;
-  --color-primary-fg: #1D4ED8;
-  --color-serious-fg: #B91C1C;
+  --color-success-fg: #2E6A4F;
+  --color-danger-fg: #9E3522;
+  --color-primary-fg: #2E6A4F;
+  --color-serious-fg: #9E3522;
 
   color-scheme: light;
 }

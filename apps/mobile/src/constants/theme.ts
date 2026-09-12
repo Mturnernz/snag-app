@@ -1,89 +1,121 @@
+/**
+ * Every design token in the app.
+ *
+ * Two rules govern the palette, and they are the whole system:
+ *
+ *   1. **The ground is warm.** `#FAF7F2` is plaster, not near-white. This is a
+ *      household list, not software you are logged into — it sits on a phone on
+ *      the kitchen bench and is shared with one other person who did not sign up
+ *      for an application.
+ *   2. **Colour is spent on state and interaction, never on decoration.** Four
+ *      hues, one job each. Anything that is not a state or an action is a
+ *      neutral.
+ *
+ * The corollary that gets second-guessed: **fern is the brand, so fern is not
+ * "done"**. A finished snag goes neutral. The reward for finishing a household
+ * job is the item leaving the list, not a green tick celebrating it — and
+ * spending the brand hue on completion would make the list's calmest state its
+ * loudest colour.
+ *
+ * Replaces the retired SnagHQ B2B palette (cool `#F9FAFB`, Tailwind cobalt
+ * `#2563EB`, blue-black `#111827`), which was the right call for a compliance
+ * tool read by whoever was the safety officer that month and the wrong one for
+ * a house.
+ *
+ * **Every pair below is measured, not eyeballed**, and the reason matters: a
+ * warm ground reads lighter than a cool one while doing nothing at all to its
+ * measured luminance. An earlier pass of this palette failed three pairings for
+ * exactly that reason. The tightest pair shipped here is muted-on-sunken at
+ * 5.31:1. If the ground is ever warmed further, re-run the numbers rather than
+ * trusting how it looks.
+ *
+ * `apps/web/src/app/globals.css` mirrors the light values — change both.
+ */
 export const Colors = {
   // Backgrounds
-  background: '#F9FAFB',
+  background: '#FAF7F2',
   surface: '#FFFFFF',
+  /** Wells: inactive chips, inputs inside a card, every neutral badge. */
+  sunken: '#F4EFE7',
 
   // Borders
-  border: '#E5E7EB',
+  border: '#E7DFD3',
 
-  // Brand accent
-  primary: '#2563EB',
-  primaryLight: '#DBEAFE',
+  // Brand accent — fern. Every primary action, and the active tab.
+  primary: '#2E6A4F',
+  primaryLight: '#E4EFE7',
 
-  // Text
-  textPrimary: '#111827',
-  // Darker than the Tailwind greys these started as. WCAG AA (4.5:1) leaves
-  // no room for a lighter tier on this background: the old muted #9CA3AF
-  // measured 2.43:1 against #F9FAFB. apps/web mirrors these exactly and its
-  // axe suite holds the line.
-  textSecondary: '#4B5563',
-  textMuted: '#6B7280',
-
-  // Status colours (Snagv1's real snag_status enum: flagged/in_progress/resolved/rca_pending)
+  // Text. Warm near-black rather than blue-black: a blue-black on a warm ground
+  // looks like two palettes stapled together.
   //
-  // Each status has three values, and the third is the point: `*Fg` is the
-  // colour to use for *text on the matching tint*. The base hue is for dots,
-  // icons and rails, where WCAG's 3:1 non-text threshold applies; as label
-  // text on its own tinted pill it does not clear 4.5:1 — in-progress managed
-  // 2.07:1, which on a badge that says whether a hazard is being dealt with
-  // is not a rounding error. apps/web mirrors these and its axe suite fails
-  // if either regresses.
+  //   ink on ground        13.85    secondary on ground   6.87
+  //   muted on ground       5.68    muted on sunken       5.31  ← tightest
+  textPrimary: '#2B2724',
+  textSecondary: '#5C554C',
+  textMuted: '#6A6156',
+
+  // Status. `*Fg` is the colour to use for text on the matching tint; the base
+  // is for dots, icons and rails. These hues are dark enough that the two are
+  // the same value, which was not true of the cobalt-era palette.
+  //
+  // Done is deliberately neutral — see the note at the top of this file.
   status: {
-    open: '#3B82F6',
-    openFg: '#1D4ED8',
-    openBg: '#EFF6FF',
-    doing: '#F59E0B',
-    doingFg: '#B45309',
-    doingBg: '#FFFBEB',
-    done: '#10B981',
-    doneFg: '#047857',
-    doneBg: '#ECFDF5',
+    open: '#35526E',      // slate: a state, not a warning
+    openFg: '#35526E',
+    openBg: '#E9EFF6',
+    doing: '#825611',     // brass
+    doingFg: '#825611',
+    doingBg: '#F7EEDC',
+    done: '#5C554C',
+    doneFg: '#5C554C',
+    doneBg: '#F4EFE7',
   },
 
-  // Effort — deliberately neutral. Effort answers "can I finish this today",
-  // which is not an alarm, so it must never compete with priority or due
-  // state for attention on the same card.
+  // Effort — deliberately colourless. Effort answers "can I finish this today",
+  // which is not an alarm, so it must never compete with priority or due state
+  // for attention on the same card.
   effort: {
-    fg: '#4B5563',
-    bg: '#F3F4F6',
+    fg: '#5C554C',
+    bg: '#F4EFE7',
   },
 
   // Due state. Overdue is the one thing on a household list that has actually
-  // earned red — it is a fact, not a judgement about importance.
+  // earned red — it is a fact about a date, not a judgement about importance.
   due: {
-    overdueFg: '#B91C1C',
-    overdueBg: '#FEE2E2',
-    soonFg: '#B45309',
-    soonBg: '#FFFBEB',
-    scheduledFg: '#4B5563',
-    scheduledBg: '#F3F4F6',
+    overdueFg: '#9E3522',
+    overdueBg: '#F9E7E1',
+    soonFg: '#825611',
+    soonBg: '#F7EEDC',
+    scheduledFg: '#5C554C',
+    scheduledBg: '#F4EFE7',
   },
 
-  // Priority colours — only "high" carries an alert colour; low/medium are
-  // rendered as neutral dots so they never collide with status badge hues.
+  // Priority — only "high" carries an alert colour; low is a neutral pill, so a
+  // second saturated hue can never collide with status on the same card.
   priority: {
-    high: '#EF4444',
-    highBg: '#FEF2F2',
-    low: '#6B7280',
-    lowBg: '#F3F4F6',
+    high: '#9E3522',      // clay
+    highBg: '#F9E7E1',
+    low: '#5C554C',
+    lowBg: '#F4EFE7',
   },
 
-  // Success — save confirmations, positive vote state, "copied" feedback
-  success: '#16A34A',
-  successFg: '#15803D',
-  successBg: '#F0FDF4',
-  successBorder: '#BBF7D0',
+  // Success — save confirmations and positive feedback. Fern, because that is
+  // the brand's "this worked" colour. Note this is feedback on an action, not a
+  // completion *state*: a snag marked done still goes neutral.
+  success: '#2E6A4F',
+  successFg: '#2E6A4F',
+  successBg: '#E4EFE7',
+  successBorder: '#C6DDD0',
 
   white: '#FFFFFF',
   black: '#000000',
-  danger: '#EF4444',
-  dangerFg: '#B91C1C',
+  danger: '#9E3522',
+  dangerFg: '#9E3522',
 
-  // Scrim for chips laid over a photo (site pill, merge indicator, the "new
-  // since your last visit" dot). A photo is not a background you can pick a
-  // text colour against, so anything sitting on one gets this behind it and
-  // white on top.
-  photoOverlay: 'rgba(17, 24, 39, 0.75)',
+  // Scrim for chips laid over a photo. A photo is not a background you can pick
+  // a text colour against, so anything sitting on one gets this behind it and
+  // white on top. Warm-tinted to match the ink rather than the old blue-black.
+  photoOverlay: 'rgba(43, 39, 36, 0.75)',
 };
 
 export const Radius = {
@@ -126,23 +158,26 @@ export const MIN_TOUCH_TARGET = 48;
 // Elevation scale. Elevated surfaces (Card variant="elevated") drop their
 // border and use one of these instead; nested rows inside lists stay
 // border-only so long scrolling lists don't stack shadows.
+//
+// Tinted with the ink rather than a blue-black: a cool shadow on a warm ground
+// reads as grey haze rather than as depth.
 export const Shadow = {
   sm: {
-    shadowColor: '#0F172A',
+    shadowColor: '#2B2724',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 2,
     elevation: 1,
   },
   md: {
-    shadowColor: '#0F172A',
+    shadowColor: '#2B2724',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 6,
     elevation: 3,
   },
   lg: {
-    shadowColor: '#0F172A',
+    shadowColor: '#2B2724',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,

@@ -263,24 +263,43 @@ reintroduce a mechanism that can fail silently for two people who live in the sa
 ## Design System (DO NOT deviate)
 
 All tokens in `apps/mobile/src/constants/theme.ts`. Never hardcode colours, spacing or shadows.
+`apps/web/src/app/globals.css` mirrors the light values — change both.
 
-- **Background** `#F9FAFB` · **Surface** `#FFFFFF` · **Border** `#E5E7EB` · **Primary** `#2563EB`
-- **Text**: primary `#111827`, secondary `#4B5563`, muted `#6B7280` — deliberately darker than
-  the Tailwind greys they resemble; at WCAG AA (4.5:1) there is no room for a lighter muted on
-  this background.
-- **Elevation**: the `Shadow` scale (`sm` list cards, `md` standalone cards, `lg` modals). An
-  elevated card drops its border; never both.
+Two rules govern the palette, and they are the whole system:
+
+1. **The ground is warm.** `#FAF7F2` is plaster, not near-white. This is a household list, not
+   software you are logged into.
+2. **Colour is spent on state and interaction, never on decoration.** Four hues, one job each.
+
+The corollary that gets second-guessed: **fern is the brand, so fern is not "done"**. A finished
+snag goes neutral. The reward for finishing a household job is the item leaving the list, and
+spending the brand hue on completion would make the list's calmest state its loudest colour.
+
+- **Ground** `#FAF7F2` · **Surface** `#FFFFFF` · **Sunken** `#F4EFE7` · **Border** `#E7DFD3`
+- **Fern** `#2E6A4F` — every primary action and the active tab. Tint `#E4EFE7`.
+- **Clay** `#9E3522` — priority high, and overdue. Tint `#F9E7E1`.
+- **Brass** `#825611` — doing, and due within a week. Tint `#F7EEDC`.
+- **Slate** `#35526E` — open. A state, not a warning. Tint `#E9EFF6`.
+- **Text**: ink `#2B2724` (warm near-black, not blue-black), secondary `#5C554C`, muted `#6A6156`.
+- **Elevation**: the `Shadow` scale (`sm` list cards, `md` standalone cards, `lg` modals), tinted
+  with the ink rather than a blue-black. An elevated card drops its border; never both.
 - **Card radius** 12px · **Button radius** 8px · **Chip radius** 4px
 - **Icons**: `@expo/vector-icons` (Ionicons) via the shared `Icon` component — never emoji.
   `-outline` by default; filled reserved for the active tab.
 - **Minimum touch target** 48px (`MIN_TOUCH_TARGET`)
 - **Light mode only.**
 
+**Every pair is measured, not eyeballed, and the reason is specific: a warm ground reads lighter
+than a cool one while doing nothing at all to its measured luminance.** An earlier pass of this
+palette failed three pairings for exactly that reason. The tightest pair shipped is
+muted-on-sunken at 5.31:1. If the ground is warmed further, re-run the numbers rather than
+trusting how it looks.
+
 Three badges carry the triage vocabulary, and their colour budget is deliberate:
 
-- **`StatusBadge`** — open / doing / done.
-- **`PriorityBadge`** — only `now` gets an alert colour; `soon` and `someday` are neutral dots, so
-  a second saturated hue can't collide with status on the same card.
+- **`StatusBadge`** — open (slate) / doing (brass) / done (neutral).
+- **`PriorityBadge`** — only `high` gets an alert colour; `low` is a neutral pill, so a second
+  saturated hue can't collide with status on the same card.
 - **`EffortBadge`** — deliberately colourless. Effort answers "can I finish this today", which is
   not an alarm.
 - **`DueBadge`** — overdue is the one thing on a household list that has earned red. It's a fact
@@ -386,9 +405,19 @@ asking for ~192px scales it up 4x and it looks visibly blurry.
 `apps/mobile/public/` is copied verbatim into `dist/`:
 
 - **`manifest.webmanifest`** — 192 and 512 PNGs, `display: standalone`. The icons are
-  `purpose: "any maskable"` on the same files because the source is full-bleed `#2563EB` with the
-  mark 29.5% out from centre, inside the 40% safe radius Android masks to. Re-measure before
-  changing the artwork.
+  `purpose: "any maskable"` on the same files because the source is full-bleed `#2E6A4F` with the
+  mark reaching 34.5% out from centre, inside the 40% safe radius Android masks to. **Re-measure
+  before changing the artwork** — the same file serves both the plain and the masked case, so a
+  mark that only works uncropped ships looking clipped on half the phones it lands on and nothing
+  warns you.
+- **`favicon.svg`** and **`icons/icon-512.svg`** — the vector masters. `favicon.svg` is drawn for
+  48px with a heavier relative stroke (6/48 rather than 44/512), because the icon-512 stroke
+  disappears at tab size. Regenerate the PNGs from `icon-512.svg`, never from each other.
+- **`assets/adaptive-icon.png`** is the Android foreground layer and is a different geometry
+  again: the launcher crops it to its middle 66%, so the mark is sized to stand 68.75% of *that*,
+  on transparency, with the fern coming from `adaptiveIcon.backgroundColor`. Trim the SVG's own
+  margin before scaling — the ink occupies only the middle ~69% of the 512 viewBox, so sizing the
+  canvas sizes the wrong thing and the icon comes out visibly small.
 - **`index.html`** — overrides Expo's HTML shell, adding the manifest link and `apple-touch-icon`
   (iOS ignores the manifest and reads only that, so both have to be stated).
 

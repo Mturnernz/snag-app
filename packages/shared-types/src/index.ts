@@ -237,12 +237,19 @@ export const THING_KIND_GROUP_LABELS: Record<ThingKind, string> = {
  * / 7BB 83/018 sits in the same two columns as Bosch / SMS46MI01A, and both are
  * things somebody reads aloud to somebody else. Only the words change.
  */
-export const THING_KIND_FIELD_LABELS: Record<ThingKind, { make: string; model: string }> = {
-  appliance: { make: 'Make', model: 'Model' },
-  finish: { make: 'Brand', model: 'Colour code' },
-  fitting: { make: 'Brand', model: 'Part' },
-  fabric: { make: 'Type', model: 'Spec' },
-  contact: { make: 'Trade', model: 'Phone' },
+export const THING_KIND_FIELD_LABELS: Record<
+  ThingKind,
+  { make: string; model: string; notes: string }
+> = {
+  appliance: { make: 'Make', model: 'Model', notes: 'Notes' },
+  // A paint's note is not an afterthought, it is what tells two of them apart:
+  // a bathroom holds Half Spanish White on the main wall and Quarter Alabaster
+  // on the windows, and "Notes" is the wrong word for the only thing
+  // distinguishing them.
+  finish: { make: 'Brand', model: 'Colour code', notes: 'Where it went' },
+  fitting: { make: 'Brand', model: 'Part', notes: 'Notes' },
+  fabric: { make: 'Type', model: 'Spec', notes: 'Notes' },
+  contact: { make: 'Trade', model: 'Phone', notes: 'What they did' },
 };
 
 /**
@@ -339,6 +346,15 @@ export type ThingGrouping = 'room' | 'kind';
  *
  * Keyed by the seeded room names exactly. A room with no entry here simply
  * arrives empty, which is the right answer for `Elsewhere`.
+ *
+ * **The paint prompt is one general one per room, and it works differently from
+ * the rest.** A room has one rangehood and a name for it; a room has several
+ * paints and the names are colours — Half Spanish White on the main wall,
+ * Quarter Alabaster on the windows. So the prompt is just "Paint", it is
+ * answered by *any* finish recorded in that room (see `ghostsForRoom`), and the
+ * second and third ones are added from the +, which offers Paint in every room
+ * whatever is already recorded. A prompt that stayed up after the first paint
+ * would be nagging; one that only ever allowed one would be wrong.
  */
 export interface ThingSuggestion {
   name: string;
@@ -353,48 +369,48 @@ export const ROOM_SUGGESTIONS: Record<string, ThingSuggestion[]> = {
     { name: 'Dishwasher', kind: 'appliance' },
     { name: 'Fridge/freezer', kind: 'appliance' },
     { name: 'Waste disposal', kind: 'appliance' },
-    { name: 'Walls and cabinetry', kind: 'finish' },
+    { name: 'Paint', kind: 'finish' },
   ],
   Bathroom: [
     { name: 'Extractor fan', kind: 'appliance' },
     { name: 'Heated towel rail', kind: 'appliance' },
-    { name: 'Walls and ceiling', kind: 'finish' },
+    { name: 'Paint', kind: 'finish' },
   ],
   Bedroom: [
     { name: 'Heat pump head', kind: 'appliance' },
     { name: 'Smoke alarm', kind: 'appliance' },
-    { name: 'Walls and trim', kind: 'finish' },
+    { name: 'Paint', kind: 'finish' },
   ],
   'Living room': [
     { name: 'Heat pump · indoor', kind: 'appliance' },
     { name: 'Wood burner', kind: 'appliance' },
-    { name: 'Walls and trim', kind: 'finish' },
+    { name: 'Paint', kind: 'finish' },
   ],
   Laundry: [
     { name: 'Washing machine', kind: 'appliance' },
     { name: 'Dryer', kind: 'appliance' },
     { name: 'Water filter', kind: 'appliance' },
-    { name: 'Walls', kind: 'finish' },
+    { name: 'Paint', kind: 'finish' },
   ],
   Hallway: [
     { name: 'Smoke alarm', kind: 'appliance' },
     { name: 'Heat pump controller', kind: 'appliance' },
-    { name: 'Walls and trim', kind: 'finish' },
+    { name: 'Paint', kind: 'finish' },
   ],
   Garage: [
     { name: 'Garage door opener', kind: 'appliance' },
     { name: 'Hot water cylinder', kind: 'appliance' },
     { name: 'Lawnmower', kind: 'appliance' },
     { name: 'Water blaster', kind: 'appliance' },
-    { name: 'Spare paint and tiles', kind: 'finish' },
+    { name: 'Paint', kind: 'finish' },
   ],
   Outside: [
     { name: 'Gas water heater', kind: 'appliance' },
     { name: 'Heat pump · outdoor unit', kind: 'appliance' },
-    { name: 'Fence or gate stain', kind: 'finish' },
+    { name: 'Stain', kind: 'finish' },
   ],
   Deck: [
-    { name: 'Deck stain', kind: 'finish' },
+    { name: 'Stain', kind: 'finish' },
   ],
 };
 

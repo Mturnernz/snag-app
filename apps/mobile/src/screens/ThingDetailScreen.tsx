@@ -315,11 +315,18 @@ export default function ThingDetailScreen() {
           ))}
 
           <Field
-            label="Notes"
+            label={words.notes}
             value={thing.notes}
-            placeholder="Anything the next person should know"
-            multiline
-            show={known(thing.notes) || reveal}
+            placeholder={
+              thing.kind === 'finish'
+                ? 'Main wall · windows · ceiling'
+                : 'Anything the next person should know'
+            }
+            multiline={thing.kind !== 'finish'}
+            // A paint's surface is the row that tells it from the other paint in
+            // the room, so it shows whether or not anything is in it — the one
+            // field on this sheet exempt from "empty fields don't render".
+            show={known(thing.notes) || reveal || thing.kind === 'finish'}
             onSave={(v) => patch({ notes: v })}
           />
         </View>

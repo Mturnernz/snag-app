@@ -872,9 +872,21 @@ export function ghostsForRoom(
     absent.filter((a) => a.room === room).map((a) => normal(a.name))
   );
 
+  // A paint prompt is answered by *any* paint in the room, not by one called
+  // "Paint". Half Spanish White on the main wall and Quarter Alabaster on the
+  // windows are both finishes and neither is named after the prompt, so a
+  // name match would leave "Paint · not recorded yet" sitting under two
+  // recorded paints — the app failing to notice work already done, which is
+  // the fastest way to get a screen ignored. The second and third paints come
+  // from the +, which offers Paint in every room regardless.
+  const kindsRecorded = new Set(
+    things.filter((thing) => thing.room === room).map((thing) => thing.kind)
+  );
+
   return suggestions.filter((suggestion) => {
     const wanted = normal(suggestion.name);
     if (dismissed.has(wanted)) return false;
+    if (suggestion.kind === 'finish') return !kindsRecorded.has('finish');
     return !recorded.some((name) => name === wanted || name.includes(wanted));
   });
 }

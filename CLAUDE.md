@@ -254,6 +254,31 @@ Three consequences:
   line that brings them all back, because a rescue costing six taps is a dead end — the same
   reason `Elsewhere` is in the location seed.
 
+### Paint is the one suggestion that works differently
+
+A room has one rangehood and a name for it. A room has as many paints as it has surfaces, and
+their names are **colours** — a bathroom holds Half Spanish White on the main wall and Quarter
+Alabaster on the windows. Three rules follow, and they are the whole feature:
+
+- **The prompt is just "Paint"**, one per room, and it is **answered by any `finish` recorded in
+  that room** rather than by name (`ghostsForRoom` special-cases the kind). Neither colour contains
+  the word "Paint", so a name match would leave the prompt sitting under two recorded paints — the
+  app failing to notice work already done, which is the fastest way to get a screen ignored.
+- **The second and third come from the +**, which offers Paint in every room whatever is already
+  recorded. The ghost prompts for the first one only; a prompt that stayed up would nag, and one
+  that allowed only one would be wrong.
+- **The colour goes in `name`, the surface in `notes`.** The colour is the answer somebody came
+  for, so it is the headline; `THING_KIND_FIELD_LABELS` calls the notes row **"Where it went"** for
+  a finish, and the card shows it as a line of its own. That note is the only thing telling two
+  paints in one room apart, which is why it is the single field on the spec sheet exempt from
+  "empty fields don't render". No other kind shows its note on a card — an appliance's note is not
+  what distinguishes it from the appliance beside it.
+
+In the walkthrough, choosing Paint asks **which colour** rather than offering a name, step three
+photographs the **tin lid** rather than a rating plate, and step four asks **where it went**
+instead of what it takes and how often it is serviced. A tin of paint takes nothing and is never
+serviced; asking it those two questions was two whole steps of the sheet interrogating a tin.
+
 **The catalogue only ever suggests `appliance` and `finish`**, the two kinds the app can actually
 describe. The obvious absentees — the toby, the switchboard, meter numbers, bathroom tapware, bulb
 fittings — are `fabric` and `fitting`, and suggesting something the spec sheet cannot then word
@@ -358,7 +383,8 @@ and unfurnished, a search answering flat with no ghosts in it, ghosts staying ou
 and the dismiss-and-restore round trip. `houseRecord.test.ts` pins the consumables search (the
 `GU10` case), the headline rules, `describeCycle`, the loose dates, and `ghostsForRoom` — including
 the case where a thing filed as "Bosch dishwasher" counts as having answered the Dishwasher
-prompt, because an app that keeps nagging about work already done is an app that gets ignored.
+prompt, and the paint rules above: one general prompt per room, answered by any finish in it and
+by nothing in another room, with the colour leading and the code searchable.
 
 ## Why the app exists at all
 

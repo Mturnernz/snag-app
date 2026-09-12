@@ -191,3 +191,51 @@ describe('what a room still shows', () => {
     }
   });
 });
+
+describe('paint, of which a room has several', () => {
+  // A room has one rangehood and a name for it. A room has as many paints as it
+  // has surfaces, and their names are colours — so the paint prompt behaves
+  // differently from every other suggestion, and these pin how.
+  const paint = (over: Partial<Thing>) => thing({ kind: 'finish', ...over });
+
+  it('prompts once per room, in general terms', () => {
+    const names = ghostsForRoom('Bathroom', [], []).map((g) => g.name);
+    expect(names).toContain('Paint');
+    expect(names.filter((n) => n === 'Paint')).toHaveLength(1);
+  });
+
+  it('stops prompting as soon as any paint in that room is recorded', () => {
+    // Neither "Half Spanish White" nor "Quarter Alabaster" contains the word
+    // "Paint", so a name match would leave the prompt sitting under two
+    // recorded paints — the app failing to notice work already done.
+    const recorded = [
+      paint({ id: 'a', room: 'Bathroom', name: 'Half Spanish White', notes: 'Main wall' }),
+      paint({ id: 'b', room: 'Bathroom', name: 'Quarter Alabaster', notes: 'Windows' }),
+    ];
+    expect(ghostsForRoom('Bathroom', recorded, []).map((g) => g.name)).not.toContain('Paint');
+    // And it is per room: the bathroom being painted says nothing about the kitchen.
+    expect(ghostsForRoom('Kitchen', recorded, []).map((g) => g.name)).toContain('Paint');
+  });
+
+  it('is not answered by an appliance in the same room', () => {
+    const recorded = [thing({ id: 'a', room: 'Bathroom', name: 'Extractor fan' })];
+    expect(ghostsForRoom('Bathroom', recorded, []).map((g) => g.name)).toContain('Paint');
+  });
+
+  it('leads with the colour, because that is the answer somebody came for', () => {
+    const wall = paint({
+      name: 'Half Spanish White', make: 'Resene', model: '7BB 83/018', notes: 'Main wall',
+    });
+    expect(thingHeadline(wall)).toBe('Half Spanish White');
+    expect(thingDetailLine(wall)).toBe('Resene 7BB 83/018');
+  });
+
+  it('finds a colour by its code as readily as its name', () => {
+    const bathroom = [
+      paint({ id: 'a', room: 'Bathroom', name: 'Half Spanish White', model: '7BB 83/018' }),
+      paint({ id: 'b', room: 'Bathroom', name: 'Quarter Alabaster', model: 'N93-002-072' }),
+    ];
+    expect(searchThings(bathroom, 'alabaster').map((t) => t.id)).toEqual(['b']);
+    expect(searchThings(bathroom, '7BB').map((t) => t.id)).toEqual(['a']);
+  });
+});

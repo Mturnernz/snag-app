@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
@@ -81,6 +81,8 @@ export default function AddThingSheet({
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [takes, setTakes] = useState('');
   const [serviceDays, setServiceDays] = useState<number | null>(null);
+  /** For a paint: which surface in the room. "Main wall", "Windows". */
+  const [where, setWhere] = useState('');
   const [busy, setBusy] = useState(false);
 
   // Reset on every open. A sheet that remembers the last thing somebody added
@@ -96,14 +98,30 @@ export default function AddThingSheet({
     setPhotoPath(null);
     setTakes('');
     setServiceDays(null);
+    setWhere('');
     setBusy(false);
     // Tapping a ghost has already answered the first two questions, so opening
     // on them would be asking somebody to confirm what they just said.
     setStep(start?.name ? 'label' : start?.room ? 'what' : 'room');
   }, [visible, start]);
 
-  const suggestions = room ? ROOM_SUGGESTIONS[room] ?? [] : [];
   const index = STEPS.indexOf(step);
+  const painting = kind === 'finish';
+
+  /**
+   * What this room offers, with Paint always on the end.
+   *
+   * A room has one rangehood; it has as many paints as it has surfaces. So the
+   * ghost prompts for the first paint and this offers every one after it —
+   * which is why Paint appears here whatever is already recorded, and why the
+   * other suggestions do not.
+   */
+  const suggestions = useMemo(() => {
+    const forRoom = room ? ROOM_SUGGESTIONS[room] ?? [] : [];
+    return forRoom.some((one) => one.kind === 'finish')
+      ? forRoom
+      : [...forRoom, { name: 'Paint', kind: 'finish' as ThingKind }];
+  }, [room]);
 
   function next() {
     if (step === 'room') setStep('what');
@@ -148,8 +166,11 @@ export default function AddThingSheet({
         photoPaths: photoPath ? [photoPath] : [],
         make: make.trim() || null,
         model: model.trim() || null,
-        consumables: takes.trim() ? [takes.trim()] : [],
-        serviceDays,
+        // A paint answers the last step with a surface; everything else answers
+        // it with a part and a cycle. Neither carries the other's fields.
+        consumables: !painting && takes.trim() ? [takes.trim()] : [],
+        serviceDays: painting ? null : serviceDays,
+        notes: painting ? where.trim() || null : null,
       });
     } finally {
       setBusy(false);
@@ -220,8 +241,16 @@ export default function AddThingSheet({
                       label={suggestion.name}
                       on={name === suggestion.name}
                       onPress={() => {
-                        setName(suggestion.name);
                         setKind(suggestion.kind);
+                        if (suggestion.kind === 'finish') {
+                          // A paint is not called "Paint" — it is called Half
+                          // Spanish White, and that is the answer somebody
+                          // came to this tab for.
+                          setName('');
+                          setNaming(true);
+                        } else {
+                          setName(suggestion.name);
+                        }
                       }}
                     />
                   ))}
@@ -229,27 +258,32 @@ export default function AddThingSheet({
                 </View>
               ) : (
                 <View style={styles.fields}>
+                  {painting ? <Text style={styles.hint}>Which colour?</Text> : null}
                   <TextInput
                     style={styles.input}
                     value={name}
                     onChangeText={setName}
-                    placeholder="Gas water heater"
+                    placeholder={painting ? 'Half Spanish White' : 'Gas water heater'}
                     placeholderTextColor={Colors.textMuted}
                     maxLength={80}
                     autoFocus
-                    accessibilityLabel="What is it"
+                    accessibilityLabel={painting ? 'Which colour' : 'What is it'}
                   />
-                  <Text style={styles.hint}>And what sort of thing is it?</Text>
-                  <View style={styles.chips}>
-                    {THING_KINDS.map((value) => (
-                      <Chip
-                        key={value}
-                        label={THING_KIND_LABELS[value]}
-                        on={kind === value}
-                        onPress={() => setKind(value)}
-                      />
-                    ))}
-                  </View>
+                  {!painting ? (
+                    <>
+                      <Text style={styles.hint}>And what sort of thing is it?</Text>
+                      <View style={styles.chips}>
+                        {THING_KINDS.map((value) => (
+                          <Chip
+                            key={value}
+                            label={THING_KIND_LABELS[value]}
+                            on={kind === value}
+                            onPress={() => setKind(value)}
+                          />
+                        ))}
+                      </View>
+                    </>
+                  ) : null}
                 </View>
               )}
             </ScrollView>
@@ -259,7 +293,9 @@ export default function AddThingSheet({
         {/* ── 3. the label ────────────────────────────────────────────── */}
         {step === 'label' ? (
           <>
-            <Text style={styles.question}>Photograph the label</Text>
+            <Text style={styles.question}>
+              {painting ? 'Photograph the tin lid' : 'Photograph the label'}
+            </Text>
             <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
               <Pressable
                 onPress={shoot}
@@ -278,13 +314,19 @@ export default function AddThingSheet({
                       color={photoPath ? Colors.primary : Colors.textSecondary}
                     />
                     <Text style={[styles.shootLabel, photoPath && styles.shootLabelDone]}>
-                      {photoPath ? 'Got it — the plate is on the record' : 'Take a photo of the rating plate'}
+                      {photoPath
+                        ? 'Got it — it is on the record'
+                        : painting
+                          ? 'Take a photo of the tin lid'
+                          : 'Take a photo of the rating plate'}
                     </Text>
                   </>
                 )}
               </Pressable>
               <Text style={styles.hint}>
-                The plate carries the make, model and serial at once. Or type them — either can wait.
+                {painting
+                  ? 'The lid carries the colour code and the tint formula — the numbers that get you the same paint rather than a near match. Or type them; either can wait.'
+                  : 'The plate carries the make, model and serial at once. Or type them — either can wait.'}
               </Text>
               <View style={styles.fields}>
                 <TextInput
@@ -313,7 +355,34 @@ export default function AddThingSheet({
         ) : null}
 
         {/* ── 4. what it takes ────────────────────────────────────────── */}
-        {step === 'takes' ? (
+        {step === 'takes' && painting ? (
+          <>
+            {/* A tin of paint takes nothing and is never serviced. What it has
+                instead is a surface, and in a room with two paints that note is
+                the only thing telling them apart. */}
+            <Text style={styles.question}>Where did it go?</Text>
+            <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
+              <View style={styles.fields}>
+                <TextInput
+                  style={styles.input}
+                  value={where}
+                  onChangeText={setWhere}
+                  placeholder="Main wall · windows · ceiling · trim"
+                  placeholderTextColor={Colors.textMuted}
+                  maxLength={200}
+                  autoFocus
+                  accessibilityLabel="Where did it go"
+                />
+              </View>
+              <Text style={styles.hint}>
+                In a room with more than one colour this is what tells them apart. Skippable, like
+                everything after the room.
+              </Text>
+            </ScrollView>
+          </>
+        ) : null}
+
+        {step === 'takes' && !painting ? (
           <>
             <Text style={styles.question}>Anything you re-buy for it?</Text>
             <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">

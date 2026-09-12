@@ -66,6 +66,15 @@ export default function ThingCard({ thing, photoUrl, onPress }: Props) {
           </Text>
         ) : null}
 
+        {/* A paint's note is what tells two of them apart — Half Spanish White
+            on the main wall, Quarter Alabaster on the windows — so for a finish
+            it earns a line rather than sitting behind a tap. No other kind gets
+            one: an appliance's note is not what distinguishes it from the
+            appliance beside it. */}
+        {thing.kind === 'finish' && thing.notes ? (
+          <Text style={styles.note} numberOfLines={1}>{thing.notes}</Text>
+        ) : null}
+
         <View style={styles.meta}>
           {thing.serviceDays ? (
             <Text style={styles.service}>Every {describeCycle(thing.serviceDays)}</Text>
@@ -123,6 +132,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textSecondary,
   },
+  note: { fontSize: Typography.sm, color: Colors.textSecondary },
   meta: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: 2 },
   ghost: {
     flexDirection: 'row',

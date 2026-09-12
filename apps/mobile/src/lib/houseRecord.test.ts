@@ -1,6 +1,6 @@
 import {
-  describeCycle, formatLooseDate, ghostsForRoom, parseLooseDate, searchThings, thingDetailLine,
-  thingHeadline, thingSearchText,
+  catalogueSuggestions, describeCycle, formatLooseDate, ghostsForRoom, matchSuggestions,
+  parseLooseDate, searchThings, thingDetailLine, thingHeadline, thingSearchText,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -250,5 +250,53 @@ describe('paint, of which a room has several', () => {
     ];
     expect(searchThings(bathroom, 'alabaster').map((t) => t.id)).toEqual(['b']);
     expect(searchThings(bathroom, '7BB').map((t) => t.id)).toEqual(['a']);
+  });
+});
+
+describe('picking something to add, when the house is not laid out like the catalogue', () => {
+  // The room's own list is what most taps hit. The rest of the house's
+  // vocabulary is what makes a study with a heat pump in it — or a flat with
+  // the washing machine in the bathroom — an ordinary house rather than one
+  // the app refuses to describe.
+  it('offers every name the catalogue knows, once each', () => {
+    const all = catalogueSuggestions();
+    const names = all.map((one) => one.name);
+    expect(new Set(names).size).toBe(names.length);
+    // Paint is in nearly every room and Smoke alarm in three; both appear once.
+    expect(names.filter((n) => n === 'Paint')).toHaveLength(1);
+    expect(names.filter((n) => n === 'Smoke alarm')).toHaveLength(1);
+    // And it reaches across rooms, so a bedroom can offer a dishwasher.
+    expect(names).toEqual(expect.arrayContaining(['Dishwasher', 'Washing machine', 'Wood burner']));
+  });
+
+  it('only ever carries kinds the app can describe', () => {
+    for (const one of catalogueSuggestions()) {
+      expect(['appliance', 'finish']).toContain(one.kind);
+    }
+  });
+
+  it('narrows on part of a word, in any case', () => {
+    const all = catalogueSuggestions();
+    // Substring, not prefix — and "wash" is inside "Dishwasher" too, which is
+    // the right answer rather than a near miss: somebody typing it may well
+    // mean either, and a short list costs nothing to read past.
+    expect(matchSuggestions(all, 'wash').map((o) => o.name).sort()).toEqual([
+      'Dishwasher', 'Washing machine',
+    ]);
+    expect(matchSuggestions(all, 'HEAT').map((o) => o.name)).toEqual(
+      expect.arrayContaining(['Heat pump · indoor', 'Heat pump head'])
+    );
+    // Matching anywhere, not only at the start — nobody searching for the
+    // rangehood types "range" and then gives up because it is a "hood".
+    expect(matchSuggestions(all, 'hood').map((o) => o.name)).toContain('Rangehood');
+  });
+
+  it('returns everything for a blank query, and nothing for a miss', () => {
+    const all = catalogueSuggestions();
+    expect(matchSuggestions(all, '')).toHaveLength(all.length);
+    expect(matchSuggestions(all, '   ')).toHaveLength(all.length);
+    // The miss is the interesting case: it is what puts "Add it yourself" on
+    // screen rather than an empty list and a dead end.
+    expect(matchSuggestions(all, 'wine fridge')).toEqual([]);
   });
 });

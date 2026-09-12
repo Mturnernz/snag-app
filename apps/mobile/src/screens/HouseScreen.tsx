@@ -392,6 +392,25 @@ export default function HouseScreen() {
           <View style={styles.groupRow}>
             <Text style={styles.group}>{section.title}</Text>
             <View style={styles.groupRule} />
+            {/* Subtle on purpose: the ghosts below already say what this room
+                probably has, and this is for the thing they didn't think of.
+                Muted, small, and only under By room — a kind heading is not a
+                place you can put something. */}
+            {section.room ? (
+              <Pressable
+                onPress={() => {
+                  // `null` here is a choice, not an absence: the walkthrough
+                  // opens on "what is it" rather than asking the room again.
+                  setSheetStart({ room: section.room === NO_ROOM ? null : section.room });
+                  setSheetOpen(true);
+                }}
+                style={styles.groupAdd}
+                accessibilityRole="button"
+                accessibilityLabel={`Add something to ${section.room}`}
+              >
+                <Icon name="add" size="sm" color={Colors.textMuted} />
+              </Pressable>
+            ) : null}
           </View>
         )}
         renderSectionFooter={({ section }) =>
@@ -610,6 +629,12 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
   groupRule: { flex: 1, height: 1, backgroundColor: Colors.border },
+  groupAdd: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
   restore: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   restoreLabel: { fontSize: Typography.sm, color: Colors.textMuted },
   addRoom: {

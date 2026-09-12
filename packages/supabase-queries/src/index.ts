@@ -876,6 +876,38 @@ export function suggestionsForRoom(room: string): ThingSuggestion[] {
     : [...known, { name: 'Paint', kind: 'finish' }];
 }
 
+/**
+ * Everything the catalogue knows about, across every room, deduplicated.
+ *
+ * **Not every house is laid out the same.** A study can hold a heat pump, a
+ * garage can hold a fridge, a bedroom can hold a washing machine in a flat.
+ * A room's own list is what the ghosts prompt for and what most taps will hit,
+ * but the picker has to offer the rest of the house's vocabulary too or it
+ * quietly insists everybody's rooms are arranged like the catalogue's.
+ *
+ * Deduplicated by name, because Paint is in every room and Smoke alarm is in
+ * three — the first kind seen wins, and they agree by construction.
+ */
+export function catalogueSuggestions(): ThingSuggestion[] {
+  const seen = new Map<string, ThingSuggestion>();
+  for (const forRoom of Object.values(ROOM_SUGGESTIONS)) {
+    for (const suggestion of forRoom) {
+      if (!seen.has(suggestion.name)) seen.set(suggestion.name, suggestion);
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Case- and whitespace-insensitive, matching anywhere in the name. */
+export function matchSuggestions(
+  suggestions: ThingSuggestion[],
+  query: string
+): ThingSuggestion[] {
+  const wanted = query.trim().toLowerCase();
+  if (!wanted) return suggestions;
+  return suggestions.filter((one) => one.name.toLowerCase().includes(wanted));
+}
+
 export function ghostsForRoom(
   room: string,
   things: Thing[],

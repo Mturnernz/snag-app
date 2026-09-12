@@ -312,6 +312,32 @@ describe. The obvious absentees — the toby, the switchboard, meter numbers, ba
 fittings — are `fabric` and `fitting`, and suggesting something the spec sheet cannot then word
 properly is how a prompt becomes a dead end. They arrive with those kinds.
 
+### A + on every room heading, and a picker that admits houses differ
+
+Every room heading carries a **subtle, muted +** — small, at the end of the rule, under *By room*
+only (a kind heading is not a place you can put something). It opens the walkthrough on **step
+two** with the room already chosen, because pressing + on the Kitchen has plainly answered "which
+room". `start.room` therefore distinguishes `null` — Whole house, chosen deliberately — from
+*absent*, which is nobody having chosen yet; collapsing the two sent people back to a question
+they had just answered.
+
+There is **one picker, not two**. The + does not open a list of its own; it opens step two, and
+step two is where the searching lives:
+
+- **The list is bigger than the room's catalogue.** This room's suggestions come first, then the
+  rest of the house's vocabulary under *Anything else* (`catalogueSuggestions`, deduplicated —
+  Paint is in nearly every room). Not every house is laid out the same: a study can hold a heat
+  pump, a flat can keep the washing machine in the bathroom, and a picker that only ever offers
+  the catalogue's idea of a kitchen quietly insists otherwise.
+- **A search field narrows both** (`matchSuggestions` — substring, anywhere in the name, any case;
+  nobody hunting the rangehood types "range", gets nothing, and thinks to try "hood"). The
+  *Elsewhere in the house* heading only appears when there is a group above it to be elsewhere
+  *than* — a search the room itself does not match is just results.
+- **No match is not a dead end.** It says so in words and offers **Add "<what they typed>"**,
+  which drops into the name-it-yourself branch already filled in. On that branch *Next* is hidden
+  entirely: adding it is the only thing to do, and a dead button under the one live control is a
+  choice that isn't one.
+
 ### Adding is a + and a walkthrough, not the compose bar
 
 `AddThingSheet` — four steps, and **only the first is required**. Which room · what is it · the
@@ -408,7 +434,10 @@ same picker capture has.
 
 `HouseScreen.test.tsx` pins the furnished day-one screen, the per-room counts, Whole house last
 and unfurnished, a search answering flat with no ghosts in it, ghosts staying out of *By kind*,
-and the dismiss-and-restore round trip. `houseRecord.test.ts` pins the consumables search (the
+and the dismiss-and-restore round trip. `houseRecord.test.ts` pins the catalogue being deduplicated, reaching across
+rooms and carrying only describable kinds, the substring matcher (including "wash" finding the
+dishwasher, which is right rather than a near miss) and the miss that puts *Add it yourself* on
+screen. It also pins the consumables search (the
 `GU10` case), the headline rules, `describeCycle`, the loose dates, and `ghostsForRoom` — including
 the case where a thing filed as "Bosch dishwasher" counts as having answered the Dishwasher
 prompt, and the paint rules above: one general prompt per room, answered by any finish in it and

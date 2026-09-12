@@ -9,7 +9,9 @@ import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '..
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
-import { suggestionsForRoom, type ThingInput } from '@snag/supabase-queries';
+import {
+  catalogueSuggestions, matchSuggestions, suggestionsForRoom, type ThingInput,
+} from '@snag/supabase-queries';
 import { Location, ThingKind, THING_KINDS, THING_KIND_LABELS } from '../types';
 
 /**
@@ -89,6 +91,8 @@ export default function AddThingSheet({
   /** For a paint: which surface in the room. "Main wall", "Windows". */
   const [where, setWhere] = useState('');
   const [newRoom, setNewRoom] = useState<string | null>(null);
+  /** What they typed into step two's search. Never a value, only a filter. */
+  const [look, setLook] = useState('');
   const [busy, setBusy] = useState(false);
 
   // Reset on every open. A sheet that remembers the last thing somebody added
@@ -106,10 +110,14 @@ export default function AddThingSheet({
     setServiceDays(null);
     setWhere('');
     setNewRoom(null);
+    setLook('');
     setBusy(false);
     // Tapping a ghost has already answered the first two questions, so opening
     // on them would be asking somebody to confirm what they just said.
-    setStep(start?.name ? 'label' : start?.room ? 'what' : 'room');
+    // `room: null` from the Whole house heading is a choice; `room` absent is
+    // nobody having chosen yet. Collapsing the two would send somebody who
+    // pressed + on a heading back to a question they just answered.
+    setStep(start?.name ? 'label' : start && start.room !== undefined ? 'what' : 'room');
   }, [visible, start]);
 
   const index = STEPS.indexOf(step);
@@ -126,6 +134,29 @@ export default function AddThingSheet({
    */
   const suggestions = useMemo(() => (room ? suggestionsForRoom(room) : []), [room]);
 
+  /**
+   * What step two offers: this room's own list first, then the rest of the
+   * house's vocabulary — because not every house is laid out the same, and a
+   * picker that only ever offers the catalogue's idea of a kitchen quietly
+   * insists everybody's rooms are arranged like it.
+   */
+  const elsewhere = useMemo(() => {
+    const mine = new Set(suggestions.map((one) => one.name));
+    return catalogueSuggestions().filter((one) => !mine.has(one.name));
+  }, [suggestions]);
+
+  const hereMatches = matchSuggestions(suggestions, look);
+  const elsewhereMatches = matchSuggestions(elsewhere, look);
+  const searchingList = look.trim().length > 0;
+  const noMatch = searchingList && hereMatches.length === 0 && elsewhereMatches.length === 0;
+
+  /** Whatever was typed, as the name of something new. */
+  function nameItYourself(from: string) {
+    setName(from);
+    setKind(from ? 'appliance' : kind);
+    setNaming(true);
+  }
+
   function next() {
     if (step === 'room') setStep('what');
     else if (step === 'what') setStep('label');
@@ -140,6 +171,7 @@ export default function AddThingSheet({
       if (await onAddRoom(name)) {
         setRoom(name);
         setNewRoom(null);
+    setLook('');
       }
     } finally {
       setBusy(false);
@@ -287,10 +319,44 @@ export default function AddThingSheet({
         {step === 'what' ? (
           <>
             <Text style={styles.question}>What is it?</Text>
+            {!naming ? (
+              <View style={styles.searchRow}>
+                <Icon name="search" size="sm" color={Colors.textMuted} />
+                <TextInput
+                  style={styles.searchField}
+                  value={look}
+                  onChangeText={setLook}
+                  placeholder="Search, or type something new"
+                  placeholderTextColor={Colors.textMuted}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  returnKeyType="search"
+                  accessibilityLabel="Search what to add"
+                />
+              </View>
+            ) : null}
             <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
-              {!naming ? (
+              {!naming && noMatch ? (
+                <View style={styles.fields}>
+                  <Text style={styles.hint}>
+                    Nothing in the list is that. Houses differ — add it and it becomes part of
+                    this one's record.
+                  </Text>
+                  <Pressable
+                    onPress={() => nameItYourself(look.trim())}
+                    style={styles.cta}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${look.trim()}`}
+                  >
+                    <Text style={styles.ctaLabel} numberOfLines={1}>
+                      Add “{look.trim()}”
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              {!naming && !noMatch ? (
                 <View style={styles.chips}>
-                  {suggestions.map((suggestion) => (
+                  {hereMatches.map((suggestion) => (
                     <Chip
                       key={suggestion.name}
                       label={suggestion.name}
@@ -309,9 +375,54 @@ export default function AddThingSheet({
                       }}
                     />
                   ))}
-                  <Chip label="Something else…" on={false} onPress={() => setNaming(true)} />
+                  {!searchingList ? (
+                    <Chip label="Something else…" on={false} onPress={() => nameItYourself('')} />
+                  ) : null}
                 </View>
-              ) : (
+              ) : null}
+              {/* The rest of the house's vocabulary, below this room's own. A
+                  study with a heat pump in it is not an odd house. */}
+              {!naming && !noMatch && elsewhereMatches.length > 0 ? (
+                <>
+                  {/* Only when there is a group above it to be elsewhere *than*.
+                      A search the room itself does not match is just results,
+                      and a lone "Elsewhere in the house" heading over the only
+                      list on screen asks the reader "elsewhere than what?". */}
+                  {hereMatches.length > 0 ? (
+                    <Text style={styles.sectionLabel}>
+                      {searchingList ? 'Elsewhere in the house' : 'Anything else'}
+                    </Text>
+                  ) : null}
+                  <View style={styles.chips}>
+                    {elsewhereMatches.map((suggestion) => (
+                      <Chip
+                        key={`else-${suggestion.name}`}
+                        label={suggestion.name}
+                        on={name === suggestion.name}
+                        onPress={() => {
+                          setKind(suggestion.kind);
+                          if (suggestion.kind === 'finish') {
+                            setName('');
+                            setNaming(true);
+                          } else {
+                            setName(suggestion.name);
+                          }
+                        }}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : null}
+              {!naming && !noMatch && searchingList ? (
+                <View style={styles.chips}>
+                  <Chip
+                    label={`Add “${look.trim()}”`}
+                    on={false}
+                    onPress={() => nameItYourself(look.trim())}
+                  />
+                </View>
+              ) : null}
+              {naming ? (
                 <View style={styles.fields}>
                   {painting ? <Text style={styles.hint}>Which colour?</Text> : null}
                   <TextInput
@@ -340,7 +451,7 @@ export default function AddThingSheet({
                     </>
                   ) : null}
                 </View>
-              )}
+              ) : null}
             </ScrollView>
           </>
         ) : null}
@@ -485,7 +596,9 @@ export default function AddThingSheet({
               <Text style={styles.ctaLabel}>Add it</Text>
             )}
           </Pressable>
-        ) : (
+        ) : step === 'what' && noMatch && !naming ? null : (
+          // Nothing matched, so the only thing to do is add it — and a dead
+          // Next sitting under the one live control is a choice that isn't one.
           <View style={styles.footer}>
             <Pressable
               onPress={next}
@@ -570,6 +683,25 @@ const styles = StyleSheet.create({
   },
   scroll: { flexGrow: 0 },
   hint: { fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19, marginTop: Spacing.sm },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.input,
+  },
+  searchField: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
+  sectionLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: Colors.textMuted,
+    marginTop: Spacing.lg,
+    marginBottom: Spacing.sm,
+  },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   chip: {

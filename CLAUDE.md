@@ -52,17 +52,32 @@ snag/
 └── SNAG_INFRA_NOTES.md            # the config that isn't in git
 ```
 
-## The one setting no migration can create
+## How `home` gets exposed, and why it isn't where you'd look
 
-**Supabase → Settings → API → Exposed schemas must include `home`.**
+PostgREST will not serve a schema it has not been told to expose. Without it, *every* call comes
+back `PGRST106` and the app reads as an account with no data — empty lists, no household, no
+error. `SchemaNotExposedError` in `packages/supabase-queries` names that, and `App.tsx` shows it
+instead of rendering an empty shell, so it fails loudly now. **If someone reports "the app is
+blank", this is the first thing to check.**
 
-It lives in the platform, not the database, so nothing in this repo can create or check it. When
-it's missing PostgREST answers *every* call with `PGRST106` and the app reads as an account with
-no data in it — empty lists, no household, no error.
+It is currently set **in the database**, not in the dashboard:
 
-That is now caught rather than silent: `SchemaNotExposedError` in `packages/supabase-queries`
-names it, and `App.tsx` shows it instead of rendering an empty shell. If someone reports "the app
-is blank", this is the first thing to check.
+```sql
+alter role authenticator set pgrst.db_schemas = 'public, graphql_public, home';
+notify pgrst, 'reload config';
+notify pgrst, 'reload schema';
+```
+
+PostgREST reads per-role config overrides when `db-config` is on, which is Supabase's default, so
+this works and took effect immediately. **But the dashboard is the durable place.** Settings →
+API → Exposed schemas is what the platform rewrites from, so a platform-side config change can
+revert the role setting without warning. Mirror it there; it costs one click and removes the
+divergence. Until then, `pg_roles.rolconfig` for `authenticator` is the real source of truth and
+the dashboard will not show `home` at all.
+
+Note the grant is deliberately narrow: `usage on schema home` went to `authenticated` only, never
+`anon`. A signed-out caller gets `42501 permission denied for schema home`, which is the correct
+answer and is *not* the same failure as `PGRST106`.
 
 ## Two schemas in one project
 

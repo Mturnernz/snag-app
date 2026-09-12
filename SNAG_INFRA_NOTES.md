@@ -21,9 +21,19 @@ rediscovering it is the painful part.
   from. 35 tables, 112 migrations, 6 pilot orgs and 57 snags, left intact as the archive. This is
   the whole reason the pivot didn't need a destructive migration.
 
-**Settings → API → Exposed schemas must list `home`.** Without it PostgREST serves none of the new
-schema and every client call 404s. This is the one piece of the setup that lives only in the
-dashboard, so it's also the one that gets lost.
+**`home` must be exposed to PostgREST.** Without it every client call comes back `PGRST106`.
+
+As of 12 September 2026 this is set **in the database**, not the dashboard:
+`alter role authenticator set pgrst.db_schemas = 'public, graphql_public, home'`, followed by
+`notify pgrst, 'reload config'`. PostgREST reads per-role config overrides (Supabase runs with
+`db-config` on), so it applies immediately — but the dashboard setting is what the platform
+rewrites from, so **mirror it at Settings → API → Exposed schemas** or a platform config change
+can silently revert it. Until that's done the dashboard will not show `home` and
+`pg_roles.rolconfig` for `authenticator` is the real source of truth.
+
+Verified after the change: `public` still answers 200 (the archive is unharmed), and `home`
+answers `42501 permission denied` to an anon key — correct, since only `authenticated` was
+granted `usage on schema home`.
 
 ### Storage buckets
 
@@ -78,6 +88,26 @@ One account, two entirely separate paths into it, which fail independently:
 
 The sender must be on a verified domain. `onboarding@resend.dev` delivers only to the Resend
 account's own address and rejects everything else with a 403 that nothing surfaces.
+
+## Deploys
+
+Both Netlify sites are deployed by uploading the repo and building on Netlify's infra, so the
+site's own base directory and environment variables apply:
+
+```bash
+npx -y @netlify/mcp@latest --site-id <id> --proxy-path <token from the Netlify MCP>
+```
+
+Run it from the **repo root**, not from the app directory — the sites are configured with
+`Base directory` set to `apps/mobile` and `apps/web`, and the upload has to mirror the repo
+layout those paths assume.
+
+| Site | id | Serves |
+|---|---|---|
+| `snagv1` | `016c74e6-9a37-4b0f-8d23-94a5339bb850` | app.snaghq.co.nz |
+| `snag-app-website` | `7fc0b551-9069-4b2c-b66f-c77dd9d4a808` | www.snaghq.co.nz |
+
+Pushing to `main` does **not** trigger a build — deploys are API-driven.
 
 ## Preservation
 

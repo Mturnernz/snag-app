@@ -35,6 +35,9 @@ import type {
   SnagPriority,
   SnagSort,
   SnagStatus,
+  Thing,
+  ThingKind,
+  ThingSpec,
 } from '@snag/shared-types';
 import { PRIORITY_ORDER } from '@snag/shared-types';
 
@@ -59,6 +62,7 @@ function mapSnag(row: Row): Snag {
     dueAt: row.due_at ?? null,
     repeatDays: row.repeat_days ?? null,
     assigneeId: row.assignee_id ?? null,
+    thingId: row.thing_id ?? null,
     reporterId: row.reporter_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -68,6 +72,38 @@ function mapSnag(row: Row): Snag {
     reporterName: row.reporter_name,
     assigneeName: row.assignee_name ?? null,
     commentCount: row.comment_count ?? 0,
+    thingName: row.thing_name ?? null,
+    thingMake: row.thing_make ?? null,
+    thingModel: row.thing_model ?? null,
+  };
+}
+
+function mapThing(row: Row): Thing {
+  return {
+    id: row.id,
+    householdId: row.household_id,
+    propertyId: row.property_id,
+    kind: row.kind,
+    name: row.name ?? null,
+    room: row.room ?? null,
+    photoPaths: row.photo_paths ?? [],
+    make: row.make ?? null,
+    model: row.model ?? null,
+    serial: row.serial ?? null,
+    consumables: row.consumables ?? [],
+    installedAt: row.installed_at ?? null,
+    warrantyUntil: row.warranty_until ?? null,
+    serviceDays: row.service_days ?? null,
+    // jsonb comes back parsed; the column is constrained to an object, so the
+    // only shape to defend against is null from an older row.
+    spec: (row.spec ?? {}) as ThingSpec,
+    notes: row.notes ?? null,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    propertyName: row.property_name,
+    snagCount: Number(row.snag_count ?? 0),
+    openSnagCount: Number(row.open_snag_count ?? 0),
   };
 }
 
@@ -382,6 +418,7 @@ export async function createSnag(
     description?: string | null;
     photoPaths?: string[];
     priority?: SnagPriority | null;
+    thingId?: string | null;
   }
 ): Promise<Snag> {
   const { data, error } = await client.rpc('create_snag', {
@@ -390,6 +427,7 @@ export async function createSnag(
     p_description: input.description ?? null,
     p_photo_paths: input.photoPaths ?? [],
     p_priority: input.priority ?? null,
+    p_thing_id: input.thingId ?? null,
   });
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_snag returns the base row, not the joined view.
@@ -406,6 +444,13 @@ export interface SnagUpdate {
   repeatDays?: number | null;
   assigneeId?: string | null;
   photoPaths?: string[];
+  /**
+   * What the snag is about, from the house record.
+   *
+   * Setting this deliberately does not start the job — saying what something
+   * is about is the tail of capture, not the head of the work.
+   */
+  thingId?: string | null;
 }
 
 const CLEARABLE: Record<string, string> = {
@@ -415,6 +460,7 @@ const CLEARABLE: Record<string, string> = {
   dueAt: 'due_at',
   repeatDays: 'repeat_days',
   assigneeId: 'assignee_id',
+  thingId: 'thing_id',
 };
 
 /**
@@ -442,6 +488,7 @@ export async function updateSnag(
     p_assignee_id: update.assigneeId ?? null,
     p_photo_paths: update.photoPaths ?? null,
     p_parts: update.parts ?? null,
+    p_thing_id: update.thingId ?? null,
     p_clear: clear,
   });
 
@@ -576,7 +623,239 @@ export async function deleteLocation(client: SupabaseClient, locationId: string)
 }
 
 
+// ------------------------------------------------------------- house record
+
+/**
+ * Everything at one place, in one read.
+ *
+ * Deliberately unpaginated and unfiltered: a house holds tens of things, not
+ * thousands, and search is the primary control on this tab — which means it has
+ * to be instant and has to work on the list already in hand. A round trip per
+ * keystroke would make the one moment this tab exists for (standing in a shop,
+ * on a bad connection, needing one string) the moment it is slowest.
+ */
+export async function getThings(client: SupabaseClient, propertyId: string): Promise<Thing[]> {
+  const { data, error } = await client
+    .from('things_with_details')
+    .select('*')
+    .eq('property_id', propertyId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw asError(error, "Couldn't load the house record");
+  return (data ?? []).map(mapThing);
+}
+
+export async function getThing(client: SupabaseClient, thingId: string): Promise<Thing> {
+  const { data, error } = await client
+    .from('things_with_details')
+    .select('*')
+    .eq('id', thingId)
+    .single();
+
+  const row = unwrap<Row>(data, error, "Couldn't load that");
+  return mapThing(row);
+}
+
+/**
+ * What a card and a sheet put at the top of a thing.
+ *
+ * The model number leads when there is one, because it is the answer somebody
+ * came for — "Heat pump" is what they already knew. A name is the fallback, and
+ * the room is the last resort, on the same reasoning as `snagHeadline`.
+ */
+export function thingHeadline(thing: Thing): string {
+  if (thing.name) return thing.name;
+  if (thing.make || thing.model) return [thing.make, thing.model].filter(Boolean).join(' ');
+  return thing.room ? `Something in the ${thing.room.toLowerCase()}` : 'Something in the house';
+}
+
+/** The line under the headline: the string you would read out. */
+export function thingDetailLine(thing: Thing): string | null {
+  const parts = thing.name ? [thing.make, thing.model] : [thing.model];
+  const line = parts.filter(Boolean).join(' ');
+  return line || null;
+}
+
+/**
+ * Everything about a thing that someone might search by, lower-cased.
+ *
+ * Consumables are in here on purpose: typing `GU10` should list every fitting
+ * in the house that takes one, and a filter part number is the single most
+ * likely thing to be typed into this field from a hardware aisle.
+ */
+export function thingSearchText(thing: Thing): string {
+  return [
+    thing.name,
+    thing.make,
+    thing.model,
+    thing.serial,
+    thing.room,
+    thing.notes,
+    ...thing.consumables,
+    ...Object.values(thing.spec),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+/** Case- and whitespace-insensitive, matching every word typed rather than the phrase. */
+export function searchThings(things: Thing[], query: string): Thing[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return things;
+  return things.filter((thing) => {
+    const haystack = thingSearchText(thing);
+    return words.every((word) => haystack.includes(word));
+  });
+}
+
+export interface ThingInput {
+  propertyId: string;
+  kind: ThingKind;
+  name?: string | null;
+  room?: string | null;
+  photoPaths?: string[];
+  make?: string | null;
+  model?: string | null;
+  serial?: string | null;
+  consumables?: string[];
+  installedAt?: string | null;
+  warrantyUntil?: string | null;
+  serviceDays?: number | null;
+  spec?: ThingSpec;
+  notes?: string | null;
+}
+
+/**
+ * Capture: a photograph of the label is enough, and everything else is asked
+ * afterwards. The RPC refuses the genuinely empty case in words rather than
+ * letting `things_has_something` surface.
+ */
+export async function createThing(client: SupabaseClient, input: ThingInput): Promise<Thing> {
+  const { data, error } = await client.rpc('create_thing', {
+    p_property_id: input.propertyId,
+    p_kind: input.kind,
+    p_name: input.name ?? null,
+    p_room: input.room ?? null,
+    p_photo_paths: input.photoPaths ?? [],
+    p_make: input.make ?? null,
+    p_model: input.model ?? null,
+    p_serial: input.serial ?? null,
+    p_consumables: input.consumables ?? null,
+    p_installed_at: input.installedAt ?? null,
+    p_warranty_until: input.warrantyUntil ?? null,
+    p_service_days: input.serviceDays ?? null,
+    p_spec: input.spec ?? null,
+    p_notes: input.notes ?? null,
+  });
+  const row = unwrap<Row>(data, error, "Couldn't save that");
+  // create_thing returns the base row, not the joined view.
+  return getThing(client, row.id);
+}
+
+export interface ThingUpdate {
+  /**
+   * Capture files everything as `appliance` rather than stopping to ask, so
+   * the amend row has to be able to correct it. Not clearable: everything is
+   * of some kind.
+   */
+  kind?: ThingKind;
+  name?: string | null;
+  room?: string | null;
+  photoPaths?: string[];
+  make?: string | null;
+  model?: string | null;
+  serial?: string | null;
+  consumables?: string[];
+  installedAt?: string | null;
+  warrantyUntil?: string | null;
+  serviceDays?: number | null;
+  /** Merged into what is already there, key by key. */
+  spec?: ThingSpec;
+  /** Spec keys to drop, by key name — a null inside `spec` can't say this. */
+  clearSpec?: string[];
+  notes?: string | null;
+}
+
+const THING_CLEARABLE: Record<string, string> = {
+  name: 'name',
+  room: 'room',
+  make: 'make',
+  model: 'model',
+  serial: 'serial',
+  installedAt: 'installed_at',
+  warrantyUntil: 'warranty_until',
+  serviceDays: 'service_days',
+  notes: 'notes',
+};
+
+/**
+ * One field at a time, written immediately — the spec sheet has no Save button
+ * for the same reason triage doesn't: a page of small independent facts behind
+ * one button turns filling in a heat pump into forty taps and a commitment.
+ */
+export async function updateThing(
+  client: SupabaseClient,
+  thingId: string,
+  update: ThingUpdate
+): Promise<Thing> {
+  const clear: string[] = [];
+  for (const [key, column] of Object.entries(THING_CLEARABLE)) {
+    if (key in update && update[key as keyof ThingUpdate] === null) clear.push(column);
+  }
+  for (const key of update.clearSpec ?? []) clear.push(`spec.${key}`);
+
+  const { error } = await client.rpc('update_thing', {
+    p_thing_id: thingId,
+    p_kind: update.kind ?? null,
+    p_name: update.name ?? null,
+    p_room: update.room ?? null,
+    p_photo_paths: update.photoPaths ?? null,
+    p_make: update.make ?? null,
+    p_model: update.model ?? null,
+    p_serial: update.serial ?? null,
+    p_consumables: update.consumables ?? null,
+    p_installed_at: update.installedAt ?? null,
+    p_warranty_until: update.warrantyUntil ?? null,
+    p_service_days: update.serviceDays ?? null,
+    p_spec: update.spec ?? null,
+    p_notes: update.notes ?? null,
+    p_clear: clear,
+  });
+
+  if (error) throw asError(error, "That didn’t save");
+  return getThing(client, thingId);
+}
+
+/**
+ * Remove something from the record.
+ *
+ * The snags about it survive with their pointer nulled: what was wrong with
+ * the old dishwasher is still what was wrong, it just no longer points at a
+ * dishwasher that isn't there.
+ */
+export async function deleteThing(client: SupabaseClient, thingId: string): Promise<void> {
+  const { error } = await client.rpc('delete_thing', { p_thing_id: thingId });
+  if (error) throw asError(error, "Couldn't remove that");
+}
+
 // ---------------------------------------------------------------- due dates
+
+/**
+ * How often something comes round, said the way somebody would say it.
+ *
+ * Both halves of the app need this and both mean the same thing by it: a
+ * repeating snag's `repeat_days` and a thing's `service_days` are the same
+ * integer, deliberately, because the moment there are two ways to schedule
+ * something in this app neither of them is trustworthy. "Every 6 months", never
+ * "every 180 days" — nobody has ever serviced anything on a day count.
+ */
+export function describeCycle(days: number): string {
+  if (days % 365 === 0) return days === 365 ? 'year' : `${days / 365} years`;
+  if (days % 30 === 0) return days === 30 ? 'month' : `${days / 30} months`;
+  if (days % 7 === 0) return days === 7 ? 'week' : `${days / 7} weeks`;
+  return days === 1 ? 'day' : `${days} days`;
+}
 
 export type DueState = 'overdue' | 'due-soon' | 'scheduled' | 'none';
 

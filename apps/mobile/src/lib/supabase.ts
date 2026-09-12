@@ -255,6 +255,19 @@ export const createLocation = (propertyId: string, name: string) =>
 
 export const deleteLocation = (locationId: string) => queries.deleteLocation(supabase, locationId);
 
+// ─── The house record ─────────────────────────────────────────────────────────
+
+export const getThings = (propertyId: string) => queries.getThings(supabase, propertyId);
+
+export const getThing = (thingId: string) => queries.getThing(supabase, thingId);
+
+export const createThing = (input: queries.ThingInput) => queries.createThing(supabase, input);
+
+export const updateThing = (thingId: string, update: queries.ThingUpdate) =>
+  queries.updateThing(supabase, thingId, update);
+
+export const deleteThing = (thingId: string) => queries.deleteThing(supabase, thingId);
+
 // ─── Photos ───────────────────────────────────────────────────────────────────
 //
 // home-photos is a PRIVATE bucket laid out as `<household_id>/<file>` — the

@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 /**
  * Every design token in the app.
  *
@@ -155,6 +157,29 @@ export const Typography = {
 };
 
 export const MIN_TOUCH_TARGET = 48;
+
+/**
+ * The one place a second typeface is spent, and it is spent on data.
+ *
+ * Model numbers, serials, colour codes and tint formulas are strings people
+ * read aloud to somebody else or copy into a search box, character by
+ * character — `MSZ-AP50VGK`, `7BB 83/018`, `FA-25`. Proportional type makes
+ * that harder in a way nobody notices until they are on the phone to a
+ * repairer: I and l and 1 collapse, O and 0 collapse, and there is no column
+ * to check your place against.
+ *
+ * This is not a decorative face and must not be used as one. Prose stays in
+ * the system font everywhere.
+ */
+export const Fonts = {
+  mono: Platform.select({
+    ios: 'Menlo',
+    android: 'monospace',
+    // react-native-web passes the family string straight through to CSS, so
+    // this is a stack rather than a name.
+    default: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  }) as string,
+};
 
 // Elevation scale. Elevated surfaces (Card variant="elevated") drop their
 // border and use one of these instead; nested rows inside lists stay

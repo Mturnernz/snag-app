@@ -22,7 +22,7 @@ import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getSnagPhotoUrls,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { snagHeadline } from '@snag/supabase-queries';
+import { describeCycle, snagHeadline } from '@snag/supabase-queries';
 import {
   Comment, RootStackParamList, Snag,
   PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
@@ -43,13 +43,6 @@ type Route = RouteProp<RootStackParamList, 'SnagDetail'>;
 const DAY_MS = 86_400_000;
 
 /** "month", "3 months" — for the sentence about when the first one lands. */
-function describeCycle(days: number): string {
-  if (days % 365 === 0) return days === 365 ? 'year' : `${days / 365} years`;
-  if (days % 30 === 0) return days === 30 ? 'month' : `${days / 30} months`;
-  if (days % 7 === 0) return days === 7 ? 'week' : `${days / 7} weeks`;
-  return `${days} days`;
-}
-
 /** Within a day either side — these are buttons, not a calendar. */
 function isDueIn(dueAt: string | null, days: number): boolean {
   if (!dueAt) return false;

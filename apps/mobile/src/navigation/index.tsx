@@ -6,10 +6,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, IconSize, Typography } from '../constants/theme';
 import { MainTabParamList, RootStackParamList } from '../types';
 import SnagListScreen from '../screens/SnagListScreen';
+import HouseScreen from '../screens/HouseScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SnagDetailScreen from '../screens/SnagDetailScreen';
 import HouseholdScreen from '../screens/HouseholdScreen';
 import LocationTagsScreen from '../screens/LocationTagsScreen';
+import ThingDetailScreen from '../screens/ThingDetailScreen';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -17,6 +19,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
   // [inactive, active] — filled is reserved for the active tab.
   Snags: ['list-outline', 'list'],
+  House: ['home-outline', 'home'],
   Profile: ['person-circle-outline', 'person-circle'],
 };
 
@@ -53,6 +56,11 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Snags" component={SnagListScreen} options={{ tabBarLabel: 'List' }} />
+      {/* What's *there*, beside the list of what's wrong. Named "House"
+          rather than "My House" because the moment there is a bach, "my
+          house" is the wrong name for half of what it holds — the property
+          name goes in the screen header instead. */}
+      <Tab.Screen name="House" component={HouseScreen} options={{ tabBarLabel: 'House' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'You' }} />
     </Tab.Navigator>
   );
@@ -71,6 +79,14 @@ export default function RootNavigator() {
       />
       <Stack.Screen name="Household" component={HouseholdScreen} />
       <Stack.Screen name="LocationTags" component={LocationTagsScreen} />
+      {/* A sheet, for the same reason SnagDetail is one: filling in a heat
+          pump is a page of small independent facts, each written as it is
+          typed, with the record it came from still underneath. */}
+      <Stack.Screen
+        name="ThingDetail"
+        component={ThingDetailScreen}
+        options={{ presentation: 'modal' }}
+      />
     </Stack.Navigator>
   );
 }

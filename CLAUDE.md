@@ -41,8 +41,8 @@ snag/
 │   │       ├── constants/theme.ts # ALL design tokens
 │   │       ├── lib/supabase.ts    # client (schema: home), auth, photo upload
 │   │       ├── hooks/useHousehold.tsx
-│   │       ├── screens/           # SnagList (home), SnagDetail, Household, LocationTags,
-│       │                       #   Profile, Auth, Setup
+│   │       ├── screens/           # SnagList (home), SnagDetail, House, ThingDetail,
+│   │       │                       #   Household, LocationTags, Profile, Auth, Setup
 │   │       └── components/
 │   └── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
 ├── packages/
@@ -188,7 +188,7 @@ friction costs most. The place for it is the amend row, or triage.
 
 ## The list is the app's home
 
-`SnagListScreen` is `initialRouteName`, and two tabs — List and You — are all there are.
+`SnagListScreen` is `initialRouteName`, and there are three tabs: List, House and You.
 
 **This product has no notifications and deliberately never will** (two people in one house do not
 need an email per snag; see `notify-snag` in the archive). So this screen is the only channel by
@@ -215,6 +215,98 @@ they last looked.
 `SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering and the done
 window. `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, and the
 keyboard lift.
+
+## The house record: what's *there*, beside what's wrong
+
+`HouseScreen` is the **House** tab, and `home.things` is the table behind it. A snag is almost
+always about a thing — the heat pump, the hallway paint, the toilet cistern — and the list never
+knew that, so "which filter", "which green", "which model" got answered from scratch every time
+someone stood in a shop.
+
+**A thing is a photograph of its label.** That is the whole design, and it is capture's design
+reused: the rating plate on the back of the heat pump and the lid of the paint tin already *are*
+the record, because somebody printed them so you could read them later. One tap captures make,
+model, serial, refrigerant charge and date of manufacture without typing a character. So
+`things_has_something` mirrors `snags_has_something` — a photo, a name, **or** a model number —
+and everything else is asked afterwards on the same amend row a snag gets, with the same room
+chips in the same seeded order.
+
+The failure mode this is built against is specific, and it is the reason there are no required
+fields and **deliberately no completeness meter**: every house-inventory product ever shipped
+opens on an empty thirty-field form, a house has four hundred things in it, and the record ends up
+8% complete. An 8% record is worse than none — you check it once, find nothing, and never check
+again.
+
+### Writing is rare and accidental; reading is under pressure, somewhere else
+
+This asymmetry decides the layout, and it is the thing to hold on to. You record the heat pump
+because a repairer happened to read its model number out loud. You read it back eight months
+later, in an aisle, needing one exact string. So:
+
+- **Search is the primary control**, above everything and always visible. Every read moment starts
+  with a half-remembered noun, and nobody in a shop navigates a tree. It matches consumables too,
+  so `GU10` lists every fitting that takes one.
+- **Search runs on the list already in hand** (`searchThings`), not on the server. A house holds
+  tens of things; a round trip per keystroke would make the one moment this tab exists for the
+  moment it is slowest, on the worst connection it will ever see.
+- **A card shows the answer, not the name.** "Heat pump" is what somebody already knew;
+  `MSZ-AP50VGK` is what they came for, so `thingDetailLine` gets the mono face and a line of its
+  own. `Fonts.mono` is spent on data only — model numbers, serials, colour codes, tint formulas —
+  never on prose.
+- **A thing's page is a spec sheet, not a form.** Every row writes on blur, and **empty fields do
+  not render**: what is known is shown, the rest is behind one *Add a detail* row. A sheet of
+  waiting blanks is a form wearing a different hat.
+- **No new colour.** Kind is an outline icon. The palette's four hues stay spent on state, and a
+  thing has no state.
+
+### Five kinds, two built
+
+`home.thing_kind` is `appliance | finish | fitting | fabric | contact`, all five in the enum from
+the first migration so adding the rest is a screen and not a migration. `THING_KINDS` is the two
+that are offered: appliances and paint, the two with the sharpest read moments.
+
+`make`/`model` carry the paint case as readily as the appliance one — Resene / 7BB 83/018 sits in
+the same two columns as Bosch / SMS46MI01A, and both are strings read aloud to somebody else.
+`THING_KIND_FIELD_LABELS` changes only the words. The genuinely per-kind fields (a paint's sheen
+and tint formula) live in `spec`, which is jsonb and is the small tail, never the body — one table
+rather than five, because five would be five read policies, five write functions and five places
+to get the property check wrong.
+
+**Capture never asks the kind.** It files everything as `appliance` and the amend row corrects it
+in one tap, on something already saved. That is why `update_thing` takes `p_kind` (and why
+`20260912170000` exists — the first migration forgot it, and the amend row had a Paint chip it
+could not wire up).
+
+### Four joins, all using mechanisms that already exist
+
+- **`snags.thing_id`** — what a snag is about. `on delete set null`, never cascade: what was wrong
+  with the old dishwasher is still what was wrong.
+- **Pointing a snag at a thing does NOT start the job.** Saying what something is about is the
+  tail of capture, the same gesture as tagging the room. Assignee, due date, repeat and parts
+  start it; `thing_id` doesn't, and the `v_started` expression in `update_snag` says so.
+- **Nothing copies a thing's consumables onto a snag's parts list.** The client offers them as
+  taps. Filling the parts list is what moves a snag to 'doing', so a job that started itself
+  because somebody named the appliance would empty the status from the same end the *Start it*
+  button did.
+- **`service_days` is not a scheduler.** It feeds `repeat_days` on a snag, using the recurring
+  mechanism the list already has — no cron, no second table, and still no notifications. The
+  moment there are two ways to schedule something in this app, neither is trustworthy.
+  `describeCycle` is shared by both so they say it the same way ("every 6 months", never "180
+  days").
+
+`things.room` is TEXT for exactly the reason `snags.room` is, and the House tab groups by
+`home.locations` in seeded order — the two tabs have to describe the house in the same words and
+the same order, or the room a snag is in and the room a thing is in stop reading as the same
+place. Things with no room fall under **Whole house**. Photos reuse `home-photos` and the existing
+`<household_id>/<file>` layout, so no storage policy changed.
+
+**The tab is called House, not "My House".** The moment there is a bach, "my house" is the wrong
+name for half of what it holds; the property name goes in the screen header instead, through the
+same picker capture has.
+
+`HouseScreen.test.tsx` pins the seeded room order, Whole house last, a search answering flat
+rather than re-grouped, and the by-kind order. `houseRecord.test.ts` pins the consumables search
+(the `GU10` case), the headline rules and `describeCycle`.
 
 ## Why the app exists at all
 

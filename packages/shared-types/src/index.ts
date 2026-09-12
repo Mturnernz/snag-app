@@ -142,6 +142,18 @@ export interface Snag {
   repeatDays: number | null;
   assigneeId: string | null;
 
+  /**
+   * What this snag is about, from the house record — the heat pump, the
+   * hallway paint.
+   *
+   * Deliberately part of capture's tail rather than triage: saying what
+   * something is about is the same gesture as tagging the room, so setting it
+   * does NOT move a snag to 'doing'. Nulled rather than cascaded when the
+   * thing is deleted, because what was wrong with the old dishwasher is still
+   * what was wrong.
+   */
+  thingId: string | null;
+
   reporterId: string;
   createdAt: string;
   updatedAt: string;
@@ -154,6 +166,10 @@ export interface Snag {
   reporterName: string;
   assigneeName: string | null;
   commentCount: number;
+  /** The thing it points at, for a card that can say so without a second read. */
+  thingName: string | null;
+  thingMake: string | null;
+  thingModel: string | null;
 }
 
 export interface Comment {
@@ -181,6 +197,115 @@ export interface SnagFilter {
 
 export type SnagSort = 'newest' | 'oldest' | 'due' | 'priority';
 
+// ------------------------------------------------------------- the house record
+
+/**
+ * The five kinds of thing a house record holds.
+ *
+ * The app ships two — `appliance` and `finish` — because those are the ones
+ * with the sharpest read moments: a model number read out on a repair call, a
+ * colour code read in a hardware aisle. The other three are in the enum from
+ * the first migration so that adding them is a screen and not a migration.
+ */
+export type ThingKind = 'appliance' | 'finish' | 'fitting' | 'fabric' | 'contact';
+
+/** The two that are built. Everything else is deliberately not offered yet. */
+export const THING_KINDS: ThingKind[] = ['appliance', 'finish'];
+
+export const THING_KIND_LABELS: Record<ThingKind, string> = {
+  appliance: 'Appliance',
+  finish: 'Paint',
+  fitting: 'Fitting',
+  fabric: 'The house',
+  contact: 'Who to call',
+};
+
+/**
+ * What each kind calls its two identifying strings.
+ *
+ * `make`/`model` carry the paint case as readily as the appliance one — Resene
+ * / 7BB 83/018 sits in the same two columns as Bosch / SMS46MI01A, and both are
+ * things somebody reads aloud to somebody else. Only the words change.
+ */
+export const THING_KIND_FIELD_LABELS: Record<ThingKind, { make: string; model: string }> = {
+  appliance: { make: 'Make', model: 'Model' },
+  finish: { make: 'Brand', model: 'Colour code' },
+  fitting: { make: 'Brand', model: 'Part' },
+  fabric: { make: 'Type', model: 'Spec' },
+  contact: { make: 'Trade', model: 'Phone' },
+};
+
+/**
+ * The per-kind tail, kept out of the columns.
+ *
+ * Paint uses `sheen`, `product`, `tint` and `leftOver`; an appliance uses none
+ * of it. Values are strings because every one of them is read back rather than
+ * computed on — a tint formula is not a number, it is a thing you hand to
+ * someone behind a counter.
+ */
+export type ThingSpec = Record<string, string>;
+
+/** The spec keys paint offers, in the order the sheet shows them. */
+export const FINISH_SPEC_FIELDS: { key: string; label: string; placeholder: string }[] = [
+  { key: 'sheen', label: 'Sheen', placeholder: 'Low sheen' },
+  { key: 'product', label: 'Product', placeholder: 'Zylone Sheen' },
+  { key: 'tint', label: 'Tint formula', placeholder: 'BS2 · Y 12.5 · R 3.0' },
+  { key: 'leftOver', label: "What's left", placeholder: '~4L, garage top shelf' },
+];
+
+/**
+ * Something in the house, as opposed to something wrong with it.
+ *
+ * A thing needs a photo, a name or a model number and nothing else — the same
+ * shape as a snag, for the same reason. The failure mode this is built against
+ * is the thirty-field form that never gets filled in.
+ */
+export interface Thing {
+  id: string;
+  householdId: string;
+  propertyId: string;
+  kind: ThingKind;
+
+  /** Capture: a photograph of the label, and four seconds of tapping. */
+  name: string | null;
+  /** TEXT server-side, so removing a room tag never rewrites what is filed under it. */
+  room: string | null;
+  photoPaths: string[];
+
+  make: string | null;
+  model: string | null;
+  serial: string | null;
+
+  /** What you re-buy for it. This is what a snag's parts list inherits. */
+  consumables: string[];
+
+  installedAt: string | null;
+  warrantyUntil: string | null;
+  /** Feeds `repeatDays` on a snag about this thing, rather than scheduling anything itself. */
+  serviceDays: number | null;
+  spec: ThingSpec;
+  notes: string | null;
+
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+
+  /** Joined in by `home.things_with_details`. */
+  propertyName: string;
+  snagCount: number;
+  openSnagCount: number;
+}
+
+/**
+ * How the record is grouped on screen.
+ *
+ * By room for when you are standing in one; by kind for "what appliances do we
+ * actually have". Search sits above both and is the primary control, because
+ * every read moment starts with a half-remembered noun.
+ */
+export type ThingGrouping = 'room' | 'kind';
+
+
 // ---------------------------------------------------------------- navigation
 
 export type RootStackParamList = {
@@ -189,6 +314,8 @@ export type RootStackParamList = {
   Household: undefined;
   /** Profile → Location tags. Editing the pick-list capture offers. */
   LocationTags: undefined;
+  /** A thing's spec sheet. Presented as a sheet, like SnagDetail. */
+  ThingDetail: { thingId: string };
 };
 
 export type MainTabParamList = {
@@ -201,5 +328,14 @@ export type MainTabParamList = {
    * this product, it is the only channel there is.
    */
   Snags: undefined;
+  /**
+   * The house record — what's *there*, beside the list of what's wrong.
+   *
+   * Named "House" rather than "My House" because the moment there is a bach,
+   * "my house" is the wrong name for half of what the tab holds. The property
+   * name goes in the screen header instead, through the same picker capture
+   * has.
+   */
+  House: undefined;
   Profile: undefined;
 };

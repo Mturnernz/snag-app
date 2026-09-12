@@ -7,11 +7,13 @@ import Icon from './Icon';
 
 interface Props {
   title: string;
+  /** Where the thing is, under its name. One line, and it truncates. */
+  subtitle?: string;
   onBack?: () => void;
   rightSlot?: React.ReactNode;
 }
 
-export default function ScreenHeader({ title, onBack, rightSlot }: Props) {
+export default function ScreenHeader({ title, subtitle, onBack, rightSlot }: Props) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
 
@@ -30,9 +32,16 @@ export default function ScreenHeader({ title, onBack, rightSlot }: Props) {
       >
         <Icon name="arrow-back" size="lg" color={Colors.textPrimary} />
       </TouchableOpacity>
-      <Text style={styles.title} numberOfLines={1}>
-        {title}
-      </Text>
+      <View style={styles.titles}>
+        <Text style={styles.title} numberOfLines={1}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
       <View style={styles.rightSlot}>{rightSlot}</View>
     </View>
   );
@@ -56,12 +65,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  titles: { flex: 1 },
   title: {
-    flex: 1,
     fontSize: Typography.lg,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
   },
+  subtitle: { fontSize: Typography.sm, color: Colors.textMuted },
   rightSlot: {
     minWidth: MIN_TOUCH_TARGET,
     alignItems: 'flex-end',

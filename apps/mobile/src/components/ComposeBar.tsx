@@ -22,6 +22,27 @@ interface Props {
   note?: { onSave: (text: string) => Promise<void> };
   /** Stacked above a tab bar, which already clears the home indicator. */
   stacked?: boolean;
+  /**
+   * What the bar is for, in the words of the tab it is on.
+   *
+   * The same three controls file a snag on the list and a thing in the house
+   * record — the gesture is identical and deliberately so — but "Add
+   * something…" is the wrong prompt when the camera is pointed at a rating
+   * plate. Only the words change; nothing else about the bar does.
+   */
+  words?: {
+    placeholder?: string;
+    notePlaceholder?: string;
+    cameraLabel?: string;
+    /**
+     * The send button's accessible name. Kept separate from the placeholder
+     * rather than derived from it: a placeholder describes what to type and a
+     * button has to say what pressing it does, and "Add something" is a worse
+     * answer to the second question than "Add to the list" is. `ComposeBar.test`
+     * pins both.
+     */
+    sendLabel?: string;
+  };
 }
 
 /**
@@ -46,7 +67,7 @@ interface Props {
  *   bar is the exact case that breaks. This is the one component in the app
  *   that could not exist without that fix.
  */
-export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) {
+export default function ComposeBar({ pathPrefix, onAdd, note, stacked, words }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
 
@@ -55,6 +76,15 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) 
 
   const canSend = draft.trim().length > 0 && !busy;
   const off = busy || !pathPrefix;
+
+  const cameraLabel = words?.cameraLabel ?? 'Take a photo';
+  const prompt = note
+    ? words?.notePlaceholder ?? 'Say what it is…'
+    : words?.placeholder ?? 'Add something…';
+  // The accessible name is the prompt without its trailing ellipsis: a screen
+  // reader saying "Say what it is dot dot dot" is reading punctuation aloud.
+  const promptLabel = prompt.replace(/[….]+$/, '');
+  const sendLabel = note ? 'Save what it is' : words?.sendLabel ?? 'Add to the list';
 
   async function handleText() {
     const text = draft.trim();
@@ -113,7 +143,7 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) 
         disabled={off}
         style={[styles.camera, off && styles.cameraOff]}
         accessibilityRole="button"
-        accessibilityLabel="Take a photo"
+        accessibilityLabel={cameraLabel}
       >
         {busy ? (
           <ActivityIndicator color={Colors.white} />
@@ -126,13 +156,13 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) 
         style={styles.field}
         value={draft}
         onChangeText={setDraft}
-        placeholder={note ? 'Say what it is…' : 'Add something…'}
+        placeholder={prompt}
         placeholderTextColor={Colors.textMuted}
         maxLength={200}
         returnKeyType="send"
         onSubmitEditing={handleText}
         blurOnSubmit={false}
-        accessibilityLabel={note ? 'Say what it is' : 'Add something'}
+        accessibilityLabel={promptLabel}
         autoFocus={!!note}
       />
 
@@ -142,7 +172,7 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) 
           disabled={!canSend}
           style={[styles.send, !canSend && styles.sendOff]}
           accessibilityRole="button"
-          accessibilityLabel={note ? 'Save what it is' : 'Add to the list'}
+          accessibilityLabel={sendLabel}
         >
           <Icon name="arrow-up" size="md" color={canSend ? Colors.white : Colors.textMuted} />
         </Pressable>

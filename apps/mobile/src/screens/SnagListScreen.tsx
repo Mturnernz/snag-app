@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SnagCard from '../components/SnagCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { getSnags, getSnagPhotoUrls } from '../lib/supabase';
 import { RootStackParamList, Snag, SnagFilter, SnagSort } from '../types';
@@ -102,18 +102,20 @@ export default function SnagListScreen() {
               <Pressable
                 key={candidate.id}
                 onPress={() => setActiveProperty(candidate.id)}
-                style={[styles.chip, active && styles.chipActive]}
+                style={styles.chipTap}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
               >
-                <Icon
-                  name={active ? 'home' : 'home-outline'}
-                  size="sm"
-                  color={active ? Colors.white : Colors.textSecondary}
-                />
-                <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
-                  {candidate.name}
-                </Text>
+                <View style={[styles.chip, active && styles.chipActive]}>
+                  <Icon
+                    name={active ? 'home' : 'home-outline'}
+                    size="sm"
+                    color={active ? Colors.white : Colors.textSecondary}
+                  />
+                  <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
+                    {candidate.name}
+                  </Text>
+                </View>
               </Pressable>
             );
           })}
@@ -131,12 +133,14 @@ export default function SnagListScreen() {
             <Pressable
               key={key}
               onPress={() => setLens(key)}
-              style={[styles.chip, active && styles.chipActive]}
+              style={styles.chipTap}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
             >
-              <Icon name={icon} size="sm" color={active ? Colors.white : Colors.textSecondary} />
-              <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>{label}</Text>
+              <View style={[styles.chip, active && styles.chipActive]}>
+                <Icon name={icon} size="sm" color={active ? Colors.white : Colors.textSecondary} />
+                <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>{label}</Text>
+              </View>
             </Pressable>
           );
         })}
@@ -146,13 +150,17 @@ export default function SnagListScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.roomRow}
+          contentContainerStyle={styles.lastChipRow}
         >
           <Pressable
             onPress={() => setRoom(null)}
-            style={[styles.roomChip, !room && styles.roomChipActive]}
+            style={styles.chipTap}
+            accessibilityRole="button"
+            accessibilityState={{ selected: !room }}
           >
-            <Text style={[styles.roomLabel, !room && styles.roomLabelActive]}>Everywhere</Text>
+            <View style={[styles.chip, !room && styles.chipActive]}>
+              <Text style={[styles.chipLabel, !room && styles.chipLabelActive]}>Everywhere</Text>
+            </View>
           </Pressable>
           {locations.map((location) => {
             const active = room === location.name;
@@ -160,13 +168,15 @@ export default function SnagListScreen() {
               <Pressable
                 key={location.id}
                 onPress={() => setRoom(active ? null : location.name)}
-                style={[styles.roomChip, active && styles.roomChipActive]}
+                style={styles.chipTap}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
               >
-                <Text style={[styles.roomLabel, active && styles.roomLabelActive]}>
-                  {location.name}
-                </Text>
+                <View style={[styles.chip, active && styles.chipActive]}>
+                  <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
+                    {location.name}
+                  </Text>
+                </View>
               </Pressable>
             );
           })}
@@ -200,7 +210,7 @@ export default function SnagListScreen() {
         ListEmptyComponent={
           loading ? null : (
             <EmptyState
-              icon={lens === 'done' ? 'checkmark-done-outline' : 'happy-outline'}
+              icon={lens === 'done' ? 'checkmark-done-outline' : 'home-outline'}
               title={lens === 'done' ? 'Nothing finished yet' : 'Nothing on the list'}
               message={
                 lens === 'parts'
@@ -234,7 +244,24 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   count: { fontSize: Typography.sm, color: Colors.textMuted },
-  chipRow: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, gap: Spacing.sm },
+  // One chip, three rails.
+  //
+  // They used to be two shapes with two selected states: the lenses filled solid
+  // fern, the rooms a pale tint with fern text, which read as two different
+  // controls doing the same job. And both sat on white with a border — on a
+  // plaster ground a white bordered box is a *card*, so a row of filters looked
+  // like a row of things to read rather than a row of things to tap.
+  //
+  // Now: a sunken well when off, solid fern when on, no border either way.
+  //
+  // The tap area and the visible pill are deliberately different sizes. The pill
+  // is ~34px because a rail of 48px lozenges is heavier than the list it filters;
+  // the Pressable around it is the full MIN_TOUCH_TARGET, so the thing you can
+  // hit is still 48. Both rails were under that before — 34px and 26px — which
+  // is the part nobody notices until they are holding the phone one-handed.
+  chipRow: { paddingHorizontal: Spacing.lg, gap: Spacing.sm },
+  lastChipRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm, gap: Spacing.sm },
+  chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -242,29 +269,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: Radius.button,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    backgroundColor: Colors.sunken,
   },
-  chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipActive: { backgroundColor: Colors.primary },
   chipLabel: {
     fontSize: Typography.sm,
     fontWeight: Typography.medium,
     color: Colors.textSecondary,
   },
-  chipLabelActive: { color: Colors.white },
-  roomRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, gap: Spacing.sm },
-  roomChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radius.chip,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  roomChipActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  roomLabel: { fontSize: Typography.sm, color: Colors.textMuted },
-  roomLabelActive: { color: Colors.primary, fontWeight: Typography.semibold },
+  chipLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
   listContent: { padding: Spacing.lg, paddingTop: 0, gap: Spacing.md },
   listContentEmpty: { flexGrow: 1, justifyContent: 'center' },
 });

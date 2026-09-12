@@ -305,6 +305,35 @@ Three badges carry the triage vocabulary, and their colour budget is deliberate:
 - **`DueBadge`** — overdue is the one thing on a household list that has earned red. It's a fact
   about a date, not a judgement about importance.
 
+### One chip, every rail
+
+Filter chips on `SnagListScreen`, the effort selector on `WeekendScreen` and the priority pair on
+`CaptureScreen` all say the same thing the same way: **a sunken well when off, solid fern when on,
+no border either way.** Two rules follow from that:
+
+- **Never put an inactive control on `surface` with a border.** On a plaster ground a white
+  bordered box is a *card*, so a row of filters styled that way reads as a row of things to read
+  rather than a row of things to tap.
+- **`primaryLight` is not a selected state for a control.** It is the tint behind fern *text* (a
+  capture tag chip, an avatar). Using it for one rail and solid fern for another made two controls
+  doing the same job look like two different controls.
+
+Priority is the one exception, and only halfway: **High** fills with clay because it is the
+screen's single alert, and **Low** takes the sunken treatment like everything else. Filling Low
+with the ink made the quieter of two choices the heavier-looking one.
+
+**A chip's tap area and its visible pill are different sizes on purpose.** The pill is ~34px,
+because a rail of 48px lozenges outweighs the list it filters; the `Pressable` around it carries
+`MIN_TOUCH_TARGET`. Both rails were under 48 before this — 34px and 26px — which is invisible
+until someone is holding the phone one-handed. `Button.test.tsx` and `CaptureScreen.test.tsx` pin
+the states.
+
+**A disabled filled button goes neutral, not faded.** Dimming a filled button dims its hue too:
+fern at half strength is a pale sage that reads as broken rather than as not-ready, and
+white-on-pale-sage fails contrast on the way past. Disabled filled variants take the sunken well
+and a muted label (5.31:1). Loading is not the same case — the spinner is the feedback, and going
+grey mid-press reads as the action having failed.
+
 ## Code Style
 
 - Functional components + hooks only.

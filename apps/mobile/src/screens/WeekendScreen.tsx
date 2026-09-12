@@ -8,7 +8,7 @@ import SnagCard from '../components/SnagCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import Card from '../components/Card';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { getSnags, getSnagPhotoUrls } from '../lib/supabase';
 import { planWeekend, snagHeadline, WeekendPlan } from '@snag/supabase-queries';
 import { EFFORT_ORDER, RootStackParamList, SnagEffort, EFFORT_LABELS } from '../types';
@@ -105,7 +105,7 @@ export default function WeekendScreen() {
 
       {empty ? (
         <EmptyState
-          icon="beer-outline"
+          icon="sunny-outline"
           title="Nothing to do"
           message="Everything that fits this much time is already done. Have the weekend off."
         />
@@ -176,14 +176,15 @@ const styles = StyleSheet.create({
   effortRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm },
   effortChip: {
     flex: 1,
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
     paddingVertical: Spacing.md,
     borderRadius: Radius.button,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    // Sunken when off, fern when on — the same language as the list's rails.
+    backgroundColor: Colors.sunken,
     alignItems: 'center',
   },
-  effortChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  effortChipActive: { backgroundColor: Colors.primary },
   effortLabel: {
     fontSize: Typography.sm,
     fontWeight: Typography.medium,

@@ -52,7 +52,10 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: Colors.background,
+    // Sunken, not the ground. Every screen that renders an empty state has the
+    // ground behind it, so a circle filled with the ground colour was a circle
+    // nobody could see — the glyph appeared to float.
+    backgroundColor: Colors.sunken,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.sm,

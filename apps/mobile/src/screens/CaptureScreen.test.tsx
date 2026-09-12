@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, flattenStyle } from '../test/render';
 import CaptureScreen from './CaptureScreen';
+import { Colors } from '../constants/theme';
 
 // What this pins is the *order and weight* of the capture form, which is the
 // one thing about this screen that keeps drifting. The tags are a suggestion:
@@ -57,6 +58,16 @@ function arrange(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+/** The nearest ancestor of a label that actually handles a press. */
+const pressableAround = (result: ReturnType<typeof render>, text: string) => {
+  let node: any = result.getByText(text);
+  while (node) {
+    if (typeof node.type === 'string' && node.props?.accessibilityState?.selected !== undefined) return node;
+    node = node.parent;
+  }
+  throw new Error(`Nothing selectable around "${text}"`);
+};
 
 /** Every host <Text> in render order, so "below" can actually be asserted. */
 const textsInOrder = (result: ReturnType<typeof render>) =>
@@ -119,6 +130,18 @@ describe('CaptureScreen', () => {
     expect(style.borderColor).toBe('transparent');
     // Still a full-height target, however quiet it looks.
     expect(style.minHeight).toBe(48);
+  });
+
+  it('reserves the alert colour for High — Low is selected, not shouting', () => {
+    const result = render(<CaptureScreen />);
+    // Low is the default, so this is what the screen looks like at rest. It used
+    // to be a filled dark block, which made the quieter of two choices the
+    // heavier-looking one and put a second saturated hue on a screen whose only
+    // alert colour is meant to be High.
+    const low = flattenStyle(pressableAround(result, 'Low').props.style);
+    expect(low.backgroundColor).toBe(Colors.sunken);
+    expect(low.backgroundColor).not.toBe(Colors.textSecondary);
+    expect(flattenStyle(result.getByText('Low').props.style).color).toBe(Colors.textPrimary);
   });
 
   it('still refuses to save with neither a photo nor a description', () => {

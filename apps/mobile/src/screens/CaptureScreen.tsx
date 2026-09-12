@@ -162,9 +162,9 @@ export default function CaptureScreen() {
             <Icon
               name="time-outline"
               size="md"
-              color={priority === 'low' ? Colors.white : Colors.textSecondary}
+              color={priority === 'low' ? Colors.textPrimary : Colors.textSecondary}
             />
-            <Text style={[styles.priorityLabel, priority === 'low' && styles.priorityLabelActive]}>
+            <Text style={[styles.priorityLabel, priority === 'low' && styles.priorityLowLabelActive]}>
               Low
             </Text>
           </Pressable>
@@ -318,13 +318,19 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   priorityHighActive: { backgroundColor: Colors.priority.high, borderColor: Colors.priority.high },
-  priorityLowActive: { backgroundColor: Colors.textSecondary, borderColor: Colors.textSecondary },
+  // Selected, not alarming. Filling Low with the ink made the quieter of two
+  // choices the heavier-looking one, and put a second saturated block on a
+  // screen whose only alert colour is meant to be High. Selection is carried by
+  // the well, the border and the weight instead — three differences, none of
+  // them a hue.
+  priorityLowActive: { backgroundColor: Colors.sunken, borderColor: Colors.border },
   priorityLabel: {
     fontSize: Typography.base,
     fontWeight: Typography.medium,
     color: Colors.textSecondary,
   },
   priorityLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
+  priorityLowLabelActive: { color: Colors.textPrimary, fontWeight: Typography.semibold },
   description: {
     backgroundColor: Colors.surface,
     borderWidth: 1,

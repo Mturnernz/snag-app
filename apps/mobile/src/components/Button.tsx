@@ -44,6 +44,17 @@ const VARIANT_STYLES: Record<Variant, { bg: string; text: string; border?: strin
   dangerOutline: { bg: 'transparent', text: Colors.danger, border: Colors.danger },
 };
 
+// A disabled filled button goes neutral rather than faded.
+//
+// Dimming a filled button dims its hue too: fern at half strength on a plaster
+// ground is a pale sage that reads as a broken button rather than as one that
+// isn't ready yet, and white-on-pale-sage fails contrast on the way past. The
+// palette's own rule settles it — colour is spent on state, and "not yet" is
+// not a state worth colouring. Muted on sunken measures 5.31:1, so the label
+// stays readable, which a 50% wash never was.
+const DISABLED_FILL = { bg: Colors.sunken, text: Colors.textMuted };
+const FILLED_VARIANTS = new Set<Variant>(['primary', 'secondary', 'danger']);
+
 export default function Button({
   label,
   onPress,
@@ -54,9 +65,12 @@ export default function Button({
   icon,
   style,
 }: Props) {
-  const cfg = VARIANT_STYLES[variant];
   const isDisabled = disabled || loading;
   const isCta = CTA_VARIANTS.has(variant);
+  // Loading keeps its own colours: the spinner is the feedback, and swapping the
+  // button to grey mid-press reads as the action having failed.
+  const neutralised = disabled && !loading && FILLED_VARIANTS.has(variant);
+  const cfg = neutralised ? { ...VARIANT_STYLES[variant], ...DISABLED_FILL } : VARIANT_STYLES[variant];
 
   // CTA variants (primary/serious) get a spring scale down; every variant
   // keeps the old opacity dip so non-CTA buttons don't lose press feedback.
@@ -67,11 +81,12 @@ export default function Button({
   // by opacity: 1 — every disabled button in the app rendered at full strength
   // with pointer events off, looking completely actionable and doing nothing.
   const scale = useSharedValue(1);
-  const opacity = useSharedValue(isDisabled ? DISABLED_OPACITY : 1);
+  const restingOpacity = isDisabled && !neutralised ? DISABLED_OPACITY : 1;
+  const opacity = useSharedValue(restingOpacity);
 
   useEffect(() => {
-    opacity.value = withSpring(isDisabled ? DISABLED_OPACITY : 1, { damping: 16, stiffness: 300 });
-  }, [isDisabled, opacity]);
+    opacity.value = withSpring(restingOpacity, { damping: 16, stiffness: 300 });
+  }, [restingOpacity, opacity]);
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ scale: scale.value }],

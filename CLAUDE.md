@@ -355,6 +355,21 @@ grey mid-press reads as the action having failed.
 - The same trap applies to every native-only module. `apps/mobile` runs in the browser as well as
   on phones, so check a platform API has a web implementation before using it — `expo-file-system`
   has none, and its stub throws rather than no-oping. See TESTING.md.
+- **`KeyboardAvoidingView` does nothing in a browser, and neither does `Keyboard`.**
+  react-native-web ships both, so they type-check and render — but `onKeyboardChange` is an empty
+  method body and `Keyboard.isVisible()` returns a hardcoded `false`. Seven screens wrap
+  themselves in one and have never been protected on the build people actually install. Use
+  `useKeyboardInset()` (`hooks/useKeyboardInset.ts`) for anything pinned to the bottom of a
+  screen, as `marginBottom`, and drop the safe-area padding while it is non-zero — the keyboard
+  already covers the home indicator, so adding both lifts the bar an inset too far.
+
+  Two mechanisms do the work and they deliberately can't double up.
+  `interactive-widget=resizes-content` in `public/index.html`'s viewport meta makes Chrome shrink
+  the *layout* viewport, so ordinary layout avoids the keyboard; Safari ignores it, and
+  `lib/keyboardInset.ts` measures `visualViewport` instead. When the layout viewport has already
+  shrunk, `innerHeight` shrinks with it and that measurement comes out at zero — so whichever one
+  is working, the other reports nothing. `keyboardInset.test.ts` pins that, and
+  `webManifest.test.ts` pins the meta directive, which nothing else could catch.
 - **The web build runs under a CSP, and nothing local enforces it.** `apps/mobile/netlify.toml`
   sends one, so a URL the code fetches has to be in `connect-src` or the request never happens —
   and a browser reports that as the same opaque `TypeError` a dead network gives, which the app

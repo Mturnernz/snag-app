@@ -126,4 +126,16 @@ describe('web HTML shell', () => {
     expect(indexHtml).not.toContain('name="theme-color"');
     expect(indexHtml).not.toContain('name="description"');
   });
+
+  it('tells Chrome to resize the layout viewport for the keyboard', () => {
+    // Half the keyboard story, and the half nothing else can assert: without
+    // it Chrome leaves the layout viewport alone and anything pinned to the
+    // bottom sits behind the keyboard. Safari ignores the directive, which is
+    // what lib/keyboardInset.ts measures instead — and losing this line moves
+    // a working Android build onto that fallback silently.
+    const viewport = indexHtml.match(/<meta name="viewport"[^>]*content="([^"]+)"/);
+    expect(viewport).not.toBeNull();
+    expect(viewport![1]).toContain('interactive-widget=resizes-content');
+    expect(viewport![1]).toContain('width=device-width');
+  });
 });

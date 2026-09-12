@@ -9,6 +9,7 @@ import Button from '../components/Button';
 import Icon from '../components/Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
+import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { useToast } from '../hooks/useToast';
 import { createSnag } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
@@ -44,6 +45,11 @@ export default function CaptureScreen() {
   const { household, properties, activeProperty, setActiveProperty, locations, refresh } = useHousehold();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
+  // The action bar is pinned below the scroll view, so on web the keyboard
+  // opens straight over it — "Add to the list" is unreachable for as long as
+  // someone is typing the description. `KeyboardAvoidingView` around this
+  // screen does nothing in a browser; see lib/keyboardInset.ts.
+  const keyboard = useKeyboardInset();
 
   const [room, setRoom] = useState<string | null>(null);
   const [description, setDescription] = useState('');
@@ -229,7 +235,17 @@ export default function CaptureScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.actionBar, { paddingBottom: insets.bottom + Spacing.md }]}>
+      <View
+        style={[
+          styles.actionBar,
+          {
+            marginBottom: keyboard,
+            // The keyboard already covers the home indicator, so the two are
+            // alternatives rather than additive.
+            paddingBottom: (keyboard > 0 ? 0 : insets.bottom) + Spacing.md,
+          },
+        ]}
+      >
         <Button
           label="Add to the list"
           onPress={handleSave}

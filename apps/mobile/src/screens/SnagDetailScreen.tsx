@@ -17,6 +17,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
+import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getSnagPhotoUrls,
 } from '../lib/supabase';
@@ -43,6 +44,10 @@ export default function SnagDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const insets = useSafeAreaInsets();
+  // The comment box is the last thing in a long scroll, so on web the keyboard
+  // opens over the thing being typed into. The KeyboardAvoidingView wrapped
+  // around this screen does nothing in a browser — see lib/keyboardInset.ts.
+  const keyboard = useKeyboardInset();
   const { members, profile, refresh: refreshHousehold } = useHousehold();
   const { showToast } = useToast();
 
@@ -162,7 +167,10 @@ export default function SnagDetailScreen() {
         />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.content, keyboard > 0 && { paddingBottom: keyboard + Spacing.lg }]}
+        keyboardShouldPersistTaps="handled"
+      >
         {snag.photoPaths.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
             {snag.photoPaths.map((path) => (

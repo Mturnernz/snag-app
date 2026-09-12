@@ -20,7 +20,15 @@
   <head>
     <meta charset="utf-8" />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <!-- `interactive-widget` is half of how this app makes room for the on-screen
+         keyboard. Chrome shrinks the layout viewport when the keyboard opens, so
+         ordinary layout avoids it and anything pinned to the bottom stays
+         reachable. Safari ignores the directive, which is what
+         src/lib/keyboardInset.ts is for — and the two can't double up, because
+         a shrunken layout viewport makes that measurement come out at zero.
+         React Native's KeyboardAvoidingView does nothing here: react-native-web
+         ships it, but its keyboard handler is an empty method body. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, interactive-widget=resizes-content" />
     <title>%WEB_TITLE%</title>
 
     <!-- The home-screen icon. Android reads the manifest; iOS ignores it and

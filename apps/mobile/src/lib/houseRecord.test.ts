@@ -1,5 +1,6 @@
 import {
-  describeCycle, searchThings, thingDetailLine, thingHeadline, thingSearchText,
+  describeCycle, formatLooseDate, parseLooseDate, searchThings, thingDetailLine, thingHeadline,
+  thingSearchText,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -91,5 +92,46 @@ describe('saying an interval out loud', () => {
     expect(describeCycle(7)).toBe('week');
     expect(describeCycle(1)).toBe('day');
     expect(describeCycle(45)).toBe('45 days');
+  });
+});
+
+describe('dates off a rating plate', () => {
+  it('accepts every form the label and the person are likely to use', () => {
+    // The column is a real `date`. Anything this cannot read reaches Postgres
+    // as a 22008 raised inside an RPC — a database error shown to somebody who
+    // answered the question correctly.
+    expect(parseLooseDate('2019')).toBe('2019-01-01');
+    expect(parseLooseDate('2019-11')).toBe('2019-11-01');
+    expect(parseLooseDate('11/2019')).toBe('2019-11-01');
+    expect(parseLooseDate('Nov 2019')).toBe('2019-11-01');
+    expect(parseLooseDate('November 2019')).toBe('2019-11-01');
+    expect(parseLooseDate('nov. 2019')).toBe('2019-11-01');
+    expect(parseLooseDate('2019-11-08')).toBe('2019-11-08');
+    expect(parseLooseDate('8 Nov 2019')).toBe('2019-11-08');
+  });
+
+  it('clears on empty, and says it cannot tell rather than guessing', () => {
+    expect(parseLooseDate('')).toBeNull();
+    expect(parseLooseDate('   ')).toBeNull();
+    // Undefined is "keep what they typed and say why" — never a wrong date
+    // stored silently.
+    expect(parseLooseDate('sometime in the winter')).toBeUndefined();
+    expect(parseLooseDate('Smarch 2019')).toBeUndefined();
+  });
+
+  it('reads a stored date back the way the plate says it', () => {
+    expect(formatLooseDate('2019-11-01')).toBe('Nov 2019');
+    expect(formatLooseDate('2019-01-01')).toBe('Jan 2019');
+    // A day that somebody actually gave is shown; the first of the month is
+    // what a month-only answer is stored as, so showing it back would invent
+    // a precision nobody offered.
+    expect(formatLooseDate('2019-11-08')).toBe('8 Nov 2019');
+    expect(formatLooseDate(null)).toBe('');
+  });
+
+  it('round-trips what it accepted', () => {
+    for (const typed of ['Nov 2019', '11/2019', '2019-11']) {
+      expect(formatLooseDate(parseLooseDate(typed) as string)).toBe('Nov 2019');
+    }
   });
 });

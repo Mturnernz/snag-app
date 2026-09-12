@@ -12,15 +12,17 @@ import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '..
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
-import { describeCycle, snagHeadline, thingHeadline } from '@snag/supabase-queries';
+import {
+  describeCycle, formatLooseDate, parseLooseDate, snagHeadline, thingHeadline,
+} from '@snag/supabase-queries';
 import {
   createSnag, deleteThing, getSnagPhotoUrls, getSnags, getThing, updateThing,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
 import {
-  FINISH_SPEC_FIELDS, RootStackParamList, Snag, Thing, THING_KINDS, THING_KIND_FIELD_LABELS,
-  THING_KIND_LABELS,
+  FINISH_SPEC_FIELDS, RootStackParamList, Snag, Thing, ThingKind, THING_KINDS,
+  THING_KIND_FIELD_LABELS, THING_KIND_LABELS,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -59,6 +61,19 @@ const DATE_FIELDS: { key: 'installedAt' | 'warrantyUntil'; label: string }[] = [
 
 /** Service intervals a household actually uses. Nobody types "180 days". */
 const SERVICE_CYCLES = [90, 180, 365, 730];
+
+/**
+ * Which kinds are asked what they take, and whether they need servicing.
+ *
+ * Paint takes nothing and is never serviced — showing it "the filter, the bulb,
+ * the cartridge" and a rail of intervals is two whole sections of the sheet
+ * asking questions about a tin of paint. The equivalent answer for paint is
+ * already on the record: what's left, and where the tin is.
+ */
+const KINDS_WITH_CONSUMABLES: ThingKind[] = ['appliance', 'fitting'];
+const KINDS_WITH_SERVICING: ThingKind[] = ['appliance', 'fabric'];
+/** A tin of paint has no serial number, and offering the row invents one. */
+const KINDS_WITH_SERIAL: ThingKind[] = ['appliance', 'fitting', 'fabric'];
 
 export default function ThingDetailScreen() {
   const navigation = useNavigation<Nav>();
@@ -247,7 +262,9 @@ export default function ThingDetailScreen() {
             placeholder="7A204871"
             mono
             onCopy={copy}
-            show={known(thing.serial) || reveal}
+            // Shown anyway if one is somehow already recorded — hiding a value
+            // is how it becomes unreachable.
+            show={known(thing.serial) || (reveal && KINDS_WITH_SERIAL.includes(thing.kind))}
             onSave={(v) => patch({ serial: v })}
           />
 
@@ -273,9 +290,27 @@ export default function ThingDetailScreen() {
               key={field.key}
               label={field.label}
               value={thing[field.key]}
-              placeholder="2019-11"
+              display={formatLooseDate}
+              placeholder="Nov 2019"
               show={known(thing[field.key]) || reveal}
-              onSave={(v) => patch({ [field.key]: v } as Parameters<typeof updateThing>[1])}
+              onSave={(v) => {
+                if (v === null) {
+                  patch({ [field.key]: null } as Parameters<typeof updateThing>[1]);
+                  return false;
+                }
+                const parsed = parseLooseDate(v);
+                if (parsed === undefined) {
+                  // The column is a real date, so an unparsed answer would come
+                  // back as a Postgres 22008 to somebody who answered correctly.
+                  showAlert(
+                    "Couldn't read that date",
+                    'Try a year, a month and a year, or a full date — "2019", "Nov 2019", "8 Nov 2019".'
+                  );
+                  return false;
+                }
+                patch({ [field.key]: parsed } as Parameters<typeof updateThing>[1]);
+                return true;
+              }}
             />
           ))}
 
@@ -322,6 +357,8 @@ export default function ThingDetailScreen() {
         </View>
 
         {/* ── what it takes ──────────────────────────────────────────── */}
+        {KINDS_WITH_CONSUMABLES.includes(thing.kind) ? (
+          <>
         <Text style={styles.sectionLabel}>What does it take?</Text>
         <Text style={styles.sectionHint}>
           The filter, the bulb, the cartridge — what you would buy again. This is what a job about
@@ -359,7 +396,7 @@ export default function ThingDetailScreen() {
             style={styles.partInput}
             value={consumableDraft}
             onChangeText={setConsumableDraft}
-            placeholder="MAC-2360FT, GU10 2700K…"
+            placeholder="A part number or a fitting…"
             placeholderTextColor={Colors.textMuted}
             maxLength={60}
             autoCorrect={false}
@@ -382,8 +419,12 @@ export default function ThingDetailScreen() {
             />
           </Pressable>
         </View>
+          </>
+        ) : null}
 
         {/* ── does it need doing regularly ───────────────────────────── */}
+        {KINDS_WITH_SERVICING.includes(thing.kind) ? (
+          <>
         <Text style={styles.sectionLabel}>Does it need servicing?</Text>
         <View style={styles.chips}>
           <Pressable
@@ -421,6 +462,8 @@ export default function ThingDetailScreen() {
             round, and the list will roll it forward each time it is done.
           </Text>
         ) : null}
+          </>
+        ) : null}
 
         {/* ── what has been wrong with it ────────────────────────────── */}
         <Text style={styles.sectionLabel}>
@@ -441,7 +484,7 @@ export default function ThingDetailScreen() {
                   color={snag.status === 'done' ? Colors.textMuted : Colors.status.open}
                 />
                 <Text
-                  style={[styles.partText, snag.status === 'done' && styles.snagDone]}
+                  style={[styles.snagText, snag.status === 'done' && styles.snagDone]}
                   numberOfLines={1}
                 >
                   {snagHeadline(snag)}
@@ -487,7 +530,7 @@ export default function ThingDetailScreen() {
  * null, so clearing a field is the same gesture as never having filled it.
  */
 function Field({
-  label, value, placeholder, show, mono, multiline, onSave, onCopy,
+  label, value, placeholder, show, mono, multiline, display, onSave, onCopy,
 }: {
   label: string;
   value: string | null;
@@ -495,29 +538,44 @@ function Field({
   show: boolean;
   mono?: boolean;
   multiline?: boolean;
-  onSave: (value: string | null) => void;
+  /** How the stored value reads when nobody is editing it. */
+  display?: (value: string | null) => string;
+  /**
+   * Return false to keep what was typed — a value the field could not accept.
+   * Anything else (including the promise `patch` returns) is taken as accepted.
+   */
+  onSave: (value: string | null) => unknown;
   onCopy?: (label: string, value: string) => void;
 }) {
-  const [draft, setDraft] = useState(value ?? '');
+  const shown = display ? display(value) : value ?? '';
+  const [draft, setDraft] = useState(shown);
   const [editing, setEditing] = useState(false);
 
   // The row is the source of truth while it has focus; the server is, the rest
-  // of the time. Without this a save that trims or rejects never shows.
+  // of the time. Without this a save that trims or reformats never shows — and
+  // a date typed as "nov 2019" would keep reading that way rather than "Nov
+  // 2019", which is the app agreeing with itself about what it stored.
   useEffect(() => {
-    if (!editing) setDraft(value ?? '');
-  }, [value, editing]);
+    if (!editing) setDraft(shown);
+  }, [shown, editing]);
 
   if (!show) return null;
 
   function commit() {
-    setEditing(false);
     const next = draft.trim();
-    if (next === (value ?? '')) return;
-    onSave(next === '' ? null : next);
+    if (next === shown) {
+      setEditing(false);
+      return;
+    }
+    const accepted = onSave(next === '' ? null : next);
+    // Staying in "editing" keeps the rejected words in front of the person who
+    // typed them, next to the message saying why.
+    if (accepted === false) return;
+    setEditing(false);
   }
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, multiline && styles.rowTall]}>
       <Text style={styles.rowLabel}>{label}</Text>
       <View style={styles.rowValue}>
         <TextInput
@@ -587,6 +645,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: Colors.textMuted,
   },
+  // A Notes value runs to several lines, and its label belongs beside the
+  // first of them rather than floating in the middle of the block.
+  rowTall: { alignItems: 'flex-start', paddingVertical: Spacing.sm },
   rowValue: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   input: {
     flex: 1,
@@ -642,7 +703,11 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
   },
   partTap: { flex: 1, justifyContent: 'center', minHeight: MIN_TOUCH_TARGET },
-  partText: { flex: 1, fontFamily: Fonts.mono, fontSize: Typography.sm, color: Colors.textPrimary },
+  // No `flex: 1`: the tap target around it is a column, so a flexing Text
+  // grows to fill it and the row comes out three times its height.
+  partText: { fontFamily: Fonts.mono, fontSize: Typography.sm, color: Colors.textPrimary },
+  // Prose, so the system font. `Fonts.mono` is for data only — see theme.ts.
+  snagText: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
   partRemove: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,

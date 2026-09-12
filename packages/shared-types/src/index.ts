@@ -212,10 +212,20 @@ export type ThingKind = 'appliance' | 'finish' | 'fitting' | 'fabric' | 'contact
 /** The two that are built. Everything else is deliberately not offered yet. */
 export const THING_KINDS: ThingKind[] = ['appliance', 'finish'];
 
+/** On a chip, where it names one thing. */
 export const THING_KIND_LABELS: Record<ThingKind, string> = {
   appliance: 'Appliance',
   finish: 'Paint',
   fitting: 'Fitting',
+  fabric: 'The house',
+  contact: 'Who to call',
+};
+
+/** Over a group, where it counts several. "Appliance · 6" reads as a typo. */
+export const THING_KIND_GROUP_LABELS: Record<ThingKind, string> = {
+  appliance: 'Appliances',
+  finish: 'Paint',
+  fitting: 'Fittings',
   fabric: 'The house',
   contact: 'Who to call',
 };

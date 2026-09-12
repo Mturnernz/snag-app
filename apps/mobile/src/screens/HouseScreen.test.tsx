@@ -155,6 +155,7 @@ describe('HouseScreen', () => {
     await TestRenderer.act(async () => byKind.props.onPress());
 
     const headings = texts(result).filter((t) => t.includes(' · '));
-    expect(headings).toEqual(['Appliance · 1', 'Paint · 2']);
+    // Plural over a group. "Appliance · 6" reads as a typo.
+    expect(headings).toEqual(['Appliances · 1', 'Paint · 2']);
   });
 });

@@ -857,6 +857,77 @@ export function describeCycle(days: number): string {
   return days === 1 ? 'day' : `${days} days`;
 }
 
+/**
+ * A date off a rating plate, in the words that are printed on it.
+ *
+ * A plate says `MFD 2019-11` and a warranty card says "November 2022" — month
+ * precision, because nobody knows or cares which day the heat pump was made.
+ * So the record shows "Nov 2019" and only says the day when somebody has
+ * actually given one.
+ */
+export function formatLooseDate(iso: string | null): string {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y) return iso;
+  const month = m ? MONTHS[m - 1] : null;
+  if (!month) return String(y);
+  // Day 1 is what a month-only answer is stored as, so showing it back would
+  // invent a precision nobody offered.
+  return d && d !== 1 ? `${d} ${month} ${y}` : `${month} ${y}`;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Takes what somebody typed and returns a date Postgres will accept, or null.
+ *
+ * The column is a real `date`, so an unparsed "Nov 2019" is a 22008 raised
+ * from inside an RPC — a database error surfaced to somebody who answered the
+ * question correctly. This accepts every form the label and the person are
+ * likely to use: `2019`, `2019-11`, `11/2019`, `Nov 2019`, `November 2019`,
+ * `2019-11-08`, `8 Nov 2019`. A missing day is the first of the month, which
+ * `formatLooseDate` then declines to show back.
+ *
+ * Returns `undefined` when it cannot tell — the caller keeps what was typed and
+ * says so, rather than silently discarding it or storing a wrong date.
+ */
+export function parseLooseDate(input: string): string | null | undefined {
+  const text = input.trim();
+  if (!text) return null;
+
+  const iso = (y: number, m: number, d: number) =>
+    `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+  const monthNumber = (word: string): number | null => {
+    const at = MONTHS.findIndex((m) => word.toLowerCase().startsWith(m.toLowerCase()));
+    return at === -1 ? null : at + 1;
+  };
+
+  let m;
+  // 2019-11-08 / 2019/11/8
+  if ((m = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/))) {
+    return iso(+m[1], +m[2], +m[3]);
+  }
+  // 2019-11 / 2019/11
+  if ((m = text.match(/^(\d{4})[-/](\d{1,2})$/))) return iso(+m[1], +m[2], 1);
+  // 11/2019
+  if ((m = text.match(/^(\d{1,2})[-/](\d{4})$/))) return iso(+m[2], +m[1], 1);
+  // 2019
+  if ((m = text.match(/^(\d{4})$/))) return iso(+m[1], 1, 1);
+  // Nov 2019 / November 2019
+  if ((m = text.match(/^([A-Za-z]{3,})\.?\s+(\d{4})$/))) {
+    const month = monthNumber(m[1]);
+    return month ? iso(+m[2], month, 1) : undefined;
+  }
+  // 8 Nov 2019 / 8 November 2019
+  if ((m = text.match(/^(\d{1,2})\s+([A-Za-z]{3,})\.?\s+(\d{4})$/))) {
+    const month = monthNumber(m[2]);
+    return month ? iso(+m[3], month, +m[1]) : undefined;
+  }
+  return undefined;
+}
+
 export type DueState = 'overdue' | 'due-soon' | 'scheduled' | 'none';
 
 export function dueState(snag: Snag, now = new Date()): DueState {

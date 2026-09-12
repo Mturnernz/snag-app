@@ -16,7 +16,10 @@ import { useToast } from '../hooks/useToast';
 import { searchThings } from '@snag/supabase-queries';
 import { createThing, getSnagPhotoUrls, getThings, updateThing } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { RootStackParamList, Thing, ThingGrouping, THING_KINDS, THING_KIND_LABELS } from '../types';
+import {
+  RootStackParamList, Thing, ThingGrouping, THING_KINDS, THING_KIND_GROUP_LABELS,
+  THING_KIND_LABELS,
+} from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -128,7 +131,7 @@ export default function HouseScreen() {
       for (const kind of THING_KINDS) {
         const group = rest.filter((t) => t.kind === kind);
         if (group.length > 0) {
-          out.push({ title: `${THING_KIND_LABELS[kind]} · ${group.length}`, data: group });
+          out.push({ title: `${THING_KIND_GROUP_LABELS[kind]} · ${group.length}`, data: group });
         }
       }
       const other = rest.filter((t) => !THING_KINDS.includes(t.kind));
@@ -232,7 +235,7 @@ export default function HouseScreen() {
             accessibilityRole="button"
             accessibilityLabel="Clear the search"
           >
-            <Icon name="close-circle" size="md" color={Colors.textMuted} />
+            <Icon name="close-circle-outline" size="md" color={Colors.textMuted} />
           </Pressable>
         ) : null}
       </View>

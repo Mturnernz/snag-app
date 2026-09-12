@@ -22,7 +22,9 @@ import { describeCycle, thingDetailLine, thingHeadline } from '@snag/supabase-qu
  */
 
 const KIND_ICONS: Record<ThingKind, React.ComponentProps<typeof Icon>['name']> = {
-  appliance: 'hardware-chip-outline',
+  // A dishwasher is not a circuit board. Generic on purpose: the icon says
+  // "a thing in the house", and the model number below it says which.
+  appliance: 'cube-outline',
   finish: 'color-palette-outline',
   fitting: 'bulb-outline',
   fabric: 'home-outline',

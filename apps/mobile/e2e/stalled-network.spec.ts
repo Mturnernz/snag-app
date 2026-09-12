@@ -31,8 +31,9 @@ async function signIn(page: Page) {
   await page.getByPlaceholder('Email').fill(EMAIL!);
   await page.getByPlaceholder('Password').fill(PASSWORD!);
   await page.getByText('Sign in', { exact: true }).click();
-  // Capture is the initial route.
-  await expect(page.getByText('What needs doing?')).toBeVisible({ timeout: 90_000 });
+  // The list is the initial route — there is no Add tab; capture is the bar at
+  // the foot of this screen.
+  await expect(page.getByPlaceholder('Add something…')).toBeVisible({ timeout: 90_000 });
 }
 
 test('a save that never comes back still stops spinning and says so', async ({ page }) => {
@@ -44,12 +45,24 @@ test('a save that never comes back still stops spinning and says so', async ({ p
     /* deliberately never fulfilled */
   });
 
-  await page.getByPlaceholder('Toilet seat is broken').fill('Stalled network probe');
-  await page.getByText('Add to the list', { exact: true }).click();
+  // `showAlert` is a `window.alert` on web (react-native-web's Alert is a no-op
+  // stub — see src/lib/alert.ts), so the failure arrives as a dialog rather
+  // than as text on the page. Playwright dismisses dialogs automatically, so
+  // the message has to be captured on the way past.
+  const dialogs: string[] = [];
+  page.on('dialog', (dialog) => {
+    dialogs.push(dialog.message());
+    dialog.dismiss().catch(() => {});
+  });
+
+  await page.getByPlaceholder('Add something…').fill('Stalled network probe');
+  await page.getByLabel('Add to the list').click();
 
   // The deadline is 20s for a data call; allow for it plus the dialog.
-  await expect(page.getByText(/couldn't save/i)).toBeVisible({ timeout: 40_000 });
+  await expect.poll(() => dialogs.join('\n'), { timeout: 40_000 }).toMatch(/couldn't add/i);
 
-  // And the form is usable again rather than stuck mid-submit.
-  await expect(page.getByPlaceholder('Toilet seat is broken')).toBeEnabled();
+  // And the bar is usable again rather than stuck mid-send, with the words put
+  // back so nobody has to retype them.
+  await expect(page.getByPlaceholder('Add something…')).toBeEnabled();
+  await expect(page.getByPlaceholder('Add something…')).toHaveValue('Stalled network probe');
 });

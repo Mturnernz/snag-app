@@ -127,7 +127,7 @@ export interface Snag {
   propertyId: string;
 
   /**
-   * Capture — four taps and, at most, one short line.
+   * Capture — a photo, or a line of text, from the bar at the foot of the list.
    *
    * There is no title: a photo of a broken toilet seat says what a title would,
    * and requiring one put a keyboard between someone and the thing in front of
@@ -199,8 +199,14 @@ export type RootStackParamList = {
 };
 
 export type MainTabParamList = {
-  /** Quick capture. The app opens here — it's the thing done most often. */
-  Capture: undefined;
+  /**
+   * The list, and the app's home.
+   *
+   * There is no Capture tab: adding something is a compose bar at the foot of
+   * this screen, not a place you navigate to. Opening on the list is how one
+   * person finds out what the other added — with no notifications anywhere in
+   * this product, it is the only channel there is.
+   */
   Snags: undefined;
   Weekend: undefined;
   Profile: undefined;

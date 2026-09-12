@@ -2,33 +2,14 @@ import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } f
 import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
-import { uploadSnagPhoto } from '../lib/supabase';
-import { withDeadline, failureReason } from '../lib/deadline';
+import { compressAndUpload, takePhoto as captureOne } from '../lib/photoUpload';
+import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import Icon from './Icon';
 
 const MAX_PHOTOS = 5;
 const THUMB_SIZE = 92;
-
-/**
- * The two stages are bounded separately, and say which one gave up, because
- * "the photo didn't upload" has two completely different causes and a
- * screenshot of the failure is usually all the evidence there is.
- *
- * Preparing is local: decode, resize, re-encode, all inside a native/browser
- * module that can simply never call back. Nothing has been sent, so 30s is
- * already generous.
- *
- * Sending has its own 60s deadline on the request itself (`fetchWithTimeout` in
- * lib/supabase.ts) — a photo on a bad site connection is slow rather than
- * broken. This backstop sits just past it, so the normal outcome is the
- * request's own "no reply from the server" and this only fires if something
- * before the request stalls.
- */
-const PREPARE_DEADLINE_MS = 30_000;
-const SEND_DEADLINE_MS = 65_000;
 
 type PhotoStatus = 'uploading' | 'success' | 'failed';
 
@@ -88,28 +69,6 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     onBlockingChange?.(photos.some((p) => p.status === 'uploading' || p.status === 'failed'));
   }, [photos, onBlockingChange]);
 
-  async function compressAndUpload(uri: string, fileName: string) {
-    const compressed = await withDeadline(
-      ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 1200 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-      ),
-      PREPARE_DEADLINE_MS,
-      'Preparing',
-    );
-    try {
-      return await withDeadline(uploadSnagPhoto(compressed.uri, fileName, bucket), SEND_DEADLINE_MS, 'Sending');
-    } finally {
-      // On web the compressed copy is an object URL held by the document until
-      // it's revoked, and a phone browser doing this five times over is the
-      // most memory-hungry thing this screen does. The thumbnail renders from
-      // the original `uri`, not this one, so nothing on screen needs it after
-      // the upload.
-      if (compressed.uri.startsWith('blob:')) URL.revokeObjectURL(compressed.uri);
-    }
-  }
-
   async function runUpload(id: string, uri: string, fileName: string) {
     setPhotos((prev) => prev.map((p) => (
       p.id === id ? { ...p, status: 'uploading', path: null, error: null } : p
@@ -120,7 +79,7 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
     // good — a spinner that never resolves and a Submit button disabled behind
     // it, with no way back but reloading the screen.
     try {
-      const { path, error } = await compressAndUpload(uri, fileName);
+      const { path, error } = await compressAndUpload(uri, fileName, bucket);
       if (error || !path) console.error('Photo upload error:', error);
       setPhotos((prev) => prev.map((p) => (
         p.id === id
@@ -208,29 +167,8 @@ const PhotoPicker = forwardRef<PhotoPickerHandle, Props>(({ pathPrefix, bucket, 
 
   async function takePhoto() {
     if (MAX_PHOTOS - photos.length <= 0) return;
-
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      showAlert('Camera access needed', 'Allow camera access to take a photo, or choose one from your library instead.');
-      return;
-    }
-    // No allowsEditing — the camera's own retake/use-photo confirmation is
-    // enough; a forced crop step after every shot was extra friction.
-    //
-    // `cameraType` is what makes this work in the browser, which is where the
-    // app is actually installed. expo-image-picker's web path renders a file
-    // input, and only `launchCameraAsync` sets `capture` on it — `back` maps to
-    // capture="environment", so a phone browser opens the rear camera instead
-    // of a file browser. Without it you get the gallery, which is the bug this
-    // replaced.
-    const result = await ImagePicker.launchCameraAsync({
-      cameraType: ImagePicker.CameraType.back,
-      quality: 1,
-      exif: false,
-    });
-    if (!result.canceled) {
-      addPhoto(result.assets[0].uri);
-    }
+    const uri = await captureOne();
+    if (uri) addPhoto(uri);
   }
 
   function removePhoto(id: string) {

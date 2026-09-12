@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, IconSize, Typography } from '../constants/theme';
 import { MainTabParamList, RootStackParamList } from '../types';
-import CaptureScreen from '../screens/CaptureScreen';
 import SnagListScreen from '../screens/SnagListScreen';
 import WeekendScreen from '../screens/WeekendScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -18,7 +17,6 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
   // [inactive, active] — filled is reserved for the active tab.
-  Capture: ['camera-outline', 'camera'],
   Snags: ['list-outline', 'list'],
   Weekend: ['hammer-outline', 'hammer'],
   Profile: ['person-circle-outline', 'person-circle'],
@@ -27,10 +25,11 @@ const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap,
 function MainTabs() {
   return (
     <Tab.Navigator
-      // Capture, not the list. Logging something is the thing done most often
-      // and the thing most sensitive to friction; reading the list is a
-      // deliberate act someone taps through to.
-      initialRouteName="Capture"
+      // The list. Adding something is a bar at the foot of it rather than a
+      // tab of its own, so there is nowhere else to open — and opening here is
+      // how one person finds out what the other added, which with no
+      // notifications anywhere in this product is the only way there is.
+      initialRouteName="Snags"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: Colors.primary,
@@ -55,7 +54,6 @@ function MainTabs() {
         },
       })}
     >
-      <Tab.Screen name="Capture" component={CaptureScreen} options={{ tabBarLabel: 'Add' }} />
       <Tab.Screen name="Snags" component={SnagListScreen} options={{ tabBarLabel: 'List' }} />
       <Tab.Screen name="Weekend" component={WeekendScreen} options={{ tabBarLabel: 'Weekend' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'You' }} />
@@ -67,7 +65,13 @@ export default function RootNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Main" component={MainTabs} />
-      <Stack.Screen name="SnagDetail" component={SnagDetailScreen} />
+      {/* A sheet, not a push. Triage is a dozen small decisions in a row, and
+          a modal presentation keeps the list underneath between them. */}
+      <Stack.Screen
+        name="SnagDetail"
+        component={SnagDetailScreen}
+        options={{ presentation: 'modal' }}
+      />
       <Stack.Screen name="Household" component={HouseholdScreen} />
       <Stack.Screen name="LocationTags" component={LocationTagsScreen} />
     </Stack.Navigator>

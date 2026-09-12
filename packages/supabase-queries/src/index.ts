@@ -504,6 +504,25 @@ export async function addComment(
   if (error) throw asError(error, "That didn’t save");
 }
 
+/**
+ * Stamps "you have looked at the list", and returns when you last did.
+ *
+ * The previous value is what the list renders "new since" against, and it is
+ * returned rather than read separately so the two can't race. Null the first
+ * time, deliberately: the alternative greets a new member with their whole
+ * household's backlog marked unread.
+ */
+export async function markListSeen(client: SupabaseClient): Promise<string | null> {
+  const { data, error } = await client.rpc('mark_list_seen');
+  // Never fatal. A list that can't work out what's new is still a list, so this
+  // reports nothing rather than taking the screen down with it.
+  if (error) {
+    console.error('Failed to mark the list seen:', error);
+    return null;
+  }
+  return (data as string | null) ?? null;
+}
+
 // ---------------------------------------------------------------- locations
 
 /**

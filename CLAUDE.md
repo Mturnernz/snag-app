@@ -41,7 +41,7 @@ snag/
 │   │       ├── constants/theme.ts # ALL design tokens
 │   │       ├── lib/supabase.ts    # client (schema: home), auth, photo upload
 │   │       ├── hooks/useHousehold.tsx
-│   │       ├── screens/           # Capture, SnagList, Weekend, SnagDetail, Household, LocationTags,
+│   │       ├── screens/           # SnagList (home), Weekend, SnagDetail, Household, LocationTags,
 │       │                       #   Profile, Auth, Setup
 │   │       └── components/
 │   └── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
@@ -122,42 +122,67 @@ owner and the caller's EXECUTE is never consulted.
 
 This is the load-bearing product decision and the easiest one to erode.
 
-**Capture** (`CaptureScreen`) is a photo, a location tag, high-or-low, and one optional line.
-Three taps and no keyboard in the common case. It is used standing in the bathroom holding a
-broken toilet seat, with about ten seconds of patience.
+**Capture** is the bar at the foot of the list (`ComposeBar`): a photo, or a line of text, or
+both. One tap to the camera, or four seconds of typing. It is used standing in the bathroom
+holding a broken toilet seat, with about ten seconds of patience.
 
-Three things about it are load-bearing:
+**There is no Add tab, and adding one back would undo the whole arrangement.** Capture was a
+destination once, and the cost was that the app opened on a form rather than on what the other
+person had added. The camera is bottom-left because that is the easiest place on a phone to
+reach one-handed; the old Add screen had it at the top, which is the hardest.
+
+Four things about capture are load-bearing:
 
 - **There is no title column.** A photo says what a title would, and requiring one put a keyboard
   between someone and the problem in front of them. A snag needs a photo *or* a description
   (`snags_has_something`), and `create_snag` refuses the empty case in words rather than letting
   the constraint name surface. `snagHeadline` supplies what the list shows for a photo-only snag.
-- **Locations are a seeded pick-list** (`home.locations`, twelve rows written by
-  `seed_locations` per property), not free text. A suggestion list derived from past use is empty
-  on the one day that matters — the day the app is installed. `snags.room` stays TEXT rather than
-  a foreign key, so the list query needs no join and renaming a location later doesn't rewrite the
-  history of snags filed under the old name.
-- **The tag row is last, and quiet.** It sits *below* the description and stays unfilled until one
-  is picked, because a tag is optional — a snag with none lands in the list and groups under
-  "Everywhere else". Twelve solid buttons above the fold read as a required field and put a
-  decision in front of someone who had already taken the photo they came to take. The pill carries
-  a hairline outline, because borderless text said nothing about being pressable; **the outline
-  goes on the pill, never on the touch target**, which stays `MIN_TOUCH_TARGET` and invisible
-  around it. Twelve 48px outlined boxes is the same "required field" reading in a different
-  costume. `CaptureScreen.test.tsx` pins the ordering, the unfilled pill and that separation.
-- **The place is a picker, shown only when there is a choice.** See "Properties" below.
-- **Priority is set at capture**, and is the one deliberate exception to the split below. It is
-  the single judgement only the person standing there can make. Two values; a third would need
-  thinking about.
+- **A line of text is a complete snag.** "Gutters" typed into the bar is a perfectly good entry,
+  and making that the same gesture as sending a message is the point of the bar existing.
+- **Nothing is asked before it is filed.** Room and urgency are offered *afterwards*, as the
+  amend row above the bar, editing a snag that already exists. Nothing there can block anyone, and
+  walking away without touching it leaves a perfectly good snag.
+- **Priority is not a capture decision any more.** It used to be, defended as the one judgement
+  only the person standing there can make — but nearly everything was filed Low, which is the
+  premise of the product, and urgency is *comparative*. It belongs where a dozen things are
+  visible at once. `create_snag` still takes it; the list's amend row and the detail sheet set it.
 
-**Triage** (`SnagDetailScreen`) is everything else — effort, needs-parts, due date, repeat,
-assignee, and changing priority afterwards — done later, sitting down, from the list. Each
-control writes immediately rather than collecting into a form with a Save button, because triage
-is a series of small independent decisions and a Save button turns sorting twelve items into
-forty taps.
+**Triage** (`SnagDetailScreen`, presented as a modal over the list) is everything else — effort,
+needs-parts, due date, repeat, assignee, priority. Each control writes immediately rather than
+collecting into a form with a Save button, because triage is a series of small independent
+decisions and a Save button turns sorting twelve items into forty taps. It is a **sheet rather
+than a push** for the same reason: the list stays underneath, so closing one and opening the next
+is not a round trip.
 
-**Do not add a fifth thing to the capture form.** Everything there is friction at the exact
-moment friction costs most. The place for it is triage.
+**Do not add a field to the compose bar.** Everything there is friction at the exact moment
+friction costs most. The place for it is the amend row, or triage.
+
+## The list is the app's home
+
+`SnagListScreen` is `initialRouteName`, and three tabs — List, Weekend, You — are all there are.
+
+**This product has no notifications and deliberately never will** (two people in one house do not
+need an email per snag; see `notify-snag` in the archive). So this screen is the only channel by
+which one person finds out what the other did, and the first thing it says is what arrived since
+they last looked.
+
+- **"New" is what somebody *else* added since your last visit.** Your own entries are never news
+  to you. The stamp is `profiles.last_seen_list_at`, written by `home.mark_list_seen`, which
+  returns the *previous* value so the section can't empty itself out while it's being read. It is
+  stamped **once per mount**, not on every focus — doing it on focus would clear the rule the
+  moment someone opened a snag and came back, which is the one journey that starts from reading
+  it. Null on a first run, deliberately: the alternative greets a new member with the household's
+  entire backlog marked unread.
+- **The rest groups by room**, in `locations` order — which is how work gets batched, and which
+  is why there is no room filter: you can see there are three things in the Garage without asking.
+- **Done leaves.** One line at the foot, not a lens. Finishing something should make the list
+  shorter; that is the whole reward on offer. Only the last seven days are rendered.
+- **Both filter rails became one button.** Filtering is occasional and was charging 96px of
+  vertical rent on every visit to a screen people now open constantly.
+
+`SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering and the done
+window. `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, and the
+keyboard lift.
 
 ## Why the app exists at all
 
@@ -170,7 +195,7 @@ hardware store you're making anyway. Two kinds, same kind:
 - **Threshold-forgotten** — the toilet seat. Never urgent enough alone, worth doing when three of
   them can be done together. Handled by the weekend view.
 
-`WeekendScreen` is the part a filtered list can't do. It's bounded by **time available** rather
+`WeekendScreen` is the one view a filtered list genuinely can't be, which is why it kept a tab. It's bounded by **time available** rather
 than importance, groups by **room** because that's how work is batched (you do the garage once),
 and pulls **needs-parts** out to the top as a shopping list — the trip to the shop is the single
 most common reason a small job stays undone for weeks.
@@ -220,10 +245,10 @@ the only permission here is which places someone is on.
 
 ## Locations are seeded, not administered and not derived
 
-`home.locations` holds the tags offered at capture, seeded **per property** by `seed_locations`:
-Kitchen, Bathroom, Bedroom, Living room, Laundry, Hallway, Garage, Outside, Deck, Roof, Under the
-house, Elsewhere. `getLocations(propertyId)` reads them in seeded order and feeds both the capture
-chips and the list filter.
+`home.locations` holds the room tags, seeded **per property** by `seed_locations`: Kitchen,
+Bathroom, Bedroom, Living room, Laundry, Hallway, Garage, Outside, Deck, Roof, Under the house,
+Elsewhere. `getLocations(propertyId)` reads them in seeded order, and that order is what the list
+groups by as well as what the amend row offers — so it is an interface, not just a seed.
 
 Nobody sets this up, and nobody has to earn it by logging something first. `Elsewhere` is the
 escape hatch that keeps a fixed list from being a dead end.
@@ -238,8 +263,9 @@ per property, through `home.create_location` / `home.delete_location`. Three thi
   afterwards and the list still filters on it. Removal only changes what capture offers next time,
   and the confirmation says so — two buttons, because `showAlert` on the web build is a
   `window.confirm`.
-- **The capture chips come from `useHousehold`**, so a change here has to be pushed back with
-  `reloadLocations()` — and only when the edited property is the one capture is pointed at.
+- **The list's room grouping and amend chips come from `useHousehold`**, so a change here has to
+  be pushed back with `reloadLocations()` — and only when the edited property is the one the list
+  is showing.
 
 There is deliberately no rename: renaming would leave every snag filed under the old name saying
 the old name, which is the one outcome the TEXT column was chosen to avoid quietly happening.
@@ -309,9 +335,9 @@ Three badges carry the triage vocabulary, and their colour budget is deliberate:
 
 ### One chip, every rail
 
-Filter chips on `SnagListScreen`, the effort selector on `WeekendScreen` and the priority pair on
-`CaptureScreen` all say the same thing the same way: **a sunken well when off, solid fern when on,
-no border either way.** Two rules follow from that:
+The amend chips and the "Show me" sheet on `SnagListScreen`, and the effort selector on
+`WeekendScreen`, all say the same thing the same way: **a sunken well when off, solid fern when
+on, no border either way.** Two rules follow from that:
 
 - **Never put an inactive control on `surface` with a border.** On a plaster ground a white
   bordered box is a *card*, so a row of filters styled that way reads as a row of things to read
@@ -320,14 +346,13 @@ no border either way.** Two rules follow from that:
   capture tag chip, an avatar). Using it for one rail and solid fern for another made two controls
   doing the same job look like two different controls.
 
-Priority is the one exception, and only halfway: **High** fills with clay because it is the
-screen's single alert, and **Low** takes the sunken treatment like everything else. Filling Low
-with the ink made the quieter of two choices the heavier-looking one.
+Priority is the one exception: **Urgent** fills with clay, because it is the only alert in the
+capture path. Nothing else in a chip row gets a hue.
 
 **A chip's tap area and its visible pill are different sizes on purpose.** The pill is ~34px,
 because a rail of 48px lozenges outweighs the list it filters; the `Pressable` around it carries
 `MIN_TOUCH_TARGET`. Both rails were under 48 before this — 34px and 26px — which is invisible
-until someone is holding the phone one-handed. `Button.test.tsx` and `CaptureScreen.test.tsx` pin
+until someone is holding the phone one-handed. `Button.test.tsx` and `ComposeBar.test.tsx` pin
 the states.
 
 **A disabled filled button goes neutral, not faded.** Dimming a filled button dims its hue too:
@@ -429,11 +454,11 @@ look at something. `apps/mobile/src/navigation/linking.ts`, wired into `Navigati
 native uses the `snag://` scheme from `app.json`.
 
 `/` is deliberately unmapped: an unmatched URL leaves the tab navigator on its `initialRouteName`,
-which is what lands someone on Capture.
+which is what lands someone on the list.
 
 ### Which tab you land on, on the web build
 
-`initialRouteName` is `Capture`, but a *matched* path beats it — and on web React Navigation
+`initialRouteName` is `Snags`, but a *matched* path beats it — and on web React Navigation
 writes the URL back on every navigation and re-reads it when `NavigationContainer` mounts. Sign
 Out lives on the Profile tab, so the address bar always read `/you` when the session ended, and
 signing back in landed everyone on Profile for no reason anything on the page could explain.

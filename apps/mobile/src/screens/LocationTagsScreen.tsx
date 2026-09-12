@@ -69,9 +69,10 @@ export default function LocationTagsScreen() {
     load();
   }, [load]);
 
-  // The capture chips read from the context, so anything changed here has to be
-  // pushed back into it — but only when it's the place capture is showing.
-  async function syncCaptureChips() {
+  // The list's amend-row chips read from the context, and so does the room
+  // grouping, so anything changed here has to be pushed back into it — but only
+  // when it's the place the list is showing.
+  async function syncListChips() {
     if (propertyId === activeProperty?.id) await reloadLocations();
   }
 
@@ -83,7 +84,7 @@ export default function LocationTagsScreen() {
       await createLocation(propertyId, next);
       setName('');
       await load();
-      await syncCaptureChips();
+      await syncListChips();
       showToast(`${next} added`);
     } catch (err: any) {
       showAlert("Couldn't add that tag", err?.message ?? 'Please try again.');
@@ -108,7 +109,7 @@ export default function LocationTagsScreen() {
     try {
       await deleteLocation(tag.id);
       await load();
-      await syncCaptureChips();
+      await syncListChips();
       showToast(`${tag.name} removed`);
     } catch (err: any) {
       showAlert("Couldn't remove that tag", err?.message ?? 'Please try again.');

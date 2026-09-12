@@ -13,7 +13,8 @@ import { APP_URL } from '../lib/appUrl';
  * screen rather than the default tab.
  *
  * `/` is deliberately unmapped. An unmatched URL leaves the tab navigator on
- * its `initialRouteName`, which is what carries someone to Capture on arrival.
+ * its `initialRouteName`, which is the list — the screen the app opens on now
+ * that capture is a bar at the foot of it rather than a tab.
  */
 export const linking: LinkingOptions<RootStackParamList> = {
   prefixes: [
@@ -25,7 +26,6 @@ export const linking: LinkingOptions<RootStackParamList> = {
     screens: {
       Main: {
         screens: {
-          Capture: 'add',
           Snags: 'snags',
           Weekend: 'weekend',
           Profile: 'you',

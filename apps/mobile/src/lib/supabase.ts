@@ -246,6 +246,8 @@ export const getComments = (snagId: string) => queries.getComments(supabase, sna
 export const addComment = (snagId: string, body: string) =>
   queries.addComment(supabase, snagId, body);
 
+export const markListSeen = () => queries.markListSeen(supabase);
+
 export const getLocations = (propertyId: string) => queries.getLocations(supabase, propertyId);
 
 export const createLocation = (propertyId: string, name: string) =>

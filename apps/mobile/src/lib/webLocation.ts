@@ -7,10 +7,11 @@ import { Platform } from 'react-native';
  * navigation and re-reads it from `window.location` when `NavigationContainer`
  * mounts. A *matched* path beats `initialRouteName`, and `src/navigation/
  * linking.ts` deliberately leaves `/` unmapped so an unmatched URL falls
- * through to it — that fall-through is what carries `initialTab`.
+ * through to it — that fall-through is what carries `initialRouteName`, which
+ * is the list.
  *
  * Signing out breaks the arrangement. Sign Out lives on the Profile tab, so the
- * address bar always reads `/profile` at the moment the session ends; App.tsx
+ * address bar always reads `/you` at the moment the session ends; App.tsx
  * then unmounts the navigator and shows AuthScreen without touching the URL.
  * Signing back in remounts the container, which parses the leftover `/profile`
  * and lands there — the user never asked to go to Profile, they asked to log in.

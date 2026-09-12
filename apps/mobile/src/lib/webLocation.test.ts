@@ -3,7 +3,7 @@ import { isPreservedUrl, resetWebPathIfStale } from './webLocation';
 
 // Signing out from the Profile tab leaves `/you` in the address bar, and React
 // Navigation reads it back on the next mount — so signing in landed the user on
-// Profile instead of the Capture tab. What matters here is that the reset
+// Profile instead of the list. What matters here is that the reset
 // happens, and that a snag deep link still survives it.
 
 jest.mock('react-native', () => ({ Platform: { OS: 'web' } }));

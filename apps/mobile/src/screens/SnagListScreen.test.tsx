@@ -46,7 +46,7 @@ const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
 const snag = (over: Partial<any>): any => ({
   id: 'x', reference: 'S-1', householdId: 'h', propertyId: 'p',
   room: null, photoPaths: [], description: 'A thing', priority: null,
-  status: 'open', effort: null, needsParts: false, dueAt: null, repeatDays: null,
+  status: 'open', parts: [], needsParts: false, dueAt: null, repeatDays: null,
   assigneeId: null, reporterId: ME, createdAt: ago(10), updatedAt: ago(10),
   lastDoneAt: null, doneAt: null, propertyName: 'Home', reporterName: 'Me',
   assigneeName: null, commentCount: 0,

@@ -12,7 +12,6 @@
 
 export type SnagStatus = 'open' | 'doing' | 'done';
 export type SnagPriority = 'high' | 'low';
-export type SnagEffort = 'quick' | 'half_day' | 'big_job';
 
 /**
  * Unused by the UI in v1 — both members are owners and nothing gates on this.
@@ -41,21 +40,10 @@ export const PRIORITY_LABELS: Record<SnagPriority, string> = {
  * Deliberately phrased as time, not size: the question these answer is "can I
  * finish this today", which is what the weekend view is filtering on.
  */
-export const EFFORT_LABELS: Record<SnagEffort, string> = {
-  quick: 'Under an hour',
-  half_day: 'Half a day',
-  big_job: 'Big job',
-};
 
-export const EFFORT_SHORT_LABELS: Record<SnagEffort, string> = {
-  quick: 'Quick',
-  half_day: 'Half day',
-  big_job: 'Big job',
-};
 
 export const STATUS_ORDER: SnagStatus[] = ['open', 'doing', 'done'];
 export const PRIORITY_ORDER: SnagPriority[] = ['high', 'low'];
-export const EFFORT_ORDER: SnagEffort[] = ['quick', 'half_day', 'big_job'];
 
 /**
  * Offered when someone sets a repeat. Free-form days are still accepted by the
@@ -141,7 +129,14 @@ export interface Snag {
 
   /** Triage — added later, from the list. */
   status: SnagStatus;
-  effort: SnagEffort | null;
+  /**
+   * What it needs from the shop, in the words you'd read in the aisle.
+   *
+   * Was a yes/no. A tick told you a trip was needed and not what for, which is
+   * the half of the problem that actually blocks a small job for weeks.
+   */
+  parts: string[];
+  /** Derived from `parts` server-side, so the two can never disagree. */
   needsParts: boolean;
   dueAt: string | null;
   repeatDays: number | null;
@@ -181,8 +176,6 @@ export interface SnagFilter {
   priority?: SnagPriority[];
   /** Only items with a due date at or before now. */
   dueOnly?: boolean;
-  /** Ceiling for the weekend view: everything at or under this effort. */
-  maxEffort?: SnagEffort;
   needsParts?: boolean;
 }
 
@@ -208,6 +201,5 @@ export type MainTabParamList = {
    * this product, it is the only channel there is.
    */
   Snags: undefined;
-  Weekend: undefined;
   Profile: undefined;
 };

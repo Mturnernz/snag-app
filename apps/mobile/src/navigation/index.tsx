@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, IconSize, Typography } from '../constants/theme';
 import { MainTabParamList, RootStackParamList } from '../types';
 import SnagListScreen from '../screens/SnagListScreen';
-import WeekendScreen from '../screens/WeekendScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SnagDetailScreen from '../screens/SnagDetailScreen';
 import HouseholdScreen from '../screens/HouseholdScreen';
@@ -18,7 +17,6 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
   // [inactive, active] — filled is reserved for the active tab.
   Snags: ['list-outline', 'list'],
-  Weekend: ['hammer-outline', 'hammer'],
   Profile: ['person-circle-outline', 'person-circle'],
 };
 
@@ -55,7 +53,6 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Snags" component={SnagListScreen} options={{ tabBarLabel: 'List' }} />
-      <Tab.Screen name="Weekend" component={WeekendScreen} options={{ tabBarLabel: 'Weekend' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'You' }} />
     </Tab.Navigator>
   );

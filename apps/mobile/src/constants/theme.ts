@@ -71,9 +71,10 @@ export const Colors = {
     doneBg: '#F4EFE7',
   },
 
-  // Effort — deliberately colourless. Effort answers "can I finish this today",
-  // which is not an alarm, so it must never compete with priority or due state
-  // for attention on the same card.
+  // The shopping pill — deliberately colourless. What a job needs from the shop
+  // is a fact about the trip, not an alarm, so it must never compete with
+  // priority or due state for attention on the same card. (Named `effort` from
+  // when it carried the effort badge; the neutral pill outlived the concept.)
   effort: {
     fg: '#5C554C',
     bg: '#F4EFE7',

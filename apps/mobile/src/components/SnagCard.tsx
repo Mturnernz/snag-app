@@ -3,7 +3,6 @@ import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 import Icon from './Icon';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
-import EffortBadge from './EffortBadge';
 import DueBadge from './DueBadge';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Snag } from '../types';
@@ -68,7 +67,14 @@ export default function SnagCard({ snag, photoUrl, onPress }: Props) {
           <StatusBadge status={snag.status} />
           <PriorityBadge priority={snag.priority} />
           <DueBadge snag={snag} />
-          <EffortBadge effort={snag.effort} needsParts={snag.needsParts} />
+          {snag.parts.length > 0 ? (
+            <View style={styles.parts}>
+              <Icon name="cart-outline" size="sm" color={Colors.effort.fg} />
+              <Text style={styles.partsLabel}>
+                {snag.parts.length === 1 ? snag.parts[0] : `${snag.parts.length} things to get`}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {snag.assigneeName || snag.commentCount > 0 ? (
@@ -126,6 +132,23 @@ const styles = StyleSheet.create({
   roomRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   room: { fontSize: Typography.sm, color: Colors.textMuted },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginTop: Spacing.xs / 2 },
+  // Named rather than counted when there is only one: "Hinge" tells you what
+  // the trip is for, which "Parts" never did.
+  parts: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs / 2,
+    borderRadius: Radius.chip,
+    backgroundColor: Colors.effort.bg,
+    alignSelf: 'flex-start',
+  },
+  partsLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.medium,
+    color: Colors.effort.fg,
+  },
   footer: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.xs / 2 },
   footerItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   footerText: { fontSize: Typography.sm, color: Colors.textMuted },

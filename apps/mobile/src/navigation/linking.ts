@@ -27,7 +27,6 @@ export const linking: LinkingOptions<RootStackParamList> = {
       Main: {
         screens: {
           Snags: 'snags',
-          Weekend: 'weekend',
           Profile: 'you',
         },
       },

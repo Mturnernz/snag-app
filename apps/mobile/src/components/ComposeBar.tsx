@@ -54,6 +54,7 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) 
   const [busy, setBusy] = useState(false);
 
   const canSend = draft.trim().length > 0 && !busy;
+  const off = busy || !pathPrefix;
 
   async function handleText() {
     const text = draft.trim();
@@ -109,15 +110,15 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) 
     >
       <Pressable
         onPress={handlePhoto}
-        disabled={busy || !pathPrefix}
-        style={[styles.camera, (busy || !pathPrefix) && styles.cameraOff]}
+        disabled={off}
+        style={[styles.camera, off && styles.cameraOff]}
         accessibilityRole="button"
         accessibilityLabel="Take a photo"
       >
         {busy ? (
           <ActivityIndicator color={Colors.white} />
         ) : (
-          <Icon name="camera" size="md" color={Colors.white} />
+          <Icon name="camera" size="md" color={off ? Colors.textMuted : Colors.white} />
         )}
       </Pressable>
 
@@ -143,7 +144,7 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked }: Props) 
           accessibilityRole="button"
           accessibilityLabel={note ? 'Save what it is' : 'Add to the list'}
         >
-          <Icon name="arrow-up" size="md" color={Colors.white} />
+          <Icon name="arrow-up" size="md" color={canSend ? Colors.white : Colors.textMuted} />
         </Pressable>
       ) : null}
     </View>
@@ -178,7 +179,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cameraOff: { backgroundColor: Colors.textMuted },
+  cameraOff: { backgroundColor: Colors.sunken },
   field: {
     flex: 1,
     minHeight: MIN_TOUCH_TARGET,
@@ -196,7 +197,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendOff: { backgroundColor: Colors.textMuted },
+  sendOff: { backgroundColor: Colors.sunken },
   amend: {
     backgroundColor: Colors.surface,
     borderTopWidth: 1,

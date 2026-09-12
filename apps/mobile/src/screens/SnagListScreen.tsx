@@ -10,7 +10,7 @@ import SnagCard from '../components/SnagCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import ComposeBar, { AmendLabel, AmendRow } from '../components/ComposeBar';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
@@ -159,6 +159,19 @@ export default function SnagListScreen() {
     return visible.filter((s) => s.reporterId !== profile.id && s.createdAt > seenBefore);
   }, [visible, seenBefore, profile.id]);
 
+  /**
+   * The one trip that clears several jobs.
+   *
+   * This was the Weekend tab's best idea and the only thing lost when it went:
+   * the reason a small job sits for a fortnight is usually a trip to the shop
+   * nobody has made. It survives as the header of the "Needs parts" lens —
+   * everything the visible jobs are waiting on, collected, with what it is for.
+   */
+  const shoppingList = useMemo(() => {
+    if (lens !== 'parts') return [];
+    return visible.flatMap((s) => s.parts.map((item) => ({ item, snag: s })));
+  }, [lens, visible]);
+
   const recentlyDone = useMemo(() => {
     const cutoff = Date.now() - DONE_WINDOW_DAYS * 86_400_000;
     return done.filter((s) => new Date(s.doneAt ?? s.updatedAt).getTime() >= cutoff);
@@ -289,6 +302,25 @@ export default function SnagListScreen() {
 
       <SectionList
         sections={sections}
+        ListHeaderComponent={
+          shoppingList.length > 0 ? (
+            <View style={styles.shopping}>
+              <View style={styles.shoppingHead}>
+                <Icon name="cart-outline" size="md" color={Colors.primary} />
+                <Text style={styles.shoppingTitle}>Pick up on the way</Text>
+              </View>
+              <Text style={styles.shoppingHint}>
+                One trip clears {visible.length} {visible.length === 1 ? 'job' : 'jobs'}.
+              </Text>
+              {shoppingList.map(({ item, snag }, index) => (
+                <View key={`${snag.id}-${index}`} style={styles.shoppingRow}>
+                  <Text style={styles.shoppingItem}>{item}</Text>
+                  <Text style={styles.shoppingFor}>{snag.room ?? '—'}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null
+        }
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.listContent, sections.length === 0 && styles.listEmpty]}
         stickySectionHeadersEnabled={false}
@@ -523,6 +555,30 @@ const styles = StyleSheet.create({
   },
   groupNew: { color: Colors.primary },
   groupRule: { flex: 1, height: 1, backgroundColor: Colors.border },
+  // The only elevated surface on the screen, and only under one lens. It should
+  // feel like the thing you opened the app for on the way out the door.
+  shopping: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.card,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+    gap: Spacing.xs,
+    ...Shadow.md,
+  },
+  shoppingHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  shoppingTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
+  shoppingHint: { fontSize: Typography.sm, color: Colors.textMuted, marginBottom: Spacing.xs },
+  shoppingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  shoppingItem: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
+  shoppingFor: { fontSize: Typography.sm, color: Colors.textMuted },
   doneLine: { paddingVertical: Spacing.lg, alignItems: 'center' },
   doneText: { fontSize: Typography.sm, color: Colors.textMuted },
   amendHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

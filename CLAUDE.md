@@ -41,7 +41,7 @@ snag/
 │   │       ├── constants/theme.ts # ALL design tokens
 │   │       ├── lib/supabase.ts    # client (schema: home), auth, photo upload
 │   │       ├── hooks/useHousehold.tsx
-│   │       ├── screens/           # SnagList (home), Weekend, SnagDetail, Household, LocationTags,
+│   │       ├── screens/           # SnagList (home), SnagDetail, Household, LocationTags,
 │       │                       #   Profile, Auth, Setup
 │   │       └── components/
 │   └── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
@@ -161,19 +161,34 @@ Four things about capture are load-bearing:
   premise of the product, and urgency is *comparative*. It belongs where a dozen things are
   visible at once. `create_snag` still takes it; the list's amend row and the detail sheet set it.
 
-**Triage** (`SnagDetailScreen`, presented as a modal over the list) is everything else — effort,
-needs-parts, due date, repeat, assignee, priority. Each control writes immediately rather than
-collecting into a form with a Save button, because triage is a series of small independent
+**Triage** (`SnagDetailScreen`, presented as a modal over the list) is everything else — what it
+needs from the shop, due date, repeat, assignee, priority. Each control writes immediately rather
+than collecting into a form with a Save button, because triage is a series of small independent
 decisions and a Save button turns sorting twelve items into forty taps. It is a **sheet rather
-than a push** for the same reason: the list stays underneath, so closing one and opening the next
-is not a round trip.
+than a push** for the same reason — though note react-native-web renders a modal presentation as
+a full screen, so that particular benefit is native-only.
+
+**Nobody moves a job to "doing" by hand.** There was a *Start it* button and it went unpressed:
+people commented on things and assigned them to each other while the list went on claiming
+nothing had been touched. Doing something about a snag is the evidence it has started, so
+`home.update_snag` and `home.add_comment` move it — server-side, so no client can forget.
+
+The rule is narrower than "any update", deliberately. Only **assignee, due date, repeat and the
+parts list** start a job; room, description and priority don't. Those three are the tail of
+capture — the amend row sets them seconds after the photo — and marking a brand-new snag "doing"
+because somebody tagged it *Bathroom* would empty the status of meaning from the other end.
+Finishing is the one state change still made by hand, because only a person knows.
+
+**There is no "how long will it take".** Effort was the only question in the app whose answer
+nobody could check, asked before the job was understood, and it existed mainly to feed a screen
+that no longer exists. The column and the `snag_effort` enum are dropped, not deprecated.
 
 **Do not add a field to the compose bar.** Everything there is friction at the exact moment
 friction costs most. The place for it is the amend row, or triage.
 
 ## The list is the app's home
 
-`SnagListScreen` is `initialRouteName`, and three tabs — List, Weekend, You — are all there are.
+`SnagListScreen` is `initialRouteName`, and two tabs — List and You — are all there are.
 
 **This product has no notifications and deliberately never will** (two people in one house do not
 need an email per snag; see `notify-snag` in the archive). So this screen is the only channel by
@@ -193,6 +208,9 @@ they last looked.
   shorter; that is the whole reward on offer. Only the last seven days are rendered.
 - **Both filter rails became one button.** Filtering is occasional and was charging 96px of
   vertical rent on every visit to a screen people now open constantly.
+- **The shopping list rides the "Needs parts" lens.** One card above the cards, listing every item
+  the visible jobs are waiting on. It is the only elevated surface on the screen, and the only
+  thing the retired Weekend tab left behind.
 
 `SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering and the done
 window. `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, and the
@@ -209,10 +227,11 @@ hardware store you're making anyway. Two kinds, same kind:
 - **Threshold-forgotten** — the toilet seat. Never urgent enough alone, worth doing when three of
   them can be done together. Handled by the weekend view.
 
-`WeekendScreen` is the one view a filtered list genuinely can't be, which is why it kept a tab. It's bounded by **time available** rather
-than importance, groups by **room** because that's how work is batched (you do the garage once),
-and pulls **needs-parts** out to the top as a shopping list — the trip to the shop is the single
-most common reason a small job stays undone for weeks.
+Both are served by the list itself. It groups by **room**, because that's how work is batched —
+you do the garage once — and the **Needs parts** lens puts a combined shopping list above the
+cards: every item the visible jobs are waiting on, with the room each is for. The trip to the shop
+is the single most common reason a small job stays undone for weeks, so that collection is the one
+piece of the retired Weekend tab worth keeping, and it now lives where people already are.
 
 ## Recurring items have no scheduler
 
@@ -223,6 +242,12 @@ no second table, no cron, no notifications.
 Two consequences: `done_at` alone would lose the fact a repeating job was ever completed, which
 is why `last_done_at` exists; and callers must re-read the returned snag rather than assuming the
 status they asked for. `SnagDetailScreen` says what actually happened rather than "Done".
+
+Setting one up is a **yes/no first, then the cycle**: how often, then when the first one lands,
+then a plain sentence stating the arrangement. It used to be a row of presets with "One-off" among
+them, which made the common answer — no, it doesn't come round — look like a setting rather than
+the default it is. A repeat with no date on it would never surface, so choosing an interval sets
+one; an existing date is never clobbered.
 
 ## Properties: the house, and later the bach
 
@@ -342,15 +367,16 @@ Three badges carry the triage vocabulary, and their colour budget is deliberate:
 - **`StatusBadge`** — open (slate) / doing (brass) / done (neutral).
 - **`PriorityBadge`** — only `high` gets an alert colour; `low` is a neutral pill, so a second
   saturated hue can't collide with status on the same card.
-- **`EffortBadge`** — deliberately colourless. Effort answers "can I finish this today", which is
-  not an alarm.
+- **The parts pill** on a card — deliberately colourless. What a job needs from the shop is a fact
+  about a trip, not an alarm. One item is named ("L-brackets"), more are counted: the name is what
+  tells you what the trip is for, and a count never did.
 - **`DueBadge`** — overdue is the one thing on a household list that has earned red. It's a fact
   about a date, not a judgement about importance.
 
 ### One chip, every rail
 
-The amend chips and the "Show me" sheet on `SnagListScreen`, and the effort selector on
-`WeekendScreen`, all say the same thing the same way: **a sunken well when off, solid fern when
+The amend chips and the "Show me" sheet on `SnagListScreen`, and every control in *Sort it out* on
+`SnagDetailScreen`, all say the same thing the same way: **a sunken well when off, solid fern when
 on, no border either way.** Two rules follow from that:
 
 - **Never put an inactive control on `surface` with a border.** On a plaster ground a white

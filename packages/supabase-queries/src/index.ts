@@ -31,13 +31,12 @@ import type {
   Profile,
   Property,
   Snag,
-  SnagEffort,
   SnagFilter,
   SnagPriority,
   SnagSort,
   SnagStatus,
 } from '@snag/shared-types';
-import { EFFORT_ORDER, PRIORITY_ORDER } from '@snag/shared-types';
+import { PRIORITY_ORDER } from '@snag/shared-types';
 
 /** Supabase row shapes are snake_case `any`; this is the one place that's true. */
 type Row = Record<string, any>;
@@ -55,7 +54,7 @@ function mapSnag(row: Row): Snag {
     description: row.description ?? null,
     status: row.status,
     priority: row.priority ?? null,
-    effort: row.effort ?? null,
+    parts: row.parts ?? [],
     needsParts: !!row.needs_parts,
     dueAt: row.due_at ?? null,
     repeatDays: row.repeat_days ?? null,
@@ -329,13 +328,6 @@ export async function getSnags(
   if (filter.priority?.length) query = query.in('priority', filter.priority);
   if (filter.needsParts !== undefined) query = query.eq('needs_parts', filter.needsParts);
   if (filter.dueOnly) query = query.not('due_at', 'is', null).lte('due_at', new Date().toISOString());
-  if (filter.maxEffort) {
-    // "Everything I could finish in half a day" means quick *and* half_day, so
-    // this is a ceiling rather than an equality — and an item nobody has sized
-    // yet is included, because excluding it hides work behind a missing field.
-    const allowed = EFFORT_ORDER.slice(0, EFFORT_ORDER.indexOf(filter.maxEffort) + 1);
-    query = query.or(`effort.in.(${allowed.join(',')}),effort.is.null`);
-  }
 
   switch (sort) {
     case 'oldest':
@@ -408,8 +400,8 @@ export interface SnagUpdate {
   room?: string | null;
   description?: string | null;
   priority?: SnagPriority | null;
-  effort?: SnagEffort | null;
-  needsParts?: boolean;
+  /** Replaces the whole list. `needs_parts` follows from it, server-side. */
+  parts?: string[];
   dueAt?: string | null;
   repeatDays?: number | null;
   assigneeId?: string | null;
@@ -420,7 +412,6 @@ const CLEARABLE: Record<string, string> = {
   room: 'room',
   description: 'description',
   priority: 'priority',
-  effort: 'effort',
   dueAt: 'due_at',
   repeatDays: 'repeat_days',
   assigneeId: 'assignee_id',
@@ -446,12 +437,11 @@ export async function updateSnag(
     p_room: update.room ?? null,
     p_description: update.description ?? null,
     p_priority: update.priority ?? null,
-    p_effort: update.effort ?? null,
-    p_needs_parts: update.needsParts ?? null,
     p_due_at: update.dueAt ?? null,
     p_repeat_days: update.repeatDays ?? null,
     p_assignee_id: update.assigneeId ?? null,
     p_photo_paths: update.photoPaths ?? null,
+    p_parts: update.parts ?? null,
     p_clear: clear,
   });
 
@@ -585,51 +575,6 @@ export async function deleteLocation(client: SupabaseClient, locationId: string)
   if (error) throw asError(error, "Couldn't remove that tag");
 }
 
-// ---------------------------------------------------------------- weekend
-
-export interface WeekendPlan {
-  /** Everything that fits, grouped so one room's jobs get done together. */
-  byRoom: { room: string; snags: Snag[] }[];
-  /** Pulled to the top: one hardware-store trip clears all of these. */
-  shoppingList: Snag[];
-  total: number;
-}
-
-/**
- * The answer to "what can I get done today", which is a different question from
- * "what's outstanding" and the reason the plain list isn't enough.
- *
- * Grouping is by room because that's how the work is actually batched — you do
- * the garage once. The parts list is separate because the trip to the hardware
- * store is the thing that blocks a small job for weeks.
- */
-export function planWeekend(snags: Snag[]): WeekendPlan {
-  const open = snags.filter((s) => s.status !== 'done');
-
-  const rooms = new Map<string, Snag[]>();
-  for (const snag of open) {
-    const room = snag.room ?? 'Everywhere else';
-    if (!rooms.has(room)) rooms.set(room, []);
-    rooms.get(room)!.push(snag);
-  }
-
-  const priorityRank = (s: Snag) =>
-    s.priority ? PRIORITY_ORDER.indexOf(s.priority) : PRIORITY_ORDER.length;
-
-  const byRoom = [...rooms.entries()]
-    .map(([room, items]) => ({
-      room,
-      snags: items.sort((a, b) => priorityRank(a) - priorityRank(b)),
-    }))
-    // Most work first: a room with four jobs is the one worth starting in.
-    .sort((a, b) => b.snags.length - a.snags.length || a.room.localeCompare(b.room));
-
-  return {
-    byRoom,
-    shoppingList: open.filter((s) => s.needsParts).sort((a, b) => priorityRank(a) - priorityRank(b)),
-    total: open.length,
-  };
-}
 
 // ---------------------------------------------------------------- due dates
 

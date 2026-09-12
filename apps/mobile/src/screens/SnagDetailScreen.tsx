@@ -25,7 +25,7 @@ import { showAlert } from '../lib/alert';
 import { snagHeadline } from '@snag/supabase-queries';
 import {
   Comment, RootStackParamList, Snag,
-  EFFORT_ORDER, EFFORT_SHORT_LABELS, PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
+  PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -40,6 +40,31 @@ type Route = RouteProp<RootStackParamList, 'SnagDetail'>;
  * quick one", "this needs a part"), and making someone confirm each one turns
  * sorting a pile of twelve into forty taps.
  */
+const DAY_MS = 86_400_000;
+
+/** "month", "3 months" — for the sentence about when the first one lands. */
+function describeCycle(days: number): string {
+  if (days % 365 === 0) return days === 365 ? 'year' : `${days / 365} years`;
+  if (days % 30 === 0) return days === 30 ? 'month' : `${days / 30} months`;
+  if (days % 7 === 0) return days === 7 ? 'week' : `${days / 7} weeks`;
+  return `${days} days`;
+}
+
+/** Within a day either side — these are buttons, not a calendar. */
+function isDueIn(dueAt: string | null, days: number): boolean {
+  if (!dueAt) return false;
+  const wanted = Date.now() + days * DAY_MS;
+  return Math.abs(new Date(dueAt).getTime() - wanted) < DAY_MS / 2;
+}
+
+/** The whole arrangement, in one sentence, so nobody has to infer it. */
+function describeRepeat(snag: Snag): string {
+  if (!snag.repeatDays) return '';
+  const every = describeCycle(snag.repeatDays);
+  const when = snag.dueAt ? new Date(snag.dueAt).toLocaleDateString() : 'once you set a date';
+  return `Due ${when}, then every ${every} after it's marked done.`;
+}
+
 export default function SnagDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
@@ -55,6 +80,11 @@ export default function SnagDetailScreen() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState('');
+  const [partDraft, setPartDraft] = useState('');
+  // Whether the repeat walk-through is open. Seeded from the snag, but kept
+  // separately so answering "Yes" can reveal the cycle questions before any
+  // interval has been chosen — there is nothing to save at that point.
+  const [repeating, setRepeating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -65,6 +95,7 @@ export default function SnagDetailScreen() {
         getComments(params.snagId),
       ]);
       setSnag(next);
+      setRepeating((open) => open || next.repeatDays !== null);
       setComments(nextComments);
       setPhotoUrls(await getSnagPhotoUrls(next.photoPaths));
     } catch (err: any) {
@@ -89,6 +120,13 @@ export default function SnagDetailScreen() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function addPart() {
+    const item = partDraft.trim();
+    if (!snag || !item || busy) return;
+    setPartDraft('');
+    await patch({ parts: [...snag.parts, item] });
   }
 
   async function handleStatus(next: Snag['status']) {
@@ -204,17 +242,14 @@ export default function SnagDetailScreen() {
 
 
 
-        {/* ── Status ── */}
+        {/* ── Status ──
+            No "Start it". Nobody pressed it: people commented on things and
+            assigned them to each other while the list went on claiming nothing
+            had been touched. Doing something about a snag is the evidence that
+            it has been started, so the server moves it — see
+            20260912140000_work_starts_itself.sql. Finishing is the one state
+            change that still needs saying out loud. */}
         <View style={styles.statusRow}>
-          {snag.status !== 'doing' ? (
-            <Button
-              label="Start it"
-              variant="outline"
-              onPress={() => handleStatus('doing')}
-              disabled={busy}
-              style={styles.statusButton}
-            />
-          ) : null}
           {snag.status !== 'done' ? (
             <Button
               label="Mark done"
@@ -251,36 +286,56 @@ export default function SnagDetailScreen() {
             ))}
           </View>
 
-          <Text style={styles.fieldLabel}>How long will it take?</Text>
-          <View style={styles.optionRow}>
-            {EFFORT_ORDER.map((value) => (
-              <Option
-                key={value}
-                label={EFFORT_SHORT_LABELS[value]}
-                active={snag.effort === value}
-                onPress={() => patch({ effort: snag.effort === value ? null : value })}
-                disabled={busy}
-              />
-            ))}
-          </View>
-
-          <Pressable
-            onPress={() => patch({ needsParts: !snag.needsParts })}
-            disabled={busy}
-            style={styles.toggleRow}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: snag.needsParts }}
-          >
-            <Icon
-              name={snag.needsParts ? 'checkbox' : 'square-outline'}
-              size="md"
-              color={snag.needsParts ? Colors.primary : Colors.textMuted}
-            />
-            <View style={styles.toggleBody}>
-              <Text style={styles.toggleLabel}>Needs something from the shop</Text>
-              <Text style={styles.toggleHint}>Collected into one list on the Weekend tab</Text>
+          {/* A tick told you a trip was needed and not what for, which is the
+              half that actually blocks a small job for weeks. Optional: most
+              jobs need nothing, and an empty list is the resting state. */}
+          <Text style={styles.fieldLabel}>Anything to pick up?</Text>
+          {snag.parts.length > 0 ? (
+            <View style={styles.partsList}>
+              {snag.parts.map((item, index) => (
+                <View key={`${item}-${index}`} style={styles.partRow}>
+                  <Icon name="ellipse-outline" size="sm" color={Colors.textMuted} />
+                  <Text style={styles.partText}>{item}</Text>
+                  <Pressable
+                    onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
+                    disabled={busy}
+                    style={styles.partRemove}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${item}`}
+                  >
+                    <Icon name="close" size="sm" color={Colors.textMuted} />
+                  </Pressable>
+                </View>
+              ))}
             </View>
-          </Pressable>
+          ) : null}
+          <View style={styles.partAddRow}>
+            <TextInput
+              style={styles.partInput}
+              value={partDraft}
+              onChangeText={setPartDraft}
+              placeholder="Hinge, wall plugs, a filter…"
+              placeholderTextColor={Colors.textMuted}
+              maxLength={60}
+              returnKeyType="done"
+              onSubmitEditing={addPart}
+              blurOnSubmit={false}
+              accessibilityLabel="Something to pick up"
+            />
+            <Pressable
+              onPress={addPart}
+              disabled={busy || !partDraft.trim()}
+              style={[styles.partAdd, (busy || !partDraft.trim()) && styles.partAddOff]}
+              accessibilityRole="button"
+              accessibilityLabel="Add to the shopping list"
+            >
+              <Icon
+                name="add"
+                size="md"
+                color={busy || !partDraft.trim() ? Colors.textMuted : Colors.white}
+              />
+            </Pressable>
+          </View>
 
           <Text style={styles.fieldLabel}>Who's doing it?</Text>
           <View style={styles.optionRow}>
@@ -300,37 +355,78 @@ export default function SnagDetailScreen() {
           </View>
         </Card>
 
-        {/* ── Repeat ── */}
+        {/* ── Repeat ──
+            A yes/no first, then the cycle. The old version was a row of
+            presets where "One-off" was one of the options, so the common
+            answer — no, it doesn't — looked like a setting rather than the
+            default it is. */}
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Does it come round again?</Text>
           <Text style={styles.sectionHint}>
             Filters, gutters, smoke alarms. Marking a repeating job done schedules the next one
             instead of closing it.
           </Text>
+
           <View style={styles.optionRow}>
             <Option
-              label="One-off"
-              active={!snag.repeatDays}
-              onPress={() => patch({ repeatDays: null })}
+              label="No"
+              active={!repeating}
+              onPress={() => {
+                setRepeating(false);
+                if (snag.repeatDays) patch({ repeatDays: null });
+              }}
               disabled={busy}
             />
-            {REPEAT_PRESETS.map(({ days, label }) => (
-              <Option
-                key={days}
-                label={label}
-                active={snag.repeatDays === days}
-                onPress={() =>
-                  patch({
-                    repeatDays: days,
-                    // A repeat with no start date would never surface. Start
-                    // the clock now unless one is already set.
-                    dueAt: snag.dueAt ?? new Date(Date.now() + days * 86_400_000).toISOString(),
-                  })
-                }
-                disabled={busy}
-              />
-            ))}
+            <Option label="Yes" active={repeating} onPress={() => setRepeating(true)} disabled={busy} />
           </View>
+
+          {repeating ? (
+            <>
+              <Text style={styles.fieldLabel}>How often?</Text>
+              <View style={styles.optionRow}>
+                {REPEAT_PRESETS.map(({ days, label }) => (
+                  <Option
+                    key={days}
+                    label={label}
+                    active={snag.repeatDays === days}
+                    onPress={() =>
+                      patch({
+                        repeatDays: days,
+                        // A repeat with no date on it would never surface. Set
+                        // one on the first choice, and leave an existing one be.
+                        dueAt: snag.dueAt ?? new Date(Date.now() + days * DAY_MS).toISOString(),
+                      })
+                    }
+                    disabled={busy}
+                  />
+                ))}
+              </View>
+
+              {snag.repeatDays ? (
+                <>
+                  <Text style={styles.fieldLabel}>When's the first one due?</Text>
+                  <View style={styles.optionRow}>
+                    {[
+                      { label: 'Today', at: 0 },
+                      { label: 'In a week', at: 7 },
+                      { label: `A full ${describeCycle(snag.repeatDays)} away`, at: snag.repeatDays },
+                    ].map(({ label, at }) => (
+                      <Option
+                        key={label}
+                        label={label}
+                        active={isDueIn(snag.dueAt, at)}
+                        onPress={() => patch({ dueAt: new Date(Date.now() + at * DAY_MS).toISOString() })}
+                        disabled={busy}
+                      />
+                    ))}
+                  </View>
+                  <Text style={styles.sectionHint}>
+                    {describeRepeat(snag)}
+                  </Text>
+                </>
+              ) : null}
+            </>
+          ) : null}
         </Card>
 
         {/* ── Comments ── */}
@@ -367,7 +463,11 @@ export default function SnagDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="Add note"
             >
-              <Icon name="arrow-up" size="md" color={Colors.white} />
+              <Icon
+                name="arrow-up"
+                size="md"
+                color={!draft.trim() || busy ? Colors.textMuted : Colors.white}
+              />
             </Pressable>
           </View>
         </Card>
@@ -463,6 +563,37 @@ const styles = StyleSheet.create({
   optionActive: { backgroundColor: Colors.primary },
   optionLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
   optionLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
+  // The shopping list. Rows read like a list you'd scan in an aisle; the field
+  // below is how you add to it, and is the only text input on this screen
+  // besides a note.
+  partsList: { gap: Spacing.xs, marginTop: Spacing.xs },
+  partRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: 32 },
+  partText: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
+  partRemove: {
+    width: MIN_TOUCH_TARGET - Spacing.md,
+    height: MIN_TOUCH_TARGET - Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  partAddRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs },
+  partInput: {
+    flex: 1,
+    minHeight: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.input,
+    paddingHorizontal: Spacing.md,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  partAdd: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    borderRadius: Radius.input,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  partAddOff: { backgroundColor: Colors.sunken },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -512,5 +643,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  commentSendDisabled: { opacity: 0.4 },
+  // Neutral, not a faded fern — see the note on Button's disabled state. Half
+  // strength on this ground is a pale sage that reads as broken.
+  commentSendDisabled: { backgroundColor: Colors.sunken },
 });

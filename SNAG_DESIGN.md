@@ -183,10 +183,19 @@ keyboard between someone and the problem in front of them. A snag needs a photo 
 description; one with neither is nothing, and the server refuses it in words rather than through
 a constraint name.
 
-**Location is a tag, not a field.** Twelve chips, seeded per property, so they are full on the
-day a place exists — which is the day someone decides whether this is quicker than saying
-it out loud. A list derived from past use is empty exactly then. `Elsewhere` sits last and is the
-escape hatch that stops a fixed list being a dead end.
+**Location is a tag, not a field, and it sits last.** Twelve chips, seeded per property, so they
+are full on the day a place exists — which is the day someone decides whether this is quicker than
+saying it out loud. A list derived from past use is empty exactly then. `Elsewhere` sits last in
+the list and is the escape hatch that stops a fixed list being a dead end.
+
+The row is deliberately the quietest thing on the screen: *below* the description, under a muted
+"Where is it? Optional", borderless and unfilled until one is tapped, at `Typography.sm` rather
+than `base`. A tag is a suggestion — a snag without one is a perfectly good snag — and a row of
+twelve solid buttons above the fold said the opposite. The touch target stays at 48px; a
+transparent 48px row reads as air, not as a control. Picked reads as a `primaryLight` fill, dark
+text and a small checkmark, so selection isn't carried by colour alone.
+
+Adding a thirteenth is a sit-down job, so it lives in **You → Location tags**, not here.
 
 **Priority is here rather than in triage**, and it is the one exception to the capture/triage
 split. It's the single judgement only the person standing there can make: is this a today problem
@@ -233,6 +242,18 @@ priority, effort, needs-parts, assignee, repeat.
 **No Save button.** Every control writes on tap. Triage is a series of small independent decisions
 ("this is a quick one", "this needs a part"), and making someone confirm each one turns sorting a
 pile of twelve into forty taps.
+
+### You
+
+Your name, the household, the tag list, and Sign out. Four rows, and the only screen in the app
+that is administration.
+
+**Location tags** is here rather than at capture because it is a sit-down job and capture is not —
+the same line the capture/triage split draws. Rows of tags with a single close affordance each,
+one text field and an *Add* button; removal asks first, in two buttons, and says in words that
+everything already filed keeps its tag. The screen carries the property picker when there is more
+than one place, for the same reason capture does: the house's list and the bach's are different
+lists.
 
 ---
 

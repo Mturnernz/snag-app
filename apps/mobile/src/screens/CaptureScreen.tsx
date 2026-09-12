@@ -26,10 +26,11 @@ import { SnagPriority } from '../types';
  *   one put a keyboard between someone and the problem in front of them. The
  *   snag needs a photo *or* a description — one with neither is nothing, and
  *   the server says so in words rather than through a constraint name.
- * - **Location is a tag, not a field.** The chips are seeded per property, so
- *   they're full on the day a place exists. A list derived from past use is
- *   empty exactly then, which is the day someone decides whether this is
- *   quicker than saying it out loud.
+ * - **Location is a tag, not a field, and it sits last.** The chips are seeded
+ *   per property, so they're full on the day a place exists — a list derived
+ *   from past use is empty exactly then. They are also deliberately quiet and
+ *   below the description: a snag with no tag is a perfectly good snag, and
+ *   twelve solid buttons above the fold read as a required field.
  * - **The place is a picker, and only when there is one to make.** A bach is a
  *   property, not a tag: it has its own people and its own tags.
  * - **Priority is here, not in triage.** It is the one judgement only the
@@ -135,26 +136,6 @@ export default function CaptureScreen() {
           onPhotosChange={setPhotoCount}
         />
 
-        <Text style={styles.label}>Where is it?</Text>
-        <View style={styles.tags}>
-          {locations.map((location) => {
-            const active = room === location.name;
-            return (
-              <Pressable
-                key={location.id}
-                onPress={() => setRoom(active ? null : location.name)}
-                style={[styles.tag, active && styles.tagActive]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-              >
-                <Text style={[styles.tagLabel, active && styles.tagLabelActive]}>
-                  {location.name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
         <Text style={styles.label}>How urgent?</Text>
         <View style={styles.priorityRow}>
           <Pressable
@@ -199,6 +180,49 @@ export default function CaptureScreen() {
           maxLength={200}
           multiline
         />
+
+        {/*
+          Last, and quiet on purpose.
+
+          These are a suggestion, not a question to be answered. A snag with no
+          tag is a perfectly good snag — it lands in the list and the weekend
+          view groups it under "Everywhere else" — so a row of twelve solid
+          buttons above the description was overstating the case, and put a
+          decision in front of someone who had already taken the photo they
+          came to take.
+
+          So: below everything, small, borderless, and unfilled until one is
+          picked. The touch target is still MIN_TOUCH_TARGET tall — a
+          transparent 48px row reads as air rather than as a control, which is
+          the whole trick. The checkmark carries the selected state alongside
+          the tint, so it isn't colour alone.
+
+          Nothing here is a closed list: Profile → Location tags edits it.
+        */}
+        <View style={styles.tagBlock}>
+          <Text style={styles.tagHint}>
+            Where is it? <Text style={styles.optional}>Optional</Text>
+          </Text>
+          <View style={styles.tags}>
+            {locations.map((location) => {
+              const active = room === location.name;
+              return (
+                <Pressable
+                  key={location.id}
+                  onPress={() => setRoom(active ? null : location.name)}
+                  style={[styles.tag, active && styles.tagActive]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  {active ? <Icon name="checkmark" size="sm" color={Colors.primary} /> : null}
+                  <Text style={[styles.tagLabel, active && styles.tagLabelActive]}>
+                    {location.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
       </ScrollView>
 
       <View style={[styles.actionBar, { paddingBottom: insets.bottom + Spacing.md }]}>
@@ -256,18 +280,30 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   propertyLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.xs },
-  tag: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderRadius: Radius.button,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
+  tagBlock: {
+    marginTop: Spacing.xl,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
-  tagActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  tagLabel: { fontSize: Typography.base, color: Colors.textSecondary },
-  tagLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
+  tagHint: { fontSize: Typography.sm, color: Colors.textMuted },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.xs },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    // Full-height target, no visible box. 'transparent' is the absence of a
+    // colour rather than a colour, and it's held here only so selecting a tag
+    // can't shift the row.
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.chip,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  tagActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primaryLight },
+  tagLabel: { fontSize: Typography.sm, color: Colors.textMuted },
+  tagLabelActive: { color: Colors.textPrimary, fontWeight: Typography.semibold },
   priorityRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.xs },
   priority: {
     flex: 1,

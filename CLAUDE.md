@@ -41,7 +41,8 @@ snag/
 │   │       ├── constants/theme.ts # ALL design tokens
 │   │       ├── lib/supabase.ts    # client (schema: home), auth, photo upload
 │   │       ├── hooks/useHousehold.tsx
-│   │       ├── screens/           # Capture, SnagList, Weekend, SnagDetail, Household, Profile, Auth, Setup
+│   │       ├── screens/           # Capture, SnagList, Weekend, SnagDetail, Household, LocationTags,
+│       │                       #   Profile, Auth, Setup
 │   │       └── components/
 │   └── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
 ├── packages/
@@ -136,6 +137,12 @@ Three things about it are load-bearing:
   on the one day that matters — the day the app is installed. `snags.room` stays TEXT rather than
   a foreign key, so the list query needs no join and renaming a location later doesn't rewrite the
   history of snags filed under the old name.
+- **The tag row is last, and quiet.** It sits *below* the description, borderless and unfilled
+  until one is picked, because a tag is optional — a snag with none lands in the list and groups
+  under "Everywhere else". Twelve solid buttons above the fold read as a required field and put a
+  decision in front of someone who had already taken the photo they came to take. Keep the touch
+  target at `MIN_TOUCH_TARGET`; a transparent 48px row reads as air rather than as a control,
+  which is the whole trick. `CaptureScreen.test.tsx` pins the ordering and the unfilled state.
 - **The place is a picker, shown only when there is a choice.** See "Properties" below.
 - **Priority is set at capture**, and is the one deliberate exception to the split below. It is
   the single judgement only the person standing there can make. Two values; a third would need
@@ -216,10 +223,25 @@ Kitchen, Bathroom, Bedroom, Living room, Laundry, Hallway, Garage, Outside, Deck
 house, Elsewhere. `getLocations(propertyId)` reads them in seeded order and feeds both the capture
 chips and the list filter.
 
-Nobody sets this up, and nobody has to earn it by logging something first. There is no UI for
-adding a thirteenth — `Elsewhere` is the escape hatch, and a property that genuinely needs
-"Boatshed" gets one RPC and one row. That is the obvious next thing here, not a gap to work
-around.
+Nobody sets this up, and nobody has to earn it by logging something first. `Elsewhere` is the
+escape hatch that keeps a fixed list from being a dead end.
+
+Beyond the seeded twelve, **Profile → Location tags** (`LocationTagsScreen`) adds and removes them
+per property, through `home.create_location` / `home.delete_location`. Three things about it:
+
+- **It is per property, with the same picker capture has**, rendered only when there is more than
+  one place. Editing the house's list must not quietly edit the bach's.
+- **Removing a tag does not touch the snags filed under it.** `snags.room` is TEXT rather than a
+  foreign key precisely so history survives: a snag logged in the Sleepout still reads Sleepout
+  afterwards and the list still filters on it. Removal only changes what capture offers next time,
+  and the confirmation says so — two buttons, because `showAlert` on the web build is a
+  `window.confirm`.
+- **The capture chips come from `useHousehold`**, so a change here has to be pushed back with
+  `reloadLocations()` — and only when the edited property is the one capture is pointed at.
+
+There is deliberately no rename: renaming would leave every snag filed under the old name saying
+the old name, which is the one outcome the TEXT column was chosen to avoid quietly happening.
+Remove and add instead.
 
 **A second place is never a tag.** If someone asks for a "Bach" tag, the answer is
 `create_property`.

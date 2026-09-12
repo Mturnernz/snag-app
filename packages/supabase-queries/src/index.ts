@@ -533,6 +533,39 @@ export async function getLocations(
   }));
 }
 
+/**
+ * Add a tag to a property's list.
+ *
+ * The seeded twelve were always a starting point rather than the vocabulary —
+ * a bach needs a Boatshed, a villa needs a Sleepout. The RPC refuses a blank
+ * name and a name already in use (case-insensitively), in words, rather than
+ * letting `locations_unique_per_property` surface.
+ */
+export async function createLocation(
+  client: SupabaseClient,
+  propertyId: string,
+  name: string
+): Promise<void> {
+  const { error } = await client.rpc('create_location', {
+    p_property_id: propertyId,
+    p_name: name,
+  });
+  if (error) throw asError(error, "Couldn't add that tag");
+}
+
+/**
+ * Remove a tag from a property's list.
+ *
+ * This does not touch the snags filed under it. `snags.room` is TEXT rather
+ * than a foreign key precisely so history survives: a snag logged in the
+ * Sleepout still reads Sleepout after the tag is retired, and the list still
+ * filters on it. What removal changes is only what capture offers next time.
+ */
+export async function deleteLocation(client: SupabaseClient, locationId: string): Promise<void> {
+  const { error } = await client.rpc('delete_location', { p_location_id: locationId });
+  if (error) throw asError(error, "Couldn't remove that tag");
+}
+
 // ---------------------------------------------------------------- weekend
 
 export interface WeekendPlan {

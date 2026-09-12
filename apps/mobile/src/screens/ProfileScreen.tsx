@@ -20,7 +20,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export default function ProfileScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { profile, household, members, reloadAccount } = useHousehold();
+  const { profile, household, members, locations, reloadAccount } = useHousehold();
   const { showToast } = useToast();
 
   const [name, setName] = useState(profile.displayName);
@@ -73,6 +73,24 @@ export default function ProfileScreen() {
             <Text style={styles.linkTitle}>{household.name}</Text>
             <Text style={styles.linkHint}>
               {members.length} {members.length === 1 ? 'person' : 'people'}
+            </Text>
+          </View>
+          <Icon name="chevron-forward" size="md" color={Colors.textMuted} />
+        </Card>
+      </Pressable>
+
+      {/*
+        The tags are the one piece of setup a household actually outgrows —
+        `Elsewhere` was the escape hatch until this screen existed. It lives here
+        rather than at capture because it is a sit-down job, and capture is not.
+      */}
+      <Pressable onPress={() => navigation.navigate('LocationTags')}>
+        <Card elevation="md" style={styles.linkRow}>
+          <Icon name="pricetags-outline" size="md" color={Colors.primary} />
+          <View style={styles.linkBody}>
+            <Text style={styles.linkTitle}>Location tags</Text>
+            <Text style={styles.linkHint}>
+              {locations.length} offered when you add something
             </Text>
           </View>
           <Icon name="chevron-forward" size="md" color={Colors.textMuted} />

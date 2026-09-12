@@ -25,6 +25,14 @@ interface HouseholdContextValue {
   setActiveProperty: (propertyId: string) => void;
   /** Tags for the active property, in seeded order. */
   locations: Location[];
+  /**
+   * Re-reads the active property's tags.
+   *
+   * Separate from `refresh` because the tag list is the one piece of this that
+   * a screen can change: Profile → Location tags adds and removes them, and the
+   * capture chips have to agree the moment someone comes back to them.
+   */
+  reloadLocations: () => Promise<void>;
   refresh: () => Promise<void>;
   /** Re-reads the household itself from App.tsx — after adding a member. */
   reloadAccount: () => Promise<void>;
@@ -74,21 +82,21 @@ export function HouseholdProvider({
   }, [refresh]);
 
   // Tags follow the selected place: a bach's are not a house's.
-  useEffect(() => {
+  const reloadLocations = useCallback(async () => {
     if (!activePropertyId) {
       setLocations([]);
       return;
     }
-    let cancelled = false;
-    getLocations(activePropertyId)
-      .then((next) => {
-        if (!cancelled) setLocations(next);
-      })
-      .catch((err) => console.error('Failed to load location tags:', err));
-    return () => {
-      cancelled = true;
-    };
+    try {
+      setLocations(await getLocations(activePropertyId));
+    } catch (err) {
+      console.error('Failed to load location tags:', err);
+    }
   }, [activePropertyId]);
+
+  useEffect(() => {
+    reloadLocations();
+  }, [reloadLocations]);
 
   const activeProperty = useMemo(
     () => properties.find((p) => p.id === activePropertyId) ?? null,
@@ -104,10 +112,14 @@ export function HouseholdProvider({
       activeProperty,
       setActiveProperty: setActivePropertyId,
       locations,
+      reloadLocations,
       refresh,
       reloadAccount: onReload,
     }),
-    [household, profile, members, properties, activeProperty, locations, refresh, onReload]
+    [
+      household, profile, members, properties, activeProperty, locations,
+      reloadLocations, refresh, onReload,
+    ]
   );
 
   return <HouseholdContext.Provider value={value}>{children}</HouseholdContext.Provider>;

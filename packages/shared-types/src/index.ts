@@ -194,6 +194,8 @@ export type RootStackParamList = {
   Main: undefined;
   SnagDetail: { snagId: string };
   Household: undefined;
+  /** Profile → Location tags. Editing the pick-list capture offers. */
+  LocationTags: undefined;
 };
 
 export type MainTabParamList = {

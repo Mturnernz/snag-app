@@ -11,6 +11,7 @@ import WeekendScreen from '../screens/WeekendScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SnagDetailScreen from '../screens/SnagDetailScreen';
 import HouseholdScreen from '../screens/HouseholdScreen';
+import LocationTagsScreen from '../screens/LocationTagsScreen';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -68,6 +69,7 @@ export default function RootNavigator() {
       <Stack.Screen name="Main" component={MainTabs} />
       <Stack.Screen name="SnagDetail" component={SnagDetailScreen} />
       <Stack.Screen name="Household" component={HouseholdScreen} />
+      <Stack.Screen name="LocationTags" component={LocationTagsScreen} />
     </Stack.Navigator>
   );
 }

@@ -248,6 +248,11 @@ export const addComment = (snagId: string, body: string) =>
 
 export const getLocations = (propertyId: string) => queries.getLocations(supabase, propertyId);
 
+export const createLocation = (propertyId: string, name: string) =>
+  queries.createLocation(supabase, propertyId, name);
+
+export const deleteLocation = (locationId: string) => queries.deleteLocation(supabase, locationId);
+
 // ─── Photos ───────────────────────────────────────────────────────────────────
 //
 // home-photos is a PRIVATE bucket laid out as `<household_id>/<file>` — the

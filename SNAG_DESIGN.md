@@ -196,11 +196,15 @@ saying it out loud. A list derived from past use is empty exactly then. `Elsewhe
 the list and is the escape hatch that stops a fixed list being a dead end.
 
 The row is deliberately the quietest thing on the screen: *below* the description, under a muted
-"Where is it? Optional", borderless and unfilled until one is tapped, at `Typography.sm` rather
-than `base`. A tag is a suggestion — a snag without one is a perfectly good snag — and a row of
-twelve solid buttons above the fold said the opposite. The touch target stays at 48px; a
-transparent 48px row reads as air, not as a control. Picked reads as a `primaryLight` fill, dark
-text and a small checkmark, so selection isn't carried by colour alone.
+"Where is it? Optional", unfilled until one is tapped, at `Typography.sm` rather than `base`. A tag
+is a suggestion — a snag without one is a perfectly good snag — and a row of twelve solid buttons
+above the fold said the opposite.
+
+Each pill carries a hairline outline and nothing else. Borderless text was quieter still, but it
+gave no affordance: nothing said the room names could be pressed. The outline sits on the pill,
+not on the touch target, which stays 48px and invisible around it — twelve 48px outlined boxes
+would be the same "required field" reading in a different costume. Picked reads as a
+`primaryLight` fill, dark text and a small checkmark, so selection isn't carried by colour alone.
 
 Adding a thirteenth is a sit-down job, so it lives in **You → Location tags**, not here.
 

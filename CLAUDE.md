@@ -137,12 +137,14 @@ Three things about it are load-bearing:
   on the one day that matters — the day the app is installed. `snags.room` stays TEXT rather than
   a foreign key, so the list query needs no join and renaming a location later doesn't rewrite the
   history of snags filed under the old name.
-- **The tag row is last, and quiet.** It sits *below* the description, borderless and unfilled
-  until one is picked, because a tag is optional — a snag with none lands in the list and groups
-  under "Everywhere else". Twelve solid buttons above the fold read as a required field and put a
-  decision in front of someone who had already taken the photo they came to take. Keep the touch
-  target at `MIN_TOUCH_TARGET`; a transparent 48px row reads as air rather than as a control,
-  which is the whole trick. `CaptureScreen.test.tsx` pins the ordering and the unfilled state.
+- **The tag row is last, and quiet.** It sits *below* the description and stays unfilled until one
+  is picked, because a tag is optional — a snag with none lands in the list and groups under
+  "Everywhere else". Twelve solid buttons above the fold read as a required field and put a
+  decision in front of someone who had already taken the photo they came to take. The pill carries
+  a hairline outline, because borderless text said nothing about being pressable; **the outline
+  goes on the pill, never on the touch target**, which stays `MIN_TOUCH_TARGET` and invisible
+  around it. Twelve 48px outlined boxes is the same "required field" reading in a different
+  costume. `CaptureScreen.test.tsx` pins the ordering, the unfilled pill and that separation.
 - **The place is a picker, shown only when there is a choice.** See "Properties" below.
 - **Priority is set at capture**, and is the one deliberate exception to the split below. It is
   the single judgement only the person standing there can make. Two values; a third would need

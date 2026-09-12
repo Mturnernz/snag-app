@@ -97,6 +97,17 @@ const tagChip = (result: ReturnType<typeof render>, name: string) => {
   throw new Error(`No pressable chip around "${name}"`);
 };
 
+/** The outlined pill inside a tag's touch target. */
+const tagPill = (result: ReturnType<typeof render>, name: string) => {
+  let node: any = result.getByText(name);
+  while (node) {
+    const style = flattenStyle(node.props?.style);
+    if (typeof node.type === 'string' && style.borderRadius !== undefined) return node;
+    node = node.parent;
+  }
+  throw new Error(`No pill around "${name}"`);
+};
+
 describe('CaptureScreen', () => {
   beforeEach(() => arrange());
 
@@ -118,18 +129,23 @@ describe('CaptureScreen', () => {
     expect(textsInOrder(result)).toContain('Where is it? Optional');
   });
 
-  it('leaves an unpicked tag unfilled and unbordered', () => {
+  it('outlines an unpicked tag but never fills it', () => {
     const result = render(<CaptureScreen />);
     const chip = tagChip(result, 'Kitchen');
     expect(chip.props.accessibilityState.selected).toBe(false);
 
-    const style = flattenStyle(chip.props.style);
-    // No fill, and a border that is there only so picking one can't shift the
-    // row. A solid ground here is the regression this exists to catch.
-    expect(style.backgroundColor).toBeUndefined();
-    expect(style.borderColor).toBe('transparent');
-    // Still a full-height target, however quiet it looks.
-    expect(style.minHeight).toBe(48);
+    // The hairline says "pressable". A fill would say "required", which is the
+    // regression this exists to catch.
+    const pill = flattenStyle(tagPill(result, 'Kitchen').props.style);
+    expect(pill.backgroundColor).toBeUndefined();
+    expect(pill.borderColor).toBe(Colors.border);
+
+    // And the outline must stay off the touch target: twelve 48px boxes is the
+    // row of solid buttons this was moved down the screen to stop being.
+    const tap = flattenStyle(chip.props.style);
+    expect(tap.minHeight).toBe(48);
+    expect(tap.borderWidth).toBeUndefined();
+    expect(pill.minHeight).toBeUndefined();
   });
 
   it('reserves the alert colour for High — Low is selected, not shouting', () => {

@@ -191,11 +191,13 @@ export default function CaptureScreen() {
           decision in front of someone who had already taken the photo they
           came to take.
 
-          So: below everything, small, borderless, and unfilled until one is
-          picked. The touch target is still MIN_TOUCH_TARGET tall — a
-          transparent 48px row reads as air rather than as a control, which is
-          the whole trick. The checkmark carries the selected state alongside
-          the tint, so it isn't colour alone.
+          So: below everything, small, and unfilled until one is picked. The pill
+          carries a hairline outline — without one, nothing said these were
+          pressable at all — but the outline sits on the pill, not on the touch
+          target, which stays MIN_TOUCH_TARGET and invisible around it. Twelve
+          48px outlined boxes would say "required field" all over again. The
+          checkmark carries the selected state alongside the tint, so it isn't
+          colour alone.
 
           Nothing here is a closed list: Profile → Location tags edits it.
         */}
@@ -210,14 +212,16 @@ export default function CaptureScreen() {
                 <Pressable
                   key={location.id}
                   onPress={() => setRoom(active ? null : location.name)}
-                  style={[styles.tag, active && styles.tagActive]}
+                  style={styles.tagTap}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
                 >
-                  {active ? <Icon name="checkmark" size="sm" color={Colors.primary} /> : null}
-                  <Text style={[styles.tagLabel, active && styles.tagLabelActive]}>
-                    {location.name}
-                  </Text>
+                  <View style={[styles.tag, active && styles.tagActive]}>
+                    {active ? <Icon name="checkmark" size="sm" color={Colors.primary} /> : null}
+                    <Text style={[styles.tagLabel, active && styles.tagLabelActive]}>
+                      {location.name}
+                    </Text>
+                  </View>
                 </Pressable>
               );
             })}
@@ -288,18 +292,24 @@ const styles = StyleSheet.create({
   },
   tagHint: { fontSize: Typography.sm, color: Colors.textMuted },
   tags: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.xs },
+  // The tap area and the visible pill are different sizes, deliberately.
+  //
+  // Borderless text gave no affordance at all: nothing said the room names were
+  // things you could press. A hairline outline says it — but wrapping a 48px
+  // target in that outline would draw twelve boxes the size of buttons, which is
+  // the "this is a required field" reading the row was moved down here to
+  // escape. So the outline goes on a small pill and the 48px target stays
+  // invisible around it.
+  tagTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   tag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
-    // Full-height target, no visible box. 'transparent' is the absence of a
-    // colour rather than a colour, and it's held here only so selecting a tag
-    // can't shift the row.
-    minHeight: MIN_TOUCH_TARGET,
-    paddingHorizontal: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
     borderRadius: Radius.chip,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: Colors.border,
   },
   tagActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primaryLight },
   tagLabel: { fontSize: Typography.sm, color: Colors.textMuted },

@@ -9,10 +9,8 @@ import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '..
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
-import type { ThingInput } from '@snag/supabase-queries';
-import {
-  Location, ThingKind, ROOM_SUGGESTIONS, THING_KINDS, THING_KIND_LABELS,
-} from '../types';
+import { suggestionsForRoom, type ThingInput } from '@snag/supabase-queries';
+import { Location, ThingKind, THING_KINDS, THING_KIND_LABELS } from '../types';
 
 /**
  * Adding something to the house record, in four steps.
@@ -61,12 +59,19 @@ interface Props {
   pathPrefix: string | null;
   /** Set when the + was pressed inside a room, or a ghost was tapped. */
   start?: { room?: string | null; name?: string | null; kind?: ThingKind } | null;
+  /**
+   * Creates a room tag and returns whether it worked. The moment somebody
+   * notices the conservatory is missing is the moment they are trying to record
+   * something in it, so the list of rooms has to be editable from inside the
+   * flow rather than three screens away in Profile.
+   */
+  onAddRoom: (name: string) => Promise<boolean>;
   onCancel: () => void;
   onAdd: (input: Omit<ThingInput, 'propertyId'>) => Promise<void>;
 }
 
 export default function AddThingSheet({
-  visible, locations, pathPrefix, start, onCancel, onAdd,
+  visible, locations, pathPrefix, start, onAddRoom, onCancel, onAdd,
 }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
@@ -83,6 +88,7 @@ export default function AddThingSheet({
   const [serviceDays, setServiceDays] = useState<number | null>(null);
   /** For a paint: which surface in the room. "Main wall", "Windows". */
   const [where, setWhere] = useState('');
+  const [newRoom, setNewRoom] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Reset on every open. A sheet that remembers the last thing somebody added
@@ -99,6 +105,7 @@ export default function AddThingSheet({
     setTakes('');
     setServiceDays(null);
     setWhere('');
+    setNewRoom(null);
     setBusy(false);
     // Tapping a ghost has already answered the first two questions, so opening
     // on them would be asking somebody to confirm what they just said.
@@ -109,24 +116,34 @@ export default function AddThingSheet({
   const painting = kind === 'finish';
 
   /**
-   * What this room offers, with Paint always on the end.
+   * What this room offers — the same list the ghosts are drawn from, so the two
+   * cannot disagree about what a room has.
    *
-   * A room has one rangehood; it has as many paints as it has surfaces. So the
-   * ghost prompts for the first paint and this offers every one after it —
-   * which is why Paint appears here whatever is already recorded, and why the
-   * other suggestions do not.
+   * A room has one rangehood; it has as many paints as it has surfaces. The
+   * ghost prompts for the first paint and this offers every one after it, which
+   * is why Paint stays here whatever is already recorded and the other
+   * suggestions do not.
    */
-  const suggestions = useMemo(() => {
-    const forRoom = room ? ROOM_SUGGESTIONS[room] ?? [] : [];
-    return forRoom.some((one) => one.kind === 'finish')
-      ? forRoom
-      : [...forRoom, { name: 'Paint', kind: 'finish' as ThingKind }];
-  }, [room]);
+  const suggestions = useMemo(() => (room ? suggestionsForRoom(room) : []), [room]);
 
   function next() {
     if (step === 'room') setStep('what');
     else if (step === 'what') setStep('label');
     else if (step === 'label') setStep('takes');
+  }
+
+  async function addRoom() {
+    const name = newRoom?.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    try {
+      if (await onAddRoom(name)) {
+        setRoom(name);
+        setNewRoom(null);
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   function back() {
@@ -213,17 +230,55 @@ export default function AddThingSheet({
           <>
             <Text style={styles.question}>Which room?</Text>
             <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
-              <View style={styles.chips}>
-                {locations.map((location) => (
+              {newRoom === null ? (
+                <View style={styles.chips}>
+                  {locations.map((location) => (
+                    <Chip
+                      key={location.id}
+                      label={location.name}
+                      on={room === location.name}
+                      onPress={() => setRoom(location.name)}
+                    />
+                  ))}
                   <Chip
-                    key={location.id}
-                    label={location.name}
-                    on={room === location.name}
-                    onPress={() => setRoom(location.name)}
+                    label="Whole house"
+                    on={room === null && !!start}
+                    onPress={() => setRoom(null)}
                   />
-                ))}
-                <Chip label="Whole house" on={room === null && !!start} onPress={() => setRoom(null)} />
-              </View>
+                  <Chip label="Add a room…" on={false} onPress={() => setNewRoom('')} />
+                </View>
+              ) : (
+                <View style={styles.fields}>
+                  <TextInput
+                    style={styles.input}
+                    value={newRoom}
+                    onChangeText={setNewRoom}
+                    placeholder="Conservatory · Study · Movie room"
+                    placeholderTextColor={Colors.textMuted}
+                    maxLength={40}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={addRoom}
+                    accessibilityLabel="Name the room"
+                  />
+                  <Pressable
+                    onPress={addRoom}
+                    disabled={busy || !newRoom.trim()}
+                    style={[styles.cta, (busy || !newRoom.trim()) && styles.ctaOff]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add the room"
+                  >
+                    <Text
+                      style={[styles.ctaLabel, (busy || !newRoom.trim()) && styles.ctaLabelOff]}
+                    >
+                      Add the room
+                    </Text>
+                  </Pressable>
+                  <Text style={styles.hint}>
+                    It joins the tags the list groups by and capture offers, not just this tab.
+                  </Text>
+                </View>
+              )}
             </ScrollView>
           </>
         ) : null}

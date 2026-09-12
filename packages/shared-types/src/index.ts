@@ -412,6 +412,22 @@ export const ROOM_SUGGESTIONS: Record<string, ThingSuggestion[]> = {
   Deck: [
     { name: 'Stain', kind: 'finish' },
   ],
+  Roof: [
+    // A roof is coated rather than painted, and saying so is the difference
+    // between a prompt that reads as knowing the subject and one that reads as
+    // generated. Spouting, cladding and skylights wait for the `fabric` kind.
+    { name: 'Roof coating', kind: 'finish' },
+  ],
+  // Piles, subfloor insulation, the toby, the sewer gully — all `fabric`, none
+  // of it paint. Empty on purpose until that kind lands, because the generic
+  // paint prompt every unknown room gets would be nonsense down here.
+  'Under the house': [],
+  // Present and empty on purpose, which is different from absent. `Elsewhere`
+  // is the location seed's escape hatch — the room whose whole meaning is
+  // "somewhere else" — and suggesting its contents is nonsense. A room that is
+  // simply *absent* from this table is an unknown room somebody added, and gets
+  // the paint prompt every room deserves. See `suggestionsForRoom`.
+  Elsewhere: [],
 };
 
 /**

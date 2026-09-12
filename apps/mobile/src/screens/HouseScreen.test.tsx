@@ -20,6 +20,7 @@ jest.mock('../components/AddThingSheet', () => {
   return { __esModule: true, default: () => React.createElement(Text, null, 'add sheet') };
 });
 
+const mock_createLocation = jest.fn();
 const mock_getThings = jest.fn();
 const mock_getAbsentThings = jest.fn();
 const mock_markThingAbsent = jest.fn();
@@ -31,6 +32,7 @@ jest.mock('../lib/supabase', () => ({
   restoreAbsentThings: (...a: unknown[]) => mock_restoreAbsentThings(...a),
   getSnagPhotoUrls: jest.fn().mockResolvedValue({}),
   createThing: jest.fn(),
+  createLocation: (...a: unknown[]) => mock_createLocation(...a),
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
@@ -56,11 +58,13 @@ function arrange(locations = ['Laundry', 'Deck', 'Elsewhere']) {
     activeProperty: { id: 'p', householdId: 'h', name: 'Home' },
     setActiveProperty: jest.fn(),
     locations: locations.map((name, i) => ({ id: `l${i}`, propertyId: 'p', name, sortOrder: i + 1 })),
-    reloadLocations: jest.fn(),
+    reloadLocations: mock_reloadLocations,
     refresh: jest.fn(),
     reloadAccount: jest.fn(),
   };
 }
+
+const mock_reloadLocations = jest.fn().mockResolvedValue(undefined);
 
 const settle = () => TestRenderer.act(async () => {});
 
@@ -90,6 +94,8 @@ beforeEach(() => {
   mock_getAbsentThings.mockResolvedValue([]);
   mock_markThingAbsent.mockResolvedValue(undefined);
   mock_restoreAbsentThings.mockResolvedValue(undefined);
+  mock_createLocation.mockResolvedValue(undefined);
+  mock_reloadLocations.mockResolvedValue(undefined);
 });
 
 describe('HouseScreen', () => {
@@ -166,6 +172,37 @@ describe('HouseScreen', () => {
     const all = texts(result);
     expect(all).toEqual(expect.arrayContaining(['Appliances · 1', 'Paint · 1']));
     expect(all).not.toContain('Not recorded yet');
+  });
+
+  it('adds a room to the tags everything else uses, not just this tab', async () => {
+    // A conservatory, a study, a movie room. `home.locations` is the same list
+    // the List tab groups by and capture offers, so a room added here is a room
+    // everywhere — two places keeping separate ideas of what rooms exist is how
+    // the two tabs stop describing the same house.
+    const result = render(<HouseScreen />);
+    await settle();
+    await TestRenderer.act(async () => pressable(result, 'Add a room').props.onPress());
+
+    const field = result.root.findAll(
+      (n: any) => typeof n.type === 'string' && n.props?.accessibilityLabel === 'Name the room',
+      { deep: true }
+    )[0];
+    await TestRenderer.act(async () => field.props.onChangeText('Conservatory'));
+    await TestRenderer.act(async () => pressable(result, 'Add the room').props.onPress());
+
+    expect(mock_createLocation).toHaveBeenCalledWith('p', 'Conservatory');
+    expect(mock_reloadLocations).toHaveBeenCalled();
+  });
+
+  it('shows a brand-new room rather than swallowing it', async () => {
+    // Nothing is catalogued for a conservatory, and a section with no things
+    // and no ghosts is not drawn — so without the universal paint prompt
+    // somebody would add a room and watch nothing happen.
+    arrange(['Laundry', 'Conservatory']);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(texts(result)).toContain('Conservatory · 0 of 1');
   });
 
   it('hides what this house has not got, and offers a way back', async () => {

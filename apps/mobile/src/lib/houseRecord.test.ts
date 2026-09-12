@@ -173,11 +173,24 @@ describe('what a room still shows', () => {
     expect(ghosts.map((g) => g.name)).toContain('Washing machine');
   });
 
-  it('offers nothing for a room with no catalogue, rather than guessing', () => {
-    // `Elsewhere` is the escape hatch in the location seed. Suggesting the
-    // contents of a room whose whole point is "somewhere else" is nonsense.
+  it('offers nothing for Elsewhere, whose whole point is being nowhere', () => {
+    // The escape hatch in the location seed. Suggesting the contents of a room
+    // that means "somewhere else" is nonsense — and it is listed in the
+    // catalogue as deliberately empty rather than left out, which is what tells
+    // it apart from a room somebody added.
     expect(ghostsForRoom('Elsewhere', [], [])).toEqual([]);
-    expect(ghostsForRoom('Sleepout', [], [])).toEqual([]);
+  });
+
+  it('offers paint in a room nobody catalogued, so it is not invisible', () => {
+    // A conservatory, a study, a movie room. Every room in every house has
+    // walls, and a room created with nothing to show would not be drawn at all
+    // — a section with no things and no ghosts does not render, so somebody
+    // would add a room and watch nothing happen.
+    expect(ghostsForRoom('Conservatory', [], []).map((g) => g.name)).toEqual(['Paint']);
+    expect(ghostsForRoom('Movie room', [], []).map((g) => g.name)).toEqual(['Paint']);
+    // And it behaves like any other paint prompt once one is recorded.
+    const painted = [thing({ id: 'a', room: 'Study', kind: 'finish', name: 'Resene Rakaia' })];
+    expect(ghostsForRoom('Study', painted, [])).toEqual([]);
   });
 
   it('only ever suggests kinds the app can actually describe', () => {

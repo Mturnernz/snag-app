@@ -279,6 +279,34 @@ photographs the **tin lid** rather than a rating plate, and step four asks **whe
 instead of what it takes and how often it is serviced. A tin of paint takes nothing and is never
 serviced; asking it those two questions was two whole steps of the sheet interrogating a tin.
 
+### Adding a room, from the tab that shows the house
+
+**A room added on the House tab is a room everywhere.** The *Add a room* line at the foot of the
+list and the *Add a room…* chip on step one of the walkthrough both call `home.create_location`
+against the active property and then `reloadLocations()` — so a conservatory, a study or a movie
+room joins the tags the List tab groups by and capture offers, not just this screen. Rooms are a
+property's vocabulary, not one tab's; two screens keeping separate ideas of what rooms exist is
+how the House tab and the list stop describing the same house.
+
+The chip is on step one because **the moment somebody notices the conservatory is missing is the
+moment they are trying to record something in it** — sending them to Profile → Location tags and
+back would lose the flow they were in. `LocationTagsScreen` still exists and is still where tags
+are *removed*; nothing about it changed.
+
+Two rules make a new room behave:
+
+- **`suggestionsForRoom` is the one source** both the ghosts and the walkthrough draw from, so the
+  two cannot disagree about what a room has. It was duplicated for one commit and that is exactly
+  how they drift.
+- **A room the catalogue does not know gets the paint prompt**, because every room in every house
+  has walls — and because a section with no things and no ghosts is not drawn at all, so without
+  it somebody would add a room and watch nothing happen. Three places are exempt, and the
+  difference is *present-and-empty* versus *absent*: `Elsewhere` (the seed's escape hatch, whose
+  whole meaning is "nowhere in particular"), `Under the house` (piles and a toby, no paint), and
+  `Whole house`, which is not a room at all but this screen's label for things belonging to the
+  place rather than a room in it. The last one was found by a test after the fallback shipped —
+  it had grown a prompt asking which surface of nowhere-in-particular the paint went on.
+
 **The catalogue only ever suggests `appliance` and `finish`**, the two kinds the app can actually
 describe. The obvious absentees — the toby, the switchboard, meter numbers, bathroom tapware, bulb
 fittings — are `fabric` and `fitting`, and suggesting something the spec sheet cannot then word

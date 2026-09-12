@@ -855,12 +855,33 @@ export async function deleteThing(client: SupabaseClient, thingId: string): Prom
  * on the + to put right; the cost of the stricter one is a permanent nag, which
  * is how a screen gets ignored.
  */
+export function suggestionsForRoom(room: string): ThingSuggestion[] {
+  const known = ROOM_SUGGESTIONS[room];
+
+  // A room nobody catalogued — a conservatory, a movie room, a study somebody
+  // added themselves — still has walls, and paint is the one thing every room
+  // in every house has. Offering it is both true and the most useful first
+  // entry; offering nothing would leave a room somebody just created invisible
+  // on the House tab, since a section with no things and no ghosts is not
+  // drawn.
+  //
+  // `Elsewhere` is listed in the catalogue as deliberately empty, so it falls
+  // through this and stays bare. Present-and-empty is not the same as absent.
+  if (!known) return [{ name: 'Paint', kind: 'finish' }];
+
+  // Every catalogued room can be painted too, whether or not the catalogue
+  // happened to say so.
+  return known.some((one) => one.kind === 'finish') || known.length === 0
+    ? known
+    : [...known, { name: 'Paint', kind: 'finish' }];
+}
+
 export function ghostsForRoom(
   room: string,
   things: Thing[],
   absent: AbsentThing[]
 ): ThingSuggestion[] {
-  const suggestions = ROOM_SUGGESTIONS[room] ?? [];
+  const suggestions = suggestionsForRoom(room);
   if (suggestions.length === 0) return [];
 
   const normal = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();

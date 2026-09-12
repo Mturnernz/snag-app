@@ -15,7 +15,8 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createThing, getAbsentThings, getSnagPhotoUrls, getThings, markThingAbsent, restoreAbsentThings,
+  createLocation, createThing, getAbsentThings, getSnagPhotoUrls, getThings, markThingAbsent,
+  restoreAbsentThings,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import {
@@ -84,7 +85,9 @@ interface Section {
 export default function HouseScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { household, properties, activeProperty, setActiveProperty, locations } = useHousehold();
+  const {
+    household, properties, activeProperty, setActiveProperty, locations, reloadLocations,
+  } = useHousehold();
   const { showToast } = useToast();
 
   const [grouping, setGrouping] = useState<ThingGrouping>('room');
@@ -96,6 +99,9 @@ export default function HouseScreen() {
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [roomOpen, setRoomOpen] = useState(false);
+  const [roomDraft, setRoomDraft] = useState('');
+  const [busy, setBusy] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetStart, setSheetStart] =
     useState<{ room?: string | null; name?: string | null; kind?: ThingKind } | null>(null);
@@ -186,7 +192,12 @@ export default function HouseScreen() {
     const out: Section[] = [];
     const addRoom = (room: string) => {
       const recorded = byRoom.get(room) ?? [];
-      const ghosts = ghostsForRoom(room, things, absent);
+      // NO_ROOM is this screen's label for "belongs to the place, not a room in
+      // it" — it is not a room and has no walls, so it is never furnished. It
+      // would otherwise pick up the paint prompt every unknown room gets, and
+      // tapping that would open the walkthrough asking which surface of
+      // nowhere-in-particular it went on.
+      const ghosts = room === NO_ROOM ? [] : ghostsForRoom(room, things, absent);
       if (recorded.length === 0 && ghosts.length === 0) return;
 
       const rows: Row[] = [
@@ -233,6 +244,49 @@ export default function HouseScreen() {
       // The sheet stays open on a failure: everything typed is still in it, and
       // the retry is the same button.
       showAlert("Couldn't add that", err?.message ?? 'Please try again.');
+    }
+  }
+
+  /**
+   * A thirteenth room — a conservatory, a study, a movie room.
+   *
+   * It writes to `home.locations`, which is the same list the List tab groups
+   * by and capture offers, so a room added here is a room everywhere. That is
+   * the point: rooms are a property's vocabulary, not this tab's, and two
+   * places keeping separate ideas of what rooms exist is how the House tab and
+   * the list stop describing the same house.
+   *
+   * A brand-new room has nothing catalogued for it, so it arrives holding the
+   * one prompt every room in every house deserves — paint. Without that the
+   * room would be invisible the moment it was created, since a section with
+   * nothing in it is not drawn.
+   */
+  async function addRoom(name: string): Promise<boolean> {
+    if (!propertyId) return false;
+    try {
+      await createLocation(propertyId, name);
+      await reloadLocations();
+      showToast(`${name} added`);
+      return true;
+    } catch (err: any) {
+      // The RPC refuses a blank name and a duplicate in words, so this is worth
+      // showing rather than swallowing.
+      showAlert("Couldn't add that room", err?.message ?? 'Please try again.');
+      return false;
+    }
+  }
+
+  async function addRoomFromList() {
+    const name = roomDraft.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    try {
+      if (await addRoom(name)) {
+        setRoomDraft('');
+        setRoomOpen(false);
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -387,6 +441,19 @@ export default function HouseScreen() {
             tintColor={Colors.primary}
           />
         }
+        ListFooterComponent={
+          !searching && grouping === 'room' && !loading ? (
+            <Pressable
+              onPress={() => setRoomOpen(true)}
+              style={styles.addRoom}
+              accessibilityRole="button"
+              accessibilityLabel="Add a room"
+            >
+              <Icon name="add" size="sm" color={Colors.primary} />
+              <Text style={styles.addRoomLabel}>Add a room</Text>
+            </Pressable>
+          ) : null
+        }
         ListEmptyComponent={
           loading ? null : searching ? (
             <EmptyState
@@ -421,9 +488,44 @@ export default function HouseScreen() {
         locations={locations}
         pathPrefix={household.id}
         start={sheetStart}
+        onAddRoom={addRoom}
         onCancel={() => setSheetOpen(false)}
         onAdd={handleAdd}
       />
+
+      <Modal visible={roomOpen} transparent animationType="slide" onRequestClose={() => setRoomOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setRoomOpen(false)} />
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
+          <View style={styles.grab} />
+          <Text style={styles.sheetTitle}>Add a room</Text>
+          <Text style={styles.sheetHint}>
+            The twelve seeded tags are a starting point, not the vocabulary. A room added here
+            joins the tags the list groups by and capture offers — it is not just for this tab.
+          </Text>
+          <TextInput
+            style={styles.roomInput}
+            value={roomDraft}
+            onChangeText={setRoomDraft}
+            placeholder="Conservatory · Study · Movie room"
+            placeholderTextColor={Colors.textMuted}
+            maxLength={40}
+            returnKeyType="done"
+            onSubmitEditing={addRoomFromList}
+            accessibilityLabel="Name the room"
+          />
+          <Pressable
+            onPress={addRoomFromList}
+            disabled={busy || !roomDraft.trim()}
+            style={[styles.cta, (busy || !roomDraft.trim()) && styles.ctaOff]}
+            accessibilityRole="button"
+            accessibilityLabel="Add the room"
+          >
+            <Text style={[styles.ctaLabel, (busy || !roomDraft.trim()) && styles.ctaLabelOff]}>
+              Add the room
+            </Text>
+          </Pressable>
+        </View>
+      </Modal>
 
       <Modal visible={placesOpen} transparent animationType="slide" onRequestClose={() => setPlacesOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setPlacesOpen(false)} />
@@ -510,6 +612,14 @@ const styles = StyleSheet.create({
   groupRule: { flex: 1, height: 1, backgroundColor: Colors.border },
   restore: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   restoreLabel: { fontSize: Typography.sm, color: Colors.textMuted },
+  addRoom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingTop: Spacing.lg,
+  },
+  addRoomLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   chip: {
     paddingHorizontal: Spacing.md,
@@ -545,6 +655,27 @@ const styles = StyleSheet.create({
   },
   grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
   sheetTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
+  sheetHint: { fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19 },
+  roomInput: {
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.input,
+    paddingHorizontal: Spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  cta: {
+    minHeight: MIN_TOUCH_TARGET,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Neutral when disabled, never faded: fern at half strength reads as broken
+  // rather than as not-ready.
+  ctaOff: { backgroundColor: Colors.sunken },
+  ctaLabel: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.white },
+  ctaLabelOff: { color: Colors.textMuted },
   placeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, minHeight: MIN_TOUCH_TARGET },
   placeLabel: { fontSize: Typography.base, color: Colors.textSecondary },
   placeLabelOn: { color: Colors.textPrimary, fontWeight: Typography.semibold },

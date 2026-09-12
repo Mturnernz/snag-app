@@ -450,15 +450,17 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  // The same chip as everywhere else: a sunken well when off, solid fern when
+  // on, no border either way. It sat on the ground colour with a border, which
+  // inside a white card is a box drawn around a box.
   option: {
+    minHeight: MIN_TOUCH_TARGET - Spacing.md,
+    justifyContent: 'center',
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
     borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.sunken,
   },
-  optionActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  optionActive: { backgroundColor: Colors.primary },
   optionLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
   optionLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
   toggleRow: {

@@ -166,10 +166,20 @@ export default function SnagListScreen() {
 
   const sections = useMemo(() => {
     const freshIds = new Set(fresh.map((s) => s.id));
-    const rest = visible.filter((s) => !freshIds.has(s.id));
+    // Whatever is being prompted about stays at the top while the prompt is up.
+    // Without this it sorts into its room — or, with no room yet, all the way
+    // down to "Everywhere else" — so the thing you are being asked about is
+    // off-screen behind the row asking about it.
+    const pinned = justAdded ? visible.filter((s) => s.id === justAdded.id) : [];
+    const pinnedId = pinned[0]?.id;
+    const rest = visible.filter((s) => !freshIds.has(s.id) && s.id !== pinnedId);
     const out: { title: string; isNew?: boolean; data: Snag[] }[] = [];
 
-    if (fresh.length > 0) out.push({ title: 'New', isNew: true, data: fresh });
+    if (pinned.length > 0) out.push({ title: 'Just added', isNew: true, data: pinned });
+    if (fresh.length > 0) {
+      const others = fresh.filter((s) => s.id !== pinnedId);
+      if (others.length > 0) out.push({ title: 'New', isNew: true, data: others });
+    }
 
     if (sort === 'room') {
       // Seeded order first, so the rooms read the way the chips did, then
@@ -194,7 +204,7 @@ export default function SnagListScreen() {
       out.push({ title: 'Done this week', data: recentlyDone });
     }
     return out;
-  }, [fresh, visible, sort, locations, showDone, recentlyDone]);
+  }, [fresh, visible, sort, locations, showDone, recentlyDone, justAdded]);
 
   async function handleAdd(input: { photoPath: string | null; description: string | null }) {
     if (!activeProperty) {
@@ -338,12 +348,15 @@ export default function SnagListScreen() {
         <AmendRow>
           <View style={styles.amendHead}>
             <AmendLabel
+              // Asks for what is still missing, and stops asking once it isn't.
               text={
-                needsNote
+                needsNote && !justAdded.room
                   ? 'On the list. What is it, and where?'
-                  : justAdded.room
-                    ? 'On the list.'
-                    : 'On the list. Where is it?'
+                  : needsNote
+                    ? 'On the list. What is it?'
+                    : justAdded.room
+                      ? 'On the list.'
+                      : 'On the list. Where is it?'
               }
             />
             <Pressable

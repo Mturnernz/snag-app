@@ -1,4 +1,4 @@
-import { createAuthEventQueue } from './authEvents';
+import { createAuthEventQueue, planAuthEvent } from './authEvents';
 
 // The property under test is the one whose absence deadlocked the whole client:
 // work triggered by an auth event must not run while the callback that
@@ -59,5 +59,79 @@ describe('createAuthEventQueue', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'profile fetch failed' }));
     // A swallowed rejection here would mean the next auth event is ignored.
     expect(ran).toEqual(['next']);
+  });
+});
+
+// The rule that keeps a returning tab from looking like a login.
+//
+// auth-js re-announces SIGNED_IN for a session nobody left, every time a hidden
+// tab becomes visible. App.tsx used to treat that as a fresh sign-in: it reset
+// the address bar to `/` and set `loading`, which unmounts the navigator and
+// every open sheet. Coming back from the camera on step three of the House
+// walkthrough therefore landed on the list with the photo gone — it lived in
+// component state, because nothing is written until the last step.
+const ME = 'user-1';
+const SOMEONE_ELSE = 'user-2';
+
+describe('planAuthEvent', () => {
+  it('does nothing when SIGNED_IN announces the session we already hold', () => {
+    // The camera case. If this ever reloads again, the photo is lost again.
+    expect(planAuthEvent('SIGNED_IN', ME, ME)).toEqual({
+      clearAccount: false,
+      reloadAccount: false,
+      resetPath: false,
+    });
+  });
+
+  it('reloads and clears the path when somebody actually signs in', () => {
+    expect(planAuthEvent('SIGNED_IN', null, ME)).toEqual({
+      clearAccount: false,
+      reloadAccount: true,
+      resetPath: true,
+    });
+  });
+
+  it('reloads and clears the path when the account switches', () => {
+    expect(planAuthEvent('SIGNED_IN', ME, SOMEONE_ELSE)).toEqual({
+      clearAccount: false,
+      reloadAccount: true,
+      resetPath: true,
+    });
+  });
+
+  it('clears the account and the path on SIGNED_OUT', () => {
+    expect(planAuthEvent('SIGNED_OUT', ME, null)).toEqual({
+      clearAccount: true,
+      reloadAccount: false,
+      resetPath: true,
+    });
+  });
+
+  it('treats a missing session as a sign-out whatever the event says', () => {
+    expect(planAuthEvent('TOKEN_REFRESHED', ME, null).clearAccount).toBe(true);
+  });
+
+  it('loads on the first INITIAL_SESSION but leaves the address bar alone', () => {
+    // Reloading a tab is not logging in, and a /snags/<id> somebody followed
+    // has to survive the round trip.
+    expect(planAuthEvent('INITIAL_SESSION', null, ME)).toEqual({
+      clearAccount: false,
+      reloadAccount: true,
+      resetPath: false,
+    });
+  });
+
+  it('ignores the INITIAL_SESSION that follows getSession claiming the user', () => {
+    expect(planAuthEvent('INITIAL_SESSION', ME, ME).reloadAccount).toBe(false);
+  });
+
+  it('is inert for a token refresh and a profile update', () => {
+    for (const event of ['TOKEN_REFRESHED', 'USER_UPDATED']) {
+      expect(planAuthEvent(event, ME, ME)).toEqual({
+        clearAccount: false,
+        reloadAccount: false,
+        resetPath: false,
+      });
+    }
   });
 });

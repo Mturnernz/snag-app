@@ -8,7 +8,7 @@ import { Session } from '@supabase/supabase-js';
 
 import { supabase, getMyProfile, getMyHousehold } from './src/lib/supabase';
 import { SchemaNotExposedError } from '@snag/supabase-queries';
-import { createAuthEventQueue } from './src/lib/authEvents';
+import { createAuthEventQueue, planAuthEvent } from './src/lib/authEvents';
 import { resetWebPathIfStale } from './src/lib/webLocation';
 import { Colors } from './src/constants/theme';
 import { Household, Profile } from './src/types';
@@ -39,6 +39,11 @@ export default function App() {
   // Anything touching Supabase from the auth callback goes through here.
   const queueAuthWork = useRef(createAuthEventQueue()).current;
 
+  // Who the last auth event was about. A ref, not state: the subscription below
+  // is set up once with `[]` deps, so it closes over the first render's values
+  // and can never read `session`.
+  const userIdRef = useRef<string | null>(null);
+
   async function loadAccount() {
     try {
       const [nextProfile, nextHousehold] = await Promise.all([
@@ -62,6 +67,9 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      // Claim the user here too, so the INITIAL_SESSION that follows is
+      // recognised as the same person and doesn't load the account twice.
+      userIdRef.current = data.session?.user.id ?? null;
       if (data.session) queueAuthWork(loadAccount);
       else setLoading(false);
     });
@@ -74,19 +82,30 @@ export default function App() {
     // to trigger it. Set state here; put anything touching Supabase through
     // the queue. See src/lib/authEvents.ts.
     const { data: sub } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      setSession(nextSession);
-      resetWebPathIfStale();
+      const nextUserId = nextSession?.user.id ?? null;
+      const plan = planAuthEvent(event, userIdRef.current, nextUserId);
+      userIdRef.current = nextUserId;
 
-      if (event === 'SIGNED_OUT') {
+      if (plan.resetPath) resetWebPathIfStale();
+
+      if (plan.clearAccount) {
+        setSession(null);
         setProfile(null);
         setHousehold(null);
         setLoading(false);
         return;
       }
-      if (nextSession) {
-        setLoading(true);
-        queueAuthWork(loadAccount);
-      }
+
+      // The session we already hold, announced again — a tab coming back from
+      // the camera, a token refresh. Reloading here would unmount the navigator
+      // and every open sheet with it, which is how a photo taken on step three
+      // of the walkthrough became a trip back to the list with nothing saved.
+      // See planAuthEvent.
+      if (!plan.reloadAccount) return;
+
+      setSession(nextSession);
+      setLoading(true);
+      queueAuthWork(loadAccount);
     });
 
     return () => sub.subscription.unsubscribe();

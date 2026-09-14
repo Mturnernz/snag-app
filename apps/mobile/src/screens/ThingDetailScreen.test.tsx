@@ -32,13 +32,13 @@ jest.mock('../components/StickyActionBar', () => {
 
 const mock_getThing = jest.fn();
 const mock_updateThing = jest.fn();
+const mock_createSnag = jest.fn();
 jest.mock('../lib/supabase', () => ({
   getThing: (...a: unknown[]) => mock_getThing(...a),
   updateThing: (...a: unknown[]) => mock_updateThing(...a),
-  getSnags: jest.fn().mockResolvedValue([]),
+  createSnag: (...a: unknown[]) => mock_createSnag(...a),
   getFileUrls: jest.fn().mockResolvedValue({}),
   getFileUrl: jest.fn().mockResolvedValue(null),
-  createSnag: jest.fn(),
   deleteThing: jest.fn(),
   uploadFile: jest.fn(),
 }));
@@ -102,6 +102,11 @@ async function open(over: Partial<any> = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
 });
+
+/** Every text rendered on the page, flattened. */
+const textOf = (node: any): string =>
+  (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : textOf(c))).join('');
+const texts = (r: RenderResult) => r.getAllByType('Text').map(textOf);
 
 describe('ThingDetailScreen', () => {
   it('shows every field as a box, even on a thing with nothing filled in', async () => {
@@ -176,5 +181,99 @@ describe('ThingDetailScreen', () => {
     const result = await open({ documentPaths: ['h1/docs/1757800000000-123456-Rangehood manual.pdf'] });
     expect(pressable(result, 'Attach a PDF')).toBeTruthy();
     expect(pressable(result, 'Open Rangehood manual.pdf')).toBeTruthy();
+  });
+
+  it('shows no example values in any box', async () => {
+    // A grey "7A204871" in the Serial box does not read as a prompt. It reads
+    // as a serial number somebody already entered — on the one page in this app
+    // that exists to be believed in a shop eight months later.
+    //
+    // Only the record's own fields. The "what it takes" box is an add control
+    // with no label of its own, so its prompt is the only thing saying what it
+    // is for — a different job from a box sitting under the word SERIAL.
+    const result = await open();
+    const found = boxes(result);
+    for (const label of ['Name', 'Make', 'Model', 'Serial', 'Installed', 'Warranty until', 'Notes']) {
+      expect(found[label]?.props.placeholder).toBeUndefined();
+    }
+    expect(found['Serial']).toBeTruthy();
+  });
+
+  it('will not turn a saved dishwasher into a tin of paint', async () => {
+    // The Appliance/Paint rail is gone. It existed because capture filed
+    // everything as `appliance` without asking; the walkthrough asks now, and a
+    // kind switch sitting over a filled-in record is an offer to wreck it on a
+    // mis-tap.
+    const result = await open({ name: 'Dishwasher' });
+    const all = texts(result);
+    expect(all).not.toContain('Appliance');
+    expect(all).not.toContain('Paint');
+  });
+
+  it('answers where it is with one pill, and hides the other eleven', async () => {
+    // Twelve chips is a paragraph of controls standing in for one word, on a
+    // page read far more often than it is edited — and eleven are wrong.
+    const result = await open({ room: 'Kitchen' });
+    expect(texts(result)).toContain('Kitchen');
+    expect(pressable(result, 'Change the room')).toBeTruthy();
+    expect(mock_updateThing).not.toHaveBeenCalled();
+  });
+
+  it('drops the section prose, including the one about filters and bulbs', async () => {
+    const result = await open();
+    const prose = texts(result);
+    expect(prose.some((t) => t.includes('The filter, the bulb, the cartridge'))).toBe(false);
+    expect(prose.some((t) => t.includes('cannot find in a drawer'))).toBe(false);
+    expect(prose.some((t) => t.includes('Nothing has needed doing to it yet'))).toBe(false);
+  });
+
+  it('no longer lists what has been wrong with it', async () => {
+    const result = await open();
+    expect(texts(result).some((t) => t.startsWith('On the list'))).toBe(false);
+  });
+
+  it('schedules a service as one already-dated job, never a started one', async () => {
+    // Both halves are the point. Setting a due date through `update_snag` is
+    // one of the four things that start a job, so a service due in six months
+    // would go on the list marked Doing today — which empties the status from
+    // the same end the retired Start button did. `create_snag` takes the date
+    // and the repeat so `v_started` never runs.
+    const saved = thing({ name: 'Heat pump', room: 'Living room', serviceDays: 180 });
+    mock_updateThing.mockResolvedValue(saved);
+    mock_createSnag.mockResolvedValue({ id: 'new-snag' });
+
+    const result = await open({ name: 'Heat pump', room: 'Living room' });
+    await TestRenderer.act(async () => { pressable(result, 'Schedule service').props.onPress(); });
+    await TestRenderer.act(async () => {
+      boxes(result)['Who services it'].props.onChangeText('Plumbing Co');
+    });
+    await TestRenderer.act(async () => { pressable(result, 'Put it on the list').props.onPress(); });
+
+    // The cycle and who does it are facts about the appliance.
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', {
+      serviceDays: 180,
+      spec: { servicedBy: 'Plumbing Co' },
+    });
+
+    // The job is one call, carrying its own date and repeat.
+    expect(mock_createSnag).toHaveBeenCalledTimes(1);
+    const input = mock_createSnag.mock.calls[0][0];
+    expect(input.repeatDays).toBe(180);
+    expect(input.dueAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(input.thingId).toBe('t1');
+    expect(input.room).toBe('Living room');
+  });
+
+  it('offers a default cycle rather than four unanswered chips', async () => {
+    // Pressing "Schedule service" has already said yes. Making somebody pick
+    // from four before anything is on screen is the rail this replaced.
+    const result = await open({ name: 'Heat pump' });
+    await TestRenderer.act(async () => { pressable(result, 'Schedule service').props.onPress(); });
+
+    const six = result.root.findAll(
+      (n) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Every 6 months',
+      { deep: true }
+    )[0];
+    expect(six.props.accessibilityState.selected).toBe(true);
   });
 });

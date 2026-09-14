@@ -211,8 +211,8 @@ friction costs most. The place for it is the capture sheet, or triage.
 
 ## The Schedule tab is a read, never a second way to write
 
-`ScheduleScreen` is the fourth tab, between List and House: a month grid over the same snags,
-arranged by date instead of by room. The list is deliberately bad at "when was the heat pump
+`ScheduleScreen` is the third tab, after House: a month grid over the same snags, arranged by
+date instead of by room. The list is deliberately bad at "when was the heat pump
 filter last changed" and "is anything landing the weekend we're away", because both are questions
 about dates.
 
@@ -222,6 +222,14 @@ two ways to schedule something, neither is trustworthy. So no cell is draggable,
 between days, there is no +, and every row is a door back to the snag. It also sends nobody
 anything: a calendar that could remind you would be the first thing in this product that speaks
 unasked.
+
+**It covers every place at once, and has no property picker.** The other tabs are about a place
+you are standing in, so they ask which one. A date is not about a place: answering "is anything
+landing that weekend" for the bach only, because the bach is what the House tab happened to be
+showing, is the wrong answer to the question. So it calls `getSnags({})` — no property filter at
+all — which returns exactly what `property_members` and the read policies let this person see, and
+names the property on each row when there is more than one. A one-property household never meets
+the concept, as everywhere else.
 
 Four kinds of mark, and **one of them is not real**:
 
@@ -252,7 +260,9 @@ projection, the overdue hue, the unfiltered read and the paging rule.
 
 ## The list is the app's home
 
-`SnagListScreen` is `initialRouteName`, and there are four tabs: List, Schedule, House and You.
+`SnagListScreen` is `initialRouteName`, and there are four tabs: List, House, Schedule and You.
+Schedule sits after House because the first two are where work is done and it is where a question
+gets answered.
 
 **This product has no notifications and deliberately never will** (two people in one house do not
 need an email per snag; see `notify-snag` in the archive). So this screen is the only channel by
@@ -421,10 +431,26 @@ repairer reads a model number out. The compose bar was answering the wrong one h
 questions, and what came out was a photograph of a plate with no room, no kind and no name — the
 weakest thing the record can hold. **Do not put the compose bar back on this tab.**
 
+- **Both list steps are the same control.** Step one was twelve room chips plus an "Add a room…"
+  chip that swapped the whole step for a naming field; step two was already a search box that
+  narrowed as you typed and offered to add whatever did not match. They asked the same shape of
+  question two different ways. Now both are: type, watch the list narrow, and if nothing is it,
+  add what you typed — and on both, the *Next* button is **hidden** when nothing matched, because
+  a dead button under the one live control is a choice that isn't one. Step one grew that footer
+  back the first time it was given a search box, and it read exactly as wrong there.
 - The room is pre-filled whenever the + was pressed inside a room, and **tapping a ghost opens on
   step three**, because it has already answered the first two questions.
 - **The camera is still one tap** — it is just step three now, where a photograph of the rating
   plate still captures make, model, serial and date of manufacture at once.
+- **Step three takes the paperwork and the notes as well as the plate.** An invoice or a
+  certificate of safety is in somebody's hand at the moment they are recording the thing; asking
+  for it later means asking them to go and find it, which is what this tab exists to stop. It is
+  uploaded there and carried into `create_thing` through `p_document_paths` rather than written
+  afterwards — a create-then-update is two chances to leave a file in the bucket that nothing
+  points at.
+- **`notes` is one column doing two jobs, and the kind decides which.** For a paint it is the
+  surface, asked at the last step in those words, because it is the only thing telling two colours
+  in one room apart. For everything else it is free text, asked beside the label.
 - **Nothing is written until the last step**, which is the one real difference from the snag amend
   row and is forced: `create_thing` needs a kind, and a row half-created by somebody who walked
   away mid-flow is exactly the unconfirmed entry the ghost design exists to keep out.
@@ -461,7 +487,17 @@ later, in an aisle, needing one exact string. So:
   **every field the kind can answer is on screen, empty or not**, and **one Save button** commits
   the typed ones together and says so. A paint still gets no Serial box: "every field" means every
   field the kind can answer.
-- **Taps are not in the form.** The kind chips, the room, the parts list, photos and documents each
+- **A saved record is thin on purpose.** Three things were taken off it, and all three were
+  information rather than answers. The Appliance/Paint rail (see below). The twelve room chips,
+  now **one pill and a *Change*** — a paragraph of controls standing in for one word, eleven of
+  them wrong, on a page read far more often than it is edited. And the prose under every section
+  heading: "the filter, the bulb, the cartridge" and the rest.
+- **No example values in any box.** A grey `7A204871` under SERIAL and `Nov 2019` under INSTALLED
+  do not read as prompts; they read as a serial number and a date somebody already entered, on the
+  one page in this app whose whole job is to be believed in a shop eight months later. The
+  uppercase label above each box already says what it wants. (The "what does it take" box keeps
+  its prompt: it is an add control with no label of its own, which is a different job.)
+- **Taps are not in the form.** The room, the parts list, photos and documents each
   still write on press. Those are single decisions that are their own confirmation, and putting a
   dozen of them behind one button is how sorting out a room becomes forty taps.
 - **A field is stacked — name above, box below, full width.** The old two-column row had nowhere to
@@ -501,10 +537,17 @@ and tint formula) live in `spec`, which is jsonb and is the small tail, never th
 rather than five, because five would be five read policies, five write functions and five places
 to get the property check wrong.
 
-**Capture never asks the kind.** It files everything as `appliance` and the thing page corrects it
-in one tap, on something already saved. That is why `update_thing` takes `p_kind` (and why
-`20260912170000` exists — the first migration forgot it, and the page had a Paint chip it
-could not wire up).
+**The walkthrough asks the kind; the thing page no longer offers to change it.** Step two sets it
+from whatever was chosen — a suggestion carries its own kind, and naming something yourself asks
+in two chips. There used to be an Appliance/Paint rail at the top of the spec sheet, because
+capture filed everything as `appliance` without asking and the page had to be able to correct it.
+Now that the kind is asked where somebody is choosing what the thing *is*, a kind switch sitting
+over a filled-in record is an offer to turn a dishwasher into a tin of paint on a mis-tap.
+Mis-filed, it is removed and added again — rarer than the mis-tap.
+
+`update_thing` still takes `p_kind` (and `20260912170000` exists because the first migration
+forgot it). Nothing in the UI passes it; leave it, because five kinds are in the enum and the
+three unbuilt ones will want it.
 
 ### Four joins, all using mechanisms that already exist
 
@@ -517,11 +560,22 @@ could not wire up).
   taps. Filling the parts list is what moves a snag to 'doing', so a job that started itself
   because somebody named the appliance would empty the status from the same end the *Start it*
   button did.
-- **`service_days` is not a scheduler.** It feeds `repeat_days` on a snag, using the recurring
-  mechanism the list already has — no cron, no second table, and still no notifications. The
-  moment there are two ways to schedule something in this app, neither is trustworthy.
-  `describeCycle` is shared by both so they say it the same way ("every 6 months", never "180
-  days").
+- **`service_days` is not a scheduler, and now it does something.** It used to be a rail of
+  intervals on the spec sheet that answered a question and then sat there: the column was written
+  and no job ever appeared. It is a **Schedule service** button and a modal now — how often, who
+  does it (`spec.servicedBy`), when the first one lands — and pressing *Put it on the list* writes
+  the cycle to the thing and puts a repeating snag on the list. Still no cron, no second table, no
+  notifications; the modal says so in words, because a thing called "Schedule service" is exactly
+  what somebody would expect to remind them. `describeCycle` is shared by both so they say it the
+  same way ("every 6 months", never "180 days").
+
+  **The job is created already dated, in one call.** Setting a due date or a repeat through
+  `update_snag` is one of the four things that *start* a job, so create-then-update would put a
+  heat pump service on the list marked **Doing** for the six months before anybody touched it —
+  emptying the status from the same end the retired *Start it* button did. `20260914150000` gave
+  `create_snag` `p_due_at` and `p_repeat_days` so `v_started` never runs. This is not a second way
+  to schedule anything: same two columns, same table, same `set_snag_status` rolling it forward.
+  **The compose bar passes neither and never will** — capture asks nothing before it files.
 
 `things.room` is TEXT for exactly the reason `snags.room` is, and the House tab groups by
 `home.locations` in seeded order — the two tabs have to describe the house in the same words and
@@ -535,7 +589,10 @@ same picker capture has.
 
 `ThingDetailScreen.test.tsx` pins the reversal: every applicable field rendering as a box on an
 empty thing, no Serial on a paint, Save off until something is typed, one write carrying only what
-changed, and an emptied box clearing the column rather than leaving it alone.
+changed, and an emptied box clearing the column rather than leaving it alone. It also pins what
+was taken away — no example values, no kind rail, one room pill, no section prose, no *On the
+list* — and that scheduling a service is one `createSnag` carrying its own date and repeat rather
+than a create followed by an update.
 `houseRecord.test.ts` also pins the document key round-trip — the filename surviving, hyphens not
 being mistaken for the prefix, and two uploads never colliding (`upsert: false` makes a collision a
 failure, not an overwrite).
@@ -908,6 +965,22 @@ npm run test:mobile  # jest
 2. Apply via the Supabase MCP (`apply_migration`) or the SQL Editor
 3. Add the type to `packages/shared-types/src/index.ts`
 4. Grant explicitly, by name
+5. **Add it to the view as well, by name.** Every list and detail screen reads
+   `snags_with_details` or `things_with_details`, never the table.
+
+**A view created with `select t.*` freezes its column list the moment it is created.** This has
+already cost one silent bug: `document_paths` was added to `home.things` two days after
+`things_with_details` was written, so the star had long since been expanded and the new column was
+not in it. The write worked, the toast said "Document added", and the PDF was invisible for ever
+after — the read dropped the column, `mapThing` defaulted it to `[]`, and nothing anywhere had an
+error to report. `20260914140000` rebuilt the view with its columns **written out one by one**, so
+the next added column is a visible omission in a diff rather than a silent one at runtime. It is
+the same argument as granting by name rather than by sweep, and `t.*` should be read the same way
+a grant sweep is: as something that looks like "everything" and means "everything as at the moment
+somebody typed it".
+
+Note `create or replace view` can only *append* columns. Putting one back where it belongs means
+dropping and recreating the view, which takes the grant with it — re-issue it.
 
 ### Add a query
 `packages/supabase-queries/src/index.ts`. Each function takes a `SupabaseClient` so both apps can

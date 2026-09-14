@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, RefreshControl, Pressable, Modal, StyleSheet,
+  View, Text, ScrollView, RefreshControl, Pressable, StyleSheet,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -38,6 +38,14 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * It changes nothing else about the product either: there are still no
  * notifications and there deliberately never will be. A calendar that could
  * remind you would be the first thing in this app that talks to you unasked.
+ *
+ * **Every place at once, and no picker.** The other two tabs are about a place
+ * you are standing in, so they ask which one. This tab is about a date, and a
+ * date does not belong to a house: "are we free that weekend" is the wrong
+ * question to answer for the bach only because the bach is what the House tab
+ * happened to be showing. So it reads every property the user is linked to —
+ * `property_members` already decides what that is — and names the place on each
+ * row when there is more than one.
  *
  * Three things about the month:
  *
@@ -138,7 +146,7 @@ const MONTHS = [
 export default function ScheduleScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { household, properties, activeProperty, setActiveProperty } = useHousehold();
+  const { household, properties } = useHousehold();
 
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
@@ -151,29 +159,34 @@ export default function ScheduleScreen() {
    * what lands in *that month*, not what happened on a day in another one.
    */
   const [selected, setSelected] = useState<string | null>(() => dayKey(today));
-  const [placesOpen, setPlacesOpen] = useState(false);
 
   const [snags, setSnags] = useState<Snag[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const propertyId = properties.length > 1 ? activeProperty?.id ?? null : null;
-
+  /**
+   * No property filter at all, and no status filter either.
+   *
+   * `getSnags` with no `propertyId` returns every place the caller can read,
+   * which `property_members` and the read policies already decide — so this is
+   * exactly "the places this person is linked to" without the client having to
+   * assemble the list or loop. And every status, because a calendar of only the
+   * open ones is missing exactly the half somebody came here to check.
+   *
+   * One small read: a household's whole history is a few hundred rows — the
+   * retired product had 57 across six organisations and two years — so this
+   * beats a query per month or a query per place.
+   */
   const load = useCallback(async () => {
     try {
-      // Every status, unfiltered: a calendar of only the open ones would be
-      // missing exactly the half somebody came here to check. A household's
-      // whole history is a few hundred rows — the retired product had 57
-      // across six organisations and two years — so this is one small read
-      // rather than a query per month.
-      setSnags(await getSnags({ propertyId }, 'newest'));
+      setSnags(await getSnags({}, 'newest'));
     } catch (err) {
       console.error('Failed to load the schedule:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propertyId]);
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -228,22 +241,18 @@ export default function ScheduleScreen() {
     setSelected(null);
   }
 
-  const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
+  // Named for what the screen covers. With a bach in the picture that is not
+  // any one place, and a picker here would offer to narrow to the one thing
+  // this tab exists not to narrow to.
+  const manyPlaces = properties.length > 1;
+  const placeName = manyPlaces ? 'Everywhere' : household.name;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable
-          onPress={() => properties.length > 1 && setPlacesOpen(true)}
-          disabled={properties.length < 2}
-          style={styles.place}
-          accessibilityRole={properties.length > 1 ? 'button' : undefined}
-        >
+        <View style={styles.place}>
           <Text style={styles.title}>{placeName}</Text>
-          {properties.length > 1 ? (
-            <Icon name="chevron-down" size="sm" color={Colors.textMuted} />
-          ) : null}
-        </Pressable>
+        </View>
 
         {/* Only offered when you are not already there — a button that does
             nothing is a button you have to test to find that out. */}
@@ -397,6 +406,10 @@ export default function ScheduleScreen() {
                       it is the heading and repeating it on every row is noise. */}
                   {selected ? '' : `${shortDay(mark.day)} · `}
                   {SCHEDULE_KIND_LABELS[mark.kind]}
+                  {/* Which house, ahead of which room: with two places on one
+                      calendar, "Roof" alone is ambiguous in the way that
+                      actually matters. */}
+                  {manyPlaces ? ` · ${mark.snag.propertyName}` : ''}
                   {mark.snag.room ? ` · ${mark.snag.room}` : ''}
                   {/* Said the way the snag says it — "every 6 months", never
                       "180 days". `describeCycle` is shared with triage so the
@@ -410,31 +423,6 @@ export default function ScheduleScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={placesOpen} transparent animationType="slide" onRequestClose={() => setPlacesOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setPlacesOpen(false)} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
-          <View style={styles.grab} />
-          <Text style={styles.sheetTitle}>Which place</Text>
-          {properties.map((candidate) => {
-            const on = activeProperty?.id === candidate.id;
-            return (
-              <Pressable
-                key={candidate.id}
-                onPress={() => {
-                  setActiveProperty(candidate.id);
-                  setPlacesOpen(false);
-                }}
-                style={styles.placeRow}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-              >
-                <Icon name={on ? 'home' : 'home-outline'} size="md" color={on ? Colors.primary : Colors.textSecondary} />
-                <Text style={[styles.placeLabel, on && styles.placeLabelOn]}>{candidate.name}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -555,21 +543,4 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, minWidth: 0, gap: 2 },
   rowTitle: { fontSize: Typography.base, color: Colors.textPrimary },
   rowMeta: { fontSize: Typography.sm, color: Colors.textMuted },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.card + 6,
-    borderTopRightRadius: Radius.card + 6,
-    padding: Spacing.lg,
-    gap: Spacing.md,
-  },
-  grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
-  sheetTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
-  placeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, minHeight: MIN_TOUCH_TARGET },
-  placeLabel: { fontSize: Typography.base, color: Colors.textSecondary },
-  placeLabelOn: { color: Colors.textPrimary, fontWeight: Typography.semibold },
 });

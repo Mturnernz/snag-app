@@ -412,7 +412,16 @@ export function snagHeadline(snag: Snag): string {
   return snag.room ? `Something in the ${snag.room.toLowerCase()}` : 'Something to sort out';
 }
 
-/** Capture. Everything else about a snag is set later, in triage. */
+/**
+ * Capture. Everything else about a snag is set later, in triage.
+ *
+ * `dueAt` and `repeatDays` are the exception, and they are not for capture —
+ * the compose bar passes neither and never will. They exist so a servicing
+ * regime can create a job that is *already* scheduled: setting either through
+ * `updateSnag` afterwards would move the snag to 'doing', because a due date is
+ * one of the four things that start a job, and a heat pump service would sit on
+ * the list marked Doing for the six months before anybody touched it.
+ */
 export async function createSnag(
   client: SupabaseClient,
   input: {
@@ -422,6 +431,9 @@ export async function createSnag(
     photoPaths?: string[];
     priority?: SnagPriority | null;
     thingId?: string | null;
+    /** Only ever set together, and only by something scheduling ahead. */
+    dueAt?: string | null;
+    repeatDays?: number | null;
   }
 ): Promise<Snag> {
   const { data, error } = await client.rpc('create_snag', {
@@ -431,6 +443,8 @@ export async function createSnag(
     p_photo_paths: input.photoPaths ?? [],
     p_priority: input.priority ?? null,
     p_thing_id: input.thingId ?? null,
+    p_due_at: input.dueAt ?? null,
+    p_repeat_days: input.repeatDays ?? null,
   });
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_snag returns the base row, not the joined view.
@@ -751,6 +765,13 @@ export interface ThingInput {
   name?: string | null;
   room?: string | null;
   photoPaths?: string[];
+  /**
+   * The invoice, the certificate, the manual — offered at the same step as the
+   * rating plate, so it arrives with the row rather than as a second write. A
+   * create followed by an update is two chances to leave a file in the bucket
+   * that nothing points at.
+   */
+  documentPaths?: string[];
   make?: string | null;
   model?: string | null;
   serial?: string | null;
@@ -774,6 +795,7 @@ export async function createThing(client: SupabaseClient, input: ThingInput): Pr
     p_name: input.name ?? null,
     p_room: input.room ?? null,
     p_photo_paths: input.photoPaths ?? [],
+    p_document_paths: input.documentPaths ?? [],
     p_make: input.make ?? null,
     p_model: input.model ?? null,
     p_serial: input.serial ?? null,

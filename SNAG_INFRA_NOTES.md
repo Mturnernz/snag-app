@@ -59,6 +59,36 @@ Last verified: 14 September 2026 — `42501`, as it should be.
 There is no way to set the dashboard value from code: it is platform config, not database state,
 and neither the Supabase MCP nor any migration reaches it. It stays a manual click.
 
+### A view does not see a column added after it
+
+`things_with_details` was created with `select t.*` on 12 September. `document_paths` was added to
+`home.things` on the 14th. The star had been expanded into named columns two days earlier, so the
+view never carried the new column — and every screen reads the view, not the table.
+
+The failure is completely silent from both ends: the write succeeds and toasts, the read drops the
+column, and the client defaults it to `[]`. One PDF was uploaded, stored, referenced on its row,
+and invisible in the app.
+
+`20260914140000` rebuilds the view with every column **named**, so the next one added is a visible
+omission in a diff. If you add a column to `home.things` or `home.snags`, add it to the view in the
+same migration. `create or replace view` can only append columns, so putting one back in its place
+means dropping and recreating — which takes the grant with it.
+
+```sql
+-- What the app can actually read, versus what the table holds.
+select column_name from information_schema.columns
+where table_schema = 'home' and table_name = 'things_with_details'
+except
+select column_name from information_schema.columns
+where table_schema = 'home' and table_name = 'things';
+-- and the other way round, which is the one that bites:
+select column_name from information_schema.columns
+where table_schema = 'home' and table_name = 'things'
+except
+select column_name from information_schema.columns
+where table_schema = 'home' and table_name = 'things_with_details';
+```
+
 ### Finding files nothing points at
 
 Uploads and the rows that reference them are two writes, so a failure between them leaves a file

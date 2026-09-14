@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, Image, TextInput, Pressable, ActivityIndicator, StyleSheet,
+  View, Text, ScrollView, Image, TextInput, Pressable, Modal, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -19,19 +19,17 @@ import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   describeCycle, documentFileName, documentName, formatLooseDate, parseLooseDate,
-  snagHeadline, thingHeadline,
+  thingHeadline,
 } from '@snag/supabase-queries';
 import {
-  createSnag, deleteThing, getFileUrl, getFileUrls, getSnags, getThing,
-  updateThing, uploadFile,
+  createSnag, deleteThing, getFileUrl, getFileUrls, getThing, updateThing, uploadFile,
 } from '../lib/supabase';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
 import {
-  FINISH_SPEC_FIELDS, RootStackParamList, Snag, Thing, ThingKind, THING_KINDS,
-  THING_KIND_FIELD_LABELS, THING_KIND_LABELS,
+  FINISH_SPEC_FIELDS, RootStackParamList, Thing, ThingKind, THING_KIND_FIELD_LABELS,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -82,6 +80,16 @@ const DATE_FIELDS: { key: 'installedAt' | 'warrantyUntil'; label: string }[] = [
 
 /** Service intervals a household actually uses. Nobody types "180 days". */
 const SERVICE_CYCLES = [90, 180, 365, 730];
+
+/** What the regime sheet is holding while it is open. */
+type ServiceDraft = { days: number; by: string; first: string };
+
+const addDays = (from: Date, days: number) =>
+  new Date(from.getFullYear(), from.getMonth(), from.getDate() + days);
+
+/** A local date as `YYYY-MM-DD`, which is what `parseLooseDate` answers in. */
+const isoDate = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 /**
  * Which kinds are asked what they take, and whether they need servicing.
@@ -157,8 +165,10 @@ export default function ThingDetailScreen() {
   const keyboard = useKeyboardInset();
 
   const [thing, setThing] = useState<Thing | null>(null);
-  const [snags, setSnags] = useState<Snag[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  /** Twelve chips stand down to one pill until somebody says otherwise. */
+  const [roomOpen, setRoomOpen] = useState(false);
+  const [service, setService] = useState<ServiceDraft | null>(null);
   const [consumableDraft, setConsumableDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -175,9 +185,6 @@ export default function ThingDetailScreen() {
       setThing(found);
       setDraft(draftFrom(found));
       setPhotoUrls(await getFileUrls(found.photoPaths));
-      // Small by construction: the snags about one appliance, over its life.
-      const all = await getSnags({ propertyId: found.propertyId }, 'newest');
-      setSnags(all.filter((s) => s.thingId === found.id));
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'Please try again.');
     }
@@ -428,6 +435,82 @@ export default function ThingDetailScreen() {
     }
   }
 
+  /**
+   * Opening the regime sheet, filled in with whatever is already arranged.
+   *
+   * A default cycle rather than nothing selected: somebody who pressed
+   * *Schedule service* has already said they want one, and making them pick
+   * from four before anything is on screen is the rail this replaced.
+   */
+  function openService() {
+    if (!thing) return;
+    const days = thing.serviceDays ?? 180;
+    setService({
+      days,
+      by: thing.spec.servicedBy ?? '',
+      first: formatLooseDate(isoDate(addDays(new Date(), days))),
+    });
+  }
+
+  /**
+   * The whole arrangement, in one press.
+   *
+   * Two writes, and both matter. The cycle and who does it go on the *thing*,
+   * because that is a fact about the appliance that outlives any one job. The
+   * job itself goes on the *list*, because the list is the only place this app
+   * ever tells anybody anything — there are no notifications and there never
+   * will be, so a service regime that lived only on the thing's page would be a
+   * note to somebody who is not looking at it.
+   *
+   * The date and the repeat are passed to `create_snag` rather than set
+   * afterwards: setting a due date through `update_snag` is one of the four
+   * things that start a job, and a service due in six months would go on the
+   * list marked *Doing* today.
+   */
+  async function scheduleService() {
+    if (!thing || !service || busy) return;
+    const first = parseLooseDate(service.first.trim());
+    if (service.first.trim() !== '' && first === undefined) {
+      showAlert(
+        "Couldn't read that date",
+        'Try a month and a year, or a full date — "Mar 2027", "14 Mar 2027".'
+      );
+      return;
+    }
+    const due = first ?? isoDate(addDays(new Date(), service.days));
+    const by = service.by.trim();
+
+    setBusy(true);
+    try {
+      const next = await updateThing(thing.id, {
+        serviceDays: service.days,
+        ...(by ? { spec: { servicedBy: by } } : { clearSpec: ['servicedBy'] }),
+      });
+      setThing(next);
+      await createSnag({
+        propertyId: next.propertyId,
+        room: next.room,
+        description: `Service the ${thingHeadline(next).toLowerCase()}${by ? ` · ${by}` : ''}`,
+        thingId: next.id,
+        dueAt: due,
+        repeatDays: service.days,
+      });
+      setService(null);
+      showToast(`On the list · every ${describeCycle(service.days)}`);
+    } catch (err: any) {
+      showAlert("Couldn't set that up", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Stops the regime on the thing. Anything already on the list stays there. */
+  async function stopService() {
+    if (!thing) return;
+    setService(null);
+    await patch({ serviceDays: null, clearSpec: ['servicedBy'] }, 'No longer serviced');
+  }
+
   async function handleDelete() {
     if (!thing) return;
     setConfirmDelete(false);
@@ -515,42 +598,28 @@ export default function ThingDetailScreen() {
           </Pressable>
         </View>
 
-        {/* ── what it is ─────────────────────────────────────────────── */}
-        <View style={styles.rail}>
-          {THING_KINDS.map((kind) => (
-            <Pressable
-              key={kind}
-              onPress={() => patch({ kind }, THING_KIND_LABELS[kind])}
-              style={styles.chipTap}
-              accessibilityRole="button"
-              accessibilityState={{ selected: thing.kind === kind }}
-            >
-              <View style={[styles.chip, thing.kind === kind && styles.chipOn]}>
-                <Text style={[styles.chipLabel, thing.kind === kind && styles.chipLabelOn]}>
-                  {THING_KIND_LABELS[kind]}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-        </View>
-
+        {/* There was an Appliance/Paint rail here, and it has gone. It existed
+            because capture filed everything as `appliance` without asking, so
+            the page had to be able to correct it — but the walkthrough asks the
+            kind now, at the step where somebody is choosing what the thing is.
+            A control that changes what kind of thing this is, sitting above a
+            record somebody has already filled in, is an offer to turn a
+            dishwasher into a tin of paint. Mis-filed, it is removed and added
+            again; that is rarer than the mis-tap it prevents. */}
         <View style={styles.rows}>
-          <Field
-            label="Name"
-            value={draft?.name ?? ''}
-            placeholder="Heat pump · indoor"
-            onChange={(v) => edit('name', v)}
-          />
-          <Field
-            label={words.make}
-            value={draft?.make ?? ''}
-            placeholder={thing.kind === 'finish' ? 'Resene' : 'Mitsubishi Electric'}
-            onChange={(v) => edit('make', v)}
-          />
+          {/* No example values in any of these boxes.
+              A grey "7A204871" in the Serial box and "Nov 2019" in Installed do
+              not read as prompts — they read as a serial number and a date
+              somebody already entered, on a page whose entire job is to be
+              believed in a shop eight months later. The uppercase label above
+              each box already says what it wants, and an empty box that looks
+              empty is the whole point of the reversal that put them all on
+              screen. */}
+          <Field label="Name" value={draft?.name ?? ''} onChange={(v) => edit('name', v)} />
+          <Field label={words.make} value={draft?.make ?? ''} onChange={(v) => edit('make', v)} />
           <Field
             label={words.model}
             value={draft?.model ?? ''}
-            placeholder={thing.kind === 'finish' ? '7BB 83/018' : 'MSZ-AP50VGK'}
             mono
             onCopy={copy}
             savedValue={thing.model}
@@ -560,7 +629,6 @@ export default function ThingDetailScreen() {
             <Field
               label="Serial"
               value={draft?.serial ?? ''}
-              placeholder="7A204871"
               mono
               onCopy={copy}
               savedValue={thing.serial}
@@ -573,7 +641,6 @@ export default function ThingDetailScreen() {
               key={field.key}
               label={field.label}
               value={draft?.spec[field.key] ?? ''}
-              placeholder={field.placeholder}
               mono={field.key === 'tint'}
               onCopy={field.key === 'tint' ? copy : undefined}
               savedValue={thing.spec[field.key] ?? null}
@@ -586,7 +653,6 @@ export default function ThingDetailScreen() {
               key={field.key}
               label={field.label}
               value={draft?.[field.key] ?? ''}
-              placeholder="Nov 2019"
               onChange={(v) => edit(field.key, v)}
             />
           ))}
@@ -594,21 +660,12 @@ export default function ThingDetailScreen() {
           <Field
             label={words.notes}
             value={draft?.notes ?? ''}
-            placeholder={
-              thing.kind === 'finish'
-                ? 'Main wall · windows · ceiling'
-                : 'Anything the next person should know'
-            }
             multiline={thing.kind !== 'finish'}
             onChange={(v) => edit('notes', v)}
           />
         </View>
         {/* ── paperwork ──────────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>Paperwork</Text>
-        <Text style={styles.sectionHint}>
-          The manual, the receipt, the warranty. What you go looking for eight months later and
-          cannot find in a drawer.
-        </Text>
 
         {thing.documentPaths.length > 0 ? (
           <View style={styles.docs}>
@@ -647,35 +704,55 @@ export default function ThingDetailScreen() {
           <Text style={styles.addDetailLabel}>Attach a PDF</Text>
         </Pressable>
 
-        {/* ── where it is ────────────────────────────────────────────── */}
+        {/* ── where it is ────────────────────────────────────────────────
+            The answer, not the question. Twelve room chips is a paragraph of
+            controls standing in for one word, on a page that is read far more
+            often than it is edited — and eleven of them are wrong. So: the room
+            it is in, and a Change beside it for the once in its life somebody
+            moves the dryer. */}
         <Text style={styles.sectionLabel}>Where is it?</Text>
-        <View style={styles.chips}>
-          {locations.map((location) => {
-            const on = thing.room === location.name;
-            return (
-              <Pressable
-                key={location.id}
-                onPress={() => patch({ room: on ? null : location.name }, on ? 'Tag removed' : location.name)}
-                style={styles.chipTap}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-              >
-                <View style={[styles.chip, on && styles.chipOn]}>
-                  <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>{location.name}</Text>
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
+        {roomOpen ? (
+          <View style={styles.chips}>
+            {locations.map((location) => {
+              const on = thing.room === location.name;
+              return (
+                <Pressable
+                  key={location.id}
+                  onPress={() => {
+                    patch({ room: on ? null : location.name }, on ? 'Tag removed' : location.name);
+                    setRoomOpen(false);
+                  }}
+                  style={styles.chipTap}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                >
+                  <View style={[styles.chip, on && styles.chipOn]}>
+                    <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>{location.name}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.roomRow}>
+            <View style={styles.chip}>
+              <Text style={styles.chipLabel}>{thing.room ?? 'Whole house'}</Text>
+            </View>
+            <Pressable
+              onPress={() => setRoomOpen(true)}
+              style={styles.change}
+              accessibilityRole="button"
+              accessibilityLabel="Change the room"
+            >
+              <Text style={styles.changeLabel}>Change</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* ── what it takes ──────────────────────────────────────────── */}
         {KINDS_WITH_CONSUMABLES.includes(thing.kind) ? (
           <>
         <Text style={styles.sectionLabel}>What does it take?</Text>
-        <Text style={styles.sectionHint}>
-          The filter, the bulb, the cartridge — what you would buy again. This is what a job about
-          it offers you in the shop.
-        </Text>
         {thing.consumables.length > 0 ? (
           <View style={styles.partsList}>
             {thing.consumables.map((item, index) => (
@@ -734,79 +811,34 @@ export default function ThingDetailScreen() {
           </>
         ) : null}
 
-        {/* ── does it need doing regularly ───────────────────────────── */}
+        {/* ── servicing ──────────────────────────────────────────────────
+            A rail of intervals answered a question nobody asked and then did
+            nothing with the answer: `service_days` sat on the row and no job
+            ever appeared. One button, and behind it the whole arrangement —
+            how often, who does it, and the job itself on the list. */}
         {KINDS_WITH_SERVICING.includes(thing.kind) ? (
           <>
-        <Text style={styles.sectionLabel}>Does it need servicing?</Text>
-        <View style={styles.chips}>
-          <Pressable
-            onPress={() => thing.serviceDays && patch({ serviceDays: null }, 'No cycle')}
-            style={styles.chipTap}
-            accessibilityRole="button"
-            accessibilityState={{ selected: !thing.serviceDays }}
-          >
-            <View style={[styles.chip, !thing.serviceDays && styles.chipOn]}>
-              <Text style={[styles.chipLabel, !thing.serviceDays && styles.chipLabelOn]}>No</Text>
-            </View>
-          </Pressable>
-          {SERVICE_CYCLES.map((days) => {
-            const on = thing.serviceDays === days;
-            return (
-              <Pressable
-                key={days}
-                onPress={() => patch({ serviceDays: days }, `Every ${describeCycle(days)}`)}
-                style={styles.chipTap}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-              >
-                <View style={[styles.chip, on && styles.chipOn]}>
-                  <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                    Every {describeCycle(days)}
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
-        {thing.serviceDays ? (
-          <Text style={styles.sectionHint}>
-            Noted, not scheduled — this app sends nothing. Add it to the list as a job that comes
-            round, and the list will roll it forward each time it is done.
-          </Text>
-        ) : null}
+            <Text style={styles.sectionLabel}>Servicing</Text>
+            {thing.serviceDays ? (
+              <Text style={styles.serviceNow}>
+                Every {describeCycle(thing.serviceDays)}
+                {thing.spec.servicedBy ? ` · ${thing.spec.servicedBy}` : ''}
+              </Text>
+            ) : null}
+            <Pressable
+              onPress={() => openService()}
+              style={styles.addDetail}
+              accessibilityRole="button"
+              accessibilityLabel="Schedule service"
+            >
+              <Icon name="calendar-outline" size="sm" color={Colors.primary} />
+              <Text style={styles.addDetailLabel}>
+                {thing.serviceDays ? 'Change the service regime' : 'Schedule service'}
+              </Text>
+            </Pressable>
           </>
         ) : null}
 
-        {/* ── what has been wrong with it ────────────────────────────── */}
-        <Text style={styles.sectionLabel}>
-          On the list{snags.length > 0 ? ` · ${snags.length}` : ''}
-        </Text>
-        {snags.length > 0 ? (
-          <View style={styles.partsList}>
-            {snags.map((snag) => (
-              <Pressable
-                key={snag.id}
-                onPress={() => navigation.navigate('SnagDetail', { snagId: snag.id })}
-                style={styles.snagRow}
-                accessibilityRole="button"
-              >
-                <Icon
-                  name={snag.status === 'done' ? 'checkmark-circle' : 'ellipse-outline'}
-                  size="sm"
-                  color={snag.status === 'done' ? Colors.textMuted : Colors.status.open}
-                />
-                <Text
-                  style={[styles.snagText, snag.status === 'done' && styles.snagDone]}
-                  numberOfLines={1}
-                >
-                  {snagHeadline(snag)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.sectionHint}>Nothing has needed doing to it yet.</Text>
-        )}
         <Pressable onPress={addSnag} style={styles.addDetail} accessibilityRole="button">
           <Icon name="add" size="sm" color={Colors.primary} />
           <Text style={styles.addDetailLabel}>Add something about this</Text>
@@ -839,6 +871,108 @@ export default function ThingDetailScreen() {
         </StickyActionBar>
       </View>
 
+      {/* ── the servicing regime ──────────────────────────────────────
+          A modal rather than a section, because it is four decisions that only
+          make sense together: a cycle with nobody to call is half an answer,
+          and a cycle with no first date never surfaces at all. */}
+      <Modal
+        visible={!!service}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setService(null)}
+      >
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setService(null)}
+          accessibilityLabel="Close"
+        />
+        <View style={[styles.sheet, { marginBottom: keyboard }]}>
+          <View style={styles.grab} />
+          <Text style={styles.sheetTitle}>How often is it serviced?</Text>
+          <View style={styles.chips}>
+            {SERVICE_CYCLES.map((days) => {
+              const on = service?.days === days;
+              return (
+                <Pressable
+                  key={days}
+                  onPress={() =>
+                    setService((d) =>
+                      d ? { ...d, days, first: formatLooseDate(isoDate(addDays(new Date(), days))) } : d
+                    )
+                  }
+                  style={styles.chipTap}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Every ${describeCycle(days)}`}
+                  accessibilityState={{ selected: on }}
+                >
+                  <View style={[styles.chip, on && styles.chipOn]}>
+                    <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
+                      Every {describeCycle(days)}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.sheetField}>
+            <Text style={styles.fieldLabel}>First one due</Text>
+            <TextInput
+              style={styles.input}
+              value={service?.first ?? ''}
+              onChangeText={(v) => setService((d) => (d ? { ...d, first: v } : d))}
+              placeholderTextColor={Colors.textMuted}
+              maxLength={40}
+              accessibilityLabel="First one due"
+            />
+          </View>
+
+          <View style={styles.sheetField}>
+            <Text style={styles.fieldLabel}>Who services it</Text>
+            <TextInput
+              style={styles.input}
+              value={service?.by ?? ''}
+              onChangeText={(v) => setService((d) => (d ? { ...d, by: v } : d))}
+              placeholderTextColor={Colors.textMuted}
+              maxLength={120}
+              accessibilityLabel="Who services it"
+            />
+          </View>
+
+          {/* Said once, here, where somebody is setting up something that
+              sounds like it might remind them. It will not. */}
+          <Text style={styles.sectionHint}>
+            It goes on the list as a job that comes round, and the list rolls it forward each time
+            it is done. Nothing is sent to anybody — this app has no notifications.
+          </Text>
+
+          <Pressable
+            onPress={scheduleService}
+            disabled={busy}
+            style={[styles.cta, busy && styles.ctaOff]}
+            accessibilityRole="button"
+            accessibilityLabel="Put it on the list"
+          >
+            {busy ? (
+              <ActivityIndicator color={Colors.white} />
+            ) : (
+              <Text style={styles.ctaLabel}>Put it on the list</Text>
+            )}
+          </Pressable>
+
+          {thing.serviceDays ? (
+            <Pressable
+              onPress={stopService}
+              style={styles.stop}
+              accessibilityRole="button"
+              accessibilityLabel="Stop servicing it"
+            >
+              <Text style={styles.stopLabel}>Stop servicing it</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </Modal>
+
       <ConfirmDialog
         visible={confirmDelete}
         title="Remove this?"
@@ -869,11 +1003,10 @@ export default function ThingDetailScreen() {
  * what this page needed anyway once every field started showing.
  */
 function Field({
-  label, value, placeholder, mono, multiline, onChange, onCopy, savedValue,
+  label, value, mono, multiline, onChange, onCopy, savedValue,
 }: {
   label: string;
   value: string;
-  placeholder: string;
   mono?: boolean;
   multiline?: boolean;
   onChange: (value: string) => void;
@@ -896,12 +1029,14 @@ function Field({
           </Pressable>
         ) : null}
       </View>
+      {/* No placeholder. Grey example text in a box on this page reads as a
+          value somebody already entered — which on the one screen people open
+          in a shop to read a serial number back is the worst thing it could
+          read as. The label above says what the box wants. */}
       <TextInput
         style={[styles.input, mono && styles.inputMono, multiline && styles.inputMulti]}
         value={value}
         onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={Colors.textMuted}
         autoCorrect={!mono}
         autoCapitalize={mono ? 'characters' : 'sentences'}
         multiline={multiline}
@@ -1083,18 +1218,37 @@ const styles = StyleSheet.create({
   // reads as broken rather than as not-ready, and white on pale sage fails
   // contrast on the way past.
   partAddOff: { backgroundColor: Colors.sunken },
-  snagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
+  roomRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  change: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.xs },
+  changeLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
+  serviceNow: { fontSize: Typography.base, color: Colors.textPrimary },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: Colors.surface,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: Spacing.md,
-    minHeight: MIN_TOUCH_TARGET,
+    borderTopLeftRadius: Radius.card,
+    borderTopRightRadius: Radius.card,
+    padding: Spacing.lg,
+    gap: Spacing.sm,
   },
-  snagDone: { color: Colors.textMuted, textDecorationLine: 'line-through' },
+  grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
+  sheetTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
+  sheetField: { gap: Spacing.xs, minWidth: 0 },
+  cta: {
+    minHeight: MIN_TOUCH_TARGET,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Spacing.xs,
+  },
+  ctaOff: { backgroundColor: Colors.sunken },
+  ctaLabel: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.white },
+  stop: { minHeight: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },
+  stopLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.danger },
   remove: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', marginTop: Spacing.xl },
   removeLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.danger },
 });

@@ -28,13 +28,22 @@ jest.mock('@react-navigation/native', () => ({
 const mock_getSnags = jest.fn();
 jest.mock('../lib/supabase', () => ({ getSnags: (...a: unknown[]) => mock_getSnags(...a) }));
 jest.mock('../hooks/useHousehold', () => ({
-  useHousehold: () => ({
-    household: { id: 'h', name: 'Home', createdAt: '' },
-    properties: [{ id: 'p', householdId: 'h', name: 'Home' }],
-    activeProperty: { id: 'p', householdId: 'h', name: 'Home' },
-    setActiveProperty: jest.fn(),
-  }),
+  useHousehold: () => (global as any).__household,
 }));
+
+/** One place by default; `places(2)` puts a bach beside the house. */
+function places(count: number) {
+  const all = [
+    { id: 'p', householdId: 'h', name: 'Home' },
+    { id: 'b', householdId: 'h', name: 'The bach' },
+  ].slice(0, count);
+  (global as any).__household = {
+    household: { id: 'h', name: 'Home', createdAt: '' },
+    properties: all,
+    activeProperty: all[0],
+    setActiveProperty: jest.fn(),
+  };
+}
 
 /** Fixed, so "this month" is a month whose contents these tests decide. */
 const NOW = new Date(2026, 8, 14, 9, 0);
@@ -78,6 +87,7 @@ async function open(rows: any[]) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  places(1);
   jest.useFakeTimers({ doNotFake: ['nextTick'] }).setSystemTime(NOW);
 });
 
@@ -86,11 +96,39 @@ afterEach(() => {
 });
 
 describe('ScheduleScreen', () => {
-  it('reads every status, because a calendar of the open ones is half a calendar', async () => {
+  it('narrows by nothing at all — not the status, not the place', async () => {
+    // A calendar of only the open ones is missing exactly the half somebody
+    // came to check. And a date does not belong to a house: reading one
+    // property would answer "is anything landing that weekend" for whichever
+    // place the House tab happened to be showing, which is not the question.
+    // An empty filter is every property `property_members` lets you read.
+    places(2);
     await open([]);
-    expect(mock_getSnags).toHaveBeenCalledWith({ propertyId: null }, 'newest');
-    // Nothing narrowed it to open, doing or done.
+
+    expect(mock_getSnags).toHaveBeenCalledWith({}, 'newest');
+    expect(mock_getSnags.mock.calls[0][0].propertyId).toBeUndefined();
     expect(mock_getSnags.mock.calls[0][0].status).toBeUndefined();
+  });
+
+  it('says which house a row is at, but only when there is a choice', async () => {
+    // Filed today, so it lists under Today without having to page anywhere.
+    const bachRow = () => snag({
+      id: 'b1', propertyName: 'The bach', room: 'Roof',
+      createdAt: '2026-09-13T21:00:00Z',
+    });
+
+    places(2);
+    const both = await open([bachRow()]);
+    const meta = texts(both).filter((t) => t.includes(' · '));
+    expect(meta.some((t) => t.includes('The bach') && t.includes('Roof'))).toBe(true);
+
+    // One house, and naming it on every row is noise about a fact that cannot
+    // vary — "Roof" is unambiguous when there is only one roof.
+    places(1);
+    const alone = await open([snag({ id: 'b1', propertyName: 'Home', room: 'Roof', createdAt: '2026-09-13T21:00:00Z' })]);
+    const soloMeta = texts(alone).filter((t) => t.includes(' · '));
+    expect(soloMeta.some((t) => t.includes('Roof'))).toBe(true);
+    expect(soloMeta.some((t) => t.includes('Home'))).toBe(false);
   });
 
   it('draws a real due date filled and a projected one hollow', async () => {

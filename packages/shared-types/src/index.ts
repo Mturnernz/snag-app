@@ -453,14 +453,6 @@ export type MainTabParamList = {
    */
   Snags: undefined;
   /**
-   * The same work, arranged by date rather than by room.
-   *
-   * A read of the list and never a second way to write to it: there is one
-   * scheduling mechanism in this app, and the moment there are two, neither is
-   * trustworthy. It still sends nobody a reminder.
-   */
-  Schedule: undefined;
-  /**
    * The house record — what's *there*, beside the list of what's wrong.
    *
    * Named "House" rather than "My House" because the moment there is a bach,
@@ -469,5 +461,15 @@ export type MainTabParamList = {
    * has.
    */
   House: undefined;
+  /**
+   * The same work, arranged by date rather than by room — and across every
+   * place you are linked to at once, because "is anything landing that
+   * weekend" does not stop at the house you happen to be looking at.
+   *
+   * A read of the list and never a second way to write to it: there is one
+   * scheduling mechanism in this app, and the moment there are two, neither is
+   * trustworthy. It still sends nobody a reminder.
+   */
+  Schedule: undefined;
   Profile: undefined;
 };

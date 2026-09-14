@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from './Icon';
@@ -9,8 +10,10 @@ import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '..
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
+import { uploadFile } from '../lib/supabase';
 import {
-  catalogueSuggestions, matchSuggestions, suggestionsForRoom, type ThingInput,
+  catalogueSuggestions, documentFileName, documentName, matchSuggestions,
+  suggestionsForRoom, type ThingInput,
 } from '@snag/supabase-queries';
 import { Location, ThingKind, THING_KINDS, THING_KIND_LABELS } from '../types';
 
@@ -36,6 +39,15 @@ import { Location, ThingKind, THING_KINDS, THING_KIND_LABELS } from '../types';
  * - **The camera is still one tap**, just no longer the doorway. Step three
  *   photographs the rating plate, which remains the fastest way to capture
  *   make, model, serial and date of manufacture without typing anything.
+ *
+ * **Both list steps are the same control**, and that is deliberate. Step one
+ * used to be a wall of twelve room chips plus an "Add a room…" chip that swapped
+ * the whole step for a naming field; step two was already a search box that
+ * narrowed as you typed and offered to add whatever did not match. They asked
+ * the same shape of question and answered it two different ways. Now both are:
+ * type, watch the list narrow, and if nothing is it, add what you typed. A house
+ * whose rooms or appliances are not the catalogue's is a normal house, and
+ * neither step is allowed to insist otherwise.
  *
  * Nothing is written until the last step. That is the one real difference from
  * the snag amend row, and it is forced: `create_thing` needs a kind, and a row
@@ -90,7 +102,12 @@ export default function AddThingSheet({
   const [serviceDays, setServiceDays] = useState<number | null>(null);
   /** For a paint: which surface in the room. "Main wall", "Windows". */
   const [where, setWhere] = useState('');
-  const [newRoom, setNewRoom] = useState<string | null>(null);
+  /** Free text on step three. A paint answers step four with a surface instead. */
+  const [note, setNote] = useState('');
+  const [docPath, setDocPath] = useState<string | null>(null);
+  const [docLabel, setDocLabel] = useState<string | null>(null);
+  /** What they typed into step one's search. Never a value, only a filter. */
+  const [lookRoom, setLookRoom] = useState('');
   /** What they typed into step two's search. Never a value, only a filter. */
   const [look, setLook] = useState('');
   const [busy, setBusy] = useState(false);
@@ -109,7 +126,10 @@ export default function AddThingSheet({
     setTakes('');
     setServiceDays(null);
     setWhere('');
-    setNewRoom(null);
+    setNote('');
+    setDocPath(null);
+    setDocLabel(null);
+    setLookRoom('');
     setLook('');
     setBusy(false);
     // Tapping a ghost has already answered the first two questions, so opening
@@ -145,6 +165,18 @@ export default function AddThingSheet({
     return catalogueSuggestions().filter((one) => !mine.has(one.name));
   }, [suggestions]);
 
+  /**
+   * The rooms this property has, narrowed by whatever is in the box.
+   *
+   * Substring anywhere and case-insensitive, exactly like step two's matcher —
+   * somebody hunting the living room types "living", and somebody hunting it
+   * from the other end types "room". Neither should come back empty.
+   */
+  const roomQuery = lookRoom.trim().toLowerCase();
+  const roomMatches = locations.filter((one) => one.name.toLowerCase().includes(roomQuery));
+  const wholeHouseMatches = 'whole house'.includes(roomQuery);
+  const noRoomMatch = roomQuery.length > 0 && roomMatches.length === 0 && !wholeHouseMatches;
+
   const hereMatches = matchSuggestions(suggestions, look);
   const elsewhereMatches = matchSuggestions(elsewhere, look);
   const searchingList = look.trim().length > 0;
@@ -163,15 +195,22 @@ export default function AddThingSheet({
     else if (step === 'label') setStep('takes');
   }
 
+  /**
+   * A room the catalogue has never heard of, named from the search box itself.
+   *
+   * It writes to `home.locations`, so a conservatory added here is a room on the
+   * List tab and in capture too — rooms are a property's vocabulary, not this
+   * sheet's. The box is cleared on success so the list comes back showing the
+   * new room selected rather than a filter that now matches one thing.
+   */
   async function addRoom() {
-    const name = newRoom?.trim();
+    const name = lookRoom.trim();
     if (!name || busy) return;
     setBusy(true);
     try {
       if (await onAddRoom(name)) {
         setRoom(name);
-        setNewRoom(null);
-    setLook('');
+        setLookRoom('');
       }
     } finally {
       setBusy(false);
@@ -204,6 +243,44 @@ export default function AddThingSheet({
     }
   }
 
+  /**
+   * The invoice, the certificate of safety, the manual.
+   *
+   * Uploaded here and carried into `create_thing` rather than written
+   * afterwards: the bytes are in the bucket the moment this returns, and a
+   * create-then-update is two chances for somebody to walk away between the
+   * file landing and the row that points at it. `create_thing` takes
+   * `p_document_paths` for exactly this.
+   *
+   * If they walk away before the last step the file is orphaned — the same
+   * trade the plate photo already makes, and the same one `create_thing`'s
+   * all-or-nothing write forces. The audit query in SNAG_INFRA_NOTES.md is how
+   * those are found.
+   */
+  async function attachDocument() {
+    if (busy || !pathPrefix) return;
+    const picked = await DocumentPicker.getDocumentAsync({
+      type: 'application/pdf',
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (picked.canceled || !picked.assets?.[0]) return;
+    const asset = picked.assets[0];
+
+    setBusy(true);
+    try {
+      const key = documentFileName(pathPrefix, asset.name ?? 'document.pdf');
+      const { path, error } = await uploadFile(asset.uri, key, 'application/pdf');
+      if (error || !path) throw error ?? new Error('The document did not upload');
+      setDocPath(path);
+      setDocLabel(documentName(path));
+    } catch (err: unknown) {
+      console.error('Document failed:', failureReason(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit() {
     if (busy) return;
     setBusy(true);
@@ -213,13 +290,18 @@ export default function AddThingSheet({
         room,
         name: name.trim() || null,
         photoPaths: photoPath ? [photoPath] : [],
+        documentPaths: docPath ? [docPath] : [],
         make: make.trim() || null,
         model: model.trim() || null,
         // A paint answers the last step with a surface; everything else answers
         // it with a part and a cycle. Neither carries the other's fields.
         consumables: !painting && takes.trim() ? [takes.trim()] : [],
         serviceDays: painting ? null : serviceDays,
-        notes: painting ? where.trim() || null : null,
+        // `notes` is one column doing two jobs, and the kind decides which. For
+        // a paint it is the surface — the only thing telling two colours in one
+        // room apart — so it is asked at the last step in those words. For
+        // everything else it is free text, asked beside the label.
+        notes: painting ? where.trim() || null : note.trim() || null,
       });
     } finally {
       setBusy(false);
@@ -231,7 +313,8 @@ export default function AddThingSheet({
   // Step three asks for nothing, so "Next" and a separate "Skip" were two
   // controls with one outcome sitting side by side. One control, and it says
   // which of the two things it is doing.
-  const labelStepEmpty = !photoPath && !make.trim() && !model.trim();
+  const labelStepEmpty =
+    !photoPath && !docPath && !make.trim() && !model.trim() && !note.trim();
   const nextLabel = step === 'label' && labelStepEmpty ? 'Skip for now' : 'Next';
 
   return (
@@ -261,10 +344,49 @@ export default function AddThingSheet({
         {step === 'room' ? (
           <>
             <Text style={styles.question}>Which room?</Text>
+            <View style={styles.searchRow}>
+              <Icon name="search" size="sm" color={Colors.textMuted} />
+              <TextInput
+                style={styles.searchField}
+                value={lookRoom}
+                onChangeText={setLookRoom}
+                placeholder="Start typing a room…"
+                placeholderTextColor={Colors.textMuted}
+                autoCorrect={false}
+                returnKeyType="done"
+                onSubmitEditing={noRoomMatch ? addRoom : undefined}
+                accessibilityLabel="Search the rooms"
+              />
+            </View>
             <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
-              {newRoom === null ? (
+              {noRoomMatch ? (
+                // Not a dead end. A conservatory is not an odd house, and the
+                // sheet has to be able to learn one without sending anybody to
+                // Profile → Location tags and back.
+                <View style={styles.fields}>
+                  <Text style={styles.hint}>
+                    No room by that name yet. It joins the tags the list groups by and capture
+                    offers, not just this tab.
+                  </Text>
+                  <Pressable
+                    onPress={addRoom}
+                    disabled={busy}
+                    style={[styles.cta, busy && styles.ctaOff]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${lookRoom.trim()} as a room`}
+                  >
+                    {busy ? (
+                      <ActivityIndicator color={Colors.white} />
+                    ) : (
+                      <Text style={styles.ctaLabel} numberOfLines={1}>
+                        Add “{lookRoom.trim()}” as a room
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              ) : (
                 <View style={styles.chips}>
-                  {locations.map((location) => (
+                  {roomMatches.map((location) => (
                     <Chip
                       key={location.id}
                       label={location.name}
@@ -272,43 +394,13 @@ export default function AddThingSheet({
                       onPress={() => setRoom(location.name)}
                     />
                   ))}
-                  <Chip
-                    label="Whole house"
-                    on={room === null && !!start}
-                    onPress={() => setRoom(null)}
-                  />
-                  <Chip label="Add a room…" on={false} onPress={() => setNewRoom('')} />
-                </View>
-              ) : (
-                <View style={styles.fields}>
-                  <TextInput
-                    style={styles.input}
-                    value={newRoom}
-                    onChangeText={setNewRoom}
-                    placeholder="Conservatory · Study · Movie room"
-                    placeholderTextColor={Colors.textMuted}
-                    maxLength={40}
-                    autoFocus
-                    returnKeyType="done"
-                    onSubmitEditing={addRoom}
-                    accessibilityLabel="Name the room"
-                  />
-                  <Pressable
-                    onPress={addRoom}
-                    disabled={busy || !newRoom.trim()}
-                    style={[styles.cta, (busy || !newRoom.trim()) && styles.ctaOff]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Add the room"
-                  >
-                    <Text
-                      style={[styles.ctaLabel, (busy || !newRoom.trim()) && styles.ctaLabelOff]}
-                    >
-                      Add the room
-                    </Text>
-                  </Pressable>
-                  <Text style={styles.hint}>
-                    It joins the tags the list groups by and capture offers, not just this tab.
-                  </Text>
+                  {wholeHouseMatches ? (
+                    <Chip
+                      label="Whole house"
+                      on={room === null && !!start}
+                      onPress={() => setRoom(null)}
+                    />
+                  ) : null}
                 </View>
               )}
             </ScrollView>
@@ -326,7 +418,7 @@ export default function AddThingSheet({
                   style={styles.searchField}
                   value={look}
                   onChangeText={setLook}
-                  placeholder="Search, or type something new"
+                  placeholder="Start typing — dishwasher, heat pump, paint…"
                   placeholderTextColor={Colors.textMuted}
                   autoCorrect={false}
                   autoCapitalize="none"
@@ -516,6 +608,58 @@ export default function AddThingSheet({
                   accessibilityLabel={kind === 'finish' ? 'Colour code' : 'Model'}
                 />
               </View>
+
+              {/* The paperwork, at the moment somebody has it in their hand.
+                  Asking for it later means asking somebody to go and find it,
+                  which is the thing this whole tab exists to stop. */}
+              {docPath ? (
+                <View style={styles.doc}>
+                  <Icon name="document-text-outline" size="sm" color={Colors.textSecondary} />
+                  <Text style={styles.docName} numberOfLines={2}>{docLabel}</Text>
+                  <Pressable
+                    onPress={() => {
+                      setDocPath(null);
+                      setDocLabel(null);
+                    }}
+                    style={styles.docRemove}
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove the file"
+                  >
+                    <Icon name="close" size="sm" color={Colors.textMuted} />
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable
+                  onPress={attachDocument}
+                  disabled={busy || !pathPrefix}
+                  style={styles.attach}
+                  accessibilityRole="button"
+                  accessibilityLabel="Attach a file"
+                >
+                  <Icon name="attach-outline" size="sm" color={Colors.primary} />
+                  <Text style={styles.attachLabel}>
+                    Attach a file — invoice, certificate, manual
+                  </Text>
+                </Pressable>
+              )}
+
+              {/* A paint is asked for its surface at the last step instead, in
+                  those words: `notes` is one column and the kind decides what
+                  it means. */}
+              {!painting ? (
+                <View style={styles.fields}>
+                  <TextInput
+                    style={[styles.input, styles.inputMulti]}
+                    value={note}
+                    onChangeText={setNote}
+                    placeholder="Anything worth writing down — where it is, who installed it, what it cost"
+                    placeholderTextColor={Colors.textMuted}
+                    maxLength={1000}
+                    multiline
+                    accessibilityLabel="Notes"
+                  />
+                </View>
+              ) : null}
             </ScrollView>
           </>
         ) : null}
@@ -596,9 +740,12 @@ export default function AddThingSheet({
               <Text style={styles.ctaLabel}>Add it</Text>
             )}
           </Pressable>
-        ) : step === 'what' && noMatch && !naming ? null : (
+        ) : (step === 'what' && noMatch && !naming) || (step === 'room' && noRoomMatch) ? null : (
           // Nothing matched, so the only thing to do is add it — and a dead
           // Next sitting under the one live control is a choice that isn't one.
+          // True of both list steps, which is the point of them being the same
+          // control: step one grew this footer back the first time it was given
+          // a search box, and it read exactly as wrong there.
           <View style={styles.footer}>
             <Pressable
               onPress={next}
@@ -723,6 +870,34 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   inputMono: { fontFamily: Fonts.mono, fontSize: Typography.sm },
+  inputMulti: { minHeight: 80, paddingTop: Spacing.sm, textAlignVertical: 'top' },
+  attach: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  attachLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
+  doc: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.input,
+  },
+  // The filename is the label — it is why the storage key keeps it — so it
+  // wraps rather than truncating to a name every invoice shares.
+  docName: { flex: 1, minWidth: 0, fontSize: Typography.sm, color: Colors.textPrimary },
+  docRemove: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   shoot: {
     flexDirection: 'row',
     alignItems: 'center',

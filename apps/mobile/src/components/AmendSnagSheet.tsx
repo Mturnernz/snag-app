@@ -65,6 +65,9 @@ export default function AmendSnagSheet({
 
   const index = ORDER.indexOf(step);
   const total = ORDER.length;
+  // `null` and `'low'` both already mean "not urgent" — only `high` is a
+  // claim, so nothing has to be written for the default to be true.
+  const urgent = snag.priority === 'high';
 
   async function next() {
     if (step === 'note') {
@@ -117,10 +120,6 @@ export default function AmendSnagSheet({
         {step === 'note' ? (
           <>
             <Text style={styles.question}>What's wrong?</Text>
-            <Text style={styles.hint}>
-              A few words is plenty. It is what the list shows, and what makes this findable in a
-              fortnight.
-            </Text>
             <TextInput
               style={styles.note}
               value={note}
@@ -139,10 +138,6 @@ export default function AmendSnagSheet({
         {step === 'room' ? (
           <>
             <Text style={styles.question}>Where is it?</Text>
-            <Text style={styles.hint}>
-              The list groups by room, so this is what puts it beside the other things waiting in
-              the same place.
-            </Text>
             <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
               <View style={styles.chips}>
                 {locations.map((location) => {
@@ -170,31 +165,37 @@ export default function AmendSnagSheet({
         {step === 'urgency' ? (
           <>
             <Text style={styles.question}>Does it need doing now?</Text>
-            <Text style={styles.hint}>
-              Nearly everything here can wait, which is the point of the list. Urgent is for the
-              things that can't.
-            </Text>
+            {/* Two named pills rather than one that toggles, because the
+                answer is already on screen before anybody touches it: a lone
+                "Urgent" chip left "not urgent" as the unlabelled absence of a
+                press, which is a state nothing on the sheet said out loud. Not
+                urgent is where every snag starts — nearly everything here can
+                wait, and that is the premise of the list rather than a
+                judgement it needs from you. */}
             <View style={styles.chips}>
               <Pressable
-                onPress={() => onSetUrgent(snag.priority !== 'high')}
-                style={[styles.chip, snag.priority === 'high' && styles.chipAlert]}
+                onPress={() => urgent && onSetUrgent(false)}
+                style={[styles.chip, !urgent && styles.chipOn]}
                 accessibilityRole="button"
-                accessibilityState={{ selected: snag.priority === 'high' }}
+                accessibilityState={{ selected: !urgent }}
               >
-                <Text
-                  style={[styles.chipLabel, snag.priority === 'high' && styles.chipAlertLabel]}
-                >
-                  Urgent
-                </Text>
+                <Text style={[styles.chipLabel, !urgent && styles.chipLabelOn]}>Not urgent</Text>
               </Pressable>
               <Pressable
-                onPress={onOpenDetail}
-                style={styles.chip}
+                onPress={() => !urgent && onSetUrgent(true)}
+                style={[styles.chip, urgent && styles.chipAlert]}
                 accessibilityRole="button"
+                accessibilityState={{ selected: urgent }}
               >
-                <Text style={styles.chipLabel}>Sort it out…</Text>
+                <Text style={[styles.chipLabel, urgent && styles.chipAlertLabel]}>Urgent</Text>
               </Pressable>
             </View>
+            {/* Its own line, not a third pill. The pills are one answer to one
+                question; this is the door out of the sheet into triage, and a
+                row mixing the two makes the answer look like three options. */}
+            <Pressable onPress={onOpenDetail} style={styles.triage} accessibilityRole="button">
+              <Text style={styles.triageLabel}>Sort it out…</Text>
+            </Pressable>
           </>
         ) : null}
 
@@ -263,7 +264,6 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
   question: { fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.textPrimary },
-  hint: { fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19 },
   note: {
     minHeight: 96,
     backgroundColor: Colors.sunken,
@@ -286,6 +286,8 @@ const styles = StyleSheet.create({
   chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   chipAlertLabel: { color: Colors.white, fontWeight: Typography.semibold },
+  triage: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  triageLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   next: {
     minHeight: MIN_TOUCH_TARGET,
     borderRadius: Radius.button,

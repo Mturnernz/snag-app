@@ -16,12 +16,10 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
   createLocation, createThing, getAbsentThings, getFileUrls, getThings, markThingAbsent,
-  restoreAbsentThings,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import {
-  AbsentThing, RootStackParamList, Thing, ThingGrouping, ThingKind, ThingSuggestion,
-  THING_KINDS, THING_KIND_GROUP_LABELS,
+  AbsentThing, RootStackParamList, Thing, ThingKind, ThingSuggestion,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -48,12 +46,18 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * - **Progress is per room, never a percentage.** "Kitchen · 2 of 8" is a unit
  *   of work somebody can finish on a Saturday. A global completeness meter is
  *   the shaming number that gets an app closed and not reopened.
- * - **Ghosts appear under *By room* only.** By kind answers "what appliances do
- *   we have", and a thing nobody has confirmed is not one of them.
- * - **Dismissing is a tap; undoing it is a rescue.** The × means "no dryer
- *   here", and each room that has dismissals carries one line to bring them all
- *   back. A rescue that costs six taps is a dead end, which is the same reason
- *   `Elsewhere` is in the location seed.
+ * - **The record is grouped by room and only by room.** There was a By kind
+ *   view beside it, and what it cost was a rail of two controls sitting over
+ *   every visit to answer a question — "what appliances do we have" — that
+ *   search already answers from the field above it. Rooms are how somebody
+ *   standing in a house thinks, and how the List tab groups; one layout means
+ *   the two tabs cannot drift.
+ * - **Dismissing a suggestion is final.** The × means "no dryer here" and
+ *   writes to `home.absent_things`, and that is the end of it: the prompt does
+ *   not come back and nothing offers to bring it back. A room full of rescue
+ *   lines for things somebody deliberately said were not there is clutter on
+ *   the answer. The + still offers every kind the catalogue knows, so a dryer
+ *   that does turn up is recorded the ordinary way.
  *
  * Adding is a **+** and a four-step walkthrough rather than the compose bar
  * capture uses. A snag is filed in ten seconds standing in front of the
@@ -61,11 +65,6 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * model number out. The camera is still one tap — it is just step three now,
  * where it captures make, model, serial and date of manufacture at once.
  */
-
-const GROUPINGS: { key: ThingGrouping; label: string }[] = [
-  { key: 'room', label: 'By room' },
-  { key: 'kind', label: 'By kind' },
-];
 
 /** Things that belong to the place rather than to a room in it. */
 const NO_ROOM = 'Whole house';
@@ -77,8 +76,6 @@ type Row =
 interface Section {
   title: string;
   room?: string;
-  hidden?: number;
-  isNew?: boolean;
   data: Row[];
 }
 
@@ -90,7 +87,6 @@ export default function HouseScreen() {
   } = useHousehold();
   const { showToast } = useToast();
 
-  const [grouping, setGrouping] = useState<ThingGrouping>('room');
   const [query, setQuery] = useState('');
   const [placesOpen, setPlacesOpen] = useState(false);
 
@@ -157,27 +153,6 @@ export default function HouseScreen() {
         : [];
     }
 
-    if (grouping === 'kind') {
-      const out: Section[] = [];
-      for (const kind of THING_KINDS) {
-        const group = visible.filter((t) => t.kind === kind);
-        if (group.length > 0) {
-          out.push({
-            title: `${THING_KIND_GROUP_LABELS[kind]} · ${group.length}`,
-            data: group.map((thing) => ({ row: 'thing' as const, key: thing.id, thing })),
-          });
-        }
-      }
-      const other = visible.filter((t) => !THING_KINDS.includes(t.kind));
-      if (other.length > 0) {
-        out.push({
-          title: `Everything else · ${other.length}`,
-          data: other.map((thing) => ({ row: 'thing' as const, key: thing.id, thing })),
-        });
-      }
-      return out;
-    }
-
     // Seeded order, exactly as the list groups snags — the two tabs have to
     // describe the house in the same words and the same order, or the room a
     // snag is in and the room a thing is in stop reading as the same place.
@@ -216,7 +191,6 @@ export default function HouseScreen() {
         // are dismissed rather than pretending the house is bigger than it is.
         title: ghosts.length > 0 ? `${room} · ${recorded.length} of ${total}` : `${room} · ${total}`,
         room,
-        hidden: absent.filter((a) => a.room === room).length,
         data: rows,
       });
     };
@@ -226,7 +200,7 @@ export default function HouseScreen() {
     for (const room of extra) addRoom(room);
     if (byRoom.has(NO_ROOM)) addRoom(NO_ROOM);
     return out;
-  }, [visible, things, absent, searching, grouping, locations]);
+  }, [visible, things, absent, searching, locations]);
 
   const recorded = things.length;
 
@@ -290,26 +264,25 @@ export default function HouseScreen() {
     }
   }
 
+  /**
+   * "No dryer here" — and that is the end of it.
+   *
+   * There is no undo line under the room any more. A suggestion is a guess
+   * about this house, saying it is wrong is a small certain fact, and a row of
+   * rescue offers for guesses somebody has already corrected is clutter on top
+   * of the answer. If a dryer does arrive, it is recorded with the + like
+   * anything else the catalogue never guessed at.
+   */
   async function dismiss(room: string, suggestion: ThingSuggestion) {
     if (!propertyId) return;
-    // Optimistic: the × is a small, certain, reversible act, and a card that
-    // waits a round trip to disappear reads as a tap that did not land.
+    // Optimistic: a card that waits a round trip to disappear reads as a tap
+    // that did not land. The write is put back if the server refuses it.
     setAbsent((current) => [...current, { propertyId, room, name: suggestion.name }]);
     try {
       await markThingAbsent(propertyId, room, suggestion.name);
     } catch (err: any) {
       setAbsent((current) => current.filter((a) => !(a.room === room && a.name === suggestion.name)));
       showAlert("Couldn't hide that", err?.message ?? 'Please try again.');
-    }
-  }
-
-  async function restore(room: string) {
-    if (!propertyId) return;
-    try {
-      await restoreAbsentThings(propertyId, room);
-      setAbsent((current) => current.filter((a) => a.room !== room));
-    } catch (err: any) {
-      showAlert("Couldn't bring those back", err?.message ?? 'Please try again.');
     }
   }
 
@@ -358,29 +331,10 @@ export default function HouseScreen() {
         ) : null}
       </View>
 
-      {!searching ? (
-        <View style={styles.rail}>
-          {GROUPINGS.map(({ key, label }) => (
-            <Pressable
-              key={key}
-              onPress={() => setGrouping(key)}
-              style={styles.chipTap}
-              accessibilityRole="button"
-              accessibilityLabel={label}
-              accessibilityState={{ selected: grouping === key }}
-            >
-              <View style={[styles.chip, grouping === key && styles.chipOn]}>
-                <Text style={[styles.chipLabel, grouping === key && styles.chipLabelOn]}>
-                  {label}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-          {/* "Recorded", not "things": the ghosts on this screen are not things
-              and counting them here would be the first place the two blur. */}
-          <Text style={styles.count}>{recorded} recorded</Text>
-        </View>
-      ) : null}
+      {/* All that is left of the grouping rail. "Recorded", not "things": the
+          ghosts on this screen are not things, and counting them here would be
+          the first place the two blur. */}
+      {!searching ? <Text style={styles.count}>{recorded} recorded</Text> : null}
 
       <SectionList
         sections={sections}
@@ -413,19 +367,6 @@ export default function HouseScreen() {
             ) : null}
           </View>
         )}
-        renderSectionFooter={({ section }) =>
-          section.hidden ? (
-            <Pressable
-              onPress={() => section.room && restore(section.room)}
-              style={styles.restore}
-              accessibilityRole="button"
-            >
-              <Text style={styles.restoreLabel}>
-                {section.hidden} not here · bring {section.hidden === 1 ? 'it' : 'them'} back
-              </Text>
-            </Pressable>
-          ) : null
-        }
         renderItem={({ item }) =>
           item.row === 'thing' ? (
             <ThingCard
@@ -461,7 +402,7 @@ export default function HouseScreen() {
           />
         }
         ListFooterComponent={
-          !searching && grouping === 'room' && !loading ? (
+          !searching && !loading ? (
             <Pressable
               onPress={() => setRoomOpen(true)}
               style={styles.addRoom}
@@ -609,14 +550,13 @@ const styles = StyleSheet.create({
   },
   search: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary, paddingVertical: Spacing.sm },
   clear: { padding: Spacing.xs },
-  rail: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
+  count: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    textAlign: 'right',
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
   },
-  count: { marginLeft: 'auto', fontSize: Typography.sm, color: Colors.textMuted },
   // Room for the + to float over without covering the last card.
   listContent: { padding: Spacing.lg, paddingBottom: Spacing.xxxl * 2, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
@@ -635,8 +575,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  restore: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
-  restoreLabel: { fontSize: Typography.sm, color: Colors.textMuted },
   addRoom: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -645,16 +583,6 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.lg,
   },
   addRoomLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
-  chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
-  chip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.chip,
-    backgroundColor: Colors.sunken,
-  },
-  chipOn: { backgroundColor: Colors.primary },
-  chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
-  chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   fab: {
     position: 'absolute',
     right: Spacing.lg,

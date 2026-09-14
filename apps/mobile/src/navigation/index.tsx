@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, IconSize, Typography } from '../constants/theme';
 import { MainTabParamList, RootStackParamList } from '../types';
 import SnagListScreen from '../screens/SnagListScreen';
+import ScheduleScreen from '../screens/ScheduleScreen';
 import HouseScreen from '../screens/HouseScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SnagDetailScreen from '../screens/SnagDetailScreen';
@@ -19,6 +20,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
   // [inactive, active] — filled is reserved for the active tab.
   Snags: ['list-outline', 'list'],
+  Schedule: ['calendar-outline', 'calendar'],
   House: ['home-outline', 'home'],
   Profile: ['person-circle-outline', 'person-circle'],
 };
@@ -56,6 +58,11 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Snags" component={SnagListScreen} options={{ tabBarLabel: 'List' }} />
+      {/* The same work by date rather than by room — when things were added and
+          finished, and when the repeating ones come round. It reads the list
+          and never writes to it: one scheduling mechanism, or neither is
+          trustworthy. */}
+      <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ tabBarLabel: 'Schedule' }} />
       {/* What's *there*, beside the list of what's wrong. Named "House"
           rather than "My House" because the moment there is a bach, "my
           house" is the wrong name for half of what it holds — the property

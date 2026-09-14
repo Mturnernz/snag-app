@@ -1151,3 +1151,159 @@ export function describeDue(snag: Snag, now = new Date()): string | null {
   if (days <= 60) return `Due in ${Math.round(days / 7)} weeks`;
   return `Due in ${Math.round(days / 30)} months`;
 }
+
+// ------------------------------------------------------------------ schedule
+//
+// The Schedule tab, which is a **read** of the list and never a second way to
+// write to it.
+//
+// That restraint is the whole design. This app has one scheduling mechanism —
+// `due_at` plus `repeat_days`, set on a snag in triage, rolled forward by
+// `home.set_snag_status` when a repeating job is marked done — and the moment
+// there are two ways to schedule something in it, neither is trustworthy. So
+// nothing here creates, moves or clears a date. It arranges what the snags
+// already say into months, and every row on it is a door back to the snag.
+//
+// Three things are worth being careful about, and all three are pinned by
+// `schedule.test.ts`.
+//
+// **A projected repeat is not a date.** A snag that comes round every six
+// months has exactly one `due_at`; the occasions after it do not exist as rows
+// and never will. Showing them is the point of the tab — "what comes round" is
+// the question — but they are marked `next` rather than `due` and drawn hollow,
+// for the same reason a ghost on the House tab is drawn dashed: an entry
+// nothing has confirmed, presented as one that has, is worse than no entry at
+// all.
+//
+// **Days are local days.** A timestamp is an instant; a calendar cell is a day
+// in whoever is holding the phone's timezone. `dayKey` crosses that boundary in
+// exactly one place so the grid and the marks can't disagree about which cell a
+// 9pm due date belongs in — which in NZDT is the difference between Saturday
+// and Sunday.
+//
+// **A repeating snag's completions are plural.** It never reaches 'done', so
+// `done_at` is null and `last_done_at` holds the most recent one. Only the most
+// recent, which is the honest limit of what the schema remembers: the tab shows
+// the completions it can prove and does not invent a history it hasn't got.
+
+/** What a day on the calendar can be carrying. */
+export type ScheduleKind = 'filed' | 'done' | 'due' | 'next';
+
+export interface ScheduleMark {
+  /** Local `YYYY-MM-DD`, which is what a calendar cell is keyed by. */
+  day: string;
+  kind: ScheduleKind;
+  snag: Snag;
+}
+
+/** The order marks are listed and drawn in: what happened, then what's coming. */
+const KIND_ORDER: ScheduleKind[] = ['filed', 'done', 'due', 'next'];
+
+/**
+ * How far a repeat is walked forward before the loop gives up.
+ *
+ * A cap rather than a date test, because the loop starts at the snag's own
+ * `due_at` — which for a monthly job someone set up two years ago is 24 steps
+ * behind the month on screen, and for a weekly one is over a hundred. This
+ * bounds the work per snag at something a phone does not notice while still
+ * reaching several years out, which is further than a household plans.
+ */
+const MAX_PROJECTED_REPEATS = 400;
+
+/**
+ * The local day an instant falls on.
+ *
+ * Deliberately not `toISOString().slice(0, 10)`, which is the UTC day: a job
+ * due at 9pm on a Saturday in Auckland is a Sunday in UTC for half the year,
+ * and a calendar that files it under Sunday is wrong about the one fact it
+ * exists to state.
+ */
+export function dayKey(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * Six weeks of local dates covering `month`, starting on a Monday.
+ *
+ * Always 42 cells, so the grid does not change height as the months go by —
+ * a calendar that reflows when you page through it makes the arrows feel like
+ * they moved something else. Monday-first because that is the week this app's
+ * only market reads.
+ */
+export function monthGrid(year: number, month: number): Date[] {
+  // getDay() is Sunday-based; shift so Monday is 0.
+  const lead = (new Date(year, month, 1).getDay() + 6) % 7;
+  // Day-of-month arithmetic rather than adding to a start date: the Date
+  // constructor normalises 0 and negatives into the previous month and past
+  // the last into the next, so one expression covers all three without the
+  // month ever having to be carried by hand.
+  return Array.from({ length: 42 }, (_, i) => new Date(year, month, 1 - lead + i));
+}
+
+/**
+ * Every mark a set of snags puts on the days between `from` and `to`.
+ *
+ * `to` is exclusive, and both are local dates rather than instants — the caller
+ * passes the first and last cells of the grid it is about to draw, so projected
+ * repeats are only ever computed for a month somebody is actually looking at.
+ */
+export function scheduleMarks(snags: Snag[], from: Date, to: Date): ScheduleMark[] {
+  const fromKey = dayKey(from);
+  const toKey = dayKey(to);
+  const within = (day: string) => day >= fromKey && day < toKey;
+  const out: ScheduleMark[] = [];
+
+  for (const snag of snags) {
+    const add = (day: string, kind: ScheduleKind) => {
+      if (within(day)) out.push({ day, kind, snag });
+    };
+
+    add(dayKey(snag.createdAt), 'filed');
+
+    // A repeating snag never reaches 'done', so `done_at` is null on it and
+    // `last_done_at` is where its completion landed. Taking both and
+    // de-duplicating means a one-off that has the same instant in each column
+    // is still one mark.
+    const finished = [snag.doneAt, snag.lastDoneAt].filter(Boolean) as string[];
+    for (const day of new Set(finished.map(dayKey))) add(day, 'done');
+
+    if (!snag.dueAt) continue;
+    add(dayKey(snag.dueAt), 'due');
+
+    // What comes round. Nothing is written and no row exists for any of these;
+    // they are `due_at` walked forward by `repeat_days`, which is the same
+    // arithmetic `home.set_snag_status` will do when the job is marked done.
+    // A finished one-off is not projected, and neither is anything already
+    // closed.
+    if (!snag.repeatDays || snag.repeatDays <= 0 || snag.status === 'done') continue;
+    const due = new Date(snag.dueAt);
+    for (let i = 1; i <= MAX_PROJECTED_REPEATS; i += 1) {
+      const at = new Date(due.getFullYear(), due.getMonth(), due.getDate() + snag.repeatDays * i);
+      const day = dayKey(at);
+      if (day >= toKey) break;
+      add(day, 'next');
+    }
+  }
+
+  return out;
+}
+
+/** The marks falling on one day, in the order they should be read. */
+export function marksOn(marks: ScheduleMark[], day: string): ScheduleMark[] {
+  return marks
+    .filter((m) => m.day === day)
+    .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+}
+
+/** What a mark is called where it is listed out. */
+export const SCHEDULE_KIND_LABELS: Record<ScheduleKind, string> = {
+  filed: 'Added',
+  done: 'Done',
+  due: 'Due',
+  // Not "Due": nothing is due then, and nothing will be until the current one
+  // is marked done and the date rolls. It is when this comes round again.
+  next: 'Comes round',
+};

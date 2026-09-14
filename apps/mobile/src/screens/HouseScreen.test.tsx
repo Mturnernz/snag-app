@@ -4,9 +4,10 @@ import { render } from '../test/render';
 import HouseScreen from './HouseScreen';
 
 // The House tab arrives furnished, and the rule the whole design rests on is
-// that a ghost is never a row. These pin the three places that distinction can
-// silently blur — the counts, the search, and the by-kind grouping — plus the
-// seeded room order the List tab shares.
+// that a ghost is never a row. These pin the two places that distinction can
+// silently blur — the counts and the search — plus the seeded room order the
+// List tab shares, and the two things that were taken away: the by-kind
+// grouping and the line that undid a dismissal.
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -24,12 +25,10 @@ const mock_createLocation = jest.fn();
 const mock_getThings = jest.fn();
 const mock_getAbsentThings = jest.fn();
 const mock_markThingAbsent = jest.fn();
-const mock_restoreAbsentThings = jest.fn();
 jest.mock('../lib/supabase', () => ({
   getThings: (...a: unknown[]) => mock_getThings(...a),
   getAbsentThings: (...a: unknown[]) => mock_getAbsentThings(...a),
   markThingAbsent: (...a: unknown[]) => mock_markThingAbsent(...a),
-  restoreAbsentThings: (...a: unknown[]) => mock_restoreAbsentThings(...a),
   getFileUrls: jest.fn().mockResolvedValue({}),
   createThing: jest.fn(),
   createLocation: (...a: unknown[]) => mock_createLocation(...a),
@@ -93,7 +92,6 @@ beforeEach(() => {
   mock_getThings.mockResolvedValue([]);
   mock_getAbsentThings.mockResolvedValue([]);
   mock_markThingAbsent.mockResolvedValue(undefined);
-  mock_restoreAbsentThings.mockResolvedValue(undefined);
   mock_createLocation.mockResolvedValue(undefined);
   mock_reloadLocations.mockResolvedValue(undefined);
 });
@@ -157,21 +155,9 @@ describe('HouseScreen', () => {
     const all = texts(result);
     expect(all).toContain('1 found');
     expect(all).not.toContain('Not recorded yet');
-    expect(all).not.toContain('By room');
-  });
-
-  it('keeps ghosts out of By kind, which answers what you have', async () => {
-    mock_getThings.mockResolvedValue([
-      thing({ id: '1', name: 'Dryer', room: 'Laundry' }),
-      thing({ id: '2', name: 'Deck stain', room: 'Deck', kind: 'finish' }),
-    ]);
-    const result = render(<HouseScreen />);
-    await settle();
-    await TestRenderer.act(async () => pressable(result, 'By kind').props.onPress());
-
-    const all = texts(result);
-    expect(all).toEqual(expect.arrayContaining(['Appliances · 1', 'Paint · 1']));
-    expect(all).not.toContain('Not recorded yet');
+    // The record's own count is about the record, not about the answer on
+    // screen, so it stands down while a search is running.
+    expect(all).not.toContain('1 recorded');
   });
 
   it('adds a room to the tags everything else uses, not just this tab', async () => {
@@ -205,7 +191,11 @@ describe('HouseScreen', () => {
     expect(texts(result)).toContain('Conservatory · 0 of 1');
   });
 
-  it('hides what this house has not got, and offers a way back', async () => {
+  it('hides what this house has not got, for good', async () => {
+    // Dismissing used to leave a rescue line under the room. It doesn't: "no
+    // dryer here" is a small certain fact about this house, and a standing
+    // offer to un-say it is clutter on top of the answer. The + is how a dryer
+    // that does turn up gets recorded.
     const result = render(<HouseScreen />);
     await settle();
     await TestRenderer.act(async () => pressable(result, 'No dryer here').props.onPress());
@@ -213,8 +203,25 @@ describe('HouseScreen', () => {
     expect(mock_markThingAbsent).toHaveBeenCalledWith('p', 'Laundry', 'Dryer');
     const all = texts(result);
     expect(all).toContain('Laundry · 0 of 3');
-    // Dismissing is a tap; undoing it is a rescue, and a rescue with no door is
-    // a dead end — the same reason `Elsewhere` is in the location seed.
-    expect(all).toContain('1 not here · bring it back');
+    expect(all.some((t) => t.includes('bring it back'))).toBe(false);
+  });
+
+  it('groups by room and offers no other layout', async () => {
+    // The By room / By kind rail is gone. It charged a control rail on every
+    // visit to answer a question the search field above it already answers,
+    // and one layout is what keeps this tab and the List tab describing the
+    // house in the same words.
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Dryer', room: 'Laundry' }),
+      thing({ id: '2', name: 'Deck stain', room: 'Deck', kind: 'finish' }),
+    ]);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    const all = texts(result);
+    expect(all).not.toContain('By room');
+    expect(all).not.toContain('By kind');
+    expect(all).toContain('2 recorded');
+    expect(all.some((t) => t.startsWith('Laundry · '))).toBe(true);
   });
 });

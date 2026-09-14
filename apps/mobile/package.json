@@ -7,7 +7,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test": "jest",
+    "test": "TZ=Pacific/Auckland jest",
     "test:watch": "jest --watch",
     "test:e2e": "playwright test --tsconfig tsconfig.e2e.json"
   },

@@ -221,15 +221,6 @@ export const THING_KIND_LABELS: Record<ThingKind, string> = {
   contact: 'Who to call',
 };
 
-/** Over a group, where it counts several. "Appliance · 6" reads as a typo. */
-export const THING_KIND_GROUP_LABELS: Record<ThingKind, string> = {
-  appliance: 'Appliances',
-  finish: 'Paint',
-  fitting: 'Fittings',
-  fabric: 'The house',
-  contact: 'Who to call',
-};
-
 /**
  * What each kind calls its two identifying strings.
  *
@@ -314,15 +305,6 @@ export interface Thing {
   snagCount: number;
   openSnagCount: number;
 }
-
-/**
- * How the record is grouped on screen.
- *
- * By room for when you are standing in one; by kind for "what appliances do we
- * actually have". Search sits above both and is the primary control, because
- * every read moment starts with a half-remembered noun.
- */
-export type ThingGrouping = 'room' | 'kind';
 
 /**
  * What a New Zealand house probably has, room by room.
@@ -470,6 +452,14 @@ export type MainTabParamList = {
    * this product, it is the only channel there is.
    */
   Snags: undefined;
+  /**
+   * The same work, arranged by date rather than by room.
+   *
+   * A read of the list and never a second way to write to it: there is one
+   * scheduling mechanism in this app, and the moment there are two, neither is
+   * trustworthy. It still sends nobody a reminder.
+   */
+  Schedule: undefined;
   /**
    * The house record — what's *there*, beside the list of what's wrong.
    *

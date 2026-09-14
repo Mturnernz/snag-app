@@ -167,6 +167,18 @@ Four things about capture are load-bearing:
   no words of its own — a photo taken after typing already carries them, and a typed snag is its
   own description. The camera keeps exactly one meaning throughout: it starts a new snag, never
   amends the last one.
+
+  **The sheet asks and does not explain.** Each of its three steps carried a paragraph of prose
+  under the question; all three are gone. A sheet whose entire argument is that it costs nothing
+  to walk away from cannot also be three screens of reading, and a question worth asking at that
+  moment is one that answers itself.
+
+  Step three is **two named pills — *Not urgent* and *Urgent*** — with Not urgent lit before
+  anybody touches anything. It was one *Urgent* chip that toggled, which left the common answer as
+  the unlabelled absence of a press: a state nothing on the sheet ever said out loud. Nothing is
+  written to make the default true, because `null` and `'low'` both already mean not urgent —
+  pressing the pill that is already lit is a no-op, deliberately, rather than a write that touches
+  `updated_at` to say what the row already said.
 - **Priority is not a capture decision any more.** It used to be, defended as the one judgement
   only the person standing there can make — but nearly everything was filed Low, which is the
   premise of the product, and urgency is *comparative*. It belongs where a dozen things are
@@ -197,9 +209,50 @@ that no longer exists. The column and the `snag_effort` enum are dropped, not de
 **Do not add a field to the compose bar.** Everything there is friction at the exact moment
 friction costs most. The place for it is the capture sheet, or triage.
 
+## The Schedule tab is a read, never a second way to write
+
+`ScheduleScreen` is the fourth tab, between List and House: a month grid over the same snags,
+arranged by date instead of by room. The list is deliberately bad at "when was the heat pump
+filter last changed" and "is anything landing the weekend we're away", because both are questions
+about dates.
+
+**Nothing on it writes.** There is one scheduling mechanism in this app — `due_at` plus
+`repeat_days`, set in triage, rolled forward by `home.set_snag_status` — and the moment there are
+two ways to schedule something, neither is trustworthy. So no cell is draggable, nothing moves
+between days, there is no +, and every row is a door back to the snag. It also sends nobody
+anything: a calendar that could remind you would be the first thing in this product that speaks
+unasked.
+
+Four kinds of mark, and **one of them is not real**:
+
+- **Added** (`created_at`, slate) · **Done** (`done_at` *or* `last_done_at`, neutral — fern is not
+  "done") · **Due** (`due_at`, brass, and clay when it is in the past).
+- **Comes round** is `due_at` walked forward by `repeat_days`. No row exists for any of those days
+  and none ever will until the current one is marked done. It is drawn **hollow** for exactly the
+  reason a House-tab suggestion is drawn dashed, and the same rule applies: **if the hollow/solid
+  distinction blurs, the projection goes rather than the distinction.** It is never called "Due",
+  because nothing is.
+
+Three smaller rules:
+
+- **A day is a local day.** `dayKey` is the single place an instant becomes a calendar cell. A job
+  due at 9pm in Auckland is the next day in UTC for half the year, and `toISOString().slice(0,10)`
+  files it under the wrong one. The mobile suite runs under `TZ=Pacific/Auckland` so the test for
+  this is a real assertion rather than one that happens to hold on a UTC runner.
+- **One dot per kind, not per mark.** A 40px cell answers "what sort of day was this"; the list
+  underneath answers it properly. Capping a per-mark row would drop a kind silently, which is the
+  worse failure.
+- **Paging a month clears the selected day**, and the list becomes the whole month. A heading
+  reading "Saturday 5 September" over a grid of November is the screen contradicting itself, and
+  it is also the wrong answer: somebody who has just paged forward is asking what lands *then*.
+
+`scheduleMarks`, `monthGrid`, `dayKey` and `marksOn` live in `packages/supabase-queries` with the
+other pure helpers and are pinned by `schedule.test.ts`; `ScheduleScreen.test.tsx` pins the hollow
+projection, the overdue hue, the unfiltered read and the paging rule.
+
 ## The list is the app's home
 
-`SnagListScreen` is `initialRouteName`, and there are three tabs: List, House and You.
+`SnagListScreen` is `initialRouteName`, and there are four tabs: List, Schedule, House and You.
 
 **This product has no notifications and deliberately never will** (two people in one house do not
 need an email per snag; see `notify-snag` in the archive). So this screen is the only channel by
@@ -225,7 +278,9 @@ they last looked.
 
 `SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering and the done
 window. `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, and the
-keyboard lift. `AmendSnagSheet.test.tsx` pins which question a new snag is asked first.
+keyboard lift. `AmendSnagSheet.test.tsx` pins which question a new snag is asked first, that the
+sheet opens on *Not urgent* without having written anything to say so, and that no step explains
+itself.
 
 ## The house record: what's *there*, beside what's wrong
 
@@ -244,9 +299,9 @@ It comes from `ROOM_SUGGESTIONS`, a constant in `shared-types`; it never reaches
 never appears in a search result, and can never be pointed at by a snag. A record full of entries
 nobody has confirmed *looks* full and answers nothing, and that is worse than an empty one — you
 believe it, check it in the shop, and find nothing there. **If the ghost/real distinction ever
-blurs, the furniture goes rather than the distinction.** Three places it would blur first, all
-pinned by `HouseScreen.test.tsx`: the header count says "recorded" and counts only real things;
-search returns real things only; *By kind* answers "what do we have" and shows no ghosts.
+blurs, the furniture goes rather than the distinction.** Two places it would blur first, both
+pinned by `HouseScreen.test.tsx`: the header count says "recorded" and counts only real things,
+and a search returns real things only.
 
 Three consequences:
 
@@ -257,12 +312,19 @@ Three consequences:
   about two-thirds the height. Six full-size dashed cards in one room was a tab-length wall of
   grey, which is the "reads as homework" failure the whole argument has to survive. Found by
   rendering, not by reading.
-- **Dismissing is a tap; undoing it is a rescue.** The × means "no dryer here" and writes to
-  `home.absent_things` — the only thing the server remembers about suggestions, and it is the
-  negative. Per property, not per person: there is one house, and two people disagreeing about
-  whether there is a dryer is not a state worth modelling. Every room with dismissals carries one
-  line that brings them all back, because a rescue costing six taps is a dead end — the same
-  reason `Elsewhere` is in the location seed.
+- **Dismissing is final.** The × means "no dryer here" and writes to `home.absent_things` — the
+  only thing the server remembers about suggestions, and it is the negative. Per property, not per
+  person: there is one house, and two people disagreeing about whether there is a dryer is not a
+  state worth modelling. There used to be a *1 not here · bring it back* line under every room
+  that had dismissals; it is gone. Saying a house has no dryer is a small certain fact, and a
+  standing offer to un-say it is clutter sitting on top of the answer. If one turns up, it is
+  recorded with the + like anything else the catalogue never guessed at — which is why removing
+  the rescue costs nothing, unlike `Elsewhere`, whose absence would leave a real dead end.
+  `home.restore_absent_things` is still in the schema with nothing calling it.
+- **There is one layout, and it is by room.** A *By room / By kind* rail used to sit above the
+  list. By kind answered "what appliances do we have" — which the search field directly above it
+  already answers — and charged a control rail on every visit to do it. One layout also means
+  this tab and the List tab cannot drift apart about how the house is organised.
 
 ### Paint is the one suggestion that works differently
 
@@ -479,8 +541,8 @@ being mistaken for the prefix, and two uploads never colliding (`upsert: false` 
 failure, not an overwrite).
 
 `HouseScreen.test.tsx` pins the furnished day-one screen, the per-room counts, Whole house last
-and unfurnished, a search answering flat with no ghosts in it, ghosts staying out of *By kind*,
-and the dismiss-and-restore round trip. `houseRecord.test.ts` pins the catalogue being deduplicated, reaching across
+and unfurnished, a search answering flat with no ghosts in it, a dismissal leaving no way back,
+and the absence of any grouping control. `houseRecord.test.ts` pins the catalogue being deduplicated, reaching across
 rooms and carrying only describable kinds, the substring matcher (including "wash" finding the
 dishwasher, which is right rather than a near miss) and the miss that puts *Add it yourself* on
 screen. It also pins the consumables search (the
@@ -514,7 +576,10 @@ no second table, no cron, no notifications.
 
 Two consequences: `done_at` alone would lose the fact a repeating job was ever completed, which
 is why `last_done_at` exists; and callers must re-read the returned snag rather than assuming the
-status they asked for. `SnagDetailScreen` says what actually happened rather than "Done".
+status they asked for. `SnagDetailScreen` says what actually happened rather than "Done". The
+Schedule tab reads `last_done_at` for the same reason, and it is the honest limit of what the
+schema remembers: only the most recent completion, so the tab shows the ones it can prove and
+invents no history it hasn't got.
 
 Setting one up is a **yes/no first, then the cycle**: how often, then when the first one lands,
 then a plain sentence stating the arrangement. It used to be a row of presets with "One-off" among

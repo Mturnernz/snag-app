@@ -59,6 +59,35 @@ Last verified: 14 September 2026 — `42501`, as it should be.
 There is no way to set the dashboard value from code: it is platform config, not database state,
 and neither the Supabase MCP nor any migration reaches it. It stays a manual click.
 
+### Finding files nothing points at
+
+Uploads and the rows that reference them are two writes, so a failure between them leaves a file
+in the bucket that no screen can reach. That is not hypothetical: until `planAuthEvent` landed,
+coming back from the camera destroyed the sheet holding the path, and five photographs were
+uploaded and orphaned that way between 12 and 14 September 2026.
+
+```sql
+with referenced as (
+  select unnest(photo_paths) as path from home.snags
+  union select unnest(photo_paths) from home.things
+  union select unnest(document_paths) from home.things
+)
+select o.name, o.created_at, (o.metadata->>'size')::bigint as bytes
+from storage.objects o
+where o.bucket_id = 'home-photos'
+  and not exists (select 1 from referenced r where r.path = o.name)
+order by o.created_at;
+```
+
+Flip the `not exists` to find the opposite — rows pointing at files that aren't there, which is
+what a restore from an older bucket would leave behind.
+
+**Deleting them is not a SQL job.** `storage.protect_delete()` raises `42501: Direct deletion from
+storage tables is not allowed` — the guard exists because removing the row leaves the bytes behind
+in the backing store, which is a worse orphan than the one you started with. Use the dashboard
+(Storage → `home-photos` → the household's folder) or the Storage API with a session that passes
+`home.can_use_photo_folder`. The anon key cannot: the delete policy needs a household member.
+
 ### The advisor's anonymous-sign-in warning on `home` is noise — but its cause isn't
 
 Supabase's security advisor flags all ten `home` tables under `auth_allow_anonymous_sign_ins`.

@@ -15,7 +15,7 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createSnag, getSnagPhotoUrls, getSnags, markListSeen, updateSnag,
+  createSnag, getFileUrls, getSnags, markListSeen, updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { RootStackParamList, Snag } from '../types';
@@ -120,7 +120,7 @@ export default function SnagListScreen() {
 
       // One request for every visible cover photo rather than one per card.
       const covers = [...open, ...finished].map((s) => s.photoPaths[0]).filter(Boolean) as string[];
-      setPhotoUrls(await getSnagPhotoUrls(covers));
+      setPhotoUrls(await getFileUrls(covers));
     } catch (err) {
       console.error('Failed to load snags:', err);
     } finally {

@@ -19,7 +19,7 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
-  getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getSnagPhotoUrls,
+  getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { describeCycle, snagHeadline } from '@snag/supabase-queries';
@@ -90,7 +90,7 @@ export default function SnagDetailScreen() {
       setSnag(next);
       setRepeating((open) => open || next.repeatDays !== null);
       setComments(nextComments);
-      setPhotoUrls(await getSnagPhotoUrls(next.photoPaths));
+      setPhotoUrls(await getFileUrls(next.photoPaths));
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'It may have been deleted.');
       navigation.goBack();

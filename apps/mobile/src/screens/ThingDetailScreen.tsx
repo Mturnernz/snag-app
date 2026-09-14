@@ -22,7 +22,7 @@ import {
   snagHeadline, thingHeadline,
 } from '@snag/supabase-queries';
 import {
-  createSnag, deleteThing, getSnagPhotoUrl, getSnagPhotoUrls, getSnags, getThing,
+  createSnag, deleteThing, getFileUrl, getFileUrls, getSnags, getThing,
   updateThing, uploadFile,
 } from '../lib/supabase';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
@@ -174,7 +174,7 @@ export default function ThingDetailScreen() {
       const found = await getThing(thingId);
       setThing(found);
       setDraft(draftFrom(found));
-      setPhotoUrls(await getSnagPhotoUrls(found.photoPaths));
+      setPhotoUrls(await getFileUrls(found.photoPaths));
       // Small by construction: the snags about one appliance, over its life.
       const all = await getSnags({ propertyId: found.propertyId }, 'newest');
       setSnags(all.filter((s) => s.thingId === found.id));
@@ -217,7 +217,7 @@ export default function ThingDetailScreen() {
       // A photo just added has no signed URL yet, and an <Image> pointed at
       // undefined is a silent blank rather than an error.
       if (next.photoPaths.some((path) => !photoUrls[path])) {
-        setPhotoUrls(await getSnagPhotoUrls(next.photoPaths));
+        setPhotoUrls(await getFileUrls(next.photoPaths));
       }
       if (toast) showToast(toast);
     } catch (err: any) {
@@ -379,7 +379,7 @@ export default function ThingDetailScreen() {
    * apps/mobile/netlify.toml.
    */
   async function openDocument(path: string) {
-    const url = await getSnagPhotoUrl(path);
+    const url = await getFileUrl(path);
     if (!url) {
       showAlert("Couldn't open that", 'The link to this document could not be made.');
       return;

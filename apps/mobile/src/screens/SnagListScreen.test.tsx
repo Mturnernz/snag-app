@@ -28,7 +28,7 @@ const mock_markListSeen = jest.fn();
 jest.mock('../lib/supabase', () => ({
   getSnags: (...a: unknown[]) => mock_getSnags(...a),
   markListSeen: () => mock_markListSeen(),
-  getSnagPhotoUrls: jest.fn().mockResolvedValue({}),
+  getFileUrls: jest.fn().mockResolvedValue({}),
   createSnag: jest.fn(),
   updateSnag: jest.fn(),
 }));

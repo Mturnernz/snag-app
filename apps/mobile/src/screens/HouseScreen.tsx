@@ -15,7 +15,7 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createLocation, createThing, getAbsentThings, getSnagPhotoUrls, getThings, markThingAbsent,
+  createLocation, createThing, getAbsentThings, getFileUrls, getThings, markThingAbsent,
   restoreAbsentThings,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
@@ -124,7 +124,7 @@ export default function HouseScreen() {
       setThings(rows);
       setAbsent(hidden);
       const covers = rows.map((t) => t.photoPaths[0]).filter(Boolean) as string[];
-      setPhotoUrls(await getSnagPhotoUrls(covers));
+      setPhotoUrls(await getFileUrls(covers));
     } catch (err) {
       console.error('Failed to load the house record:', err);
     } finally {

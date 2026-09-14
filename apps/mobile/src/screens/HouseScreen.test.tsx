@@ -30,7 +30,7 @@ jest.mock('../lib/supabase', () => ({
   getAbsentThings: (...a: unknown[]) => mock_getAbsentThings(...a),
   markThingAbsent: (...a: unknown[]) => mock_markThingAbsent(...a),
   restoreAbsentThings: (...a: unknown[]) => mock_restoreAbsentThings(...a),
-  getSnagPhotoUrls: jest.fn().mockResolvedValue({}),
+  getFileUrls: jest.fn().mockResolvedValue({}),
   createThing: jest.fn(),
   createLocation: (...a: unknown[]) => mock_createLocation(...a),
 }));

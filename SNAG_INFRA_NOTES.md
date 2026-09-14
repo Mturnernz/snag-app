@@ -31,15 +31,58 @@ rewrites from, so **mirror it at Settings → API → Exposed schemas** or a pla
 can silently revert it. Until that's done the dashboard will not show `home` and
 `pg_roles.rolconfig` for `authenticator` is the real source of truth.
 
-Verified after the change: `public` still answers 200 (the archive is unharmed), and `home`
-answers `42501 permission denied` to an anon key — correct, since only `authenticated` was
-granted `usage on schema home`.
+#### Checking it, in one command
+
+Don't reason about this from the dashboard — ask the API, which is the thing that actually
+decides. From the repo root:
+
+```bash
+set -a && . apps/mobile/.env && set +a
+curl -s "$EXPO_PUBLIC_SUPABASE_URL/rest/v1/snags?select=id&limit=1" \
+  -H "apikey: $EXPO_PUBLIC_SUPABASE_ANON_KEY" -H "Accept-Profile: home"
+```
+
+Two answers, and they mean opposite things:
+
+| Response | Meaning |
+|---|---|
+| `42501 permission denied for schema home` | **Correct.** The schema is exposed, and `usage` went to `authenticated` only — never `anon`. |
+| `PGRST106` | **The setting has reverted.** Re-run the `alter role` above, then mirror it in the dashboard. |
+
+The failure this guards against is silent from inside the app: every call 404s, so it renders as
+an account with no data rather than as an error. `SchemaNotExposedError`
+(`packages/supabase-queries`) is what turns that into something `App.tsx` can say out loud, but
+the check above is how you find out without waiting for somebody to report a blank screen.
+
+Last verified: 14 September 2026 — `42501`, as it should be.
+
+There is no way to set the dashboard value from code: it is platform config, not database state,
+and neither the Supabase MCP nor any migration reaches it. It stays a manual click.
+
+### The advisor's anonymous-sign-in warning on `home` is noise — but its cause isn't
+
+Supabase's security advisor flags all ten `home` tables under `auth_allow_anonymous_sign_ins`.
+Checked on 14 September 2026: **not exploitable, and two gates deep.**
+
+- Every `home` read policy qualifies on `home.is_member(...)` or `home.is_property_member(...)`,
+  which need a membership row. An anonymous user has neither a profile nor a membership, so the
+  policies return zero rows rather than leaking any.
+- It never gets that far anyway: `usage on schema home` went to `authenticated` only, never `anon`,
+  so an anonymous caller is stopped at the schema with `42501` — the same answer the check above
+  relies on.
+
+The lint fires because the policies are declared `to public` and the *project* still has anonymous
+sign-ins enabled. That setting is a leftover: it existed for the retired product's QR public
+reporting (`?report=<token>`), which no longer has a client. **Turning it off at Auth → Providers
+→ Anonymous sign-ins would silence 46 advisories across both schemas and remove a sign-in route
+nothing uses** — but it would also disable that flow in the frozen archive, so it is a deliberate
+call rather than a tidy-up. Not done.
 
 ### Storage buckets
 
 | Bucket | Used by | Notes |
 |---|---|---|
-| `home-photos` | `home` | Private. 15 MB limit, image types only. Layout `<household_id>/<file>` — the RLS policies assume it. |
+| `home-photos` | `home` | Private. 15 MB limit. **Holds manuals as well as photos** — `allowed_mime_types` gained `application/pdf` on 14 Sep 2026, and Storage enforces that list *before* RLS, so a type that isn't on it is refused with nothing said about permissions. Layout `<household_id>/<file>`, documents one deeper at `<household_id>/docs/<file>`; the RLS policies read only the first segment. The id can't be renamed, so the name stays wrong and the code is named honestly instead (`HOUSEHOLD_FILES_BUCKET`, `getFileUrl`). |
 | `snag-photos`, `snag-evidence`, `org-documents`, `investigation-files`, `governance-reports`, `work-group-images` | retired `public` product | Left in place with the rest of the archive. |
 
 ### Edge functions — all belong to the retired product

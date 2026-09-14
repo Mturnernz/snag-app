@@ -11,7 +11,7 @@ import PhotoPicker from './PhotoPicker';
 // disappear at the cap, and neither is usable before the upload path knows
 // where photos go.
 
-jest.mock('../lib/supabase', () => ({ uploadSnagPhoto: jest.fn() }));
+jest.mock('../lib/supabase', () => ({ uploadPhoto: jest.fn() }));
 
 const MAX_PHOTOS = 5;
 

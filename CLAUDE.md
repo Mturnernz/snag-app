@@ -76,6 +76,11 @@ revert the role setting without warning. Mirror it there; it costs one click and
 divergence. Until then, `pg_roles.rolconfig` for `authenticator` is the real source of truth and
 the dashboard will not show `home` at all.
 
+**Don't reason about this from the dashboard — ask the API.** A signed-out request for a `home`
+table answers `42501 permission denied for schema home` when the setting is good and `PGRST106`
+when it has reverted, which is a one-command check rather than a judgement call.
+`SNAG_INFRA_NOTES.md` has the exact curl under *Checking it, in one command*.
+
 Note the grant is deliberately narrow: `usage on schema home` went to `authenticated` only, never
 `anon`. A signed-out caller gets `42501 permission denied for schema home`, which is the correct
 answer and is *not* the same failure as `PGRST106`.
@@ -404,11 +409,20 @@ later, in an aisle, needing one exact string. So:
   card and off the screen edge. Anything flexed around a `TextInput` needs `minWidth: 0`.
 - **Paperwork lives beside the photos.** `things.document_paths` holds PDFs in the **`home-photos`**
   bucket under `<household_id>/docs/`, reusing the four storage policies and
-  `home.can_use_photo_folder` rather than standing up a second bucket. The bucket's name is a small
-  lie and its `allowed_mime_types` had to learn `application/pdf` — which Storage enforces *before*
-  RLS, so a PDF was refused with nothing said about permissions. The original filename is kept in
-  the key because it is the label: a list of UUIDs answers nothing. Opened with a signed URL in a
-  new tab, never embedded — the deployed CSP sets `object-src 'none'` and names no `frame-src`.
+  `home.can_use_photo_folder` rather than standing up a second bucket. Its `allowed_mime_types` had
+  to learn `application/pdf` — which Storage enforces *before* RLS, so a PDF was refused with
+  nothing said about permissions. The original filename is kept in the key because it is the label:
+  a list of UUIDs answers nothing. Opened with a signed URL in a new tab, never embedded — the
+  deployed CSP sets `object-src 'none'` and names no `frame-src`.
+
+  **The bucket id says "photos" and the bucket holds manuals. Leave it.** A bucket id cannot be
+  renamed, so undoing the mismatch means a second bucket, four more storage policies, another
+  EXECUTE grant on another folder helper and a second signing path — for the same bytes under the
+  same layout. The name is the price, and it is paid once: the *code* is named for what it does.
+  One exported constant, `HOUSEHOLD_FILES_BUCKET` in `lib/supabase.ts` (it was declared twice, which
+  is two strings that have to agree about a storage policy), and the signing helpers are
+  `getFileUrl` / `getFileUrls` — a manual fetched through something called `getSnagPhotoUrl` is how
+  the mismatch spreads from the string into everything that touches it.
 - **No new colour.** Kind is an outline icon. The palette's four hues stay spent on state, and a
   thing has no state.
 

@@ -276,14 +276,22 @@ export const markThingAbsent = (propertyId: string, room: string, name: string) 
 export const restoreAbsentThings = (propertyId: string, room?: string) =>
   queries.restoreAbsentThings(supabase, propertyId, room);
 
-// ─── Photos ───────────────────────────────────────────────────────────────────
+// ─── Files ────────────────────────────────────────────────────────────────────
 //
-// home-photos is a PRIVATE bucket laid out as `<household_id>/<file>` — the
-// storage policies read that first path segment, so the prefix is not
-// cosmetic. Store the path, never a URL, and resolve a short-lived signed URL
-// whenever a photo is displayed.
+// A PRIVATE bucket laid out as `<household_id>/<file>`, with documents one level
+// deeper under `<household_id>/docs/<file>` — the storage policies read only that
+// first path segment, so the prefix is not cosmetic. Store the path, never a URL,
+// and resolve a short-lived signed URL whenever something is displayed.
+//
+// **The bucket is called `home-photos` and it holds manuals too.** That is not an
+// oversight and it is not worth fixing: a bucket id cannot be renamed, so undoing
+// it would mean a second bucket, four more storage policies, another EXECUTE grant
+// on another folder helper and a second signing path — all to hold the same bytes
+// under the same layout `home.can_use_photo_folder` already answers for. The name
+// is the price. Everything in this file is named for what it actually does, so the
+// mismatch stops at the string.
 
-const PHOTOS_BUCKET = 'home-photos';
+export const HOUSEHOLD_FILES_BUCKET = 'home-photos';
 
 /**
  * Returns `{ path, error }` rather than throwing or swallowing, because
@@ -301,7 +309,7 @@ export async function uploadFile(
   localUri: string,
   fileName: string,
   contentType: string,
-  bucket: string = PHOTOS_BUCKET,
+  bucket: string = HOUSEHOLD_FILES_BUCKET,
 ): Promise<{ path: string | null; error: any }> {
   try {
     // Reading the picked file is platform-specific — and a wrong read fails
@@ -325,40 +333,41 @@ export async function uploadFile(
 }
 
 /** Every photo in this app is a JPEG by the time it gets here — see compressAndUpload. */
-export async function uploadSnagPhoto(
+export async function uploadPhoto(
   localUri: string,
   fileName: string,
-  bucket: string = PHOTOS_BUCKET,
+  bucket: string = HOUSEHOLD_FILES_BUCKET,
 ): Promise<{ path: string | null; error: any }> {
   return uploadFile(localUri, fileName, 'image/jpeg', bucket);
 }
 
-export async function getSnagPhotoUrl(path: string): Promise<string | null> {
+/** A short-lived link to anything in the bucket — a photo, or a manual. */
+export async function getFileUrl(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage
-    .from(PHOTOS_BUCKET)
+    .from(HOUSEHOLD_FILES_BUCKET)
     .createSignedUrl(path, 60 * 60);
-  if (error) console.error('getSnagPhotoUrl error:', path, error);
+  if (error) console.error('getFileUrl error:', path, error);
   if (error || !data) return null;
   return data.signedUrl;
 }
 
 /**
- * Batched sibling of getSnagPhotoUrl for list views — one request for every
- * visible card's cover photo instead of one signed-URL call per card, which was
- * cheap to trip up: a slow or rate-limited response for any single card left it
- * on the "No photo" placeholder forever.
+ * Batched sibling of getFileUrl for list views — one request for every visible
+ * card's cover photo instead of one signed-URL call per card, which was cheap to
+ * trip up: a slow or rate-limited response for any single card left it on the
+ * "No photo" placeholder forever.
  *
  * This matters more here than it did in the workplace app. A household list is
  * mostly photos — twelve thumbnails is a Saturday you can act on, twelve lines
  * of text is a list you skim and close.
  */
-export async function getSnagPhotoUrls(paths: string[]): Promise<Record<string, string>> {
+export async function getFileUrls(paths: string[]): Promise<Record<string, string>> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return {};
   const { data, error } = await supabase.storage
-    .from(PHOTOS_BUCKET)
+    .from(HOUSEHOLD_FILES_BUCKET)
     .createSignedUrls(unique, 60 * 60);
-  if (error) console.error('getSnagPhotoUrls error:', error);
+  if (error) console.error('getFileUrls error:', error);
   const map: Record<string, string> = {};
   for (const row of data ?? []) {
     if (row.signedUrl && !row.error) map[row.path ?? ''] = row.signedUrl;

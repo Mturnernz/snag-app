@@ -1,7 +1,7 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 
-import { uploadSnagPhoto } from './supabase';
+import { uploadPhoto } from './supabase';
 import { withDeadline } from './deadline';
 import { showAlert } from './alert';
 
@@ -31,7 +31,10 @@ import { showAlert } from './alert';
 const PREPARE_DEADLINE_MS = 30_000;
 const SEND_DEADLINE_MS = 65_000;
 
-export const PHOTO_BUCKET = 'home-photos';
+// The bucket's name lives in one place. It was declared here as well as in
+// lib/supabase.ts, which is two strings that have to agree about a storage
+// policy's idea of where a household's files live.
+export { HOUSEHOLD_FILES_BUCKET } from './supabase';
 
 /** Resizes, compresses and uploads. Resolves to the storage path, or an error. */
 export async function compressAndUpload(
@@ -50,7 +53,7 @@ export async function compressAndUpload(
   );
   try {
     return await withDeadline(
-      uploadSnagPhoto(compressed.uri, fileName, bucket),
+      uploadPhoto(compressed.uri, fileName, bucket),
       SEND_DEADLINE_MS,
       'Sending',
     );

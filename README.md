@@ -9,11 +9,14 @@ the same name. See `SNAG_HOME_PIVOT_REVIEW.md` for why, and `CLAUDE.md` for how.
 
 ## What it does
 
-- **Add** — a photo, a title, a room. Ten seconds, standing up.
-- **Sort it out** — priority, effort, whether it needs a trip to the shop, when it's due, who's
-  doing it. Later, sitting down.
-- **Free weekend?** — what fits the time you've got, grouped by room, with everything waiting on
-  a hardware-store trip collected into one list at the top.
+- **Add** — a photo, or a line of text, from the bar at the foot of the list. No title and no
+  form: ten seconds, standing up, and the questions come after it's saved.
+- **Sort it out** — what it needs from the shop, when it's due, whether it comes round, who's
+  doing it, how urgent. Later, sitting down.
+- **The house** — what's *there* beside what's wrong: the heat pump's model number, the paint
+  colour in the bathroom, the manual. Read back eight months later in a hardware aisle.
+- **The schedule** — the same jobs by date instead of by room, including the repeating ones. It
+  reads the list and never writes to it.
 
 ## Running it
 

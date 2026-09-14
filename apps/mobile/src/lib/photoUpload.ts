@@ -8,9 +8,10 @@ import { showAlert } from './alert';
 /**
  * Taking one photo and getting it into storage.
  *
- * Extracted from PhotoPicker so the compose bar can use the same path rather
- * than growing a second one. The tray still owns the multi-photo tray state —
- * the cap, the retries, the per-photo status — this is only the part both need.
+ * One path, shared by everything that takes a picture: the compose bar, the
+ * walkthrough's step three, and a thing's spec sheet. Each owns its own state
+ * around it — the cap, the retry, what the photo is for — and none of them owns
+ * a second way of getting the bytes into the bucket.
  */
 
 /**

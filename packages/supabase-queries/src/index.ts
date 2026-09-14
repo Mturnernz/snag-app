@@ -183,18 +183,43 @@ export async function upsertProfile(
 /**
  * Returns null for someone who has signed up but isn't in a household yet —
  * the only branch the onboarding flow needs.
+ *
+ * **Ordered by when you joined, newest first, and that is the whole fix for a
+ * trap that had no way out.** RLS returns every household you are a member of,
+ * and this used to take the oldest one created. So somebody who tapped "Create
+ * it" on the Setup screen instead of "Someone else set ours up" made an empty
+ * household, got added to the real one, and was then pinned to the empty one
+ * for ever — no switcher, no error, nothing on screen to explain it. The house
+ * you were most recently let into is the right answer in every real case, and
+ * it un-pins that person the moment somebody adds them.
+ *
+ * It is still one household, deliberately. A switcher would make this a fourth
+ * gate, and the whole shape of App.tsx is three. `deleteHousehold` is the way
+ * out of the mistake; `countMyHouseholds` is how the Setup screen knows to
+ * offer it.
  */
 export async function getMyHousehold(client: SupabaseClient): Promise<Household | null> {
   const { data, error } = await client
-    .from('households')
-    .select('id, name, created_at')
-    .order('created_at')
+    .from('household_members')
+    .select('created_at, household:households!inner(id, name, created_at)')
+    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (error) throw asError(error, "Couldn't load your household");
-  if (!data) return null;
-  return { id: data.id, name: data.name, createdAt: data.created_at };
+  const row = (data as Row | null)?.household;
+  if (!row) return null;
+  return { id: row.id, name: row.name, createdAt: row.created_at };
+}
+
+/** How many households this account is in. Only ever 0 or 1 unless something went wrong. */
+export async function countMyHouseholds(client: SupabaseClient): Promise<number> {
+  const { count, error } = await client
+    .from('household_members')
+    .select('household_id', { count: 'exact', head: true });
+
+  if (error) throw asError(error, "Couldn't load your households");
+  return count ?? 0;
 }
 
 export async function createHousehold(
@@ -349,6 +374,90 @@ export async function setPropertyMember(
     { p_property_id: propertyId, p_profile_id: profileId }
   );
   if (error) throw asError(error, "Couldn't change who's linked");
+}
+
+// ---------------------------------------------------------------- taking away
+//
+// Nothing here existed until 20260914160000: a member could be added and never
+// removed, a place created and never deleted, and a household could not be left
+// at all. Each of these refuses the case that would strand a row nobody can
+// reach, and says so in words rather than letting a constraint name surface.
+
+/**
+ * Removes somebody from a household — including yourself, which is what
+ * leaving is. One call for both, because with two people in a house they are
+ * the same act, and there are no roles here to make one of them a privilege.
+ *
+ * The profile row survives, so a snag filed by somebody who has since left
+ * still says who filed it.
+ */
+export async function removeMember(
+  client: SupabaseClient,
+  householdId: string,
+  profileId: string
+): Promise<void> {
+  const { error } = await client.rpc('remove_member', {
+    p_household_id: householdId,
+    p_profile_id: profileId,
+  });
+  if (error) throw asError(error, "Couldn't remove them");
+}
+
+/**
+ * Deletes a place and everything filed at it, and answers with the storage keys
+ * the cascade just orphaned.
+ *
+ * The caller has to clear those itself: SQL can't, because
+ * `storage.protect_delete()` refuses a direct delete of a storage.objects row,
+ * and rightly — it would leave the bytes behind with the row gone, which is a
+ * worse orphan than the one you started with. See `deleteStoredFiles` in
+ * apps/mobile/src/lib/supabase.ts.
+ */
+export async function deleteProperty(
+  client: SupabaseClient,
+  propertyId: string
+): Promise<string[]> {
+  const { data, error } = await client.rpc('delete_property', { p_property_id: propertyId });
+  if (error) throw asError(error, "Couldn't delete that place");
+  return (data as string[] | null) ?? [];
+}
+
+/**
+ * Every storage key a household owns — read BEFORE deleting it, never after.
+ *
+ * A household is the one case where the order has to invert, and the reason is
+ * the storage policy: `home.can_use_photo_folder` reads the first path segment
+ * as a household id and answers `home.is_member(...)`. Deleting a property
+ * leaves your membership intact, so the file delete that follows is allowed.
+ * Deleting a *household* removes the row that permission is read from — so keys
+ * handed back afterwards are keys you can no longer act on, and the path that
+ * orphans the most files would orphan every one of them.
+ */
+export async function getHouseholdFilePaths(
+  client: SupabaseClient,
+  householdId: string
+): Promise<string[]> {
+  const { data, error } = await client.rpc('household_file_paths', {
+    p_household_id: householdId,
+  });
+  if (error) throw asError(error, "Couldn't work out what this household holds");
+  return (data as string[] | null) ?? [];
+}
+
+/**
+ * Refuses while anybody else is in it — at that point the list is theirs as
+ * much as yours, and the honest move is `removeMember` on yourself.
+ *
+ * Returns nothing, deliberately. Clear the files first with
+ * `getHouseholdFilePaths`; keys handed back from here would read as though they
+ * had been dealt with.
+ */
+export async function deleteHousehold(
+  client: SupabaseClient,
+  householdId: string
+): Promise<void> {
+  const { error } = await client.rpc('delete_household', { p_household_id: householdId });
+  if (error) throw asError(error, "Couldn't delete this household");
 }
 
 // ---------------------------------------------------------------- snags
@@ -1040,22 +1149,11 @@ export async function markThingAbsent(
   if (error) throw asError(error, "Couldn't hide that");
 }
 
-/**
- * Bring a room's dismissed suggestions back — all of them, not one at a time.
- * Dismissing is a tap; undoing it is a rescue, and a rescue that costs six taps
- * is a dead end.
- */
-export async function restoreAbsentThings(
-  client: SupabaseClient,
-  propertyId: string,
-  room?: string
-): Promise<void> {
-  const { error } = await client.rpc('restore_absent_things', {
-    p_property_id: propertyId,
-    p_room: room ?? null,
-  });
-  if (error) throw asError(error, "Couldn't bring those back");
-}
+// `home.restore_absent_things` is deliberately left in the schema with nothing
+// calling it — the *1 not here · bring it back* line was removed because saying
+// a house has no dryer is a small certain fact, and a standing offer to un-say
+// it is clutter sitting on top of the answer. The RPC stays; a client wrapper
+// for it would just be a second dead thing to keep in step with the first.
 
 // ---------------------------------------------------------------- due dates
 

@@ -19,17 +19,13 @@ import { Platform } from 'react-native';
  * So: at the two auth transitions, put the address bar back to `/` unless the
  * URL is one somebody meant to arrive at.
  *
- * Two are kept:
+ * Exactly one is kept: `/snags/<id>`, which is what one person sends the other
+ * when they want them to look at something. Following that link while signed
+ * out means signing in first, and the snag has to survive the round trip or the
+ * link was pointless.
  *
- * - `/snags/<id>` — what `supabase/functions/notify-snag` mails people. Someone
- *   following that link while signed out has to sign in first, and the snag has
- *   to survive the round trip or the link was pointless.
- * - `?report=<token>` — the QR public-report landing, read on boot by
- *   `getQrReportToken`. Its anonymous sign-in fires an auth event of its own.
- * - `?join=<code>` — the org join QR landing, read on boot by
- *   `getInitialJoinCode`. Someone scanning a "scan to join" poster signs up or
- *   signs in on the way through, so it has to survive both transitions or the
- *   poster drops them on the default tab of an org they haven't joined.
+ * (It was three. `?report=<token>` and `?join=<code>` were the QR landings of
+ * the retired product and went with it — see `isPreservedUrl`.)
  *
  * No-ops off web: on native there is no address bar, `history` doesn't exist,
  * and a cold launch has no initial URL to be stale.

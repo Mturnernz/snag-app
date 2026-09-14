@@ -28,15 +28,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Snag needs access to your photos to attach images to issue reports.",
-          "cameraPermission": "Snag needs access to your camera to take photos of issues."
+          "photosPermission": "Snag needs your photos so you can add one to something on the list.",
+          "cameraPermission": "Snag needs your camera so you can photograph something that needs doing."
         }
       ],
       "expo-asset",
       [
         "expo-camera",
         {
-          "cameraPermission": "Snag needs access to your camera to scan a join QR code."
+          "cameraPermission": "Snag needs your camera so you can photograph something that needs doing."
         }
       ],
       [

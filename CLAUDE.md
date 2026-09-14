@@ -715,12 +715,75 @@ no pending state.
 
 It takes an optional `p_property_ids`. Omitted means every property in the household — right
 while there is one place, and wrong the moment there is a bach, so the client passes an explicit
-list once there is more than one.
+list once there is more than one. **That list is chosen, not assumed.** It used to be
+`properties.slice(0, 1)` — whichever place happened to be first in the *adder's* linked list — with
+a hint underneath stating it as though somebody had decided. A row of chips asks instead, defaulted
+to the place being looked at, and a one-place household still never meets the question.
 
 That's deliberate, not lazy. The retired product's `invite_user` wrote the invite row and
 returned — the RPC succeeded, the app toasted "Invite sent", the invite listed as pending, and
 **no invite was ever emailed for the entire life of the feature**. Nothing said so. Don't
 reintroduce a mechanism that can fail silently for two people who live in the same house.
+
+## Taking someone, or something, away
+
+Adding had no opposite for eleven migrations, and the gap had a sharp edge. `getMyHousehold` reads
+the households RLS lets you see and takes **one** — so somebody who tapped *Create it* on the Setup
+screen instead of *Someone else set ours up* owned an empty household, was then added to the real
+one, and stayed pinned to the empty one for ever. No switcher, no error, nothing on screen able to
+explain it. `20260914160000` is the other half.
+
+**The read is ordered by when you joined, newest first.** Not by when the household was made: that
+asks the wrong question, and it is the exact line the bug lived on. There is still deliberately no
+switcher — App.tsx is three gates and a fourth would be a different product — so the way out of a
+mistake is to leave or delete, not to pick.
+
+Three functions, and each refuses the one case that would strand a row nobody can reach:
+
+- **`remove_member`** takes somebody out, or takes you out; deliberately one function, because with
+  two people in a house those are the same act and there are no roles here to make one a privilege.
+  It refuses the last member (a household nobody is in is invisible to everyone, including whoever
+  would add somebody back). It **nulls their assignments**, because an assignee who cannot see the
+  place is a job that silently never gets done — the same state `update_snag` already refuses to
+  create. And a property they were the only person on is **inherited**, by the caller, or by the
+  longest-standing member when the caller is the one leaving: refusing instead is a dead end, since
+  you cannot link somebody to a place you can no longer see. The profile row is untouched, so a snag
+  still says who filed it.
+- **`delete_property`** refuses the household's last place, for the reason `create_household` makes
+  one in the first breath: a household with no property cannot receive a snag.
+- **`delete_household`** refuses while anybody else is in it. At that point the list is theirs as
+  much as yours and the honest move is to take yourself out.
+
+**The client has to clear the storage keys, because SQL can't.** `storage.protect_delete()` raises
+`42501` on a direct delete of a `storage.objects` row, rightly, because that leaves the bytes behind
+with the row gone. So `deleteStoredFiles` does it, with a session that passes
+`home.can_use_photo_folder`. The same helper now runs after `deleteSnag` and `deleteThing`, which
+both used to drop the row and leave the JPEGs — the orphan `SNAG_INFRA_NOTES.md` had a manual audit
+query for.
+
+**And a household is the one case where the order inverts.** `delete_property` *returns* the keys
+its cascade orphaned and the client clears them afterwards, which works because your membership
+survives. A household cannot do that: `can_use_photo_folder` reads the first path segment as a
+household id and answers `home.is_member(...)`, so deleting the household removes the row that
+permission is read from, and keys handed back afterwards are keys you can no longer act on — every
+delete refused, in silence, because `deleteStoredFiles` deliberately never throws. So
+`getHouseholdFilePaths` is read **first**, the files go, and the household goes last
+(`20260914161000`). Left the other way it is the path that orphans the most files orphaning all of
+them. `delete_household` returns void for the same reason: keys you can't use read as keys that
+were dealt with.
+
+On the screen: **exactly one of Leave and Delete is ever offered**, because exactly one of them can
+succeed. Deleting a place is the one action in this app that destroys somebody else's work rather
+than a row of your own, so it is the one confirmation that asks for the place's **name to be typed**
+(`ConfirmDialog`'s `confirmText`) and names what goes with it in counts rather than warning in
+general. Everything else stays a two-button `ConfirmDialog` — never `Alert.alert`, which is a no-op
+on the build people install.
+
+`HouseholdScreen.test.tsx` pins that the last member has no ×, that Leave and Delete are never both
+on screen, that a place delete is gated on the typed name and hands its returned keys to
+`deleteStoredFiles`, that a household delete clears its files *before* the membership that
+authorises clearing them, and that a new member goes to the places that were picked.
+`household.test.ts` pins the newest-join-first read.
 
 ## Design System (DO NOT deviate)
 

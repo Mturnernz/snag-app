@@ -96,6 +96,13 @@ in the bucket that no screen can reach. That is not hypothetical: until `planAut
 coming back from the camera destroyed the sheet holding the path, and five photographs were
 uploaded and orphaned that way between 12 and 14 September 2026.
 
+**Deletes no longer add to the pile.** Until 14 September every delete path dropped its row and
+left the bytes: `deleteSnag`, `deleteThing`, and nothing above them. They now call
+`deleteStoredFiles` (`apps/mobile/src/lib/supabase.ts`) with the paths that just stopped being
+referenced, and `home.delete_property` / `home.delete_household` *return* the keys their cascade
+orphaned so the client can do the same for a whole place at once. So what this query finds now is
+the interrupted-upload case only, which is the one the schema can't see coming.
+
 ```sql
 with referenced as (
   select unnest(photo_paths) as path from home.snags
@@ -144,15 +151,27 @@ call rather than a tidy-up. Not done.
 | `home-photos` | `home` | Private. 15 MB limit. **Holds manuals as well as photos** — `allowed_mime_types` gained `application/pdf` on 14 Sep 2026, and Storage enforces that list *before* RLS, so a type that isn't on it is refused with nothing said about permissions. Layout `<household_id>/<file>`, documents one deeper at `<household_id>/docs/<file>`; the RLS policies read only the first segment. The id can't be renamed, so the name stays wrong and the code is named honestly instead (`HOUSEHOLD_FILES_BUCKET`, `getFileUrl`). |
 | `snag-photos`, `snag-evidence`, `org-documents`, `investigation-files`, `governance-reports`, `work-group-images` | retired `public` product | Left in place with the rest of the archive. |
 
-### Edge functions — all belong to the retired product
+### Edge functions — all belong to the retired product, and all five are to be deleted
 
 `notify-snag` (v20), `export-investigation`, `export-governance-report`, `worksheet`,
-`worksheet-import`. None are called by the home app; `notify-snag` is deliberately not adapted
-(two people in one house don't need an email per snag). Left deployed rather than deleted so the
-archive stays runnable.
+`worksheet-import`. None is called by the home app; `notify-snag` is deliberately not adapted
+(two people in one house don't need an email per snag).
+
+**Their source is no longer in this repo.** It came out with the rest of the retired product on
+14 Sep 2026 and is recoverable from git at `604a62c` if it is ever wanted. What is still true, and
+is the reason this section now says *delete* rather than *leave*, is that all five are still
+**deployed and ACTIVE**, and `notify-snag` runs with `verify_jwt: false` — a publicly reachable
+endpoint holding a service-role key and a Resend key, for a product that no longer exists. The
+header secret is the only thing in front of it.
+
+Deleting them is a dashboard job: **Edge Functions → the function → Settings → Delete**. The
+Supabase MCP server can deploy and read functions but cannot delete one, so this cannot be done
+from a session here.
 
 Their function secrets, which are not recoverable from anywhere else:
-`RESEND_API_KEY`, `SNAG_FROM_ADDRESS` (`noreply@snaghq.co.nz`), `SNAG_PORTAL_URL`.
+`RESEND_API_KEY`, `SNAG_FROM_ADDRESS` (`noreply@snaghq.co.nz`), `SNAG_PORTAL_URL`. `RESEND_API_KEY`
+is used by nothing else — Auth's SMTP password is a *separate* Resend key — so it goes when the
+functions do.
 
 ### Auth — shared by both schemas, unchanged by the pivot
 

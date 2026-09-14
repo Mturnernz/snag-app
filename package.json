@@ -9,7 +9,6 @@
     "mobile": "npm run start --workspace=apps/mobile",
     "web": "npm run dev --workspace=apps/web",
     "typecheck": "npm run typecheck --workspace=apps/web && tsc --noEmit -p apps/mobile",
-    "typecheck:functions": "bash scripts/check-edge-functions.sh",
     "test": "npm run test:mobile && npm run test:e2e && npm run test:e2e:mobile",
     "test:mobile": "npm run test --workspace=apps/mobile",
     "test:e2e": "npm run test:e2e --workspace=apps/web",

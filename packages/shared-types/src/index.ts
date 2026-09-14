@@ -36,13 +36,6 @@ export const PRIORITY_LABELS: Record<SnagPriority, string> = {
   low: 'Low',
 };
 
-/**
- * Deliberately phrased as time, not size: the question these answer is "can I
- * finish this today", which is what the weekend view is filtering on.
- */
-
-
-export const STATUS_ORDER: SnagStatus[] = ['open', 'doing', 'done'];
 export const PRIORITY_ORDER: SnagPriority[] = ['high', 'low'];
 
 /**

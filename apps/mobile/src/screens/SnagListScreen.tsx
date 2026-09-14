@@ -9,7 +9,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SnagCard from '../components/SnagCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
-import ComposeBar, { AmendLabel, AmendRow } from '../components/ComposeBar';
+import ComposeBar from '../components/ComposeBar';
+import AmendSnagSheet from '../components/AmendSnagSheet';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -101,6 +102,7 @@ export default function SnagListScreen() {
   /** Where the "New" rule sits. Captured once per visit, not per render. */
   const [seenBefore, setSeenBefore] = useState<string | null>(null);
   const [justAdded, setJustAdded] = useState<Snag | null>(null);
+  const [amending, setAmending] = useState(false);
   const seenThisVisit = useRef(false);
 
   const propertyId = properties.length > 1 ? activeProperty?.id ?? null : null;
@@ -252,19 +254,20 @@ export default function SnagListScreen() {
    */
   async function amend(update: Parameters<typeof updateSnag>[1], toast: string) {
     if (!justAdded) return;
+    setAmending(true);
     try {
       setJustAdded(await updateSnag(justAdded.id, update));
       showToast(toast);
       await load();
     } catch (err: any) {
       showAlert("Couldn't change that", err?.message ?? 'Please try again.');
+    } finally {
+      setAmending(false);
     }
   }
 
   const since = describeSince(seenBefore);
   const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
-  // A photo with no words and no room shows as "Something to sort out".
-  const needsNote = !!justAdded && !justAdded.description;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -377,83 +380,27 @@ export default function SnagListScreen() {
       />
 
       {justAdded ? (
-        <AmendRow>
-          <View style={styles.amendHead}>
-            <AmendLabel
-              // Asks for what is still missing, and stops asking once it isn't.
-              text={
-                needsNote && !justAdded.room
-                  ? 'On the list. What is it, and where?'
-                  : needsNote
-                    ? 'On the list. What is it?'
-                    : justAdded.room
-                      ? 'On the list.'
-                      : 'On the list. Where is it?'
-              }
-            />
-            <Pressable
-              onPress={() => setJustAdded(null)}
-              style={styles.amendDoneTap}
-              accessibilityRole="button"
-              accessibilityLabel="Finished adding"
-            >
-              <Text style={styles.amendDone}>Done</Text>
-            </Pressable>
-          </View>
-
-          {/* Every room, not the first three: the one you want is the one you
-              are standing in, and it is as likely to be the Roof as the
-              Kitchen. Horizontal so twelve of them cost one row. */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.chips}
-          >
-            {locations.map((location) => {
-              const on = justAdded.room === location.name;
-              return (
-                <Pressable
-                  key={location.id}
-                  onPress={() => amend({ room: on ? null : location.name }, on ? 'Tag removed' : location.name)}
-                  style={[styles.chip, on && styles.chipOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                >
-                  <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>{location.name}</Text>
-                </Pressable>
-              );
-            })}
-            <Pressable
-              onPress={() => amend({ priority: justAdded.priority === 'high' ? null : 'high' }, 'Marked urgent')}
-              style={[styles.chip, justAdded.priority === 'high' && styles.chipAlert]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: justAdded.priority === 'high' }}
-            >
-              <Text style={[styles.chipLabel, justAdded.priority === 'high' && styles.chipAlertLabel]}>
-                Urgent
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => navigation.navigate('SnagDetail', { snagId: justAdded.id })}
-              style={styles.chip}
-              accessibilityRole="button"
-            >
-              <Text style={styles.chipLabel}>More…</Text>
-            </Pressable>
-          </ScrollView>
-        </AmendRow>
+        <AmendSnagSheet
+          snag={justAdded}
+          locations={locations}
+          busy={amending}
+          onSaveNote={(text) => amend({ description: text }, 'Added')}
+          onSetRoom={(room) => amend({ room }, room ?? 'Tag removed')}
+          onSetUrgent={(urgent) => amend({ priority: urgent ? 'high' : null }, urgent ? 'Marked urgent' : 'No longer urgent')}
+          onOpenDetail={() => {
+            const id = justAdded.id;
+            setJustAdded(null);
+            navigation.navigate('SnagDetail', { snagId: id });
+          }}
+          onClose={() => setJustAdded(null)}
+        />
       ) : null}
 
-      <ComposeBar
-        pathPrefix={household.id}
-        onAdd={handleAdd}
-        // Only while the thing just added has no words of its own. A photo
-        // taken after typing already carries them, and a typed snag is its own
-        // description — asking again would be asking twice.
-        note={needsNote ? { onSave: (text) => amend({ description: text }, 'Saved') } : undefined}
-        stacked
-      />
+      {/* The bar files, and only files. It used to double as the note field
+          for the snag just added, which is the thing nobody noticed: the
+          placeholder changed and the meaning of the field changed with it.
+          AmendSnagSheet asks for the note in words now. */}
+      <ComposeBar pathPrefix={household.id} onAdd={handleAdd} stacked />
 
       {/* ─────────────────────────────────────────────── show me */}
       <Modal visible={filterOpen} transparent animationType="slide" onRequestClose={() => setFilterOpen(false)}>
@@ -581,17 +528,6 @@ const styles = StyleSheet.create({
   shoppingFor: { fontSize: Typography.sm, color: Colors.textMuted },
   doneLine: { paddingVertical: Spacing.lg, alignItems: 'center' },
   doneText: { fontSize: Typography.sm, color: Colors.textMuted },
-  amendHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  amendDoneTap: {
-    minHeight: MIN_TOUCH_TARGET - Spacing.md,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.sm,
-  },
-  amendDone: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.primary,
-  },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   chip: {
     minHeight: MIN_TOUCH_TARGET - Spacing.md,

@@ -86,35 +86,21 @@ describe('ComposeBar', () => {
     expect(onAdd).toHaveBeenCalledWith({ photoPath: 'house-1/1.jpg', description: 'Hinge sheared off' });
   });
 
-  it('writes a note onto the snag just added, rather than filing another', async () => {
-    // The prompt after a photo. A photo with no words and no room shows as
-    // "Something to sort out", which is unreadable a fortnight later — so the
-    // same field asks about the thing that was just added instead of starting
-    // a new one.
-    const onAdd = jest.fn();
-    const onSave = jest.fn().mockResolvedValue(undefined);
-    const result = render(<ComposeBar pathPrefix="house-1" onAdd={onAdd} note={{ onSave }} />);
-
-    expect(field(result).props.placeholder).toBe('Say what it is…');
-
-    await TestRenderer.act(async () => field(result).props.onChangeText('Hinge sheared off'));
-    await TestRenderer.act(async () => labelled(result, 'Save what it is').props.onPress());
-
-    expect(onSave).toHaveBeenCalledWith('Hinge sheared off');
-    expect(onAdd).not.toHaveBeenCalled();
-  });
-
-  it('still starts a new snag from the camera while a note is being asked for', async () => {
-    // Pressing the camera has exactly one meaning, and it is not "amend".
-    mock_takePhoto.mockResolvedValue('file://second.jpg');
-    mock_compressAndUpload.mockResolvedValue({ path: 'house-1/2.jpg', error: null });
+  it('is only ever a way to file something new', async () => {
+    // The bar used to double as the note field for the snag just added: after a
+    // photo its placeholder changed and so did the meaning of pressing send.
+    // Nobody noticed, so people filed a photo and then opened the snag again to
+    // describe it. AmendSnagSheet asks in words now, and this bar has one job.
     const onAdd = jest.fn().mockResolvedValue(undefined);
-    const result = render(
-      <ComposeBar pathPrefix="house-1" onAdd={onAdd} note={{ onSave: jest.fn() }} />
-    );
+    const result = render(<ComposeBar pathPrefix="house-1" onAdd={onAdd} />);
 
-    await TestRenderer.act(async () => labelled(result, 'Take a photo').props.onPress());
-    expect(onAdd).toHaveBeenCalledWith({ photoPath: 'house-1/2.jpg', description: null });
+    // The prompt never changes meaning, and the send button says one thing.
+    expect(field(result).props.placeholder).toBe('Add something…');
+
+    await TestRenderer.act(async () => field(result).props.onChangeText('Gutters'));
+    await TestRenderer.act(async () => labelled(result, 'Add to the list').props.onPress());
+
+    expect(onAdd).toHaveBeenCalledWith({ photoPath: null, description: 'Gutters' });
   });
 
   it('refuses the camera until it knows where photos go', async () => {

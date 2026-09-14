@@ -289,31 +289,48 @@ const PHOTOS_BUCKET = 'home-photos';
  * Returns `{ path, error }` rather than throwing or swallowing, because
  * PhotoPicker has to tell "no photo" apart from "upload failed" — the second
  * needs showing and retrying rather than being silently dropped.
+ *
+ * The content type is a parameter because this bucket holds manuals as well as
+ * photos now. It has to be passed in *twice* — to `readForUpload`, which uses it
+ * to retype the Blob, and to Storage — because a multipart upload carries the
+ * Blob's own type rather than the `contentType` option, so a mismatch lands the
+ * file as `application/octet-stream` and the bucket's mime allow-list refuses
+ * it. See `lib/uploadBody.ts`.
  */
-export async function uploadSnagPhoto(
+export async function uploadFile(
   localUri: string,
   fileName: string,
+  contentType: string,
   bucket: string = PHOTOS_BUCKET,
 ): Promise<{ path: string | null; error: any }> {
   try {
     // Reading the picked file is platform-specific — and a wrong read fails
     // before any request is made, which looks like an upload failure with
     // nothing in the Storage logs. See readForUpload.
-    const body = await readForUpload(localUri, 'image/jpeg');
+    const body = await readForUpload(localUri, contentType);
 
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, body, { contentType: 'image/jpeg', upsert: false });
+      .upload(fileName, body, { contentType, upsert: false });
 
     if (error || !data) {
-      console.error('Photo upload error:', error);
+      console.error('Upload error:', error);
       return { path: null, error: error ?? new Error('Upload failed') };
     }
     return { path: data.path, error: null };
   } catch (err) {
-    console.error('Photo upload error:', err);
+    console.error('Upload error:', err);
     return { path: null, error: err };
   }
+}
+
+/** Every photo in this app is a JPEG by the time it gets here — see compressAndUpload. */
+export async function uploadSnagPhoto(
+  localUri: string,
+  fileName: string,
+  bucket: string = PHOTOS_BUCKET,
+): Promise<{ path: string | null; error: any }> {
+  return uploadFile(localUri, fileName, 'image/jpeg', bucket);
 }
 
 export async function getSnagPhotoUrl(path: string): Promise<string | null> {

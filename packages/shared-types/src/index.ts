@@ -288,6 +288,8 @@ export interface Thing {
   /** TEXT server-side, so removing a room tag never rewrites what is filed under it. */
   room: string | null;
   photoPaths: string[];
+  /** Manuals and receipts, in `home-photos` under `<household_id>/docs/`. */
+  documentPaths: string[];
 
   make: string | null;
   model: string | null;

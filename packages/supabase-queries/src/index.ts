@@ -93,6 +93,7 @@ function mapThing(row: Row): Thing {
     model: row.model ?? null,
     serial: row.serial ?? null,
     consumables: row.consumables ?? [],
+    documentPaths: row.document_paths ?? [],
     installedAt: row.installed_at ?? null,
     warrantyUntil: row.warranty_until ?? null,
     serviceDays: row.service_days ?? null,
@@ -665,6 +666,39 @@ export async function getThing(client: SupabaseClient, thingId: string): Promise
  * came for — "Heat pump" is what they already knew. A name is the fallback, and
  * the room is the last resort, on the same reasoning as `snagHeadline`.
  */
+/**
+ * A storage key for an attached document, and the name to show for one.
+ *
+ * The key keeps the original filename because the filename *is* the label: a
+ * list reading "Rangehood manual.pdf" answers what a list of UUIDs never
+ * could. Only the first path segment matters to the storage policies
+ * (`home.can_use_photo_folder` reads it and nothing else), so the `docs/`
+ * level and the name after it are free to carry meaning.
+ *
+ * The timestamp and random prefix are what stop two people attaching
+ * `manual.pdf` on the same day from colliding — uploads are `upsert: false`,
+ * so a collision is a failure rather than an overwrite.
+ */
+export function documentFileName(pathPrefix: string, originalName: string): string {
+  const cleaned = originalName
+    .replace(/[^A-Za-z0-9._ -]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(-80);
+  const safe = cleaned.length > 0 ? cleaned : 'document.pdf';
+  return `${pathPrefix}/docs/${Date.now()}-${Math.round(Math.random() * 1e6)}-${safe}`;
+}
+
+/** The name to show for a stored document — the key with its prefix taken off. */
+export function documentName(path: string): string {
+  const base = path.slice(path.lastIndexOf('/') + 1);
+  // Only strip a prefix this app minted. A file that arrived some other way
+  // keeps whatever name it has rather than losing its first two hyphenated
+  // words to a pattern it never followed.
+  const stripped = base.replace(/^\d{10,}-\d+-/, '');
+  return stripped.length > 0 ? stripped : base;
+}
+
 export function thingHeadline(thing: Thing): string {
   if (thing.name) return thing.name;
   if (thing.make || thing.model) return [thing.make, thing.model].filter(Boolean).join(' ');
@@ -772,6 +806,8 @@ export interface ThingUpdate {
   installedAt?: string | null;
   warrantyUntil?: string | null;
   serviceDays?: number | null;
+  /** Manuals and receipts. An array, so it is emptied with `[]`, never null. */
+  documentPaths?: string[];
   /** Merged into what is already there, key by key. */
   spec?: ThingSpec;
   /** Spec keys to drop, by key name — a null inside `spec` can't say this. */
@@ -792,9 +828,14 @@ const THING_CLEARABLE: Record<string, string> = {
 };
 
 /**
- * One field at a time, written immediately — the spec sheet has no Save button
- * for the same reason triage doesn't: a page of small independent facts behind
- * one button turns filling in a heat pump into forty taps and a commitment.
+ * Everything the caller names, in one write.
+ *
+ * The thing page used to call this once per field, on blur. It now collects the
+ * typed fields and saves them together, because a page that writes silently
+ * leaves nobody any way to know it worked — the rows were writing, and the
+ * person filling them in could not tell. Taps (the kind chips, the room, the
+ * parts list, photos and documents) still call this one at a time: those are
+ * single decisions that are their own confirmation.
  */
 export async function updateThing(
   client: SupabaseClient,
@@ -820,6 +861,7 @@ export async function updateThing(
     p_installed_at: update.installedAt ?? null,
     p_warranty_until: update.warrantyUntil ?? null,
     p_service_days: update.serviceDays ?? null,
+    p_document_paths: update.documentPaths ?? null,
     p_spec: update.spec ?? null,
     p_notes: update.notes ?? null,
     p_clear: clear,

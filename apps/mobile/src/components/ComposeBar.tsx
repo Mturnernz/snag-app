@@ -14,12 +14,6 @@ interface Props {
   pathPrefix: string | null;
   /** Files a snag with a photo, a line of text, or both. */
   onAdd: (input: { photoPath: string | null; description: string | null }) => Promise<void>;
-  /**
-   * When set, the text field writes a note onto the snag that was *just* added
-   * rather than filing a new one — the prompt after a photo. The camera still
-   * starts a new snag either way, which is the only reading of pressing it.
-   */
-  note?: { onSave: (text: string) => Promise<void> };
   /** Stacked above a tab bar, which already clears the home indicator. */
   stacked?: boolean;
   /**
@@ -32,7 +26,6 @@ interface Props {
    */
   words?: {
     placeholder?: string;
-    notePlaceholder?: string;
     cameraLabel?: string;
     /**
      * The send button's accessible name. Kept separate from the placeholder
@@ -67,7 +60,7 @@ interface Props {
  *   bar is the exact case that breaks. This is the one component in the app
  *   that could not exist without that fix.
  */
-export default function ComposeBar({ pathPrefix, onAdd, note, stacked, words }: Props) {
+export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
 
@@ -78,13 +71,11 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked, words }: 
   const off = busy || !pathPrefix;
 
   const cameraLabel = words?.cameraLabel ?? 'Take a photo';
-  const prompt = note
-    ? words?.notePlaceholder ?? 'Say what it is…'
-    : words?.placeholder ?? 'Add something…';
+  const prompt = words?.placeholder ?? 'Add something…';
   // The accessible name is the prompt without its trailing ellipsis: a screen
   // reader saying "Say what it is dot dot dot" is reading punctuation aloud.
   const promptLabel = prompt.replace(/[….]+$/, '');
-  const sendLabel = note ? 'Save what it is' : words?.sendLabel ?? 'Add to the list';
+  const sendLabel = words?.sendLabel ?? 'Add to the list';
 
   async function handleText() {
     const text = draft.trim();
@@ -95,11 +86,10 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked, words }: 
       // tick, and a bar still holding the words that are now on screen reads
       // as "that didn't send".
       setDraft('');
-      if (note) await note.onSave(text);
-      else await onAdd({ photoPath: null, description: text });
+      await onAdd({ photoPath: null, description: text });
     } catch (err: any) {
       setDraft(text);
-      showAlert(note ? "Couldn't save that note" : "Couldn't add that", err?.message ?? 'Please try again.');
+      showAlert("Couldn't add that", err?.message ?? 'Please try again.');
     } finally {
       setBusy(false);
     }
@@ -163,7 +153,6 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked, words }: 
         onSubmitEditing={handleText}
         blurOnSubmit={false}
         accessibilityLabel={promptLabel}
-        autoFocus={!!note}
       />
 
       {draft.trim().length > 0 ? (
@@ -179,15 +168,6 @@ export default function ComposeBar({ pathPrefix, onAdd, note, stacked, words }: 
       ) : null}
     </View>
   );
-}
-
-/** The chips that amend the snag just added, shown above the bar. */
-export function AmendRow({ children }: { children: React.ReactNode }) {
-  return <View style={styles.amend}>{children}</View>;
-}
-
-export function AmendLabel({ text }: { text: string }) {
-  return <Text style={styles.amendLabel}>{text}</Text>;
 }
 
 const styles = StyleSheet.create({
@@ -228,16 +208,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendOff: { backgroundColor: Colors.sunken },
-  amend: {
-    backgroundColor: Colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.sm,
-    gap: Spacing.sm,
-  },
-  amendLabel: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-  },
 });

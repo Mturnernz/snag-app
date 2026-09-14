@@ -1,6 +1,7 @@
 import {
-  catalogueSuggestions, describeCycle, formatLooseDate, ghostsForRoom, matchSuggestions,
-  parseLooseDate, searchThings, thingDetailLine, thingHeadline, thingSearchText,
+  catalogueSuggestions, describeCycle, documentFileName, documentName, formatLooseDate,
+  ghostsForRoom, matchSuggestions, parseLooseDate, searchThings, thingDetailLine,
+  thingHeadline, thingSearchText,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -11,7 +12,7 @@ import type { Thing } from '../types';
 
 const thing = (over: Partial<Thing>): Thing => ({
   id: 'x', householdId: 'h', propertyId: 'p', kind: 'appliance',
-  name: null, room: null, photoPaths: [],
+  name: null, room: null, photoPaths: [], documentPaths: [],
   make: null, model: null, serial: null, consumables: [],
   installedAt: null, warrantyUntil: null, serviceDays: null, spec: {}, notes: null,
   createdBy: 'me', createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
@@ -298,5 +299,52 @@ describe('picking something to add, when the house is not laid out like the cata
     // The miss is the interesting case: it is what puts "Add it yourself" on
     // screen rather than an empty list and a dead end.
     expect(matchSuggestions(all, 'wine fridge')).toEqual([]);
+  });
+});
+
+// A document's filename is its label. The storage key keeps it for that reason
+// alone — a paperwork list of UUIDs answers nothing, and "which manual" is the
+// entire question somebody has when they open this.
+describe('attached documents', () => {
+  it('keeps the original name in the key, under the household folder', () => {
+    const key = documentFileName('house-1', 'Rangehood manual.pdf');
+    // Segment one is the only thing the storage policy reads, so it has to be
+    // the household and nothing else.
+    expect(key.startsWith('house-1/docs/')).toBe(true);
+    expect(key.endsWith('Rangehood manual.pdf')).toBe(true);
+  });
+
+  it('reads the name back off the key', () => {
+    const key = documentFileName('house-1', 'Rangehood manual.pdf');
+    expect(documentName(key)).toBe('Rangehood manual.pdf');
+  });
+
+  it('keeps hyphens in a name rather than mistaking them for the prefix', () => {
+    // The prefix is digits-digits-; a name that merely contains hyphens must
+    // survive it, or "CS2-600-1 manual.pdf" loses its model number.
+    const key = documentFileName('house-1', 'CS2-600-1 manual.pdf');
+    expect(documentName(key)).toBe('CS2-600-1 manual.pdf');
+  });
+
+  it('gives two files uploaded together different keys', () => {
+    // Uploads are upsert: false, so a collision is a failure, not an overwrite.
+    const a = documentFileName('house-1', 'manual.pdf');
+    const b = documentFileName('house-1', 'manual.pdf');
+    expect(a).not.toBe(b);
+  });
+
+  it('strips characters a storage key cannot carry', () => {
+    const key = documentFileName('house-1', 'recei/pt?2019.pdf');
+    expect(documentName(key)).toBe('receipt2019.pdf');
+    expect(key.split('/').length).toBe(3);
+  });
+
+  it('leaves a name alone when it was never given our prefix', () => {
+    expect(documentName('house-1/docs/manual.pdf')).toBe('manual.pdf');
+    expect(documentName('manual.pdf')).toBe('manual.pdf');
+  });
+
+  it('falls back rather than minting a key with no name at all', () => {
+    expect(documentName(documentFileName('house-1', '???'))).toBe('document.pdf');
   });
 });

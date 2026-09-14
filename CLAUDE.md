@@ -141,10 +141,15 @@ Four things about capture are load-bearing:
 - **A line of text is a complete snag.** "Gutters" typed into the bar is a perfectly good entry,
   and making that the same gesture as sending a message is the point of the bar existing.
 - **Nothing is asked before it is filed, and everything is asked straight after.** Taking a photo
-  saves the snag and *then* prompts: what is it, and where. The amend row offers every room tag
-  (not a shortlist — the one you want is the one you're standing in, and that is as likely to be
-  the Roof as the Kitchen) plus Urgent and a way into triage, and the compose bar's field switches
-  to writing a note onto the snag just added rather than filing another.
+  saves the snag and *then* opens `AmendSnagSheet`: what is wrong, then where, then whether it is
+  urgent, with a way into triage at the end. Every room tag is offered, not a shortlist — the one
+  you want is the one you're standing in, and that is as likely to be the Roof as the Kitchen.
+
+  It used to be a row of chips above the compose bar, with the note typed into the bar itself.
+  That row was right about what to ask and wrong about how: the bar's field quietly changed
+  meaning after a photo, nobody noticed, and people filed a photo and then opened the snag again
+  to describe it — the one journey the whole arrangement exists to remove. **The sheet asks in
+  words instead. The bar now only ever files something new.**
 
   The prompt exists because **a photo with no words and no room is the weakest thing this app can
   hold**: `snagHeadline` has nothing to work with and the list reads "Something to sort out",
@@ -160,7 +165,7 @@ Four things about capture are load-bearing:
 - **Priority is not a capture decision any more.** It used to be, defended as the one judgement
   only the person standing there can make — but nearly everything was filed Low, which is the
   premise of the product, and urgency is *comparative*. It belongs where a dozen things are
-  visible at once. `create_snag` still takes it; the list's amend row and the detail sheet set it.
+  visible at once. `create_snag` still takes it; the capture sheet and the detail sheet set it.
 
 **Triage** (`SnagDetailScreen`, presented as a modal over the list) is everything else — what it
 needs from the shop, due date, repeat, assignee, priority. Each control writes immediately rather
@@ -176,7 +181,7 @@ nothing had been touched. Doing something about a snag is the evidence it has st
 
 The rule is narrower than "any update", deliberately. Only **assignee, due date, repeat and the
 parts list** start a job; room, description and priority don't. Those three are the tail of
-capture — the amend row sets them seconds after the photo — and marking a brand-new snag "doing"
+capture — the capture sheet sets them seconds after the photo — and marking a brand-new snag "doing"
 because somebody tagged it *Bathroom* would empty the status of meaning from the other end.
 Finishing is the one state change still made by hand, because only a person knows.
 
@@ -185,7 +190,7 @@ nobody could check, asked before the job was understood, and it existed mainly t
 that no longer exists. The column and the `snag_effort` enum are dropped, not deprecated.
 
 **Do not add a field to the compose bar.** Everything there is friction at the exact moment
-friction costs most. The place for it is the amend row, or triage.
+friction costs most. The place for it is the capture sheet, or triage.
 
 ## The list is the app's home
 
@@ -215,7 +220,7 @@ they last looked.
 
 `SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering and the done
 window. `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, and the
-keyboard lift.
+keyboard lift. `AmendSnagSheet.test.tsx` pins which question a new snag is asked first.
 
 ## The house record: what's *there*, beside what's wrong
 
@@ -381,9 +386,29 @@ later, in an aisle, needing one exact string. So:
   `MSZ-AP50VGK` is what they came for, so `thingDetailLine` gets the mono face and a line of its
   own. `Fonts.mono` is spent on data only — model numbers, serials, colour codes, tint formulas —
   never on prose.
-- **A thing's page is a spec sheet, not a form.** Every row writes on blur, and **empty fields do
-  not render**: what is known is shown, the rest is behind one *Add a detail* row. A sheet of
-  waiting blanks is a form wearing a different hat.
+- **A thing's page is a form, and that is a reversal.** It used to write every row on blur and
+  render only the fields already filled in, with the rest behind an *Add a detail* row — the
+  argument being that a page of blanks is homework. Lived with, it failed at both ends: nothing
+  ever said a change had been kept (the rows called `patch` without the toast it takes, so edits
+  saved in silence), and a page showing only what it has cannot tell you what it could hold. So
+  **every field the kind can answer is on screen, empty or not**, and **one Save button** commits
+  the typed ones together and says so. A paint still gets no Serial box: "every field" means every
+  field the kind can answer.
+- **Taps are not in the form.** The kind chips, the room, the parts list, photos and documents each
+  still write on press. Those are single decisions that are their own confirmation, and putting a
+  dozen of them behind one button is how sorting out a room becomes forty taps.
+- **A field is stacked — name above, box below, full width.** The old two-column row had nowhere to
+  put a long answer, and `MSZ-AP50VGK` and "Award Appliances" are exactly what somebody came to
+  read. It also overflowed: on web a `TextInput` is an `<input>` with an intrinsic ~20-character
+  width that `min-width: auto` will not shrink below, so a flexed right-aligned value grew past the
+  card and off the screen edge. Anything flexed around a `TextInput` needs `minWidth: 0`.
+- **Paperwork lives beside the photos.** `things.document_paths` holds PDFs in the **`home-photos`**
+  bucket under `<household_id>/docs/`, reusing the four storage policies and
+  `home.can_use_photo_folder` rather than standing up a second bucket. The bucket's name is a small
+  lie and its `allowed_mime_types` had to learn `application/pdf` — which Storage enforces *before*
+  RLS, so a PDF was refused with nothing said about permissions. The original filename is kept in
+  the key because it is the label: a list of UUIDs answers nothing. Opened with a signed URL in a
+  new tab, never embedded — the deployed CSP sets `object-src 'none'` and names no `frame-src`.
 - **No new colour.** Kind is an outline icon. The palette's four hues stay spent on state, and a
   thing has no state.
 
@@ -400,9 +425,9 @@ and tint formula) live in `spec`, which is jsonb and is the small tail, never th
 rather than five, because five would be five read policies, five write functions and five places
 to get the property check wrong.
 
-**Capture never asks the kind.** It files everything as `appliance` and the amend row corrects it
+**Capture never asks the kind.** It files everything as `appliance` and the thing page corrects it
 in one tap, on something already saved. That is why `update_thing` takes `p_kind` (and why
-`20260912170000` exists — the first migration forgot it, and the amend row had a Paint chip it
+`20260912170000` exists — the first migration forgot it, and the page had a Paint chip it
 could not wire up).
 
 ### Four joins, all using mechanisms that already exist
@@ -431,6 +456,13 @@ place. Things with no room fall under **Whole house**. Photos reuse `home-photos
 **The tab is called House, not "My House".** The moment there is a bach, "my house" is the wrong
 name for half of what it holds; the property name goes in the screen header instead, through the
 same picker capture has.
+
+`ThingDetailScreen.test.tsx` pins the reversal: every applicable field rendering as a box on an
+empty thing, no Serial on a paint, Save off until something is typed, one write carrying only what
+changed, and an emptied box clearing the column rather than leaving it alone.
+`houseRecord.test.ts` also pins the document key round-trip — the filename surviving, hyphens not
+being mistaken for the prefix, and two uploads never colliding (`upsert: false` makes a collision a
+failure, not an overwrite).
 
 `HouseScreen.test.tsx` pins the furnished day-one screen, the per-room counts, Whole house last
 and unfurnished, a search answering flat with no ghosts in it, ghosts staying out of *By kind*,
@@ -514,7 +546,7 @@ the only permission here is which places someone is on.
 `home.locations` holds the room tags, seeded **per property** by `seed_locations`: Kitchen,
 Bathroom, Bedroom, Living room, Laundry, Hallway, Garage, Outside, Deck, Roof, Under the house,
 Elsewhere. `getLocations(propertyId)` reads them in seeded order, and that order is what the list
-groups by as well as what the amend row offers — so it is an interface, not just a seed.
+groups by as well as what the capture sheet offers — so it is an interface, not just a seed.
 
 Nobody sets this up, and nobody has to earn it by logging something first. `Elsewhere` is the
 escape hatch that keeps a fixed list from being a dead end.

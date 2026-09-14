@@ -20,8 +20,6 @@ jest.mock('../components/ComposeBar', () => {
   return {
     __esModule: true,
     default: () => React.createElement(Text, null, 'compose bar'),
-    AmendRow: ({ children }: { children: React.ReactNode }) => children,
-    AmendLabel: ({ text }: { text: string }) => React.createElement(Text, null, text),
   };
 });
 

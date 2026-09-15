@@ -569,7 +569,8 @@ three unbuilt ones will want it.
   the cycle to the thing and puts a repeating snag on the list. Still no cron, no second table, no
   notifications; the modal says so in words, because a thing called "Schedule service" is exactly
   what somebody would expect to remind them. `describeCycle` is shared by both so they say it the
-  same way ("every 6 months", never "180 days").
+  same way ("every 6 months", never "180 days") — see *One vocabulary for how often* below, which
+  is what finally made that sentence true.
 
   **The job is created already dated, in one call.** Setting a due date or a repeat through
   `update_snag` is one of the four things that *start* a job, so create-then-update would put a
@@ -639,6 +640,33 @@ status they asked for. `SnagDetailScreen` says what actually happened rather tha
 Schedule tab reads `last_done_at` for the same reason, and it is the honest limit of what the
 schema remembers: only the most recent completion, so the tab shows the ones it can prove and
 invents no history it hasn't got.
+
+### One vocabulary for how often
+
+`REPEAT_PRESETS` (a snag's repeat) and `SERVICE_CYCLES` (a thing's servicing) are two selections
+from **one** vocabulary, and they live beside each other in `shared-types` for a reason: they
+drifted the moment they didn't.
+
+`REPEAT_PRESETS` offered six months as **182** days; `SERVICE_CYCLES` used **180**. So "every 6
+months" meant two different numbers depending on which screen set it — and because scheduling a
+service *creates a snag* carrying that number, two snags with identical intent ended up with
+different repeats. Worse, `describeCycle` only reaches months on a multiple of 30, so the 182-day
+repeat came back out as **"every 26 weeks"**: the app failing to say back the words on the chip
+somebody had just pressed, on four screens at once (triage, the Schedule tab, the thing card, the
+extract).
+
+**Six months is 180 days everywhere now.** It is not half of 365 and that is fine — this is a list
+of household chores, not an amortisation schedule, and the number nobody types matters far less
+than the words everybody reads.
+
+The rule to keep, and the one `cycles.test.ts` pins: **every interval either list offers must be a
+whole number of months or years**, so `describeCycle` never falls through to its weeks or days
+branch for anything the UI can produce. It asserts the property rather than the numbers, so the
+next interval added to either list cannot reintroduce this. It also pins that no phrase maps to two
+day counts, and that each preset's label matches what `describeCycle` says about its days.
+
+The weeks and days branches stay, because `create_snag` accepts any interval from 1 to 3650 and an
+extract should say what the row actually holds rather than round it into a lie.
 
 Setting one up is a **yes/no first, then the cycle**: how often, then when the first one lands,
 then a plain sentence stating the arrangement. It used to be a row of presets with "One-off" among

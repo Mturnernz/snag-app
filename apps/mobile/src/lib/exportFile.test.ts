@@ -21,7 +21,7 @@ import { loadExportImages, renderPdf, type ExportImage } from './exportFile';
 const snag = (over: Partial<any> = {}): any => ({
   id: 's1', reference: 'SNAG-0007', householdId: 'h', propertyId: 'p',
   room: 'Kitchen', photoPaths: [], description: 'Gutters', priority: 'low',
-  status: 'open', parts: [], needsParts: false, dueAt: null, repeatDays: null,
+  status: 'open', parts: [], bought: [], needsParts: false, dueAt: null, repeatDays: null,
   assigneeId: null, thingId: null, reporterId: 'me',
   createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
   lastDoneAt: null, doneAt: null, propertyName: 'Home', reporterName: 'Mike',

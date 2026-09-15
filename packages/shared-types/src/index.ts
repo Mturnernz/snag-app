@@ -236,7 +236,19 @@ export interface Snag {
    * the half of the problem that actually blocks a small job for weeks.
    */
   parts: string[];
-  /** Derived from `parts` server-side, so the two can never disagree. */
+  /**
+   * Which of them have been got, as written on the list above.
+   *
+   * A trip is a thing that happens halfway: one person is in the aisle with
+   * four items and two of them are in the trolley. Kept as the item text rather
+   * than as indices, because the list can be edited from the other phone while
+   * somebody is standing in the shop.
+   */
+  bought: string[];
+  /**
+   * Derived in the view, so the flag the list filters on cannot disagree with
+   * the list it describes: true only while something on it has not been bought.
+   */
   needsParts: boolean;
   dueAt: string | null;
   repeatDays: number | null;

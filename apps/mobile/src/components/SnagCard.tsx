@@ -6,7 +6,7 @@ import PriorityBadge from './PriorityBadge';
 import DueBadge from './DueBadge';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Snag } from '../types';
-import { snagHeadline } from '@snag/supabase-queries';
+import { snagHeadline, unboughtParts } from '@snag/supabase-queries';
 
 interface Props {
   snag: Snag;
@@ -26,6 +26,7 @@ export default function SnagCard({ snag, photoUrl, onPress }: Props) {
   const done = snag.status === 'done';
   // No title field exists: a photo-only snag is named by where it is.
   const headline = snagHeadline(snag);
+  const toGet = unboughtParts(snag);
 
   return (
     <Pressable
@@ -67,11 +68,14 @@ export default function SnagCard({ snag, photoUrl, onPress }: Props) {
           <StatusBadge status={snag.status} />
           <PriorityBadge priority={snag.priority} />
           <DueBadge snag={snag} />
-          {snag.parts.length > 0 ? (
+          {/* What is still to get, never what was listed: a card claiming it
+              needs the seal you bought on Saturday is a card you stop
+              believing. The pill goes when the trip is done. */}
+          {toGet.length > 0 ? (
             <View style={styles.parts}>
               <Icon name="cart-outline" size="sm" color={Colors.effort.fg} />
               <Text style={styles.partsLabel}>
-                {snag.parts.length === 1 ? snag.parts[0] : `${snag.parts.length} things to get`}
+                {toGet.length === 1 ? toGet[0] : `${toGet.length} things to get`}
               </Text>
             </View>
           ) : null}

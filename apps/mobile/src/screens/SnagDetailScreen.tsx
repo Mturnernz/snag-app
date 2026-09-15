@@ -22,7 +22,7 @@ import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
-  deleteStoredFiles, getSnagAdvice, deleteSnagAdvice,
+  deleteStoredFiles, getSnagAdvice, deleteSnagAdvice, setPartBought,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { describeCycle, snagHeadline } from '@snag/supabase-queries';
@@ -111,6 +111,26 @@ export default function SnagDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * Off the list, or back onto it.
+   *
+   * Not through `patch`, because `update_snag` starts a job when its parts
+   * change and buying one of them is not adding one — see
+   * `20260915150000_a_shopping_list_you_can_tick.sql`.
+   */
+  async function tick(item: string, bought: boolean) {
+    if (!snag) return;
+    setBusy(true);
+    try {
+      await setPartBought(snag.id, item, bought);
+      setSnag(await getSnag(snag.id));
+    } catch (err: any) {
+      showAlert("Couldn't tick that off", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   /** Every triage control goes through here: write, then re-read. */
   async function patch(update: Parameters<typeof updateSnag>[1]) {
@@ -425,21 +445,42 @@ export default function SnagDetailScreen() {
           <Text style={styles.fieldLabel}>Anything to pick up?</Text>
           {snag.parts.length > 0 ? (
             <View style={styles.partsList}>
-              {snag.parts.map((item, index) => (
-                <View key={`${item}-${index}`} style={styles.partRow}>
-                  <Icon name="ellipse-outline" size="sm" color={Colors.textMuted} />
-                  <Text style={styles.partText}>{item}</Text>
-                  <Pressable
-                    onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
-                    disabled={busy}
-                    style={styles.partRemove}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${item}`}
-                  >
-                    <Icon name="close" size="sm" color={Colors.textMuted} />
-                  </Pressable>
-                </View>
-              ))}
+              {snag.parts.map((item, index) => {
+                const got = snag.bought.includes(item);
+                return (
+                  <View key={`${item}-${index}`} style={styles.partRow}>
+                    {/* Ticking is its own write and deliberately not a `patch`:
+                        changing the list starts the job, and buying something
+                        off it is not starting anything. It is also where a
+                        mis-tap in an aisle gets undone, which is why the row
+                        stays on the trip sheet rather than vanishing. */}
+                    <Pressable
+                      onPress={() => tick(item, !got)}
+                      disabled={busy}
+                      style={styles.partTick}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: got }}
+                      accessibilityLabel={got ? `${item}, got it` : `${item}, tick off`}
+                    >
+                      <Icon
+                        name={got ? 'checkmark-circle' : 'ellipse-outline'}
+                        size="sm"
+                        color={got ? Colors.primary : Colors.textMuted}
+                      />
+                    </Pressable>
+                    <Text style={[styles.partText, got && styles.partTextGot]}>{item}</Text>
+                    <Pressable
+                      onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
+                      disabled={busy}
+                      style={styles.partRemove}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${item}`}
+                    >
+                      <Icon name="close" size="sm" color={Colors.textMuted} />
+                    </Pressable>
+                  </View>
+                );
+              })}
             </View>
           ) : null}
           <View style={styles.partAddRow}>
@@ -684,6 +725,8 @@ const styles = StyleSheet.create({
   partsList: { gap: Spacing.xs, marginTop: Spacing.xs },
   partRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: 32 },
   partText: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
+  partTick: { minWidth: 28, minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  partTextGot: { color: Colors.textMuted, textDecorationLine: 'line-through' },
   partRemove: {
     width: MIN_TOUCH_TARGET - Spacing.md,
     height: MIN_TOUCH_TARGET - Spacing.md,

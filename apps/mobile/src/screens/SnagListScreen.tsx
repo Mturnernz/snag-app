@@ -17,11 +17,12 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createSnag, getFileUrls, getSnags, getThings, markListSeen, updateSnag,
+  createSnag, getFileUrls, getSnags, getThings, markListSeen, setPartBought, updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import {
-  assessmentBrief, exportDateStamp, snagExportPhotos, snagExportTable,
+  assessmentBrief, exportDateStamp, shoppingCount, shoppingList, snagExportPhotos,
+  snagExportTable,
 } from '@snag/supabase-queries';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag, Thing } from '../types';
@@ -242,10 +243,39 @@ export default function SnagListScreen() {
    * nobody has made. It survives as the header of the "Needs parts" lens —
    * everything the visible jobs are waiting on, collected, with what it is for.
    */
-  const shoppingList = useMemo(() => {
-    if (lens !== 'parts') return [];
-    return visible.flatMap((s) => s.parts.map((item) => ({ item, snag: s })));
-  }, [lens, visible]);
+  const shopping = useMemo(
+    () => (lens === 'parts' ? shoppingList(visible) : []),
+    [lens, visible],
+  );
+
+  /**
+   * How many things are still to get, across the whole list rather than the
+   * lens — the pill is how somebody finds out there is shopping to do, so
+   * counting only what a filter already reveals would answer a question nobody
+   * could have asked yet.
+   */
+  const toGet = useMemo(() => shoppingCount(snags), [snags]);
+
+  /**
+   * Ticked at the shop.
+   *
+   * A local re-read rather than a full `load()`: the trip is a run of taps and
+   * re-fetching two lists and every cover photo between each one would make the
+   * card lag exactly where it is being used hardest.
+   */
+  async function tick(snagId: string, item: string, bought: boolean) {
+    setSnags((current) => current.map((s) => (
+      s.id === snagId
+        ? { ...s, bought: bought ? [...s.bought, item] : s.bought.filter((i) => i !== item) }
+        : s
+    )));
+    try {
+      await setPartBought(snagId, item, bought);
+    } catch (err: any) {
+      showAlert("Couldn't tick that off", err?.message ?? 'Please try again.');
+      load();
+    }
+  }
 
   const recentlyDone = useMemo(() => {
     const cutoff = Date.now() - DONE_WINDOW_DAYS * 86_400_000;
@@ -375,6 +405,30 @@ export default function SnagListScreen() {
           ) : null}
         </Pressable>
 
+        {/* Only when there is something to get: at nought it is a control
+            dressed as a choice, and the two filter rails were evicted from
+            this screen for charging rent on every visit. Tapping it is the
+            lens, not a second place parts live. */}
+        {toGet > 0 ? (
+          <Pressable
+            onPress={() => setLens(lens === 'parts' ? 'all' : 'parts')}
+            style={styles.shopTap}
+            accessibilityRole="button"
+            accessibilityLabel={`${toGet} ${toGet === 1 ? 'thing' : 'things'} to get`}
+          >
+            <View style={[styles.shopPill, lens === 'parts' && styles.shopPillOn]}>
+              <Icon
+                name="cart-outline"
+                size="sm"
+                color={lens === 'parts' ? Colors.white : Colors.textSecondary}
+              />
+              <Text style={[styles.shopCount, lens === 'parts' && styles.shopCountOn]}>
+                {toGet}
+              </Text>
+            </View>
+          </Pressable>
+        ) : null}
+
         <Pressable
           onPress={() => setFilterOpen(true)}
           style={[styles.filterBtn, (lens !== 'all' || sort !== 'room') && styles.filterBtnOn]}
@@ -397,7 +451,7 @@ export default function SnagListScreen() {
       <SectionList
         sections={sections}
         ListHeaderComponent={
-          shoppingList.length > 0 ? (
+          shopping.length > 0 ? (
             <View style={styles.shopping}>
               <View style={styles.shoppingHead}>
                 <Icon name="cart-outline" size="md" color={Colors.primary} />
@@ -406,11 +460,31 @@ export default function SnagListScreen() {
               <Text style={styles.shoppingHint}>
                 One trip clears {visible.length} {visible.length === 1 ? 'job' : 'jobs'}.
               </Text>
-              {shoppingList.map(({ item, snag }, index) => (
-                <View key={`${snag.id}-${index}`} style={styles.shoppingRow}>
-                  <Text style={styles.shoppingItem}>{item}</Text>
+              {/* A ticked row stays, struck through, rather than vanishing
+                  under the finger that tapped it: otherwise undoing a mis-tap
+                  means remembering which job the item belonged to. It leaves on
+                  its own terms — a job with nothing left to get stops being
+                  `needs_parts`, drops out of this lens, and takes its rows with
+                  it, so the card empties as the trip ends. */}
+              {shopping.map(({ item, snag, bought }) => (
+                <Pressable
+                  key={`${snag.id}-${item}`}
+                  onPress={() => tick(snag.id, item, !bought)}
+                  style={styles.shoppingRow}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: bought }}
+                  accessibilityLabel={bought ? `${item}, got it` : `${item}, tick off`}
+                >
+                  <Icon
+                    name={bought ? 'checkmark-circle' : 'ellipse-outline'}
+                    size="sm"
+                    color={bought ? Colors.primary : Colors.textMuted}
+                  />
+                  <Text style={[styles.shoppingItem, bought && styles.shoppingItemGot]}>
+                    {item}
+                  </Text>
                   <Text style={styles.shoppingFor}>{snag.room ?? '—'}</Text>
-                </View>
+                </Pressable>
               ))}
             </View>
           ) : null
@@ -612,6 +686,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   filterBtnOn: { backgroundColor: Colors.primary },
+  // The app's one chip: a sunken well when off, solid fern when on, no border
+  // either way. The pill is ~34px and the tap area is the full 48 — a rail of
+  // lozenges outweighs the list it filters, and a 34px target is invisible
+  // until somebody is holding the phone one-handed.
+  shopTap: { minWidth: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  shopPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    height: 34,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.sunken,
+  },
+  shopPillOn: { backgroundColor: Colors.primary },
+  shopCount: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textSecondary,
+  },
+  shopCountOn: { color: Colors.white },
   since: { fontSize: Typography.sm, color: Colors.textMuted, paddingHorizontal: Spacing.lg },
   listContent: { padding: Spacing.lg, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
@@ -648,6 +743,7 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
   },
   shoppingItem: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
+  shoppingItemGot: { color: Colors.textMuted, textDecorationLine: 'line-through' },
   shoppingFor: { fontSize: Typography.sm, color: Colors.textMuted },
   doneLine: { paddingVertical: Spacing.lg, alignItems: 'center' },
   doneText: { fontSize: Typography.sm, color: Colors.textMuted },

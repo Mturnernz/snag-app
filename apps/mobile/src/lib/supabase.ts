@@ -282,6 +282,9 @@ export const createSnag = (input: Parameters<typeof queries.createSnag>[1]) =>
 export const updateSnag = (snagId: string, update: queries.SnagUpdate) =>
   queries.updateSnag(supabase, snagId, update);
 
+export const setPartBought = (snagId: string, item: string, bought: boolean) =>
+  queries.setPartBought(supabase, snagId, item, bought);
+
 export const setSnagStatus = (snagId: string, status: SnagStatus) =>
   queries.setSnagStatus(supabase, snagId, status);
 

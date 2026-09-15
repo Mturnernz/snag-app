@@ -73,6 +73,7 @@ function mapSnag(row: Row): Snag {
     status: row.status,
     priority: row.priority ?? null,
     parts: row.parts ?? [],
+    bought: row.bought ?? [],
     needsParts: !!row.needs_parts,
     dueAt: row.due_at ?? null,
     repeatDays: row.repeat_days ?? null,
@@ -872,6 +873,71 @@ export async function updateSnag(
  * forward, records `last_done_at`, and leaves it open. Callers should re-read
  * the returned snag rather than assuming the status they asked for.
  */
+/**
+ * Tick something off at the shop, or untick it.
+ *
+ * **Its own function, so that buying cannot start a job.** `update_snag` moves a
+ * snag to 'doing' when its parts change, because deciding what to buy is
+ * deciding to do the work — but getting one of them is not adding one, and a
+ * whole list of jobs flipping to 'doing' because somebody walked round a
+ * hardware shop would empty the status of meaning from the same end the retired
+ * *Start it* button did.
+ *
+ * Keyed by the item's own text rather than an index: the list can be edited from
+ * the other phone while somebody is standing in the aisle.
+ */
+export async function setPartBought(
+  client: SupabaseClient,
+  snagId: string,
+  item: string,
+  bought: boolean
+): Promise<void> {
+  const { error } = await client.rpc('set_part_bought', {
+    p_snag_id: snagId,
+    p_item: item,
+    p_bought: bought,
+  });
+  if (error) throw asError(error, "Couldn't tick that off");
+}
+
+/** What is still to get on one job. */
+export function unboughtParts(snag: Snag): string[] {
+  const got = new Set(snag.bought);
+  return snag.parts.filter((item) => !got.has(item));
+}
+
+/** One line on the trip sheet. */
+export interface ShoppingItem {
+  item: string;
+  snag: Snag;
+  bought: boolean;
+}
+
+/**
+ * Every job's parts, collected into one trip.
+ *
+ * **What has been got stays on screen, struck through, rather than vanishing.**
+ * A tap in an aisle lands on the wrong row often enough that a list which
+ * silently drops the thing you just touched is a dead end — you would have to
+ * remember which job it belonged to to put it back. It leaves on its own terms:
+ * a job with nothing left to get is no longer `needs_parts`, so it drops out of
+ * the lens and takes its rows with it, and the card empties as the trip ends.
+ *
+ * Unbought first, because that is the half being read.
+ */
+export function shoppingList(snags: Snag[]): ShoppingItem[] {
+  const rows = snags.flatMap((snag) => {
+    const got = new Set(snag.bought);
+    return snag.parts.map((item) => ({ item, snag, bought: got.has(item) }));
+  });
+  return [...rows.filter((row) => !row.bought), ...rows.filter((row) => row.bought)];
+}
+
+/** How many things are still to get, across everything on the list. */
+export function shoppingCount(snags: Snag[]): number {
+  return snags.reduce((total, snag) => total + unboughtParts(snag).length, 0);
+}
+
 export async function setSnagStatus(
   client: SupabaseClient,
   snagId: string,

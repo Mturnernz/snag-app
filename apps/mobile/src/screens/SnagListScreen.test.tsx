@@ -34,12 +34,16 @@ jest.mock('../lib/exportFile', () => ({
 
 const mock_getSnags = jest.fn();
 const mock_markListSeen = jest.fn();
+const mock_setPartBought = jest.fn().mockResolvedValue(undefined);
+const mock_updateSnag = jest.fn();
 jest.mock('../lib/supabase', () => ({
   getSnags: (...a: unknown[]) => mock_getSnags(...a),
   markListSeen: () => mock_markListSeen(),
   getFileUrls: jest.fn().mockResolvedValue({}),
+  getThings: jest.fn().mockResolvedValue([]),
   createSnag: jest.fn(),
-  updateSnag: jest.fn(),
+  updateSnag: (...a: unknown[]) => mock_updateSnag(...a),
+  setPartBought: (...a: unknown[]) => mock_setPartBought(...a),
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
@@ -53,7 +57,7 @@ const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
 const snag = (over: Partial<any>): any => ({
   id: 'x', reference: 'S-1', householdId: 'h', propertyId: 'p',
   room: null, photoPaths: [], description: 'A thing', priority: null,
-  status: 'open', parts: [], needsParts: false, dueAt: null, repeatDays: null,
+  status: 'open', parts: [], bought: [], needsParts: false, dueAt: null, repeatDays: null,
   assigneeId: null, reporterId: ME, createdAt: ago(10), updatedAt: ago(10),
   lastDoneAt: null, doneAt: null, propertyName: 'Home', reporterName: 'Me',
   assigneeName: null, commentCount: 0,
@@ -256,5 +260,103 @@ describe('taking the list out', () => {
     expect(table.name).toBe('Home list');
     expect(table.subtitle).toContain('Home');
     expect(format).toBe('pdf');
+  });
+});
+
+// ─── the shopping pill and the trip sheet ─────────────────────────────────────
+
+describe('the shopping list', () => {
+  const byLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+        && !!n.props?.onPress,
+      { deep: true },
+    )[0];
+
+  const withParts = () => {
+    arrange();
+    const all = [
+      snag({ id: 'a', room: 'Bathroom', parts: ['Seal', 'Washer'], bought: ['Washer'], needsParts: true }),
+      snag({ id: 'b', room: 'Outside', parts: ['Brackets'], bought: [], needsParts: true }),
+      snag({ id: 'c', room: 'Kitchen' }),
+    ];
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      all.filter((s) => filter.status.includes(s.status)));
+  };
+
+  beforeEach(() => {
+    mock_setPartBought.mockClear();
+    mock_updateSnag.mockClear();
+  });
+
+  it('counts what is left across the whole list, not the lens', async () => {
+    withParts();
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    // Three items listed, one already got.
+    expect(byLabel(r, '2 things to get')).toBeDefined();
+  });
+
+  it('is not there at all when there is nothing to get', async () => {
+    // At nought it is a control dressed as a choice, and this screen evicted
+    // two filter rails for charging rent on every visit.
+    arrange();
+    mock_getSnags.mockResolvedValue([snag({ id: 'a', room: 'Kitchen' })]);
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    expect(byLabel(r, '1 thing to get')).toBeUndefined();
+    expect(byLabel(r, '0 things to get')).toBeUndefined();
+  });
+
+  it('opens the lens it already has, rather than a second place parts live', async () => {
+    withParts();
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    expect(r.queryByText('Pick up on the way')).toBeNull();
+    await TestRenderer.act(async () => byLabel(r, '2 things to get').props.onPress());
+    expect(r.queryByText('Pick up on the way')).not.toBeNull();
+  });
+
+  it('ticks an item off without touching the job', async () => {
+    // Changing the list starts the job; buying something off it is not adding
+    // one, so it must not go through update_snag.
+    withParts();
+    const r = render(<SnagListScreen />);
+    await settle();
+    await TestRenderer.act(async () => byLabel(r, '2 things to get').props.onPress());
+
+    await TestRenderer.act(async () => byLabel(r, 'Seal, tick off').props.onPress());
+
+    expect(mock_setPartBought).toHaveBeenCalledWith('a', 'Seal', true);
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+  });
+
+  it('keeps what has been got on screen, and offers it back', async () => {
+    withParts();
+    const r = render(<SnagListScreen />);
+    await settle();
+    await TestRenderer.act(async () => byLabel(r, '2 things to get').props.onPress());
+
+    // Undoing a mis-tap must not mean remembering which job the item was for.
+    const got = byLabel(r, 'Washer, got it');
+    expect(got).toBeDefined();
+    await TestRenderer.act(async () => got.props.onPress());
+    expect(mock_setPartBought).toHaveBeenCalledWith('a', 'Washer', false);
+  });
+
+  it('stops a card asking for something once it has been bought', async () => {
+    // A card claiming it needs the seal you bought on Saturday is a card you
+    // stop believing.
+    arrange();
+    const all = [snag({ id: 'a', room: 'Bathroom', parts: ['Seal'], bought: ['Seal'], needsParts: false })];
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      all.filter((s) => filter.status.includes(s.status)));
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    expect(r.queryByText('Seal')).toBeNull();
   });
 });

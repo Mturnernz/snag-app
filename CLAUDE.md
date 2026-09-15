@@ -1058,6 +1058,73 @@ extract is refused;
 control is at the foot rather than on the compose bar; `HouseScreen.test.tsx` pins that not one
 ghost reaches the file.
 
+### The PDF can carry the question, and the answer comes back by hand
+
+The loop is deliberately **outside the app**: a briefed PDF goes out, somebody puts it in front of
+an assistant, and the reply is pasted back in. No key, no queue, no edge function, nothing to
+rate-limit and nothing that can fail while claiming it didn't. `assessmentBrief` writes the
+question, `parseSnagActions` reads the answer, and both are pure — the whole judgement of this
+feature is in two functions `advice.test.ts` can assert without a network.
+
+**The brief rides in the PDF and only there**, exactly as the photographs do: an `ExportTable`
+holds rows to be sorted and a brief is prose addressed to a reader. It is two named chips on the
+export sheet — *To get it assessed* and *To send to somebody* — asked every time and never
+remembered, like scope, and defaulted to the brief because that is now the main reason a PDF gets
+made. Not one chip that toggles, which would leave the other answer as the unlabelled absence of a
+press; absent entirely on a spreadsheet, and on the house record, where nothing is wrong with a
+dishwasher that is merely recorded.
+
+Four things in the wording are load-bearing:
+
+- **It states the scope it was made under**, because the chips already asked and *Everything*
+  includes finished work. A brief reading "review all open issues" would contradict the file it is
+  stapled to and spend half the answer on jobs already done.
+- **It requires the page every tradesman was found on, and permits "none found".** Asked for three
+  local tradesmen, an assistant with no way to look will produce three plausible names and three
+  plausible mobile numbers, and at this end they are indistinguishable from real ones. A URL is the
+  only part of such a row anybody can follow, so `parseTradies` **drops a tradesman with no
+  source** rather than showing one unsourced. Same lesson as the invitation screen: the row was
+  never the problem, the unverifiable claim was.
+- **It names the work a householder legally cannot do** — prescribed electrical work, gasfitting,
+  most plumbing and drainlaying, anything needing a consent or an LBP, asbestos disturbance in a
+  pre-2000 house, roof work at height. A hard list in the text, not a hope about the answer.
+- **It asks for the callout fee and the likely total separately**, because "about $200" means
+  different things as each, and the difference is what a household actually decides on: four jobs
+  booked into one visit pay the callout once.
+
+**The answer is never a comment.** `home.add_comment` sets `status = 'doing'`, so an assessment
+posted as a note would mark the job as being worked on. It is `home.snag_advice` — one row per
+snag, replaced rather than stacked, because the PDF is the history and nobody wants to compare last
+month's guess.
+
+**And recording it does not touch the snag.** This is the rule to keep. `update_snag` starts a job
+the moment parts, a due date, an assignee or a repeat change, and an assessment answers all of
+those at once — so applying a reply through it would mark every open job in the house as being
+worked on the moment somebody pasted, which is the retired *Start it* failure at twelve times the
+scale and from the other end. Suggested parts are **offers with a + beside them**, accepted one tap
+at a time from the snag's own page, and that tap is the human act that starts the job.
+
+Money stays **text**, quoted back with the date beside it: parsing "180-260" into a number is the
+app asserting a precision the answer never had. An unknown reference is **named, never guessed at**
+— a job from another place, one since deleted, or an invention all get the same answer, because
+silently filing eleven of twelve is the version nobody notices. And a paste that fails says *which*
+of the three ways it failed, since nothing pasted, no block in it, and a block that isn't readable
+are three different mistakes with three different fixes.
+
+A place knows its **suburb and town** now (`set_property_location`), which is what lets the brief
+ask for somebody local. Not a street address: the file gets forwarded, and that is precision
+nobody needs and everybody who receives the PDF would then hold.
+
+`advice.test.ts` pins the brief's scope line, the source requirement, the restricted-work list, the
+split costs and the fence, and the whole of the parser — the unsourced tradesman, the caps, the
+three failure messages, and the unknown reference. `AdviceCard.test.tsx` pins the source line, a
+part being an offer, an accepted one going quiet, the tradesmen staying collapsed and never showing
+without their source. `PasteAdviceScreen.test.tsx` pins that nothing writes before the review, that
+filing never calls `updateSnag`, the unticked row, and the partial-failure count.
+`ExportSheet.test.tsx` pins the two chips, their absence on a spreadsheet and on an extract that
+cannot carry a brief; `exportFile.test.ts` pins that the brief reaches the PDF, never the CSV, and
+that the page numbers count its sheets.
+
 ## Taking someone, or something, away
 
 Adding had no opposite for eleven migrations, and the gap had a sharp edge. `getMyHousehold` reads

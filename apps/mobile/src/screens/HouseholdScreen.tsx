@@ -19,7 +19,8 @@ import {
   acceptInvitation, cancelInvitation, createInviteLink, createProperty, declineInvitation,
   deleteHousehold, deleteProperty, deleteStoredFiles, getHouseholdFilePaths,
   getHouseholdInvitations, getMyInvitations, getPropertyMemberIds, getSnags, getThings,
-  inviteToHousehold, removeMember, renameProperty, revokeInviteLink, setPropertyMember,
+  inviteToHousehold, removeMember, renameProperty, revokeInviteLink, setPropertyLocation,
+  setPropertyMember,
 } from '../lib/supabase';
 import { joinUrl } from '@snag/supabase-queries';
 import { APP_URL } from '../lib/appUrl';
@@ -78,6 +79,11 @@ export default function HouseholdScreen() {
 
   /** The place being renamed, and the text so far. Null when nothing is. */
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
+  /** Which place is having its suburb and town typed in, if any. */
+  const [locating, setLocating] = useState<
+    { id: string; suburb: string; town: string } | null
+  >(null);
+  const locateBusy = useRef(false);
   // Submitting a field also blurs it, so both handlers fire from two different
   // render closures holding the same `renaming` — two RPCs and two toasts for
   // one edit. Clearing the state doesn't help; the second closure never sees it.
@@ -178,6 +184,35 @@ export default function HouseholdScreen() {
       showAlert("Couldn't rename that place", err?.message ?? 'Please try again.');
     } finally {
       renameBusy.current = false;
+    }
+  }
+
+  /**
+   * Where a place is, for the one question its name cannot answer.
+   *
+   * Suburb and town, and deliberately not a street address: the only thing it
+   * is read for is finding a tradesman in the right part of the country, and it
+   * rides out of the app in every briefed extract — which is a file that gets
+   * forwarded. Saved on blur like the rename beside it, and both values go
+   * together so whichever field was left last cannot half-write the answer.
+   */
+  async function handleLocation() {
+    if (!locating || locateBusy.current) return;
+    const place = properties.find((p) => p.id === locating.id);
+    const suburb = locating.suburb.trim();
+    const town = locating.town.trim();
+    const unchanged = suburb === (place?.suburb ?? '') && town === (place?.town ?? '');
+    setLocating(null);
+    if (unchanged) return;
+    locateBusy.current = true;
+    try {
+      await setPropertyLocation(locating.id, suburb, town);
+      await refresh();
+      showToast(suburb || town ? 'Saved' : 'Cleared');
+    } catch (err: any) {
+      showAlert("Couldn't save where that is", err?.message ?? 'Please try again.');
+    } finally {
+      locateBusy.current = false;
     }
   }
 
@@ -480,6 +515,57 @@ export default function HouseholdScreen() {
                   </Pressable>
                 ) : null}
               </View>
+              {/* Under the name, because it is a fact about the place rather
+                  than an action on it. Muted until it has been answered: an
+                  empty line asking a question is the only prompt on this
+                  screen, and it earns that by being what makes a briefed
+                  extract able to name anybody local. */}
+              {locating?.id === place.id ? (
+                <View style={styles.whereRow}>
+                  <TextInput
+                    style={[styles.input, styles.whereInput]}
+                    value={locating.suburb}
+                    onChangeText={(suburb) => setLocating({ ...locating, suburb })}
+                    onBlur={handleLocation}
+                    onSubmitEditing={handleLocation}
+                    placeholder="Suburb"
+                    placeholderTextColor={Colors.textMuted}
+                    maxLength={80}
+                    autoCapitalize="words"
+                    autoFocus
+                    accessibilityLabel={`Suburb for ${place.name}`}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.whereInput]}
+                    value={locating.town}
+                    onChangeText={(town) => setLocating({ ...locating, town })}
+                    onBlur={handleLocation}
+                    onSubmitEditing={handleLocation}
+                    placeholder="Town or city"
+                    placeholderTextColor={Colors.textMuted}
+                    maxLength={80}
+                    autoCapitalize="words"
+                    accessibilityLabel={`Town for ${place.name}`}
+                  />
+                </View>
+              ) : (
+                <Pressable
+                  onPress={() => setLocating({
+                    id: place.id,
+                    suburb: place.suburb ?? '',
+                    town: place.town ?? '',
+                  })}
+                  style={styles.whereTap}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Where ${place.name} is`}
+                >
+                  <Icon name="location-outline" size="sm" color={Colors.textMuted} />
+                  <Text style={styles.whereLabel}>
+                    {[place.suburb, place.town].filter(Boolean).join(', ')
+                      || 'Say where it is, for finding somebody local'}
+                  </Text>
+                </Pressable>
+              )}
               {properties.length > 1 ? (
                 <View style={styles.linkRow}>
                   {members.map((member) => {
@@ -796,6 +882,18 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   renameInput: { flex: 1, minWidth: 0, marginBottom: 0 },
+  whereRow: { flexDirection: 'row', gap: Spacing.sm },
+  // minWidth: 0 because on web a TextInput is an <input> with an intrinsic
+  // ~20-character width that `min-width: auto` will not shrink below, and a
+  // flexed one grows past the card and off the screen edge.
+  whereInput: { flex: 1, minWidth: 0, marginBottom: 0 },
+  whereTap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  whereLabel: { flex: 1, fontSize: Typography.xs, color: Colors.textMuted },
   linkRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   linkChip: {
     flexDirection: 'row',

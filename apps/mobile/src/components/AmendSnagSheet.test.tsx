@@ -18,7 +18,7 @@ jest.mock('../hooks/useKeyboardInset', () => ({ useKeyboardInset: () => 0 }));
 const snag = (over: Partial<Snag> = {}): Snag => ({
   id: 's1', reference: 'S-100', householdId: 'h', propertyId: 'p',
   room: null, photoPaths: [], description: null, priority: null,
-  status: 'open', parts: [], needsParts: false,
+  status: 'open', parts: [], bought: [], needsParts: false,
   dueAt: null, repeatDays: null, assigneeId: null, thingId: null,
   reporterId: 'me', createdAt: '', updatedAt: '', lastDoneAt: null, doneAt: null,
   propertyName: 'Home', reporterName: 'Matt', assigneeName: null, commentCount: 0,

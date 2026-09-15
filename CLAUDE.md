@@ -357,9 +357,10 @@ they last looked.
   shorter; that is the whole reward on offer. Only the last seven days are rendered.
 - **Both filter rails became one button.** Filtering is occasional and was charging 96px of
   vertical rent on every visit to a screen people now open constantly.
-- **The shopping list rides the "Needs parts" lens.** One card above the cards, listing every item
-  the visible jobs are waiting on. It is the only elevated surface on the screen, and the only
-  thing the retired Weekend tab left behind.
+- **The shopping list rides the "Needs parts" lens**, and a pill in the header says how much of it
+  there is. One card above the cards, listing every item the visible jobs are waiting on — the only
+  elevated surface on the screen, and the only thing the retired Weekend tab left behind. See
+  *A list you can tick* below for the pill and the ticking.
 
 `SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering and the done
 window. `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, and the
@@ -370,6 +371,62 @@ it, absent while the house record is still on its way, this room's things and no
 press unlinking, *Skip for now* until something is chosen, and the header counting four.
 `houseRecord.test.ts` pins `thingsInArea` itself: one room only, `Whole house` for a snag with no
 room, and the chip order being the order of the words on the chips.
+
+### A list you can tick, and a flag that cannot lie about it
+
+The parts list has answered "why has this sat for a fortnight" since `20260912140000` — the trip to
+the shop is the thing that does not happen. What it could not do was record the trip: you bought the
+seal and the list went on asking for the seal.
+
+**`home.bought_parts` is a side table of what has been got, not a second list.** The items stay in
+`snags.parts`, written the one way they always were, through `update_snag`. A row exists only when
+the answer to "has this been got" is yes, so absence is unbought — the resting state of nearly every
+item — and the table stays the size of the shopping actually done rather than the shopping ever
+listed. Per household, never per person: there is one house and one trip, the same argument as
+`absent_things`.
+
+**`needs_parts` is derived in the view now, and the column is gone.** It was maintained by
+`update_snag` beside the list, on the argument that a flag and the list it describes must not be able
+to disagree. Ticking breaks exactly that: buying the last item has to clear the flag, so either
+`set_part_bought` maintains the column too — two writers of one derived value, which is the
+disagreement arriving by another door — or nothing does. So the view computes it: **has an item
+nobody has bought yet.** One expression, one reader, nothing to keep in step. `20260915150000` also
+writes the view's columns out **one by one**, because it was `select s.*` — the footgun
+`20260914140000` already paid for on `things_with_details`.
+
+**Ticking is not doing.** `update_snag` moves a job to 'doing' when its parts change, because
+deciding what to buy is deciding to do the work. Buying one is not adding one, so `set_part_bought`
+is a separate function that touches neither the status nor `updated_at` — and it is separate
+precisely so it cannot. It is keyed by the item's own text rather than an index, because the list can
+be edited from the other phone while somebody is standing in the aisle, and it refuses a tick for
+something not on the list rather than storing one where nothing will ever show it.
+
+Three rules on screen:
+
+- **The pill only exists above zero.** At nought it is a control dressed as a choice — the same rule
+  as *Fit* in `PhotoViewer` — and this screen evicted two filter rails for charging vertical rent on
+  every visit. It counts **unbought items across the whole list**, not the lens, because the pill is
+  how somebody finds out there is shopping to do at all. Tapping it is the *Needs parts* lens, never
+  a second place parts live.
+- **A ticked row stays on the trip sheet, struck through.** "Done leaves" would have it vanish, but a
+  tap in an aisle lands on the wrong row often enough that a list which silently drops what you just
+  touched is a dead end — you would have to remember which job the item belonged to to put it back.
+  It leaves on its own terms instead: a job with nothing left to get stops being `needs_parts`, drops
+  out of the lens, and takes its rows with it, so the card empties as the trip ends. Unticking is on
+  the snag's own page as well, beside the ×.
+- **A card names what is left, never what was listed.** A card claiming it needs the seal you bought
+  on Saturday is a card you stop believing, so the pill goes when the trip is done.
+
+**Where to buy and roughly what it costs stay on the advice row**, not on `bought_parts`. That is
+what keeps `update_snag(p_parts)` the only way to set *what* is on a list — the new table answers one
+question about each item and nothing else.
+
+`shopping.test.ts` pins `unboughtParts`, the unbought-first ordering, a bought item being kept rather
+than dropped, a stale tick for a removed item counting for nothing, and the count being across
+everything. `SnagListScreen.test.tsx` pins the pill's absence at zero, the count ignoring the lens,
+the pill opening the lens it already has, ticking going through `setPartBought` and never
+`updateSnag`, a got item still being offered back, and a card no longer asking for what has been
+bought.
 
 ## The house record: what's *there*, beside what's wrong
 
@@ -1057,6 +1114,73 @@ extract is refused;
 `SnagListScreen.test.tsx` pins that *Everything* ignores the lens and includes done, and that the
 control is at the foot rather than on the compose bar; `HouseScreen.test.tsx` pins that not one
 ghost reaches the file.
+
+### The PDF can carry the question, and the answer comes back by hand
+
+The loop is deliberately **outside the app**: a briefed PDF goes out, somebody puts it in front of
+an assistant, and the reply is pasted back in. No key, no queue, no edge function, nothing to
+rate-limit and nothing that can fail while claiming it didn't. `assessmentBrief` writes the
+question, `parseSnagActions` reads the answer, and both are pure — the whole judgement of this
+feature is in two functions `advice.test.ts` can assert without a network.
+
+**The brief rides in the PDF and only there**, exactly as the photographs do: an `ExportTable`
+holds rows to be sorted and a brief is prose addressed to a reader. It is two named chips on the
+export sheet — *To get it assessed* and *To send to somebody* — asked every time and never
+remembered, like scope, and defaulted to the brief because that is now the main reason a PDF gets
+made. Not one chip that toggles, which would leave the other answer as the unlabelled absence of a
+press; absent entirely on a spreadsheet, and on the house record, where nothing is wrong with a
+dishwasher that is merely recorded.
+
+Four things in the wording are load-bearing:
+
+- **It states the scope it was made under**, because the chips already asked and *Everything*
+  includes finished work. A brief reading "review all open issues" would contradict the file it is
+  stapled to and spend half the answer on jobs already done.
+- **It requires the page every tradesman was found on, and permits "none found".** Asked for three
+  local tradesmen, an assistant with no way to look will produce three plausible names and three
+  plausible mobile numbers, and at this end they are indistinguishable from real ones. A URL is the
+  only part of such a row anybody can follow, so `parseTradies` **drops a tradesman with no
+  source** rather than showing one unsourced. Same lesson as the invitation screen: the row was
+  never the problem, the unverifiable claim was.
+- **It names the work a householder legally cannot do** — prescribed electrical work, gasfitting,
+  most plumbing and drainlaying, anything needing a consent or an LBP, asbestos disturbance in a
+  pre-2000 house, roof work at height. A hard list in the text, not a hope about the answer.
+- **It asks for the callout fee and the likely total separately**, because "about $200" means
+  different things as each, and the difference is what a household actually decides on: four jobs
+  booked into one visit pay the callout once.
+
+**The answer is never a comment.** `home.add_comment` sets `status = 'doing'`, so an assessment
+posted as a note would mark the job as being worked on. It is `home.snag_advice` — one row per
+snag, replaced rather than stacked, because the PDF is the history and nobody wants to compare last
+month's guess.
+
+**And recording it does not touch the snag.** This is the rule to keep. `update_snag` starts a job
+the moment parts, a due date, an assignee or a repeat change, and an assessment answers all of
+those at once — so applying a reply through it would mark every open job in the house as being
+worked on the moment somebody pasted, which is the retired *Start it* failure at twelve times the
+scale and from the other end. Suggested parts are **offers with a + beside them**, accepted one tap
+at a time from the snag's own page, and that tap is the human act that starts the job.
+
+Money stays **text**, quoted back with the date beside it: parsing "180-260" into a number is the
+app asserting a precision the answer never had. An unknown reference is **named, never guessed at**
+— a job from another place, one since deleted, or an invention all get the same answer, because
+silently filing eleven of twelve is the version nobody notices. And a paste that fails says *which*
+of the three ways it failed, since nothing pasted, no block in it, and a block that isn't readable
+are three different mistakes with three different fixes.
+
+A place knows its **suburb and town** now (`set_property_location`), which is what lets the brief
+ask for somebody local. Not a street address: the file gets forwarded, and that is precision
+nobody needs and everybody who receives the PDF would then hold.
+
+`advice.test.ts` pins the brief's scope line, the source requirement, the restricted-work list, the
+split costs and the fence, and the whole of the parser — the unsourced tradesman, the caps, the
+three failure messages, and the unknown reference. `AdviceCard.test.tsx` pins the source line, a
+part being an offer, an accepted one going quiet, the tradesmen staying collapsed and never showing
+without their source. `PasteAdviceScreen.test.tsx` pins that nothing writes before the review, that
+filing never calls `updateSnag`, the unticked row, and the partial-failure count.
+`ExportSheet.test.tsx` pins the two chips, their absence on a spreadsheet and on an extract that
+cannot carry a brief; `exportFile.test.ts` pins that the brief reaches the PDF, never the CSV, and
+that the page numbers count its sheets.
 
 ## Taking someone, or something, away
 

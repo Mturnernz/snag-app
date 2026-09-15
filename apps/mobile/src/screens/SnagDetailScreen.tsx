@@ -15,18 +15,19 @@ import StatusBadge from '../components/StatusBadge';
 import DueBadge from '../components/DueBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PhotoViewer from '../components/PhotoViewer';
+import AdviceCard from '../components/AdviceCard';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
-  deleteStoredFiles,
+  deleteStoredFiles, getSnagAdvice, deleteSnagAdvice, setPartBought,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { describeCycle, snagHeadline } from '@snag/supabase-queries';
 import {
-  Comment, RootStackParamList, Snag,
+  Comment, RootStackParamList, Snag, SnagAdvice,
   PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
 } from '../types';
 
@@ -73,6 +74,7 @@ export default function SnagDetailScreen() {
 
   const [snag, setSnag] = useState<Snag | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [advice, setAdvice] = useState<SnagAdvice | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   // Which photo is open full screen, or null. An index rather than a URL, so
   // the viewer's own next/previous walk the same strip.
@@ -88,13 +90,17 @@ export default function SnagDetailScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [next, nextComments] = await Promise.all([
+      const [next, nextComments, nextAdvice] = await Promise.all([
         getSnag(params.snagId),
         getComments(params.snagId),
+        // Never fatal: a job with no assessment is the resting state, and a
+        // read that fails must not take the page down with it.
+        getSnagAdvice(params.snagId).catch(() => null),
       ]);
       setSnag(next);
       setRepeating((open) => open || next.repeatDays !== null);
       setComments(nextComments);
+      setAdvice(nextAdvice);
       setPhotoUrls(await getFileUrls(next.photoPaths));
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'It may have been deleted.');
@@ -105,6 +111,26 @@ export default function SnagDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * Off the list, or back onto it.
+   *
+   * Not through `patch`, because `update_snag` starts a job when its parts
+   * change and buying one of them is not adding one — see
+   * `20260915150000_a_shopping_list_you_can_tick.sql`.
+   */
+  async function tick(item: string, bought: boolean) {
+    if (!snag) return;
+    setBusy(true);
+    try {
+      await setPartBought(snag.id, item, bought);
+      setSnag(await getSnag(snag.id));
+    } catch (err: any) {
+      showAlert("Couldn't tick that off", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   /** Every triage control goes through here: write, then re-read. */
   async function patch(update: Parameters<typeof updateSnag>[1]) {
@@ -370,6 +396,32 @@ export default function SnagDetailScreen() {
           </View>
         </Card>
 
+        {/* ── What came back ──
+            Below the notes and above triage: the note the other person left is
+            still the most common reason this screen is open, and this is the
+            thing that answers the controls underneath it. A suggested part is
+            an offer with a + beside it — accepting one is what puts it on the
+            shopping list, and that tap is what starts the job. */}
+        {advice ? (
+          <AdviceCard
+            advice={advice}
+            parts={snag.parts}
+            busy={busy}
+            onAccept={(item) => patch({ parts: [...snag.parts, item] })}
+            onRemove={async () => {
+              setBusy(true);
+              try {
+                await deleteSnagAdvice(snag.id);
+                setAdvice(null);
+              } catch (err: any) {
+                showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        ) : null}
+
         {/* ── Triage ── */}
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Sort it out</Text>
@@ -393,21 +445,42 @@ export default function SnagDetailScreen() {
           <Text style={styles.fieldLabel}>Anything to pick up?</Text>
           {snag.parts.length > 0 ? (
             <View style={styles.partsList}>
-              {snag.parts.map((item, index) => (
-                <View key={`${item}-${index}`} style={styles.partRow}>
-                  <Icon name="ellipse-outline" size="sm" color={Colors.textMuted} />
-                  <Text style={styles.partText}>{item}</Text>
-                  <Pressable
-                    onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
-                    disabled={busy}
-                    style={styles.partRemove}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${item}`}
-                  >
-                    <Icon name="close" size="sm" color={Colors.textMuted} />
-                  </Pressable>
-                </View>
-              ))}
+              {snag.parts.map((item, index) => {
+                const got = snag.bought.includes(item);
+                return (
+                  <View key={`${item}-${index}`} style={styles.partRow}>
+                    {/* Ticking is its own write and deliberately not a `patch`:
+                        changing the list starts the job, and buying something
+                        off it is not starting anything. It is also where a
+                        mis-tap in an aisle gets undone, which is why the row
+                        stays on the trip sheet rather than vanishing. */}
+                    <Pressable
+                      onPress={() => tick(item, !got)}
+                      disabled={busy}
+                      style={styles.partTick}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: got }}
+                      accessibilityLabel={got ? `${item}, got it` : `${item}, tick off`}
+                    >
+                      <Icon
+                        name={got ? 'checkmark-circle' : 'ellipse-outline'}
+                        size="sm"
+                        color={got ? Colors.primary : Colors.textMuted}
+                      />
+                    </Pressable>
+                    <Text style={[styles.partText, got && styles.partTextGot]}>{item}</Text>
+                    <Pressable
+                      onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
+                      disabled={busy}
+                      style={styles.partRemove}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${item}`}
+                    >
+                      <Icon name="close" size="sm" color={Colors.textMuted} />
+                    </Pressable>
+                  </View>
+                );
+              })}
             </View>
           ) : null}
           <View style={styles.partAddRow}>
@@ -652,6 +725,8 @@ const styles = StyleSheet.create({
   partsList: { gap: Spacing.xs, marginTop: Spacing.xs },
   partRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: 32 },
   partText: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
+  partTick: { minWidth: 28, minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  partTextGot: { color: Colors.textMuted, textDecorationLine: 'line-through' },
   partRemove: {
     width: MIN_TOUCH_TARGET - Spacing.md,
     height: MIN_TOUCH_TARGET - Spacing.md,

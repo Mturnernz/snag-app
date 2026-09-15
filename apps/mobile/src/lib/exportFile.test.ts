@@ -1,5 +1,5 @@
 import {
-  EXPORT_PHOTO_LIMIT, exportFileName, snagExportPhotos, snagExportTable,
+  EXPORT_PHOTO_LIMIT, assessmentBrief, exportFileName, snagExportPhotos, snagExportTable,
   thingExportPhotos, thingExportTable, toCsv,
 } from '@snag/supabase-queries';
 import { loadExportImages, renderPdf, type ExportImage } from './exportFile';
@@ -21,7 +21,7 @@ import { loadExportImages, renderPdf, type ExportImage } from './exportFile';
 const snag = (over: Partial<any> = {}): any => ({
   id: 's1', reference: 'SNAG-0007', householdId: 'h', propertyId: 'p',
   room: 'Kitchen', photoPaths: [], description: 'Gutters', priority: 'low',
-  status: 'open', parts: [], needsParts: false, dueAt: null, repeatDays: null,
+  status: 'open', parts: [], bought: [], needsParts: false, dueAt: null, repeatDays: null,
   assigneeId: null, thingId: null, reporterId: 'me',
   createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
   lastDoneAt: null, doneAt: null, propertyName: 'Home', reporterName: 'Mike',
@@ -272,6 +272,46 @@ describe('the photos in the PDF', () => {
     const broken = image({ bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0x00]), kind: 'JPEG' });
     const bytes = renderPdf(snagExportTable([snag()], META), [broken, image()]);
     expect(String.fromCharCode(...bytes.subarray(0, 5))).toBe('%PDF-');
+  });
+});
+
+describe('the brief at the front', () => {
+  const brief = assessmentBrief({
+    household: '32 Le Roy', place: 'Home', where: 'Mount Eden, Auckland',
+    scope: 'Everything', stamp: '2026-09-15', rowCount: 2, photoCount: 0,
+  });
+
+  /** The text of a rendered PDF. jsPDF does not compress by default. */
+  const read = (bytes: Uint8Array) => Buffer.from(bytes).toString('latin1');
+
+  it('goes in the PDF, and the table still starts on a sheet of its own', () => {
+    const table = snagExportTable([snag()], META);
+    const plain = countPages(renderPdf(table));
+    const briefed = countPages(renderPdf(table, [], brief));
+
+    expect(briefed).toBeGreaterThan(plain);
+    expect(read(renderPdf(table, [], brief))).toContain('assessing this list');
+  });
+
+  it('carries the fence the parser looks for', () => {
+    // The whole return path hangs off this string surviving into the file.
+    expect(read(renderPdf(snagExportTable([snag()], META), [], brief)))
+      .toContain('snag-actions');
+  });
+
+  it('never reaches the spreadsheet', () => {
+    // Same rule as the photographs: ExportTable holds rows to be sorted, and a
+    // spreadsheet with a page of instructions in it cannot be sorted.
+    expect(toCsv(snagExportTable([snag()], META))).not.toContain('snag-actions');
+  });
+
+  it('is counted by the page numbers on the table\u2019s own sheets', () => {
+    // Otherwise the first sheet of the list claims to be page 1 of a file whose
+    // page 1 is prose — and a loose sheet with the wrong number is worse than
+    // one with none.
+    const briefed = read(renderPdf(snagExportTable([snag()], META), [], brief));
+    expect(briefed).toMatch(/page 3 of/);
+    expect(read(renderPdf(snagExportTable([snag()], META)))).toMatch(/page 1 of/);
   });
 });
 

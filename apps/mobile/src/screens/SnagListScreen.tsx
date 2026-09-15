@@ -17,12 +17,12 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createSnag, getFileUrls, getSnags, markListSeen, updateSnag,
+  createSnag, getFileUrls, getSnags, getThings, markListSeen, updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { exportDateStamp, snagExportPhotos, snagExportTable } from '@snag/supabase-queries';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
-import { RootStackParamList, Snag } from '../types';
+import { RootStackParamList, Snag, Thing } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -109,6 +109,18 @@ export default function SnagListScreen() {
   const [seenBefore, setSeenBefore] = useState<string | null>(null);
   const [justAdded, setJustAdded] = useState<Snag | null>(null);
   const [amending, setAmending] = useState(false);
+  /**
+   * The house record, for the amend sheet's "is it about one of these?" step.
+   *
+   * **Fetched when a snag is filed, not when the list loads.** The list is the
+   * screen people open constantly and this serves a sheet that only appears
+   * after capture, so putting it in `load()` would spend a request on every
+   * pull-to-refresh to answer a question nobody asked. Keyed by property, so
+   * moving between the house and the bach re-reads rather than offering the
+   * wrong place's appliances.
+   */
+  const [things, setThings] = useState<Thing[]>([]);
+  const thingsFor = useRef<string | null>(null);
   const seenThisVisit = useRef(false);
 
   const propertyId = properties.length > 1 ? activeProperty?.id ?? null : null;
@@ -277,6 +289,11 @@ export default function SnagListScreen() {
       priority: null,
     });
     setJustAdded(snag);
+    // Started here rather than awaited: the sheet opens on "What's wrong?" and
+    // the step this feeds is two taps away, so the read has the whole of that
+    // to arrive in. If it is slow the step appears late; if it fails the step
+    // never appears. Neither can block a snag that is already filed.
+    void loadThings(activeProperty.id);
     await load();
   }
 
@@ -293,6 +310,19 @@ export default function SnagListScreen() {
    * every one of these controls edits something that exists, so none of them
    * can block anybody and walking away leaves a perfectly good entry.
    */
+  const loadThings = useCallback(async (placeId: string) => {
+    if (thingsFor.current === placeId) return;
+    try {
+      const found = await getThings(placeId);
+      thingsFor.current = placeId;
+      setThings(found);
+    } catch (err) {
+      // The step simply does not appear. A capture sheet is not the place to
+      // report that the house record could not be read.
+      console.error('Failed to load the house record:', err);
+    }
+  }, []);
+
   async function amend(update: Parameters<typeof updateSnag>[1], toast: string) {
     if (!justAdded) return;
     setAmending(true);
@@ -432,6 +462,11 @@ export default function SnagListScreen() {
           busy={amending}
           onSaveNote={(text) => amend({ description: text }, 'Added')}
           onSetRoom={(room) => amend({ room }, room ?? 'Tag removed')}
+          things={things}
+          onSetThing={(thingId) => amend(
+            { thingId },
+            thingId ? 'Noted what it\'s about' : 'No longer about that',
+          )}
           onSetUrgent={(urgent) => amend({ priority: urgent ? 'high' : null }, urgent ? 'Marked urgent' : 'No longer urgent')}
           onOpenDetail={() => {
             const id = justAdded.id;

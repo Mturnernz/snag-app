@@ -175,7 +175,29 @@ Four things about capture are load-bearing:
   to walk away from cannot also be three screens of reading, and a question worth asking at that
   moment is one that answers itself.
 
-  Step three is **two named pills — *Not urgent* and *Urgent*** — with Not urgent lit before
+  **There is a fourth step, and it is only sometimes there.** After the room, *Is it about one of
+  these?* offers the things recorded **in that room** — the kitchen's dishwasher and rangehood, not
+  the house's forty things — and writes `snags.thing_id`. The room is what makes the offer short
+  enough to be a two-second tag rather than a search, which is why it comes after it and not
+  before. A room with nothing recorded in it has no step at all: an empty rail over a *Skip for
+  now* is the app asking somebody to dismiss a question it cannot answer, so `amendSteps` leaves
+  it out and the header counts three instead of four. The count moves if the room changes
+  mid-sheet, which is right — tagging the Kitchen is what makes the kitchen's dishwasher offerable.
+
+  **The payoff is somewhere else entirely**, and that is the point of asking at capture: a snag
+  that knows it is about the heat pump carries `thing_name`, `thing_make` and `thing_model` from
+  `snags_with_details`, so the model number is on the snag in the shop rather than two tabs away.
+  Those three columns existed and were read by nothing but the extract's *About* column — nothing
+  in the app could set `thing_id` from the snag's side at all. `SnagDetailScreen` now shows it as
+  a row under the badges, mono-faced, tapping through to the thing, with a × to unlink; without
+  that the answer would be written and never shown, which is the silent failure this codebase
+  keeps catching.
+
+  **Ghosts cannot appear here, and that is the type rather than a filter.** `thingsInArea` takes
+  `Thing[]`; a suggestion is a `RoomSuggestion` from a constant with no id for `thing_id` to point
+  at. And **pointing a snag at a thing does not start the job** — see the four joins below.
+
+  Step four is **two named pills — *Not urgent* and *Urgent*** — with Not urgent lit before
   anybody touches anything. It was one *Urgent* chip that toggled, which left the common answer as
   the unlabelled absence of a press: a state nothing on the sheet ever said out loud. Nothing is
   written to make the default true, because `null` and `'low'` both already mean not urgent —
@@ -342,8 +364,12 @@ they last looked.
 `SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering and the done
 window. `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, and the
 keyboard lift. `AmendSnagSheet.test.tsx` pins which question a new snag is asked first, that the
-sheet opens on *Not urgent* without having written anything to say so, and that no step explains
-itself.
+sheet opens on *Not urgent* without having written anything to say so, that no step explains
+itself, and the whole of the *Is it about one of these?* step — absent for a room with nothing in
+it, absent while the house record is still on its way, this room's things and no other, the second
+press unlinking, *Skip for now* until something is chosen, and the header counting four.
+`houseRecord.test.ts` pins `thingsInArea` itself: one room only, `Whole house` for a snag with no
+room, and the chip order being the order of the words on the chips.
 
 ## The house record: what's *there*, beside what's wrong
 
@@ -605,7 +631,13 @@ three unbuilt ones will want it.
 ### Four joins, all using mechanisms that already exist
 
 - **`snags.thing_id`** — what a snag is about. `on delete set null`, never cascade: what was wrong
-  with the old dishwasher is still what was wrong.
+  with the old dishwasher is still what was wrong. It is set at capture (the amend sheet's fourth
+  step, above) and cleared from the snag's own page; the house record it needs is read **when a
+  snag is filed, not when the list loads**, because the list is the screen people open constantly
+  and this serves a sheet that only appears after capture. Keyed by property, so moving between
+  the house and the bach re-reads rather than offering the wrong place's appliances. If that read
+  is slow the step appears late and if it fails the step never appears — neither can block a snag
+  that is already on the list.
 - **Pointing a snag at a thing does NOT start the job.** Saying what something is about is the
   tail of capture, the same gesture as tagging the room. Assignee, due date, repeat and parts
   start it; `thing_id` doesn't, and the `v_started` expression in `update_snag` says so.

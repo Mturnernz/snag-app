@@ -13,11 +13,13 @@ import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
+import { Invitation, InvitationToMe } from '../types';
 import { useToast } from '../hooks/useToast';
 import {
-  addMemberByEmail, createProperty, deleteHousehold, deleteProperty, deleteStoredFiles,
-  getHouseholdFilePaths, getPropertyMemberIds, getSnags, getThings, removeMember, renameProperty,
-  setPropertyMember,
+  acceptInvitation, cancelInvitation, createProperty, declineInvitation, deleteHousehold,
+  deleteProperty, deleteStoredFiles, getHouseholdFilePaths, getHouseholdInvitations,
+  getMyInvitations, getPropertyMemberIds, getSnags, getThings, inviteToHousehold, removeMember,
+  renameProperty, setPropertyMember,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 
@@ -25,12 +27,18 @@ import { showAlert } from '../lib/alert';
  * The whole of household management: who's here, where the places are, adding
  * one more person — and, since 20260914160000, taking any of it away again.
  *
- * Adding is by email address, against an account that already exists. There is
- * no invite token, no email delivery and no pending state — which also means
- * none of the ways the retired product's invite pipeline failed. That one wrote
- * the invite row and returned; the RPC succeeded, the app said "Invite sent",
- * and no invite was ever emailed for the entire life of the feature. Nothing
- * that can't fail silently is worth building here for two people.
+ * Adding is by email address, and **the address does not need an account yet**.
+ * It used to: `add_member_by_email` refused anybody who hadn't both signed up
+ * and saved a name, so the honest answer to "add my partner" was *That account
+ * has not finished signing up yet* — shown to the one person who couldn't do
+ * anything about it, naming an order nothing had published. An invitation waits
+ * on the address instead, so the two halves can happen in either order.
+ *
+ * **Nothing is emailed and nothing here says it was.** That is the line the
+ * retired product crossed: its `invite_user` wrote the row, returned, and the
+ * app said "Invite sent" — and no invite was ever emailed for the life of the
+ * feature. The failure was the claim, not the row. A waiting invitation is
+ * called waiting, and telling them is still something you do out loud.
  *
  * Removing is the half that was missing. Every RPC behind it refuses the case
  * that strands a row nobody can reach — the last member of a household, the
@@ -53,8 +61,13 @@ export default function HouseholdScreen() {
   const [links, setLinks] = useState<Record<string, string[]>>({});
   const [busyLink, setBusyLink] = useState(false);
 
-  /** Which places a newly added person lands on. Only asked once there's a choice. */
+  /** Which places a newly invited person lands on. Only asked once there's a choice. */
   const [startOn, setStartOn] = useState<string[]>([]);
+
+  /** Invitations this household is waiting on, and ones waiting on me. */
+  const [waiting, setWaiting] = useState<Invitation[]>([]);
+  const [mine, setMine] = useState<InvitationToMe[]>([]);
+  const [busyInvite, setBusyInvite] = useState(false);
 
   /** The place being renamed, and the text so far. Null when nothing is. */
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
@@ -91,6 +104,27 @@ export default function HouseholdScreen() {
   useEffect(() => {
     loadLinks();
   }, [loadLinks]);
+
+  // Both directions of the same table: who this house is waiting on, and who is
+  // waiting on me. The second is why an invitation to somebody who already has
+  // a household isn't invisible — with no switcher, that would be an invitation
+  // nothing could ever show them.
+  const loadInvitations = useCallback(async () => {
+    try {
+      const [ours, toMe] = await Promise.all([
+        getHouseholdInvitations(household.id),
+        getMyInvitations(),
+      ]);
+      setWaiting(ours);
+      setMine(toMe);
+    } catch (err) {
+      console.error('Failed to load invitations:', err);
+    }
+  }, [household.id]);
+
+  useEffect(() => {
+    loadInvitations();
+  }, [loadInvitations]);
 
   // Default the new-member places to the one being looked at, so the common
   // answer is already selected and the question costs nothing to skip.
@@ -150,28 +184,60 @@ export default function HouseholdScreen() {
     }
   }
 
-  async function handleAdd() {
+  async function handleInvite() {
     const address = email.trim();
     if (!address) return;
     setAdding(true);
     try {
       // With one place everyone shares it, so the default (all properties) is
-      // right. With a bach it is not: someone added to the household should not
-      // silently land on every place — nor on whichever one happened to be
+      // right. With a bach it is not: someone invited to the household should
+      // not silently land on every place — nor on whichever one happened to be
       // first, which is what this did before the chips above existed.
-      await addMemberByEmail(
+      await inviteToHousehold(
         household.id,
         address,
         properties.length > 1 ? startOn : undefined
       );
       setEmail('');
-      await refresh();
-      await reloadAccount();
-      showToast('Added to the household');
+      await loadInvitations();
+      // Deliberately not "Invite sent". Nothing was sent. What is true is that
+      // the invitation is now waiting, and that they still have to hear it from
+      // you — which is the whole of what the retired product got wrong.
+      showToast('Waiting for them — tell them to sign up with that address');
     } catch (err: any) {
-      showAlert("Couldn't add them", err?.message ?? 'Please try again.');
+      showAlert("Couldn't invite them", err?.message ?? 'Please try again.');
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function handleCancelInvite(invitationId: string) {
+    try {
+      await cancelInvitation(invitationId);
+      await loadInvitations();
+      showToast('Invitation cancelled');
+    } catch (err: any) {
+      showAlert("Couldn't cancel that", err?.message ?? 'Please try again.');
+    }
+  }
+
+  async function handleAnswerInvite(invitationId: string, join: boolean) {
+    setBusyInvite(true);
+    try {
+      if (join) {
+        await acceptInvitation(invitationId);
+        // App.tsx re-gates: getMyHousehold reads newest-join-first, so this is
+        // the household the app shows from here.
+        await reloadAccount();
+      } else {
+        await declineInvitation(invitationId);
+        await loadInvitations();
+        showToast('Declined');
+      }
+    } catch (err: any) {
+      showAlert("Couldn't do that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusyInvite(false);
     }
   }
 
@@ -277,7 +343,59 @@ export default function HouseholdScreen() {
               </View>
             );
           })}
+          {/* A waiting invitation is drawn lighter than a member and says so in
+              words, because the one thing it must never read as is somebody who
+              is already here. */}
+          {waiting.map((invitation) => (
+            <View key={invitation.id} style={styles.memberRow}>
+              <View style={styles.waitingMark}>
+                <Icon name="hourglass-outline" size="sm" color={Colors.textMuted} />
+              </View>
+              <View style={styles.waitingBody}>
+                <Text style={styles.waitingEmail} numberOfLines={1}>{invitation.email}</Text>
+                <Text style={styles.waitingHint}>Waiting — they need to sign up with this address</Text>
+              </View>
+              <Pressable
+                onPress={() => handleCancelInvite(invitation.id)}
+                style={styles.rowAction}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Cancel the invitation to ${invitation.email}`}
+              >
+                <Icon name="close" size="sm" color={Colors.textMuted} />
+              </Pressable>
+            </View>
+          ))}
         </Card>
+
+        {/* An invitation addressed to me. It lives here rather than only on the
+            Setup screen because somebody who already has a household never sees
+            that screen, and an invitation nothing can show is the silent
+            failure this whole mechanism exists to avoid. */}
+        {mine.map((invitation) => (
+          <Card key={invitation.id} elevation="md" style={styles.section}>
+            <Text style={styles.sectionTitle}>{invitation.householdName} wants to add you</Text>
+            <Text style={styles.sectionHint}>
+              {invitation.invitedByName} invited you. Joining replaces the household this app is
+              showing you; you can leave again at any time.
+            </Text>
+            <View style={styles.answerRow}>
+              <Button
+                label="No thanks"
+                variant="outline"
+                onPress={() => handleAnswerInvite(invitation.id, false)}
+                disabled={busyInvite}
+                style={styles.answerButton}
+              />
+              <Button
+                label="Join"
+                onPress={() => handleAnswerInvite(invitation.id, true)}
+                disabled={busyInvite}
+                style={styles.answerButton}
+              />
+            </View>
+          </Card>
+        ))}
 
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Places</Text>
@@ -376,7 +494,8 @@ export default function HouseholdScreen() {
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Add someone</Text>
           <Text style={styles.sectionHint}>
-            They need to sign up first. Then add them with the address they used.
+            Invite the address they'll sign up with. They don't need an account yet — the
+            invitation waits until they do. Snag doesn't email them, so tell them yourself.
           </Text>
           <View style={styles.addRow}>
             <TextInput
@@ -426,8 +545,8 @@ export default function HouseholdScreen() {
             </>
           ) : null}
           <Button
-            label="Add to household"
-            onPress={handleAdd}
+            label="Invite them"
+            onPress={handleInvite}
             loading={adding}
             disabled={!email.trim() || adding || (properties.length > 1 && startOn.length === 0)}
             fullWidth
@@ -548,6 +667,21 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
+  // A waiting invitation carries no avatar: an avatar is a person who is here,
+  // and the whole job of this row is to not read as one.
+  waitingMark: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.sunken,
+  },
+  waitingBody: { flex: 1, minWidth: 0 },
+  waitingEmail: { fontSize: Typography.base, color: Colors.textSecondary },
+  waitingHint: { fontSize: Typography.sm, color: Colors.textMuted },
+  answerRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.xs },
+  answerButton: { flex: 1 },
   placeRow: {
     paddingVertical: Spacing.sm,
     borderTopWidth: 1,

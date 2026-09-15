@@ -37,6 +37,7 @@ snag/
 ├── apps/
 │   ├── mobile/                    # the app
 │   │   ├── App.tsx                # three gates: signed in? in a household? go.
+│   │   │                           #   (Setup answers a waiting invitation before asking.)
 │   │   └── src/
 │   │       ├── constants/theme.ts # ALL design tokens
 │   │       ├── lib/supabase.ts    # client (schema: home), auth, photo upload
@@ -89,10 +90,11 @@ answer and is *not* the same failure as `PGRST106`.
 
 The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
 
-- **`home`** — this product. Ten tables: `households`, `profiles`, `household_members`,
-  `properties`, `property_members`, `locations`, `snags`, `comments`, `things` (the house record)
-  and `absent_things` (what a place hasn't got). Plus `snags_with_details` and
-  `things_with_details`, the views every list, record and detail screen reads.
+- **`home`** — this product. Eleven tables: `households`, `profiles`, `household_members`,
+  `properties`, `property_members`, `locations`, `snags`, `comments`, `things` (the house record),
+  `absent_things` (what a place hasn't got) and `invitations` (who has been asked and hasn't
+  answered). Plus `snags_with_details` and `things_with_details`, the views every list, record and
+  detail screen reads.
 - **`public`** — the retired B2B product, **frozen**. 35 tables, 112 migrations, 6 pilot orgs and
   57 snags. Not migrated, not dropped, not read from. Leaving it intact *is* the archive, which
   is why the pivot needed no destructive migration and why there's no schema dump anywhere.
@@ -710,20 +712,93 @@ Remove and add instead.
 
 ## Adding someone to a household
 
-`home.add_member_by_email`, against an account that already exists. No tokens, no email delivery,
-no pending state.
+**An invitation waits on an address, not on an account.** `home.invite_to_household` takes any
+email — signed up or not, named or not — and the row sits until somebody answers it.
 
-It takes an optional `p_property_ids`. Omitted means every property in the household — right
-while there is one place, and wrong the moment there is a bach, so the client passes an explicit
-list once there is more than one. **That list is chosen, not assumed.** It used to be
-`properties.slice(0, 1)` — whichever place happened to be first in the *adder's* linked list — with
-a hint underneath stating it as though somebody had decided. A row of chips asks instead, defaulted
-to the place being looked at, and a one-place household still never meets the question.
+This replaced `add_member_by_email`, which is dropped. That one required the other person to have
+already signed up *and* already saved a name, so the honest answer to "add my partner to the house"
+was **`That account has not finished signing up yet`** — a true sentence naming neither what went
+wrong nor what to do, shown to the one person who couldn't act on it. The ordering was load-bearing
+and nothing anywhere published it. On the live project it was the answer for every account but one.
 
-That's deliberate, not lazy. The retired product's `invite_user` wrote the invite row and
-returned — the RPC succeeded, the app toasted "Invite sent", the invite listed as pending, and
-**no invite was ever emailed for the entire life of the feature**. Nothing said so. Don't
-reintroduce a mechanism that can fail silently for two people who live in the same house.
+It still takes an optional `p_property_ids`. Omitted means every property — right while there is one
+place, wrong the moment there is a bach, so the client passes an explicit list once there is more
+than one. **That list is chosen, not assumed.** It used to be `properties.slice(0, 1)` — whichever
+place happened to be first in the *inviter's* linked list — with a hint underneath stating it as
+though somebody had decided. A row of chips asks instead, defaulted to the place being looked at.
+
+### The pending state, and the rule it does not break
+
+CLAUDE.md said "no pending state" and meant it. The retired product's `invite_user` wrote the invite
+row and returned — the RPC succeeded, the app toasted "Invite sent", the invite listed as pending,
+and **no invite was ever emailed for the entire life of the feature**. Nothing said so.
+
+**The failure was the claim, not the row.** So the row is back and the claim is not. Nothing sends
+anything and nothing says it did: the toast is *Waiting for them — tell them to sign up with that
+address*, the card says Snag doesn't email them, and `HouseholdScreen.test.tsx` asserts the word
+"sent" appears nowhere on the screen. Telling the other person is still something you do out loud.
+What the row buys is that they no longer have to do their half first.
+
+**Don't add email delivery to this.** The moment a send can fail, the screen is claiming something
+it cannot check, which is exactly where the old one died.
+
+### The invitee answers it, and can refuse
+
+`accept_invitation` and `decline_invitation` match on the *address the invitation names*, never on
+an id alone, so an invitation is only ever actionable by the person it is addressed to — and
+`my_invitations` is the only way an invitee reads one, so nobody can enumerate invitations by
+household id. There is no read policy for them on the table at all.
+
+It is answered in two places, and both are needed:
+
+- **`SetupScreen`** — someone who has just signed up. The invitation beats *both* branches of that
+  screen, because somebody staring at "Set up your house" must not have to guess the answer is
+  behind the second button. It is looked for only once a profile exists, since `accept_invitation`
+  needs one.
+- **`HouseholdScreen`** — someone who already has a household. Without this an invitation to an
+  existing user would be invisible: they never see Setup, and there is deliberately no household
+  switcher. An invitation nothing can show is the silent failure the whole mechanism exists to end.
+
+A waiting invitation renders under *Who's here* with an hourglass instead of an avatar and the words
+"Waiting — they need to sign up with this address". **It must never read as somebody who is here.**
+
+## Deleting your own account
+
+`home.delete_my_account`, on the Profile tab, below Sign out and quieter than it — the everyday door
+and the other one should not look alike. Gated on typing your own name, the same gate deleting a
+place uses and for the same reason: it can take a household with it.
+
+Households you are the only member of go whole. Households you share do not — it leaves those
+exactly as `remove_member` would, nulling your assignments and handing on any property you were
+alone on. Files first, then the account, then `signOut`: the storage delete policy asks
+`home.is_member(<household id>)`, so an account that has deleted itself cannot clear up after
+itself. Same rule as deleting a household, written up under *Taking someone, or something, away*.
+
+### A profile outlives its login
+
+**`home.profiles.id` no longer cascades from `auth.users`**, and this is the load-bearing part.
+Six columns record who did something — `snags.reporter_id`, `snags.updated_by`,
+`comments.author_id`, `things.created_by`, `things.updated_by`, `absent_things.created_by` — and
+three are NOT NULL. They are NO ACTION deliberately, because `remove_member` already leaves the
+profile row alone so a snag still says who filed it.
+
+So deleting the login used to try to take the person with it, and the person is still referenced by
+every household they leave behind. `delete_my_account` failed outright on the first realistic shape,
+with `23503 ... violates foreign key constraint "snags_reporter_id_fkey"`.
+
+An account and a person are not the same row. A login is a way in; a profile is a name attached to
+work that happened. `delete_my_account` deletes the `auth.users` row and leaves a **tombstone**: the
+profile row with `deleted_at` set and the display name replaced by *Someone who left*. The name is
+the personal thing, and the name is what goes. `snags_with_details.reporter_name` then reads
+"Someone who left" rather than the household losing work that was never the leaver's to take.
+
+`upsert_profile` clears `deleted_at` on the way past. Signing up again gets a new `auth.users` id
+and therefore a new profile, so that can't actually be reached — it is there so a row that ever does
+come back doesn't read as gone everywhere it is named.
+
+`SetupScreen.test.tsx` pins the invitee's end, `ProfileScreen.test.tsx` the deletion order and that
+Delete sits quieter than Sign out, and `HouseholdScreen.test.tsx` the waiting rows, the cancel, the
+answerable invitation and the absence of the word "sent".
 
 ## Taking someone, or something, away
 

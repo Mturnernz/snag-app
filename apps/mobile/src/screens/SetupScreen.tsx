@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Button from '../components/Button';
 import Icon from '../components/Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
-import { createHousehold, upsertProfile, signOut } from '../lib/supabase';
+import {
+  acceptInvitation, createHousehold, declineInvitation, getMyInvitations, signOut, upsertProfile,
+} from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { Profile } from '../types';
+import { InvitationToMe, Profile } from '../types';
 
 interface Props {
   /** Null for an account that hasn't given a name yet. */
@@ -24,8 +26,15 @@ interface Props {
  * an onboarding carousel. All of that existed to get a stranger into a company.
  * Nobody is a stranger to their own house.
  *
- * The second person doesn't create anything — they're added by the first, by
- * the address they signed up with, so their branch is just a message saying so.
+ * The second person doesn't create anything — they're invited by the first, at
+ * the address they sign up with, and this is where they answer it.
+ *
+ * **That answer used to be nobody's to give.** Adding somebody required them to
+ * have already signed up *and* saved a name; before that, the person doing the
+ * adding got *That account has not finished signing up yet*, which named an
+ * order nothing had published and blamed the wrong end. Now the invitation
+ * waits at the address, this screen finds it, and the person it names decides —
+ * Join, or No thanks. An invitation you can't refuse is an instruction.
  */
 export default function SetupScreen({ profile, onReady }: Props) {
   const insets = useSafeAreaInsets();
@@ -33,6 +42,28 @@ export default function SetupScreen({ profile, onReady }: Props) {
   const [householdName, setHouseholdName] = useState('');
   const [saving, setSaving] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [invitations, setInvitations] = useState<InvitationToMe[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [answering, setAnswering] = useState(false);
+
+  // Only ever looked for once there is a profile to accept with — accept_invitation
+  // needs one, and asking before the name is saved would find nothing and say so
+  // for the wrong reason.
+  const loadInvitations = useCallback(async () => {
+    if (!profile) return;
+    setChecking(true);
+    try {
+      setInvitations(await getMyInvitations());
+    } catch (err) {
+      console.error('Failed to check for invitations:', err);
+    } finally {
+      setChecking(false);
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    loadInvitations();
+  }, [loadInvitations]);
 
   async function handleCreate() {
     if (!name.trim() || !householdName.trim()) return;
@@ -52,16 +83,66 @@ export default function SetupScreen({ profile, onReady }: Props) {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      // Saving the name is what makes this account addable: add_member_by_email
-      // refuses an account with no profile row, because a household member with
-      // no name is a blank row in every list.
+      // Saving the name is what lets this account accept: accept_invitation
+      // needs a profile, because a household member with no name is a blank row
+      // in every list. Unlike before, nobody else is blocked while it is missing.
       await upsertProfile(name.trim());
       setJoining(true);
+      setInvitations(await getMyInvitations());
     } catch (err: any) {
       showAlert("Couldn't save your name", err?.message ?? 'Please try again.');
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleAnswer(invitationId: string, join: boolean) {
+    setAnswering(true);
+    try {
+      if (join) {
+        await acceptInvitation(invitationId);
+        // App.tsx re-gates on this and lands them in the house.
+        await onReady();
+      } else {
+        await declineInvitation(invitationId);
+        setInvitations(await getMyInvitations());
+      }
+    } catch (err: any) {
+      showAlert("Couldn't do that", err?.message ?? 'Please try again.');
+    } finally {
+      setAnswering(false);
+    }
+  }
+
+  // An invitation is worth showing the moment it exists, whichever branch they
+  // are on: somebody who signed up first and is staring at "Set up your house"
+  // should not have to guess that the answer is behind the second button.
+  if (invitations.length > 0) {
+    const invitation = invitations[0];
+    return (
+      <View style={[styles.centered, { paddingTop: insets.top }]}>
+        <Icon name="home-outline" size="xxl" color={Colors.primary} />
+        <Text style={styles.title}>{invitation.householdName} wants to add you</Text>
+        <Text style={styles.body}>
+          {invitation.invitedByName} invited you. Everyone in a household can see and change
+          everything in it, and you can leave whenever you like.
+        </Text>
+        <Button
+          label="Join"
+          onPress={() => handleAnswer(invitation.id, true)}
+          loading={answering}
+          disabled={answering}
+          fullWidth
+        />
+        <Button
+          label="No thanks"
+          variant="outline"
+          onPress={() => handleAnswer(invitation.id, false)}
+          disabled={answering}
+          fullWidth
+        />
+      </View>
+    );
   }
 
   if (joining) {
@@ -70,10 +151,17 @@ export default function SetupScreen({ profile, onReady }: Props) {
         <Icon name="home-outline" size="xxl" color={Colors.primary} />
         <Text style={styles.title}>You're ready</Text>
         <Text style={styles.body}>
-          Ask whoever set up your household to add you. They'll need the email address you just
-          signed up with.
+          Ask whoever set up your household to invite you — they'll need the email address you
+          just signed up with. Snag doesn't email you, so their invitation will simply be here when
+          you next look.
         </Text>
-        <Button label="Check again" onPress={onReady} fullWidth />
+        <Button
+          label="Check again"
+          onPress={loadInvitations}
+          loading={checking}
+          disabled={checking}
+          fullWidth
+        />
         <Button label="Sign out" variant="ghost" onPress={() => signOut()} fullWidth />
       </View>
     );

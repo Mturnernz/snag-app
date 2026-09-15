@@ -8,10 +8,13 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
-import { signOut, upsertProfile } from '../lib/supabase';
+import {
+  deleteMyAccount, deleteStoredFiles, getMyOrphanFilePaths, signOut, upsertProfile,
+} from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { RootStackParamList } from '../types';
 
@@ -25,6 +28,7 @@ export default function ProfileScreen() {
 
   const [name, setName] = useState(profile.displayName);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const dirty = name.trim() !== profile.displayName && name.trim().length > 0;
 
@@ -38,6 +42,25 @@ export default function ProfileScreen() {
       showAlert("Couldn't save that", err?.message ?? 'Please try again.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    setConfirmDelete(false);
+    try {
+      // Files first. The storage delete policy asks whether you are a member of
+      // the household a file's folder names, so an account that has just deleted
+      // itself can no longer clear up after itself — and deleteStoredFiles never
+      // throws, so every refusal would pass in silence. Same rule as deleting a
+      // household, for the same reason. See 20260914161000.
+      await deleteStoredFiles(await getMyOrphanFilePaths());
+      await deleteMyAccount();
+      // The session now belongs to an account that doesn't exist. signOut is
+      // bounded and falls back to dropping the stored session, so it gets out
+      // even though nothing it asks the server can succeed.
+      await signOut();
+    } catch (err: any) {
+      showAlert("Couldn't delete your account", err?.message ?? 'Please try again.');
     }
   }
 
@@ -107,6 +130,35 @@ export default function ProfileScreen() {
         fullWidth
         style={styles.signOut}
       />
+
+      {/* Signing out is the everyday door and deleting is the other one, so it
+          sits below, quieter, and asks for the name to be typed — the same gate
+          deleting a place uses, for the same reason: this one takes other
+          people's work with it if you are the only one in the house. */}
+      <Button
+        label="Delete my account"
+        variant="ghost"
+        onPress={() => setConfirmDelete(true)}
+        fullWidth
+      />
+      <Text style={styles.deleteHint}>
+        Any household you're the only one in goes with you, and so does everything in it. Ones you
+        share stay, and so does what you filed in them.
+      </Text>
+
+      <ConfirmDialog
+        visible={confirmDelete}
+        title="Delete your account?"
+        message={
+          "You'll be signed out for good. Any household you're the only one in is deleted with " +
+          'every snag, thing and photo in it. This cannot be undone.'
+        }
+        confirmLabel="Delete"
+        confirmText={profile.displayName}
+        destructive
+        onConfirm={handleDeleteAccount}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </ScrollView>
   );
 }
@@ -146,4 +198,10 @@ const styles = StyleSheet.create({
   },
   linkHint: { fontSize: Typography.sm, color: Colors.textMuted },
   signOut: { marginTop: Spacing.md },
+  deleteHint: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
 });

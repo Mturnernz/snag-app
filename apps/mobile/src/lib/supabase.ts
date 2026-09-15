@@ -201,8 +201,26 @@ export const createHousehold = (name: string, propertyName?: string) =>
 
 export const getMembers = (householdId: string) => queries.getMembers(supabase, householdId);
 
-export const addMemberByEmail = (householdId: string, email: string, propertyIds?: string[]) =>
-  queries.addMemberByEmail(supabase, householdId, email, propertyIds);
+export const inviteToHousehold = (householdId: string, email: string, propertyIds?: string[]) =>
+  queries.inviteToHousehold(supabase, householdId, email, propertyIds);
+
+export const getHouseholdInvitations = (householdId: string) =>
+  queries.getHouseholdInvitations(supabase, householdId);
+
+export const cancelInvitation = (invitationId: string) =>
+  queries.cancelInvitation(supabase, invitationId);
+
+export const getMyInvitations = () => queries.getMyInvitations(supabase);
+
+export const acceptInvitation = (invitationId: string) =>
+  queries.acceptInvitation(supabase, invitationId);
+
+export const declineInvitation = (invitationId: string) =>
+  queries.declineInvitation(supabase, invitationId);
+
+export const getMyOrphanFilePaths = () => queries.getMyOrphanFilePaths(supabase);
+
+export const deleteMyAccount = () => queries.deleteMyAccount(supabase);
 
 export const getMyProperties = () => queries.getMyProperties(supabase);
 

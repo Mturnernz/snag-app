@@ -193,6 +193,13 @@ decisions and a Save button turns sorting twelve items into forty taps. It is a 
 than a push** for the same reason — though note react-native-web renders a modal presentation as
 a full screen, so that particular benefit is native-only.
 
+**Notes sit above *Sort it out*, not below it.** This product has no notifications and never will,
+so a note is the only way one person tells the other anything — "ordered the part, arriving
+Tuesday" is usually the entire reason the screen was opened. Two cards of controls standing
+between the photo and it made the one piece of news on the page the last thing anybody read. The
+order down the screen is now: photo, headline, status, **Notes**, *Sort it out*, *Does it come
+round again?*.
+
 **Nobody moves a job to "doing" by hand.** There was a *Start it* button and it went unpressed:
 people commented on things and assigned them to each other while the list went on claiming
 nothing had been touched. Doing something about a snag is the evidence it has started, so
@@ -210,6 +217,50 @@ that no longer exists. The column and the `snag_effort` enum are dropped, not de
 
 **Do not add a field to the compose bar.** Everything there is friction at the exact moment
 friction costs most. The place for it is the capture sheet, or triage.
+
+### A photo opens, and can be got closer to
+
+`PhotoViewer` is a full-screen modal over the strip on `SnagDetailScreen` and `ThingDetailScreen`:
+pinch, drag, double-tap, and buttons that do the same things. It exists because **the photo is the
+account of the problem** — there is no title column precisely because a picture of the broken
+toilet seat says what a title would — and a 220×165 tile says roughly that and no more. A serial
+number, a model plate, a hairline crack: none of them are legible in the strip, and the strip is
+where the read moment this whole record exists for actually lands.
+
+Four things are load-bearing.
+
+- **It is hand-rolled, and the two obvious alternatives are both traps.** `ScrollView`'s
+  `maximumZoomScale` is iOS-native only, so it would work in the simulator and do nothing on the
+  build people install — the same shape of failure `Alert.alert` and `KeyboardAvoidingView` have
+  already caught this codebase out with twice. `react-native-gesture-handler` is not a dependency,
+  wants a root-view wrapper on native, and would be a second animation runtime on a web export
+  that has just paid 490 KB for the PDF renderer. `PanResponder` is core React Native, is
+  implemented on react-native-web, and reports `touches`, which is everything a pinch needs. **No
+  new dependency; the bundle does not move.**
+- **The arithmetic is in `lib/photoZoom.ts`, not in the component.** Every way a zoomable image
+  goes wrong is the same failure from the other side of the screen — *the picture is gone and
+  there is no obvious way to get it back* — and each is one sign or one divisor away. `panBounds`
+  is zero at fit, which is what makes zooming out re-centre rather than leaving the photo parked
+  in a corner; `zoomAbout` holds the point between the fingers still, without which the detail
+  somebody is pinching towards travels away from them as they pinch. `photoZoom.test.ts` pins both
+  as properties rather than as numbers. Bounds are measured against the **frame**, not the JPEG's
+  own aspect ratio: knowing the latter means a network round trip before the first gesture can be
+  answered, in exchange for slightly tighter letterbox behaviour on a photo already on screen.
+- **There are buttons as well as gestures.** Half the people who open this are on a desktop
+  browser with no pinch and no second finger, and a viewer whose only way in is a gesture that
+  device cannot make is a viewer that does nothing. *Fit* renders only once there is something to
+  fit — at fit it is a control dressed as a choice.
+- **`touchAction: 'none'`, on web only.** Without it the browser claims the pinch and zooms the
+  *page*, so the photo sits unchanged inside a scaled-up app. It is scoped to the one surface that
+  handles its own touches; the viewport meta still allows page zoom everywhere else.
+
+Two smaller rules. **Opening and removing are siblings, never nested** — the Thing page's tile
+carries a × and a `Pressable` inside a `Pressable` is a coin toss about which one gets the tap.
+And **a new photo opens at fit**: carrying the last one's zoom over drops somebody into the middle
+of a picture they have not seen yet.
+
+`PhotoViewer.test.tsx` pins the buttons, *Fit* appearing only when there is something to fit, the
+counter, both ends of the strip, and the reset on moving to the next photo.
 
 ## The Schedule tab is a read, never a second way to write
 

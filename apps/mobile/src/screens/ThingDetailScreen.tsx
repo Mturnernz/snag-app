@@ -22,7 +22,8 @@ import {
   thingHeadline,
 } from '@snag/supabase-queries';
 import {
-  createSnag, deleteThing, getFileUrl, getFileUrls, getThing, updateThing, uploadFile,
+  createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getThing, updateThing,
+  uploadFile,
 } from '../lib/supabase';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
@@ -515,7 +516,11 @@ export default function ThingDetailScreen() {
     if (!thing) return;
     setConfirmDelete(false);
     try {
+      const files = [...thing.photoPaths, ...thing.documentPaths];
       await deleteThing(thing.id);
+      // Photos and paperwork both: a manual left in the bucket is the same
+      // orphan as a photo, and harder to spot because nothing lists it.
+      await deleteStoredFiles(files);
       showToast('Removed from the record');
       navigation.goBack();
     } catch (err: any) {

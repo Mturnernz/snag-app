@@ -221,6 +221,19 @@ export const getPropertyMemberIds = (propertyId: string) =>
 export const setPropertyMember = (propertyId: string, profileId: string, linked: boolean) =>
   queries.setPropertyMember(supabase, propertyId, profileId, linked);
 
+export const countMyHouseholds = () => queries.countMyHouseholds(supabase);
+
+export const removeMember = (householdId: string, profileId: string) =>
+  queries.removeMember(supabase, householdId, profileId);
+
+export const deleteProperty = (propertyId: string) => queries.deleteProperty(supabase, propertyId);
+
+export const getHouseholdFilePaths = (householdId: string) =>
+  queries.getHouseholdFilePaths(supabase, householdId);
+
+export const deleteHousehold = (householdId: string) =>
+  queries.deleteHousehold(supabase, householdId);
+
 // ─── Snags ────────────────────────────────────────────────────────────────────
 
 export const getSnags = (
@@ -273,9 +286,6 @@ export const getAbsentThings = (propertyId: string) => queries.getAbsentThings(s
 export const markThingAbsent = (propertyId: string, room: string, name: string) =>
   queries.markThingAbsent(supabase, propertyId, room, name);
 
-export const restoreAbsentThings = (propertyId: string, room?: string) =>
-  queries.restoreAbsentThings(supabase, propertyId, room);
-
 // ─── Files ────────────────────────────────────────────────────────────────────
 //
 // A PRIVATE bucket laid out as `<household_id>/<file>`, with documents one level
@@ -294,9 +304,9 @@ export const restoreAbsentThings = (propertyId: string, room?: string) =>
 export const HOUSEHOLD_FILES_BUCKET = 'home-photos';
 
 /**
- * Returns `{ path, error }` rather than throwing or swallowing, because
- * PhotoPicker has to tell "no photo" apart from "upload failed" — the second
- * needs showing and retrying rather than being silently dropped.
+ * Returns `{ path, error }` rather than throwing or swallowing, because callers
+ * have to tell "no photo" apart from "upload failed" — the second needs showing
+ * and retrying rather than being silently dropped.
  *
  * The content type is a parameter because this bucket holds manuals as well as
  * photos now. It has to be passed in *twice* — to `readForUpload`, which uses it
@@ -339,6 +349,29 @@ export async function uploadPhoto(
   bucket: string = HOUSEHOLD_FILES_BUCKET,
 ): Promise<{ path: string | null; error: any }> {
   return uploadFile(localUri, fileName, 'image/jpeg', bucket);
+}
+
+/**
+ * Removes files from the bucket — a deleted snag's photos, a deleted thing's
+ * manuals, everything a deleted place leaves behind.
+ *
+ * **A row and its files are two writes, and until this existed only the first
+ * one ever happened.** Deleting a snag dropped the row and left the JPEGs in
+ * `home-photos` with nothing anywhere pointing at them, which is the orphan
+ * SNAG_INFRA_NOTES.md had a manual audit query for. It has to be done from a
+ * client rather than in SQL: `storage.protect_delete()` raises 42501 on a
+ * direct delete of a storage.objects row, and it is right to — that would leave
+ * the bytes in the backing store with the row gone, which is worse.
+ *
+ * Deliberately never throws. The row is already gone by the time this runs, so
+ * a failure here costs some bytes, and failing the delete somebody just
+ * confirmed — or worse, telling them it didn't work when it did — costs more.
+ */
+export async function deleteStoredFiles(paths: string[]): Promise<void> {
+  const unique = [...new Set(paths)].filter(Boolean);
+  if (unique.length === 0) return;
+  const { error } = await supabase.storage.from(HOUSEHOLD_FILES_BUCKET).remove(unique);
+  if (error) console.error('deleteStoredFiles error:', error);
 }
 
 /** A short-lived link to anything in the bucket — a photo, or a manual. */

@@ -19,8 +19,8 @@ import { Alert, Platform } from 'react-native';
  *
  * **Two buttons at most** (an optional cancel plus one action), because that is
  * all a `confirm` can express. A choice between three things is a UI, not an
- * alert — see PhotoPicker, which offers Camera and Library as two tiles rather
- * than asking which one you wanted.
+ * alert — the compose bar offers the camera as a control of its own rather than
+ * asking which source you wanted.
  */
 export interface AlertButton {
   text?: string;

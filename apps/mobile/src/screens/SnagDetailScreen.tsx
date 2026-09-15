@@ -20,6 +20,7 @@ import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
+  deleteStoredFiles,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { describeCycle, snagHeadline } from '@snag/supabase-queries';
@@ -160,7 +161,13 @@ export default function SnagDetailScreen() {
     if (!snag) return;
     setConfirmDelete(false);
     try {
+      const photos = snag.photoPaths;
       await deleteSnag(snag.id);
+      // The row and its files are two writes. Only the first one used to
+      // happen, which left the JPEGs in the bucket with nothing pointing at
+      // them. Ordered after the delete, and never allowed to fail the delete:
+      // see deleteStoredFiles.
+      await deleteStoredFiles(photos);
       showToast('Deleted');
       navigation.goBack();
     } catch (err: any) {

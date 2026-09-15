@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
@@ -10,16 +10,20 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  addMemberByEmail, createProperty, getPropertyMemberIds, setPropertyMember,
+  addMemberByEmail, createProperty, deleteHousehold, deleteProperty, deleteStoredFiles,
+  getHouseholdFilePaths, getPropertyMemberIds, getSnags, getThings, removeMember, renameProperty,
+  setPropertyMember,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 
 /**
- * The whole of household management: who's in it, and adding one more person.
+ * The whole of household management: who's here, where the places are, adding
+ * one more person — and, since 20260914160000, taking any of it away again.
  *
  * Adding is by email address, against an account that already exists. There is
  * no invite token, no email delivery and no pending state — which also means
@@ -27,11 +31,18 @@ import { showAlert } from '../lib/alert';
  * the invite row and returned; the RPC succeeded, the app said "Invite sent",
  * and no invite was ever emailed for the entire life of the feature. Nothing
  * that can't fail silently is worth building here for two people.
+ *
+ * Removing is the half that was missing. Every RPC behind it refuses the case
+ * that strands a row nobody can reach — the last member of a household, the
+ * last place in one — and says which, so the way out is named rather than
+ * guessed at.
  */
 export default function HouseholdScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { household, members, profile, properties, refresh, reloadAccount } = useHousehold();
+  const {
+    household, members, profile, properties, activeProperty, refresh, reloadAccount,
+  } = useHousehold();
   const { showToast } = useToast();
 
   const [email, setEmail] = useState('');
@@ -41,6 +52,27 @@ export default function HouseholdScreen() {
   /** property id -> the profile ids linked to it. */
   const [links, setLinks] = useState<Record<string, string[]>>({});
   const [busyLink, setBusyLink] = useState(false);
+
+  /** Which places a newly added person lands on. Only asked once there's a choice. */
+  const [startOn, setStartOn] = useState<string[]>([]);
+
+  /** The place being renamed, and the text so far. Null when nothing is. */
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
+  // Submitting a field also blurs it, so both handlers fire from two different
+  // render closures holding the same `renaming` — two RPCs and two toasts for
+  // one edit. Clearing the state doesn't help; the second closure never sees it.
+  const renameBusy = useRef(false);
+
+  /** Who's about to be removed — them, or you leaving. */
+  const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [confirmDeleteHouse, setConfirmDeleteHouse] = useState(false);
+  /** The place about to go, with the count of what goes with it. */
+  const [confirmPlace, setConfirmPlace] = useState<
+    { id: string; name: string; snags: number; things: number } | null
+  >(null);
+
+  const alone = members.length <= 1;
 
   // Only meaningful once there is more than one place: with one, everybody in
   // the household is on it and there is nothing to show.
@@ -60,6 +92,17 @@ export default function HouseholdScreen() {
     loadLinks();
   }, [loadLinks]);
 
+  // Default the new-member places to the one being looked at, so the common
+  // answer is already selected and the question costs nothing to skip.
+  useEffect(() => {
+    setStartOn((current) => {
+      const live = current.filter((id) => properties.some((p) => p.id === id));
+      if (live.length > 0) return live;
+      const fallback = activeProperty?.id ?? properties[0]?.id;
+      return fallback ? [fallback] : [];
+    });
+  }, [properties, activeProperty]);
+
   async function handleAddPlace() {
     const name = newPlace.trim();
     if (!name) return;
@@ -73,6 +116,24 @@ export default function HouseholdScreen() {
       showAlert("Couldn't add that place", err?.message ?? 'Please try again.');
     } finally {
       setAddingPlace(false);
+    }
+  }
+
+  async function handleRename() {
+    if (!renaming || renameBusy.current) return;
+    const name = renaming.value.trim();
+    const was = properties.find((p) => p.id === renaming.id)?.name;
+    setRenaming(null);
+    if (!name || name === was) return;
+    renameBusy.current = true;
+    try {
+      await renameProperty(renaming.id, name);
+      await refresh();
+      showToast('Renamed');
+    } catch (err: any) {
+      showAlert("Couldn't rename that place", err?.message ?? 'Please try again.');
+    } finally {
+      renameBusy.current = false;
     }
   }
 
@@ -95,12 +156,13 @@ export default function HouseholdScreen() {
     setAdding(true);
     try {
       // With one place everyone shares it, so the default (all properties) is
-      // right. With a bach it is not: someone added to the household should
-      // not silently land on every place, so the caller names them.
+      // right. With a bach it is not: someone added to the household should not
+      // silently land on every place — nor on whichever one happened to be
+      // first, which is what this did before the chips above existed.
       await addMemberByEmail(
         household.id,
         address,
-        properties.length > 1 ? properties.slice(0, 1).map((p) => p.id) : undefined
+        properties.length > 1 ? startOn : undefined
       );
       setEmail('');
       await refresh();
@@ -113,6 +175,74 @@ export default function HouseholdScreen() {
     }
   }
 
+  async function handleRemoveMember(profileId: string) {
+    setConfirmRemove(null);
+    try {
+      await removeMember(household.id, profileId);
+      await refresh();
+      showToast('Removed');
+    } catch (err: any) {
+      showAlert("Couldn't remove them", err?.message ?? 'Please try again.');
+    }
+  }
+
+  async function handleLeave() {
+    setConfirmLeave(false);
+    try {
+      await removeMember(household.id, profile.id);
+      // App.tsx re-gates on this: it lands on whichever household is left, or
+      // on Setup when there is none.
+      await reloadAccount();
+    } catch (err: any) {
+      showAlert("Couldn't leave", err?.message ?? 'Please try again.');
+    }
+  }
+
+  async function handleDeleteHousehold() {
+    setConfirmDeleteHouse(false);
+    try {
+      // Files first, and this is the one place that order is inverted. The
+      // storage delete policy asks `home.is_member(<household id>)`, so
+      // deleting the household takes away the permission to clean up after it
+      // — and deleteStoredFiles never throws, so every refusal would pass in
+      // silence. See 20260914161000.
+      await deleteStoredFiles(await getHouseholdFilePaths(household.id));
+      await deleteHousehold(household.id);
+      await reloadAccount();
+    } catch (err: any) {
+      showAlert("Couldn't delete this household", err?.message ?? 'Please try again.');
+    }
+  }
+
+  /** Counts what a place is holding, so the confirmation can name it rather than warn in general. */
+  async function askDeletePlace(propertyId: string, name: string) {
+    try {
+      const [snags, things] = await Promise.all([
+        getSnags({ propertyId }),
+        getThings(propertyId),
+      ]);
+      setConfirmPlace({ id: propertyId, name, snags: snags.length, things: things.length });
+    } catch (err: any) {
+      showAlert("Couldn't check that place", err?.message ?? 'Please try again.');
+    }
+  }
+
+  async function handleDeletePlace() {
+    if (!confirmPlace) return;
+    const { id, name } = confirmPlace;
+    setConfirmPlace(null);
+    try {
+      // The RPC answers with every storage key its cascade just orphaned —
+      // photos and manuals both — because SQL cannot clear them itself.
+      const orphaned = await deleteProperty(id);
+      await deleteStoredFiles(orphaned);
+      await refresh();
+      showToast(`${name} deleted`);
+    } catch (err: any) {
+      showAlert("Couldn't delete that place", err?.message ?? 'Please try again.');
+    }
+  }
+
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={{ paddingTop: insets.top }}>
@@ -122,15 +252,31 @@ export default function HouseholdScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Who's here</Text>
-          {members.map((member) => (
-            <View key={member.profileId} style={styles.memberRow}>
-              <Avatar name={member.displayName} size={36} />
-              <Text style={styles.memberName}>
-                {member.displayName}
-                {member.profileId === profile.id ? ' (you)' : ''}
-              </Text>
-            </View>
-          ))}
+          {members.map((member) => {
+            const isYou = member.profileId === profile.id;
+            return (
+              <View key={member.profileId} style={styles.memberRow}>
+                <Avatar name={member.displayName} size={36} />
+                <Text style={styles.memberName}>
+                  {member.displayName}
+                  {isYou ? ' (you)' : ''}
+                </Text>
+                {/* Nothing to remove when you're the only one here: the RPC
+                    refuses it, and the way out is the button at the foot. */}
+                {!isYou && !alone ? (
+                  <Pressable
+                    onPress={() => setConfirmRemove({ id: member.profileId, name: member.displayName })}
+                    style={styles.rowAction}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${member.displayName}`}
+                  >
+                    <Icon name="close" size="sm" color={Colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
+            );
+          })}
         </Card>
 
         <Card elevation="md" style={styles.section}>
@@ -143,7 +289,41 @@ export default function HouseholdScreen() {
             <View key={place.id} style={styles.placeRow}>
               <View style={styles.placeHeader}>
                 <Icon name="home-outline" size="md" color={Colors.primary} />
-                <Text style={styles.placeName}>{place.name}</Text>
+                {renaming?.id === place.id ? (
+                  <TextInput
+                    style={[styles.input, styles.renameInput]}
+                    value={renaming.value}
+                    onChangeText={(value) => setRenaming({ id: place.id, value })}
+                    onBlur={handleRename}
+                    onSubmitEditing={handleRename}
+                    maxLength={80}
+                    autoCapitalize="words"
+                    autoFocus
+                    accessibilityLabel={`Rename ${place.name}`}
+                  />
+                ) : (
+                  <Pressable
+                    style={styles.placeNameTap}
+                    onPress={() => setRenaming({ id: place.id, value: place.name })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Rename ${place.name}`}
+                  >
+                    <Text style={styles.placeName}>{place.name}</Text>
+                  </Pressable>
+                )}
+                {/* The last place can't go: a household with none can't receive
+                    a snag, which is why create_household makes one. */}
+                {properties.length > 1 ? (
+                  <Pressable
+                    onPress={() => askDeletePlace(place.id, place.name)}
+                    style={styles.rowAction}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete ${place.name}`}
+                  >
+                    <Icon name="close" size="sm" color={Colors.textMuted} />
+                  </Pressable>
+                ) : null}
               </View>
               {properties.length > 1 ? (
                 <View style={styles.linkRow}>
@@ -197,9 +377,6 @@ export default function HouseholdScreen() {
           <Text style={styles.sectionTitle}>Add someone</Text>
           <Text style={styles.sectionHint}>
             They need to sign up first. Then add them with the address they used.
-            {properties.length > 1
-              ? ` They'll start on ${properties[0].name}; link them to anywhere else above.`
-              : ''}
           </Text>
           <View style={styles.addRow}>
             <TextInput
@@ -214,11 +391,45 @@ export default function HouseholdScreen() {
               inputMode="email"
             />
           </View>
+          {/* Asked only once there's a choice to make. It used to send them to
+              whichever place happened to be first in the adder's list, and the
+              hint underneath asserted that as though somebody had decided it. */}
+          {properties.length > 1 ? (
+            <>
+              <Text style={styles.sectionHint}>Where do they start?</Text>
+              <View style={styles.linkRow}>
+                {properties.map((place) => {
+                  const on = startOn.includes(place.id);
+                  return (
+                    <Pressable
+                      key={place.id}
+                      onPress={() =>
+                        setStartOn((current) =>
+                          on ? current.filter((id) => id !== place.id) : [...current, place.id]
+                        )
+                      }
+                      style={[styles.linkChip, on && styles.linkChipOn]}
+                      accessibilityRole="switch"
+                      accessibilityState={{ checked: on }}
+                      accessibilityLabel={`Start on ${place.name}`}
+                    >
+                      <Icon
+                        name={on ? 'checkmark-circle' : 'ellipse-outline'}
+                        size="sm"
+                        color={on ? Colors.white : Colors.textMuted}
+                      />
+                      <Text style={[styles.linkLabel, on && styles.linkLabelOn]}>{place.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          ) : null}
           <Button
             label="Add to household"
             onPress={handleAdd}
             loading={adding}
-            disabled={!email.trim() || adding}
+            disabled={!email.trim() || adding || (properties.length > 1 && startOn.length === 0)}
             fullWidth
             icon="person-add-outline"
           />
@@ -232,7 +443,80 @@ export default function HouseholdScreen() {
               : 'Everyone in a household can see and change everything. There are no permissions to manage.'}
           </Text>
         </View>
+
+        {/*
+          Leaving and deleting are the same door seen from two sides, and which
+          one you get is decided by whether anybody else is here: remove_member
+          refuses the last member of a household and delete_household refuses
+          one that still has somebody in it, so offering both at once would put
+          a button on screen that can only ever answer with an error.
+        */}
+        {alone ? (
+          <Button
+            label="Delete this household"
+            variant="outline"
+            onPress={() => setConfirmDeleteHouse(true)}
+            fullWidth
+            style={styles.leave}
+          />
+        ) : (
+          <Button
+            label="Leave this household"
+            variant="outline"
+            onPress={() => setConfirmLeave(true)}
+            fullWidth
+            style={styles.leave}
+          />
+        )}
       </ScrollView>
+
+      <ConfirmDialog
+        visible={!!confirmRemove}
+        title={`Remove ${confirmRemove?.name ?? ''}?`}
+        message="They lose this household and everything at its places. Anything they filed stays, still in their name."
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => confirmRemove && handleRemoveMember(confirmRemove.id)}
+        onCancel={() => setConfirmRemove(null)}
+      />
+
+      <ConfirmDialog
+        visible={confirmLeave}
+        title={`Leave ${household.name}?`}
+        message="You lose the list, the house record and the places. Anything you filed stays, still in your name."
+        confirmLabel="Leave"
+        destructive
+        onConfirm={handleLeave}
+        onCancel={() => setConfirmLeave(false)}
+      />
+
+      <ConfirmDialog
+        visible={confirmDeleteHouse}
+        title={`Delete ${household.name}?`}
+        message="You're the only one here, so this deletes the household and everything in it — every place, every snag, every photo. It cannot be undone."
+        confirmLabel="Delete"
+        confirmText={household.name}
+        destructive
+        onConfirm={handleDeleteHousehold}
+        onCancel={() => setConfirmDeleteHouse(false)}
+      />
+
+      <ConfirmDialog
+        visible={!!confirmPlace}
+        title={`Delete ${confirmPlace?.name ?? ''}?`}
+        message={
+          confirmPlace
+            ? `${confirmPlace.snags} ${confirmPlace.snags === 1 ? 'snag' : 'snags'} and ` +
+              `${confirmPlace.things} ${confirmPlace.things === 1 ? 'thing' : 'things'} go with it, ` +
+              'along with its rooms and every photo. It cannot be undone.'
+            : undefined
+        }
+        confirmLabel="Delete"
+        confirmText={confirmPlace?.name}
+        destructive
+        onConfirm={handleDeletePlace}
+        onCancel={() => setConfirmPlace(null)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -255,7 +539,15 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
-  memberName: { fontSize: Typography.base, color: Colors.textPrimary },
+  memberName: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
+  // Muted and small on purpose: removing somebody is rare, and a destructive
+  // control drawn loudly is one that gets pressed by accident.
+  rowAction: {
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
   placeRow: {
     paddingVertical: Spacing.sm,
     borderTopWidth: 1,
@@ -263,11 +555,14 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   placeHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  // minWidth: 0 so a long name shrinks rather than pushing the × off the card.
+  placeNameTap: { flex: 1, minWidth: 0, justifyContent: 'center', minHeight: MIN_TOUCH_TARGET },
   placeName: {
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
   },
+  renameInput: { flex: 1, minWidth: 0, marginBottom: 0 },
   linkRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   linkChip: {
     flexDirection: 'row',
@@ -298,4 +593,5 @@ const styles = StyleSheet.create({
   },
   note: { flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.xs },
   noteText: { flex: 1, fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19 },
+  leave: { marginBottom: Spacing.xxxl },
 });

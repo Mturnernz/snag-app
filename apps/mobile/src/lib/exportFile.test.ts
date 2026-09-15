@@ -1,7 +1,8 @@
 import {
-  exportFileName, snagExportTable, thingExportTable, toCsv,
+  EXPORT_PHOTO_LIMIT, exportFileName, snagExportPhotos, snagExportTable,
+  thingExportPhotos, thingExportTable, toCsv,
 } from '@snag/supabase-queries';
-import { renderPdf } from './exportFile';
+import { loadExportImages, renderPdf, type ExportImage } from './exportFile';
 
 // An extract is read at a desk, months later, by somebody deciding something —
 // what to buy, what to claim, what a tradesperson needs to know. So the things
@@ -143,3 +144,139 @@ describe('the PDF', () => {
     expect(String.fromCharCode(...bytes.subarray(0, 5))).toBe('%PDF-');
   });
 });
+
+// A 1x1 PNG. Real bytes, because the thing that breaks when photos are added to
+// a PDF is the library refusing to read them — which a fake would hide exactly
+// the way a mocked jsPDF would.
+const PNG = Uint8Array.from(Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+));
+
+const image = (over: Partial<ExportImage> = {}): ExportImage => ({
+  caption: 'Gutters', detail: 'SNAG-0007 · Roof', bytes: PNG, kind: 'PNG', ...over,
+});
+
+describe('which photos go in', () => {
+  // Row order would let one snag somebody photographed from five angles spend a
+  // quarter of the allowance, and an extract of fourteen jobs would come back
+  // showing four of them.
+  it('pictures every row once before it pictures any row twice', () => {
+    const chosen = snagExportPhotos([
+      snag({ id: 'a', photoPaths: ['a1', 'a2', 'a3'] }),
+      snag({ id: 'b', photoPaths: ['b1'] }),
+      snag({ id: 'c', photoPaths: ['c1', 'c2'] }),
+    ]);
+    expect(chosen.map((p) => p.path)).toEqual(['a1', 'b1', 'c1', 'a2', 'c2', 'a3']);
+  });
+
+  it('stops at the cap', () => {
+    const many = Array.from({ length: 30 }, (_, i) =>
+      snag({ id: `s${i}`, photoPaths: [`p${i}`] }));
+    expect(snagExportPhotos(many)).toHaveLength(EXPORT_PHOTO_LIMIT);
+    expect(snagExportPhotos(many, 4)).toHaveLength(4);
+  });
+
+  it('says what each picture is, since a page of uncaptioned photos answers nothing', () => {
+    const [first] = snagExportPhotos([snag({ photoPaths: ['h/one.jpg'] })]);
+    expect(first.caption).toBe('Gutters');
+    expect(first.detail).toBe('SNAG-0007 · Kitchen');
+  });
+
+  it('captions a thing with its room and the number somebody came for', () => {
+    const [first] = thingExportPhotos([thing({ photoPaths: ['h/plate.jpg'] })]);
+    expect(first.caption).toContain('Heat pump');
+    expect(first.detail).toContain('Living room');
+    expect(first.detail).toContain('MSZ-AP50VGK');
+  });
+
+  it('is empty when nothing has been photographed', () => {
+    expect(snagExportPhotos([snag()])).toEqual([]);
+  });
+});
+
+describe('fetching them', () => {
+  const signed = (map: Record<string, string>) => async () => map;
+
+  afterEach(() => { (global as any).fetch = undefined; });
+
+  // A signed URL expires and a key can be orphaned. Somebody waiting on a file
+  // at a desk wants the pictures that did arrive, not an error naming one that
+  // didn't.
+  it('drops a photo that will not come rather than failing the export', async () => {
+    (global as any).fetch = jest.fn(async (url: string) =>
+      (url.includes('good')
+        ? { ok: true, arrayBuffer: async () => PNG.buffer }
+        : { ok: false }));
+
+    const images = await loadExportImages(
+      [
+        { path: 'a', caption: 'One', detail: '' },
+        { path: 'b', caption: 'Two', detail: '' },
+        { path: 'c', caption: 'Three', detail: '' },
+      ],
+      signed({ a: 'https://good', b: 'https://gone' }),
+    );
+
+    // 'c' was never signed at all, 'b' answered 404, 'a' came back.
+    expect(images.map((i) => i.caption)).toEqual(['One']);
+  });
+
+  // jsPDF raises on anything it cannot identify, and it would do it after the
+  // whole table had been laid out.
+  it('drops bytes that are not a JPEG or a PNG', async () => {
+    (global as any).fetch = jest.fn(async () => ({
+      ok: true, arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+    }));
+    const images = await loadExportImages(
+      [{ path: 'a', caption: 'One', detail: '' }],
+      signed({ a: 'https://whatever' }),
+    );
+    expect(images).toEqual([]);
+  });
+
+  it('asks for nothing when there is nothing to ask for', async () => {
+    const sign = jest.fn();
+    expect(await loadExportImages([], sign as any)).toEqual([]);
+    expect(sign).not.toHaveBeenCalled();
+  });
+});
+
+describe('the photos in the PDF', () => {
+  it('adds pages for them, and none when there are none', () => {
+    const table = snagExportTable([snag()], META);
+    const without = renderPdf(table);
+    const with20 = renderPdf(table, Array.from({ length: 20 }, () => image()));
+
+    expect(with20.length).toBeGreaterThan(without.length);
+    expect(String.fromCharCode(...with20.subarray(0, 5))).toBe('%PDF-');
+    expect(String.fromCharCode(...with20.subarray(-6)).trim()).toBe('%%EOF');
+  });
+
+  // Six to a page, so twenty is four extra pages on top of the table's own.
+  it('lays them out six to a page', () => {
+    const table = snagExportTable([snag()], META);
+    const pages = (n: number) =>
+      countPages(renderPdf(table, Array.from({ length: n }, () => image())));
+
+    const base = countPages(renderPdf(table));
+    expect(pages(1)).toBe(base + 1);
+    expect(pages(6)).toBe(base + 1);
+    expect(pages(7)).toBe(base + 2);
+    expect(pages(20)).toBe(base + 4);
+  });
+
+  // A photograph jsPDF cannot read must leave its well empty rather than take
+  // the document down at the last step of a slow export.
+  it('survives one that cannot be decoded', () => {
+    const broken = image({ bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0x00]), kind: 'JPEG' });
+    const bytes = renderPdf(snagExportTable([snag()], META), [broken, image()]);
+    expect(String.fromCharCode(...bytes.subarray(0, 5))).toBe('%PDF-');
+  });
+});
+
+/** Counts the page objects in a rendered PDF. */
+function countPages(bytes: Uint8Array): number {
+  const text = Buffer.from(bytes).toString('latin1');
+  return (text.match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+}

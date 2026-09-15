@@ -3,6 +3,13 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import ExportSheet from './ExportSheet';
 
+// Two questions and one button. Spreadsheet and PDF used to *be* the action —
+// two buttons that each chose a format and fired at the same moment — which put
+// the only irreversible control one tap from opening the sheet, and left three
+// of five controls drawn as the primary action with none of them labelled as
+// one. Everything above the fold is a choice now; Export is the only filled
+// button in the dialog.
+//
 // Scope is asked every time and is deliberately not remembered: the two answers
 // are different documents, and a sticky default would quietly make one of them
 // the only one anybody ever gets. It defaults to what's on screen because that
@@ -54,17 +61,21 @@ describe('choosing what goes in', () => {
     expect(byLabel(r, 'Everything, 12 rows')).toBeDefined();
   });
 
-  it('starts on what you are looking at', async () => {
+  // The whole point of the change: picking a format decides nothing on its own.
+  it('does not export until Export is pressed', async () => {
     const r = sheet();
-    await press(pressableAround(r, 'PDF'));
-    expect(onExport).toHaveBeenCalledWith('view', 'pdf');
+    await press(byLabel(r, 'PDF'));
+    await press(byLabel(r, 'Everything, 12 rows'));
+    expect(onExport).not.toHaveBeenCalled();
+
+    await press(pressableAround(r, 'Export'));
+    expect(onExport).toHaveBeenCalledWith('all', 'pdf');
   });
 
-  it('exports everything once that is chosen', async () => {
+  it('starts on what you are looking at, as a spreadsheet', async () => {
     const r = sheet();
-    await press(byLabel(r, 'Everything, 12 rows'));
-    await press(pressableAround(r, 'Spreadsheet'));
-    expect(onExport).toHaveBeenCalledWith('all', 'csv');
+    await press(pressableAround(r, 'Export'));
+    expect(onExport).toHaveBeenCalledWith('view', 'csv');
   });
 
   // One row is one row. "1 rows" is the kind of thing nobody notices until it
@@ -75,15 +86,32 @@ describe('choosing what goes in', () => {
   });
 });
 
+const button = (r: ReturnType<typeof render>, label: string) =>
+  r.root.findAll((n: any) => typeof n.type !== 'string' && n.props?.label === label)[0];
+
+describe('what the two files actually differ by', () => {
+  // The one real difference between them, and the reason somebody picks the
+  // PDF. Saying it on the sheet stops the CSV being opened in search of
+  // pictures a spreadsheet cell was never going to hold.
+  it('says the photos ride in the PDF, and only there', () => {
+    const r = sheet();
+    expect(r.queryByText('No photos in a spreadsheet — just how many each row has.'))
+      .not.toBeNull();
+  });
+
+  it('names the cap once the PDF is chosen', async () => {
+    const r = sheet();
+    await press(byLabel(r, 'PDF'));
+    expect(r.queryByText('The photos go in too, up to 20 of them.')).not.toBeNull();
+  });
+});
+
 describe('nothing to extract', () => {
-  it('says so and offers neither format', () => {
+  it('says so and will not export', () => {
     const r = sheet({ view: 0, all: 0 });
 
     expect(r.queryByText("There's nothing to put in it yet.")).not.toBeNull();
-    const button = (label: string) =>
-      r.root.findAll((n: any) => typeof n.type !== 'string' && n.props?.label === label)[0];
-    expect(button('Spreadsheet').props.disabled).toBe(true);
-    expect(button('PDF').props.disabled).toBe(true);
+    expect(button(r, 'Export').props.disabled).toBe(true);
   });
 
   // An empty view with a full house is the common case — you searched for
@@ -91,10 +119,7 @@ describe('nothing to extract', () => {
   it('still allows everything when only the view is empty', async () => {
     const r = sheet({ view: 0, all: 9 });
     await press(byLabel(r, 'Everything, 9 rows'));
-
-    const button = (label: string) =>
-      r.root.findAll((n: any) => typeof n.type !== 'string' && n.props?.label === label)[0];
-    expect(button('PDF').props.disabled).toBe(false);
+    expect(button(r, 'Export').props.disabled).toBe(false);
   });
 });
 
@@ -104,11 +129,8 @@ describe('while a file is being made', () => {
       <ExportSheet visible what="the list" counts={{ view: 3, all: 12 }} busy
         onExport={onExport} onCancel={onCancel} />,
     );
-    const button = (label: string) =>
-      r.root.findAll((n: any) => typeof n.type !== 'string' && n.props?.label === label)[0];
 
-    expect(button('Spreadsheet').props.disabled).toBe(true);
-    expect(button('PDF').props.disabled).toBe(true);
-    expect(button('Cancel').props.disabled).toBe(true);
+    expect(button(r, 'Export').props.disabled).toBe(true);
+    expect(button(r, 'Cancel').props.disabled).toBe(true);
   });
 });

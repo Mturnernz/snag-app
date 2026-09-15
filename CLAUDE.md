@@ -943,8 +943,47 @@ documents, and a file whose contents depend on a filter you set twenty minutes a
 misread later — so both chips carry their row count, and the file names the scope, the house, the
 place and the day at the top.
 
+**Both questions are answered before anything happens, and one button does it.** Spreadsheet and
+PDF used to *be* the action — two buttons, each choosing a format and firing at the same moment,
+which put the only irreversible control on the sheet one tap from opening it. It also made the
+sheet contradict itself: the scope rail said "pick one of these" while the row underneath said
+"press either of these to finish", and the lit scope chip, the filled PDF button and the outlined
+Spreadsheet button meant three of five controls read as the primary action with none of them
+labelled as one. Everything above the fold is a chip now — the app's one chip, sunken off, solid
+fern on — and **Export** is the only filled button in the dialog.
+
 **Ghosts are in neither extract**, which is the House tab's own rule reaching one place further: a
 suggestion never becomes a row, so it can never become a line in a record somebody checks in a shop.
+
+### Photographs ride in the PDF, and only there
+
+A spreadsheet cell cannot hold a picture, which is why `snagExportTable` carries a photo *count*.
+The PDF is the copy that gets sent to somebody who was not there — a builder, a landlord, an
+insurer — and for that reader the photograph is most of the evidence, so it goes in: three across,
+two down, after the table, each captioned with the headline the list shows and the reference and
+room beneath it. A page of uncaptioned photographs of six different rooms is the part of a report
+nobody can act on. **The sheet says which file carries them**, because that is the one real
+difference between the two and the reason somebody picks the PDF.
+
+- **Twenty, capped, and chosen one round each.** `snagExportPhotos` / `thingExportPhotos` walk the
+  rows taking each one's *first* photo before any row's second. Row order would let a single snag
+  photographed from five angles spend a quarter of the allowance, and an extract of fourteen jobs
+  would come back picturing four of them.
+- **Bytes, not an `<Image>`.** jsPDF will take a DOM element and `apps/mobile` runs on phones too,
+  where there isn't one — and reading pixels back off a canvas would need a `blob:` the CSP has no
+  rule for. A signed URL fetched as an array buffer is the one path both platforms and the deployed
+  policy already allow, because it is the request every thumbnail on the list already makes.
+  `connect-src` covers `https://*.supabase.co` already; nothing in `netlify.toml` changed.
+- **A photograph that will not come is left out, never thrown.** Signed URLs expire and keys get
+  orphaned. Somebody waiting on a file at a desk wants the twelve pictures that did arrive, not an
+  error naming one that did not — so a 404, an unsigned key, bytes that are neither JPEG nor PNG,
+  and one jsPDF cannot decode each cost their own well and nothing else.
+- **Letterboxed, never cropped.** A crop takes the middle of a photograph somebody framed
+  deliberately, and the whole reason a snag has no title is that the framing is the description.
+
+`exportFile.test.ts` pins the round-robin, the cap, the captions, the three ways a photo is dropped
+rather than raised, and the page arithmetic — six to a page, against a real jsPDF with real PNG
+bytes, for the same reason the PDF itself is not mocked.
 
 Four things about the file itself, each of which is how a spreadsheet extract usually arrives
 looking corrupt when it isn't:
@@ -980,7 +1019,9 @@ does not exist. (jsPDF's `html2canvas` and `dompurify` do come out as separate c
   the library failing to run at all, which is exactly what a mock hides.
 
 `exportFile.test.ts` pins the escaping, the BOM, the CRLF, the photo-only headline and the real PDF;
-`ExportSheet.test.tsx` pins the counts, the default scope and that an empty extract is refused;
+`ExportSheet.test.tsx` pins the counts, the default scope, that choosing a format exports nothing
+until *Export* is pressed, that the sheet says which file the photos are in, and that an empty
+extract is refused;
 `SnagListScreen.test.tsx` pins that *Everything* ignores the lens and includes done, and that the
 control is at the foot rather than on the compose bar; `HouseScreen.test.tsx` pins that not one
 ghost reaches the file.

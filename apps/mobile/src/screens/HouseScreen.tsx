@@ -7,7 +7,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  exportDateStamp, ghostsForRoom, searchThings, thingExportTable, type ThingInput,
+  exportDateStamp, ghostsForRoom, searchThings, thingExportPhotos, thingExportTable,
+  type ThingInput,
 } from '@snag/supabase-queries';
 import ThingCard, { GhostCard } from '../components/ThingCard';
 import EmptyState from '../components/EmptyState';
@@ -22,7 +23,7 @@ import {
   createLocation, createThing, getAbsentThings, getFileUrls, getThings, markThingAbsent,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { writeExport, type ExportFormat } from '../lib/exportFile';
+import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import {
   AbsentThing, RootStackParamList, Thing, ThingKind, ThingSuggestion,
 } from '../types';
@@ -158,13 +159,19 @@ export default function HouseScreen() {
   async function handleExport(scope: ExportScope, format: ExportFormat) {
     setExporting(true);
     try {
-      const table = thingExportTable(scope === 'all' ? things : visible, {
+      const rows = scope === 'all' ? things : visible;
+      const table = thingExportTable(rows, {
         household: household.name,
         place: activeProperty?.name ?? household.name,
         scope: scope === 'all' ? 'Everything' : "What's on screen",
         stamp: exportDateStamp(),
       });
-      const { fileName, path } = await writeExport(table, format);
+      // Photographs go in the PDF only — a spreadsheet cell cannot hold one,
+      // and a rating plate is most of what the record is for.
+      const images = format === 'pdf'
+        ? await loadExportImages(thingExportPhotos(rows), getFileUrls)
+        : [];
+      const { fileName, path } = await writeExport(table, format, images);
       setShowExport(false);
       showToast(path ? `Saved to ${fileName}` : `${fileName} downloaded`);
     } catch (err: any) {

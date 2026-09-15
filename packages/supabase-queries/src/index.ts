@@ -1720,6 +1720,78 @@ export function snagExportTable(
 }
 
 /**
+ * How many photographs a PDF will carry. Twenty is a file somebody can open on
+ * a phone and send to a builder, and roughly where a JPEG-per-page extract
+ * stops being a document and starts being an album.
+ */
+export const EXPORT_PHOTO_LIMIT = 20;
+
+/** One picture in an extract, and the two lines printed under it. */
+export interface ExportPhoto {
+  /** Storage key, signed at render time. */
+  path: string;
+  /** What it is — the same headline the list shows. */
+  caption: string;
+  /** Where and which one: the reference and the room. */
+  detail: string;
+}
+
+/**
+ * Choose which photographs go in, **one round each before any second one**.
+ *
+ * Taking them in row order would let a single snag somebody photographed from
+ * five angles spend a quarter of the allowance, and an extract of fourteen jobs
+ * would come back showing four of them. A round-robin means every row on the
+ * extract is pictured before any row is pictured twice, which is the answer
+ * somebody flicking to the back of the document is actually looking for.
+ */
+function roundRobin<T>(
+  rows: T[],
+  photosOf: (row: T) => string[],
+  describe: (row: T, path: string) => ExportPhoto,
+  limit: number,
+): ExportPhoto[] {
+  const out: ExportPhoto[] = [];
+  const deepest = rows.reduce((max, row) => Math.max(max, photosOf(row).length), 0);
+  for (let round = 0; round < deepest && out.length < limit; round += 1) {
+    for (const row of rows) {
+      if (out.length >= limit) break;
+      const path = photosOf(row)[round];
+      if (path) out.push(describe(row, path));
+    }
+  }
+  return out;
+}
+
+/** The photographs on an extract of the list. */
+export function snagExportPhotos(snags: Snag[], limit = EXPORT_PHOTO_LIMIT): ExportPhoto[] {
+  return roundRobin(
+    snags,
+    (snag) => snag.photoPaths ?? [],
+    (snag, path) => ({
+      path,
+      caption: snagHeadline(snag),
+      detail: [snag.reference, snag.room].filter(Boolean).join(' · '),
+    }),
+    limit,
+  );
+}
+
+/** The photographs on an extract of the house record. */
+export function thingExportPhotos(things: Thing[], limit = EXPORT_PHOTO_LIMIT): ExportPhoto[] {
+  return roundRobin(
+    things,
+    (thing) => thing.photoPaths ?? [],
+    (thing, path) => ({
+      path,
+      caption: thingHeadline(thing),
+      detail: [thing.room ?? 'Whole house', thingDetailLine(thing)].filter(Boolean).join(' · '),
+    }),
+    limit,
+  );
+}
+
+/**
  * Every recorded thing as a row.
  *
  * Ghosts are not in it, and that is the same rule the tab itself rests on: a

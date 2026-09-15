@@ -177,6 +177,18 @@ export interface Property {
   id: string;
   householdId: string;
   name: string;
+  /**
+   * Suburb and town, for the one question a property name cannot answer:
+   * *near here*.
+   *
+   * Suburb and town rather than a street address, because the only thing it is
+   * read for is finding a tradesman in the right part of the country, and it
+   * rides out of the app in every briefed extract — a file that gets forwarded.
+   * The precision a street number would add is precision nobody needs and
+   * everybody who receives the PDF would then hold.
+   */
+  suburb: string | null;
+  town: string | null;
   /** How many people are linked to it. Only shown when there's a choice. */
   memberCount?: number;
 }
@@ -514,6 +526,105 @@ export interface AbsentThing {
   propertyId: string;
   room: string;
   name: string;
+}
+
+
+// ---------------------------------------------------------------- advice
+//
+// What came back when somebody asked about the list.
+//
+// The loop is deliberately outside the app: a briefed PDF goes out, an answer
+// comes back as text, and `parseSnagActions` turns it into rows. Nothing here
+// is written by the app itself, which is why every field is treated as a claim
+// rather than a fact — see `SnagAdvice.source`.
+
+/**
+ * Whether the person holding the phone can do it.
+ *
+ * `unclear` is a first-class answer, not a failure. A photograph of a damp
+ * patch cannot say whether the pipe behind it is leaking, and an assessment
+ * that guesses confidently is worse than one that says what it would need to
+ * see — which is what `needToSee` carries.
+ */
+export type AdviceVerdict = 'diy' | 'trade' | 'unclear';
+
+export const ADVICE_VERDICT_LABELS: Record<AdviceVerdict, string> = {
+  diy: 'You can probably do this',
+  trade: 'This needs a tradesman',
+  unclear: "Can't tell from the photo",
+};
+
+/**
+ * One thing to buy, and the two facts that make a shopping list worth having.
+ *
+ * Both are optional because an answer that knows the part but not the shop is
+ * still most of the way there, and dropping the row for the missing half would
+ * lose the part as well.
+ */
+export interface AdvicePart {
+  item: string;
+  /** "Mitre 10", "an appliance parts place" — where, in words. */
+  where: string | null;
+  /** A range as written, "35-45". Never parsed into a number: see below. */
+  approxNzd: string | null;
+}
+
+/**
+ * Somebody to ring.
+ *
+ * **`source` is not optional, and that is the whole point.** A model asked for
+ * three local tradesmen will produce three plausible names with three
+ * plausible-looking mobile numbers whether or not they exist, and they arrive
+ * looking exactly like the real thing. So the brief requires a URL the name was
+ * found at, and a tradesman with nowhere it came from is dropped by the parser
+ * rather than shown unsourced.
+ *
+ * The two costs are split because "about $200" means something different as a
+ * callout fee and as a total, and the difference is the one a household
+ * actually decides on: four jobs batched into one visit pay the callout once.
+ */
+export interface AdviceTradie {
+  name: string;
+  phone: string | null;
+  url: string | null;
+  /** Where this name was found. Required — an unsourced name is dropped. */
+  source: string;
+  /** "180" — what it costs to get them to the door. */
+  calloutNzd: string | null;
+  /** "180-260" — callout and the work, as a range. */
+  totalNzd: string | null;
+}
+
+/**
+ * The answer for one snag.
+ *
+ * **Money and quantities stay strings.** They are quoted back exactly as they
+ * arrived, with the date they arrived on, because parsing "35-45" into a number
+ * is the app asserting a precision the answer never had — and a stale price
+ * that says when it was given is useful, while a stale price rendered as data
+ * is a number somebody budgets against.
+ */
+export interface SnagAdvice {
+  snagId: string;
+  diagnosis: string;
+  verdict: AdviceVerdict;
+  /** Why it is a trade job — the regulation, the risk, the tool nobody owns. */
+  reason: string | null;
+  steps: string[];
+  parts: AdvicePart[];
+  /** "plumber", "registered electrician" — null when it is a DIY job. */
+  trade: string | null;
+  tradies: AdviceTradie[];
+  /** What a better photograph would have to show. Set when `unclear`. */
+  needToSee: string | null;
+  /**
+   * Where the answer came from, in words, because nothing in this app can
+   * check it: "Pasted 15 Sep". It is rendered beside the advice for the same
+   * reason the invitation card says Snag doesn't email anybody — a claim the
+   * screen cannot verify has to read as a claim.
+   */
+  source: string;
+  createdAt: string;
 }
 
 

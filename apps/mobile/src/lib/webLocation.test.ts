@@ -59,6 +59,16 @@ describe('resetWebPathIfStale', () => {
     expect(replaceState).toHaveBeenCalledWith(null, '', '/');
   });
 
+  // The load-bearing one: somebody who just scanned a QR has no account, so the
+  // sign-up round trip is the normal case, not the edge. Lose the token there
+  // and they land on an empty Setup screen having no idea what they scanned,
+  // with nothing on screen able to recover the code.
+  it('keeps a join code across the sign-up round trip', () => {
+    atUrl('/join/8f1d3c2e-0000-4000-8000-000000000000');
+    resetWebPathIfStale();
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
   it('does nothing when already at the root', () => {
     atUrl('/');
     resetWebPathIfStale();
@@ -83,6 +93,8 @@ describe('isPreservedUrl', () => {
     ['/mentions', '', false],
     ['/', '?report=tok', false],
     ['/', '?join=VDJQFNEM', false],
+    ['/join/8f1d3c2e-0000-4000-8000-000000000000', '', true],
+    ['/join', '', false],
   ])('%s%s -> %s', (pathname, search, expected) => {
     expect(isPreservedUrl(pathname, search)).toBe(expected);
   });

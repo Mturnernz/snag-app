@@ -19,13 +19,19 @@ import { Platform } from 'react-native';
  * So: at the two auth transitions, put the address bar back to `/` unless the
  * URL is one somebody meant to arrive at.
  *
- * Exactly one is kept: `/snags/<id>`, which is what one person sends the other
- * when they want them to look at something. Following that link while signed
- * out means signing in first, and the snag has to survive the round trip or the
- * link was pointless.
+ * Two are kept:
  *
- * (It was three. `?report=<token>` and `?join=<code>` were the QR landings of
- * the retired product and went with it — see `isPreservedUrl`.)
+ * - `/snags/<id>` — what one person sends the other when they want them to look
+ *   at something. Following it while signed out means signing in first, and the
+ *   snag has to survive the round trip or the link was pointless.
+ * - `/join/<token>` — a household's QR code. This one is *load-bearing*: the
+ *   person scanning has almost certainly never signed in here, so the sign-up
+ *   round trip is the normal case rather than the edge one. Lose the token
+ *   there and they land on an empty Setup screen with no idea what they just
+ *   scanned, and the code is not recoverable from anything on screen.
+ *
+ * (The retired product's `?report=<token>` and `?join=<code>` query landings
+ * went with it; this is a path, and a different mechanism — see joinLink.ts.)
  *
  * No-ops off web: on native there is no address bar, `history` doesn't exist,
  * and a cold launch has no initial URL to be stale.
@@ -45,8 +51,10 @@ export function resetWebPathIfStale(): void {
 export function isPreservedUrl(pathname: string, _search = ''): boolean {
   // A specific snag, not the `/snags` list tab: only the former names a record.
   if (/^\/snags\/[^/]+/.test(pathname)) return true;
-  // `?report=` (the site QR landing) and `?join=` (an org invite) retired with
-  // the B2B product. A specific snag is the only URL left worth preserving
-  // across a sign-in round trip.
+  // A household's join code. Signing up IS the journey here — somebody who has
+  // just scanned a QR has no account yet — so this has to survive both
+  // transitions or the code is gone and nothing on screen can recover it.
+  if (/^\/join\/[^/]+/.test(pathname)) return true;
+  // The retired product's `?report=` and `?join=` query landings went with it.
   return false;
 }

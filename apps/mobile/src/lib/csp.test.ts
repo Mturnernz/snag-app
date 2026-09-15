@@ -54,3 +54,28 @@ describe('the web build’s deployed CSP', () => {
     expect(directive('frame-ancestors')).toEqual(["'none'"]);
   });
 });
+
+// Not the CSP, but the same class of failure: something the deployed site does
+// that nothing local enforces, and whose absence is silent until somebody in a
+// kitchen points a camera at a code.
+describe('the SPA rewrite a join code depends on', () => {
+  const TOML = readFileSync(join(__dirname, '..', '..', 'netlify.toml'), 'utf8');
+
+  // `/join/<token>` is a path, not a query string, and the export publishes one
+  // index.html and no /join directory. Without a catch-all rewrite Netlify
+  // answers 404 before the app loads at all — so the QR would be dead on
+  // arrival with everything here green and nothing in the app able to say why.
+  it('serves index.html for a path the export never wrote a file for', () => {
+    const redirect = TOML.match(/\[\[redirects\]\][\s\S]*?from\s*=\s*"([^"]+)"[\s\S]*?to\s*=\s*"([^"]+)"[\s\S]*?status\s*=\s*(\d+)/);
+    expect(redirect).not.toBeNull();
+    expect(redirect![1]).toBe('/*');
+    expect(redirect![2]).toBe('/index.html');
+    expect(redirect![3]).toBe('200');
+  });
+
+  // A QR landing page inside an iframe is the classic phishing shell: the code
+  // looks like it came from Snag and the page around it is somebody else's.
+  it('refuses to be framed, which is what a join landing page invites', () => {
+    expect(directive('frame-ancestors')).toEqual(["'none'"]);
+  });
+});

@@ -28,6 +28,7 @@ import type {
   Household,
   HouseholdMember,
   Invitation,
+  InvitationByToken,
   InvitationToMe,
   Location,
   Profile,
@@ -116,7 +117,9 @@ function mapInvitation(row: Row): Invitation {
   return {
     id: row.id,
     householdId: row.household_id,
-    email: row.email,
+    email: row.email ?? null,
+    token: row.token ?? null,
+    expiresAt: row.expires_at ?? null,
     propertyIds: row.property_ids ?? [],
     invitedBy: row.invited_by,
     createdAt: row.created_at,
@@ -317,7 +320,7 @@ export async function getHouseholdInvitations(
 ): Promise<Invitation[]> {
   const { data, error } = await client
     .from('invitations')
-    .select('id, household_id, email, property_ids, invited_by, created_at')
+    .select('id, household_id, email, token, expires_at, property_ids, invited_by, created_at')
     .eq('household_id', householdId)
     .order('created_at');
 
@@ -331,6 +334,86 @@ export async function cancelInvitation(
 ): Promise<void> {
   const { error } = await client.rpc('cancel_invitation', { p_invitation_id: invitationId });
   if (error) throw asError(error, "Couldn't cancel that invitation");
+}
+
+// ------------------------------------------------------------- a code to hold up
+//
+// The same invitation, addressed to whoever holds the link rather than to an
+// address. One table, one accept path, one set of Waiting rows — not a second
+// mechanism, for the reason the Schedule tab gives about scheduling: two ways
+// to do one thing and neither is trustworthy.
+//
+// **Nothing in this app scans anything.** The QR encodes an ordinary URL and
+// the scanner's own camera opens it, which is the point — they haven't
+// installed Snag yet. No camera permission, no scanner screen, no getUserMedia
+// to get past the deployed CSP.
+
+/** The URL a join QR encodes, and the one shown beside it to copy. */
+export function joinUrl(appUrl: string, token: string): string {
+  return `${appUrl.replace(/\/+$/, '')}/join/${token}`;
+}
+
+/**
+ * Mints the household's one live code, replacing any previous one.
+ *
+ * Short-lived and revocable is the whole security model: a screenshot is a way
+ * in until it expires. Every arrival still has to press Join.
+ */
+export async function createInviteLink(
+  client: SupabaseClient,
+  householdId: string,
+  propertyIds?: string[],
+  hours = 24
+): Promise<Invitation> {
+  const { data, error } = await client.rpc('create_invite_link', {
+    p_household_id: householdId,
+    p_property_ids: propertyIds ?? null,
+    p_hours: hours,
+  });
+  const row = unwrap<Row>(data, error, "Couldn't make a code");
+  return mapInvitation(row);
+}
+
+export async function revokeInviteLink(
+  client: SupabaseClient,
+  householdId: string
+): Promise<void> {
+  const { error } = await client.rpc('revoke_invite_link', { p_household_id: householdId });
+  if (error) throw asError(error, "Couldn't stop sharing that code");
+}
+
+/**
+ * What a scanner is being asked to join, named before they answer.
+ *
+ * Null for a code that has expired or been revoked — which is a real answer, not
+ * an error: somebody scanning yesterday's screenshot needs telling, not a stack
+ * trace.
+ */
+export async function getInvitationByToken(
+  client: SupabaseClient,
+  token: string
+): Promise<InvitationByToken | null> {
+  const { data, error } = await client.rpc('invitation_by_token', { p_token: token });
+  if (error) throw asError(error, "Couldn't check that code");
+  const row = ((data as Row[]) ?? [])[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    householdId: row.household_id,
+    householdName: row.household_name,
+    invitedByName: row.invited_by_name,
+    expiresAt: row.expires_at,
+    alreadyAMember: !!row.already_a_member,
+  };
+}
+
+/** Joins by code. Idempotent — scanning twice is a thing people do. */
+export async function acceptInvitationByToken(
+  client: SupabaseClient,
+  token: string
+): Promise<void> {
+  const { error } = await client.rpc('accept_invitation_by_token', { p_token: token });
+  if (error) throw asError(error, "Couldn't join that household");
 }
 
 /**

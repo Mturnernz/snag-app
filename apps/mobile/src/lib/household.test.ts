@@ -1,4 +1,4 @@
-import { countMyHouseholds, getMyHousehold } from '@snag/supabase-queries';
+import { countMyHouseholds, getMyHousehold, joinUrl } from '@snag/supabase-queries';
 
 // `getMyHousehold` answers the gate the whole app hangs off — App.tsx renders
 // Setup or the navigator on it — and it used to answer it wrong in a way
@@ -98,5 +98,22 @@ describe('countMyHouseholds', () => {
   it('is zero, not NaN, when PostgREST answers with no count at all', async () => {
     const { client } = fakeClient({});
     expect(await countMyHouseholds(client)).toBe(0);
+  });
+});
+
+describe('joinUrl', () => {
+  const TOKEN = '8f1d3c2e-0000-4000-8000-000000000000';
+
+  // This string is what a QR encodes and what somebody may end up reading off a
+  // screen and typing. A double slash is not fatal but it is the kind of thing
+  // that makes a link look wrong to the person being asked to trust it.
+  it('builds the link a QR encodes', () => {
+    expect(joinUrl('https://app.snaghq.co.nz', TOKEN))
+      .toBe(`https://app.snaghq.co.nz/join/${TOKEN}`);
+  });
+
+  it('does not double the slash when the host carries one', () => {
+    expect(joinUrl('https://app.snaghq.co.nz/', TOKEN))
+      .toBe(`https://app.snaghq.co.nz/join/${TOKEN}`);
   });
 });

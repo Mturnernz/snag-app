@@ -210,6 +210,18 @@ export const getHouseholdInvitations = (householdId: string) =>
 export const cancelInvitation = (invitationId: string) =>
   queries.cancelInvitation(supabase, invitationId);
 
+export const createInviteLink = (householdId: string, propertyIds?: string[], hours?: number) =>
+  queries.createInviteLink(supabase, householdId, propertyIds, hours);
+
+export const revokeInviteLink = (householdId: string) =>
+  queries.revokeInviteLink(supabase, householdId);
+
+export const getInvitationByToken = (token: string) =>
+  queries.getInvitationByToken(supabase, token);
+
+export const acceptInvitationByToken = (token: string) =>
+  queries.acceptInvitationByToken(supabase, token);
+
 export const getMyInvitations = () => queries.getMyInvitations(supabase);
 
 export const acceptInvitation = (invitationId: string) =>

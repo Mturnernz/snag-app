@@ -846,6 +846,66 @@ re-gate order, `joinLink.test.ts` what is and isn't a join path, and `HouseholdS
 waiting rows, the cancel, the answerable invitation, the absence of the word "sent", and that a live
 code never renders as somebody waiting to arrive.
 
+## Taking a list out of the app
+
+A **CSV** to sort, a **PDF** to send to somebody. Both offered from the foot of the scrolled
+content on the List and House tabs — `ListFooterComponent`, deliberately **not** pinned to the
+bottom of the screen, because on the List tab that is the compose bar and nothing goes on the
+compose bar. An export is a thing you go looking for at a desk once a month; reaching the end of
+the list is the cheapest possible place for something that rare.
+
+**One table, two renderers.** `snagExportTable` and `thingExportTable` build the rows in
+`packages/supabase-queries` with the other pure helpers, and `toCsv` and `renderPdf` only format
+them — so a CSV and a PDF of the same extract can never disagree about what is in it.
+
+**Scope is asked every time and never remembered.** *What's on screen* honours the lens, the
+search and the done section; *Everything* ignores all three. They are genuinely different
+documents, and a file whose contents depend on a filter you set twenty minutes ago is one you will
+misread later — so both chips carry their row count, and the file names the scope, the house, the
+place and the day at the top.
+
+**Ghosts are in neither extract**, which is the House tab's own rule reaching one place further: a
+suggestion never becomes a row, so it can never become a line in a record somebody checks in a shop.
+
+Four things about the file itself, each of which is how a spreadsheet extract usually arrives
+looking corrupt when it isn't:
+
+- **Every value is quoted and inner quotes are doubled.** A snag's description can hold a comma, a
+  quote and a newline at once.
+- **CRLF**, which Excel on Windows still wants and everything else accepts.
+- **A UTF-8 BOM**, without which Excel guesses a code page and every macron in a NZ address comes
+  back mangled.
+- **A photo-only snag gets `snagHeadline`**, because it has no words of its own and a spreadsheet
+  cannot show the photo.
+
+### The bundle cost, and why it is paid up front
+
+`jspdf` + `jspdf-autotable` are imported at module scope and take the main web bundle from **2.65 MB
+to 3.14 MB (+490 KB)**. That is not laziness: `"output": "single"` in `app.json` means Metro emits
+one bundle with no lazy chunks, and the deployed CSP is `default-src 'self'` with no CDN reachable —
+so there is nowhere to fetch a renderer from at export time. It ships in the bundle or the feature
+does not exist. (jsPDF's `html2canvas` and `dompurify` do come out as separate chunks; nothing calls
+`.html()`, so they are never fetched.)
+
+**Two traps, both already sprung once:**
+
+- **Downloads and the CSP.** A download is a navigation, not a fetch, so `connect-src` does not
+  govern it and `object-src 'none'` covers `<object>`/`<embed>` rather than `<a download>`. Verified
+  in Chromium against the deployed policy: the download fires, no violation. The directive that
+  *would* kill it silently is `sandbox`, which `csp.test.ts` now asserts is absent.
+- **jsPDF under jest.** Its `exports` map names only `node` and `browser` conditions, so jest-expo's
+  resolver finds nothing — `moduleNameMapper` points at `dist/jspdf.umd.min.js`. And Expo's winter
+  `TextDecoder` polyfill wins over Node's without implementing `latin1`, which jsPDF needs at module
+  scope: `jest.setup.js` hands Node's back. Deliberately not a mock of jsPDF — `exportFile.test.ts`
+  asserts a real PDF comes out, `%PDF-` to `%%EOF`, because the thing that actually breaks here is
+  the library failing to run at all, which is exactly what a mock hides.
+
+`exportFile.test.ts` pins the escaping, the BOM, the CRLF, the photo-only headline and the real PDF;
+`ExportSheet.test.tsx` pins the counts, the default scope and that an empty extract is refused;
+`SnagListScreen.test.tsx` pins that *Everything* ignores the lens and includes done, and that the
+control is at the foot rather than on the compose bar; `HouseScreen.test.tsx` pins that not one
+ghost reaches the file.
+
 ## Taking someone, or something, away
 
 Adding had no opposite for eleven migrations, and the gap had a sharp edge. `getMyHousehold` reads

@@ -23,6 +23,11 @@ jest.mock('../components/ComposeBar', () => {
   };
 });
 
+const mock_writeExport = jest.fn().mockResolvedValue({ fileName: 'list.csv', path: null });
+jest.mock('../lib/exportFile', () => ({
+  writeExport: (...a: unknown[]) => mock_writeExport(...a),
+}));
+
 const mock_getSnags = jest.fn();
 const mock_markListSeen = jest.fn();
 jest.mock('../lib/supabase', () => ({
@@ -167,5 +172,85 @@ describe('SnagListScreen', () => {
     const result = render(<SnagListScreen />);
     await settle();
     expect(texts(result).some((t) => t.includes('done this week'))).toBe(false);
+  });
+});
+
+// An extract is an archive. The screen-level job is which rows go in, and the
+// way to get that wrong is to let "Everything" quietly inherit the lens you set
+// twenty minutes ago — a file you would then read as the whole list.
+describe('taking the list out', () => {
+  const settle = () => TestRenderer.act(async () => {});
+
+  const pressableAround = (r: ReturnType<typeof render>, text: string) => {
+    let node: any = r.getByText(text);
+    while (node) {
+      if (typeof node.props?.onPress === 'function') return node;
+      node = node.parent;
+    }
+    throw new Error(`Nothing pressable around "${text}"`);
+  };
+
+  const openSheet = async (r: ReturnType<typeof render>) => {
+    await TestRenderer.act(async () => {
+      await pressableAround(r, 'Export this list').props.onPress();
+    });
+    return r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && typeof n.props?.onExport === 'function',
+    )[0];
+  };
+
+  beforeEach(() => {
+    mock_writeExport.mockClear();
+    mock_writeExport.mockResolvedValue({ fileName: 'list.csv', path: null });
+  });
+
+  it('offers the extract at the foot of the list, not on the compose bar', async () => {
+    arrange();
+    mock_getSnags.mockResolvedValue([snag({ id: 'a', room: 'Kitchen' })]);
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    expect(r.queryByText('Export this list')).not.toBeNull();
+    // The compose bar is mocked to a single Text node; the export control is
+    // nowhere inside it. Nothing goes on the compose bar.
+    expect(r.queryByText('compose bar')).not.toBeNull();
+  });
+
+  it('puts every snag in "Everything", done ones included and no lens applied', async () => {
+    arrange();
+    // The screen reads open and done separately, so the mock has to answer the
+    // status it was asked for — returning everything twice would double the
+    // rows and hide whatever this test is trying to say.
+    const all = [
+      snag({ id: 'a', room: 'Kitchen', needsParts: false }),
+      snag({ id: 'b', room: 'Garage', needsParts: true }),
+      snag({ id: 'c', status: 'done', doneAt: ago(1) }),
+    ];
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      all.filter((s) => filter.status.includes(s.status)));
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    const sheet = await openSheet(r);
+    await TestRenderer.act(async () => sheet.props.onExport('all', 'csv'));
+
+    const [table] = mock_writeExport.mock.calls[0];
+    expect(table.rows).toHaveLength(3);
+    expect(table.subtitle).toContain('Everything');
+  });
+
+  it('names the house and the place at the top of the file', async () => {
+    arrange();
+    mock_getSnags.mockResolvedValue([snag({ id: 'a', room: 'Kitchen' })]);
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    const sheet = await openSheet(r);
+    await TestRenderer.act(async () => sheet.props.onExport('view', 'pdf'));
+
+    const [table, format] = mock_writeExport.mock.calls[0];
+    expect(table.name).toBe('Home list');
+    expect(table.subtitle).toContain('Home');
+    expect(format).toBe('pdf');
   });
 });

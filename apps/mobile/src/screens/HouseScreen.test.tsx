@@ -21,6 +21,11 @@ jest.mock('../components/AddThingSheet', () => {
   return { __esModule: true, default: () => React.createElement(Text, null, 'add sheet') };
 });
 
+const mock_writeExport = jest.fn().mockResolvedValue({ fileName: 'house.csv', path: null });
+jest.mock('../lib/exportFile', () => ({
+  writeExport: (...a: unknown[]) => mock_writeExport(...a),
+}));
+
 const mock_createLocation = jest.fn();
 const mock_getThings = jest.fn();
 const mock_getAbsentThings = jest.fn();
@@ -40,7 +45,7 @@ jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).
 const thing = (over: Partial<any>): any => ({
   id: 'x', householdId: 'h', propertyId: 'p', kind: 'appliance',
   name: 'A thing', room: null, photoPaths: [],
-  make: null, model: null, serial: null, consumables: [],
+  make: null, model: null, serial: null, consumables: [], documentPaths: [],
   installedAt: null, warrantyUntil: null, serviceDays: null, spec: {}, notes: null,
   createdBy: 'me', createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
   propertyName: 'Home', snagCount: 0, openSnagCount: 0,
@@ -223,5 +228,49 @@ describe('HouseScreen', () => {
     expect(all).not.toContain('By kind');
     expect(all).toContain('2 recorded');
     expect(all.some((t) => t.startsWith('Laundry · '))).toBe(true);
+  });
+});
+
+// The rule the whole tab rests on is that a ghost is not a row, and an extract
+// is the third place it could blur — after the header count and the search. A
+// file full of suggestions nobody has confirmed is exactly the record you check
+// in a shop and find nothing behind.
+describe('taking the house record out', () => {
+  const openSheet = async (r: ReturnType<typeof render>) => {
+    const control = r.root.findAll(
+      (n: any) => typeof n.type !== 'string'
+        && n.props?.accessibilityLabel === 'Export the house record'
+        && !!n.props?.onPress,
+      { deep: true },
+    )[0];
+    await TestRenderer.act(async () => control.props.onPress());
+    return r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && typeof n.props?.onExport === 'function',
+    )[0];
+  };
+
+  beforeEach(() => {
+    mock_writeExport.mockClear();
+    mock_writeExport.mockResolvedValue({ fileName: 'house.csv', path: null });
+  });
+
+  it('carries recorded things and not one ghost', async () => {
+    arrange(['Laundry', 'Deck', 'Elsewhere']);
+    mock_getThings.mockResolvedValue([
+      thing({ id: 't1', name: 'Dryer', room: 'Laundry' }),
+    ]);
+    mock_getAbsentThings.mockResolvedValue([]);
+
+    const r = render(<HouseScreen />);
+    await settle();
+
+    const sheet = await openSheet(r);
+    await TestRenderer.act(async () => sheet.props.onExport('all', 'csv'));
+
+    const [table] = mock_writeExport.mock.calls[0];
+    // The Laundry's catalogue suggests several things; exactly one is recorded.
+    expect(table.rows).toHaveLength(1);
+    expect(table.rows[0]).toContain('Dryer');
+    expect(table.name).toBe('Home house');
   });
 });

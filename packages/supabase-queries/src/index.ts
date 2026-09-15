@@ -1720,6 +1720,31 @@ export function snagExportTable(
 }
 
 /**
+ * The recorded things in one room, for the "what is it about?" offer.
+ *
+ * **Only that room's, which is the whole point.** A house holds tens of things
+ * and a snag is about one of them; offering the lot turns a two-second tag into
+ * a search, and the room has just been answered on the step before. So a snag
+ * tagged Kitchen is offered the kitchen's things and nothing else — and one
+ * with no room at all is offered the things that belong to the place rather
+ * than to a room in it (`Whole house`, which is `room === null` on both tables).
+ *
+ * **Ghosts cannot be here, and that is not a filter — it is the type.** A
+ * suggestion is a `RoomSuggestion` from a constant, never a `Thing`, so it has
+ * no id for `snags.thing_id` to point at. If this ever takes anything but rows
+ * that came back from `things_with_details`, the House tab's founding rule has
+ * been broken somewhere upstream.
+ *
+ * Sorted by what the chip will say, because a rail somebody scans for a noun is
+ * a rail that should be in the order of the nouns.
+ */
+export function thingsInArea(things: Thing[], room: string | null): Thing[] {
+  return things
+    .filter((thing) => (thing.room ?? null) === (room ?? null))
+    .sort((a, b) => thingHeadline(a).localeCompare(thingHeadline(b)));
+}
+
+/**
  * How many photographs a PDF will carry. Twenty is a file somebody can open on
  * a phone and send to a builder, and roughly where a JPEG-per-page extract
  * stops being a document and starts being an album.

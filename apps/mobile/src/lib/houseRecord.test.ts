@@ -1,7 +1,7 @@
 import {
   catalogueSuggestions, describeCycle, documentFileName, documentName, formatLooseDate,
   ghostsForRoom, matchSuggestions, parseLooseDate, searchThings, thingDetailLine,
-  thingHeadline, thingSearchText,
+  thingHeadline, thingSearchText, thingsInArea,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -346,5 +346,44 @@ describe('attached documents', () => {
 
   it('falls back rather than minting a key with no name at all', () => {
     expect(documentName(documentFileName('house-1', '???'))).toBe('document.pdf');
+  });
+});
+
+// The offer the capture sheet makes after the room has been answered. A house
+// holds tens of things and a snag is about one of them, so "only this room" is
+// the whole feature — offering the lot turns a two-second tag into a search.
+
+describe('what a snag can be said to be about', () => {
+  it('offers the room that was tagged and no other', () => {
+    const found = thingsInArea([
+      thing({ id: 'a', name: 'Dishwasher', room: 'Kitchen' }),
+      thing({ id: 'b', name: 'Dryer', room: 'Laundry' }),
+      thing({ id: 'c', name: 'Rangehood', room: 'Kitchen' }),
+    ], 'Kitchen');
+    expect(found.map((t) => t.id)).toEqual(['a', 'c']);
+  });
+
+  // "Whole house" is not a room; it is where a thing belonging to the place
+  // rather than to a room in it lives, on both tables, as null.
+  it('offers the place-wide things to a snag with no room', () => {
+    const found = thingsInArea([
+      thing({ id: 'a', name: 'Switchboard', room: null }),
+      thing({ id: 'b', name: 'Dishwasher', room: 'Kitchen' }),
+    ], null);
+    expect(found.map((t) => t.id)).toEqual(['a']);
+  });
+
+  it('is empty for a room with nothing recorded in it, which removes the step', () => {
+    expect(thingsInArea([thing({ name: 'Dishwasher', room: 'Kitchen' })], 'Roof')).toEqual([]);
+  });
+
+  // A rail somebody scans for a noun should be in the order of the nouns.
+  it('is in the order of what the chips will say, not of when they were added', () => {
+    const found = thingsInArea([
+      thing({ id: 'a', name: 'Rangehood', room: 'Kitchen' }),
+      thing({ id: 'b', make: 'Bosch', model: 'SMS46MI01A', room: 'Kitchen' }),
+      thing({ id: 'c', name: 'Dishwasher', room: 'Kitchen' }),
+    ], 'Kitchen');
+    expect(found.map(thingHeadline)).toEqual(['Bosch SMS46MI01A', 'Dishwasher', 'Rangehood']);
   });
 });

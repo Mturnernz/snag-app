@@ -1,9 +1,9 @@
 import React from 'react';
 import TestRenderer from 'react-test-renderer';
-import AmendSnagSheet, { firstStep } from './AmendSnagSheet';
+import AmendSnagSheet, { amendSteps, firstStep } from './AmendSnagSheet';
 import { render, flattenStyle, type RenderResult } from '../test/render';
 import { Colors } from '../constants/theme';
-import type { Snag } from '../types';
+import type { Snag, Thing } from '../types';
 
 jest.mock('../hooks/useKeyboardInset', () => ({ useKeyboardInset: () => 0 }));
 
@@ -74,6 +74,7 @@ async function openOnUrgency(over: Partial<Snag> = {}) {
       locations={[]}
       onSaveNote={jest.fn()}
       onSetRoom={jest.fn()}
+      onSetThing={jest.fn()}
       onSetUrgent={onSetUrgent}
       onOpenDetail={jest.fn()}
       onClose={jest.fn()}
@@ -126,5 +127,113 @@ describe('how urgent', () => {
     expect(prose.some((t) => t.includes('which is the point of the list'))).toBe(false);
     expect(prose.some((t) => t.includes('A few words is plenty'))).toBe(false);
     expect(prose.some((t) => t.includes('The list groups by room'))).toBe(false);
+  });
+});
+
+// ------------------------------------------------------- what is it about
+//
+// The one question on this sheet whose payoff is somewhere else entirely: in a
+// shop, eight months later, wanting a model number. A snag that knows it is
+// about the heat pump carries the heat pump's make and model with it.
+//
+// It is offered only because the room has already been answered. A house holds
+// tens of things; offering the lot would turn a two-second tag into a search.
+
+const thing = (over: Partial<Thing> = {}): Thing => ({
+  id: 't1', householdId: 'h', propertyId: 'p', kind: 'appliance',
+  name: 'Dishwasher', room: 'Kitchen', photoPaths: [], make: 'Bosch',
+  model: 'SMS46MI01A', serial: null, consumables: [], documentPaths: [],
+  installedAt: null, warrantyUntil: null, serviceDays: null, spec: {}, notes: null,
+  createdBy: 'me', createdAt: '', updatedAt: '',
+  propertyName: 'Home', snagCount: 0, openSnagCount: 0,
+  ...over,
+});
+
+describe('whether the step is there at all', () => {
+  // A step with an empty rail and a Skip is the app asking somebody to dismiss
+  // a question it cannot answer.
+  it('is absent when the room has nothing recorded in it', () => {
+    expect(amendSteps(snag({ room: 'Roof' }), [thing()]))
+      .toEqual(['note', 'room', 'urgency']);
+  });
+
+  it('appears once the room has something to point at', () => {
+    expect(amendSteps(snag({ room: 'Kitchen' }), [thing()]))
+      .toEqual(['note', 'room', 'thing', 'urgency']);
+  });
+
+  // Things arrive after the sheet opens — the read starts when the snag is
+  // filed. A count that moves from 3 to 4 is right; a step that appears with
+  // nothing in it is not.
+  it('is absent while the house record is still on its way', () => {
+    expect(amendSteps(snag({ room: 'Kitchen' }), []))
+      .toEqual(['note', 'room', 'urgency']);
+  });
+
+  it('offers the place-wide things to a snag with no room', () => {
+    expect(amendSteps(snag({ room: null }), [thing({ room: null })]))
+      .toEqual(['note', 'room', 'thing', 'urgency']);
+  });
+});
+
+describe('what the step offers', () => {
+  async function openOnThing(things: Thing[], over: Partial<Snag> = {}) {
+    const onSetThing = jest.fn().mockResolvedValue(undefined);
+    const result = render(
+      <AmendSnagSheet
+        snag={snag({ description: 'Leaking', room: 'Kitchen', ...over })}
+        locations={[]}
+        things={things}
+        onSaveNote={jest.fn()}
+        onSetRoom={jest.fn()}
+        onSetThing={onSetThing}
+        onSetUrgent={jest.fn()}
+        onOpenDetail={jest.fn()}
+        onClose={jest.fn()}
+      />
+    );
+    // Opens on the room (the snag has words); one Next reaches the thing step.
+    await TestRenderer.act(async () => { byLabel(result, 'Next').props.onPress(); });
+    return { result, onSetThing };
+  }
+
+  it('offers this room and nothing else', async () => {
+    const { result } = await openOnThing([
+      thing({ id: 'a', name: 'Dishwasher', room: 'Kitchen' }),
+      thing({ id: 'b', name: 'Dryer', room: 'Laundry' }),
+      thing({ id: 'c', name: 'Rangehood', room: 'Kitchen', make: null, model: null }),
+    ]);
+
+    expect(result.queryByText('Is it about one of these?')).not.toBeNull();
+    expect(chip(result, 'Dishwasher')).toBeDefined();
+    expect(chip(result, 'Rangehood')).toBeDefined();
+    expect(chip(result, 'Dryer')).toBeUndefined();
+  });
+
+  it('links it, and unlinks on a second press', async () => {
+    const { result, onSetThing } = await openOnThing([thing()]);
+    await TestRenderer.act(async () => { chip(result, 'Dishwasher').props.onPress(); });
+    expect(onSetThing).toHaveBeenCalledWith('t1');
+
+    const linked = await openOnThing([thing()], { thingId: 't1' });
+    await TestRenderer.act(async () => {
+      chip(linked.result, 'Dishwasher').props.onPress();
+    });
+    expect(linked.onSetThing).toHaveBeenCalledWith(null);
+  });
+
+  // Nothing on this sheet has to be answered, and a Next over an untouched
+  // rail is the app implying otherwise.
+  it('says Skip for now until something is chosen', async () => {
+    const { result } = await openOnThing([thing()]);
+    expect(byLabel(result, 'Skip for now')).toBeDefined();
+
+    const linked = await openOnThing([thing()], { thingId: 't1' });
+    expect(byLabel(linked.result, 'Next')).toBeDefined();
+  });
+
+  it('counts itself in the header', async () => {
+    const { result } = await openOnThing([thing()]);
+    expect(result.queryByText('On the list · 3 of 4')).not.toBeNull();
   });
 });

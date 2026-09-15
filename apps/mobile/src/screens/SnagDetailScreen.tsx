@@ -15,7 +15,7 @@ import StatusBadge from '../components/StatusBadge';
 import DueBadge from '../components/DueBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PhotoViewer from '../components/PhotoViewer';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
@@ -248,6 +248,46 @@ export default function SnagDetailScreen() {
             </View>
           ) : null}
         </View>
+
+        {/* ── What it's about ──
+            The payoff for the one question the capture sheet asks that has no
+            effect on the list: a snag that knows it is about the heat pump
+            carries the heat pump's make and model with it, so the answer
+            somebody is standing in a shop needing is on the snag rather than
+            two tabs away. `Fonts.mono` on the number, as everywhere data is
+            read aloud or copied.
+
+            The row is the door to the full record and the × is its sibling
+            rather than its child, for the same reason the photo tile's is: a
+            Pressable inside a Pressable is a coin toss about which one gets
+            the tap. */}
+        {snag.thingId && snag.thingName ? (
+          <View style={styles.aboutRow}>
+            <Pressable
+              onPress={() => navigation.navigate('ThingDetail', { thingId: snag.thingId! })}
+              style={styles.about}
+              accessibilityRole="button"
+              accessibilityLabel={`About ${snag.thingName}`}
+            >
+              <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
+              <Text style={styles.aboutName} numberOfLines={1}>{snag.thingName}</Text>
+              {snag.thingMake || snag.thingModel ? (
+                <Text style={styles.aboutSpec} numberOfLines={1}>
+                  {[snag.thingMake, snag.thingModel].filter(Boolean).join(' ')}
+                </Text>
+              ) : null}
+            </Pressable>
+            <Pressable
+              onPress={() => patch({ thingId: null })}
+              disabled={busy}
+              style={styles.aboutClear}
+              accessibilityRole="button"
+              accessibilityLabel="Not about that"
+            >
+              <Icon name="close" size="sm" color={Colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : null}
 
         <Text style={styles.reportedBy}>
           Added by {snag.reporterId === profile.id ? 'you' : snag.reporterName}
@@ -553,6 +593,24 @@ const styles = StyleSheet.create({
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   metaText: { fontSize: Typography.sm, color: Colors.textMuted },
   reportedBy: { fontSize: Typography.sm, color: Colors.textMuted },
+  aboutRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  about: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  aboutName: { fontSize: Typography.sm, color: Colors.textSecondary, flexShrink: 1 },
+  // The answer somebody came for, in the face this app spends only on data.
+  aboutSpec: { fontSize: Typography.sm, color: Colors.textMuted, fontFamily: Fonts.mono, flexShrink: 1 },
+  aboutClear: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   description: {
     fontSize: Typography.base,
     color: Colors.textSecondary,

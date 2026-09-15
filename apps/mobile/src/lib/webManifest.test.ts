@@ -138,4 +138,30 @@ describe('web HTML shell', () => {
     expect(viewport![1]).toContain('interactive-widget=resizes-content');
     expect(viewport![1]).toContain('width=device-width');
   });
+
+  // The directive that makes every safe-area inset in this app real.
+  //
+  // `react-native-safe-area-context` on web measures a fixed element padded by
+  // `env(safe-area-inset-*)`, and those resolve to ZERO unless the viewport
+  // opts into the display cutout. Without it iOS also lays the page out inside
+  // the safe area, so a notched iPhone gets bands above and below in the page's
+  // background rather than the app's.
+  //
+  // It is exactly the failure class the CSP and manifest tests exist for:
+  // `useSafeAreaInsets()` still exists, still type-checks, still renders, and
+  // still answers — with 0, which is a perfectly legitimate answer on a phone
+  // with no cutout. Eleven screens pad by `insets.top` and none of them did
+  // anything on the build people install, and nothing anywhere had an error.
+  it('opts into the display cutout, without which every inset is zero', () => {
+    const viewport = indexHtml.match(/<meta name="viewport"[^>]*content="([^"]+)"/);
+    expect(viewport![1]).toContain('viewport-fit=cover');
+  });
+
+  // With the cutout covered, the bands and the overscroll show whatever is
+  // behind the app. The app's ground is plaster; the browser's is white.
+  it('paints the ground behind the app rather than leaving it white', () => {
+    const reset = indexHtml.match(/<style id="expo-reset">([\s\S]*?)<\/style>/);
+    expect(reset).not.toBeNull();
+    expect(reset![1]).toMatch(/background-color:\s*#FAF7F2/i);
+  });
 });

@@ -27,8 +27,20 @@
          src/lib/keyboardInset.ts is for — and the two can't double up, because
          a shrunken layout viewport makes that measurement come out at zero.
          React Native's KeyboardAvoidingView does nothing here: react-native-web
-         ships it, but its keyboard handler is an empty method body. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, interactive-widget=resizes-content" />
+         ships it, but its keyboard handler is an empty method body.
+
+         `viewport-fit=cover` is load-bearing and its absence was silent.
+         Without it iOS lays the page out INSIDE the safe area — letterboxed,
+         with bands above and below in the page's own background rather than the
+         app's — and, worse, `env(safe-area-inset-*)` resolves to **zero**.
+         react-native-safe-area-context's web implementation measures a fixed
+         element padded by exactly those env values, so every `useSafeAreaInsets`
+         call in this app returned all zeros on the build people actually
+         install. Eleven screens pad by `insets.top`; none of them did anything.
+         Nothing could catch it: the hook exists, type-checks, renders, and
+         answers 0 — which is a legitimate answer on a phone without a notch. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, interactive-widget=resizes-content, viewport-fit=cover" />
+
     <title>%WEB_TITLE%</title>
 
     <!-- The home-screen icon. Android reads the manifest; iOS ignores it and
@@ -54,6 +66,9 @@
       html,
       body {
         height: 100%;
+        /* The ground, so a safe-area band or an overscroll never flashes white
+           on a plaster-coloured app. Matches Colors.background. */
+        background-color: #FAF7F2;
       }
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {

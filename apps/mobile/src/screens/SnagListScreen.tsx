@@ -20,8 +20,8 @@ import {
   createSnag, getFileUrls, getSnags, markListSeen, updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { exportDateStamp, snagExportTable } from '@snag/supabase-queries';
-import { writeExport, type ExportFormat } from '../lib/exportFile';
+import { exportDateStamp, snagExportPhotos, snagExportTable } from '@snag/supabase-queries';
+import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -181,7 +181,12 @@ export default function SnagListScreen() {
         scope: scope === 'all' ? 'Everything' : "What's on screen",
         stamp: exportDateStamp(),
       });
-      const { fileName, path } = await writeExport(table, format);
+      // Photographs go in the PDF only — a spreadsheet cell cannot hold one,
+      // and the PDF is the copy that gets sent to somebody who was not there.
+      const images = format === 'pdf'
+        ? await loadExportImages(snagExportPhotos(rows), getFileUrls)
+        : [];
+      const { fileName, path } = await writeExport(table, format, images);
       setShowExport(false);
       showToast(path ? `Saved to ${fileName}` : `${fileName} downloaded`);
     } catch (err: any) {

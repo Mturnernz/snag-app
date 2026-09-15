@@ -14,6 +14,7 @@ import Icon from '../components/Icon';
 import StatusBadge from '../components/StatusBadge';
 import DueBadge from '../components/DueBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
+import PhotoViewer from '../components/PhotoViewer';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -73,6 +74,9 @@ export default function SnagDetailScreen() {
   const [snag, setSnag] = useState<Snag | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  // Which photo is open full screen, or null. An index rather than a URL, so
+  // the viewer's own next/previous walk the same strip.
+  const [viewing, setViewing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [partDraft, setPartDraft] = useState('');
   // Whether the repeat walk-through is open. Seeded from the snag, but kept
@@ -211,13 +215,23 @@ export default function SnagDetailScreen() {
       >
         {snag.photoPaths.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
-            {snag.photoPaths.map((path) => (
-              <Image
+            {snag.photoPaths.map((path, i) => (
+              // The photo is the snag — there is no title column because a
+              // picture of the broken seat says what a title would. At 220×165
+              // it says roughly that and no more, so it opens.
+              <Pressable
                 key={path}
-                source={{ uri: photoUrls[path] }}
-                style={styles.photo}
-                resizeMode="cover"
-              />
+                onPress={() => setViewing(i)}
+                disabled={!photoUrls[path]}
+                accessibilityRole="imagebutton"
+                accessibilityLabel="Open this photo"
+              >
+                <Image
+                  source={{ uri: photoUrls[path] }}
+                  style={styles.photo}
+                  resizeMode="cover"
+                />
+              </Pressable>
             ))}
           </ScrollView>
         ) : null}
@@ -268,6 +282,53 @@ export default function SnagDetailScreen() {
             />
           )}
         </View>
+
+        {/* ── Notes ──
+            Above triage, not below it. What the other person wrote is the
+            reason this screen was opened — "ordered the part, arriving
+            Tuesday" is the whole answer, and a rail of controls standing
+            between the photo and it made the news the last thing read. */}
+        <Card elevation="md" style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Notes {comments.length > 0 ? `(${comments.length})` : ''}
+          </Text>
+          {comments.map((comment) => (
+            <View key={comment.id} style={styles.comment}>
+              <Text style={styles.commentAuthor}>
+                {comment.authorId === profile.id ? 'You' : comment.authorName}
+                <Text style={styles.commentDate}>
+                  {'  '}
+                  {new Date(comment.createdAt).toLocaleDateString()}
+                </Text>
+              </Text>
+              <Text style={styles.commentBody}>{comment.body}</Text>
+            </View>
+          ))}
+          <View style={styles.commentInputRow}>
+            <TextInput
+              style={styles.commentInput}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Ordered the part, arriving Tuesday"
+              placeholderTextColor={Colors.textMuted}
+              multiline
+              maxLength={4000}
+            />
+            <Pressable
+              onPress={handleComment}
+              disabled={!draft.trim() || busy}
+              style={[styles.commentSend, (!draft.trim() || busy) && styles.commentSendDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Add note"
+            >
+              <Icon
+                name="arrow-up"
+                size="md"
+                color={!draft.trim() || busy ? Colors.textMuted : Colors.white}
+              />
+            </Pressable>
+          </View>
+        </Card>
 
         {/* ── Triage ── */}
         <Card elevation="md" style={styles.section}>
@@ -428,50 +489,14 @@ export default function SnagDetailScreen() {
             </>
           ) : null}
         </Card>
-
-        {/* ── Comments ── */}
-        <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            Notes {comments.length > 0 ? `(${comments.length})` : ''}
-          </Text>
-          {comments.map((comment) => (
-            <View key={comment.id} style={styles.comment}>
-              <Text style={styles.commentAuthor}>
-                {comment.authorId === profile.id ? 'You' : comment.authorName}
-                <Text style={styles.commentDate}>
-                  {'  '}
-                  {new Date(comment.createdAt).toLocaleDateString()}
-                </Text>
-              </Text>
-              <Text style={styles.commentBody}>{comment.body}</Text>
-            </View>
-          ))}
-          <View style={styles.commentInputRow}>
-            <TextInput
-              style={styles.commentInput}
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Ordered the part, arriving Tuesday"
-              placeholderTextColor={Colors.textMuted}
-              multiline
-              maxLength={4000}
-            />
-            <Pressable
-              onPress={handleComment}
-              disabled={!draft.trim() || busy}
-              style={[styles.commentSend, (!draft.trim() || busy) && styles.commentSendDisabled]}
-              accessibilityRole="button"
-              accessibilityLabel="Add note"
-            >
-              <Icon
-                name="arrow-up"
-                size="md"
-                color={!draft.trim() || busy ? Colors.textMuted : Colors.white}
-              />
-            </Pressable>
-          </View>
-        </Card>
       </ScrollView>
+
+      <PhotoViewer
+        visible={viewing !== null}
+        photos={snag.photoPaths.map((path) => photoUrls[path]).filter(Boolean)}
+        startIndex={viewing ?? 0}
+        onClose={() => setViewing(null)}
+      />
 
       <ConfirmDialog
         visible={confirmDelete}

@@ -24,6 +24,10 @@ jest.mock('../components/AddThingSheet', () => {
 const mock_writeExport = jest.fn().mockResolvedValue({ fileName: 'house.csv', path: null });
 jest.mock('../lib/exportFile', () => ({
   writeExport: (...a: unknown[]) => mock_writeExport(...a),
+  // Photographs ride in the PDF only. Fetching them is `exportFile`'s own
+  // business and is pinned in `exportFile.test.ts` against the real library;
+  // what this file cares about is which rows reached the extract.
+  loadExportImages: async () => [],
 }));
 
 const mock_createLocation = jest.fn();

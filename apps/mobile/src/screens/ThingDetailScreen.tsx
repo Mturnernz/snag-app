@@ -11,6 +11,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from '../components/Icon';
 import ScreenHeader from '../components/ScreenHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
+import PhotoViewer from '../components/PhotoViewer';
 import Button from '../components/Button';
 import StickyActionBar from '../components/StickyActionBar';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -165,6 +166,9 @@ export default function ThingDetailScreen() {
 
   const [thing, setThing] = useState<Thing | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  // Which photo is open full screen, or null. A rating plate is the whole
+  // reason this tab exists and is unreadable in a 220px tile.
+  const [viewing, setViewing] = useState<number | null>(null);
   /** Twelve chips stand down to one pill until somebody says otherwise. */
   const [roomOpen, setRoomOpen] = useState(false);
   const [service, setService] = useState<ServiceDraft | null>(null);
@@ -556,9 +560,20 @@ export default function ThingDetailScreen() {
       >
         {thing.photoPaths.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
-            {thing.photoPaths.map((path) => (
+            {thing.photoPaths.map((path, i) => (
               <View key={path} style={styles.photoWrap}>
-                <Image source={{ uri: photoUrls[path] }} style={styles.photo} resizeMode="cover" />
+                {/* Opening and removing are siblings, never nested: a
+                    Pressable inside a Pressable is a coin toss about which
+                    one gets the tap. The × is drawn after, so it wins its
+                    own 28px and nothing else. */}
+                <Pressable
+                  onPress={() => setViewing(i)}
+                  disabled={!photoUrls[path]}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel="Open this photo"
+                >
+                  <Image source={{ uri: photoUrls[path] }} style={styles.photo} resizeMode="cover" />
+                </Pressable>
                 <Pressable
                   onPress={() => removePhoto(path)}
                   style={styles.photoRemove}
@@ -873,6 +888,13 @@ export default function ThingDetailScreen() {
           />
         </StickyActionBar>
       </View>
+
+      <PhotoViewer
+        visible={viewing !== null}
+        photos={thing.photoPaths.map((path) => photoUrls[path]).filter(Boolean)}
+        startIndex={viewing ?? 0}
+        onClose={() => setViewing(null)}
+      />
 
       {/* ── the servicing regime ──────────────────────────────────────
           A modal rather than a section, because it is four decisions that only

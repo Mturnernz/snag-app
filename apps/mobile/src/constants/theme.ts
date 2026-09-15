@@ -119,6 +119,14 @@ export const Colors = {
   // a text colour against, so anything sitting on one gets this behind it and
   // white on top. Warm-tinted to match the ink rather than the old blue-black.
   photoOverlay: 'rgba(43, 39, 36, 0.75)',
+
+  /**
+   * The photo viewer's ground. Near-opaque rather than a scrim: a photo being
+   * read closely — a serial number, a model plate — wants nothing behind it,
+   * and the warm ink keeps the one dark surface in a light-mode app from
+   * reading as a different application.
+   */
+  photoViewerBackdrop: 'rgba(43, 39, 36, 0.97)',
 };
 
 export const Radius = {

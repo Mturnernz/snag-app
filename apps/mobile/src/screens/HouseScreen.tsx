@@ -6,11 +6,15 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ghostsForRoom, searchThings, type ThingInput } from '@snag/supabase-queries';
+import {
+  exportDateStamp, ghostsForRoom, searchThings, thingExportTable, type ThingInput,
+} from '@snag/supabase-queries';
 import ThingCard, { GhostCard } from '../components/ThingCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import AddThingSheet from '../components/AddThingSheet';
+import ExportFooter from '../components/ExportFooter';
+import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -18,6 +22,7 @@ import {
   createLocation, createThing, getAbsentThings, getFileUrls, getThings, markThingAbsent,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { writeExport, type ExportFormat } from '../lib/exportFile';
 import {
   AbsentThing, RootStackParamList, Thing, ThingKind, ThingSuggestion,
 } from '../types';
@@ -92,6 +97,8 @@ export default function HouseScreen() {
 
   const [things, setThings] = useState<Thing[]>([]);
   const [absent, setAbsent] = useState<AbsentThing[]>([]);
+  const [exporting, setExporting] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -138,6 +145,34 @@ export default function HouseScreen() {
   useEffect(() => navigation.addListener('focus', load), [navigation, load]);
 
   const visible = useMemo(() => searchThings(things, query), [things, query]);
+
+  /**
+   * An extract of the house record.
+   *
+   * "What's on screen" is whatever the search has narrowed to; "Everything" is
+   * every recorded thing at this place. **Ghosts are in neither**, and that is
+   * the tab's own rule rather than an omission: a suggestion never reaches
+   * `home.things`, so a record full of them would be exactly the one you check
+   * in a shop and find nothing behind.
+   */
+  async function handleExport(scope: ExportScope, format: ExportFormat) {
+    setExporting(true);
+    try {
+      const table = thingExportTable(scope === 'all' ? things : visible, {
+        household: household.name,
+        place: activeProperty?.name ?? household.name,
+        scope: scope === 'all' ? 'Everything' : "What's on screen",
+        stamp: exportDateStamp(),
+      });
+      const { fileName, path } = await writeExport(table, format);
+      setShowExport(false);
+      showToast(path ? `Saved to ${fileName}` : `${fileName} downloaded`);
+    } catch (err: any) {
+      showAlert("Couldn't make that file", err?.message ?? 'Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  }
   const searching = query.trim().length > 0;
 
   const sections = useMemo<Section[]>(() => {
@@ -402,16 +437,24 @@ export default function HouseScreen() {
           />
         }
         ListFooterComponent={
-          !searching && !loading ? (
-            <Pressable
-              onPress={() => setRoomOpen(true)}
-              style={styles.addRoom}
-              accessibilityRole="button"
-              accessibilityLabel="Add a room"
-            >
-              <Icon name="add" size="sm" color={Colors.primary} />
-              <Text style={styles.addRoomLabel}>Add a room</Text>
-            </Pressable>
+          !loading ? (
+            <>
+              {!searching ? (
+                <Pressable
+                  onPress={() => setRoomOpen(true)}
+                  style={styles.addRoom}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add a room"
+                >
+                  <Icon name="add" size="sm" color={Colors.primary} />
+                  <Text style={styles.addRoomLabel}>Add a room</Text>
+                </Pressable>
+              ) : null}
+              <ExportFooter
+                label="Export the house record"
+                onPress={() => setShowExport(true)}
+              />
+            </>
           ) : null
         }
         ListEmptyComponent={
@@ -451,6 +494,15 @@ export default function HouseScreen() {
         onAddRoom={addRoom}
         onCancel={() => setSheetOpen(false)}
         onAdd={handleAdd}
+      />
+
+      <ExportSheet
+        visible={showExport}
+        what="the house record"
+        counts={{ view: visible.length, all: things.length }}
+        busy={exporting}
+        onExport={handleExport}
+        onCancel={() => setShowExport(false)}
       />
 
       <Modal visible={roomOpen} transparent animationType="slide" onRequestClose={() => setRoomOpen(false)}>

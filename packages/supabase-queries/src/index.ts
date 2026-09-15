@@ -44,7 +44,13 @@ import type {
   ThingSuggestion,
   AbsentThing,
 } from '@snag/shared-types';
-import { PRIORITY_ORDER, ROOM_SUGGESTIONS } from '@snag/shared-types';
+import {
+  PRIORITY_LABELS,
+  PRIORITY_ORDER,
+  ROOM_SUGGESTIONS,
+  STATUS_LABELS,
+  THING_KIND_LABELS,
+} from '@snag/shared-types';
 
 /** Supabase row shapes are snake_case `any`; this is the one place that's true. */
 type Row = Record<string, any>;
@@ -1631,3 +1637,145 @@ export const SCHEDULE_KIND_LABELS: Record<ScheduleKind, string> = {
   // is marked done and the date rolls. It is when this comes round again.
   next: 'Comes round',
 };
+
+// ---------------------------------------------------------------- extracts
+//
+// Taking the list, or the house record, out of the app as a file.
+//
+// The rows are built here rather than in a screen for the usual reason — they
+// are pure, so they can be asserted without rendering anything — and because
+// the CSV and the PDF must never disagree about what an extract contains. One
+// row builder each, two renderers over the same rows.
+//
+// **An extract says what it is at the top.** Scope is asked each time (this
+// view, or everything), and a file whose contents depend on screen state you
+// set twenty minutes ago is one you will misread later. So the heading carries
+// the house, the place, the date and which scope was chosen.
+
+/** A rendered table: the header row, then the body rows, all strings. */
+export interface ExportTable {
+  /** What the file is called, without an extension. */
+  name: string;
+  /** The line under the title: house, place, scope, date. */
+  subtitle: string;
+  columns: string[];
+  rows: string[][];
+}
+
+const yesNo = (value: boolean): string => (value ? 'Yes' : '');
+
+/** `2026-09-15`, in local time — an extract is filed by the day it was taken. */
+export function exportDateStamp(now = new Date()): string {
+  return dayKey(now);
+}
+
+/** Spaces and punctuation out of a name that has to survive a file system. */
+export function exportFileName(base: string, stamp: string, extension: string): string {
+  const safe = base
+    .normalize('NFKD')
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .toLowerCase() || 'snag';
+  return `${safe}-${stamp}.${extension}`;
+}
+
+/**
+ * Every snag as a row.
+ *
+ * Deliberately wider than the card: an extract is read at a desk, where the
+ * columns the list hides — who filed it, when, what it repeats on — are the
+ * reason for taking one at all. `snagHeadline` leads, because a photo-only snag
+ * has no words of its own and a spreadsheet cannot show the photo.
+ */
+export function snagExportTable(
+  snags: Snag[],
+  meta: { household: string; place: string; scope: string; stamp: string }
+): ExportTable {
+  return {
+    name: `${meta.household} list`,
+    subtitle: `${meta.place} · ${meta.scope} · ${meta.stamp}`,
+    columns: [
+      'Reference', 'What', 'Room', 'Status', 'Priority', 'Needs parts', 'Parts',
+      'Due', 'Repeats', 'About', 'Assigned to', 'Filed by', 'Filed', 'Done', 'Photos',
+    ],
+    rows: snags.map((snag) => [
+      snag.reference,
+      snagHeadline(snag),
+      snag.room ?? '',
+      STATUS_LABELS[snag.status] ?? snag.status,
+      snag.priority ? PRIORITY_LABELS[snag.priority] : '',
+      yesNo(snag.needsParts),
+      (snag.parts ?? []).join('; '),
+      formatLooseDate(snag.dueAt),
+      snag.repeatDays ? describeCycle(snag.repeatDays) : '',
+      [snag.thingName, snag.thingMake, snag.thingModel].filter(Boolean).join(' '),
+      snag.assigneeName ?? '',
+      snag.reporterName ?? '',
+      formatLooseDate(snag.createdAt),
+      formatLooseDate(snag.doneAt ?? snag.lastDoneAt),
+      String((snag.photoPaths ?? []).length || ''),
+    ]),
+  };
+}
+
+/**
+ * Every recorded thing as a row.
+ *
+ * Ghosts are not in it, and that is the same rule the tab itself rests on: a
+ * suggestion never reaches `home.things`, so it cannot reach an extract either.
+ * An extract full of things nobody has confirmed is exactly the record you
+ * check in a shop and find nothing behind.
+ */
+export function thingExportTable(
+  things: Thing[],
+  meta: { household: string; place: string; scope: string; stamp: string }
+): ExportTable {
+  return {
+    name: `${meta.household} house`,
+    subtitle: `${meta.place} · ${meta.scope} · ${meta.stamp}`,
+    columns: [
+      'Room', 'Kind', 'Name', 'Make', 'Model', 'Serial', 'Takes',
+      'Installed', 'Warranty until', 'Serviced', 'Notes', 'Photos', 'Documents',
+    ],
+    rows: things.map((thing) => [
+      thing.room ?? 'Whole house',
+      THING_KIND_LABELS[thing.kind] ?? thing.kind,
+      thing.name ?? '',
+      thing.make ?? '',
+      thing.model ?? '',
+      thing.serial ?? '',
+      (thing.consumables ?? []).join('; '),
+      formatLooseDate(thing.installedAt),
+      formatLooseDate(thing.warrantyUntil),
+      thing.serviceDays ? describeCycle(thing.serviceDays) : '',
+      thing.notes ?? '',
+      String((thing.photoPaths ?? []).length || ''),
+      // `?? []` rather than trusting the type: `document_paths` was dropped by
+      // `things_with_details` for two days once and `mapThing` defaulted it —
+      // nothing anywhere had an error to report. An extract should come out
+      // missing a count, not fail to come out. See 20260914140000.
+      String((thing.documentPaths ?? []).length || ''),
+    ]),
+  };
+}
+
+/**
+ * RFC 4180 CSV.
+ *
+ * Three things it has to get right, and all three are how a spreadsheet extract
+ * usually arrives broken: a value containing a comma, a value containing a
+ * quote, and a value containing a newline — a snag's description can hold all
+ * three. Quoting everything is simpler than deciding per value and costs bytes
+ * nobody is counting.
+ *
+ * CRLF because Excel on Windows still wants it, and every other reader accepts
+ * it. The BOM is there so Excel reads the file as UTF-8 rather than guessing a
+ * code page and turning a résumé into rÃ©sumÃ© — the single most common way a
+ * CSV looks corrupt when it isn't.
+ */
+export function toCsv(table: ExportTable, { bom = true } = {}): string {
+  const cell = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const lines = [table.columns, ...table.rows].map((row) => row.map(cell).join(','));
+  return `${bom ? '﻿' : ''}${lines.join('\r\n')}\r\n`;
+}

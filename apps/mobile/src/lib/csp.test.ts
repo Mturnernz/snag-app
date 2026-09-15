@@ -55,6 +55,28 @@ describe('the web build’s deployed CSP', () => {
   });
 });
 
+// An extract is handed over as a Blob, an object URL and an anchor carrying
+// `download`. Verified against this exact policy in Chromium: the download
+// fires and no violation is logged. What would silently kill it is `sandbox`,
+// which blocks downloads unless it names allow-downloads — and a sandbox
+// directive is the sort of thing added to a policy for unrelated reasons.
+//
+// Nothing else in the policy governs it: a download is a navigation, not a
+// fetch, so connect-src does not apply, and object-src covers <object>/<embed>
+// rather than <a download>.
+describe('the directives an extract download depends on', () => {
+  it('never sandboxes the page, which would block downloads outright', () => {
+    expect(CSP).not.toMatch(/\bsandbox\b/);
+  });
+
+  // Both renderers are bundled because they have to be: no CDN is reachable
+  // under default-src 'self', and "output": "single" leaves no lazy chunk to
+  // fetch either. If this ever loosens, that reasoning is stale.
+  it('still allows no third-party origin to be fetched at export time', () => {
+    expect(directive('default-src')).toEqual(["'self'"]);
+  });
+});
+
 // Not the CSP, but the same class of failure: something the deployed site does
 // that nothing local enforces, and whose absence is silent until somebody in a
 // kitchen points a camera at a code.

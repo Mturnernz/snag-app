@@ -1,3 +1,15 @@
+// Expo's "winter" TextDecoder polyfill wins over Node's in this environment and
+// does not implement `latin1`, which jsPDF asks for while building a PDF's
+// object streams. The failure is at module scope — importing the library throws
+// `RangeError: Unknown encoding: latin1` before a single test runs.
+//
+// Node's own TextDecoder handles it, so hand it back. Deliberately a patch
+// rather than a mock of jsPDF: the point of testing an extract is that a real
+// PDF comes out, and a stub would assert only that we called a stub.
+const { TextDecoder: NodeTextDecoder, TextEncoder: NodeTextEncoder } = require('util');
+global.TextDecoder = NodeTextDecoder;
+global.TextEncoder = NodeTextEncoder;
+
 // Native modules have no JS implementation under Jest, so stub the ones the
 // units under test reach for. Anything not listed here should be mocked in the
 // individual spec, so this file stays a list of genuinely global concerns.

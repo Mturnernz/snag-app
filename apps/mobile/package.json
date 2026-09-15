@@ -37,6 +37,8 @@
     "expo-image-picker": "~17.0.11",
     "expo-navigation-bar": "~5.0.10",
     "expo-status-bar": "~3.0.9",
+    "jspdf": "^3.0.4",
+    "jspdf-autotable": "^5.0.8",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -63,6 +65,10 @@
   "private": true,
   "jest": {
     "preset": "jest-expo",
+    "moduleNameMapper": {
+      "^jspdf$": "<rootDir>/../../node_modules/jspdf/dist/jspdf.umd.min.js",
+      "^jspdf-autotable$": "<rootDir>/../../node_modules/jspdf-autotable/dist/jspdf.plugin.autotable.js"
+    },
     "transformIgnorePatterns": [
       "node_modules/(?!(?:jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|@snag/.*)"
     ],

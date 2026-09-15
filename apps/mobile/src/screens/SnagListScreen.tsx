@@ -10,6 +10,8 @@ import SnagCard from '../components/SnagCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import ComposeBar from '../components/ComposeBar';
+import ExportFooter from '../components/ExportFooter';
+import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import AmendSnagSheet from '../components/AmendSnagSheet';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
@@ -18,6 +20,8 @@ import {
   createSnag, getFileUrls, getSnags, markListSeen, updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { exportDateStamp, snagExportTable } from '@snag/supabase-queries';
+import { writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -94,6 +98,8 @@ export default function SnagListScreen() {
 
   const [snags, setSnags] = useState<Snag[]>([]);
   const [done, setDone] = useState<Snag[]>([]);
+  const [exporting, setExporting] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -154,6 +160,36 @@ export default function SnagListScreen() {
       default: return snags;
     }
   }, [snags, lens, profile.id]);
+
+  /**
+   * An extract of the list.
+   *
+   * "What's on screen" is the lens applied and the done section as it stands;
+   * "Everything" is every open snag plus every done one, whatever the lens —
+   * because an extract is an archive, and one that silently honoured a filter
+   * set twenty minutes ago is one nobody could read correctly later.
+   */
+  async function handleExport(scope: ExportScope, format: ExportFormat) {
+    setExporting(true);
+    try {
+      const rows = scope === 'all'
+        ? [...snags, ...done]
+        : [...visible, ...(showDone ? recentlyDone : [])];
+      const table = snagExportTable(rows, {
+        household: household.name,
+        place: activeProperty?.name ?? household.name,
+        scope: scope === 'all' ? 'Everything' : "What's on screen",
+        stamp: exportDateStamp(),
+      });
+      const { fileName, path } = await writeExport(table, format);
+      setShowExport(false);
+      showToast(path ? `Saved to ${fileName}` : `${fileName} downloaded`);
+    } catch (err: any) {
+      showAlert("Couldn't make that file", err?.message ?? 'Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   // What somebody else has put on the list since you last looked.
   const fresh = useMemo(() => {
@@ -341,18 +377,23 @@ export default function SnagListScreen() {
           />
         )}
         ListFooterComponent={
-          recentlyDone.length > 0 ? (
-            <Pressable
-              onPress={() => setShowDone((v) => !v)}
-              style={styles.doneLine}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: showDone }}
-            >
-              <Text style={styles.doneText}>
-                {showDone ? 'Hide' : 'Show'} {recentlyDone.length} done this week
-              </Text>
-            </Pressable>
-          ) : null
+          <>
+            {recentlyDone.length > 0 ? (
+              <Pressable
+                onPress={() => setShowDone((v) => !v)}
+                style={styles.doneLine}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: showDone }}
+              >
+                <Text style={styles.doneText}>
+                  {showDone ? 'Hide' : 'Show'} {recentlyDone.length} done this week
+                </Text>
+              </Pressable>
+            ) : null}
+            {/* At the foot of the scrolled content, never pinned to the bottom
+                of the screen — that is the compose bar, and nothing goes on it. */}
+            <ExportFooter label="Export this list" onPress={() => setShowExport(true)} />
+          </>
         }
         refreshControl={
           <RefreshControl
@@ -401,6 +442,18 @@ export default function SnagListScreen() {
           placeholder changed and the meaning of the field changed with it.
           AmendSnagSheet asks for the note in words now. */}
       <ComposeBar pathPrefix={household.id} onAdd={handleAdd} stacked />
+
+      <ExportSheet
+        visible={showExport}
+        what="the list"
+        counts={{
+          view: visible.length + (showDone ? recentlyDone.length : 0),
+          all: snags.length + done.length,
+        }}
+        busy={exporting}
+        onExport={handleExport}
+        onCancel={() => setShowExport(false)}
+      />
 
       {/* ─────────────────────────────────────────────── show me */}
       <Modal visible={filterOpen} transparent animationType="slide" onRequestClose={() => setFilterOpen(false)}>

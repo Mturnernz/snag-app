@@ -448,6 +448,15 @@ export default function SnagListScreen() {
             {/* At the foot of the scrolled content, never pinned to the bottom
                 of the screen — that is the compose bar, and nothing goes on it. */}
             <ExportFooter label="Export this list" onPress={() => setShowExport(true)} />
+            {/* The way back in, under the way out, because they are the two
+                halves of one journey: a briefed PDF goes out here and the
+                reply comes back here. Drawn the same muted way — neither is an
+                action the screen is recommending. */}
+            <ExportFooter
+              label="Paste an assessment back in"
+              icon="clipboard-outline"
+              onPress={() => navigation.navigate('PasteAdvice')}
+            />
           </>
         }
         refreshControl={

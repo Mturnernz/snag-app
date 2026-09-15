@@ -5,6 +5,8 @@ import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/them
 
 interface Props {
   label: string;
+  /** Defaults to the download arrow — the other one is the way back in. */
+  icon?: 'download-outline' | 'clipboard-outline';
   onPress: () => void;
 }
 
@@ -21,7 +23,7 @@ interface Props {
  * Drawn like the *Add a room* line it sits under: muted, no fill, no border.
  * It is not an action the screen is recommending.
  */
-export default function ExportFooter({ label, onPress }: Props) {
+export default function ExportFooter({ label, icon = 'download-outline', onPress }: Props) {
   return (
     <Pressable
       onPress={onPress}
@@ -29,7 +31,7 @@ export default function ExportFooter({ label, onPress }: Props) {
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Icon name="download-outline" size="sm" color={Colors.textMuted} />
+      <Icon name={icon} size="sm" color={Colors.textMuted} />
       <Text style={styles.label}>{label}</Text>
     </Pressable>
   );

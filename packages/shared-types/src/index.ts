@@ -639,6 +639,14 @@ export type RootStackParamList = {
   LocationTags: undefined;
   /** A thing's spec sheet. Presented as a sheet, like SnagDetail. */
   ThingDetail: { thingId: string };
+  /**
+   * Where an answer to a briefed extract comes back in.
+   *
+   * A screen rather than a sheet: it is a paste, then a list of what that paste
+   * would change, and both want the whole height. Reached from the foot of the
+   * list, beside the way out — the two halves of the same journey.
+   */
+  PasteAdvice: undefined;
 };
 
 export type MainTabParamList = {

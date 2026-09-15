@@ -15,18 +15,19 @@ import StatusBadge from '../components/StatusBadge';
 import DueBadge from '../components/DueBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PhotoViewer from '../components/PhotoViewer';
+import AdviceCard from '../components/AdviceCard';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
-  deleteStoredFiles,
+  deleteStoredFiles, getSnagAdvice, deleteSnagAdvice,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { describeCycle, snagHeadline } from '@snag/supabase-queries';
 import {
-  Comment, RootStackParamList, Snag,
+  Comment, RootStackParamList, Snag, SnagAdvice,
   PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
 } from '../types';
 
@@ -73,6 +74,7 @@ export default function SnagDetailScreen() {
 
   const [snag, setSnag] = useState<Snag | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [advice, setAdvice] = useState<SnagAdvice | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   // Which photo is open full screen, or null. An index rather than a URL, so
   // the viewer's own next/previous walk the same strip.
@@ -88,13 +90,17 @@ export default function SnagDetailScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [next, nextComments] = await Promise.all([
+      const [next, nextComments, nextAdvice] = await Promise.all([
         getSnag(params.snagId),
         getComments(params.snagId),
+        // Never fatal: a job with no assessment is the resting state, and a
+        // read that fails must not take the page down with it.
+        getSnagAdvice(params.snagId).catch(() => null),
       ]);
       setSnag(next);
       setRepeating((open) => open || next.repeatDays !== null);
       setComments(nextComments);
+      setAdvice(nextAdvice);
       setPhotoUrls(await getFileUrls(next.photoPaths));
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'It may have been deleted.');
@@ -369,6 +375,32 @@ export default function SnagDetailScreen() {
             </Pressable>
           </View>
         </Card>
+
+        {/* ── What came back ──
+            Below the notes and above triage: the note the other person left is
+            still the most common reason this screen is open, and this is the
+            thing that answers the controls underneath it. A suggested part is
+            an offer with a + beside it — accepting one is what puts it on the
+            shopping list, and that tap is what starts the job. */}
+        {advice ? (
+          <AdviceCard
+            advice={advice}
+            parts={snag.parts}
+            busy={busy}
+            onAccept={(item) => patch({ parts: [...snag.parts, item] })}
+            onRemove={async () => {
+              setBusy(true);
+              try {
+                await deleteSnagAdvice(snag.id);
+                setAdvice(null);
+              } catch (err: any) {
+                showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        ) : null}
 
         {/* ── Triage ── */}
         <Card elevation="md" style={styles.section}>

@@ -242,6 +242,9 @@ export const getDefaultPropertyId = (properties: Parameters<typeof queries.getDe
 export const createProperty = (householdId: string, name: string) =>
   queries.createProperty(supabase, householdId, name);
 
+export const setPropertyLocation = (propertyId: string, suburb: string, town: string) =>
+  queries.setPropertyLocation(supabase, propertyId, suburb, town);
+
 export const renameProperty = (propertyId: string, name: string) =>
   queries.renameProperty(supabase, propertyId, name);
 
@@ -283,6 +286,16 @@ export const setSnagStatus = (snagId: string, status: SnagStatus) =>
   queries.setSnagStatus(supabase, snagId, status);
 
 export const deleteSnag = (snagId: string) => queries.deleteSnag(supabase, snagId);
+
+export const getSnagAdvice = (snagId: string) => queries.getSnagAdvice(supabase, snagId);
+
+export const recordSnagAdvice = (
+  snagId: string,
+  advice: Parameters<typeof queries.recordSnagAdvice>[2],
+  source: string,
+) => queries.recordSnagAdvice(supabase, snagId, advice, source);
+
+export const deleteSnagAdvice = (snagId: string) => queries.deleteSnagAdvice(supabase, snagId);
 
 export const getComments = (snagId: string) => queries.getComments(supabase, snagId);
 

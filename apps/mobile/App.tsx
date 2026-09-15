@@ -11,6 +11,7 @@ import { SchemaNotExposedError } from '@snag/supabase-queries';
 import { createAuthEventQueue, planAuthEvent } from './src/lib/authEvents';
 import { resetWebPathIfStale } from './src/lib/webLocation';
 import { clearJoinToken, readJoinToken } from './src/lib/joinLink';
+import { chooseGate } from './src/lib/gates';
 import { Colors } from './src/constants/theme';
 import { Household, Profile } from './src/types';
 import RootNavigator from './src/navigation';
@@ -127,7 +128,20 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  if (loading) {
+  // One decision, made in one place and asserted in gates.test.ts. The order
+  // used to live in the ladder below, where nothing could see it — which is how
+  // the join branch shipped behind the Setup branch and behind a profile that a
+  // brand-new scanner does not have.
+  const gate = chooseGate({
+    loading,
+    fatal: !!fatal,
+    signedIn: !!session,
+    hasJoinToken: !!joinToken,
+    hasProfile: !!profile,
+    hasHousehold: !!household,
+  });
+
+  if (gate === 'loading') {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -135,7 +149,7 @@ export default function App() {
     );
   }
 
-  if (fatal) {
+  if (gate === 'fatal') {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" />
@@ -147,7 +161,7 @@ export default function App() {
     );
   }
 
-  if (!session) {
+  if (gate === 'auth') {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" />
@@ -156,16 +170,28 @@ export default function App() {
     );
   }
 
-  // Holding a code, and far enough in to answer it. `accept_invitation_by_token`
-  // needs a profile, so somebody who scanned before signing up passes through
-  // Setup first and comes back here with the token still in the URL.
-  if (joinToken && profile) {
+  // Holding a code. **Signed in is enough — a profile is NOT required**, and
+  // that distinction is the whole bug this branch once had.
+  //
+  // It read `joinToken && profile`, on the assumption that somebody who scanned
+  // before signing up would pass through Setup and come back. They don't. A
+  // brand-new scanner has no profile, so this was skipped, and Setup's first
+  // offer is *Create it* with nothing on the screen mentioning the code they
+  // just scanned. Alyssa scanned 32 Le Roy's code, was shown Setup, and created
+  // a second household also called 32 Le Roy — alone in it, while the real one
+  // sat two taps away. That is the exact journey this feature exists for, and
+  // it was the one path that didn't work.
+  //
+  // So the gate comes BEFORE the Setup gate and asks for the name itself. A
+  // scanner should never see "Set up your house": they are not setting one up.
+  if (gate === 'join' && joinToken) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" />
         <ToastProvider>
           <JoinScreen
             token={joinToken}
+            profile={profile}
             onJoined={loadAccount}
             onDismiss={() => {
               clearJoinToken();
@@ -179,7 +205,10 @@ export default function App() {
 
   // Signed in, but not yet in a household — either a brand new account, or the
   // second person waiting to be invited by the first.
-  if (!profile || !household) {
+  // `gate === 'app'` already means both of these are present — this narrows it
+  // for the compiler, which cannot read chooseGate, and it is the same condition
+  // rather than a second opinion about it.
+  if (gate === 'setup' || !profile || !household) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" />

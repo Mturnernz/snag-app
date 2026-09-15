@@ -30,7 +30,8 @@ import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
 import {
-  FINISH_SPEC_FIELDS, RootStackParamList, Thing, ThingKind, THING_KIND_FIELD_LABELS,
+  FINISH_SPEC_FIELDS, RootStackParamList, SERVICE_CYCLES, Thing, ThingKind,
+  THING_KIND_FIELD_LABELS,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -78,9 +79,6 @@ const DATE_FIELDS: { key: 'installedAt' | 'warrantyUntil'; label: string }[] = [
   { key: 'installedAt', label: 'Installed' },
   { key: 'warrantyUntil', label: 'Warranty until' },
 ];
-
-/** Service intervals a household actually uses. Nobody types "180 days". */
-const SERVICE_CYCLES = [90, 180, 365, 730];
 
 /** What the regime sheet is holding while it is open. */
 type ServiceDraft = { days: number; by: string; first: string };

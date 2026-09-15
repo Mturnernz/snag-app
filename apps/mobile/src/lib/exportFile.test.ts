@@ -85,11 +85,14 @@ describe('what a row says', () => {
     expect(snagExportTable([snag({ repeatDays: 90 })], META).rows[0][8]).toBe('3 months');
     expect(snagExportTable([snag({ repeatDays: 365 })], META).rows[0][8]).toBe('year');
 
-    // Worth knowing rather than worth hiding: REPEAT_PRESETS labels 182 days
-    // "Every 6 months", but describeCycle only reaches months on a multiple of
-    // 30, so 182 comes out in weeks. That mismatch is the app's, not the
-    // extract's — the file says exactly what every other screen says.
-    expect(snagExportTable([snag({ repeatDays: 182 })], META).rows[0][8]).toBe('26 weeks');
+    // Six months, from either the repeat chips or the service sheet — the two
+    // used to disagree about what number that was. See cycles.test.ts.
+    expect(snagExportTable([snag({ repeatDays: 180 })], META).rows[0][8]).toBe('6 months');
+
+    // The fallback is still there for a hand-set interval: create_snag takes
+    // any 1..3650, and an extract should say what the row holds rather than
+    // round it into a lie.
+    expect(snagExportTable([snag({ repeatDays: 45 })], META).rows[0][8]).toBe('45 days');
   });
 
   it('names the house, the place, the scope and the day at the top', () => {

@@ -39,15 +39,42 @@ export const PRIORITY_LABELS: Record<SnagPriority, string> = {
 export const PRIORITY_ORDER: SnagPriority[] = ['high', 'low'];
 
 /**
- * Offered when someone sets a repeat. Free-form days are still accepted by the
- * RPC; these are just the intervals a house actually runs on.
+ * The intervals a house actually runs on — one vocabulary, two selections from
+ * it, and every one of them a whole number of months or years.
+ *
+ * **That last part is load-bearing and was broken.** `describeCycle` only
+ * reaches months on a multiple of 30, so the six-month repeat at 182 days came
+ * back out as "26 weeks" — the app failing to say back the words on the chip
+ * somebody had just pressed. Worse, the service sheet used **180** for the same
+ * phrase, so "every 6 months" meant two different numbers depending on which
+ * screen set it, and a service scheduled at 180 days became a snag repeating at
+ * 180 while a repeat chosen at 182 stayed 182. Same intent, two numbers, two
+ * different sentences.
+ *
+ * So six months is 180 days everywhere. It is not half of 365, and that is
+ * fine: this is a list of household chores, not an amortisation schedule, and
+ * the number nobody types matters far less than the words everybody reads.
+ *
+ * `cycles.test.ts` pins the property rather than the values — every day count
+ * either list offers must describe in months or years, never in weeks or days.
  */
 export const REPEAT_PRESETS: { days: number; label: string }[] = [
   { days: 30, label: 'Monthly' },
   { days: 90, label: 'Every 3 months' },
-  { days: 182, label: 'Every 6 months' },
+  { days: 180, label: 'Every 6 months' },
   { days: 365, label: 'Yearly' },
 ];
+
+/**
+ * What a thing is serviced on. A different selection from the same vocabulary,
+ * deliberately: a chore repeats monthly, a heat pump does not, and a heat pump
+ * can run two years between services where a gutter cannot.
+ *
+ * It lived in `ThingDetailScreen` as a bare array, which is how it came to
+ * disagree with the list above about what six months is. Here, beside it, the
+ * two are visibly one family.
+ */
+export const SERVICE_CYCLES: number[] = [90, 180, 365, 730];
 
 // ---------------------------------------------------------------- rows
 

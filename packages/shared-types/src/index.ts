@@ -61,6 +61,47 @@ export interface Profile {
   id: string;
   displayName: string;
   createdAt: string;
+  /**
+   * Set when the account behind this profile was deleted.
+   *
+   * The row stays: `snags.reporter_id`, `comments.author_id` and
+   * `things.created_by` are NOT NULL, so a household that survives somebody
+   * leaving still names them. The name is replaced, which is the part that was
+   * theirs. See `20260915091000`.
+   */
+  deletedAt?: string | null;
+}
+
+/**
+ * Somebody invited to a household who hasn't answered yet.
+ *
+ * It waits on an *address*, not an account, which is the whole point: you can
+ * invite your partner before they have signed up, in whatever order suits. When
+ * an account appears on that address, the invitation is there waiting.
+ *
+ * **Nothing emails them and the app never says it did.** That is the line the
+ * retired product crossed — "Invite sent", nothing sent, for the life of the
+ * feature. Telling them is still something you do out loud; what the row buys
+ * is that they no longer have to finish signing up before you can type their
+ * address.
+ */
+export interface Invitation {
+  id: string;
+  householdId: string;
+  email: string;
+  /** Empty means every property in the household. */
+  propertyIds: string[];
+  invitedBy: string;
+  createdAt: string;
+}
+
+/** An invitation seen from the other end, by the person it names. */
+export interface InvitationToMe {
+  id: string;
+  householdId: string;
+  householdName: string;
+  invitedByName: string;
+  createdAt: string;
 }
 
 export interface HouseholdMember {

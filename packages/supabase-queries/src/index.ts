@@ -27,6 +27,8 @@ import type {
   Comment,
   Household,
   HouseholdMember,
+  Invitation,
+  InvitationToMe,
   Location,
   Profile,
   Property,
@@ -110,6 +112,17 @@ function mapThing(row: Row): Thing {
   };
 }
 
+function mapInvitation(row: Row): Invitation {
+  return {
+    id: row.id,
+    householdId: row.household_id,
+    email: row.email,
+    propertyIds: row.property_ids ?? [],
+    invitedBy: row.invited_by,
+    createdAt: row.created_at,
+  };
+}
+
 function mapComment(row: Row): Comment {
   return {
     id: row.id,
@@ -162,13 +175,18 @@ export async function getMyProfile(client: SupabaseClient): Promise<Profile | nu
 
   const { data, error } = await client
     .from('profiles')
-    .select('id, display_name, created_at')
+    .select('id, display_name, created_at, deleted_at')
     .eq('id', auth.user.id)
     .maybeSingle();
 
   if (error) throw asError(error, "Couldn't load your profile");
   if (!data) return null;
-  return { id: data.id, displayName: data.display_name, createdAt: data.created_at };
+  return {
+    id: data.id,
+    displayName: data.display_name,
+    createdAt: data.created_at,
+    deletedAt: data.deleted_at ?? null,
+  };
 }
 
 export async function upsertProfile(
@@ -177,7 +195,12 @@ export async function upsertProfile(
 ): Promise<Profile> {
   const { data, error } = await client.rpc('upsert_profile', { p_display_name: displayName });
   const row = unwrap<Row>(data, error, "Couldn't save your name");
-  return { id: row.id, displayName: row.display_name, createdAt: row.created_at };
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    createdAt: row.created_at,
+    deletedAt: row.deleted_at ?? null,
+  };
 }
 
 /**
@@ -254,26 +277,124 @@ export async function getMembers(
   }));
 }
 
+// ---------------------------------------------------------------- invitations
+//
+// `addMemberByEmail` used to live here. It could only add somebody who had
+// already signed up AND already saved a name, so the honest answer to "add my
+// partner" was *That account has not finished signing up yet* — shown to the
+// one person who could not do anything about it. The order was load-bearing and
+// nothing anywhere published it.
+//
+// An invitation waits on the address instead, so the two halves can happen in
+// either order. Nothing is emailed and nothing claims to be: that is the line
+// the retired product crossed, not the row itself.
+
 /**
- * v1's entire "invite" flow: the other person signs up, then you add them by
- * the address they used. No tokens and no email delivery — which is also why
- * none of the ways the old invite pipeline failed silently can happen here.
+ * Invites an address to a household. It does not have to have an account yet.
+ *
+ * `propertyIds` omitted means every property, which is the one-place answer;
+ * with a bach the caller names them, exactly as before.
  */
-export async function addMemberByEmail(
+export async function inviteToHousehold(
   client: SupabaseClient,
   householdId: string,
   email: string,
   propertyIds?: string[]
-): Promise<void> {
-  const { error } = await client.rpc('add_member_by_email', {
+): Promise<Invitation> {
+  const { data, error } = await client.rpc('invite_to_household', {
     p_household_id: householdId,
     p_email: email,
-    // Omitted means every property in the household, which is right while
-    // there is one place and wrong the moment there is a bach — so the caller
-    // passes an explicit list once there is more than one to choose between.
     p_property_ids: propertyIds ?? null,
   });
-  if (error) throw asError(error, "That didn’t save");
+  const row = unwrap<Row>(data, error, "Couldn't invite them");
+  return mapInvitation(row);
+}
+
+/** Who is still waiting on this household — the Waiting rows under Who's here. */
+export async function getHouseholdInvitations(
+  client: SupabaseClient,
+  householdId: string
+): Promise<Invitation[]> {
+  const { data, error } = await client
+    .from('invitations')
+    .select('id, household_id, email, property_ids, invited_by, created_at')
+    .eq('household_id', householdId)
+    .order('created_at');
+
+  if (error) throw asError(error, "Couldn't load who's waiting");
+  return (data ?? []).map(mapInvitation);
+}
+
+export async function cancelInvitation(
+  client: SupabaseClient,
+  invitationId: string
+): Promise<void> {
+  const { error } = await client.rpc('cancel_invitation', { p_invitation_id: invitationId });
+  if (error) throw asError(error, "Couldn't cancel that invitation");
+}
+
+/**
+ * What is waiting for *me*.
+ *
+ * Matched on the caller's address inside the RPC, never on an id passed in, so
+ * an invitation is only ever reachable by the person it names — there is no
+ * table read here for a non-member to make.
+ */
+export async function getMyInvitations(client: SupabaseClient): Promise<InvitationToMe[]> {
+  const { data, error } = await client.rpc('my_invitations');
+  if (error) throw asError(error, "Couldn't check for invitations");
+  return ((data as Row[]) ?? []).map((row) => ({
+    id: row.id,
+    householdId: row.household_id,
+    householdName: row.household_name,
+    invitedByName: row.invited_by_name,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function acceptInvitation(
+  client: SupabaseClient,
+  invitationId: string
+): Promise<void> {
+  const { error } = await client.rpc('accept_invitation', { p_invitation_id: invitationId });
+  if (error) throw asError(error, "Couldn't join that household");
+}
+
+export async function declineInvitation(
+  client: SupabaseClient,
+  invitationId: string
+): Promise<void> {
+  const { error } = await client.rpc('decline_invitation', { p_invitation_id: invitationId });
+  if (error) throw asError(error, "Couldn't decline that");
+}
+
+// ---------------------------------------------------------------- an ending
+
+/**
+ * Every storage key deleting this account would strand — the files of the
+ * households it is the only member of, which are the ones about to go.
+ *
+ * Read BEFORE `deleteMyAccount`, for the reason `getHouseholdFilePaths` gives:
+ * the storage delete policy asks whether you are a member, and an account that
+ * has deleted itself is not.
+ */
+export async function getMyOrphanFilePaths(client: SupabaseClient): Promise<string[]> {
+  const { data, error } = await client.rpc('my_orphan_file_paths');
+  if (error) throw asError(error, "Couldn't work out what would be deleted");
+  return (data as string[] | null) ?? [];
+}
+
+/**
+ * Ends the account. Households it is alone in go with it; households it shares
+ * do not, and it leaves those the way `removeMember` would.
+ *
+ * The profile row stays behind as a tombstone with the name replaced — three
+ * NOT NULL columns in the surviving households still name this person, and a
+ * household should not lose work because somebody left. See `20260915091000`.
+ */
+export async function deleteMyAccount(client: SupabaseClient): Promise<void> {
+  const { error } = await client.rpc('delete_my_account');
+  if (error) throw asError(error, "Couldn't delete your account");
 }
 
 /**

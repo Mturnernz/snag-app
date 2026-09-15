@@ -3,16 +3,19 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import HouseholdScreen from './HouseholdScreen';
 
-// Until 20260914160000 nothing in this app could remove anybody from anything.
-// What these pin is the shape of the half that was added, and specifically the
-// three ways it could silently go wrong:
+// Until 20260914160000 nothing in this app could remove anybody from anything,
+// and until 20260915090000 adding somebody required them to have finished
+// signing up first. What these pin is the shape of both halves, and the ways
+// each could silently go wrong:
 //
 //   - offering a control that can only ever answer with an error (the last
 //     member's Leave, the only place's ×),
 //   - deleting a place and leaving its photos in the bucket, which is the
 //     orphan the delete RPC hands back the keys for,
-//   - and going back to choosing somebody's place for them, which is what
-//     `properties.slice(0, 1)` did before the chips existed.
+//   - going back to choosing somebody's place for them, which is what
+//     `properties.slice(0, 1)` did before the chips existed,
+//   - and the one the retired product actually shipped: a screen claiming an
+//     invitation was sent when nothing sends anything.
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -21,7 +24,12 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ goBack: jest.fn(), navigate: jest.fn() }),
 }));
 
-const mock_addMemberByEmail = jest.fn().mockResolvedValue(undefined);
+const mock_inviteToHousehold = jest.fn().mockResolvedValue(undefined);
+const mock_getHouseholdInvitations = jest.fn().mockResolvedValue([]);
+const mock_getMyInvitations = jest.fn().mockResolvedValue([]);
+const mock_cancelInvitation = jest.fn().mockResolvedValue(undefined);
+const mock_acceptInvitation = jest.fn().mockResolvedValue(undefined);
+const mock_declineInvitation = jest.fn().mockResolvedValue(undefined);
 const mock_removeMember = jest.fn().mockResolvedValue(undefined);
 const mock_deleteProperty = jest.fn().mockResolvedValue([]);
 const mock_deleteHousehold = jest.fn().mockResolvedValue(undefined);
@@ -31,7 +39,12 @@ const mock_getSnags = jest.fn().mockResolvedValue([]);
 const mock_getThings = jest.fn().mockResolvedValue([]);
 
 jest.mock('../lib/supabase', () => ({
-  addMemberByEmail: (...a: unknown[]) => mock_addMemberByEmail(...a),
+  inviteToHousehold: (...a: unknown[]) => mock_inviteToHousehold(...a),
+  getHouseholdInvitations: (...a: unknown[]) => mock_getHouseholdInvitations(...a),
+  getMyInvitations: (...a: unknown[]) => mock_getMyInvitations(...a),
+  cancelInvitation: (...a: unknown[]) => mock_cancelInvitation(...a),
+  acceptInvitation: (...a: unknown[]) => mock_acceptInvitation(...a),
+  declineInvitation: (...a: unknown[]) => mock_declineInvitation(...a),
   removeMember: (...a: unknown[]) => mock_removeMember(...a),
   deleteProperty: (...a: unknown[]) => mock_deleteProperty(...a),
   deleteHousehold: (...a: unknown[]) => mock_deleteHousehold(...a),
@@ -106,6 +119,8 @@ beforeEach(() => {
   mock_deleteHousehold.mockResolvedValue(undefined);
   mock_getHouseholdFilePaths.mockResolvedValue([]);
   mock_deleteStoredFiles.mockResolvedValue(undefined);
+  mock_getHouseholdInvitations.mockResolvedValue([]);
+  mock_getMyInvitations.mockResolvedValue([]);
 });
 
 describe('who can be taken out', () => {
@@ -238,11 +253,85 @@ describe('adding someone', () => {
 
     // Home is pre-selected as the place being looked at; add the bach as well.
     await press(byLabel(r, 'Start on The bach'));
-    await press(pressableAround(r, 'Add to household'));
+    await press(pressableAround(r, 'Invite them'));
     await settle();
 
-    expect(mock_addMemberByEmail).toHaveBeenCalledWith(
+    expect(mock_inviteToHousehold).toHaveBeenCalledWith(
       'h', 'alyssa@example.com', expect.arrayContaining(['p1', 'p2'])
     );
+  });
+});
+
+describe('inviting somebody who has not signed up', () => {
+  // The bug this replaces: add_member_by_email refused any address without a
+  // finished account, so the person doing the adding was told "That account has
+  // not finished signing up yet" — an order nothing had published, blamed on
+  // the one person who could not act on it.
+  it('sends the address straight through, account or not', async () => {
+    arrange();
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    const email = input(r, (props) => props.inputMode === 'email');
+    await TestRenderer.act(async () => email.props.onChangeText('alyssa@example.com'));
+    await press(pressableAround(r, 'Invite them'));
+    await settle();
+
+    // undefined, not a list: one place means everybody is on it.
+    expect(mock_inviteToHousehold).toHaveBeenCalledWith('h', 'alyssa@example.com', undefined);
+  });
+
+  // The retired product's whole failure was the claim, not the row: it said
+  // "Invite sent" and nothing was ever sent, for the life of the feature.
+  it('never claims anything was sent', async () => {
+    arrange();
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    const said = r.root
+      .findAll((n: any) => typeof n.type === 'string' && n.type === 'Text')
+      .map((n: any) => JSON.stringify(n.children))
+      .join(' ');
+    expect(said).not.toMatch(/\bsent\b/i);
+    expect(said).toMatch(/doesn't email them, so tell them yourself/i);
+  });
+
+  it('shows who is waiting, without their reading as somebody who is here', async () => {
+    arrange();
+    mock_getHouseholdInvitations.mockResolvedValue([
+      { id: 'i1', householdId: 'h', email: 'alyssa@example.com', propertyIds: [], invitedBy: 'me',
+        createdAt: '2026-09-15T00:00:00Z' },
+    ]);
+
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    expect(r.queryByText('alyssa@example.com')).not.toBeNull();
+    expect(r.queryByText('Waiting — they need to sign up with this address')).not.toBeNull();
+
+    await press(byLabel(r, 'Cancel the invitation to alyssa@example.com'));
+    expect(mock_cancelInvitation).toHaveBeenCalledWith('i1');
+  });
+
+  // An invitation to somebody who already has a household has nowhere else to
+  // appear: they never see the Setup screen, and there is no household switcher.
+  it('lets you answer an invitation addressed to you', async () => {
+    arrange();
+    mock_getMyInvitations.mockResolvedValue([
+      { id: 'i9', householdId: 'other', householdName: '32 Le Roy', invitedByName: 'Alyssa',
+        createdAt: '2026-09-15T00:00:00Z' },
+    ]);
+
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    expect(r.queryByText('32 Le Roy wants to add you')).not.toBeNull();
+
+    await press(pressableAround(r, 'No thanks'));
+    expect(mock_declineInvitation).toHaveBeenCalledWith('i9');
+    expect(mock_acceptInvitation).not.toHaveBeenCalled();
+
+    await press(pressableAround(r, 'Join'));
+    expect(mock_acceptInvitation).toHaveBeenCalledWith('i9');
   });
 });

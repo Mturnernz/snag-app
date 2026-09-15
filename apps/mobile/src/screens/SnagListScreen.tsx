@@ -20,7 +20,9 @@ import {
   createSnag, getFileUrls, getSnags, getThings, markListSeen, updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { exportDateStamp, snagExportPhotos, snagExportTable } from '@snag/supabase-queries';
+import {
+  assessmentBrief, exportDateStamp, snagExportPhotos, snagExportTable,
+} from '@snag/supabase-queries';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag, Thing } from '../types';
 
@@ -181,24 +183,42 @@ export default function SnagListScreen() {
    * because an extract is an archive, and one that silently honoured a filter
    * set twenty minutes ago is one nobody could read correctly later.
    */
-  async function handleExport(scope: ExportScope, format: ExportFormat) {
+  async function handleExport(scope: ExportScope, format: ExportFormat, briefed: boolean) {
     setExporting(true);
     try {
       const rows = scope === 'all'
         ? [...snags, ...done]
         : [...visible, ...(showDone ? recentlyDone : [])];
+      const scopeLabel = scope === 'all' ? 'Everything' : "What's on screen";
+      const stamp = exportDateStamp();
+      const place = activeProperty?.name ?? household.name;
       const table = snagExportTable(rows, {
         household: household.name,
-        place: activeProperty?.name ?? household.name,
-        scope: scope === 'all' ? 'Everything' : "What's on screen",
-        stamp: exportDateStamp(),
+        place,
+        scope: scopeLabel,
+        stamp,
       });
       // Photographs go in the PDF only — a spreadsheet cell cannot hold one,
       // and the PDF is the copy that gets sent to somebody who was not there.
       const images = format === 'pdf'
         ? await loadExportImages(snagExportPhotos(rows), getFileUrls)
         : [];
-      const { fileName, path } = await writeExport(table, format, images);
+      // The brief names the scope the file was made under, and counts the
+      // photographs that actually got in rather than the ones that were asked
+      // for — a reader told there are twenty when four came is a reader who
+      // thinks sixteen jobs have no photograph.
+      const brief = briefed
+        ? assessmentBrief({
+          household: household.name,
+          place,
+          where: [activeProperty?.suburb, activeProperty?.town].filter(Boolean).join(', ') || null,
+          scope: scopeLabel,
+          stamp,
+          rowCount: rows.length,
+          photoCount: images.length,
+        })
+        : undefined;
+      const { fileName, path } = await writeExport(table, format, images, brief);
       setShowExport(false);
       showToast(path ? `Saved to ${fileName}` : `${fileName} downloaded`);
     } catch (err: any) {
@@ -491,6 +511,7 @@ export default function SnagListScreen() {
           all: snags.length + done.length,
         }}
         busy={exporting}
+        canBrief
         onExport={handleExport}
         onCancel={() => setShowExport(false)}
       />

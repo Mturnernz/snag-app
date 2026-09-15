@@ -1,6 +1,7 @@
 import {
   ExportTable, ExportPhoto, toCsv, exportDateStamp, exportFileName,
 } from '@snag/supabase-queries';
+import type { assessmentBrief } from '@snag/supabase-queries';
 import { saveFile, type SavedFile } from './download';
 
 /**
@@ -19,10 +20,14 @@ import autoTable from 'jspdf-autotable';
 
 export type ExportFormat = 'csv' | 'pdf';
 
+/** What `assessmentBrief` hands back, without importing its shape twice. */
+export type AssessmentBrief = ReturnType<typeof assessmentBrief>;
+
 export async function writeExport(
   table: ExportTable,
   format: ExportFormat,
   images: ExportImage[] = [],
+  brief?: AssessmentBrief,
 ): Promise<SavedFile & { fileName: string }> {
   // Stamped with the local day, so two extracts of the same list don't land in
   // a downloads folder as "(1)" and "(2)" with nothing to tell them apart.
@@ -31,7 +36,7 @@ export async function writeExport(
     const saved = await saveFile(fileName, toCsv(table), 'text/csv;charset=utf-8');
     return { ...saved, fileName };
   }
-  const saved = await saveFile(fileName, renderPdf(table, images), 'application/pdf');
+  const saved = await saveFile(fileName, renderPdf(table, images, brief), 'application/pdf');
   return { ...saved, fileName };
 }
 
@@ -98,8 +103,17 @@ export async function loadExportImages(
  * Only the standard 14 fonts are used, so nothing is embedded and nothing is
  * fetched — a font file would be a network request the CSP has no rule for.
  */
-export function renderPdf(table: ExportTable, images: ExportImage[] = []): Uint8Array {
+export function renderPdf(
+  table: ExportTable,
+  images: ExportImage[] = [],
+  brief?: AssessmentBrief,
+): Uint8Array {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  // The brief comes first and the table starts on a fresh sheet, so the pages
+  // a reader flips past are prose and the pages they work from are the list.
+  const briefPages = brief ? drawBriefPages(doc, brief) : 0;
+  if (briefPages > 0) doc.addPage();
 
   doc.setFontSize(16);
   doc.text(table.name, 40, 44);
@@ -124,7 +138,7 @@ export function renderPdf(table: ExportTable, images: ExportImage[] = []): Uint8
       doc.setFontSize(8);
       doc.setTextColor(105, 97, 86);
       doc.text(
-        `${table.name} · page ${data.pageNumber} of ${page}`,
+        `${table.name} · page ${data.pageNumber + briefPages} of ${page}`,
         data.settings.margin.left,
         doc.internal.pageSize.getHeight() - 20,
       );
@@ -134,6 +148,86 @@ export function renderPdf(table: ExportTable, images: ExportImage[] = []): Uint8
   drawPhotoPages(doc, table, images);
 
   return new Uint8Array(doc.output('arraybuffer'));
+}
+
+/**
+ * The brief, on its own sheet or two at the front of the file.
+ *
+ * **It is in the PDF and never in the CSV**, for the same reason the
+ * photographs are: `ExportTable` holds rows to be sorted, and this is prose
+ * addressed to a reader. A spreadsheet with a page of instructions in cell A1
+ * is a spreadsheet nobody can sort.
+ *
+ * The text column is held to about 90 characters rather than running the full
+ * width of a landscape sheet. A 120-character line is the width the page
+ * happens to be, not a width anybody reads.
+ *
+ * Returns how many sheets it used, because the footer on the table's own pages
+ * has to count them or the second sheet of the file claims to be the first.
+ */
+function drawBriefPages(doc: jsPDF, brief: AssessmentBrief): number {
+  const margin = 40;
+  const pageH = doc.internal.pageSize.getHeight();
+  const column = 520;
+  const bottom = pageH - margin;
+  const first = doc.getNumberOfPages();
+  let y = margin + 18;
+
+  const room = (needed: number) => {
+    if (y + needed <= bottom) return;
+    doc.addPage();
+    y = margin + 18;
+  };
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(...INK);
+  doc.text(brief.title, margin, y);
+  y += 26;
+
+  for (const block of brief.blocks) {
+    if (block.heading) {
+      room(30);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(...INK);
+      doc.text(block.heading, margin, y);
+      y += 16;
+    }
+
+    if (block.mono) {
+      // Courier, because this is the block somebody copies and the shape of it
+      // is the instruction. Pre-formatted, so it is never re-wrapped.
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(...INK);
+      for (const line of block.lines) {
+        room(12);
+        doc.text(line, margin, y);
+        y += 11;
+      }
+      y += 8;
+      continue;
+    }
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(...INK);
+    for (const line of block.lines) {
+      const wrapped = doc.splitTextToSize(line, column) as string[];
+      for (const row of wrapped) {
+        room(14);
+        doc.text(row, margin, y);
+        y += 13;
+      }
+      y += 4;
+    }
+    y += 6;
+  }
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(0, 0, 0);
+  return doc.getNumberOfPages() - first + 1;
 }
 
 const INK: [number, number, number] = [43, 39, 36];

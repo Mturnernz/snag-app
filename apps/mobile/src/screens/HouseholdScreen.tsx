@@ -16,11 +16,15 @@ import { useHousehold } from '../hooks/useHousehold';
 import { Invitation, InvitationToMe } from '../types';
 import { useToast } from '../hooks/useToast';
 import {
-  acceptInvitation, cancelInvitation, createProperty, declineInvitation, deleteHousehold,
-  deleteProperty, deleteStoredFiles, getHouseholdFilePaths, getHouseholdInvitations,
-  getMyInvitations, getPropertyMemberIds, getSnags, getThings, inviteToHousehold, removeMember,
-  renameProperty, setPropertyMember,
+  acceptInvitation, cancelInvitation, createInviteLink, createProperty, declineInvitation,
+  deleteHousehold, deleteProperty, deleteStoredFiles, getHouseholdFilePaths,
+  getHouseholdInvitations, getMyInvitations, getPropertyMemberIds, getSnags, getThings,
+  inviteToHousehold, removeMember, renameProperty, revokeInviteLink, setPropertyMember,
 } from '../lib/supabase';
+import { joinUrl } from '@snag/supabase-queries';
+import { APP_URL } from '../lib/appUrl';
+import { copyToClipboard } from '../lib/clipboard';
+import QrCode, { QrCaption } from '../components/QrCode';
 import { showAlert } from '../lib/alert';
 
 /**
@@ -68,6 +72,9 @@ export default function HouseholdScreen() {
   const [waiting, setWaiting] = useState<Invitation[]>([]);
   const [mine, setMine] = useState<InvitationToMe[]>([]);
   const [busyInvite, setBusyInvite] = useState(false);
+  /** The household's one live join code, if it is being shared right now. */
+  const [link, setLink] = useState<Invitation | null>(null);
+  const [busyLink2, setBusyLink2] = useState(false);
 
   /** The place being renamed, and the text so far. Null when nothing is. */
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
@@ -115,7 +122,10 @@ export default function HouseholdScreen() {
         getHouseholdInvitations(household.id),
         getMyInvitations(),
       ]);
-      setWaiting(ours);
+      // One table, two ways of being addressed. A link is not a person waiting,
+      // so it never belongs in the Waiting rows under Who's here.
+      setWaiting(ours.filter((i) => !i.token));
+      setLink(ours.find((i) => !!i.token) ?? null);
       setMine(toMe);
     } catch (err) {
       console.error('Failed to load invitations:', err);
@@ -208,6 +218,33 @@ export default function HouseholdScreen() {
       showAlert("Couldn't invite them", err?.message ?? 'Please try again.');
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function handleShowCode() {
+    setBusyLink2(true);
+    try {
+      setLink(await createInviteLink(
+        household.id,
+        properties.length > 1 ? startOn : undefined
+      ));
+    } catch (err: any) {
+      showAlert("Couldn't make a code", err?.message ?? 'Please try again.');
+    } finally {
+      setBusyLink2(false);
+    }
+  }
+
+  async function handleStopSharing() {
+    setBusyLink2(true);
+    try {
+      await revokeInviteLink(household.id);
+      setLink(null);
+      showToast('Code stopped');
+    } catch (err: any) {
+      showAlert("Couldn't stop sharing", err?.message ?? 'Please try again.');
+    } finally {
+      setBusyLink2(false);
     }
   }
 
@@ -552,6 +589,52 @@ export default function HouseholdScreen() {
             fullWidth
             icon="person-add-outline"
           />
+
+          {/* The same invitation, addressed to whoever holds the code instead of
+              to an address — one table, one accept path, not a second way in.
+              Nothing here scans: their own camera opens the link, which is the
+              point, because they haven't installed Snag yet. */}
+          <View style={styles.codeBlock}>
+            <Text style={styles.orLine}>or, if they're standing right here</Text>
+            {link?.token ? (
+              <>
+                <QrCode value={joinUrl(APP_URL, link.token)} />
+                <QrCaption text={joinUrl(APP_URL, link.token)} />
+                <Text style={styles.codeHint}>
+                  Point their camera at this. It opens Snag and asks them to join — good for a
+                  day, and only for whoever you show it to.
+                </Text>
+                <View style={styles.codeActions}>
+                  <Button
+                    label="Copy link"
+                    variant="outline"
+                    onPress={async () => {
+                      await copyToClipboard(joinUrl(APP_URL, link.token!));
+                      showToast('Link copied');
+                    }}
+                    style={styles.codeButton}
+                  />
+                  <Button
+                    label="Stop sharing"
+                    variant="outline"
+                    onPress={handleStopSharing}
+                    disabled={busyLink2}
+                    style={styles.codeButton}
+                  />
+                </View>
+              </>
+            ) : (
+              <Button
+                label="Show a QR code"
+                variant="outline"
+                onPress={handleShowCode}
+                loading={busyLink2}
+                disabled={busyLink2 || (properties.length > 1 && startOn.length === 0)}
+                fullWidth
+                icon="qr-code-outline"
+              />
+            )}
+          </View>
         </Card>
 
         <View style={styles.note}>
@@ -682,6 +765,22 @@ const styles = StyleSheet.create({
   waitingHint: { fontSize: Typography.sm, color: Colors.textMuted },
   answerRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.xs },
   answerButton: { flex: 1 },
+  codeBlock: {
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  orLine: { fontSize: Typography.sm, color: Colors.textMuted, textAlign: 'center' },
+  codeHint: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
+  codeActions: { flexDirection: 'row', gap: Spacing.sm },
+  codeButton: { flex: 1 },
   placeRow: {
     paddingVertical: Spacing.sm,
     borderTopWidth: 1,

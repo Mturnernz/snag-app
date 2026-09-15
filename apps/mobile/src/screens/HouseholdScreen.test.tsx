@@ -30,6 +30,8 @@ const mock_getMyInvitations = jest.fn().mockResolvedValue([]);
 const mock_cancelInvitation = jest.fn().mockResolvedValue(undefined);
 const mock_acceptInvitation = jest.fn().mockResolvedValue(undefined);
 const mock_declineInvitation = jest.fn().mockResolvedValue(undefined);
+const mock_createInviteLink = jest.fn();
+const mock_revokeInviteLink = jest.fn().mockResolvedValue(undefined);
 const mock_removeMember = jest.fn().mockResolvedValue(undefined);
 const mock_deleteProperty = jest.fn().mockResolvedValue([]);
 const mock_deleteHousehold = jest.fn().mockResolvedValue(undefined);
@@ -45,6 +47,8 @@ jest.mock('../lib/supabase', () => ({
   cancelInvitation: (...a: unknown[]) => mock_cancelInvitation(...a),
   acceptInvitation: (...a: unknown[]) => mock_acceptInvitation(...a),
   declineInvitation: (...a: unknown[]) => mock_declineInvitation(...a),
+  createInviteLink: (...a: unknown[]) => mock_createInviteLink(...a),
+  revokeInviteLink: (...a: unknown[]) => mock_revokeInviteLink(...a),
   removeMember: (...a: unknown[]) => mock_removeMember(...a),
   deleteProperty: (...a: unknown[]) => mock_deleteProperty(...a),
   deleteHousehold: (...a: unknown[]) => mock_deleteHousehold(...a),
@@ -60,6 +64,15 @@ jest.mock('../lib/supabase', () => ({
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
+
+const TOKEN = '8f1d3c2e-0000-4000-8000-000000000000';
+
+/** A live join code: one table with the email invitations, addressed by token. */
+const LINK = {
+  id: 'link1', householdId: 'h', email: null, token: TOKEN,
+  expiresAt: '2026-09-16T00:00:00Z', propertyIds: [], invitedBy: 'me',
+  createdAt: '2026-09-15T00:00:00Z',
+};
 
 const place = (id: string, name: string) => ({ id, householdId: 'h', name });
 const member = (id: string, displayName: string) => ({
@@ -121,6 +134,7 @@ beforeEach(() => {
   mock_deleteStoredFiles.mockResolvedValue(undefined);
   mock_getHouseholdInvitations.mockResolvedValue([]);
   mock_getMyInvitations.mockResolvedValue([]);
+  mock_createInviteLink.mockResolvedValue(LINK);
 });
 
 describe('who can be taken out', () => {
@@ -333,5 +347,61 @@ describe('inviting somebody who has not signed up', () => {
 
     await press(pressableAround(r, 'Join'));
     expect(mock_acceptInvitation).toHaveBeenCalledWith('i9');
+  });
+});
+
+describe('a code you can hold up', () => {
+  it('offers one, and shows the link once there is one', async () => {
+    arrange();
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    expect(r.queryByText('Show a QR code')).not.toBeNull();
+    await press(pressableAround(r, 'Show a QR code'));
+    await settle();
+
+    // One place, so no property list is passed — everybody is on it.
+    expect(mock_createInviteLink).toHaveBeenCalledWith('h', undefined);
+    expect(r.queryByText(`https://app.snaghq.co.nz/join/${TOKEN}`)).not.toBeNull();
+    expect(r.queryByText('Show a QR code')).toBeNull();
+  });
+
+  // One table, two ways of being addressed — so the one thing the partition can
+  // get wrong is showing the code as a person who is waiting to arrive.
+  it('never reads as somebody waiting under Who is here', async () => {
+    arrange();
+    mock_getHouseholdInvitations.mockResolvedValue([LINK]);
+
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    expect(r.queryByText('Waiting — they need to sign up with this address')).toBeNull();
+    expect(r.queryByText(`https://app.snaghq.co.nz/join/${TOKEN}`)).not.toBeNull();
+  });
+
+  it('can be stopped, which is the whole of its security model', async () => {
+    arrange();
+    mock_getHouseholdInvitations.mockResolvedValue([LINK]);
+
+    const r = render(<HouseholdScreen />);
+    await settle();
+    await press(pressableAround(r, 'Stop sharing'));
+    await settle();
+
+    expect(mock_revokeInviteLink).toHaveBeenCalledWith('h');
+    expect(r.queryByText('Show a QR code')).not.toBeNull();
+  });
+
+  // A code minted while a bach is on screen must land people on the places that
+  // were picked, exactly as an emailed invitation does — one mechanism.
+  it('carries the chosen places, same as an invitation by address', async () => {
+    arrange({ properties: [place('p1', 'Home'), place('p2', 'The bach')] });
+    const r = render(<HouseholdScreen />);
+    await settle();
+    await press(byLabel(r, 'Start on The bach'));
+    await press(pressableAround(r, 'Show a QR code'));
+    await settle();
+
+    expect(mock_createInviteLink).toHaveBeenCalledWith('h', expect.arrayContaining(['p1', 'p2']));
   });
 });

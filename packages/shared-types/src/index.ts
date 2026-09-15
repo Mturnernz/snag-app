@@ -88,11 +88,38 @@ export interface Profile {
 export interface Invitation {
   id: string;
   householdId: string;
-  email: string;
+  /**
+   * Null for a link invitation — the QR kind, which is addressed to whoever
+   * holds it rather than to anybody in particular.
+   *
+   * Exactly one of `email` and `token` is ever set (`invitations_addressed_one_way`).
+   * Deliberately one table and one accept path rather than two mechanisms: the
+   * moment there are two ways to join a household, neither is trustworthy.
+   */
+  email: string | null;
+  /** Set for a link invitation. The URL is `<APP_URL>/join/<token>`. */
+  token?: string | null;
+  /** Set for a link invitation. A code is short-lived; that is its whole security model. */
+  expiresAt?: string | null;
   /** Empty means every property in the household. */
   propertyIds: string[];
   invitedBy: string;
   createdAt: string;
+}
+
+/**
+ * What somebody scanning a code is told before they answer.
+ *
+ * `alreadyAMember` is there so a second scan reads as "you're already in"
+ * rather than as an invitation — people do scan twice.
+ */
+export interface InvitationByToken {
+  id: string;
+  householdId: string;
+  householdName: string;
+  invitedByName: string;
+  expiresAt: string;
+  alreadyAMember: boolean;
 }
 
 /** An invitation seen from the other end, by the person it names. */

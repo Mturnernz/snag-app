@@ -10,12 +10,14 @@ import { supabase, getMyProfile, getMyHousehold } from './src/lib/supabase';
 import { SchemaNotExposedError } from '@snag/supabase-queries';
 import { createAuthEventQueue, planAuthEvent } from './src/lib/authEvents';
 import { resetWebPathIfStale } from './src/lib/webLocation';
+import { clearJoinToken, readJoinToken } from './src/lib/joinLink';
 import { Colors } from './src/constants/theme';
 import { Household, Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import { linking } from './src/navigation/linking';
 import AuthScreen from './src/screens/AuthScreen';
 import SetupScreen from './src/screens/SetupScreen';
+import JoinScreen from './src/screens/JoinScreen';
 import { ToastProvider } from './src/hooks/useToast';
 import { HouseholdProvider } from './src/hooks/useHousehold';
 
@@ -27,6 +29,14 @@ import { HouseholdProvider } from './src/hooks/useHousehold';
  * whether you'd arrived by QR code as an anonymous reporter. A household has
  * none of those questions: you are signed in or you aren't, and you are in a
  * household or you aren't.
+ *
+ * A join code is **not** a fourth gate, though it reads like one. It is a
+ * question asked of somebody who arrived holding one, and only while they are
+ * holding it: no token in the URL, no branch. It sits here rather than on a
+ * route because the normal case is somebody who has just scanned a QR, signed
+ * up, and has no household yet — so there is no navigator to route them
+ * through. `/join/<token>` is deliberately unmapped in linking.ts for the same
+ * reason. See src/lib/joinLink.ts.
  */
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -43,6 +53,12 @@ export default function App() {
   // is set up once with `[]` deps, so it closes over the first render's values
   // and can never read `session`.
   const userIdRef = useRef<string | null>(null);
+
+  // A `/join/<token>` code in the address bar. Read once on mount, because
+  // resetWebPathIfStale preserves it across the sign-in round trip and the
+  // question has to survive that trip too — signing up IS the journey for
+  // somebody who just scanned a QR.
+  const [joinToken, setJoinToken] = useState<string | null>(() => readJoinToken());
 
   async function loadAccount() {
     try {
@@ -140,8 +156,29 @@ export default function App() {
     );
   }
 
+  // Holding a code, and far enough in to answer it. `accept_invitation_by_token`
+  // needs a profile, so somebody who scanned before signing up passes through
+  // Setup first and comes back here with the token still in the URL.
+  if (joinToken && profile) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <ToastProvider>
+          <JoinScreen
+            token={joinToken}
+            onJoined={loadAccount}
+            onDismiss={() => {
+              clearJoinToken();
+              setJoinToken(null);
+            }}
+          />
+        </ToastProvider>
+      </SafeAreaProvider>
+    );
+  }
+
   // Signed in, but not yet in a household — either a brand new account, or the
-  // second person waiting to be added by the first.
+  // second person waiting to be invited by the first.
   if (!profile || !household) {
     return (
       <SafeAreaProvider>

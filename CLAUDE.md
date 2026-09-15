@@ -796,9 +796,55 @@ the personal thing, and the name is what goes. `snags_with_details.reporter_name
 and therefore a new profile, so that can't actually be reached — it is there so a row that ever does
 come back doesn't read as gone everywhere it is named.
 
+### A code you can hold up
+
+Typing an address assumes you know it and are willing to type it. Standing in the same kitchen both
+are friction, so an invitation can also be addressed to **whoever holds the link**:
+`home.create_invite_link` mints the household's one live code and the QR encodes
+`https://app.snaghq.co.nz/join/<token>`.
+
+**It is one table and one accept path, not a second mechanism.** A row is addressed by `email` OR by
+`token`, never both and never neither (`invitations_addressed_one_way`), and a partial unique index
+keeps it to one live link per household — so pressing *Show a QR code* again kills the old one,
+which is the thing somebody pressing it is usually trying to do. The Schedule tab's rule applies
+exactly: two ways to join a household and neither is trustworthy.
+
+**Nothing in this app scans anything, and that is the design.** The scanner's own camera opens an
+ordinary URL — which is the point, because the person scanning has not installed Snag yet. No camera
+permission, no scanner screen, and no getUserMedia to get past the deployed CSP. `netlify.toml`
+already spelled out why an in-app scanner would fail silently: `expo-camera`'s module scope builds a
+`blob:` worker that pulls jsQR off a CDN, the policy blocks it, and a blocked import is not a
+runtime error anybody gets told about. **Don't add a scanner.**
+
+Short-lived and revocable is the whole security model: 24 hours, one tap to stop, and every arrival
+still presses Join. A screenshot is a way in until it expires. That is what keeps this from becoming
+the retired product's join codes, printed on walls with nobody able to say who held one.
+
+Three things make the journey work, and each is silent if it breaks:
+
+- **`isPreservedUrl` keeps `/join/<token>`.** Signing up *is* the journey here — the scanner has no
+  account — so losing the token across the auth round trip drops them on an empty Setup screen with
+  no idea what they scanned and no way to recover the code.
+- **The `/*` → `/index.html` rewrite in `netlify.toml`.** `/join/<token>` is a path and the export
+  writes no file for it; without the rewrite Netlify answers 404 before the app loads. `csp.test.ts`
+  pins it for that reason, alongside the schemes.
+- **`/join/:token` is deliberately NOT in `linking.ts`.** `JoinScreen` is a gate in `App.tsx`, not a
+  route, because the normal case is somebody with no household — there is no navigator to route them
+  through. A matched path would send React Navigation somewhere while the gate is asking a question.
+
+It is a question, not a fourth gate: no token in the URL, no branch. `clearJoinToken` takes the code
+out of the address bar *before* `loadAccount` re-gates, or the next reload asks again about a
+household they just joined.
+
+`JoinScreen` answers three arrivals and all three are real: a live code (asks), a dead one (says so
+in words — a screenshot of yesterday's code is not an error state), and a code for a house you are
+already in (people scan twice).
+
 `SetupScreen.test.tsx` pins the invitee's end, `ProfileScreen.test.tsx` the deletion order and that
-Delete sits quieter than Sign out, and `HouseholdScreen.test.tsx` the waiting rows, the cancel, the
-answerable invitation and the absence of the word "sent".
+Delete sits quieter than Sign out, `JoinScreen.test.tsx` the three arrivals and the clear-before-
+re-gate order, `joinLink.test.ts` what is and isn't a join path, and `HouseholdScreen.test.tsx` the
+waiting rows, the cancel, the answerable invitation, the absence of the word "sent", and that a live
+code never renders as somebody waiting to arrive.
 
 ## Taking someone, or something, away
 

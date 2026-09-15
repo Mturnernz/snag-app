@@ -86,6 +86,39 @@ Note the grant is deliberately narrow: `usage on schema home` went to `authentic
 `anon`. A signed-out caller gets `42501 permission denied for schema home`, which is the correct
 answer and is *not* the same failure as `PGRST106`.
 
+### "Everything has disappeared" has a second cause, and it is us
+
+`PGRST106` above is the platform-side one. The other is a **client asking for a column the database
+has not got yet**, and it has already happened once: a merge to `main` deploys `apps/mobile` to
+Netlify, so pushing code whose migration has not been applied puts exactly that client in front of
+people. `getMyProperties` names its columns — `select('id, household_id, name, suburb, town, …')` —
+so PostgREST rejected the whole request rather than returning a row with two nulls, `useHousehold`
+came up with no properties, and the **House tab rendered empty**, because `getThings` needs an
+active property. Eighteen things sat untouched in `home.things` the whole time.
+
+Two things to take from it:
+
+- **A read that names its columns fails loudly, and a `select('*')` does not.** That asymmetry is
+  why the List tab still worked while the House tab looked wiped: `getSnags` stars the view, so an
+  absent column came back as `undefined` and `mapSnag` defaulted it. Naming columns is still right
+  — it is the same argument as granting by name — but it means a missing column is a **400 on the
+  whole request**, not a gap in one field, so the screen that loses it loses everything.
+- **Apply the migration before the merge that deploys the code needing it**, never after. There is
+  no staging project and `main` is what `app.snaghq.co.nz` serves, so the window between the two is
+  a window in which the live app is broken for everybody. Order: apply, check the API answers,
+  then merge.
+
+Checking it is one query rather than a judgement call — the columns the client names, against the
+schema it is reading:
+
+```sql
+select column_name from information_schema.columns
+where table_schema = 'home' and table_name = 'properties';
+```
+
+And after any DDL, `notify pgrst, 'reload schema';` — the platform usually reloads on its own, but a
+stale cache serves the same 400 as a missing column and is indistinguishable from the app's side.
+
 ## Two schemas in one project
 
 The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
@@ -1482,7 +1515,10 @@ npm run test:mobile  # jest
 
 ### Add a column or table
 1. New timestamped file in `supabase/migrations/` — never edit a past one
-2. Apply via the Supabase MCP (`apply_migration`) or the SQL Editor
+2. Apply via the Supabase MCP (`apply_migration`) or the SQL Editor — **before** merging the code
+   that reads it. `main` is what `app.snaghq.co.nz` serves, and a client naming a column the
+   database has not got gets a 400 on the whole request, which reads on screen as an empty tab.
+   See *"Everything has disappeared" has a second cause* above.
 3. Add the type to `packages/shared-types/src/index.ts`
 4. Grant explicitly, by name
 5. **Add it to the view as well, by name.** Every list and detail screen reads

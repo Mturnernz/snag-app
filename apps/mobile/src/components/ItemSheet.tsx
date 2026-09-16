@@ -11,7 +11,9 @@ import Attachments from './Attachments';
 import ConfirmDialog from './ConfirmDialog';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
-import { formatLooseDate, formatMoney, inclGst, parseLooseDate } from '@snag/supabase-queries';
+import {
+  formatDayFirst, formatLooseDate, formatMoney, inclGst, parseLooseDate,
+} from '@snag/supabase-queries';
 import {
   ProjectItem, ProjectItemStatus, ProjectQuote, ProjectQuoteKind,
   PROJECT_ITEM_STATUS_LABELS, PROJECT_ITEM_STATUS_ORDER,
@@ -35,6 +37,25 @@ interface Props {
     dated: string | null;
   }) => Promise<void>;
   onChooseQuote: (quoteId: string, chosen: boolean) => Promise<void>;
+  /**
+   * Corrects a price already saved.
+   *
+   * Deliberately does **not** carry `chosen`: choosing stays on
+   * `set_quote_chosen`, which is its own RPC precisely so the sibling-clearing
+   * can never be skipped by a caller passing it among eight other fields. A
+   * correction is not a decision.
+   */
+  onUpdateQuote: (
+    quoteId: string,
+    update: {
+      supplier: string | null;
+      detail: string | null;
+      amount: number | null;
+      amountInclGst: boolean;
+      kind: ProjectQuoteKind;
+      dated: string | null;
+    }
+  ) => Promise<void>;
   onDeleteQuote: (quoteId: string) => Promise<void>;
   onUpdateQuoteFiles: (quoteId: string, next: { photoPaths?: string[]; documentPaths?: string[] }, toast: string) => Promise<void>;
   /** Offered once something is in: an item that exists is a thing the house now has. */
@@ -65,7 +86,7 @@ interface Props {
  */
 export default function ItemSheet({
   visible, householdId, item, quotes, onClose,
-  onUpdateItem, onDeleteItem, onAddQuote, onChooseQuote, onDeleteQuote,
+  onUpdateItem, onDeleteItem, onAddQuote, onChooseQuote, onUpdateQuote, onDeleteQuote,
   onUpdateQuoteFiles, onRecordAsThing,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -82,6 +103,14 @@ export default function ItemSheet({
   const [notes, setNotes] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [expandedQuote, setExpandedQuote] = useState<string | null>(null);
+  /**
+   * The quote the form is correcting, or null when it is adding a new one.
+   *
+   * One form for both, rather than a second sheet: the fields are identical and
+   * a separate editor is a second place the GST pill and the kind chips would
+   * have to be got right.
+   */
+  const [editingQuote, setEditingQuote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -94,11 +123,60 @@ export default function ItemSheet({
     setDated('');
     setNotes(item?.notes ?? '');
     setExpandedQuote(null);
+    setEditingQuote(null);
   }, [visible, item?.id]);
 
   if (!item) return null;
 
   const canSaveQuote = amount.trim().length > 0 || supplier.trim().length > 0;
+
+  /** Loads a saved price back into the one form, exactly as it was typed. */
+  function editQuote(quote: ProjectQuote) {
+    setEditingQuote(quote.id);
+    setAdding(false);
+    setSupplier(quote.supplier ?? '');
+    setDetail(quote.detail ?? '');
+    // The figure as entered, not the GST-inclusive one the rollup uses — the
+    // pill beside it says which it is, and converting on the way into an edit
+    // box would change the number somebody is trying to correct.
+    setAmount(quote.amount === null ? '' : String(quote.amount));
+    setIncl(quote.amountInclGst);
+    setKind(quote.kind);
+    setDated(formatDayFirst(quote.dated));
+  }
+
+  function closeForm() {
+    setEditingQuote(null);
+    setAdding(false);
+    setSupplier('');
+    setDetail('');
+    setAmount('');
+    setIncl(true);
+    setKind('quote');
+    setDated('');
+  }
+
+  async function saveQuote() {
+    if (busy || !canSaveQuote || !editingQuote) return;
+    setBusy(true);
+    try {
+      const parsed = amount.trim() ? Number(amount.replace(/[^0-9.]/g, '')) : NaN;
+      await onUpdateQuote(editingQuote, {
+        // Empty means clear, which `updateQuote` turns into `p_clear` — an
+        // emptied supplier is somebody saying they no longer know, and leaving
+        // the old one there would be the box lying about what it holds.
+        supplier: supplier.trim() || null,
+        detail: detail.trim() || null,
+        amount: Number.isFinite(parsed) ? parsed : null,
+        amountInclGst: incl,
+        kind,
+        dated: parseLooseDate(dated) ?? null,
+      });
+      closeForm();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function addQuote() {
     if (busy || !canSaveQuote) return;
@@ -172,7 +250,7 @@ export default function ItemSheet({
               {quotes.length > 1 ? 'Quotes' : 'What it costs'}
             </Text>
             <View style={styles.rule} />
-            {!adding ? (
+            {!adding && !editingQuote ? (
               <Pressable
                 onPress={() => setAdding(true)}
                 style={styles.plusTap}
@@ -215,6 +293,23 @@ export default function ItemSheet({
                           : `excl · ${gross} incl`}
                     </Text>
                   </View>
+                  {/* A pencil, the same affordance the snag headline carries
+                      for the same job — correcting what was written. A sibling
+                      of the amount rather than wrapping it: a Pressable inside a
+                      Pressable is a coin toss about which one gets the tap, and
+                      this row already holds three others.
+
+                      Muted and small, because a price that is right is the
+                      normal case and the pencil must not compete with the
+                      figure it sits beside. */}
+                  <Pressable
+                    onPress={() => editQuote(quote)}
+                    style={styles.quoteEdit}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Correct the ${quote.supplier ?? 'unnamed'} price`}
+                  >
+                    <Icon name="pencil-outline" size="sm" color={Colors.textMuted} />
+                  </Pressable>
                 </View>
 
                 <View style={styles.quoteFoot}>
@@ -269,7 +364,7 @@ export default function ItemSheet({
             );
           })}
 
-          {adding ? (
+          {adding || editingQuote ? (
             <View style={styles.form}>
               <Text style={styles.fieldLabel}>Who from</Text>
               <TextInput
@@ -330,19 +425,32 @@ export default function ItemSheet({
                 pickerTitle="When was it quoted?"
               />
               <Pressable
-                onPress={addQuote}
+                onPress={editingQuote ? saveQuote : addQuote}
                 disabled={busy || !canSaveQuote}
                 style={[styles.cta, (busy || !canSaveQuote) && styles.ctaOff]}
                 accessibilityRole="button"
-                accessibilityLabel="Save this price"
+                accessibilityLabel={editingQuote ? 'Save the correction' : 'Save this price'}
               >
                 {busy ? (
                   <ActivityIndicator color={Colors.white} />
                 ) : (
                   <Text style={[styles.ctaLabel, !canSaveQuote && styles.ctaLabelOff]}>
-                    Save this price
+                    {editingQuote ? 'Save the correction' : 'Save this price'}
                   </Text>
                 )}
+              </Pressable>
+              {/* A way back out that does not save. Without it the only escape
+                  from a form somebody opened by mistake is closing the whole
+                  sheet, which loses the item they were looking at too. */}
+              <Pressable
+                onPress={closeForm}
+                style={styles.formCancel}
+                accessibilityRole="button"
+                accessibilityLabel="Leave it as it was"
+              >
+                <Text style={styles.formCancelLabel}>
+                  {editingQuote ? 'Leave it as it was' : 'Not now'}
+                </Text>
               </Pressable>
             </View>
           ) : null}
@@ -470,6 +578,16 @@ const styles = StyleSheet.create({
   quoteMoney: { alignItems: 'flex-end' },
   quoteAmount: { fontFamily: Fonts.mono, fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
   quoteGst: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
+  quoteEdit: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    marginRight: -Spacing.sm,
+    marginTop: -Spacing.xs,
+  },
+  formCancel: { alignItems: 'center', minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  formCancelLabel: { fontSize: Typography.sm, color: Colors.textMuted },
   quoteFoot: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs },
   quoteFiles: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, minHeight: MIN_TOUCH_TARGET, flex: 1 },
   quoteRemove: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.sm },

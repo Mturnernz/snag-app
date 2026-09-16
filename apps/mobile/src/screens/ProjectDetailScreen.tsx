@@ -12,6 +12,7 @@ import ItemSheet from '../components/ItemSheet';
 import ConfirmDialog from '../components/ConfirmDialog';
 import AddThingSheet from '../components/AddThingSheet';
 import ExportFooter from '../components/ExportFooter';
+import ProjectRoomsSheet from '../components/ProjectRoomsSheet';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import StatusBadge from '../components/StatusBadge';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -19,7 +20,8 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
 import {
-  createElement, createItem, createQuote, createThing, deleteItem, deleteProject, deleteQuote,
+  createElement, createItem, createLocation, createQuote, createThing, deleteElement, deleteItem,
+  deleteProject, deleteQuote,
   deleteStoredFiles, describeTotals, formatMoney, getProject, getProjectContents, getProjectFiles,
   getSnags, rangeLabel, setQuoteChosen, showsElements, updateElement, updateItem, updateProject,
   updateQuote,
@@ -72,7 +74,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export default function ProjectDetailScreen({ route }: Props) {
   const { projectId } = route.params;
   const navigation = useNavigation<Nav>();
-  const { household, locations } = useHousehold();
+  const { household, locations, reloadLocations } = useHousehold();
   const { showToast } = useToast();
 
   const [project, setProject] = useState<Project | null>(null);
@@ -85,8 +87,8 @@ export default function ProjectDetailScreen({ route }: Props) {
 
   const [openElement, setOpenElement] = useState<string | null>(null);
   const [itemDraft, setItemDraft] = useState<Record<string, string>>({});
-  const [elementDraft, setElementDraft] = useState('');
-  const [addingElement, setAddingElement] = useState(false);
+  const [roomsOpen, setRoomsOpen] = useState(false);
+  const [removingElement, setRemovingElement] = useState<ProjectElement | null>(null);
   const [openItem, setOpenItem] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [thingFor, setThingFor] = useState<ProjectItem | null>(null);
@@ -181,19 +183,48 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
-  async function addElement() {
-    const name = elementDraft.trim();
-    if (!name || busy) return;
+  async function addElement(name: string, room: string | null) {
+    if (busy) return;
     setBusy(true);
     try {
-      await createElement(projectId, name, locations.some((l) => l.name === name) ? name : null);
-      setElementDraft('');
-      setAddingElement(false);
+      await createElement(projectId, name, room);
       await load();
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't add that");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * A room added here is a room everywhere, through the same pair every other
+   * screen uses. Rooms are a property's vocabulary, not one sheet's.
+   */
+  async function addRoomTag(name: string): Promise<boolean> {
+    if (!project) return false;
+    try {
+      await createLocation(project.propertyId, name);
+      await reloadLocations();
+      return true;
+    } catch (err: unknown) {
+      showAlert("Couldn't add that room", err instanceof Error ? err.message : 'Please try again.');
+      return false;
+    }
+  }
+
+  async function removeElement(element: ProjectElement) {
+    setRemovingElement(null);
+    try {
+      // The keys come back for the client to clear, because
+      // storage.protect_delete() refuses a direct delete of a storage row.
+      const paths = await deleteElement(element.id);
+      await deleteStoredFiles(paths);
+      showToast('Removed');
+      await load();
+    } catch (err: unknown) {
+      // The server refuses the last one in words — a project with no parts is a
+      // project nothing can be added to.
+      showAlert("Couldn't remove that", err instanceof Error ? err.message : 'Please try again.');
     }
   }
 
@@ -350,44 +381,19 @@ export default function ProjectDetailScreen({ route }: Props) {
         <View style={styles.sectionRow}>
           <Text style={styles.section}>{drawElements ? 'Parts of the job' : 'What it takes'}</Text>
           <View style={styles.rule} />
+          {/* Opens the room picker rather than a naming box. Adding the
+              bathroom used to mean typing "Bathroom" and hoping it matched the
+              tag the rest of the app files things under — a picker is the only
+              control that cannot misspell the vocabulary. */}
           <Pressable
-            onPress={() => setAddingElement((open) => !open)}
+            onPress={() => setRoomsOpen(true)}
             style={styles.plusTap}
             accessibilityRole="button"
-            accessibilityLabel="Add a part of the job"
+            accessibilityLabel="Add a room to this job"
           >
-            <Icon name={addingElement ? 'close' : 'add'} size="md" color={Colors.textMuted} />
+            <Icon name="add" size="md" color={Colors.textMuted} />
           </Pressable>
         </View>
-
-        {addingElement ? (
-          <View style={styles.addRow}>
-            <TextInput
-              style={styles.addInput}
-              value={elementDraft}
-              onChangeText={setElementDraft}
-              placeholder="Bathroom renovation"
-              placeholderTextColor={Colors.textMuted}
-              onSubmitEditing={addElement}
-              returnKeyType="done"
-              autoFocus
-              accessibilityLabel="Name this part of the job"
-            />
-            <Pressable
-              onPress={addElement}
-              disabled={!elementDraft.trim()}
-              style={styles.addGo}
-              accessibilityRole="button"
-              accessibilityLabel="Add it"
-            >
-              <Icon
-                name="checkmark"
-                size="md"
-                color={elementDraft.trim() ? Colors.primary : Colors.textMuted}
-              />
-            </Pressable>
-          </View>
-        ) : null}
 
         {elements.map((element) => {
           const elementItems = itemsByElement[element.id] ?? [];
@@ -395,6 +401,7 @@ export default function ProjectDetailScreen({ route }: Props) {
 
           return (
             <View key={element.id} style={[styles.element, drawElements && styles.elementCard]}>
+              <View style={styles.elementTop}>
               {drawElements ? (
                 <Pressable
                   onPress={() => setOpenElement(open ? null : element.id)}
@@ -417,6 +424,21 @@ export default function ProjectDetailScreen({ route }: Props) {
                   <Icon name={open ? 'chevron-up' : 'chevron-down'} size="sm" color={Colors.textMuted} />
                 </Pressable>
               ) : null}
+              {/* A sibling of the heading, never inside it — a Pressable in a
+                  Pressable is a coin toss about which one gets the tap. Muted,
+                  because removing a part of the job is the rarest thing on this
+                  page and it takes what the part holds with it. */}
+              {drawElements ? (
+                <Pressable
+                  onPress={() => setRemovingElement(element)}
+                  style={styles.elementRemove}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${element.name} from this job`}
+                >
+                  <Icon name="close" size="sm" color={Colors.textMuted} />
+                </Pressable>
+              ) : null}
+              </View>
 
               {open ? (
                 <View style={styles.items}>
@@ -641,6 +663,31 @@ export default function ProjectDetailScreen({ route }: Props) {
         </Pressable>
       </ScrollView>
 
+      <ProjectRoomsSheet
+        visible={roomsOpen}
+        locations={locations}
+        elements={elements}
+        onAddRoom={addRoomTag}
+        onAdd={async (name, room) => {
+          await addElement(name, room);
+        }}
+        onClose={() => setRoomsOpen(false)}
+      />
+
+      <ConfirmDialog
+        visible={removingElement !== null}
+        title={`Remove ${removingElement?.name ?? ''}?`}
+        message={
+          removingElement && removingElement.itemCount > 0
+            ? `${removingElement.itemCount === 1 ? 'Its item goes' : `Its ${removingElement.itemCount} items go`} with it, and so does every quote and file on them. The room itself stays.`
+            : 'Nothing is on it yet. The room itself stays.'
+        }
+        confirmLabel="Remove"
+        destructive
+        onCancel={() => setRemovingElement(null)}
+        onConfirm={() => removingElement && removeElement(removingElement)}
+      />
+
       <ExportSheet
         visible={showExport}
         what="this job"
@@ -674,6 +721,13 @@ export default function ProjectDetailScreen({ route }: Props) {
           if (!activeItem) return;
           await createQuote({ itemId: activeItem.id, ...input });
           showToast('Saved');
+          await load();
+        }}
+        onUpdateQuote={async (quoteId, update) => {
+          await updateQuote(quoteId, update);
+          showToast('Saved');
+          // Re-read, because a corrected amount moves Quoted, Chosen and Spent
+          // at three levels at once and every one of them is derived in a view.
           await load();
         }}
         onChooseQuote={async (quoteId, chosen) => {
@@ -780,7 +834,22 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     ...Shadow.sm,
   },
-  elementHead: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, minHeight: MIN_TOUCH_TARGET },
+  elementHead: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  elementTop: { flexDirection: 'row', alignItems: 'flex-start' },
+  elementRemove: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    marginRight: -Spacing.sm,
+  },
   elementTitles: { flex: 1, minWidth: 0 },
   elementName: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
   elementSub: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },

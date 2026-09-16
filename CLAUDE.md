@@ -987,6 +987,14 @@ Three consequences worth holding on to:
   asked for, and the new room is **selected the moment it exists**: somebody who has typed
   "Storage area" into a question asking which rooms are touched has answered it, and making them
   tap the chip they just made would be the sheet asking twice.
+- **Leaving step two commits a name still sitting in the box**, and this shipped broken. The tick
+  beside the field was the only thing that created the room, so pressing *Next* with "Workshop"
+  typed discarded it and created no room either — a project came out with two parts where three
+  were asked for, and nothing anywhere said so, because from the sheet's point of view nothing had
+  happened. A half-typed answer in a box is still an answer, and the only honest readings of *Next*
+  are "take it" or "say why you can't". Forwards, backwards and *Skip for now* all commit it; a
+  refusal (`create_location` rejects a duplicate in words) **holds the step open with the words
+  still there** rather than advancing past a name it did not take.
 
 ### Money that cannot lie about itself
 
@@ -1092,6 +1100,23 @@ bathroom. No second bucket: `home-photos` under `<household_id>/docs/`, through
 dozen small decisions taken against a list still visible underneath, where a project is a page you
 *read*.
 
+**The rooms a job touches are answerable afterwards.** Step two asks once, which froze the answer at
+the moment somebody knew least — a renovation grows a room more often than it loses one, and
+finding out the laundry is coming in too is the normal middle of a job. The + on *Parts of the job*
+opens `ProjectRoomsSheet`: every room as a chip, the ones already a part lit and inert (adding one
+twice is two elements with one name and no way to tell them apart), *Add a room…* writing through
+`home.create_location` like everywhere else, and underneath a naming box for **the parts that are
+not rooms** — a renovation has a *Consent and council* and a *Scaffolding* that belong to no room,
+and a picker alone would insist otherwise.
+
+It replaced a free-text field, which was the wrong control: adding the bathroom meant typing
+"Bathroom" and hoping it matched the tag the rest of the app files things under. **A picker is the
+only control that cannot misspell the vocabulary.**
+
+Removing one is a **×** on the part's own heading with a confirmation naming what goes in counts —
+its items, their quotes and their files — and saying **the room itself stays**, because taking a
+part off a job is not deleting a room. The server refuses the last one in words.
+
 Two smaller rules. **`delete_element` refuses the last one** — items hang off an element, so a
 project with none is a project nothing can be added to. And **`set_quote_chosen` is its own
 function**, for the reason `set_part_bought` is: it is the only write in the feature that changes
@@ -1099,17 +1124,55 @@ what a total says, and alone it cannot have its sibling-clearing skipped by a ca
 `chosen` among eight other fields. The server clears the sibling *first*, because
 `project_quotes_one_chosen` is a plain unique index and not a deferred constraint.
 
+### Nobody types Quoted, Chosen or Spent
+
+All three are derived, and the only thing anybody enters is **one amount per quote** plus two
+decisions: which quote is *chosen*, and what kind of paper each one is. The kind is what drives
+*Spent* — a `quote` never counts, or every project would read as fully paid the day it was priced,
+so recording money that has actually gone out means a second row on the same item marked **Invoice**
+or **Receipt**. That is how a deposit works: a chosen $4,600 quote beside an $1,840 receipt reads as
+Chosen $4,600, Spent $1,840.
+
+**A saved price can be corrected**, through a pencil beside the amount — the same affordance the
+snag headline carries for the same job. It reuses the one form rather than opening a second sheet,
+because the fields are identical and a separate editor is a second place the GST pill and the kind
+chips would have to be got right.
+
+Three things about it are load-bearing:
+
+- **The box loads the figure as it was typed, never the normalised one.** The rollups work in
+  GST-inclusive dollars, so a form that loaded $1,150 for a $1,000 ex-GST trade price would raise it
+  by 15% every time somebody opened it to fix a typo in the supplier's name. Pinned.
+- **A correction never carries `chosen`.** Choosing stays on `set_quote_chosen` for the reason
+  above; a correction is not a decision, and routing it through the general update would be exactly
+  the caller-with-eight-other-fields that function exists to prevent.
+- **An emptied box clears the column** rather than leaving the old value — `updateQuote` turns a
+  null into `p_clear`, the same convention `update_snag` and `update_thing` use. An emptied supplier
+  is somebody saying they no longer know.
+
+There is also a way out that does not save, because otherwise the only escape from a form opened by
+mistake is closing the whole sheet and losing the item somebody was looking at.
+
+`ItemSheet.test.tsx` pins the pencil, the un-normalised load, the day-first date round-trip, the
+correction going through `updateQuote` rather than adding a second price, `chosen` never riding
+along, the emptied field clearing, the way out, and the add control hiding while a correction is
+open.
+
 `projects.test.ts` pins the money rules as properties rather than examples — the denominator, the
 unpriced item that is never zero, the GST gross-up, the range collapsing when nothing is left to
 decide, and that an extract states its GST basis and gives an unpriced item its own row.
 `MoneyField.test.tsx` pins the two named halves and the other-figure line.
 `AddProjectSheet.test.tsx` pins the new-room chip writing through the shared vocabulary rather than
 keeping its own, the field staying shut until asked for and open when a name is refused, the new
-room being selected without a second tap, and the step still being skippable.
+room being selected without a second tap, the step still being skippable, and the whole of the
+typed-and-not-ticked bug — committed on Next, on Skip and on Back, held open on a refusal, and an
+untouched step still passing through untouched.
 `ProjectsScreen.test.tsx` pins the grouping order, the dimmed done card, the empty day-one screen
 inventing nothing, the absence of a compose bar, and that no total renders without its denominator.
 `ProjectDetailScreen.test.tsx` pins the implicit layer staying hidden, the layer appearing once a
-real element exists, the three figures, and that files roll up without rolling down.
+real element exists, the three figures, that files roll up without rolling down, the + opening the
+room picker rather than a naming box, the × naming what goes with a part, and no × while the layer
+is still implicit.
 
 ## Why the app exists at all
 

@@ -96,6 +96,9 @@ function mapSnag(row: Row): Snag {
     assigneeId: row.assignee_id ?? null,
     thingId: row.thing_id ?? null,
     projectId: row.project_id ?? null,
+    projectItemId: row.project_item_id ?? null,
+    projectItemName: row.project_item_name ?? null,
+    projectElementName: row.project_element_name ?? null,
     reporterId: row.reporter_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -810,6 +813,13 @@ export async function createSnag(
     thingId?: string | null;
     /** The renovation it belongs to, when a job is filed from a project's page. */
     projectId?: string | null;
+    /**
+     * Which project item this snag's answer belongs to — set here and nowhere
+     * else. `updateSnag` deliberately cannot reach it, so it can never start a
+     * job; and setting it afterwards would be a create-then-update, which is
+     * two chances to write half of it.
+     */
+    projectItemId?: string | null;
     /** Only ever set together, and only by something scheduling ahead. */
     dueAt?: string | null;
     repeatDays?: number | null;
@@ -825,6 +835,7 @@ export async function createSnag(
     p_due_at: input.dueAt ?? null,
     p_repeat_days: input.repeatDays ?? null,
     p_project_id: input.projectId ?? null,
+    p_project_item_id: input.projectItemId ?? null,
   });
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_snag returns the base row, not the joined view.
@@ -978,6 +989,54 @@ export async function setSnagStatus(
   const { error } = await client.rpc('set_snag_status', {
     p_snag_id: snagId,
     p_status: status,
+  });
+  if (error) throw asError(error, "That didn’t save");
+  return getSnag(client, snagId);
+}
+
+/**
+ * Answer an open question about a project, and close it.
+ *
+ * The destination is not passed here: it was bound to the snag when the
+ * question was written (`createSnag`'s `projectItemId`), which is the whole
+ * reason there is nothing to sort out at this end. Whoever writes the question
+ * knows where the answer goes for free; three months later nobody does.
+ *
+ * What the person supplies is the one thing only a person can: the figure they
+ * read off the paper. There is deliberately no path that takes a document and
+ * returns a number — a scraped total has a source nobody can check, and it will
+ * be wrong about GST, about provisional sums, and about which of three
+ * revisions it read.
+ *
+ * `chosen` is not a parameter and never will be. Choosing stays on
+ * `setQuoteChosen`, which is its own function precisely so it cannot be
+ * smuggled in beside eight other fields.
+ */
+export async function answerProjectSnag(
+  client: SupabaseClient,
+  snagId: string,
+  answer: {
+    /** Leave null to file paperwork alone, or to just close the question. */
+    amount?: number | null;
+    /** What the typed figure meant. Nothing is converted on save. */
+    amountInclGst?: boolean;
+    /** A quote never counts towards Spent; an invoice or a receipt does. */
+    kind?: ProjectQuoteKind;
+    supplier?: string | null;
+    detail?: string | null;
+    dated?: string | null;
+    documentPaths?: string[];
+  } = {}
+): Promise<Snag> {
+  const { error } = await client.rpc('answer_project_snag', {
+    p_snag_id: snagId,
+    p_amount: answer.amount ?? null,
+    p_amount_incl_gst: answer.amountInclGst ?? true,
+    p_kind: answer.kind ?? 'invoice',
+    p_supplier: answer.supplier ?? null,
+    p_detail: answer.detail ?? null,
+    p_dated: answer.dated ?? null,
+    p_document_paths: answer.documentPaths ?? [],
   });
   if (error) throw asError(error, "That didn’t save");
   return getSnag(client, snagId);

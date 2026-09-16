@@ -27,6 +27,7 @@ const snag = (over: Partial<any> = {}): any => ({
   lastDoneAt: null, doneAt: null, propertyName: 'Home', reporterName: 'Mike',
   assigneeName: null, commentCount: 0, thingName: null, thingMake: null, thingModel: null,
   projectId: null, projectName: null,
+  projectItemId: null, projectItemName: null, projectElementName: null,
   ...over,
 });
 

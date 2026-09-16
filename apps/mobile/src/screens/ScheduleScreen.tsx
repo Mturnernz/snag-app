@@ -14,8 +14,8 @@ import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
-import { getSnags } from '../lib/supabase';
-import { RootStackParamList, Snag } from '../types';
+import { getAllProjects, getSnags } from '../lib/supabase';
+import { Project, RootStackParamList, Snag } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -79,6 +79,12 @@ const KIND_COLOURS: Record<ScheduleKind, string> = {
   // takes clay instead — see `markColour`.
   due: Colors.due.soonFg,
   next: Colors.due.soonFg,
+  // Neutral, and distinguished by **shape** rather than by a fifth hue: a
+  // project mark is a square where everything else is a circle. This palette
+  // has four hues with one job each and a renovation is not a snag state, so
+  // the distinction it needs is the one hollow-vs-solid already makes for a
+  // projection — form, not colour.
+  project: Colors.textMuted,
 };
 
 /**
@@ -92,7 +98,7 @@ const KIND_COLOURS: Record<ScheduleKind, string> = {
  */
 function markColour(mark: ScheduleMark, todayKey: string): string {
   const overdue =
-    mark.kind === 'due' && mark.day < todayKey && mark.snag.status !== 'done';
+    mark.kind === 'due' && mark.day < todayKey && mark.snag?.status !== 'done';
   return overdue ? Colors.due.overdueFg : KIND_COLOURS[mark.kind];
 }
 
@@ -105,9 +111,11 @@ function markColour(mark: ScheduleMark, todayKey: string): string {
  */
 function dotStyle(mark: ScheduleMark, todayKey: string, onFill = false) {
   const colour = onFill ? Colors.white : markColour(mark, todayKey);
-  return mark.kind === 'next'
-    ? { borderColor: colour, borderWidth: 1 }
-    : { backgroundColor: colour };
+  if (mark.kind === 'next') return { borderColor: colour, borderWidth: 1 };
+  // Square, not round — see KIND_COLOURS. Drawn by taking the radius off
+  // rather than by a second shape, so the two can never be different sizes.
+  if (mark.kind === 'project') return { backgroundColor: colour, borderRadius: 1 };
+  return { backgroundColor: colour };
 }
 
 /**
@@ -124,12 +132,12 @@ function dotsFor(marks: ScheduleMark[], todayKey: string): ScheduleMark[] {
     const here = marks.filter((m) => m.kind === kind);
     if (here.length === 0) return [];
     // For a due date, an overdue one speaks for the day if there is one.
-    return [here.find((m) => m.snag.status !== 'done' && m.day < todayKey) ?? here[0]];
+    return [here.find((m) => m.snag !== null && m.snag.status !== 'done' && m.day < todayKey) ?? here[0]];
   });
 }
 
 /** What happened, then what is coming — both on a cell and down a list. */
-const KIND_DRAW_ORDER: ScheduleKind[] = ['filed', 'done', 'due', 'next'];
+const KIND_DRAW_ORDER: ScheduleKind[] = ['filed', 'done', 'due', 'next', 'project'];
 
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 // Sunday-first, to index straight off `getDay()`.
@@ -161,6 +169,7 @@ export default function ScheduleScreen() {
   const [selected, setSelected] = useState<string | null>(() => dayKey(today));
 
   const [snags, setSnags] = useState<Snag[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -182,10 +191,18 @@ export default function ScheduleScreen() {
       setSnags(await getSnags({}, 'newest'));
     } catch (err) {
       console.error('Failed to load the schedule:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
     }
+    try {
+      // Separately, and deliberately not fatal: a calendar that cannot draw the
+      // renovations is still a calendar, and taking the whole tab down over the
+      // addition would be the worse trade. Same rule as the thing-history card
+      // on the snag page.
+      setProjects(await getAllProjects());
+    } catch (err) {
+      console.error('Failed to load the projects:', err);
+    }
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
   useEffect(() => {
@@ -203,8 +220,8 @@ export default function ScheduleScreen() {
 
   const marks = useMemo(() => {
     const after = new Date(days[41].getFullYear(), days[41].getMonth(), days[41].getDate() + 1);
-    return scheduleMarks(snags, days[0], after);
-  }, [snags, days]);
+    return scheduleMarks(snags, days[0], after, projects);
+  }, [snags, projects, days]);
 
   const byDay = useMemo(() => {
     const out = new Map<string, ScheduleMark[]>();
@@ -356,14 +373,16 @@ export default function ScheduleScreen() {
         </View>
 
         <View style={styles.legend}>
-          {(['filed', 'done', 'due', 'next'] as ScheduleKind[]).map((kind) => (
+          {(['filed', 'done', 'due', 'next', 'project'] as ScheduleKind[]).map((kind) => (
             <View key={kind} style={styles.legendItem}>
               <View
                 style={[
                   styles.dot,
                   kind === 'next'
                     ? { borderColor: KIND_COLOURS.next, borderWidth: 1 }
-                    : { backgroundColor: KIND_COLOURS[kind] },
+                    : kind === 'project'
+                      ? { backgroundColor: KIND_COLOURS.project, borderRadius: 1 }
+                      : { backgroundColor: KIND_COLOURS[kind] },
                 ]}
               />
               <Text style={styles.legendLabel}>{SCHEDULE_KIND_LABELS[kind]}</Text>
@@ -391,30 +410,45 @@ export default function ScheduleScreen() {
         ) : (
           listed.map((mark, i) => (
             <Pressable
-              key={`${mark.snag.id}-${mark.kind}-${i}`}
-              onPress={() => navigation.navigate('SnagDetail', { snagId: mark.snag.id })}
+              key={`${mark.snag?.id ?? mark.project?.id}-${mark.kind}-${i}`}
+              onPress={() =>
+                mark.snag
+                  ? navigation.navigate('SnagDetail', { snagId: mark.snag.id })
+                  : mark.project
+                    ? navigation.navigate('ProjectDetail', { projectId: mark.project.id })
+                    : undefined
+              }
               style={styles.row}
               accessibilityRole="button"
+              accessibilityLabel={
+                mark.snag ? snagHeadline(mark.snag) : mark.project?.name ?? 'Project'
+              }
             >
               <View
                 style={[styles.rowDot, dotStyle(mark, todayKey)]}
               />
               <View style={styles.rowBody}>
-                <Text style={styles.rowTitle} numberOfLines={2}>{snagHeadline(mark.snag)}</Text>
+                <Text style={styles.rowTitle} numberOfLines={2}>
+                  {mark.snag ? snagHeadline(mark.snag) : mark.project?.name}
+                </Text>
                 <Text style={styles.rowMeta}>
                   {/* The date leads when the list is a whole month; on one day
                       it is the heading and repeating it on every row is noise. */}
                   {selected ? '' : `${shortDay(mark.day)} · `}
-                  {SCHEDULE_KIND_LABELS[mark.kind]}
+                  {/* A project's row says which of its three dates this is —
+                      "Started", "Finished", "Aiming to finish" — because they
+                      are three different claims and one word for all of them
+                      would be the tab inventing a state. */}
+                  {mark.note ?? SCHEDULE_KIND_LABELS[mark.kind]}
                   {/* Which house, ahead of which room: with two places on one
                       calendar, "Roof" alone is ambiguous in the way that
                       actually matters. */}
-                  {manyPlaces ? ` · ${mark.snag.propertyName}` : ''}
-                  {mark.snag.room ? ` · ${mark.snag.room}` : ''}
+                  {manyPlaces ? ` · ${mark.snag?.propertyName ?? mark.project?.propertyName}` : ''}
+                  {mark.snag?.room ? ` · ${mark.snag.room}` : ''}
                   {/* Said the way the snag says it — "every 6 months", never
                       "180 days". `describeCycle` is shared with triage so the
                       two cannot word the same arrangement differently. */}
-                  {mark.snag.repeatDays ? ` · every ${describeCycle(mark.snag.repeatDays)}` : ''}
+                  {mark.snag?.repeatDays ? ` · every ${describeCycle(mark.snag.repeatDays)}` : ''}
                 </Text>
               </View>
               <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />

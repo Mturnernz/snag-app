@@ -340,6 +340,8 @@ export const getAbsentThings = (propertyId: string) => queries.getAbsentThings(s
 
 export const getProjects = (propertyId: string) => queries.getProjects(supabase, propertyId);
 
+export const getAllProjects = () => queries.getAllProjects(supabase);
+
 export const getProject = (projectId: string) => queries.getProject(supabase, projectId);
 
 export const getProjectContents = (projectId: string) =>

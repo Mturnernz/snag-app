@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, ScrollView, Pressable, StyleSheet } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,21 +13,53 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../consta
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  deleteMyAccount, deleteStoredFiles, getMyOrphanFilePaths, signOut, upsertProfile,
+  deleteMyAccount, deleteStoredFiles, getAllProjects, getMyOrphanFilePaths, getSnags, signOut,
+  upsertProfile,
 } from '../lib/supabase';
+import { looseEnds, type LooseEnd } from '@snag/supabase-queries';
 import { showAlert } from '../lib/alert';
 import { RootStackParamList } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+/**
+ * How many loose ends are ever drawn at once.
+ *
+ * Five is a sitting's worth. The count above the list stays honest about the
+ * total, but a scrolling wall of them is precisely the completeness meter this
+ * whole section is built not to become.
+ */
+const LOOSE_END_LIMIT = 5;
+
 export default function ProfileScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { profile, household, members, locations, reloadAccount } = useHousehold();
+  const { profile, household, members, locations, properties, reloadAccount } = useHousehold();
   const { showToast } = useToast();
 
   const [name, setName] = useState(profile.displayName);
   const [saving, setSaving] = useState(false);
+  const [ends, setEnds] = useState<LooseEnd[]>([]);
+  const [endsOpen, setEndsOpen] = useState(false);
+
+  /**
+   * What the app knows is half-finished and can name the next move for.
+   *
+   * **Two reads, and neither is fatal.** They are the same two the Schedule tab
+   * already makes, and a list of optional tidying must never be the thing that
+   * stops somebody signing out — this screen is also the escape hatch from a
+   * broken session.
+   */
+  const loadEnds = useCallback(async () => {
+    try {
+      const [projects, snags] = await Promise.all([getAllProjects(), getSnags({})]);
+      setEnds(looseEnds({ projects, snags, properties }));
+    } catch {
+      setEnds([]);
+    }
+  }, [properties]);
+
+  useFocusEffect(useCallback(() => { loadEnds(); }, [loadEnds]));
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const dirty = name.trim() !== profile.displayName && name.trim().length > 0;
@@ -88,6 +120,77 @@ export default function ProfileScreen() {
           <Button label="Save" onPress={handleSave} loading={saving} fullWidth />
         ) : null}
       </Card>
+
+      {/* ── Worth finishing ───────────────────────────────────────────
+          **Quiet, and absent at zero.** One muted line that expands, sitting
+          below the name card rather than above it, in no colour and on no
+          elevated surface — everything else on this screen is a white card, and
+          this deliberately is not one.
+
+          The rule it is built against is the House tab's, one screen further
+          on: *a global completeness meter is the shaming number that gets an
+          app closed and not reopened.* So there is no percentage, no progress
+          bar and no denominator of everything — only a count of concrete things
+          somebody could do, the same shape as the shopping pill's "2 things to
+          get". Each entry has to be a fact from a column, have one obvious next
+          action, and have a payoff nameable in a sentence; anything that fails
+          one of those is left out, which is why the list is short and usually
+          empty.
+
+          Collapsed by default, because the person opening the You tab came to
+          change their name or sign out. */}
+      {ends.length > 0 ? (
+        <View style={styles.ends}>
+          <Pressable
+            onPress={() => setEndsOpen((open) => !open)}
+            style={styles.endsHead}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: endsOpen }}
+            accessibilityLabel={
+              ends.length === 1 ? '1 thing worth finishing' : `${ends.length} things worth finishing`
+            }
+          >
+            <Text style={styles.endsTitle}>
+              {ends.length === 1 ? '1 thing worth finishing' : `${ends.length} things worth finishing`}
+            </Text>
+            <Icon
+              name={endsOpen ? 'chevron-up' : 'chevron-down'}
+              size="sm"
+              color={Colors.textMuted}
+            />
+          </Pressable>
+
+          {endsOpen ? (
+            <View style={styles.endsList}>
+              {/* Capped, and the cap is the point: a wall of them would be the
+                  meter this is built not to be. The count above stays honest;
+                  the line below says why the rest are not drawn. */}
+              {ends.slice(0, LOOSE_END_LIMIT).map((end, i) => (
+                <Pressable
+                  key={`${end.kind}-${end.projectId ?? end.snagId ?? i}`}
+                  onPress={() => {
+                    if (end.projectId) navigation.navigate('ProjectDetail', { projectId: end.projectId });
+                    else if (end.snagId) navigation.navigate('SnagDetail', { snagId: end.snagId });
+                    else navigation.navigate('Household');
+                  }}
+                  style={styles.end}
+                  accessibilityRole="button"
+                  accessibilityLabel={end.title}
+                >
+                  <View style={styles.endBody}>
+                    <Text style={styles.endTitle}>{end.title}</Text>
+                    <Text style={styles.endDetail}>{end.detail}</Text>
+                  </View>
+                  <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+                </Pressable>
+              ))}
+              {ends.length > LOOSE_END_LIMIT ? (
+                <Text style={styles.endsMore}>More once these are done.</Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
 
       <Pressable onPress={() => navigation.navigate('Household')}>
         <Card elevation="md" style={styles.linkRow}>
@@ -198,6 +301,37 @@ const styles = StyleSheet.create({
   },
   linkHint: { fontSize: Typography.sm, color: Colors.textMuted },
   signOut: { marginTop: Spacing.md },
+  // No card, no elevation, no hue. Everything else on this screen is a white
+  // card on the plaster ground; this is deliberately quieter than all of it.
+  ends: { marginBottom: Spacing.md },
+  endsHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.xs,
+  },
+  endsTitle: { fontSize: Typography.sm, color: Colors.textMuted },
+  endsList: { paddingHorizontal: Spacing.xs },
+  end: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  endBody: { flex: 1, minWidth: 0 },
+  endTitle: { fontSize: Typography.sm, color: Colors.textPrimary },
+  endDetail: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
+  endsMore: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
   deleteHint: {
     fontSize: Typography.sm,
     color: Colors.textMuted,

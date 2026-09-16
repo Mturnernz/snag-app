@@ -362,9 +362,24 @@ Three smaller rules:
   reading "Saturday 5 September" over a grid of November is the screen contradicting itself, and
   it is also the wrong answer: somebody who has just paged forward is asking what lands *then*.
 
+**Projects are on it too, and still nothing writes.** A renovation's `started_on`, `finished_on`
+and `target_on` are drawn as a fifth kind — a read of dates set on the project's own page, so the
+rule holds exactly: no cell is draggable, and every row is a door back to the project. Three
+details are load-bearing. A project mark carries `snag: null` and a `project` instead, because a
+project is not a snag and pretending otherwise gives the tab two ideas of what it is showing. It is
+distinguished by **shape** — a square where everything else is a circle — because the palette has
+four hues with one job each and a renovation is not a state; that is the same move hollow-vs-solid
+already makes for a projection. And `target_on` is **never called "Due"**: nothing is due then, it
+is a hope somebody typed, and "Due" is the one word this tab must not spend loosely. A met target
+is dropped rather than drawn, since the row saying it finished is two lines up. The read is
+`getAllProjects()` — no property filter, for the same reason `getSnags({})` has none — and it is
+**not fatal**: a calendar that cannot draw the renovations is still a calendar.
+
 `scheduleMarks`, `monthGrid`, `dayKey` and `marksOn` live in `packages/supabase-queries` with the
 other pure helpers and are pinned by `schedule.test.ts`; `ScheduleScreen.test.tsx` pins the hollow
-projection, the overdue hue, the unfiltered read and the paging rule.
+projection, the overdue hue, the unfiltered read and the paging rule. `looseEnds.test.ts` pins the
+project marks — the two real dates, the target never reading as "Due", a met target dropped, and
+that a caller passing no projects gets exactly what it got before.
 
 ## The list is the app's home
 
@@ -1345,6 +1360,53 @@ It is answered in two places, and both are needed:
 
 A waiting invitation renders under *Who's here* with an hourglass instead of an avatar and the words
 "Waiting — they need to sign up with this address". **It must never read as somebody who is here.**
+
+## Worth finishing: the quiet list, and the meter it must never become
+
+The You tab carries one muted line — *"3 things worth finishing"* — that expands into a short list
+and is **absent entirely at zero**. It exists because the app now holds four kinds of record that
+are supposed to inform each other, and the places they fall out of step are knowable.
+
+**The rule it is built against is the House tab's, one screen further on:** a global completeness
+meter is the shaming number that gets an app closed and not reopened, and there is deliberately no
+such meter anywhere. So there is no percentage, no progress bar, and no denominator of everything —
+only a count of concrete things somebody could do, the same shape as the shopping pill's "2 things
+to get". `ProfileScreen.test.tsx` asserts that no `%`, no `N of M` and no "complete" ever reaches
+the screen.
+
+**Three tests every entry has to pass**, and anything failing one is left out — which is why the
+list is short and usually empty:
+
+1. **The app is certain.** A fact from a column, never "this looks thin".
+2. **There is one obvious next action**, and a tap that starts it.
+3. **The payoff is nameable in a sentence**, and it is a payoff to the household rather than to the
+   record's tidiness.
+
+Three things pass today. **What a renovation has not handed over** —
+`installed_count - thing_count` on `projects_with_totals`, added by `20260916120000` — because
+three years on nobody asks what the laundry cost, they ask the model number and the warranty, and
+that answer only exists if somebody recorded the machine. A **photo with no words and no room**,
+which is named elsewhere in this file as the weakest thing the app can hold: `snagHeadline` has
+nothing to work with and the list reads "Something to sort out". And a **place with no suburb or
+town**, because `set_property_location` is what lets a briefed extract ask for somebody *local*.
+
+What is deliberately **not** listed is the more instructive half: a project with items nobody has
+priced (nagging about work in progress), a thing with no make or model (the photo of the rating
+plate may well be the answer), a subtraction that comes out negative (recording the old dishwasher
+beside the new one is not a loose end), and a finished snag however it was worded — there is
+nothing to sort out about a job that is done.
+
+Four smaller rules. It is **collapsed by default**, because somebody opening the You tab came to
+change their name or sign out. It sits on **no card, in no colour, at no elevation** — everything
+else on that screen is a white card on the plaster ground and this is quieter than all of it. It is
+**capped at `LOOSE_END_LIMIT`** (five, a sitting's worth) with the count above staying honest and
+one line saying *"More once these are done."* And the two reads it needs are **never fatal**: this
+screen is also the escape hatch from a broken session, so a list of optional tidying must not be
+what stops somebody signing out.
+
+`looseEnds.test.ts` pins every rule above as a property, including the four refusals;
+`ProfileScreen.test.tsx` pins the absence at zero, the collapsed line, the payoff wording, the
+missing meter, and Sign out surviving a failed read.
 
 ## Deleting your own account
 

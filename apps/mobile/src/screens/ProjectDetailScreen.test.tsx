@@ -30,6 +30,15 @@ jest.mock('../components/ItemSheet', () => {
   const { Text } = require('react-native');
   return { __esModule: true, default: () => React.createElement(Text, null, 'item sheet') };
 });
+jest.mock('../components/ProjectRoomsSheet', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return {
+    __esModule: true,
+    default: (props: any) =>
+      props.visible ? React.createElement(Text, null, 'rooms sheet open') : null,
+  };
+});
 jest.mock('../components/Attachments', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -43,6 +52,7 @@ const mock_getSnags = jest.fn();
 const mock_setQuoteChosen = jest.fn();
 const mock_updateItem = jest.fn();
 const mock_createElement = jest.fn();
+const mock_deleteElement = jest.fn().mockResolvedValue([]);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -54,6 +64,8 @@ jest.mock('../lib/supabase', () => {
     updateItem: (...a: unknown[]) => mock_updateItem(...a),
     createElement: (...a: unknown[]) => mock_createElement(...a),
     createItem: jest.fn(), createQuote: jest.fn(), createThing: jest.fn(),
+    createLocation: jest.fn(),
+    deleteElement: (...a: unknown[]) => mock_deleteElement(...a),
     deleteItem: jest.fn(), deleteProject: jest.fn(), deleteQuote: jest.fn(),
     deleteStoredFiles: jest.fn(), updateElement: jest.fn(), updateProject: jest.fn(),
     updateQuote: jest.fn(), getFileUrls: jest.fn().mockResolvedValue({}),
@@ -239,5 +251,66 @@ describe('the punch list', () => {
     // A punch list nobody can fetch must not take the page down — the same rule
     // the thing-history card follows on the snag page.
     r.getByText('Quoted');
+  });
+});
+
+/**
+ * Adding and removing the rooms a job touches.
+ *
+ * Step two of the start sheet asks once and never again, which froze the answer
+ * at the moment somebody knew least — a renovation grows a room more often than
+ * it loses one.
+ */
+describe('the rooms a job touches', () => {
+  const byLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+        && !!n.props?.onPress,
+      { deep: true }
+    )[0];
+
+  it('opens a room picker rather than a naming box', async () => {
+    const r = await arrange({
+      elements: [element({ implicit: false, name: 'Bathroom', room: 'Bathroom' })],
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Add a room to this job').props.onPress());
+    // A picker is the only control that cannot misspell the vocabulary the rest
+    // of the app files things under.
+    r.getByText('rooms sheet open');
+  });
+
+  it('offers a way to take a room off the job', async () => {
+    const r = await arrange({
+      elements: [
+        element({ id: 'e1', implicit: false, name: 'Bathroom', room: 'Bathroom' }),
+        element({ id: 'e2', implicit: false, name: 'Laundry', room: 'Laundry' }),
+      ],
+    });
+    expect(byLabel(r, 'Remove Bathroom from this job')).toBeDefined();
+  });
+
+  it('says what goes with it before it goes', async () => {
+    const r = await arrange({
+      elements: [
+        element({ id: 'e1', implicit: false, name: 'Bathroom', room: 'Bathroom', itemCount: 3 }),
+        element({ id: 'e2', implicit: false, name: 'Laundry', room: 'Laundry' }),
+      ],
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Remove Bathroom from this job').props.onPress());
+    // Named in counts rather than warned about in general, and it says the room
+    // itself survives — removing a part of a job is not removing a room.
+    const dialog = r.root.findAll(
+      (n: any) => typeof n.props?.message === 'string' && n.props?.visible === true
+    )[0];
+    expect(dialog.props.message).toContain('3 items');
+    expect(dialog.props.message).toContain('The room itself stays.');
+    expect(mock_deleteElement).not.toHaveBeenCalled();
+  });
+
+  it('shows no × while the layer is still implicit', async () => {
+    // One implicit element is a project with no parts drawn at all, so there is
+    // nothing to remove and a × would be a control for a concept not on screen.
+    const r = await arrange({ elements: [element({ implicit: true })] });
+    expect(byLabel(r, 'Remove Downstairs laundry from this job')).toBeUndefined();
   });
 });

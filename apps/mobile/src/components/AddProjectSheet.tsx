@@ -121,6 +121,12 @@ export default function AddProjectSheet({
       onCancel();
       return;
     }
+    if (step === 'rooms') {
+      // Backwards too: a name typed here is lost just as completely by going
+      // back to the title as by going on.
+      leaveRooms('name');
+      return;
+    }
     setStep(STEPS[index - 1]);
   }
 
@@ -130,21 +136,41 @@ export default function AddProjectSheet({
     );
   }
 
-  async function addRoom() {
+  async function addRoom(): Promise<boolean> {
     const name = roomDraft.trim();
-    if (!name || busy) return;
+    if (!name || busy) return true;
     setBusy(true);
     try {
-      if (await onAddRoom(name)) {
-        // Selected on the way in: the question on screen is which rooms it
-        // touches, and typing one is an answer to it.
-        setRooms((current) => (current.includes(name) ? current : [...current, name]));
-        setRoomDraft('');
-        setNamingRoom(false);
-      }
+      if (!(await onAddRoom(name))) return false;
+      // Selected on the way in: the question on screen is which rooms it
+      // touches, and typing one is an answer to it.
+      setRooms((current) => (current.includes(name) ? current : [...current, name]));
+      setRoomDraft('');
+      setNamingRoom(false);
+      return true;
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Leaving step two commits a room that was typed and not ticked.
+   *
+   * **This was a real bug and it lost people's work in silence.** The tick
+   * beside the field was the only thing that created the room, so somebody who
+   * typed "Workshop", pressed *Next*, and finished the project got a project
+   * with one fewer part than they had asked for — and no room created either.
+   * Nothing said so, because from the sheet's point of view nothing had
+   * happened. A half-typed answer sitting in a box is still an answer, and the
+   * only honest readings of *Next* are "take it" or "say why you can't".
+   *
+   * A refusal — `create_location` rejects a duplicate in words — keeps the step
+   * open with the words still in the box, rather than advancing past a name it
+   * did not take.
+   */
+  async function leaveRooms(to: Step): Promise<void> {
+    if (roomDraft.trim() && !(await addRoom())) return;
+    setStep(to);
   }
 
   async function save() {
@@ -354,7 +380,11 @@ export default function AddProjectSheet({
 
         <View style={styles.footer}>
           <Pressable
-            onPress={() => (step === 'when' ? save() : setStep(STEPS[index + 1]))}
+            onPress={() =>
+              step === 'when' ? save()
+                : step === 'rooms' ? leaveRooms('when')
+                  : setStep(STEPS[index + 1])
+            }
             disabled={busy || (step === 'name' && !name.trim())}
             style={[styles.cta, (busy || (step === 'name' && !name.trim())) && styles.ctaOff]}
             accessibilityRole="button"
@@ -375,7 +405,7 @@ export default function AddProjectSheet({
           </Pressable>
           {step === 'rooms' ? (
             <Pressable
-              onPress={() => setStep('when')}
+              onPress={() => leaveRooms('when')}
               style={styles.skip}
               accessibilityRole="button"
               accessibilityLabel="Skip for now"

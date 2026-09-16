@@ -134,3 +134,84 @@ it('still lets the step be skipped entirely', async () => {
   // named after it and the layer is never drawn.
   expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ rooms: [] }));
 });
+
+/**
+ * The typed-and-not-ticked room, which shipped losing people's work in silence.
+ *
+ * A real project was created with three rooms intended and two recorded: the
+ * tick beside the field was the only thing that created a room, so pressing
+ * *Next* with a name still in the box discarded it — and created no room
+ * either. Nothing anywhere said so, because from the sheet's point of view
+ * nothing had happened.
+ */
+describe('a room typed but not ticked', () => {
+  it('is created and selected when Next is pressed', async () => {
+    const { r, onAddRoom, onCreate } = arrange();
+    await toRooms(r);
+    await TestRenderer.act(async () => byLabel(r, 'Bathroom').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Add a room').props.onPress());
+    await TestRenderer.act(async () => {
+      inputByLabel(r, 'Name the room').props.onChangeText('Workshop');
+    });
+
+    // Straight to Next, never touching the tick — the journey that lost it.
+    await TestRenderer.act(async () => byLabel(r, 'Next').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Start it').props.onPress());
+
+    expect(onAddRoom).toHaveBeenCalledWith('Workshop');
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ rooms: ['Bathroom', 'Workshop'] })
+    );
+  });
+
+  it('is created when the step is skipped', async () => {
+    const { r, onAddRoom, onCreate } = arrange();
+    await toRooms(r);
+    await TestRenderer.act(async () => byLabel(r, 'Add a room').props.onPress());
+    await TestRenderer.act(async () => {
+      inputByLabel(r, 'Name the room').props.onChangeText('Workshop');
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Skip for now').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Start it').props.onPress());
+
+    expect(onAddRoom).toHaveBeenCalledWith('Workshop');
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ rooms: ['Workshop'] }));
+  });
+
+  it('survives going back to the title as well', async () => {
+    const { r, onAddRoom } = arrange();
+    await toRooms(r);
+    await TestRenderer.act(async () => byLabel(r, 'Add a room').props.onPress());
+    await TestRenderer.act(async () => {
+      inputByLabel(r, 'Name the room').props.onChangeText('Workshop');
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Back').props.onPress());
+    // Backwards loses a name just as completely as forwards.
+    expect(onAddRoom).toHaveBeenCalledWith('Workshop');
+  });
+
+  it('holds the step open when the name is refused, rather than advancing past it', async () => {
+    const { r, onCreate } = arrange({ onAddRoom: jest.fn().mockResolvedValue(false) });
+    await toRooms(r);
+    await TestRenderer.act(async () => byLabel(r, 'Add a room').props.onPress());
+    await TestRenderer.act(async () => {
+      inputByLabel(r, 'Name the room').props.onChangeText('Bathroom');
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Next').props.onPress());
+
+    // Still on step two, with the words still there — create_location refuses a
+    // duplicate in words, and advancing past a name it did not take is how the
+    // original bug felt from the outside.
+    expect(inputByLabel(r, 'Name the room')).toBeDefined();
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it('still lets an untouched step through untouched', async () => {
+    const { r, onAddRoom, onCreate } = arrange();
+    await toRooms(r);
+    await TestRenderer.act(async () => byLabel(r, 'Next').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Start it').props.onPress());
+    expect(onAddRoom).not.toHaveBeenCalled();
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ rooms: [] }));
+  });
+});

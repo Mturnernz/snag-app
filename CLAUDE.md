@@ -962,6 +962,16 @@ Three consequences worth holding on to:
   elements never appear at all. The alternative — a nullable `element_id` on an item — was rejected
   because it gives the rollup two paths to sum through, which is how a total starts disagreeing
   with itself.
+- **A room the seed never guessed at is made on that step**, through the same *Add a room…* chip
+  the walkthrough's first step carries, and for the same reason: the moment somebody notices the
+  storage area under the house is not on the list is the moment they are describing a renovation
+  that touches it, and sending them to Profile → Location tags and back loses the flow. It calls
+  `home.create_location` against the active property and then `reloadLocations()`, so a room added
+  here is a room on the List tab and the House tab too — **one vocabulary, or the tabs stop
+  describing the same house**. The chip is dashed rather than sunken, the field appears only when
+  asked for, and the new room is **selected the moment it exists**: somebody who has typed
+  "Storage area" into a question asking which rooms are touched has answered it, and making them
+  tap the chip they just made would be the sheet asking twice.
 
 ### Money that cannot lie about itself
 
@@ -1078,6 +1088,9 @@ what a total says, and alone it cannot have its sibling-clearing skipped by a ca
 unpriced item that is never zero, the GST gross-up, the range collapsing when nothing is left to
 decide, and that an extract states its GST basis and gives an unpriced item its own row.
 `MoneyField.test.tsx` pins the two named halves and the other-figure line.
+`AddProjectSheet.test.tsx` pins the new-room chip writing through the shared vocabulary rather than
+keeping its own, the field staying shut until asked for and open when a name is refused, the new
+room being selected without a second tap, and the step still being skippable.
 `ProjectsScreen.test.tsx` pins the grouping order, the dimmed done card, the empty day-one screen
 inventing nothing, the absence of a compose bar, and that no total renders without its denominator.
 `ProjectDetailScreen.test.tsx` pins the implicit layer staying hidden, the layer appearing once a

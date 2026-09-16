@@ -14,7 +14,8 @@ import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } 
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createProject, describeTotals, formatMoney, getProjects, projectSubtitle, rangeLabel,
+  createLocation, createProject, describeTotals, formatMoney, getProjects, projectSubtitle,
+  rangeLabel,
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
 import { exportDateStamp, groupProjectsByStatus, projectExportTable } from '@snag/supabase-queries';
@@ -63,7 +64,9 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export default function ProjectsScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { household, properties, activeProperty, setActiveProperty, locations } = useHousehold();
+  const {
+    household, properties, activeProperty, setActiveProperty, locations, reloadLocations,
+  } = useHousehold();
   const { showToast } = useToast();
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -100,6 +103,29 @@ export default function ProjectsScreen() {
       })),
     [projects]
   );
+
+  /**
+   * A room added here is a room everywhere.
+   *
+   * Same RPC, same property and the same `reloadLocations()` the House tab's
+   * *Add a room* line calls — rooms are a property's vocabulary, not one
+   * screen's, and two screens keeping separate ideas of what rooms exist is how
+   * the tabs stop describing the same house.
+   */
+  async function addRoom(name: string): Promise<boolean> {
+    if (!activeProperty) return false;
+    try {
+      await createLocation(activeProperty.id, name);
+      await reloadLocations();
+      showToast(`${name} added`);
+      return true;
+    } catch (err: unknown) {
+      // The RPC refuses a blank name and a duplicate in words, so this is worth
+      // showing rather than swallowing.
+      showAlert("Couldn't add that room", err instanceof Error ? err.message : 'Please try again.');
+      return false;
+    }
+  }
 
   async function start(input: ProjectInput) {
     try {
@@ -270,6 +296,7 @@ export default function ProjectsScreen() {
         visible={sheetOpen}
         propertyId={activeProperty?.id ?? ''}
         locations={locations}
+        onAddRoom={addRoom}
         onCancel={() => setSheetOpen(false)}
         onCreate={start}
       />

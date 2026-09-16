@@ -18,6 +18,15 @@ interface Props {
   visible: boolean;
   propertyId: string;
   locations: Location[];
+  /**
+   * Creates a room tag and says whether it worked.
+   *
+   * The same prop `AddThingSheet` takes, calling the same `home.create_location`
+   * against the same property — because a room is a property's vocabulary, not
+   * one sheet's. A room added here joins the tags the List tab groups by, the
+   * House tab sections on and capture offers.
+   */
+  onAddRoom: (name: string) => Promise<boolean>;
   onCancel: () => void;
   onCreate: (input: ProjectInput) => Promise<void>;
 }
@@ -40,6 +49,20 @@ interface Props {
  * makes it implicit and the client never draws it. Nobody is ever asked to
  * understand the hierarchy before they can record a renovation.
  *
+ * **And a room the seed never guessed at can be made right here**, for exactly
+ * the reason the walkthrough's *Add a room…* chip sits on its first step: the
+ * moment somebody notices the storage area under the house is not on the list is
+ * the moment they are describing a renovation that touches it, and sending them
+ * to Profile → Location tags and back loses the flow they were in. It calls the
+ * same `home.create_location` against the same property, so a room added here is
+ * a room on the List tab and the House tab too — one vocabulary, or the tabs
+ * stop describing the same house.
+ *
+ * The new room is **selected as soon as it exists**, because somebody who has
+ * just typed "Storage area" into a question asking which rooms are touched has
+ * plainly answered it. Making them tap the chip they just created would be the
+ * sheet asking twice.
+ *
  * **"Already finished" is a first-class answer**, not an edge case. Recording
  * the bathroom you did in 2024 is how the record becomes useful before the next
  * renovation starts, and it is where the receipts and the guarantee live. The
@@ -56,7 +79,7 @@ interface Props {
  * walked away mid-flow would be a row with no parts to hang anything off.
  */
 export default function AddProjectSheet({
-  visible, propertyId, locations, onCancel, onCreate,
+  visible, propertyId, locations, onAddRoom, onCancel, onCreate,
 }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
@@ -71,6 +94,8 @@ export default function AddProjectSheet({
   const [budget, setBudget] = useState('');
   const [budgetIncl, setBudgetIncl] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [namingRoom, setNamingRoom] = useState(false);
+  const [roomDraft, setRoomDraft] = useState('');
 
   useEffect(() => {
     if (!visible) return;
@@ -84,6 +109,8 @@ export default function AddProjectSheet({
     setBudget('');
     setBudgetIncl(true);
     setBusy(false);
+    setNamingRoom(false);
+    setRoomDraft('');
   }, [visible]);
 
   const index = STEPS.indexOf(step);
@@ -100,6 +127,23 @@ export default function AddProjectSheet({
     setRooms((current) =>
       current.includes(room) ? current.filter((r) => r !== room) : [...current, room]
     );
+  }
+
+  async function addRoom() {
+    const name = roomDraft.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    try {
+      if (await onAddRoom(name)) {
+        // Selected on the way in: the question on screen is which rooms it
+        // touches, and typing one is an answer to it.
+        setRooms((current) => (current.includes(name) ? current : [...current, name]));
+        setRoomDraft('');
+        setNamingRoom(false);
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function save() {
@@ -186,7 +230,55 @@ export default function AddProjectSheet({
                   </Pressable>
                 );
               })}
+              {/* Dashed rather than sunken, so it reads as a way to make one
+                  rather than as a room that exists — the same distinction the
+                  House tab draws between a ghost and a record. */}
+              <Pressable
+                onPress={() => setNamingRoom(true)}
+                style={styles.chipTap}
+                accessibilityRole="button"
+                accessibilityLabel="Add a room"
+              >
+                <View style={[styles.chip, styles.chipNew]}>
+                  <Text style={styles.chipNewLabel}>+ Add a room…</Text>
+                </View>
+              </Pressable>
             </View>
+
+            {namingRoom ? (
+              <View style={styles.newRoomRow}>
+                <TextInput
+                  style={styles.newRoomInput}
+                  value={roomDraft}
+                  onChangeText={setRoomDraft}
+                  placeholder="Storage area · Conservatory · Sleepout"
+                  placeholderTextColor={Colors.textMuted}
+                  onSubmitEditing={addRoom}
+                  returnKeyType="done"
+                  maxLength={40}
+                  autoFocus
+                  accessibilityLabel="Name the room"
+                />
+                <Pressable
+                  onPress={addRoom}
+                  disabled={busy || !roomDraft.trim()}
+                  style={styles.newRoomGo}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add it"
+                >
+                  {busy ? (
+                    <ActivityIndicator color={Colors.primary} />
+                  ) : (
+                    <Icon
+                      name="checkmark"
+                      size="md"
+                      color={roomDraft.trim() ? Colors.primary : Colors.textMuted}
+                    />
+                  )}
+                </Pressable>
+              </View>
+            ) : null}
+
             {/* Said in one line, at the moment the answer decides it, rather
                 than as a concept explained anywhere. */}
             <Text style={styles.hint}>
@@ -295,7 +387,12 @@ export default function AddProjectSheet({
             )}
           </Pressable>
           {step === 'rooms' ? (
-            <Pressable onPress={() => setStep('when')} style={styles.skip} accessibilityRole="button">
+            <Pressable
+              onPress={() => setStep('when')}
+              style={styles.skip}
+              accessibilityRole="button"
+              accessibilityLabel="Skip for now"
+            >
               <Text style={styles.skipLabel}>Skip for now</Text>
             </Pressable>
           ) : null}
@@ -372,6 +469,33 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: Colors.primary },
   chipLabel: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
+  chipNew: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.border,
+  },
+  chipNewLabel: { fontSize: Typography.sm, color: Colors.textMuted },
+  newRoomRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
+  newRoomInput: {
+    // A TextInput on web is an <input> with an intrinsic ~20-character width
+    // that `min-width: auto` will not shrink below, so anything flexed around
+    // one needs minWidth: 0 or it grows past the sheet.
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.input,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
+  },
+  newRoomGo: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   footer: { marginTop: Spacing.lg },
   cta: {
     backgroundColor: Colors.primary,

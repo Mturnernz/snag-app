@@ -16,6 +16,7 @@ import DueBadge from '../components/DueBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PhotoViewer from '../components/PhotoViewer';
 import AdviceCard from '../components/AdviceCard';
+import DoneDialog from '../components/DoneDialog';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -87,6 +88,8 @@ export default function SnagDetailScreen() {
   const [repeating, setRepeating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** Whether the congratulations dialog is up. Only a real finish sets it. */
+  const [celebrating, setCelebrating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -161,10 +164,17 @@ export default function SnagDetailScreen() {
       setSnag(updated);
       // A repeating snag doesn't close — the RPC rolls it forward instead, so
       // say what actually happened rather than what was asked for.
+      //
+      // Which is also why only one of these two branches congratulates
+      // anybody: the job that rolled forward is back on the list before the
+      // phone is down, and a dialog saying well done over a snag that is still
+      // there would be the app claiming something the list contradicts. It
+      // dims and sinks to the foot of the list instead (`isDoneForNow`), and
+      // keeps the toast that says so.
       if (next === 'done' && updated.status === 'open') {
         showToast(`Done — back on the list ${updated.dueAt ? 'when it’s next due' : 'again'}`);
       } else if (next === 'done') {
-        showToast('Done');
+        setCelebrating(true);
       }
     } catch (err: any) {
       showAlert("Couldn't update that", err?.message ?? 'Please try again.');
@@ -609,6 +619,17 @@ export default function SnagDetailScreen() {
         photos={snag.photoPaths.map((path) => photoUrls[path]).filter(Boolean)}
         startIndex={viewing ?? 0}
         onClose={() => setViewing(null)}
+      />
+
+      {/* One button, and it goes back to the list — which is where the reward
+          actually is, because the snag has just left it. */}
+      <DoneDialog
+        visible={celebrating}
+        headline={snagHeadline(snag)}
+        onClose={() => {
+          setCelebrating(false);
+          navigation.goBack();
+        }}
       />
 
       <ConfirmDialog

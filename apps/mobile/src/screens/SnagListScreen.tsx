@@ -21,8 +21,8 @@ import {
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import {
-  assessmentBrief, exportDateStamp, shoppingCount, shoppingList, snagExportPhotos,
-  snagExportTable,
+  assessmentBrief, exportDateStamp, isDoneForNow, shoppingCount, shoppingList,
+  snagExportPhotos, snagExportTable,
 } from '@snag/supabase-queries';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag, Thing } from '../types';
@@ -232,7 +232,8 @@ export default function SnagListScreen() {
   // What somebody else has put on the list since you last looked.
   const fresh = useMemo(() => {
     if (!seenBefore) return [];
-    return visible.filter((s) => s.reporterId !== profile.id && s.createdAt > seenBefore);
+    return visible.filter((s) =>
+      s.reporterId !== profile.id && s.createdAt > seenBefore && !isDoneForNow(s));
   }, [visible, seenBefore, profile.id]);
 
   /**
@@ -282,6 +283,18 @@ export default function SnagListScreen() {
     return done.filter((s) => new Date(s.doneAt ?? s.updatedAt).getTime() >= cutoff);
   }, [done]);
 
+  /**
+   * What the header counts.
+   *
+   * A repeating job that has been done this cycle is not something to do, and
+   * saying "3 to do" over a list where one of them is dimmed and parked at the
+   * bottom is the screen contradicting itself.
+   */
+  const toDo = useMemo(() => visible.filter((s) => !isDoneForNow(s)).length, [visible]);
+
+  /** Everything but whatever the amend sheet is asking about. */
+  const rest0 = (rows: Snag[]) => (justAdded ? rows.filter((s) => s.id !== justAdded.id) : rows);
+
   const sections = useMemo(() => {
     const freshIds = new Set(fresh.map((s) => s.id));
     // Whatever is being prompted about stays at the top while the prompt is up.
@@ -290,7 +303,16 @@ export default function SnagListScreen() {
     // off-screen behind the row asking about it.
     const pinned = justAdded ? visible.filter((s) => s.id === justAdded.id) : [];
     const pinnedId = pinned[0]?.id;
-    const rest = visible.filter((s) => !freshIds.has(s.id) && s.id !== pinnedId);
+    // A repeating job that has been done sinks past every room to the foot of
+    // the list. It cannot *leave* the way a finished snag does — the RPC rolls
+    // it forward and leaves it open — so this is the only version of that
+    // reward available to it, and leaving it sitting in its room means the one
+    // thing on the list nobody has to think about is competing with the ones
+    // they do. It comes back up on its own when the date arrives.
+    const settled = rest0(visible).filter((s) => isDoneForNow(s));
+    const settledIds = new Set(settled.map((s) => s.id));
+    const rest = visible.filter((s) =>
+      !freshIds.has(s.id) && s.id !== pinnedId && !settledIds.has(s.id));
     const out: { title: string; isNew?: boolean; data: Snag[] }[] = [];
 
     if (pinned.length > 0) out.push({ title: 'Just added', isNew: true, data: pinned });
@@ -316,6 +338,12 @@ export default function SnagListScreen() {
       }
     } else if (rest.length > 0) {
       out.push({ title: sort === 'due' ? 'By when' : 'Everything else', data: rest });
+    }
+
+    if (settled.length > 0) {
+      // The Schedule tab's words for the same fact, so the two screens do not
+      // invent two names for one mechanism.
+      out.push({ title: `Comes round again · ${settled.length}`, data: settled });
     }
 
     if (showDone && recentlyDone.length > 0) {
@@ -444,7 +472,7 @@ export default function SnagListScreen() {
       </View>
 
       <Text style={styles.since}>
-        {visible.length} to do
+        {toDo} to do
         {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
       </Text>
 

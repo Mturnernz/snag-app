@@ -6,7 +6,7 @@ import PriorityBadge from './PriorityBadge';
 import DueBadge from './DueBadge';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Snag } from '../types';
-import { snagHeadline, unboughtParts } from '@snag/supabase-queries';
+import { isDoneForNow, snagHeadline, unboughtParts } from '@snag/supabase-queries';
 
 interface Props {
   snag: Snag;
@@ -24,6 +24,11 @@ interface Props {
  */
 export default function SnagCard({ snag, photoUrl, onPress }: Props) {
   const done = snag.status === 'done';
+  // A repeating job that has been done and is waiting for its next turn gets
+  // the same translucency, because it is the same fact: there is nothing to do
+  // about it. It cannot leave the list the way a finished snag does, so dimming
+  // is the only reward available — see `isDoneForNow`.
+  const settled = done || isDoneForNow(snag);
   // No title field exists: a photo-only snag is named by where it is.
   const headline = snagHeadline(snag);
   const toGet = unboughtParts(snag);
@@ -31,7 +36,7 @@ export default function SnagCard({ snag, photoUrl, onPress }: Props) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed, done && styles.doneCard]}
+      style={({ pressed }) => [styles.card, pressed && styles.pressed, settled && styles.doneCard]}
       accessibilityRole="button"
       accessibilityLabel={`${headline}${snag.room ? `, ${snag.room}` : ''}`}
     >

@@ -360,3 +360,80 @@ describe('the shopping list', () => {
     expect(r.queryByText('Seal')).toBeNull();
   });
 });
+
+// ─── a repeat that has been done ──────────────────────────────────────────────
+
+describe('a job that comes round again', () => {
+  const DAY = 86_400_000;
+  const at = (days: number) => new Date(Date.now() + days * DAY).toISOString();
+
+  const sectionTitles = (r: ReturnType<typeof render>) =>
+    r.root.findAll((n: any) => typeof n.type !== 'string'
+      && typeof n.props?.sections === 'object')[0]?.props.sections.map((x: any) => x.title);
+
+  const withParked = () => {
+    arrange();
+    const all = [
+      snag({ id: 'a', room: 'Kitchen', description: 'Cupboard door' }),
+      snag({
+        id: 'b', room: 'Outside', description: 'Heat pump filter',
+        repeatDays: 180, lastDoneAt: at(-1), dueAt: at(179),
+      }),
+    ];
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      all.filter((s) => filter.status.includes(s.status)));
+  };
+
+  it('sinks past every room to the foot of the list', async () => {
+    // It cannot leave the way a finished snag does, so this is the only version
+    // of that reward available to it.
+    withParked();
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    const titles = sectionTitles(r);
+    expect(titles[titles.length - 1]).toBe('Comes round again · 1');
+    expect(titles).toContain('Kitchen · 1');
+    expect(titles).not.toContain('Outside · 1');
+  });
+
+  it('is dimmed, and still opens', async () => {
+    withParked();
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    const card = r.root.findAll((n: any) => typeof n.type !== 'string'
+      && n.props?.snag?.id === 'b')[0];
+    expect(card).toBeDefined();
+    expect(typeof card.props.onPress).toBe('function');
+    // The translucency is the card's own, the same one a finished snag gets.
+    const styles = card.findAll((n: any) => typeof n.type === 'string'
+      && Array.isArray(n.props?.style))[0]?.props.style.flat();
+    expect(JSON.stringify(styles)).toContain('0.62');
+  });
+
+  it('is not counted as something to do', async () => {
+    // "2 to do" over a list where one is dimmed and parked at the bottom is the
+    // screen contradicting itself.
+    withParked();
+    const r = render(<SnagListScreen />);
+    await settle();
+    expect(r.queryByText('1 to do')).not.toBeNull();
+  });
+
+  it('leaves an ordinary repeat exactly where it was', async () => {
+    // Due on Saturday and never done: there is work to do, so it stays in its
+    // room with everything else.
+    arrange();
+    const all = [snag({
+      id: 'b', room: 'Outside', description: 'Gutters', repeatDays: 180, dueAt: at(3),
+    })];
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      all.filter((s) => filter.status.includes(s.status)));
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    expect(sectionTitles(r)).toContain('Outside · 1');
+    expect(r.queryByText('1 to do')).not.toBeNull();
+  });
+});

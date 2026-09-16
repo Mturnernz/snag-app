@@ -387,7 +387,8 @@ they last looked.
 - **The rest groups by room**, in `locations` order — which is how work gets batched, and which
   is why there is no room filter: you can see there are three things in the Garage without asking.
 - **Done leaves.** One line at the foot, not a lens. Finishing something should make the list
-  shorter; that is the whole reward on offer. Only the last seven days are rendered.
+  shorter; that is the whole reward on offer. Only the last seven days are rendered. A repeating
+  job cannot leave — see *Finishing says so* below.
 - **Both filter rails became one button.** Filtering is occasional and was charging 96px of
   vertical rent on every visit to a screen people now open constantly.
 - **The shopping list rides the "Needs parts" lens**, and a pill in the header says how much of it
@@ -404,6 +405,50 @@ it, absent while the house record is still on its way, this room's things and no
 press unlinking, *Skip for now* until something is chosen, and the header counting four.
 `houseRecord.test.ts` pins `thingsInArea` itself: one room only, `Whole house` for a snag with no
 room, and the chip order being the order of the words on the chips.
+
+### Finishing says so, and a repeat cannot finish
+
+Marking something done opens **one dialog with one button**: *Congratulations*, the headline of what
+was finished, and *Return to list*. It is `DoneDialog`, not `showAlert` — that is a `window.confirm`
+on the build people install, which cannot congratulate anybody and cannot carry a tick. The button
+goes back to the list because that is where the reward actually is: the card has gone neutral and
+left, and the dialog now says out loud what the shortening list has always said quietly.
+
+The tick is fern, and that is not a breach of *fern is not "done"*: this is an **interaction**, which
+is what fern is for. The snag's own `StatusBadge` still goes neutral, so the list's calmest state is
+still its quietest colour.
+
+**A repeating job never sees that dialog, and this is the part to keep.** `set_snag_status` rolls
+`due_at` forward and leaves the status `open`, so the heat pump filter is back on the list before the
+phone is down — congratulating somebody there would be the app claiming something the list flatly
+contradicts. The branch already existed to word the toast honestly (*"Done — back on the list when
+it's next due"*); it now also decides who gets congratulated, and it decides from the row that came
+back from the write rather than from what was asked for.
+
+So the repeat gets the other half of the reward instead, since it cannot have the first:
+
+- **It dims.** `isDoneForNow` — a repeat with a `last_done_at` and a `due_at` still ahead — takes the
+  same `opacity: 0.62` a finished card takes, because it is the same fact: there is nothing to do
+  about it. No strike-through, though; it is not finished, and it will be back.
+- **It sinks to the very bottom**, past every room, under the heading **Comes round again**. Left in
+  its room, the one thing on the list nobody has to think about competes with the ones they do.
+  *Comes round again* is the Schedule tab's own phrase for the same mechanism, deliberately, so two
+  screens do not invent two names for it.
+- **It stops being counted.** The header says what is left to do, and "3 to do" over a list where one
+  of them is dimmed and parked at the foot is the screen contradicting itself. It is also kept out of
+  **New**, which would otherwise raise to the top the one row that has just been put to bed.
+- **It comes back up on its own.** The rule is a date comparison, so the day `due_at` arrives it is an
+  ordinary job in its own room again — no write, no cron, nothing to remember. The distinction is
+  `last_done_at` **and** a future date, never merely having a `repeat_days`: the gutters due on
+  Saturday are ordinary work and belong in Outside with everything else.
+
+`repeats.test.ts` pins all five cases of `isDoneForNow` — the parked repeat, the one merely
+repeating, the one whose date has come round, the one-off done yesterday, the genuinely finished one
+— and that the due badge still says what it always said, because dimming is a fact about attention
+and not about the date. `SnagDetailScreen.test.tsx` pins the dialog's words and its one button, that
+a rolled-forward repeat gets the toast and no dialog, and that reopening says nothing at all.
+`SnagListScreen.test.tsx` pins the last-section placement, the translucency, the count and the
+ordinary repeat staying put.
 
 ### A list you can tick, and a flag that cannot lie about it
 
@@ -674,8 +719,16 @@ later, in an aisle, needing one exact string. So:
   read. It also overflowed: on web a `TextInput` is an `<input>` with an intrinsic ~20-character
   width that `min-width: auto` will not shrink below, so a flexed right-aligned value grew past the
   card and off the screen edge. Anything flexed around a `TextInput` needs `minWidth: 0`.
-- **Paperwork lives beside the photos.** `things.document_paths` holds PDFs in the **`home-photos`**
-  bucket under `<household_id>/docs/`, reusing the four storage policies and
+- **Paperwork lives beside the photos, and so does the way to add either.** The section is
+  **Photos and paperwork**, and one wrapping row carries all three offers: *Add a photo*, *Choose
+  one*, *Attach a PDF*. The camera used to sit under the strip at the top, five hundred pixels
+  above the PDF button — so somebody wanting a second photograph of the dishwasher went looking in
+  the section that attaches things and found only a PDF, which reads as a record that does not take
+  photographs at all. The strip itself stays at the top, because a rating plate is what this page is
+  opened to *read*: the answer goes above the form and the controls that grow it live with the rest
+  of the attaching. The plate photo at creation is the walkthrough's step three and has not moved;
+  these are for the extras that come later. `things.document_paths` holds PDFs in the
+  **`home-photos`** bucket under `<household_id>/docs/`, reusing the four storage policies and
   `home.can_use_photo_folder` rather than standing up a second bucket. Its `allowed_mime_types` had
   to learn `application/pdf` — which Storage enforces *before* RLS, so a PDF was refused with
   nothing said about permissions. The original filename is kept in the key because it is the label:

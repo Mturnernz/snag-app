@@ -587,35 +587,6 @@ export default function ThingDetailScreen() {
           </ScrollView>
         ) : null}
 
-        {/* A slim row, not a 165px tile. An empty tile is the biggest thing on
-            a page nobody has filled in yet, which is how a record starts
-            reading as homework — and the two offers are siblings rather than
-            one nested inside the other, because a Pressable inside a Pressable
-            is a coin toss about which one gets the tap. */}
-        <View style={styles.attachRow}>
-          <Pressable
-            onPress={() => attachPhoto('camera')}
-            disabled={busy}
-            style={styles.addDetail}
-            accessibilityRole="button"
-            accessibilityLabel="Photograph the label"
-          >
-            <Icon name="camera-outline" size="sm" color={Colors.primary} />
-            <Text style={styles.addDetailLabel}>
-              {thing.photoPaths.length > 0 ? 'Another photo' : 'Photograph the label'}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => attachPhoto('library')}
-            disabled={busy}
-            style={styles.addDetail}
-            accessibilityRole="button"
-            accessibilityLabel="Choose a photo"
-          >
-            <Text style={styles.addDetailAlt}>Choose one</Text>
-          </Pressable>
-        </View>
-
         {/* There was an Appliance/Paint rail here, and it has gone. It existed
             because capture filed everything as `appliance` without asking, so
             the page had to be able to correct it — but the walkthrough asks the
@@ -682,8 +653,21 @@ export default function ThingDetailScreen() {
             onChange={(v) => edit('notes', v)}
           />
         </View>
-        {/* ── paperwork ──────────────────────────────────────────────── */}
-        <Text style={styles.sectionLabel}>Paperwork</Text>
+        {/* ── photos and paperwork ───────────────────────────────────────
+            **One place to attach something to this record**, rather than a
+            camera under the photo strip and a PDF button five hundred pixels
+            below it. Somebody wanting to add a second photograph of the
+            dishwasher goes looking in the section that attaches things, and
+            finding only *Attach a PDF* there reads as the record not taking
+            photographs at all.
+
+            The strip itself stays at the top, because a rating plate is what
+            this page is opened *to read* — the answer goes above the form, and
+            the controls that grow it live with the rest of the attaching. The
+            plate photo at creation is the walkthrough's step three and has not
+            moved; these offers are for the extras that come later, which is
+            exactly what they now sit beside. */}
+        <Text style={styles.sectionLabel}>Photos and paperwork</Text>
 
         {thing.documentPaths.length > 0 ? (
           <View style={styles.docs}>
@@ -711,16 +695,43 @@ export default function ThingDetailScreen() {
           </View>
         ) : null}
 
-        <Pressable
-          onPress={attachDocument}
-          disabled={busy}
-          style={styles.addDetail}
-          accessibilityRole="button"
-          accessibilityLabel="Attach a PDF"
-        >
-          <Icon name="add" size="sm" color={Colors.primary} />
-          <Text style={styles.addDetailLabel}>Attach a PDF</Text>
-        </Pressable>
+        {/* Siblings in one wrapping row, never nested — a Pressable inside a
+            Pressable is a coin toss about which one gets the tap — and it
+            wraps rather than squeezing three labels onto one phone-width
+            line. */}
+        <View style={styles.attachRow}>
+          <Pressable
+            onPress={() => attachPhoto('camera')}
+            disabled={busy}
+            style={styles.addDetail}
+            accessibilityRole="button"
+            accessibilityLabel={thing.photoPaths.length > 0 ? 'Add a photo' : 'Photograph the label'}
+          >
+            <Icon name="camera-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.addDetailLabel}>
+              {thing.photoPaths.length > 0 ? 'Add a photo' : 'Photograph the label'}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => attachPhoto('library')}
+            disabled={busy}
+            style={styles.addDetail}
+            accessibilityRole="button"
+            accessibilityLabel="Choose a photo"
+          >
+            <Text style={styles.addDetailAlt}>Choose one</Text>
+          </Pressable>
+          <Pressable
+            onPress={attachDocument}
+            disabled={busy}
+            style={styles.addDetail}
+            accessibilityRole="button"
+            accessibilityLabel="Attach a PDF"
+          >
+            <Icon name="add" size="sm" color={Colors.primary} />
+            <Text style={styles.addDetailLabel}>Attach a PDF</Text>
+          </Pressable>
+        </View>
 
         {/* ── where it is ────────────────────────────────────────────────
             The answer, not the question. Twelve room chips is a paragraph of
@@ -1101,7 +1112,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(43, 39, 36, 0.62)',
   },
-  attachRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg },
+  attachRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.lg,
+  },
   addDetailAlt: { fontSize: Typography.sm, color: Colors.textMuted },
   docs: { gap: Spacing.xs },
   doc: {

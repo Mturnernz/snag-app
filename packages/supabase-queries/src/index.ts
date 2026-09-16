@@ -1555,6 +1555,29 @@ export function parseLooseDate(input: string): string | null | undefined {
   return undefined;
 }
 
+/**
+ * A repeating job that has been done and is waiting for its next turn.
+ *
+ * **This is the closest a repeat gets to finished, and the list has to show it.**
+ * `home.set_snag_status` rolls `due_at` forward and leaves the status `open`, so
+ * a job somebody has just completed sits in its room looking exactly like one
+ * nobody has touched — the "done leaves" reward the whole list is built on
+ * cannot fire, because nothing left. So it dims and sinks instead: same
+ * translucency a done card gets, at the very bottom of the list.
+ *
+ * The rule is `last_done_at` plus a date still ahead, **not** merely having a
+ * `repeat_days`. The gutters due on Saturday are an ordinary job and belong in
+ * Outside with everything else; it is only the one already dealt with this
+ * cycle that has nothing to ask of anybody. The moment the date comes round it
+ * is an ordinary job again, with no write and no cron — the same arithmetic the
+ * Schedule tab's hollow "comes round" marks are drawn from.
+ */
+export function isDoneForNow(snag: Snag, now = new Date()): boolean {
+  if (!snag.repeatDays || !snag.lastDoneAt || !snag.dueAt) return false;
+  if (snag.status === 'done') return false;
+  return new Date(snag.dueAt).getTime() > now.getTime();
+}
+
 export type DueState = 'overdue' | 'due-soon' | 'scheduled' | 'none';
 
 export function dueState(snag: Snag, now = new Date()): DueState {

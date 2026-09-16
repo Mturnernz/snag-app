@@ -276,6 +276,22 @@ export interface Snag {
    */
   projectId: string | null;
 
+  /**
+   * Which project item this snag's answer belongs to.
+   *
+   * An open question about a renovation — what the geotech engineer cost, what
+   * the cabinetry came to — is an ordinary snag in its ordinary room, because a
+   * project does not get a to-do list of its own. What it carries is a
+   * destination, written at the moment the question was written rather than
+   * sorted out at the moment it is answered: `answerProjectSnag` needs no
+   * target because the row already names one.
+   *
+   * Set only by `createSnag`, never by `updateSnag`, so like `thingId` and
+   * `projectId` it cannot start a job. `on delete set null`: delete the item
+   * and the question falls back to the project rather than orphaning.
+   */
+  projectItemId: string | null;
+
   reporterId: string;
   createdAt: string;
   updatedAt: string;
@@ -293,6 +309,9 @@ export interface Snag {
   thingMake: string | null;
   thingModel: string | null;
   projectName: string | null;
+  /** Where a bound question's answer will land, in words. */
+  projectItemName: string | null;
+  projectElementName: string | null;
 }
 
 /**

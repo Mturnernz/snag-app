@@ -406,6 +406,69 @@ press unlinking, *Skip for now* until something is chosen, and the header counti
 `houseRecord.test.ts` pins `thingsInArea` itself: one room only, `Whole house` for a snag with no
 room, and the chip order being the order of the words on the chips.
 
+### A filed job can be edited, and can say what it is about
+
+Two things were answerable for ten seconds after the shutter and never again: **the words and the
+room**. The amend sheet asks both straight after the photo and then it is gone, so "Gutters" typed a
+fortnight ago stayed "Gutters" — and a snag filed in the wrong room stayed there. A pencil on the
+headline opens `EditSnagSheet`: the description, every room chip, and **one Save**.
+
+One Save rather than the write-on-press every other control here uses, and the reason is the
+distinction the thing page's spec sheet already draws. Priority, parts, assignee, due date and
+repeat are each one small decision that is its own confirmation. The words and the room are the
+job's *description* rather than a decision about it, typed and chosen together — and a half-typed
+sentence saving itself on every keystroke is not an edit, it is a race. **Neither field starts the
+job**, which is the existing rule and the reason editing is safe: `update_snag` moves a snag to
+'doing' on assignee, due date, repeat or parts, and never on room or description. The sheet also
+refuses to leave a photo-less snag with no words, in those words, rather than letting
+`snags_has_something` surface as a constraint name.
+
+**What it is about is answerable from the job now, all three ways.** Capture's fourth step is the
+fast way — that room's things, a two-second tag — and it is skipped entirely for a room with
+nothing recorded in it, so the answer had to be reachable afterwards. On the snag: *Say what it's
+about* when nothing is linked; a **swap** and a **×** beside the row when something is.
+
+- **The picker offers the whole record and a search**, not the room's shortlist (`LinkThingSheet`).
+  By the time somebody is doing this from the job, the room is not what narrows it — the noun is.
+  A ghost still cannot appear: `searchThings` takes `Thing[]`, and a suggestion has no id for
+  `thing_id` to point at.
+- **"Not recorded yet" is not a dead end.** *Create one instead* opens `AddThingSheet` — the
+  walkthrough itself, with the room pre-filled from the job — and links what comes back. Not a
+  second shorter form: a record created from here has to be as strong as one created from the House
+  tab, or this is the back door that fills the house record with rows nobody can read in a shop.
+- **The house record is read when the picker opens**, never on page load. This is a
+  once-in-a-job's-life decision on a page people open constantly, and it is keyed by the snag's own
+  property so it can never offer the bach's appliances for a job at the house.
+- **`start` must be memoised.** `AddThingSheet` resets itself from that prop in an effect that
+  depends on the object, so a fresh literal per render is an infinite loop — the effect sets state,
+  the render makes a new object, the effect fires again. It **hangs** the screen rather than failing.
+  `SnagDetailScreen.test.tsx` caught it as a timeout, which is the only way this shape of bug ever
+  announces itself. The same trap is in the tests themselves: a `useNavigation` mock returning a
+  fresh object per call spins any screen whose loader depends on it.
+
+**And the asset's own history is pulled through.** A card under Notes — *Also said about the heat
+pump* — carries the comments from that asset's **other** jobs, each naming the snag it came from and
+tapping through to it (`getThingNotes`). The heat pump has been serviced twice and had a fault
+once; what somebody wrote last time is the most useful paragraph in the app when it plays up again,
+and it was buried in a job nobody would think to open. Three rules: it sits **under** this job's
+notes, because what the other person wrote *here* is still why the screen was opened; **this job's
+own comments are excluded by id**, or they would read as duplicates rather than as history; and a
+read that fails is **not fatal**, because history nobody can fetch must not take the page down.
+
+RLS does the filtering rather than the query pretending to: the comments policy asks each snag's
+property, so this returns exactly what this person could have read by opening those jobs one at a
+time.
+
+**And the repeat card says what it does.** *Does it come round again?* was the heading, which made
+somebody hunting for a way to schedule the filter read straight past the one card that does it. The
+heading is **Schedule a recurring job**; the question it used to be is now the field label over the
+two chips, where a question belongs. The list's *Comes round again* section keeps its name
+deliberately — that one describes a state, this one names an action.
+
+`SnagDetailScreen.test.tsx` pins the edit sheet writing both fields in one call, the refusal on a
+photo-less job with no words, the three about-offers, the record being read only when the picker
+opens, the history card and its exclusion, and that a failed history read still renders the page.
+
 ### Finishing says so, and a repeat cannot finish
 
 Marking something done opens **one dialog with one button**: *Congratulations*, the headline of what
@@ -720,8 +783,24 @@ later, in an aisle, needing one exact string. So:
   width that `min-width: auto` will not shrink below, so a flexed right-aligned value grew past the
   card and off the screen edge. Anything flexed around a `TextInput` needs `minWidth: 0`.
 - **Paperwork lives beside the photos, and so does the way to add either.** The section is
-  **Photos and paperwork**, and one wrapping row carries all three offers: *Add a photo*, *Choose
-  one*, *Attach a PDF*. The camera used to sit under the strip at the top, five hundred pixels
+  **Photos and paperwork**, and one row carries both offers: **Add photos** and *Attach a PDF*.
+  There is deliberately **one** photo control rather than a camera and a *Choose one* beside it —
+  two controls with one outcome, and on the build people install the distinction was never the
+  app's to make: `<input type="file" accept="image/*">` is answered by the phone's own sheet, which
+  offers *Take Photo* above the library, so asking first only added a tap. (On native it is the
+  library; `takePhoto` stays for the two screens whose whole gesture is the shutter — the compose
+  bar, and the walkthrough's rating plate.) **It takes several at once**, capped at
+  `PHOTO_PICK_LIMIT` — five is a plausible number of angles on one appliance, and the cap exists
+  because each photograph is decoded, resized and re-encoded before it is sent, so *select all* on
+  a camera roll would otherwise be minutes of spinner with no way back. Three rules in the upload:
+  **one write at the end** (eight photographs must not be eight round trips, eight re-reads and
+  eight stacked toasts), **one after another rather than in parallel** (repeated compression is the
+  most memory-hungry thing this app does, and eight simultaneous uploads is how the request
+  deadlines start firing), and **what arrived is kept** — six uploaded with two refused is six
+  added and a sentence about the two, the same rule the PDF export follows for a photograph that
+  will not come. Anything past the cap is said out loud, because a cap nobody is told about is
+  indistinguishable from photographs that failed. The camera used to sit under the strip at the
+  top, five hundred pixels
   above the PDF button — so somebody wanting a second photograph of the dishwasher went looking in
   the section that attaches things and found only a PDF, which reads as a record that does not take
   photographs at all. The strip itself stays at the top, because a rating plate is what this page is

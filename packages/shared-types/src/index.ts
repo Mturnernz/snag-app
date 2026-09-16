@@ -284,6 +284,23 @@ export interface Snag {
   thingModel: string | null;
 }
 
+/**
+ * Something written on another job about the same thing.
+ *
+ * Carries the reference of the snag it came from, because "the filter was
+ * stiff" means something quite different when it was written about a service
+ * eight months ago than it does about this morning's fault — and because the
+ * row is a door back to that job.
+ */
+export interface ThingNote {
+  id: string;
+  body: string;
+  createdAt: string;
+  authorName: string;
+  snagId: string;
+  snagReference: string;
+}
+
 export interface Comment {
   id: string;
   snagId: string;

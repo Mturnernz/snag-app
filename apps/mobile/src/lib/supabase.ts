@@ -302,6 +302,9 @@ export const deleteSnagAdvice = (snagId: string) => queries.deleteSnagAdvice(sup
 
 export const getComments = (snagId: string) => queries.getComments(supabase, snagId);
 
+export const getThingNotes = (thingId: string, exceptSnagId: string) =>
+  queries.getThingNotes(supabase, thingId, exceptSnagId);
+
 export const addComment = (snagId: string, body: string) =>
   queries.addComment(supabase, snagId, body);
 

@@ -4,7 +4,6 @@ import {
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import { Linking } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -26,7 +25,7 @@ import {
   createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getThing, updateThing,
   uploadFile,
 } from '../lib/supabase';
-import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
+import { PHOTO_PICK_LIMIT, compressAndUpload, photoFileName, pickPhotos } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
@@ -320,31 +319,69 @@ export default function ThingDetailScreen() {
    * them is how you get an orphaned file nobody can reach, and a back-swipe
    * between the upload and the Save would do exactly that.
    */
-  async function attachPhoto(from: 'camera' | 'library') {
+  /**
+   * Several photographs, one control, one write.
+   *
+   * **One write at the end, never one per photograph.** `patch` is a round trip
+   * and a toast each time, so eight photographs would be eight writes, eight
+   * re-reads and eight toasts stacking up over a page somebody is watching.
+   *
+   * **Uploaded one after another, not all at once.** Each one is decoded,
+   * resized and re-encoded before it is sent, and doing that to eight images
+   * in parallel on a phone browser is the most memory-hungry thing this app
+   * could be asked to do — eight simultaneous uploads on a household
+   * connection is also how the request deadlines start firing.
+   *
+   * **What arrived is kept.** Six uploaded and two refused means six added and
+   * a sentence about the two, not nothing added and an error — the same rule
+   * the PDF export follows for a photograph that will not come, and the paste
+   * screen follows for a write that fails part way.
+   */
+  async function attachPhotos() {
     if (!thing || !household || busy) return;
-    const uri = from === 'camera'
-      ? await takePhoto()
-      : await pickFromLibrary();
-    if (!uri) return;
+    const { uris, dropped } = await pickPhotos();
+    if (uris.length === 0) return;
+
     setBusy(true);
+    const added: string[] = [];
+    let lastError: unknown = null;
     try {
-      const { path, error } = await compressAndUpload(uri, photoFileName(household.id));
-      if (error || !path) throw error ?? new Error('The photo did not upload');
-      await patch({ photoPaths: [...thing.photoPaths, path] }, 'Photo added');
+      for (const uri of uris) {
+        try {
+          const { path, error } = await compressAndUpload(uri, photoFileName(household.id));
+          if (error || !path) throw error ?? new Error('The photo did not upload');
+          added.push(path);
+        } catch (err: unknown) {
+          lastError = err;
+        }
+      }
+
+      if (added.length > 0) {
+        await patch(
+          { photoPaths: [...thing.photoPaths, ...added] },
+          added.length === 1 ? 'Photo added' : `${added.length} photos added`,
+        );
+      }
     } catch (err: unknown) {
-      showAlert("That photo didn't save", failureReason(err));
+      lastError = err;
     } finally {
       setBusy(false);
     }
-  }
 
-  async function pickFromLibrary(): Promise<string | null> {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
-      quality: 1,
-      exif: false,
-    });
-    return result.canceled ? null : result.assets[0].uri;
+    const missed = uris.length - added.length;
+    if (missed > 0) {
+      showAlert(
+        added.length > 0 ? `${missed} of ${uris.length} didn't save` : "That photo didn't save",
+        failureReason(lastError),
+      );
+    } else if (dropped > 0) {
+      // Said out loud rather than dropped in silence — a cap nobody is told
+      // about is indistinguishable from photographs that failed.
+      showAlert(
+        `${PHOTO_PICK_LIMIT} at a time`,
+        `${added.length} added. Choose the other ${dropped} in another go.`,
+      );
+    }
   }
 
   async function removePhoto(path: string) {
@@ -700,26 +737,20 @@ export default function ThingDetailScreen() {
             wraps rather than squeezing three labels onto one phone-width
             line. */}
         <View style={styles.attachRow}>
+          {/* One control, not a camera and a *Choose one* beside it. Those were
+              two controls with one outcome — and on the build people install
+              the distinction was never the app's to make: the file input's own
+              sheet offers *Take Photo* above the library, so asking first only
+              added a tap. It takes several at once. */}
           <Pressable
-            onPress={() => attachPhoto('camera')}
+            onPress={attachPhotos}
             disabled={busy}
             style={styles.addDetail}
             accessibilityRole="button"
-            accessibilityLabel={thing.photoPaths.length > 0 ? 'Add a photo' : 'Photograph the label'}
+            accessibilityLabel="Add photos"
           >
             <Icon name="camera-outline" size="sm" color={Colors.primary} />
-            <Text style={styles.addDetailLabel}>
-              {thing.photoPaths.length > 0 ? 'Add a photo' : 'Photograph the label'}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => attachPhoto('library')}
-            disabled={busy}
-            style={styles.addDetail}
-            accessibilityRole="button"
-            accessibilityLabel="Choose a photo"
-          >
-            <Text style={styles.addDetailAlt}>Choose one</Text>
+            <Text style={styles.addDetailLabel}>Add photos</Text>
           </Pressable>
           <Pressable
             onPress={attachDocument}
@@ -1118,7 +1149,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: Spacing.lg,
   },
-  addDetailAlt: { fontSize: Typography.sm, color: Colors.textMuted },
   docs: { gap: Spacing.xs },
   doc: {
     flexDirection: 'row',

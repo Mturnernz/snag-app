@@ -42,15 +42,19 @@ jest.mock('../lib/supabase', () => ({
   deleteThing: jest.fn(),
   uploadFile: jest.fn(),
 }));
-const mock_takePhoto = jest.fn();
+const mock_pickPhotos = jest.fn();
 const mock_compressAndUpload = jest.fn();
 jest.mock('../lib/photoUpload', () => ({
-  takePhoto: (...a: unknown[]) => mock_takePhoto(...a),
+  PHOTO_PICK_LIMIT: 5,
+  pickPhotos: (...a: unknown[]) => mock_pickPhotos(...a),
+  // The storage key is whatever the upload says it wrote, so the name only has
+  // to be a string here.
   compressAndUpload: (...a: unknown[]) => mock_compressAndUpload(...a),
-  photoFileName: () => 'h1/second.jpg',
+  photoFileName: () => 'h1/whatever.jpg',
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
-jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
+const mock_showAlert = jest.fn();
+jest.mock('../lib/alert', () => ({ showAlert: (...a: unknown[]) => mock_showAlert(...a) }));
 jest.mock('../hooks/useHousehold', () => ({
   useHousehold: () => ({
     household: { id: 'h1', name: 'Home', createdAt: '' },
@@ -174,39 +178,89 @@ describe('ThingDetailScreen', () => {
     expect(mock_updateThing).toHaveBeenCalledWith('t1', { serial: null });
   });
 
-  it('offers to photograph the label from here, not only from the walkthrough', async () => {
+  it('takes photographs from here, not only from the walkthrough', async () => {
+    // The rating-plate prompt lives in the walkthrough's step three; this page
+    // is where the angles that come later get added, so it says what it does
+    // rather than naming the one photograph it was originally for.
     const result = await open();
-    expect(pressable(result, 'Photograph the label')).toBeTruthy();
+    expect(pressable(result, 'Add photos')).toBeTruthy();
   });
 
   // Somebody wanting a second photograph of the dishwasher goes looking in the
   // section that attaches things. Finding only *Attach a PDF* there reads as a
-  // record that does not take photographs at all — so all three offers sit in
-  // one row, and adding a photo is offered exactly once on the page.
-  it('offers another photo beside the PDF button, and only there', async () => {
+  // record that does not take photographs at all — so both offers sit in one
+  // row, and there is exactly one way to add a photograph.
+  it('offers photos beside the PDF button, as one control', async () => {
     const result = await open({ photoPaths: ['h1/plate.jpg'] });
 
-    expect(pressable(result, 'Add a photo')).toBeTruthy();
-    expect(pressable(result, 'Choose a photo')).toBeTruthy();
+    expect(pressable(result, 'Add photos')).toBeTruthy();
     expect(pressable(result, 'Attach a PDF')).toBeTruthy();
-    // One camera offer on the page, not one under the strip and another below.
-    expect(result.getAllByText('Add a photo')).toHaveLength(1);
-    // And the first-photo wording is gone once there is one.
-    expect(result.queryByText('Photograph the label')).toBeNull();
+    // One offer, not a camera and a *Choose one* beside it: two controls with
+    // one outcome, and on the web build the sheet already asks which.
+    expect(result.getAllByText('Add photos')).toHaveLength(1);
+    expect(result.queryByText('Choose one')).toBeNull();
   });
 
-  it('adds the photo to the ones already there rather than replacing them', async () => {
-    mock_takePhoto.mockResolvedValue({ uri: 'file:///new.jpg' });
-    mock_compressAndUpload.mockResolvedValue({ path: 'h1/second.jpg' });
+  it('adds several in one write, after the ones already there', async () => {
+    // Eight photographs must not be eight writes, eight re-reads and eight
+    // toasts stacking up over a page somebody is watching.
+    mock_pickPhotos.mockResolvedValue({ uris: ['file:///a.jpg', 'file:///b.jpg'], dropped: 0 });
+    mock_compressAndUpload
+      .mockResolvedValueOnce({ path: 'h1/a.jpg' })
+      .mockResolvedValueOnce({ path: 'h1/b.jpg' });
     const result = await open({ photoPaths: ['h1/plate.jpg'] });
 
     await TestRenderer.act(async () => {
-      await pressable(result, 'Add a photo').props.onPress();
+      await pressable(result, 'Add photos').props.onPress();
     });
 
+    expect(mock_updateThing).toHaveBeenCalledTimes(1);
     expect(mock_updateThing).toHaveBeenCalledWith('t1', {
-      photoPaths: ['h1/plate.jpg', 'h1/second.jpg'],
+      photoPaths: ['h1/plate.jpg', 'h1/a.jpg', 'h1/b.jpg'],
     });
+  });
+
+  it('keeps the ones that arrived when another refuses', async () => {
+    // Six uploaded and two refused is six added and a sentence about the two,
+    // not nothing added and an error.
+    mock_pickPhotos.mockResolvedValue({ uris: ['file:///a.jpg', 'file:///b.jpg'], dropped: 0 });
+    mock_compressAndUpload
+      .mockResolvedValueOnce({ path: 'h1/a.jpg' })
+      .mockRejectedValueOnce(new Error('Network'));
+    const result = await open({ photoPaths: [] });
+
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Add photos').props.onPress();
+    });
+
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/a.jpg'] });
+    expect(mock_showAlert).toHaveBeenCalledWith("1 of 2 didn't save", expect.any(String));
+  });
+
+  it('writes nothing when the picker is closed without choosing', async () => {
+    mock_pickPhotos.mockResolvedValue({ uris: [], dropped: 0 });
+    const result = await open({ photoPaths: ['h1/plate.jpg'] });
+
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Add photos').props.onPress();
+    });
+
+    expect(mock_updateThing).not.toHaveBeenCalled();
+  });
+
+  it('says so when more were chosen than one go will take', async () => {
+    // A cap nobody is told about is indistinguishable from photographs that
+    // failed to upload.
+    mock_pickPhotos.mockResolvedValue({ uris: ['file:///a.jpg'], dropped: 3 });
+    mock_compressAndUpload.mockResolvedValueOnce({ path: 'h1/a.jpg' });
+    const result = await open({ photoPaths: [] });
+
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Add photos').props.onPress();
+    });
+
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/a.jpg'] });
+    expect(mock_showAlert).toHaveBeenCalledWith('5 at a time', expect.stringContaining('other 3'));
   });
 
   it('offers to attach a PDF, and lists one by its own filename', async () => {

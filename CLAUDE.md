@@ -1099,6 +1099,40 @@ what a total says, and alone it cannot have its sibling-clearing skipped by a ca
 `chosen` among eight other fields. The server clears the sibling *first*, because
 `project_quotes_one_chosen` is a plain unique index and not a deferred constraint.
 
+### Nobody types Quoted, Chosen or Spent
+
+All three are derived, and the only thing anybody enters is **one amount per quote** plus two
+decisions: which quote is *chosen*, and what kind of paper each one is. The kind is what drives
+*Spent* — a `quote` never counts, or every project would read as fully paid the day it was priced,
+so recording money that has actually gone out means a second row on the same item marked **Invoice**
+or **Receipt**. That is how a deposit works: a chosen $4,600 quote beside an $1,840 receipt reads as
+Chosen $4,600, Spent $1,840.
+
+**A saved price can be corrected**, through a pencil beside the amount — the same affordance the
+snag headline carries for the same job. It reuses the one form rather than opening a second sheet,
+because the fields are identical and a separate editor is a second place the GST pill and the kind
+chips would have to be got right.
+
+Three things about it are load-bearing:
+
+- **The box loads the figure as it was typed, never the normalised one.** The rollups work in
+  GST-inclusive dollars, so a form that loaded $1,150 for a $1,000 ex-GST trade price would raise it
+  by 15% every time somebody opened it to fix a typo in the supplier's name. Pinned.
+- **A correction never carries `chosen`.** Choosing stays on `set_quote_chosen` for the reason
+  above; a correction is not a decision, and routing it through the general update would be exactly
+  the caller-with-eight-other-fields that function exists to prevent.
+- **An emptied box clears the column** rather than leaving the old value — `updateQuote` turns a
+  null into `p_clear`, the same convention `update_snag` and `update_thing` use. An emptied supplier
+  is somebody saying they no longer know.
+
+There is also a way out that does not save, because otherwise the only escape from a form opened by
+mistake is closing the whole sheet and losing the item somebody was looking at.
+
+`ItemSheet.test.tsx` pins the pencil, the un-normalised load, the day-first date round-trip, the
+correction going through `updateQuote` rather than adding a second price, `chosen` never riding
+along, the emptied field clearing, the way out, and the add control hiding while a correction is
+open.
+
 `projects.test.ts` pins the money rules as properties rather than examples — the denominator, the
 unpriced item that is never zero, the GST gross-up, the range collapsing when nothing is left to
 decide, and that an extract states its GST basis and gives an unpriced item its own row.

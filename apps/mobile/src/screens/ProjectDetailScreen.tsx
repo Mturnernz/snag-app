@@ -676,6 +676,13 @@ export default function ProjectDetailScreen({ route }: Props) {
           showToast('Saved');
           await load();
         }}
+        onUpdateQuote={async (quoteId, update) => {
+          await updateQuote(quoteId, update);
+          showToast('Saved');
+          // Re-read, because a corrected amount moves Quoted, Chosen and Spent
+          // at three levels at once and every one of them is derived in a view.
+          await load();
+        }}
         onChooseQuote={async (quoteId, chosen) => {
           await setQuoteChosen(quoteId, chosen);
           showToast(chosen ? 'Chosen' : 'Unchosen');

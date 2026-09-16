@@ -720,8 +720,24 @@ later, in an aisle, needing one exact string. So:
   width that `min-width: auto` will not shrink below, so a flexed right-aligned value grew past the
   card and off the screen edge. Anything flexed around a `TextInput` needs `minWidth: 0`.
 - **Paperwork lives beside the photos, and so does the way to add either.** The section is
-  **Photos and paperwork**, and one wrapping row carries all three offers: *Add a photo*, *Choose
-  one*, *Attach a PDF*. The camera used to sit under the strip at the top, five hundred pixels
+  **Photos and paperwork**, and one row carries both offers: **Add photos** and *Attach a PDF*.
+  There is deliberately **one** photo control rather than a camera and a *Choose one* beside it —
+  two controls with one outcome, and on the build people install the distinction was never the
+  app's to make: `<input type="file" accept="image/*">` is answered by the phone's own sheet, which
+  offers *Take Photo* above the library, so asking first only added a tap. (On native it is the
+  library; `takePhoto` stays for the two screens whose whole gesture is the shutter — the compose
+  bar, and the walkthrough's rating plate.) **It takes several at once**, capped at
+  `PHOTO_PICK_LIMIT` — ten is a plausible number of angles on one appliance, and the cap exists
+  because each photograph is decoded, resized and re-encoded before it is sent, so *select all* on
+  a camera roll would otherwise be minutes of spinner with no way back. Three rules in the upload:
+  **one write at the end** (eight photographs must not be eight round trips, eight re-reads and
+  eight stacked toasts), **one after another rather than in parallel** (repeated compression is the
+  most memory-hungry thing this app does, and eight simultaneous uploads is how the request
+  deadlines start firing), and **what arrived is kept** — six uploaded with two refused is six
+  added and a sentence about the two, the same rule the PDF export follows for a photograph that
+  will not come. Anything past the cap is said out loud, because a cap nobody is told about is
+  indistinguishable from photographs that failed. The camera used to sit under the strip at the
+  top, five hundred pixels
   above the PDF button — so somebody wanting a second photograph of the dishwasher went looking in
   the section that attaches things and found only a PDF, which reads as a record that does not take
   photographs at all. The strip itself stays at the top, because a rating plate is what this page is

@@ -98,6 +98,49 @@ export async function takePhoto(): Promise<string | null> {
   return result.canceled ? null : result.assets[0].uri;
 }
 
+/**
+ * How many a single go will take.
+ *
+ * Not a product rule, a protection: each photograph is decoded, resized and
+ * re-encoded before it is sent, one after another, and somebody who taps
+ * *select all* on a camera roll would otherwise sit in front of a spinner for
+ * several minutes with no way back. Ten is a plausible number of angles on one
+ * appliance, and anything past it is said out loud rather than dropped in
+ * silence.
+ */
+export const PHOTO_PICK_LIMIT = 10;
+
+/**
+ * Opens the picker for **several** photographs at once.
+ *
+ * On the build people actually install this is also the way to the camera: the
+ * web path renders `<input type="file" accept="image/*">`, and a phone browser
+ * answers that with its own sheet — *Take Photo*, *Photo Library*, *Browse* —
+ * so one control covers both without the app asking a question first. On native
+ * it is the library only; `takePhoto` remains for the two screens whose whole
+ * gesture is the shutter (the compose bar, and the walkthrough's rating plate).
+ *
+ * Returns what was chosen and how many were left behind, because a cap that
+ * says nothing is a cap that looks like a bug.
+ */
+export async function pickPhotos(
+  limit = PHOTO_PICK_LIMIT
+): Promise<{ uris: string[]; dropped: number }> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: 'images',
+    allowsMultipleSelection: true,
+    selectionLimit: limit,
+    quality: 1,
+    exif: false,
+  });
+  if (result.canceled) return { uris: [], dropped: 0 };
+
+  // `selectionLimit` is advisory on some platforms and ignored by the web file
+  // input entirely, so the cap is enforced here as well as asked for there.
+  const chosen = result.assets.map((asset) => asset.uri);
+  return { uris: chosen.slice(0, limit), dropped: Math.max(0, chosen.length - limit) };
+}
+
 /** A storage path nobody else will claim, under this household's folder. */
 export function photoFileName(pathPrefix: string): string {
   return `${pathPrefix}/${Date.now()}-${Math.round(Math.random() * 1e6)}.jpg`;

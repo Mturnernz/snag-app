@@ -368,9 +368,9 @@ projection, the overdue hue, the unfiltered read and the paging rule.
 
 ## The list is the app's home
 
-`SnagListScreen` is `initialRouteName`, and there are four tabs: List, House, Schedule and You.
-Schedule sits after House because the first two are where work is done and it is where a question
-gets answered.
+`SnagListScreen` is `initialRouteName`, and there are five tabs: List, House, Projects, Schedule
+and You. Projects sits beside House because both describe the fabric of the place; Schedule stays
+last because it is the one you go to with a question, where the others are where work is done.
 
 **This product has no notifications and deliberately never will** (two people in one house do not
 need an email per snag; see `notify-snag` in the archive). So this screen is the only channel by
@@ -915,6 +915,173 @@ screen. It also pins the consumables search (the
 the case where a thing filed as "Bosch dishwasher" counts as having answered the Dishwasher
 prompt, and the paint rules above: one general prompt per room, answered by any finish in it and
 by nothing in another room, with the colour leading and the code searchable.
+
+## Projects: what we're *changing*
+
+`ProjectsScreen` is the **Projects** tab, and `home.projects` is the table behind it. The third
+noun. The list holds what is wrong with the house; the House tab holds what is in it; neither could
+hold a renovation — a body of work with a budget, a span of rooms, a folder of quotes, and an
+answer to "what did the bathroom actually cost".
+
+**It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
+Schedule · You. Projects sits third because it and House both describe the fabric of the place;
+Schedule stays last because it is the tab you go to with a question rather than the one where work
+is done. Folding this behind a switch on the House tab was considered and rejected: that is the
+`By room / By kind` rail coming back, and a tab with two minds is how a tab becomes two tabs badly.
+At 375pt each tab gets 75pt and `Projects` and `Schedule` are both eight characters at 11px — they
+fit with nothing to spare. **If a sixth noun ever arrives, the answer is not a sixth tab**; it is
+that two of these five were never really different.
+
+### Four levels, and the rule that stops them being four
+
+A downstairs laundry renovation is a bathroom, a laundry and a storage area; the bathroom is a
+toilet, a shower mixer, tiles and waterproofing; the toilet is three quotes of which one gets
+chosen. Storing that needs four tables — `projects`, `project_elements`, `project_items`,
+`project_quotes`. *Showing* it needs two.
+
+**A middle layer appears only when it earns its place.** Every project gets an element the moment
+it is created — named after the room when one room was chosen, after the project when none was —
+and that element is flagged `implicit`. The client does not draw an implicit element; it draws its
+items directly, under the heading *What it takes*, and the word never appears. Adding a second
+element clears the flag on every element of the project, and the layer becomes visible at the
+moment somebody actually made it exist. The same shape repeats at the bottom: an item with one
+quote shows that number inline and never says "quote".
+
+Three consequences worth holding on to:
+
+- **`implicit` is stored, not derived from "is this the only one".** Derived was the first shape
+  and it is wrong: deleting the second of two elements would silently re-hide the first, which by
+  then had a name somebody chose and paperwork attached to it. Once a person has seen the layer, it
+  stays.
+- **An implicit element with nothing in it is removed when a real one arrives**, rather than
+  becoming a phantom "Downstairs laundry" part inside the Downstairs laundry project. One that
+  *does* hold something stays and becomes visible, because what it holds is real even though its
+  name was never chosen.
+- **Elements come from step two of the start sheet, never from a concept anybody has to learn.**
+  "Which rooms does it touch" produces one element per room, already named. Pick one room and
+  elements never appear at all. The alternative — a nullable `element_id` on an item — was rejected
+  because it gives the rollup two paths to sum through, which is how a total starts disagreeing
+  with itself.
+
+### Money that cannot lie about itself
+
+This is the one part of this app that can actually hurt somebody, and the rules are not negotiable.
+`home.snag_advice` keeps costs as **text**, quoted back with the date, because parsing "180-260"
+into a number is the app asserting a precision the answer never had. A project cannot do that:
+rolling elements up into a total is the entire reason elements exist. So amounts are numeric, and
+they buy that back with three rules:
+
+- **A total always ships its denominator.** Never `$8,990` on its own; always `$8,990 · 5 of 9
+  items priced`. `ProjectTotals` carries `itemCount` and `pricedCount` in the same object as
+  `chosenTotal`, and every rollup view computes all three in the same row, so no screen *can*
+  render a figure without having been handed its denominator. `describeTotals` writes the line and
+  there is no path through either project screen that draws a total without it.
+- **An unpriced item is not zero.** It is counted in `itemCount`, excluded from every sum, and the
+  gap is named in words — "3 not priced". `sum` over nothing is null here, never 0, and
+  `numberOrNull` in the query package exists because `Number(null)` is `0`, which is exactly the
+  lie this feature cannot tell.
+- **Nothing reads a figure out of an attachment.** Every amount is typed by somebody who looked at
+  the quote. There is deliberately no function anywhere that takes a document and returns a number:
+  a scraped total has a source nobody can check, and it will be wrong about GST, about provisional
+  sums, and about which of three revisions it read.
+
+**Three figures, never one.** *Quoted* is the range of what suppliers have said including options
+not taken; *Chosen* is the sum of the picked quotes — what it is going to cost; *Spent* is invoices
+and receipts only — how far in we are. A quote is never "spent", or every project would read as
+fully paid the day it was priced. All three are **derived in the views**, never stored — the
+`needs_parts` argument applied to a far more dangerous number, since a maintained total and the
+quotes it describes will disagree the first time somebody edits an amount from the other phone.
+
+### GST is a fact about each amount, never a household setting
+
+New Zealand quotes come both ways — a trade supplier writes ex-GST, a retailer writes inc — and the
+difference is 15%, which on a renovation is the difference between on budget and two thousand over.
+So **every money column is a pair**: the number as it was typed, and `*_incl_gst` recording what
+that number meant. `MoneyField` puts the pill beside every box, defaulted to *incl*, as **two named
+halves rather than one chip that toggles** — one chip leaves the other answer as the unlabelled
+absence of a press, and here that unlabelled answer is worth 15%. The same argument that made
+capture's priority step two named pills.
+
+The line under the box shows the *other* figure as it is typed, which is what makes it trustworthy.
+**Nothing is converted on save**: the figure stored is the figure typed. The rollups normalise to
+**inclusive**, because that is what leaves the bank account, and `home.incl_gst` is the single place
+the arithmetic happens server-side — `inclGst` in the query package is its client twin and
+`projects.test.ts` pins that `GST_RATE` is the 0.15 the function uses. If those two ever disagree,
+the figure on screen and the figure in the rollup disagree, and the one people would trust is the
+wrong one. Every extract says *all figures incl GST* in its subtitle, because a forwarded PDF is a
+copy of these numbers nobody can ask a follow-up question about.
+
+### Files belong to one level, and they roll up rather than down
+
+A council consent belongs to the project; a tiling quote belongs to the item it prices. **Every
+level takes photos and PDFs**, through one `Attachments` component rather than four copies of the
+upload rules — it inherits every rule the thing page already paid for: one photo control (the
+phone's own sheet offers *Take Photo* above the library), several at once capped at
+`PHOTO_PICK_LIMIT` with the cap said out loud, one write at the end, one upload after another
+rather than in parallel, what arrived is kept, opening and removing as siblings, and a PDF opened
+with a signed URL rather than embedded (`object-src 'none'`).
+
+**`home.project_files` is the union that rolls them up**, and it names which level each file came
+from. So the project's page shows the whole folder with a line saying where each file lives, and
+opening the bathroom does *not* show the project's consent — because that document is not about the
+bathroom. No second bucket: `home-photos` under `<household_id>/docs/`, through
+`HOUSEHOLD_FILES_BUCKET` and `getFileUrl`, so not one storage policy changed.
+
+### What it joins to, and what that deliberately does not do
+
+- **`snags.project_id`** — the punch list, in the app's own word: the defects list at the end of a
+  renovation is literally a snag list, which is where the word comes from. A project does not get a
+  to-do list of its own; it gets a filter over `home.snags`, and those jobs sit on the List tab in
+  their rooms with everything else. One place work lives, or neither is trustworthy.
+- **Filing a snag against a project does NOT start it.** `project_id` is excluded from `v_started`
+  in `update_snag`, exactly as `thing_id` is: naming which renovation a dripping cistern belongs to
+  is the tail of capture, the same gesture as tagging the room. A link that marked twelve jobs
+  'doing' at once would empty the status from the other end than the retired *Start it* button did.
+- **`things.project_id`** — what the project left behind, and the payoff for keeping the record at
+  all. Three years on nobody asks what the laundry cost; they ask what the model number of the
+  machine is and whether it is still under warranty. The thing page carries an *Installed during*
+  row through to the project, where the invoice is attached to the quote that bought it, and an
+  item is promoted to a thing in one tap through `AddThingSheet` with the room pre-filled. Carried
+  into `create_thing` rather than written afterwards — a create-then-update is two chances to write
+  half of it.
+- Both are **`on delete set null`, never cascade**: deleting the record of the renovation must not
+  delete the washing machine, and what was wrong with the cistern is still what was wrong.
+
+### Four things that stay exactly as they are
+
+- **No compose bar on this tab, ever.** A project is started deliberately, at a desk, like a thing —
+  not in ten seconds standing in a doorway. The ten-second gesture would produce a project with a
+  name and nothing else at the one moment nobody is at a workbench.
+- **No notifications, still.** "Your quote expires Friday" would be the first thing in this product
+  that speaks unasked.
+- **No ghosts.** The House tab arrives furnished because a catalogue can guess a kitchen has a
+  rangehood. Nothing can guess a renovation, and a suggested project would be a fabrication rather
+  than a prompt — the ghost rule's own argument, one noun further on. Day one is genuinely empty,
+  and the empty state names the second use instead: the renovation you have already done.
+- **Done dims and sinks, and does not leave.** The list's rule is that finishing makes the list
+  shorter, because the reward is the item going away. A renovation is the opposite — the finished
+  one is the record you open in four years in front of a valuer — so it takes the same
+  `opacity: 0.62` a parked repeat takes and stays where it can be found.
+
+`ProjectDetailScreen` is a **push, not a sheet**, unlike SnagDetail and ThingDetail: those are a
+dozen small decisions taken against a list still visible underneath, where a project is a page you
+*read*.
+
+Two smaller rules. **`delete_element` refuses the last one** — items hang off an element, so a
+project with none is a project nothing can be added to. And **`set_quote_chosen` is its own
+function**, for the reason `set_part_bought` is: it is the only write in the feature that changes
+what a total says, and alone it cannot have its sibling-clearing skipped by a caller passing
+`chosen` among eight other fields. The server clears the sibling *first*, because
+`project_quotes_one_chosen` is a plain unique index and not a deferred constraint.
+
+`projects.test.ts` pins the money rules as properties rather than examples — the denominator, the
+unpriced item that is never zero, the GST gross-up, the range collapsing when nothing is left to
+decide, and that an extract states its GST basis and gives an unpriced item its own row.
+`MoneyField.test.tsx` pins the two named halves and the other-figure line.
+`ProjectsScreen.test.tsx` pins the grouping order, the dimmed done card, the empty day-one screen
+inventing nothing, the absence of a compose bar, and that no total renders without its denominator.
+`ProjectDetailScreen.test.tsx` pins the implicit layer staying hidden, the layer appearing once a
+real element exists, the three figures, and that files roll up without rolling down.
 
 ## Why the app exists at all
 

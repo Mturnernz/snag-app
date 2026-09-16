@@ -8,6 +8,8 @@ import { MainTabParamList, RootStackParamList } from '../types';
 import SnagListScreen from '../screens/SnagListScreen';
 import ScheduleScreen from '../screens/ScheduleScreen';
 import HouseScreen from '../screens/HouseScreen';
+import ProjectsScreen from '../screens/ProjectsScreen';
+import ProjectDetailScreen from '../screens/ProjectDetailScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SnagDetailScreen from '../screens/SnagDetailScreen';
 import HouseholdScreen from '../screens/HouseholdScreen';
@@ -22,6 +24,7 @@ const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap,
   // [inactive, active] — filled is reserved for the active tab.
   Snags: ['list-outline', 'list'],
   House: ['home-outline', 'home'],
+  Projects: ['construct-outline', 'construct'],
   Schedule: ['calendar-outline', 'calendar'],
   Profile: ['person-circle-outline', 'person-circle'],
 };
@@ -64,11 +67,25 @@ function MainTabs() {
           house" is the wrong name for half of what it holds — the property
           name goes in the screen header instead. */}
       <Tab.Screen name="House" component={HouseScreen} options={{ tabBarLabel: 'House' }} />
+      {/* What we're *changing* about the place — renovations, rebuilds, the
+          heat pump going in, planned or already done.
+
+          A fifth tab rather than a mode on the House tab. Both describe the
+          fabric of the place, which is why it sits beside it — but a tab with
+          two minds is how a tab becomes two tabs badly, and this app has
+          already removed a `By room / By kind` rail for exactly that.
+
+          **Five is the ceiling, not a direction.** At 375pt each tab gets 75pt,
+          and `Projects` and `Schedule` are both eight characters at 11px: they
+          fit with nothing to spare. If a sixth noun ever arrives the answer is
+          not a sixth tab — it is that two of these five were never really
+          different. */}
+      <Tab.Screen name="Projects" component={ProjectsScreen} options={{ tabBarLabel: 'Projects' }} />
       {/* The same work by date rather than by room — when things were added and
           finished, and when the repeating ones come round. It reads the list
           and never writes to it: one scheduling mechanism, or neither is
-          trustworthy. Last of the three because it is the one you go to with a
-          question, where the other two are where the work is done. */}
+          trustworthy. Last of the four because it is the one you go to with a
+          question, where the others are where the work is done. */}
       <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ tabBarLabel: 'Schedule' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'You' }} />
     </Tab.Navigator>
@@ -86,6 +103,12 @@ export default function RootNavigator() {
         component={SnagDetailScreen}
         options={{ presentation: 'modal' }}
       />
+      {/* A push, not a sheet, unlike SnagDetail and ThingDetail. Those are a
+          dozen small decisions taken against a list still visible underneath. A
+          project is a page you read — three figures, a set of parts that open,
+          and a folder — and deep enough that a sheet would spend its height
+          covering the tab it came from. */}
+      <Stack.Screen name="ProjectDetail" component={ProjectDetailScreen} />
       <Stack.Screen name="Household" component={HouseholdScreen} />
       <Stack.Screen name="LocationTags" component={LocationTagsScreen} />
       {/* A push, not a sheet: it is a paste and then a list of what that paste

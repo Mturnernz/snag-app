@@ -11,6 +11,7 @@ const snag = (over: Partial<Snag>): Snag => ({
   room: null, photoPaths: [], description: 'A thing', status: 'open', priority: null,
   parts: [], bought: [], needsParts: false, dueAt: null, repeatDays: null,
   assigneeId: null, thingId: null, thingName: null, thingMake: null, thingModel: null,
+  projectId: null, projectName: null,
   reporterId: 'me', reporterName: 'Me', assigneeName: null, propertyName: 'Home',
   createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
   lastDoneAt: null, doneAt: null, commentCount: 0,

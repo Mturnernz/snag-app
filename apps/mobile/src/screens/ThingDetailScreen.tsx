@@ -10,6 +10,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from '../components/Icon';
 import ScreenHeader from '../components/ScreenHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
+import DateField from '../components/DateField';
 import PhotoViewer from '../components/PhotoViewer';
 import Button from '../components/Button';
 import StickyActionBar from '../components/StickyActionBar';
@@ -713,12 +714,19 @@ export default function ThingDetailScreen() {
             />
           ))}
 
+          {/* A calendar beside the box rather than instead of it. "Nov 2019"
+              and "1998" are honest answers for a villa's wiring that no picker
+              can express, and `formatLooseDate` declines to show back a day it
+              would have had to invent — so the typed half is not a fallback.
+              Still inside the one-Save form: the calendar fills the box, it
+              does not write. */}
           {DATE_FIELDS.map((field) => (
-            <Field
+            <DateField
               key={field.key}
               label={field.label}
               value={draft?.[field.key] ?? ''}
-              onChange={(v) => edit(field.key, v)}
+              onChangeValue={(v) => edit(field.key, v)}
+              pickerTitle={field.label}
             />
           ))}
 
@@ -1022,14 +1030,11 @@ export default function ThingDetailScreen() {
           </View>
 
           <View style={styles.sheetField}>
-            <Text style={styles.fieldLabel}>First one due</Text>
-            <TextInput
-              style={styles.input}
+            <DateField
+              label="First one due"
               value={service?.first ?? ''}
-              onChangeText={(v) => setService((d) => (d ? { ...d, first: v } : d))}
-              placeholderTextColor={Colors.textMuted}
-              maxLength={40}
-              accessibilityLabel="First one due"
+              onChangeValue={(v) => setService((d) => (d ? { ...d, first: v } : d))}
+              pickerTitle="When's the first one due?"
             />
           </View>
 

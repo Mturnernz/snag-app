@@ -20,6 +20,7 @@ import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
 import LinkThingSheet from '../components/LinkThingSheet';
 import LinkProjectSheet from '../components/LinkProjectSheet';
+import { CalendarSheet } from '../components/DateField';
 import AddThingSheet from '../components/AddThingSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
@@ -31,7 +32,7 @@ import {
   getThingNotes, getThings, createThing, createLocation,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { describeCycle, snagHeadline } from '@snag/supabase-queries';
+import { dayKey, describeCycle, snagHeadline } from '@snag/supabase-queries';
 import {
   Comment, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote,
   PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
@@ -112,6 +113,8 @@ export default function SnagDetailScreen() {
   const [editing, setEditing] = useState(false);
   /** Which renovation this job belongs to. Read only when the sheet opens. */
   const [projectOpen, setProjectOpen] = useState(false);
+  /** The day the first one lands, when none of the three presets is the answer. */
+  const [dueOpen, setDueOpen] = useState(false);
   /** Choosing what it is about, and the record that choice reads from. */
   const [linking, setLinking] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -818,6 +821,20 @@ export default function SnagDetailScreen() {
                         disabled={busy}
                       />
                     ))}
+                    {/* The three presets cover the common answers and cannot
+                        say "the Saturday we're back", which is the answer often
+                        enough that having no way to give it made this rail read
+                        as the only dates on offer. Lit whenever the date set is
+                        not one the presets would have produced. */}
+                    <Option
+                      label="Pick a date…"
+                      active={
+                        !!snag.dueAt &&
+                        ![0, 7, snag.repeatDays].some((at) => isDueIn(snag.dueAt, at ?? -1))
+                      }
+                      onPress={() => setDueOpen(true)}
+                      disabled={busy}
+                    />
                   </View>
                   <Text style={styles.sectionHint}>
                     {describeRepeat(snag)}
@@ -846,6 +863,22 @@ export default function SnagDetailScreen() {
           await patch(update);
         }}
         onCancel={() => setEditing(false)}
+      />
+
+      {/* A day tapped on a calendar is a *local* day: built at local midnight
+          and stored as the instant that is, so `dayKey` reads it back as the
+          same square somebody pressed. `toISOString().slice(0, 10)` would file
+          a September evening in Auckland under the next day for half the year,
+          which is the bug `dayKey` exists for. */}
+      <CalendarSheet
+        visible={dueOpen}
+        selected={snag.dueAt ? dayKey(snag.dueAt) : null}
+        title="When's the first one due?"
+        onPick={(iso) => {
+          setDueOpen(false);
+          patch({ dueAt: new Date(`${iso}T00:00:00`).toISOString() });
+        }}
+        onClose={() => setDueOpen(false)}
       />
 
       <LinkProjectSheet

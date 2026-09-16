@@ -33,7 +33,7 @@ const project = (over: Partial<Project> = {}): Project => ({
   createdBy: 'me', createdAt: '2026-08-04T00:00:00Z', updatedAt: '2026-08-04T00:00:00Z',
   propertyName: 'Home', createdByName: 'Kate',
   elementCount: 1, shownElementCount: 0, fileCount: 0,
-  snagCount: 0, openSnagCount: 0, thingCount: 0,
+  snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
   ...totals(), ...over,
 });
 

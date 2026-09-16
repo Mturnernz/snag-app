@@ -362,9 +362,24 @@ Three smaller rules:
   reading "Saturday 5 September" over a grid of November is the screen contradicting itself, and
   it is also the wrong answer: somebody who has just paged forward is asking what lands *then*.
 
+**Projects are on it too, and still nothing writes.** A renovation's `started_on`, `finished_on`
+and `target_on` are drawn as a fifth kind — a read of dates set on the project's own page, so the
+rule holds exactly: no cell is draggable, and every row is a door back to the project. Three
+details are load-bearing. A project mark carries `snag: null` and a `project` instead, because a
+project is not a snag and pretending otherwise gives the tab two ideas of what it is showing. It is
+distinguished by **shape** — a square where everything else is a circle — because the palette has
+four hues with one job each and a renovation is not a state; that is the same move hollow-vs-solid
+already makes for a projection. And `target_on` is **never called "Due"**: nothing is due then, it
+is a hope somebody typed, and "Due" is the one word this tab must not spend loosely. A met target
+is dropped rather than drawn, since the row saying it finished is two lines up. The read is
+`getAllProjects()` — no property filter, for the same reason `getSnags({})` has none — and it is
+**not fatal**: a calendar that cannot draw the renovations is still a calendar.
+
 `scheduleMarks`, `monthGrid`, `dayKey` and `marksOn` live in `packages/supabase-queries` with the
 other pure helpers and are pinned by `schedule.test.ts`; `ScheduleScreen.test.tsx` pins the hollow
-projection, the overdue hue, the unfiltered read and the paging rule.
+projection, the overdue hue, the unfiltered read and the paging rule. `looseEnds.test.ts` pins the
+project marks — the two real dates, the target never reading as "Due", a met target dropped, and
+that a caller passing no projects gets exactly what it got before.
 
 ## The list is the app's home
 
@@ -1159,6 +1174,77 @@ them, which made the common answer — no, it doesn't come round — look like a
 the default it is. A repeat with no date on it would never surface, so choosing an interval sets
 one; an existing date is never clobbered.
 
+## A date is typed or tapped, and never only tapped
+
+Every date field in the app is a `DateField`: a box that takes what somebody
+writes, and a calendar beside it that takes a day. Both, and **the typed half is
+not the fallback** — that is the rule to keep if this is ever tidied.
+
+A calendar can only say one exact day. `installed_at` on a forty-year-old villa
+is honestly answered *"Nov 2019"*, or just *"1998"*, and `parseLooseDate` stores
+a missing day as the first of the month while `formatLooseDate` then declines to
+show it back — precisely so the record never claims a precision nobody offered.
+Replacing the box with a picker would force everybody to invent a day. So the
+calendar is an **addition**, never a replacement.
+
+**`8/11/2019` is the eighth of November, never the eleventh of August.** This is
+a New Zealand app and `dd/mm/yyyy` is what people write — and it is what the
+calendar writes back into the box, so the two halves of one control round-trip
+through `formatDayFirst` and `parseLooseDate`. Day-first was not merely
+undecided before: the three-part numeric form matched no pattern at all and came
+back `undefined`, so the most natural way to type a date was the one way that
+did not work.
+
+Two smaller rules that were each a real bug:
+
+- **A two-digit year is refused, never guessed at.** `8/11/98` is 1998 on a
+  villa's wiring and 2098 on nothing at all. The field saying it cannot read it
+  is recoverable; a silently wrong century is not — and a wrong warranty date is
+  not re-read until the day it matters.
+- **Every branch is checked against a real calendar.** `31/02/2026` and
+  `2019-13-45` come back `undefined` rather than reaching Postgres as a `22008`
+  raised from inside an RPC, which is the failure `parseLooseDate` exists to
+  prevent and which its numeric branches could previously still produce. The
+  check is a round trip through `new Date`, because the constructor rolls 31
+  February forward into March.
+
+**The calendar is hand-rolled, and the dependency is the trap.**
+`@react-native-community/datetimepicker` is a native module first, so on the
+build people actually install it is react-native-web's problem — the same shape
+of failure `Alert.alert` and `KeyboardAvoidingView` have already caught this
+codebase out with twice. The deployed CSP is `default-src 'self'` with no CDN
+reachable and `"output": "single"` means anything added ships in the one bundle
+that has already paid 490 KB for the PDF renderer.
+
+**And the arithmetic already existed.** `monthGrid` and `dayKey` were written for
+the Schedule tab, so this is a rendering job rather than a date-maths job — which
+also means the calendar somebody picks a due date from and the grid the Schedule
+tab draws can never disagree about what a month looks like. Two month grids built
+two ways drift at exactly the edges nobody tests: the lead-in week and the leap
+year. A day is a **local** day for the same reason it is there —
+`toISOString().slice(0, 10)` files a September evening in Auckland under the next
+day for half the year, and the suite runs under `TZ=Pacific/Auckland` so the test
+is a real assertion.
+
+**No example value in a date box.** The rule about `7A204871` under SERIAL covers
+`Nov 2019` under INSTALLED explicitly, and now covers `dd/mm/yyyy` too: the
+calendar sitting in the box says what it wants better than grey text does. A
+placeholder goes in only when it says something an example never could — *"No
+date — that's fine"*.
+
+It reaches every date in the app: the project sheet's three, a quote's date, the
+thing page's *Installed* and *Warranty until*, the service regime's first date,
+and the snag's due date — which had **no way to name a day at all** before this,
+only *Today*, *In a week* and *A full cycle away*. A *Pick a date…* option sits
+beside them, lit whenever the date set is not one those three would have
+produced.
+
+`DateField.test.tsx` pins the day-first read, the refused two-digit year, the
+refused 31 February, the month-only answer surviving, the round trip between the
+two halves, the absent placeholder, the calendar opening on the month already
+set, the Monday-first week, and the tapped square giving back the local day it
+shows.
+
 ## Properties: the house, and later the bach
 
 **A bach is a property, not a location tag.** This is the distinction to hold on to, because it
@@ -1274,6 +1360,53 @@ It is answered in two places, and both are needed:
 
 A waiting invitation renders under *Who's here* with an hourglass instead of an avatar and the words
 "Waiting — they need to sign up with this address". **It must never read as somebody who is here.**
+
+## Worth finishing: the quiet list, and the meter it must never become
+
+The You tab carries one muted line — *"3 things worth finishing"* — that expands into a short list
+and is **absent entirely at zero**. It exists because the app now holds four kinds of record that
+are supposed to inform each other, and the places they fall out of step are knowable.
+
+**The rule it is built against is the House tab's, one screen further on:** a global completeness
+meter is the shaming number that gets an app closed and not reopened, and there is deliberately no
+such meter anywhere. So there is no percentage, no progress bar, and no denominator of everything —
+only a count of concrete things somebody could do, the same shape as the shopping pill's "2 things
+to get". `ProfileScreen.test.tsx` asserts that no `%`, no `N of M` and no "complete" ever reaches
+the screen.
+
+**Three tests every entry has to pass**, and anything failing one is left out — which is why the
+list is short and usually empty:
+
+1. **The app is certain.** A fact from a column, never "this looks thin".
+2. **There is one obvious next action**, and a tap that starts it.
+3. **The payoff is nameable in a sentence**, and it is a payoff to the household rather than to the
+   record's tidiness.
+
+Three things pass today. **What a renovation has not handed over** —
+`installed_count - thing_count` on `projects_with_totals`, added by `20260916120000` — because
+three years on nobody asks what the laundry cost, they ask the model number and the warranty, and
+that answer only exists if somebody recorded the machine. A **photo with no words and no room**,
+which is named elsewhere in this file as the weakest thing the app can hold: `snagHeadline` has
+nothing to work with and the list reads "Something to sort out". And a **place with no suburb or
+town**, because `set_property_location` is what lets a briefed extract ask for somebody *local*.
+
+What is deliberately **not** listed is the more instructive half: a project with items nobody has
+priced (nagging about work in progress), a thing with no make or model (the photo of the rating
+plate may well be the answer), a subtraction that comes out negative (recording the old dishwasher
+beside the new one is not a loose end), and a finished snag however it was worded — there is
+nothing to sort out about a job that is done.
+
+Four smaller rules. It is **collapsed by default**, because somebody opening the You tab came to
+change their name or sign out. It sits on **no card, in no colour, at no elevation** — everything
+else on that screen is a white card on the plaster ground and this is quieter than all of it. It is
+**capped at `LOOSE_END_LIMIT`** (five, a sitting's worth) with the count above staying honest and
+one line saying *"More once these are done."* And the two reads it needs are **never fatal**: this
+screen is also the escape hatch from a broken session, so a list of optional tidying must not be
+what stops somebody signing out.
+
+`looseEnds.test.ts` pins every rule above as a property, including the four refusals;
+`ProfileScreen.test.tsx` pins the absence at zero, the collapsed line, the payoff wording, the
+missing meter, and Sign out surviving a failed read.
 
 ## Deleting your own account
 

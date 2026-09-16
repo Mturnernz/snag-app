@@ -16,12 +16,15 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: jest.fn() }),
+  useFocusEffect: (cb: () => void) => require('react').useEffect(cb, [cb]),
 }));
 
 const mock_deleteMyAccount = jest.fn().mockResolvedValue(undefined);
 const mock_getMyOrphanFilePaths = jest.fn().mockResolvedValue([]);
 const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
 const mock_signOut = jest.fn().mockResolvedValue({ forced: false });
+const mock_getAllProjects = jest.fn().mockResolvedValue([]);
+const mock_getSnags = jest.fn().mockResolvedValue([]);
 
 jest.mock('../lib/supabase', () => ({
   deleteMyAccount: (...a: unknown[]) => mock_deleteMyAccount(...a),
@@ -29,6 +32,8 @@ jest.mock('../lib/supabase', () => ({
   deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
   signOut: (...a: unknown[]) => mock_signOut(...a),
   upsertProfile: jest.fn().mockResolvedValue(undefined),
+  getAllProjects: (...a: unknown[]) => mock_getAllProjects(...a),
+  getSnags: (...a: unknown[]) => mock_getSnags(...a),
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
@@ -50,6 +55,13 @@ function arrange() {
 }
 
 const settle = () => TestRenderer.act(async () => {});
+
+/** Render and let the loose-ends reads land before anything is asserted. */
+async function renderProfile() {
+  const r = render(<ProfileScreen />);
+  await settle();
+  return r;
+}
 
 const pressableAround = (r: ReturnType<typeof render>, text: string) => {
   let node: any = r.getByText(text);
@@ -73,6 +85,8 @@ beforeEach(() => {
   mock_deleteStoredFiles.mockResolvedValue(undefined);
   mock_deleteMyAccount.mockResolvedValue(undefined);
   mock_signOut.mockResolvedValue({ forced: false });
+  mock_getAllProjects.mockResolvedValue([]);
+  mock_getSnags.mockResolvedValue([]);
 });
 
 describe('deleting your account', () => {
@@ -138,5 +152,87 @@ describe('deleting your account', () => {
 
     expect(button('Sign out').props.variant).toBe('outline');
     expect(button('Delete my account').props.variant).toBe('ghost');
+  });
+});
+
+/**
+ * The quiet list, and the rule it exists under.
+ *
+ * *A global completeness meter is the shaming number that gets an app closed
+ * and not reopened.* These pin the four ways this section would become one.
+ */
+describe('worth finishing', () => {
+  const project = (over: Record<string, unknown> = {}) => ({
+    id: 'p1', householdId: 'h', propertyId: 'prop', name: 'Downstairs laundry',
+    summary: null, status: 'underway',
+    startedOn: null, targetOn: null, finishedOn: null,
+    budget: null, budgetInclGst: true, photoPaths: [], documentPaths: [],
+    createdBy: 'me', createdAt: '', updatedAt: '',
+    propertyName: 'Home', createdByName: 'Kate',
+    elementCount: 1, shownElementCount: 0, fileCount: 0,
+    snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
+    itemCount: 0, pricedCount: 0, quotedCount: 0,
+    chosenTotal: null, rangeLow: null, rangeHigh: null, spentTotal: null,
+    ...over,
+  });
+
+  const open = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+        && !!n.props?.onPress,
+      { deep: true }
+    )[0];
+
+  it('draws nothing at all when there is nothing outstanding', async () => {
+    mock_getAllProjects.mockResolvedValue([]);
+    mock_getSnags.mockResolvedValue([]);
+    const r = await renderProfile();
+    // A control at zero is a control dressed as a choice — the same rule as the
+    // shopping pill and *Fit* in the photo viewer.
+    expect(r.queryByText('1 thing worth finishing')).toBeNull();
+    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+    expect(text).not.toContain('worth finishing');
+  });
+
+  it('is one muted line, collapsed, until it is asked to open', async () => {
+    mock_getAllProjects.mockResolvedValue([project({ installedCount: 2, thingCount: 0 })]);
+    mock_getSnags.mockResolvedValue([]);
+    const r = await renderProfile();
+    r.getByText('1 thing worth finishing');
+    // The detail is behind the line: somebody opening the You tab came to
+    // change their name or sign out.
+    expect(r.queryByText('Recording one puts its model number where you’ll look for it in a shop.'))
+      .toBeNull();
+  });
+
+  it('names the outstanding work and its payoff once opened', async () => {
+    mock_getAllProjects.mockResolvedValue([project({ installedCount: 2, thingCount: 0 })]);
+    mock_getSnags.mockResolvedValue([]);
+    const r = await renderProfile();
+    await TestRenderer.act(async () => open(r, '1 thing worth finishing').props.onPress());
+    r.getByText('2 things put in by Downstairs laundry aren’t in the house record');
+    r.getByText('Recording one puts its model number where you’ll look for it in a shop.');
+  });
+
+  it('shows no percentage, meter or total of everything', async () => {
+    mock_getAllProjects.mockResolvedValue([
+      project({ installedCount: 2, thingCount: 0, itemCount: 40, pricedCount: 3 }),
+    ]);
+    mock_getSnags.mockResolvedValue([]);
+    const r = await renderProfile();
+    await TestRenderer.act(async () => open(r, '1 thing worth finishing').props.onPress());
+    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+    expect(text).not.toContain('%');
+    expect(text).not.toMatch(/\b\d+\s+of\s+\d+\b/);
+    expect(text.toLowerCase()).not.toContain('complete');
+  });
+
+  it('never stops somebody signing out when the reads fail', async () => {
+    // This screen is also the escape hatch from a broken session. A list of
+    // optional tidying must not be what takes it down.
+    mock_getAllProjects.mockRejectedValue(new Error('offline'));
+    mock_getSnags.mockRejectedValue(new Error('offline'));
+    const r = await renderProfile();
+    expect(r.getByText('Sign out')).toBeTruthy();
   });
 });

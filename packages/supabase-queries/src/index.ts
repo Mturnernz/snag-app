@@ -1605,8 +1605,28 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
  * from inside an RPC — a database error surfaced to somebody who answered the
  * question correctly. This accepts every form the label and the person are
  * likely to use: `2019`, `2019-11`, `11/2019`, `Nov 2019`, `November 2019`,
- * `2019-11-08`, `8 Nov 2019`. A missing day is the first of the month, which
- * `formatLooseDate` then declines to show back.
+ * `2019-11-08`, `8 Nov 2019`, and `8/11/2019`. A missing day is the first of
+ * the month, which `formatLooseDate` then declines to show back.
+ *
+ * **`8/11/2019` is the eighth of November, never the eleventh of August.**
+ * This is a New Zealand household app and `dd/mm/yyyy` is what people write
+ * here — it is also what the calendar writes back into the field, so the two
+ * halves of a date control have to agree. Day-first was not merely undecided
+ * before: the three-part numeric form matched no pattern at all and came back
+ * `undefined`, so the single most natural way to type a date was the one way
+ * that did not work. A warranty filed three months out is not a date anybody
+ * re-reads until it matters, which is why this is stated here and pinned in
+ * `houseRecord.test.ts` rather than left to the reader of the regex.
+ *
+ * **A two-digit year is refused rather than guessed at.** `8/11/98` is 1998 on
+ * a villa's wiring and 2098 on nothing at all, and there is no rule that gets
+ * both right; the field says it cannot read it, which is recoverable, where a
+ * silently wrong century is not.
+ *
+ * **Every branch is checked against a real calendar**, so `31/02/2026` and
+ * `2019-13-45` come back `undefined` rather than reaching Postgres as a 22008
+ * from inside an RPC — which is the failure this function exists to prevent and
+ * which the numeric branches could previously still produce.
  *
  * Returns `undefined` when it cannot tell — the caller keeps what was typed and
  * says so, rather than silently discarding it or storing a wrong date.
@@ -1615,8 +1635,21 @@ export function parseLooseDate(input: string): string | null | undefined {
   const text = input.trim();
   if (!text) return null;
 
-  const iso = (y: number, m: number, d: number) =>
-    `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  /**
+   * Null unless the three numbers are a day that exists.
+   *
+   * Constructed and read back rather than range-checked by hand: the Date
+   * constructor rolls 31 February forward into March, so a round trip that
+   * comes back with a different month is the check.
+   */
+  const iso = (y: number, m: number, d: number): string | undefined => {
+    if (!(y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= 31)) return undefined;
+    const probe = new Date(y, m - 1, d);
+    if (probe.getFullYear() !== y || probe.getMonth() !== m - 1 || probe.getDate() !== d) {
+      return undefined;
+    }
+    return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  };
 
   const monthNumber = (word: string): number | null => {
     const at = MONTHS.findIndex((m) => word.toLowerCase().startsWith(m.toLowerCase()));
@@ -1630,6 +1663,11 @@ export function parseLooseDate(input: string): string | null | undefined {
   }
   // 2019-11 / 2019/11
   if ((m = text.match(/^(\d{4})[-/](\d{1,2})$/))) return iso(+m[1], +m[2], 1);
+  // 8/11/2019 — day first, always. See the note above: this is the form most
+  // people here actually type, and it matched nothing at all until now.
+  if ((m = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/))) {
+    return iso(+m[3], +m[2], +m[1]);
+  }
   // 11/2019
   if ((m = text.match(/^(\d{1,2})[-/](\d{4})$/))) return iso(+m[2], +m[1], 1);
   // 2019
@@ -1733,17 +1771,26 @@ export function describeDue(snag: Snag, now = new Date()): string | null {
 // the completions it can prove and does not invent a history it hasn't got.
 
 /** What a day on the calendar can be carrying. */
-export type ScheduleKind = 'filed' | 'done' | 'due' | 'next';
+export type ScheduleKind = 'filed' | 'done' | 'due' | 'next' | 'project';
 
 export interface ScheduleMark {
   /** Local `YYYY-MM-DD`, which is what a calendar cell is keyed by. */
   day: string;
   kind: ScheduleKind;
-  snag: Snag;
+  /**
+   * The job this mark is about. **Null on a project mark**, because a project
+   * is not a snag and pretending otherwise is how the tab would end up with two
+   * ideas of what it is showing.
+   */
+  snag: Snag | null;
+  /** Set on a project mark and on nothing else. */
+  project?: Project;
+  /** Which of a project's three dates this is: "Started", "Finished". */
+  note?: string;
 }
 
 /** The order marks are listed and drawn in: what happened, then what's coming. */
-const KIND_ORDER: ScheduleKind[] = ['filed', 'done', 'due', 'next'];
+const KIND_ORDER: ScheduleKind[] = ['filed', 'done', 'due', 'next', 'project'];
 
 /**
  * How far a repeat is walked forward before the loop gives up.
@@ -1796,7 +1843,19 @@ export function monthGrid(year: number, month: number): Date[] {
  * passes the first and last cells of the grid it is about to draw, so projected
  * repeats are only ever computed for a month somebody is actually looking at.
  */
-export function scheduleMarks(snags: Snag[], from: Date, to: Date): ScheduleMark[] {
+export function scheduleMarks(
+  snags: Snag[],
+  from: Date,
+  to: Date,
+  /**
+   * The renovations, so the calendar answers "what were we doing that month"
+   * as well as "what is due".
+   *
+   * Optional, so every existing caller and every existing test keeps working
+   * unchanged — a project mark is an addition to this tab, not a change to it.
+   */
+  projects: Project[] = []
+): ScheduleMark[] {
   const fromKey = dayKey(from);
   const toKey = dayKey(to);
   const within = (day: string) => day >= fromKey && day < toKey;
@@ -1834,6 +1893,31 @@ export function scheduleMarks(snags: Snag[], from: Date, to: Date): ScheduleMark
     }
   }
 
+  // Projects, and **still nothing that writes**. The tab's rule is that there
+  // is one scheduling mechanism in this app — `due_at` plus `repeat_days` — and
+  // the moment there are two, neither is trustworthy. These are a read of dates
+  // already set on the project's own page: no cell is draggable, nothing moves
+  // between days, and every row is a door back to the project.
+  //
+  // A project has three dates and they are three different claims, so each gets
+  // its own mark with its own word rather than one dot meaning "something about
+  // this renovation". `target_on` is deliberately **not** called "Due": nothing
+  // is due, it is a hope somebody typed, and the one word this tab must never
+  // spend loosely is that one.
+  for (const project of projects) {
+    const addProject = (date: string | null, note: string) => {
+      if (!date) return;
+      const day = dayKey(`${date}T00:00:00`);
+      if (within(day)) out.push({ day, kind: 'project', snag: null, project, note });
+    };
+
+    addProject(project.startedOn, 'Started');
+    addProject(project.finishedOn, 'Finished');
+    // A target already met is not a date anybody needs on a calendar — the job
+    // finished, and the row saying so is two lines up.
+    if (!project.finishedOn) addProject(project.targetOn, 'Aiming to finish');
+  }
+
   return out;
 }
 
@@ -1852,6 +1936,10 @@ export const SCHEDULE_KIND_LABELS: Record<ScheduleKind, string> = {
   // Not "Due": nothing is due then, and nothing will be until the current one
   // is marked done and the date rolls. It is when this comes round again.
   next: 'Comes round',
+  // The row carries its own word — "Started", "Finished", "Aiming to finish" —
+  // because a project's three dates are three different claims. This is only
+  // the fallback and the legend's name for the kind.
+  project: 'Project',
 };
 
 // ---------------------------------------------------------------- extracts
@@ -2544,6 +2632,22 @@ export async function deleteSnagAdvice(client: SupabaseClient, snagId: string): 
   if (error) throw asError(error, "Couldn't remove that assessment");
 }
 
+/**
+ * `08/11/2019` — a stored date written the way a date control asks for it.
+ *
+ * Deliberately not `formatLooseDate`, which answers in words and drops a day it
+ * would have had to invent ("Nov 2019"). This is what the calendar writes back
+ * into the field it sits beside, so it has to be a form `parseLooseDate` reads
+ * exactly — the two halves of one control must round-trip, or tapping a day
+ * and then leaving the field would change the answer.
+ */
+export function formatDayFirst(iso: string | null): string {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return '';
+  return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+}
+
 /** "Pasted 15 Sep" — the source line under the advice. */
 export function adviceSource(now = new Date()): string {
   return `Pasted ${now.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}`;
@@ -2591,6 +2695,7 @@ function mapProject(row: Row): Project {
     snagCount: row.snag_count ?? 0,
     openSnagCount: row.open_snag_count ?? 0,
     thingCount: row.thing_count ?? 0,
+    installedCount: row.installed_count ?? 0,
     itemCount: row.item_count ?? 0,
     pricedCount: row.priced_count ?? 0,
     quotedCount: row.quoted_count ?? 0,
@@ -2849,6 +2954,25 @@ export async function getProjects(
     .from('projects_with_totals')
     .select('*')
     .eq('property_id', propertyId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw asError(error, "Couldn't load the projects");
+  return (data ?? []).map(mapProject);
+}
+
+/**
+ * Every project at every place this person is linked to.
+ *
+ * No property filter at all, which is the Schedule tab's own argument: a date is
+ * not about a place, so answering "what were we doing that month" for the house
+ * only — because the house is what the Projects tab happened to be showing — is
+ * the wrong answer to the question. RLS and `property_members` decide the rest,
+ * exactly as `getSnags({})` relies on them to.
+ */
+export async function getAllProjects(client: SupabaseClient): Promise<Project[]> {
+  const { data, error } = await client
+    .from('projects_with_totals')
+    .select('*')
     .order('created_at', { ascending: false });
 
   if (error) throw asError(error, "Couldn't load the projects");
@@ -3436,4 +3560,99 @@ export function projectExportPhotos(
     (source, path) => ({ path, caption: source.caption, detail: source.detail }),
     limit
   );
+}
+
+// ------------------------------------------------------- the loose ends
+//
+// **What the app knows is half-finished, and can name the next move for.**
+//
+// The rule this is built against is already written down for the House tab: a
+// global completeness meter is the shaming number that gets an app closed and
+// not reopened, and there is deliberately no such meter anywhere. So this is
+// not one. Three tests every entry has to pass:
+//
+//   1. **The app is certain.** Not "this looks thin" — a fact, from a column.
+//   2. **There is one obvious next action**, and a tap that starts it.
+//   3. **The payoff is nameable in a sentence**, and it is a payoff to the
+//      household rather than to the record's tidiness.
+//
+// Anything that fails one of those is left out, which is why this list is short
+// and why it is usually empty. An empty list draws nothing at all — the same
+// rule as the shopping pill at nought and *Fit* in the photo viewer: a control
+// at zero is a control dressed as a choice.
+
+export type LooseEndKind = 'record-installed' | 'wordless-snag' | 'place-unlocated';
+
+export interface LooseEnd {
+  kind: LooseEndKind;
+  /** The row's own line: what is outstanding. */
+  title: string;
+  /** Why it is worth doing — the payoff, never the tidiness. */
+  detail: string;
+  projectId?: string;
+  snagId?: string;
+}
+
+export function looseEnds(input: {
+  projects: Project[];
+  snags: Snag[];
+  properties: Property[];
+}): LooseEnd[] {
+  const out: LooseEnd[] = [];
+
+  // 1. What a renovation put in that the house record has never heard of.
+  //
+  // This is the join the whole Projects tab was built to make pay: three years
+  // on nobody asks what the laundry cost, they ask the model number and whether
+  // it is still under warranty — and that answer only exists if somebody
+  // recorded the machine. The count is a subtraction of two columns, so it is
+  // certain rather than inferred from names.
+  for (const project of input.projects) {
+    const outstanding = project.installedCount - project.thingCount;
+    if (outstanding <= 0) continue;
+    out.push({
+      kind: 'record-installed',
+      title:
+        outstanding === 1
+          ? `1 thing put in by ${project.name} isn’t in the house record`
+          : `${outstanding} things put in by ${project.name} aren’t in the house record`,
+      detail: 'Recording one puts its model number where you’ll look for it in a shop.',
+      projectId: project.id,
+    });
+  }
+
+  // 2. A photograph with no words and no room.
+  //
+  // Named in this codebase as the weakest thing the app can hold: `snagHeadline`
+  // has nothing to work with and the list reads "Something to sort out", which
+  // is unreadable a fortnight later to the person who filed it as much as to
+  // anybody else. Done ones are left alone — there is nothing to sort out about
+  // a job that is finished, whatever it was called.
+  for (const snag of input.snags) {
+    if (snag.status === 'done') continue;
+    if (snag.description || snag.room) continue;
+    if (snag.photoPaths.length === 0) continue;
+    out.push({
+      kind: 'wordless-snag',
+      title: `${snag.reference} is a photo with no words`,
+      detail: 'A line about it, or the room it’s in, keeps the list readable in a fortnight.',
+      snagId: snag.id,
+    });
+  }
+
+  // 3. A place that cannot say roughly where it is.
+  //
+  // `set_property_location` exists so a briefed extract can ask for somebody
+  // *local*; without it the brief asks for a tradesman near nowhere. Suburb and
+  // town, never a street address — the file gets forwarded.
+  for (const property of input.properties) {
+    if (property.suburb || property.town) continue;
+    out.push({
+      kind: 'place-unlocated',
+      title: `${property.name} doesn’t say which part of the country it’s in`,
+      detail: 'A suburb and town let an assessment ask for somebody local.',
+    });
+  }
+
+  return out;
 }

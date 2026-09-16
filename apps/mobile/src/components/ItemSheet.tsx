@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from './Icon';
 import MoneyField from './MoneyField';
+import DateField from './DateField';
 import Attachments from './Attachments';
 import ConfirmDialog from './ConfirmDialog';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -322,14 +323,11 @@ export default function ItemSheet({
                 A quote is what it might cost. An invoice or a receipt is what it did — only those
                 two count towards what’s been spent.
               </Text>
-              <Text style={styles.fieldLabel}>Dated</Text>
-              <TextInput
-                style={styles.input}
+              <DateField
+                label="Dated"
                 value={dated}
-                onChangeText={setDated}
-                placeholder="28 August"
-                placeholderTextColor={Colors.textMuted}
-                accessibilityLabel="Dated"
+                onChangeValue={setDated}
+                pickerTitle="When was it quoted?"
               />
               <Pressable
                 onPress={addQuote}

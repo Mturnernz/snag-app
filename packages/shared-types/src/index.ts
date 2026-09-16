@@ -843,7 +843,17 @@ export interface Project extends ProjectTotals {
   fileCount: number;
   snagCount: number;
   openSnagCount: number;
+  /** What this project put into the house record. */
   thingCount: number;
+  /**
+   * What it says it installed.
+   *
+   * The gap between this and `thingCount` is the one place two halves of the
+   * record can be quietly out of step: the laundry has a new washing machine in
+   * it and the House tab has never heard of it. `looseEnds` reads exactly that
+   * subtraction, and it is a count of things somebody can do — never a score.
+   */
+  installedCount: number;
 }
 
 /**

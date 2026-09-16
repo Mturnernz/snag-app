@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from './Icon';
 import MoneyField from './MoneyField';
+import DateField from './DateField';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { parseLooseDate, formatLooseDate, type ProjectInput } from '@snag/supabase-queries';
@@ -316,43 +317,29 @@ export default function AddProjectSheet({
             </View>
 
             {status !== 'planned' ? (
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Started</Text>
-                <TextInput
-                  style={styles.input}
-                  value={startedOn}
-                  onChangeText={setStartedOn}
-                  placeholder="4 August 2026"
-                  placeholderTextColor={Colors.textMuted}
-                  accessibilityLabel="Started"
-                />
-              </View>
+              <DateField
+                label="Started"
+                value={startedOn}
+                onChangeValue={setStartedOn}
+                pickerTitle="When did it start?"
+              />
             ) : null}
 
             {status === 'done' ? (
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Finished</Text>
-                <TextInput
-                  style={styles.input}
-                  value={finishedOn}
-                  onChangeText={setFinishedOn}
-                  placeholder="March 2026"
-                  placeholderTextColor={Colors.textMuted}
-                  accessibilityLabel="Finished"
-                />
-              </View>
+              <DateField
+                label="Finished"
+                value={finishedOn}
+                onChangeValue={setFinishedOn}
+                pickerTitle="When did it finish?"
+              />
             ) : (
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Hoping to finish</Text>
-                <TextInput
-                  style={styles.input}
-                  value={targetOn}
-                  onChangeText={setTargetOn}
-                  placeholder="No date — that’s fine"
-                  placeholderTextColor={Colors.textMuted}
-                  accessibilityLabel="Hoping to finish"
-                />
-              </View>
+              <DateField
+                label="Hoping to finish"
+                value={targetOn}
+                onChangeValue={setTargetOn}
+                placeholder="No date — that’s fine"
+                pickerTitle="Hoping to finish by"
+              />
             )}
 
             <MoneyField

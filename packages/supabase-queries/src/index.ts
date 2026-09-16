@@ -1605,8 +1605,28 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
  * from inside an RPC — a database error surfaced to somebody who answered the
  * question correctly. This accepts every form the label and the person are
  * likely to use: `2019`, `2019-11`, `11/2019`, `Nov 2019`, `November 2019`,
- * `2019-11-08`, `8 Nov 2019`. A missing day is the first of the month, which
- * `formatLooseDate` then declines to show back.
+ * `2019-11-08`, `8 Nov 2019`, and `8/11/2019`. A missing day is the first of
+ * the month, which `formatLooseDate` then declines to show back.
+ *
+ * **`8/11/2019` is the eighth of November, never the eleventh of August.**
+ * This is a New Zealand household app and `dd/mm/yyyy` is what people write
+ * here — it is also what the calendar writes back into the field, so the two
+ * halves of a date control have to agree. Day-first was not merely undecided
+ * before: the three-part numeric form matched no pattern at all and came back
+ * `undefined`, so the single most natural way to type a date was the one way
+ * that did not work. A warranty filed three months out is not a date anybody
+ * re-reads until it matters, which is why this is stated here and pinned in
+ * `houseRecord.test.ts` rather than left to the reader of the regex.
+ *
+ * **A two-digit year is refused rather than guessed at.** `8/11/98` is 1998 on
+ * a villa's wiring and 2098 on nothing at all, and there is no rule that gets
+ * both right; the field says it cannot read it, which is recoverable, where a
+ * silently wrong century is not.
+ *
+ * **Every branch is checked against a real calendar**, so `31/02/2026` and
+ * `2019-13-45` come back `undefined` rather than reaching Postgres as a 22008
+ * from inside an RPC — which is the failure this function exists to prevent and
+ * which the numeric branches could previously still produce.
  *
  * Returns `undefined` when it cannot tell — the caller keeps what was typed and
  * says so, rather than silently discarding it or storing a wrong date.
@@ -1615,8 +1635,21 @@ export function parseLooseDate(input: string): string | null | undefined {
   const text = input.trim();
   if (!text) return null;
 
-  const iso = (y: number, m: number, d: number) =>
-    `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  /**
+   * Null unless the three numbers are a day that exists.
+   *
+   * Constructed and read back rather than range-checked by hand: the Date
+   * constructor rolls 31 February forward into March, so a round trip that
+   * comes back with a different month is the check.
+   */
+  const iso = (y: number, m: number, d: number): string | undefined => {
+    if (!(y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= 31)) return undefined;
+    const probe = new Date(y, m - 1, d);
+    if (probe.getFullYear() !== y || probe.getMonth() !== m - 1 || probe.getDate() !== d) {
+      return undefined;
+    }
+    return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  };
 
   const monthNumber = (word: string): number | null => {
     const at = MONTHS.findIndex((m) => word.toLowerCase().startsWith(m.toLowerCase()));
@@ -1630,6 +1663,11 @@ export function parseLooseDate(input: string): string | null | undefined {
   }
   // 2019-11 / 2019/11
   if ((m = text.match(/^(\d{4})[-/](\d{1,2})$/))) return iso(+m[1], +m[2], 1);
+  // 8/11/2019 — day first, always. See the note above: this is the form most
+  // people here actually type, and it matched nothing at all until now.
+  if ((m = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/))) {
+    return iso(+m[3], +m[2], +m[1]);
+  }
   // 11/2019
   if ((m = text.match(/^(\d{1,2})[-/](\d{4})$/))) return iso(+m[2], +m[1], 1);
   // 2019
@@ -2542,6 +2580,22 @@ export async function recordSnagAdvice(
 export async function deleteSnagAdvice(client: SupabaseClient, snagId: string): Promise<void> {
   const { error } = await client.rpc('delete_snag_advice', { p_snag_id: snagId });
   if (error) throw asError(error, "Couldn't remove that assessment");
+}
+
+/**
+ * `08/11/2019` — a stored date written the way a date control asks for it.
+ *
+ * Deliberately not `formatLooseDate`, which answers in words and drops a day it
+ * would have had to invent ("Nov 2019"). This is what the calendar writes back
+ * into the field it sits beside, so it has to be a form `parseLooseDate` reads
+ * exactly — the two halves of one control must round-trip, or tapping a day
+ * and then leaving the field would change the answer.
+ */
+export function formatDayFirst(iso: string | null): string {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return '';
+  return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
 }
 
 /** "Pasted 15 Sep" — the source line under the advice. */

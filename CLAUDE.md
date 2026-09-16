@@ -1159,6 +1159,77 @@ them, which made the common answer — no, it doesn't come round — look like a
 the default it is. A repeat with no date on it would never surface, so choosing an interval sets
 one; an existing date is never clobbered.
 
+## A date is typed or tapped, and never only tapped
+
+Every date field in the app is a `DateField`: a box that takes what somebody
+writes, and a calendar beside it that takes a day. Both, and **the typed half is
+not the fallback** — that is the rule to keep if this is ever tidied.
+
+A calendar can only say one exact day. `installed_at` on a forty-year-old villa
+is honestly answered *"Nov 2019"*, or just *"1998"*, and `parseLooseDate` stores
+a missing day as the first of the month while `formatLooseDate` then declines to
+show it back — precisely so the record never claims a precision nobody offered.
+Replacing the box with a picker would force everybody to invent a day. So the
+calendar is an **addition**, never a replacement.
+
+**`8/11/2019` is the eighth of November, never the eleventh of August.** This is
+a New Zealand app and `dd/mm/yyyy` is what people write — and it is what the
+calendar writes back into the box, so the two halves of one control round-trip
+through `formatDayFirst` and `parseLooseDate`. Day-first was not merely
+undecided before: the three-part numeric form matched no pattern at all and came
+back `undefined`, so the most natural way to type a date was the one way that
+did not work.
+
+Two smaller rules that were each a real bug:
+
+- **A two-digit year is refused, never guessed at.** `8/11/98` is 1998 on a
+  villa's wiring and 2098 on nothing at all. The field saying it cannot read it
+  is recoverable; a silently wrong century is not — and a wrong warranty date is
+  not re-read until the day it matters.
+- **Every branch is checked against a real calendar.** `31/02/2026` and
+  `2019-13-45` come back `undefined` rather than reaching Postgres as a `22008`
+  raised from inside an RPC, which is the failure `parseLooseDate` exists to
+  prevent and which its numeric branches could previously still produce. The
+  check is a round trip through `new Date`, because the constructor rolls 31
+  February forward into March.
+
+**The calendar is hand-rolled, and the dependency is the trap.**
+`@react-native-community/datetimepicker` is a native module first, so on the
+build people actually install it is react-native-web's problem — the same shape
+of failure `Alert.alert` and `KeyboardAvoidingView` have already caught this
+codebase out with twice. The deployed CSP is `default-src 'self'` with no CDN
+reachable and `"output": "single"` means anything added ships in the one bundle
+that has already paid 490 KB for the PDF renderer.
+
+**And the arithmetic already existed.** `monthGrid` and `dayKey` were written for
+the Schedule tab, so this is a rendering job rather than a date-maths job — which
+also means the calendar somebody picks a due date from and the grid the Schedule
+tab draws can never disagree about what a month looks like. Two month grids built
+two ways drift at exactly the edges nobody tests: the lead-in week and the leap
+year. A day is a **local** day for the same reason it is there —
+`toISOString().slice(0, 10)` files a September evening in Auckland under the next
+day for half the year, and the suite runs under `TZ=Pacific/Auckland` so the test
+is a real assertion.
+
+**No example value in a date box.** The rule about `7A204871` under SERIAL covers
+`Nov 2019` under INSTALLED explicitly, and now covers `dd/mm/yyyy` too: the
+calendar sitting in the box says what it wants better than grey text does. A
+placeholder goes in only when it says something an example never could — *"No
+date — that's fine"*.
+
+It reaches every date in the app: the project sheet's three, a quote's date, the
+thing page's *Installed* and *Warranty until*, the service regime's first date,
+and the snag's due date — which had **no way to name a day at all** before this,
+only *Today*, *In a week* and *A full cycle away*. A *Pick a date…* option sits
+beside them, lit whenever the date set is not one those three would have
+produced.
+
+`DateField.test.tsx` pins the day-first read, the refused two-digit year, the
+refused 31 February, the month-only answer surviving, the round trip between the
+two halves, the absent placeholder, the calendar opening on the month already
+set, the Monday-first week, and the tapped square giving back the local day it
+shows.
+
 ## Properties: the house, and later the bach
 
 **A bach is a property, not a location tag.** This is the distinction to hold on to, because it

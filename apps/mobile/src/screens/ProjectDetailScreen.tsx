@@ -345,19 +345,33 @@ export default function ProjectDetailScreen({ route }: Props) {
         </View>
 
         {/* ── the money ──────────────────────────────────────────────────
-            Three figures, never one, and never without the line beneath. */}
+            Three figures, never one, and never without the line beneath.
+
+            Stacked rather than three columns across, and that is a fix rather
+            than a preference: a third of 390pt cannot hold
+            "$188,352.22–191,583.72", so the range wrapped mid-number and the
+            strip went ragged the moment a job got past five figures. It is the
+            same argument the thing page's spec sheet already made when it
+            un-columned itself — a two-column row has nowhere to put a long
+            answer, and a renovation's totals are the longest answers here.
+
+            The label holds a fixed column so the three figures line up on their
+            right edge, which is how a column of money is read. */}
         <View style={styles.strip}>
-          <View style={styles.cell}>
-            <Text style={styles.cellKey}>Quoted</Text>
-            <Text style={styles.cellValue}>{range ?? '—'}</Text>
+          <View style={styles.row}>
+            <Text style={styles.rowKey}>Quoted</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{range ?? '—'}</Text>
           </View>
-          <View style={styles.cell}>
-            <Text style={styles.cellKey}>Chosen</Text>
-            <Text style={styles.cellValue}>{chosen ?? '—'}</Text>
+          <View style={styles.row}>
+            <Text style={styles.rowKey}>Chosen</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{chosen ?? '—'}</Text>
           </View>
-          <View style={[styles.cell, styles.cellLast]}>
-            <Text style={styles.cellKey}>Spent</Text>
-            <Text style={[styles.cellValue, spent ? styles.cellValueSpent : null]}>
+          <View style={[styles.row, styles.rowLast]}>
+            <Text style={styles.rowKey}>Spent</Text>
+            <Text
+              style={[styles.rowValue, spent ? styles.rowValueSpent : null]}
+              numberOfLines={1}
+            >
               {spent ?? '—'}
             </Text>
           </View>
@@ -482,6 +496,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                             price.state === 'range' && styles.itemPriceRange,
                             price.state === 'none' && styles.itemPriceNone,
                           ]}
+                          numberOfLines={1}
                         >
                           {price.text}
                         </Text>
@@ -674,15 +689,24 @@ export default function ProjectDetailScreen({ route }: Props) {
         onClose={() => setRoomsOpen(false)}
       />
 
+      {/* An empty part is a heading and nothing else, so taking it off is a
+          two-button decision like every other. A part that *holds* something is
+          the one case here where pressing Remove destroys work that cannot be
+          got back — its items, their quotes and their files all go — so it asks
+          for the word to be typed, the same gate deleting a place already uses
+          and for the same reason. The room itself always survives either way. */}
       <ConfirmDialog
         visible={removingElement !== null}
         title={`Remove ${removingElement?.name ?? ''}?`}
         message={
-          removingElement && removingElement.itemCount > 0
-            ? `${removingElement.itemCount === 1 ? 'Its item goes' : `Its ${removingElement.itemCount} items go`} with it, and so does every quote and file on them. The room itself stays.`
+          removingElement && elementHoldsSomething(removingElement)
+            ? `${describeWhatGoes(removingElement)} The room itself stays.`
             : 'Nothing is on it yet. The room itself stays.'
         }
         confirmLabel="Remove"
+        confirmText={
+          removingElement && elementHoldsSomething(removingElement) ? 'Delete' : undefined
+        }
         destructive
         onCancel={() => setRemovingElement(null)}
         onConfirm={() => removingElement && removeElement(removingElement)}
@@ -782,6 +806,42 @@ function elementRoom(elements: ProjectElement[], item: ProjectItem): string | nu
   return elements.find((element) => element.id === item.elementId)?.room ?? null;
 }
 
+/**
+ * Whether removing this part would destroy anything.
+ *
+ * Files count, not just items: a part with no items but a council letter
+ * attached is not empty, and "Nothing is on it yet" would be the screen telling
+ * somebody a lie right before it acted on it.
+ */
+export function elementHoldsSomething(element: ProjectElement): boolean {
+  return (
+    element.itemCount > 0 ||
+    element.photoPaths.length > 0 ||
+    element.documentPaths.length > 0
+  );
+}
+
+/**
+ * What goes with it, in counts rather than a general warning — the same rule
+ * deleting a place follows. A reader can weigh "3 items and 2 files"; they
+ * cannot weigh "this cannot be undone".
+ */
+export function describeWhatGoes(element: ProjectElement): string {
+  const files = element.photoPaths.length + element.documentPaths.length;
+  const parts: string[] = [];
+  if (element.itemCount > 0) {
+    parts.push(
+      element.itemCount === 1
+        ? 'its item, and every quote on it'
+        : `its ${element.itemCount} items, and every quote on them`
+    );
+  }
+  if (files > 0) parts.push(files === 1 ? '1 file' : `${files} files`);
+  if (parts.length === 0) return 'Nothing is on it yet.';
+  const listed = parts.length === 1 ? parts[0] : `${parts[0]} and ${parts[1]}`;
+  return `That takes ${listed} with it, and none of it comes back.`;
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
@@ -795,29 +855,42 @@ const styles = StyleSheet.create({
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
 
   strip: {
-    flexDirection: 'row',
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: Radius.card,
     overflow: 'hidden',
   },
-  cell: { flex: 1, minWidth: 0, padding: Spacing.md, borderRightWidth: 1, borderRightColor: Colors.border },
-  cellLast: { borderRightWidth: 0 },
-  cellKey: {
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  rowLast: { borderBottomWidth: 0 },
+  rowKey: {
+    width: 58,
+    flexShrink: 0,
     fontSize: Typography.xs,
     color: Colors.textMuted,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
-  cellValue: {
+  // Right-aligned so the three figures share an edge; `minWidth: 0` because a
+  // flexed Text around a long unbroken string will otherwise refuse to shrink.
+  rowValue: {
+    flex: 1,
+    minWidth: 0,
+    textAlign: 'right',
     fontFamily: Fonts.mono,
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
-    marginTop: 2,
   },
-  cellValueSpent: { color: Colors.primary },
+  rowValueSpent: { color: Colors.primary },
   // Not optional, anywhere. The figures above mean nothing without it.
   denominator: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: Spacing.sm },
   gstNote: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },
@@ -876,7 +949,9 @@ const styles = StyleSheet.create({
   itemTitles: { flex: 1, minWidth: 0 },
   itemName: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
   itemSub: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
-  itemPrice: { fontFamily: Fonts.mono, fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  // `flexShrink: 0` so the name gives way before the price does: the figure is
+  // what the row is read for, and half a number is worse than a clipped noun.
+  itemPrice: { flexShrink: 0, fontFamily: Fonts.mono, fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
   itemPriceRange: { color: Colors.status.doing, fontWeight: Typography.regular, fontSize: Typography.xs },
   itemPriceNone: { color: Colors.textMuted, fontWeight: Typography.regular, fontSize: Typography.xs },
 

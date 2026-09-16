@@ -191,6 +191,24 @@ describe('the money', () => {
     const r = await arrange();
     r.getByText('Every figure here is GST-inclusive.');
   });
+
+  it('keeps a six-figure range on one line rather than wrapping mid-number', async () => {
+    // A third of 390pt cannot hold "$188,352.22–191,583.72". Three figures
+    // across is what made the strip go ragged the moment a job got past five
+    // figures, so they stack and each one is pinned to a single line — half a
+    // number read off a wrapped row is worse than no number at all.
+    const r = await arrange({
+      project: project({
+        rangeLow: 188352.22, rangeHigh: 191583.72,
+        chosenTotal: 184528.47, spentTotal: 97753.22,
+        itemCount: 18, pricedCount: 10,
+      }),
+    });
+    const figure = r.getByText('$188,352.22–191,583.72');
+    expect(figure.props.numberOfLines).toBe(1);
+    expect(r.getByText('$184,528.47').props.numberOfLines).toBe(1);
+    expect(r.getByText('$97,753.22').props.numberOfLines).toBe(1);
+  });
 });
 
 describe('files roll up, never down', () => {
@@ -305,6 +323,60 @@ describe('the rooms a job touches', () => {
     expect(dialog.props.message).toContain('3 items');
     expect(dialog.props.message).toContain('The room itself stays.');
     expect(mock_deleteElement).not.toHaveBeenCalled();
+  });
+
+  it('makes a part that holds something ask for the word to be typed', async () => {
+    // The one case on this page where a press destroys work that cannot be got
+    // back. Two taps is the right price for a snag and the wrong price for
+    // three items, their quotes and their files.
+    const r = await arrange({
+      elements: [
+        element({ id: 'e1', implicit: false, name: 'Bathroom', room: 'Bathroom', itemCount: 3 }),
+        element({ id: 'e2', implicit: false, name: 'Laundry', room: 'Laundry' }),
+      ],
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Remove Bathroom from this job').props.onPress());
+    const dialog = r.root.findAll(
+      (n: any) => typeof n.props?.message === 'string' && n.props?.visible === true
+    )[0];
+    expect(dialog.props.confirmText).toBe('Delete');
+  });
+
+  it('counts the files as something, not just the items', async () => {
+    // A part with no items but a council letter on it is not empty, and
+    // "Nothing is on it yet" would be the screen lying right before it acted.
+    const r = await arrange({
+      elements: [
+        element({
+          id: 'e1', implicit: false, name: 'Consent', room: null,
+          documentPaths: ['h/docs/consent.pdf'],
+        }),
+        element({ id: 'e2', implicit: false, name: 'Laundry', room: 'Laundry' }),
+      ],
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Remove Consent from this job').props.onPress());
+    const dialog = r.root.findAll(
+      (n: any) => typeof n.props?.message === 'string' && n.props?.visible === true
+    )[0];
+    expect(dialog.props.confirmText).toBe('Delete');
+    expect(dialog.props.message).toContain('1 file');
+  });
+
+  it('leaves an empty part as an ordinary two-button confirm', async () => {
+    // The gate is worth its friction only where the damage is real. Asking for
+    // a typed word to remove a heading teaches people to type it unread.
+    const r = await arrange({
+      elements: [
+        element({ id: 'e1', implicit: false, name: 'Bathroom', room: 'Bathroom' }),
+        element({ id: 'e2', implicit: false, name: 'Laundry', room: 'Laundry' }),
+      ],
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Remove Bathroom from this job').props.onPress());
+    const dialog = r.root.findAll(
+      (n: any) => typeof n.props?.message === 'string' && n.props?.visible === true
+    )[0];
+    expect(dialog.props.confirmText).toBeUndefined();
+    expect(dialog.props.message).toContain('Nothing is on it yet');
   });
 
   it('shows no × while the layer is still implicit', async () => {

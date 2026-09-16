@@ -13,10 +13,17 @@ interface Props {
   /**
    * When set, the confirm button stays disabled until this exact word is typed.
    *
-   * For the one action in this app that destroys other people's work rather
-   * than one row of your own: deleting a place takes its snags, its things and
-   * its photos with it, and the photos do not come back. Two taps is the right
-   * price for a snag; it is the wrong price for a house.
+   * For the actions that destroy other people's work rather than one row of
+   * your own. Deleting a place takes its snags, its things and its photos with
+   * it, and the photos do not come back; removing a part of a job that holds
+   * something takes its items, their quotes and their files the same way. Two
+   * taps is the right price for a snag; it is the wrong price for either of
+   * those.
+   *
+   * The gate is worth its friction only where the damage is real, so an *empty*
+   * part stays an ordinary two-button confirm — asking somebody to type a word
+   * to remove a heading is the kind of ceremony that teaches people to type it
+   * without reading.
    */
   confirmText?: string;
   onConfirm: () => void;

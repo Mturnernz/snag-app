@@ -1025,6 +1025,16 @@ fully paid the day it was priced. All three are **derived in the views**, never 
 `needs_parts` argument applied to a far more dangerous number, since a maintained total and the
 quotes it describes will disagree the first time somebody edits an amount from the other phone.
 
+**And the three are stacked down the page, not laid across it.** They were three cells in a row,
+which works until a renovation gets past five figures and *Quoted* has to hold something like
+`$188,352.22–191,583.72` in a third of 390pt — it wrapped mid-number and the whole strip went
+ragged. It is the same failure the thing page's spec sheet already fixed by un-columning itself: a
+two-column row has nowhere to put a long answer, and a project's totals are the longest answers in
+the app. Label left in a fixed column, figure right-aligned and pinned to `numberOfLines={1}`, so
+the three share an edge the way a column of money is read. The same rule covers an item's own price
+— it does not shrink, the name beside it does, because the figure is what the row is opened for and
+**half a number is worse than a clipped noun**.
+
 ### GST is a fact about each amount, never a household setting
 
 New Zealand quotes come both ways — a trade supplier writes ex-GST, a retailer writes inc — and the
@@ -1116,6 +1126,17 @@ only control that cannot misspell the vocabulary.**
 Removing one is a **×** on the part's own heading with a confirmation naming what goes in counts —
 its items, their quotes and their files — and saying **the room itself stays**, because taking a
 part off a job is not deleting a room. The server refuses the last one in words.
+
+**A part that holds something asks for the word to be typed; an empty one does not.** Removing a
+part with items or files on it destroys work that does not come back, which is the same shape as
+deleting a place, so it takes the same gate — `ConfirmDialog`'s `confirmText`, set to **Delete**.
+An empty part is a heading and nothing else, and it stays an ordinary two-button confirm:
+demanding a typed word to remove a heading is the ceremony that teaches people to type the word
+without reading the sentence above it, which is how the gate stops working on the day it matters.
+**Files count as holding something, not just items** — a part with no items but a council letter
+attached is not empty, and "Nothing is on it yet" would be the screen saying something untrue
+immediately before acting on it. `elementHoldsSomething` is the one test both the wording and the
+gate read from, so they cannot disagree.
 
 Two smaller rules. **`delete_element` refuses the last one** — items hang off an element, so a
 project with none is a project nothing can be added to. And **`set_quote_chosen` is its own
@@ -1771,11 +1792,12 @@ them. `delete_household` returns void for the same reason: keys you can't use re
 were dealt with.
 
 On the screen: **exactly one of Leave and Delete is ever offered**, because exactly one of them can
-succeed. Deleting a place is the one action in this app that destroys somebody else's work rather
-than a row of your own, so it is the one confirmation that asks for the place's **name to be typed**
-(`ConfirmDialog`'s `confirmText`) and names what goes with it in counts rather than warning in
-general. Everything else stays a two-button `ConfirmDialog` — never `Alert.alert`, which is a no-op
-on the build people install.
+succeed. Deleting a place destroys somebody else's work rather than a row of your own, so it asks
+for the place's **name to be typed** (`ConfirmDialog`'s `confirmText`) and names what goes with it
+in counts rather than warning in general. Removing a **part of a job that holds something** is the
+only other action that earns the gate, and it asks for *Delete* rather than a name — see *The rooms
+a job touches*. Everything else stays a two-button `ConfirmDialog` — never `Alert.alert`, which is
+a no-op on the build people install.
 
 `HouseholdScreen.test.tsx` pins that the last member has no ×, that Leave and Delete are never both
 on screen, that a place delete is gated on the typed name and hands its returned keys to

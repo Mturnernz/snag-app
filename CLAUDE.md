@@ -719,8 +719,16 @@ later, in an aisle, needing one exact string. So:
   read. It also overflowed: on web a `TextInput` is an `<input>` with an intrinsic ~20-character
   width that `min-width: auto` will not shrink below, so a flexed right-aligned value grew past the
   card and off the screen edge. Anything flexed around a `TextInput` needs `minWidth: 0`.
-- **Paperwork lives beside the photos.** `things.document_paths` holds PDFs in the **`home-photos`**
-  bucket under `<household_id>/docs/`, reusing the four storage policies and
+- **Paperwork lives beside the photos, and so does the way to add either.** The section is
+  **Photos and paperwork**, and one wrapping row carries all three offers: *Add a photo*, *Choose
+  one*, *Attach a PDF*. The camera used to sit under the strip at the top, five hundred pixels
+  above the PDF button — so somebody wanting a second photograph of the dishwasher went looking in
+  the section that attaches things and found only a PDF, which reads as a record that does not take
+  photographs at all. The strip itself stays at the top, because a rating plate is what this page is
+  opened to *read*: the answer goes above the form and the controls that grow it live with the rest
+  of the attaching. The plate photo at creation is the walkthrough's step three and has not moved;
+  these are for the extras that come later. `things.document_paths` holds PDFs in the
+  **`home-photos`** bucket under `<household_id>/docs/`, reusing the four storage policies and
   `home.can_use_photo_folder` rather than standing up a second bucket. Its `allowed_mime_types` had
   to learn `application/pdf` — which Storage enforces *before* RLS, so a PDF was refused with
   nothing said about permissions. The original filename is kept in the key because it is the label:

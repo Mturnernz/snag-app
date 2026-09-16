@@ -42,10 +42,12 @@ jest.mock('../lib/supabase', () => ({
   deleteThing: jest.fn(),
   uploadFile: jest.fn(),
 }));
+const mock_takePhoto = jest.fn();
+const mock_compressAndUpload = jest.fn();
 jest.mock('../lib/photoUpload', () => ({
-  takePhoto: jest.fn(),
-  compressAndUpload: jest.fn(),
-  photoFileName: jest.fn(),
+  takePhoto: (...a: unknown[]) => mock_takePhoto(...a),
+  compressAndUpload: (...a: unknown[]) => mock_compressAndUpload(...a),
+  photoFileName: () => 'h1/second.jpg',
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
@@ -175,6 +177,36 @@ describe('ThingDetailScreen', () => {
   it('offers to photograph the label from here, not only from the walkthrough', async () => {
     const result = await open();
     expect(pressable(result, 'Photograph the label')).toBeTruthy();
+  });
+
+  // Somebody wanting a second photograph of the dishwasher goes looking in the
+  // section that attaches things. Finding only *Attach a PDF* there reads as a
+  // record that does not take photographs at all — so all three offers sit in
+  // one row, and adding a photo is offered exactly once on the page.
+  it('offers another photo beside the PDF button, and only there', async () => {
+    const result = await open({ photoPaths: ['h1/plate.jpg'] });
+
+    expect(pressable(result, 'Add a photo')).toBeTruthy();
+    expect(pressable(result, 'Choose a photo')).toBeTruthy();
+    expect(pressable(result, 'Attach a PDF')).toBeTruthy();
+    // One camera offer on the page, not one under the strip and another below.
+    expect(result.getAllByText('Add a photo')).toHaveLength(1);
+    // And the first-photo wording is gone once there is one.
+    expect(result.queryByText('Photograph the label')).toBeNull();
+  });
+
+  it('adds the photo to the ones already there rather than replacing them', async () => {
+    mock_takePhoto.mockResolvedValue({ uri: 'file:///new.jpg' });
+    mock_compressAndUpload.mockResolvedValue({ path: 'h1/second.jpg' });
+    const result = await open({ photoPaths: ['h1/plate.jpg'] });
+
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Add a photo').props.onPress();
+    });
+
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', {
+      photoPaths: ['h1/plate.jpg', 'h1/second.jpg'],
+    });
   });
 
   it('offers to attach a PDF, and lists one by its own filename', async () => {

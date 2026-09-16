@@ -38,6 +38,7 @@ import type {
   Property,
   Snag,
   SnagAdvice,
+  ThingNote,
   SnagFilter,
   SnagPriority,
   SnagSort,
@@ -967,6 +968,52 @@ export async function getComments(client: SupabaseClient, snagId: string): Promi
 
   if (error) throw asError(error, "Couldn't load the comments");
   return (data ?? []).map(mapComment);
+}
+
+/**
+ * Everything anybody has written about one thing, from its *other* jobs.
+ *
+ * **This is the payoff for linking a snag to an asset, arriving on the screen
+ * where it is useful.** The heat pump has been serviced twice and had a fault
+ * once; what somebody wrote the last time is the single most useful paragraph
+ * in the app when the same appliance plays up again, and until now it was
+ * buried in a snag nobody would think to open.
+ *
+ * The current snag is excluded by id — its own notes are already on the page,
+ * directly above, and showing them twice would read as a duplicate rather than
+ * as history.
+ *
+ * RLS does the rest: the comments policy asks the snag's property, so this
+ * returns exactly what this person could have read by opening those snags one
+ * at a time.
+ */
+export async function getThingNotes(
+  client: SupabaseClient,
+  thingId: string,
+  exceptSnagId: string,
+  limit = 10
+): Promise<ThingNote[]> {
+  const { data, error } = await client
+    .from('comments')
+    .select(`
+      id, body, created_at,
+      author:profiles!inner(display_name),
+      snag:snags!inner(id, reference, thing_id, description, room)
+    `)
+    .eq('snag.thing_id', thingId)
+    .neq('snag_id', exceptSnagId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw asError(error, "Couldn't load what has been said about it");
+  return (data ?? []).map((row: Row) => ({
+    id: row.id,
+    body: row.body,
+    createdAt: row.created_at,
+    authorName: row.author?.display_name ?? 'Someone who left',
+    snagId: row.snag?.id,
+    snagReference: row.snag?.reference,
+  }));
 }
 
 export async function addComment(

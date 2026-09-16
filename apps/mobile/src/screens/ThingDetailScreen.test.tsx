@@ -45,7 +45,7 @@ jest.mock('../lib/supabase', () => ({
 const mock_pickPhotos = jest.fn();
 const mock_compressAndUpload = jest.fn();
 jest.mock('../lib/photoUpload', () => ({
-  PHOTO_PICK_LIMIT: 10,
+  PHOTO_PICK_LIMIT: 5,
   pickPhotos: (...a: unknown[]) => mock_pickPhotos(...a),
   // The storage key is whatever the upload says it wrote, so the name only has
   // to be a string here.
@@ -260,7 +260,7 @@ describe('ThingDetailScreen', () => {
     });
 
     expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/a.jpg'] });
-    expect(mock_showAlert).toHaveBeenCalledWith('10 at a time', expect.stringContaining('other 3'));
+    expect(mock_showAlert).toHaveBeenCalledWith('5 at a time', expect.stringContaining('other 3'));
   });
 
   it('offers to attach a PDF, and lists one by its own filename', async () => {

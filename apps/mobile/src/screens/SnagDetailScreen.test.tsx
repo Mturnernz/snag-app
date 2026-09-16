@@ -13,8 +13,13 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 const mock_goBack = jest.fn();
+// One stable object, because React Navigation's own is stable and `load`
+// depends on it: a fresh literal per render changes the callback's identity,
+// re-fires the effect, and spins the screen forever. It looks like a hang
+// rather than a failure, which is why this is spelled out.
+const mock_navigation = { goBack: mock_goBack, navigate: jest.fn(), push: jest.fn() };
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ goBack: mock_goBack, navigate: jest.fn() }),
+  useNavigation: () => mock_navigation,
   useRoute: () => ({ params: { snagId: 's1' } }),
 }));
 jest.mock('../hooks/useKeyboardInset', () => ({ useKeyboardInset: () => 0 }));
@@ -24,6 +29,8 @@ const mock_getSnag = jest.fn();
 const mock_setSnagStatus = jest.fn();
 const mock_updateSnag = jest.fn();
 const mock_setPartBought = jest.fn().mockResolvedValue(undefined);
+const mock_getThings = jest.fn().mockResolvedValue([]);
+const mock_getThingNotes = jest.fn().mockResolvedValue([]);
 jest.mock('../lib/supabase', () => ({
   getSnag: (...a: unknown[]) => mock_getSnag(...a),
   getComments: jest.fn().mockResolvedValue([]),
@@ -36,6 +43,10 @@ jest.mock('../lib/supabase', () => ({
   deleteStoredFiles: jest.fn(),
   getSnagAdvice: jest.fn().mockResolvedValue(null),
   deleteSnagAdvice: jest.fn(),
+  getThingNotes: (...a: unknown[]) => mock_getThingNotes(...a),
+  getThings: (...a: unknown[]) => mock_getThings(...a),
+  createThing: jest.fn(),
+  createLocation: jest.fn(),
 }));
 const mock_showToast = jest.fn();
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: mock_showToast }) }));
@@ -45,8 +56,12 @@ jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 const mock_household = {
   members: [{ profileId: 'me', displayName: 'Me' }],
   profile: { id: 'me', displayName: 'Me' },
-  locations: [],
+  locations: [
+    { id: 'l1', propertyId: 'p', name: 'Bathroom', sortOrder: 0 },
+    { id: 'l2', propertyId: 'p', name: 'Kitchen', sortOrder: 1 },
+  ],
   refresh: jest.fn().mockResolvedValue(undefined),
+  reloadLocations: jest.fn().mockResolvedValue(undefined),
 };
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => mock_household }));
 
@@ -122,5 +137,119 @@ describe('finishing a snag', () => {
 
     expect(r.queryByText('Congratulations')).toBeNull();
     expect(mock_showToast).not.toHaveBeenCalled();
+  });
+});
+
+// ─── editing what a job says, and what it is about ────────────────────────────
+
+const byLabel = (r: ReturnType<typeof render>, label: string) =>
+  r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+      && !!n.props?.onPress,
+    { deep: true },
+  )[0];
+
+describe('editing a job after it was filed', () => {
+  it('offers the words and the room back, and writes both in one go', async () => {
+    // Both were answerable for ten seconds after the photo and never again.
+    const r = await arrange();
+    mock_getSnag.mockResolvedValue(snag({ description: 'The cistern drips', room: 'Kitchen' }));
+
+    await press(byLabel(r, 'Edit this job'));
+    await TestRenderer.act(async () => {
+      byLabel(r, "What's wrong?") ?? null;
+    });
+
+    const input = r.root.findAll((n: any) => typeof n.type !== 'string'
+      && n.props?.accessibilityLabel === "What's wrong?")[0];
+    await TestRenderer.act(async () => { input.props.onChangeText('The cistern drips'); });
+    await press(byLabel(r, 'Kitchen'));
+    await press(button(r, 'Save'));
+
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', {
+      description: 'The cistern drips',
+      room: 'Kitchen',
+    });
+  });
+
+  it('will not let a photo-less job be left with no words at all', async () => {
+    // `snags_has_something` would refuse it, and a constraint name surfacing
+    // from Postgres is not an answer anybody can act on.
+    const r = await arrange(snag({ description: 'Gutters', photoPaths: [] }));
+    await press(byLabel(r, 'Edit this job'));
+
+    const input = r.root.findAll((n: any) => typeof n.type !== 'string'
+      && n.props?.accessibilityLabel === "What's wrong?")[0];
+    await TestRenderer.act(async () => { input.props.onChangeText('   '); });
+
+    expect(button(r, 'Save').props.disabled).toBe(true);
+    expect(r.queryByText(
+      'This one has no photo, so it needs a few words — otherwise there is nothing to go on.',
+    )).not.toBeNull();
+  });
+});
+
+describe('what the job is about', () => {
+  it('offers to say so when nothing is linked', async () => {
+    const r = await arrange(snag({ thingId: null, thingName: null }));
+    expect(byLabel(r, "Say what it's about")).toBeDefined();
+  });
+
+  it('offers to change it or remove it once something is', async () => {
+    const r = await arrange(snag({ thingId: 't1', thingName: 'Heat pump' }));
+
+    expect(byLabel(r, 'Change what it is about')).toBeDefined();
+    await press(byLabel(r, 'Not about that'));
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { thingId: null });
+  });
+
+  it('reads the house record only when the picker is opened', async () => {
+    // A once-in-a-job's-life decision must not cost a request on every visit
+    // to a page people open constantly.
+    const r = await arrange(snag({ thingId: null, thingName: null }));
+    expect(mock_getThings).not.toHaveBeenCalled();
+
+    await press(byLabel(r, "Say what it's about"));
+    expect(mock_getThings).toHaveBeenCalledWith('p');
+  });
+});
+
+describe("the asset's own history", () => {
+  const note = (over: Partial<any> = {}): any => ({
+    id: 'n1',
+    body: 'Filter was stiff, took a wiggle',
+    createdAt: '2026-03-01T00:00:00Z',
+    authorName: 'Sam',
+    snagId: 's9',
+    snagReference: 'SNAG-0009',
+    ...over,
+  });
+
+  it('pulls through what was said on the asset\u2019s other jobs', async () => {
+    // The payoff for linking, arriving where it is useful: what somebody wrote
+    // the last time this appliance played up.
+    mock_getThingNotes.mockResolvedValue([note()]);
+    const r = await arrange(snag({ thingId: 't1', thingName: 'Heat pump' }));
+
+    expect(mock_getThingNotes).toHaveBeenCalledWith('t1', 's1');
+    expect(r.queryByText('Also said about Heat pump')).not.toBeNull();
+    expect(r.queryByText('Filter was stiff, took a wiggle')).not.toBeNull();
+    // Each row names the job it came from and is a door back to it.
+    expect(byLabel(r, 'Open SNAG-0009')).toBeDefined();
+  });
+
+  it('asks for nothing when the job is about nothing', async () => {
+    mock_getThingNotes.mockClear();
+    await arrange(snag({ thingId: null, thingName: null }));
+    expect(mock_getThingNotes).not.toHaveBeenCalled();
+  });
+
+  it('renders the page even when that history cannot be read', async () => {
+    // History nobody can fetch must not take the page down with it.
+    mock_getThingNotes.mockRejectedValue(new Error('Network'));
+    const r = await arrange(snag({ thingId: 't1', thingName: 'Heat pump' }));
+
+    expect(r.queryByText('Toilet cistern keeps running')).not.toBeNull();
+    expect(r.queryByText('Also said about Heat pump')).toBeNull();
   });
 });

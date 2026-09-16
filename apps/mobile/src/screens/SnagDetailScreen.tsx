@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, Image, TextInput, Pressable, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -17,6 +17,9 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import PhotoViewer from '../components/PhotoViewer';
 import AdviceCard from '../components/AdviceCard';
 import DoneDialog from '../components/DoneDialog';
+import EditSnagSheet from '../components/EditSnagSheet';
+import LinkThingSheet from '../components/LinkThingSheet';
+import AddThingSheet from '../components/AddThingSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -24,11 +27,12 @@ import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
   deleteStoredFiles, getSnagAdvice, deleteSnagAdvice, setPartBought,
+  getThingNotes, getThings, createThing, createLocation,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { describeCycle, snagHeadline } from '@snag/supabase-queries';
 import {
-  Comment, RootStackParamList, Snag, SnagAdvice,
+  Comment, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote,
   PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
 } from '../types';
 
@@ -70,7 +74,9 @@ export default function SnagDetailScreen() {
   // opens over the thing being typed into. The KeyboardAvoidingView wrapped
   // around this screen does nothing in a browser — see lib/keyboardInset.ts.
   const keyboard = useKeyboardInset();
-  const { members, profile, refresh: refreshHousehold } = useHousehold();
+  const {
+    members, profile, locations, refresh: refreshHousehold, reloadLocations,
+  } = useHousehold();
   const { showToast } = useToast();
 
   const [snag, setSnag] = useState<Snag | null>(null);
@@ -88,8 +94,28 @@ export default function SnagDetailScreen() {
   const [repeating, setRepeating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /**
+   * What the walkthrough opens on, held stable.
+   *
+   * `AddThingSheet` resets itself from `start` in an effect that depends on the
+   * object, so a fresh literal per render is an infinite loop — the effect sets
+   * state, the render makes a new object, the effect fires again. It hangs the
+   * screen rather than failing, which is the worst shape of bug this codebase
+   * keeps finding: `SnagDetailScreen.test.tsx` caught it as a timeout.
+   */
+  const createStart = useMemo(() => ({ room: snag?.room ?? null }), [snag?.room]);
+
   /** Whether the congratulations dialog is up. Only a real finish sets it. */
   const [celebrating, setCelebrating] = useState(false);
+  /** Editing what the job says — its words and its room, together. */
+  const [editing, setEditing] = useState(false);
+  /** Choosing what it is about, and the record that choice reads from. */
+  const [linking, setLinking] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [things, setThings] = useState<Thing[]>([]);
+  const [thingsLoading, setThingsLoading] = useState(false);
+  /** What has been written about the same asset, on its other jobs. */
+  const [thingNotes, setThingNotes] = useState<ThingNote[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -104,6 +130,13 @@ export default function SnagDetailScreen() {
       setRepeating((open) => open || next.repeatDays !== null);
       setComments(nextComments);
       setAdvice(nextAdvice);
+
+      // What has been said on the asset's *other* jobs. Read after the snag
+      // rather than beside it, because it needs the snag's `thingId` — and
+      // never fatal: history nobody can fetch must not take the page down.
+      setThingNotes(next.thingId
+        ? await getThingNotes(next.thingId, next.id).catch(() => [])
+        : []);
       setPhotoUrls(await getFileUrls(next.photoPaths));
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'It may have been deleted.');
@@ -116,6 +149,38 @@ export default function SnagDetailScreen() {
   }, [load]);
 
   /**
+   * The record this place holds, for choosing what the job is about.
+   *
+   * Read when the picker is opened rather than when the page loads: this is a
+   * once-in-a-snag's-life decision and the page is opened constantly, so
+   * spending a request on every visit to answer a question nobody asked is the
+   * same waste the list already refuses. Keyed by the snag's own property, so
+   * it can never offer the bach's appliances for a job at the house.
+   */
+  async function openLink() {
+    if (!snag) return;
+    setLinking(true);
+    setThingsLoading(true);
+    try {
+      setThings(await getThings(snag.propertyId));
+    } catch {
+      // The picker still opens, with its own words for an empty list. A failed
+      // read here must not be a dead modal.
+    } finally {
+      setThingsLoading(false);
+    }
+  }
+
+  /** Recording something that was never in the house record, and linking it. */
+  async function handleCreateThing(input: Parameters<typeof createThing>[0]) {
+    if (!snag) return;
+    const thing = await createThing(input);
+    setCreating(false);
+    await patch({ thingId: thing.id });
+    showToast(`${thing.name ?? 'Recorded'} — and this job is about it`);
+  }
+
+    /**
    * Off the list, or back onto it.
    *
    * Not through `patch`, because `update_snag` starts a job when its parts
@@ -272,7 +337,21 @@ export default function SnagDetailScreen() {
           </ScrollView>
         ) : null}
 
-        <Text style={styles.title}>{snagHeadline(snag)}</Text>
+        {/* The words and the room were answerable for ten seconds after the
+            photo and never again. A pencil on the headline is the way back to
+            both — see EditSnagSheet. */}
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>{snagHeadline(snag)}</Text>
+          <Pressable
+            onPress={() => setEditing(true)}
+            disabled={busy}
+            style={styles.titleEdit}
+            accessibilityRole="button"
+            accessibilityLabel="Edit this job"
+          >
+            <Icon name="create-outline" size="sm" color={Colors.textMuted} />
+          </Pressable>
+        </View>
 
         <View style={styles.metaRow}>
           <StatusBadge status={snag.status} />
@@ -313,6 +392,18 @@ export default function SnagDetailScreen() {
                 </Text>
               ) : null}
             </Pressable>
+            {/* Change and remove are siblings of the door rather than children
+                of it — a Pressable inside a Pressable is a coin toss about
+                which one gets the tap. */}
+            <Pressable
+              onPress={openLink}
+              disabled={busy}
+              style={styles.aboutClear}
+              accessibilityRole="button"
+              accessibilityLabel="Change what it is about"
+            >
+              <Icon name="swap-horizontal-outline" size="sm" color={Colors.textMuted} />
+            </Pressable>
             <Pressable
               onPress={() => patch({ thingId: null })}
               disabled={busy}
@@ -323,7 +414,24 @@ export default function SnagDetailScreen() {
               <Icon name="close" size="sm" color={Colors.textMuted} />
             </Pressable>
           </View>
-        ) : null}
+        ) : (
+          /* Capture's fourth step is the *fast* way to answer this and it only
+             offers the room's things; it is also skipped entirely for a room
+             with nothing recorded in it. So the answer has to be reachable
+             afterwards, from the job itself — and "not recorded yet" has to be
+             answerable here too, or the offer is a dead end for exactly the
+             appliance nobody has written down. */
+          <Pressable
+            onPress={openLink}
+            disabled={busy}
+            style={styles.aboutAdd}
+            accessibilityRole="button"
+            accessibilityLabel="Say what it's about"
+          >
+            <Icon name="cube-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.aboutAddLabel}>Say what it's about</Text>
+          </Pressable>
+        )}
 
         <Text style={styles.reportedBy}>
           Added by {snag.reporterId === profile.id ? 'you' : snag.reporterName}
@@ -405,6 +513,44 @@ export default function SnagDetailScreen() {
             </Pressable>
           </View>
         </Card>
+
+        {/* ── What has been said about the asset ──
+            The payoff for linking, arriving where it is useful. The heat pump
+            has been serviced twice and had a fault once; what somebody wrote
+            the last time is the most useful paragraph in the app when the same
+            appliance plays up again, and until now it was buried in a job
+            nobody would think to open.
+
+            Under this job's own notes rather than above them: what the other
+            person wrote *here* is still why the screen was opened, and the
+            history is the second read, not the first. This job's own comments
+            are excluded by id — showing them again would read as duplicates
+            rather than as history. */}
+        {snag.thingId && thingNotes.length > 0 ? (
+          <Card elevation="md" style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              Also said about {snag.thingName ?? 'it'}
+            </Text>
+            {thingNotes.map((note) => (
+              <Pressable
+                key={note.id}
+                onPress={() => navigation.push('SnagDetail', { snagId: note.snagId })}
+                style={styles.comment}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${note.snagReference}`}
+              >
+                <Text style={styles.commentAuthor}>
+                  {note.authorName}
+                  <Text style={styles.commentDate}>
+                    {'  '}
+                    {new Date(note.createdAt).toLocaleDateString()} · {note.snagReference}
+                  </Text>
+                </Text>
+                <Text style={styles.commentBody}>{note.body}</Text>
+              </Pressable>
+            ))}
+          </Card>
+        ) : null}
 
         {/* ── What came back ──
             Below the notes and above triage: the note the other person left is
@@ -543,14 +689,21 @@ export default function SnagDetailScreen() {
             A yes/no first, then the cycle. The old version was a row of
             presets where "One-off" was one of the options, so the common
             answer — no, it doesn't — looked like a setting rather than the
-            default it is. */}
+            default it is.
+
+            The heading says what the section *does* rather than asking
+            whether it applies: "Does it come round again?" made somebody
+            hunting for a way to schedule the filter read past the one card
+            that does it. The question it used to be is now the field label
+            over the two chips, where a question belongs. */}
         <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Does it come round again?</Text>
+          <Text style={styles.sectionTitle}>Schedule a recurring job</Text>
           <Text style={styles.sectionHint}>
             Filters, gutters, smoke alarms. Marking a repeating job done schedules the next one
             instead of closing it.
           </Text>
 
+          <Text style={styles.fieldLabel}>Does it come round again?</Text>
           <View style={styles.optionRow}>
             <Option
               label="No"
@@ -621,6 +774,58 @@ export default function SnagDetailScreen() {
         onClose={() => setViewing(null)}
       />
 
+      <EditSnagSheet
+        visible={editing}
+        snag={snag}
+        locations={locations}
+        busy={busy}
+        onSave={async (update) => {
+          setEditing(false);
+          await patch(update);
+        }}
+        onCancel={() => setEditing(false)}
+      />
+
+      <LinkThingSheet
+        visible={linking}
+        things={things}
+        loading={thingsLoading}
+        linkedId={snag.thingId}
+        onPick={async (thingId) => {
+          setLinking(false);
+          // The second press on the one it is already about unlinks it, the
+          // same gesture the capture sheet uses.
+          await patch({ thingId: thingId === snag.thingId ? null : thingId });
+        }}
+        onCreate={() => {
+          setLinking(false);
+          setCreating(true);
+        }}
+        onCancel={() => setLinking(false)}
+      />
+
+      {/* The walkthrough itself, not a second shorter form — a record created
+          from here has to be as strong as one created from the House tab, or
+          this is the back door that fills the house record with rows nobody
+          can read in a shop. The room is pre-filled from the job. */}
+      <AddThingSheet
+        visible={creating}
+        locations={locations}
+        pathPrefix={snag.householdId}
+        start={createStart}
+        onAddRoom={async (name) => {
+          try {
+            await createLocation(snag.propertyId, name);
+            await reloadLocations();
+            return true;
+          } catch {
+            return false;
+          }
+        }}
+        onAdd={(input) => handleCreateThing({ ...input, propertyId: snag.propertyId })}
+        onCancel={() => setCreating(false)}
+      />
+
       {/* One button, and it goes back to the list — which is where the reward
           actually is, because the snag has just left it. */}
       <DoneDialog
@@ -678,10 +883,32 @@ const styles = StyleSheet.create({
     marginRight: Spacing.sm,
     backgroundColor: Colors.border,
   },
+  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   title: {
+    flex: 1,
+    minWidth: 0,
     fontSize: Typography.xl,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
+  },
+  // Muted and small: editing the wording is rare next to reading it, and the
+  // pencil must not compete with the headline it sits beside.
+  titleEdit: {
+    width: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  aboutAdd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  aboutAddLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
   },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.sm },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },

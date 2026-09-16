@@ -104,11 +104,11 @@ export async function takePhoto(): Promise<string | null> {
  * Not a product rule, a protection: each photograph is decoded, resized and
  * re-encoded before it is sent, one after another, and somebody who taps
  * *select all* on a camera roll would otherwise sit in front of a spinner for
- * several minutes with no way back. Ten is a plausible number of angles on one
+ * several minutes with no way back. Five is a plausible number of angles on one
  * appliance, and anything past it is said out loud rather than dropped in
  * silence.
  */
-export const PHOTO_PICK_LIMIT = 10;
+export const PHOTO_PICK_LIMIT = 5;
 
 /**
  * Opens the picker for **several** photographs at once.

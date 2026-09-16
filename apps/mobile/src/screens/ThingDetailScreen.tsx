@@ -595,6 +595,45 @@ export default function ThingDetailScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        {/* ── Where it came from ──
+            The payoff for recording a renovation at all, and the reason the
+            record is worth keeping: three years on, nobody asks what the
+            laundry cost — they ask what the model number of the machine is and
+            whether it is still under warranty. This row is the door back to the
+            job that installed it, where the invoice is attached to the quote
+            that bought it.
+
+            `on delete set null`, never cascade: deleting the record of the
+            renovation must not delete the washing machine. The × is a sibling
+            of the door rather than its child, as everywhere else. */}
+        {thing.projectId && thing.projectName ? (
+          <View style={styles.fromRow}>
+            <Pressable
+              onPress={() => navigation.navigate('ProjectDetail', { projectId: thing.projectId! })}
+              style={styles.from}
+              accessibilityRole="button"
+              accessibilityLabel={`Installed during ${thing.projectName}`}
+            >
+              <View style={styles.fromTitles}>
+                <Text style={styles.fromKey}>Installed during</Text>
+                <Text style={styles.fromName} numberOfLines={1}>
+                  {thing.projectName}
+                  {thing.projectFinishedOn ? ` · ${formatLooseDate(thing.projectFinishedOn)}` : ''}
+                </Text>
+              </View>
+              <Icon name="chevron-forward" size="sm" color={Colors.primary} />
+            </Pressable>
+            <Pressable
+              onPress={() => patch({ projectId: null }, 'Unlinked')}
+              style={styles.fromClear}
+              accessibilityRole="button"
+              accessibilityLabel="Not from that job"
+            >
+              <Icon name="close" size="sm" color={Colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : null}
+
         {thing.photoPaths.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
             {thing.photoPaths.map((path, i) => (
@@ -1117,6 +1156,36 @@ function Field({
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
+  fromRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.button,
+    paddingLeft: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  from: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  fromTitles: { flex: 1, minWidth: 0 },
+  fromKey: {
+    fontSize: Typography.xs,
+    color: Colors.primary,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  fromName: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  fromClear: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   loading: {
     flex: 1,
     alignItems: 'center',

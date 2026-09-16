@@ -48,6 +48,15 @@ import type {
   ThingSpec,
   ThingSuggestion,
   AbsentThing,
+  Project,
+  ProjectElement,
+  ProjectFile,
+  ProjectItem,
+  ProjectItemStatus,
+  ProjectQuote,
+  ProjectQuoteKind,
+  ProjectStatus,
+  ProjectTotals,
 } from '@snag/shared-types';
 import {
   PRIORITY_LABELS,
@@ -55,6 +64,12 @@ import {
   ROOM_SUGGESTIONS,
   STATUS_LABELS,
   THING_KIND_LABELS,
+  GST_RATE,
+  PROJECT_STATUS_ORDER,
+  PROJECT_STATUS_LABELS,
+  PROJECT_ITEM_STATUS_LABELS,
+  PROJECT_QUOTE_KIND_LABELS,
+  SPENT_QUOTE_KINDS,
 } from '@snag/shared-types';
 
 /** Supabase row shapes are snake_case `any`; this is the one place that's true. */
@@ -80,6 +95,7 @@ function mapSnag(row: Row): Snag {
     repeatDays: row.repeat_days ?? null,
     assigneeId: row.assignee_id ?? null,
     thingId: row.thing_id ?? null,
+    projectId: row.project_id ?? null,
     reporterId: row.reporter_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -92,6 +108,7 @@ function mapSnag(row: Row): Snag {
     thingName: row.thing_name ?? null,
     thingMake: row.thing_make ?? null,
     thingModel: row.thing_model ?? null,
+    projectName: row.project_name ?? null,
   };
 }
 
@@ -116,6 +133,9 @@ function mapThing(row: Row): Thing {
     // only shape to defend against is null from an older row.
     spec: (row.spec ?? {}) as ThingSpec,
     notes: row.notes ?? null,
+    projectId: row.project_id ?? null,
+    projectName: row.project_name ?? null,
+    projectFinishedOn: row.project_finished_on ?? null,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -720,6 +740,7 @@ export async function getSnags(
   if (filter.status?.length) query = query.in('status', filter.status);
   if (filter.room) query = query.eq('room', filter.room);
   if (filter.assigneeId) query = query.eq('assignee_id', filter.assigneeId);
+  if (filter.projectId) query = query.eq('project_id', filter.projectId);
   if (filter.priority?.length) query = query.in('priority', filter.priority);
   if (filter.needsParts !== undefined) query = query.eq('needs_parts', filter.needsParts);
   if (filter.dueOnly) query = query.not('due_at', 'is', null).lte('due_at', new Date().toISOString());
@@ -787,6 +808,8 @@ export async function createSnag(
     photoPaths?: string[];
     priority?: SnagPriority | null;
     thingId?: string | null;
+    /** The renovation it belongs to, when a job is filed from a project's page. */
+    projectId?: string | null;
     /** Only ever set together, and only by something scheduling ahead. */
     dueAt?: string | null;
     repeatDays?: number | null;
@@ -801,6 +824,7 @@ export async function createSnag(
     p_thing_id: input.thingId ?? null,
     p_due_at: input.dueAt ?? null,
     p_repeat_days: input.repeatDays ?? null,
+    p_project_id: input.projectId ?? null,
   });
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_snag returns the base row, not the joined view.
@@ -824,6 +848,11 @@ export interface SnagUpdate {
    * is about is the tail of capture, not the head of the work.
    */
   thingId?: string | null;
+  /**
+   * The renovation it belongs to. Excluded from `v_started` server-side for
+   * exactly the same reason `thingId` is.
+   */
+  projectId?: string | null;
 }
 
 const CLEARABLE: Record<string, string> = {
@@ -834,6 +863,7 @@ const CLEARABLE: Record<string, string> = {
   repeatDays: 'repeat_days',
   assigneeId: 'assignee_id',
   thingId: 'thing_id',
+  projectId: 'project_id',
 };
 
 /**
@@ -862,6 +892,7 @@ export async function updateSnag(
     p_photo_paths: update.photoPaths ?? null,
     p_parts: update.parts ?? null,
     p_thing_id: update.thingId ?? null,
+    p_project_id: update.projectId ?? null,
     p_clear: clear,
   });
 
@@ -1248,6 +1279,15 @@ export interface ThingInput {
   serviceDays?: number | null;
   spec?: ThingSpec;
   notes?: string | null;
+  /**
+   * The renovation that put it here, when a thing is recorded from a project's
+   * item rather than from the House tab.
+   *
+   * Carried into `create_thing` rather than written afterwards, for the reason
+   * `documentPaths` is: a create followed by an update is two chances to write
+   * half of it.
+   */
+  projectId?: string | null;
 }
 
 /**
@@ -1272,6 +1312,7 @@ export async function createThing(client: SupabaseClient, input: ThingInput): Pr
     p_service_days: input.serviceDays ?? null,
     p_spec: input.spec ?? null,
     p_notes: input.notes ?? null,
+    p_project_id: input.projectId ?? null,
   });
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_thing returns the base row, not the joined view.
@@ -1302,6 +1343,8 @@ export interface ThingUpdate {
   /** Spec keys to drop, by key name — a null inside `spec` can't say this. */
   clearSpec?: string[];
   notes?: string | null;
+  /** Null unlinks it from the project — the × beside the *Installed during* row. */
+  projectId?: string | null;
 }
 
 const THING_CLEARABLE: Record<string, string> = {
@@ -1314,6 +1357,7 @@ const THING_CLEARABLE: Record<string, string> = {
   warrantyUntil: 'warranty_until',
   serviceDays: 'service_days',
   notes: 'notes',
+  projectId: 'project_id',
 };
 
 /**
@@ -1353,6 +1397,7 @@ export async function updateThing(
     p_document_paths: update.documentPaths ?? null,
     p_spec: update.spec ?? null,
     p_notes: update.notes ?? null,
+    p_project_id: update.projectId ?? null,
     p_clear: clear,
   });
 
@@ -2502,4 +2547,893 @@ export async function deleteSnagAdvice(client: SupabaseClient, snagId: string): 
 /** "Pasted 15 Sep" — the source line under the advice. */
 export function adviceSource(now = new Date()): string {
   return `Pasted ${now.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}`;
+}
+
+// ---------------------------------------------------------------- projects
+//
+// What we're *changing*, beside what's wrong and what's there.
+//
+// Everything below obeys one rule that the rest of this file does not have to
+// think about: **a total always ships its denominator**. `ProjectTotals` carries
+// `itemCount` and `pricedCount` in the same object as `chosenTotal`, the view
+// computes all three in the same row, and `describeTotals` is what a screen
+// renders under a figure. A renovation total assembled from half the items is
+// the most misleading number this app could show.
+
+function mapProject(row: Row): Project {
+  return {
+    id: row.id,
+    householdId: row.household_id,
+    propertyId: row.property_id,
+    name: row.name,
+    summary: row.summary ?? null,
+    status: row.status,
+    startedOn: row.started_on ?? null,
+    targetOn: row.target_on ?? null,
+    finishedOn: row.finished_on ?? null,
+    // numeric comes back from PostgREST as a string, because a JS number cannot
+    // hold every numeric. Money here is dollars and cents on a household
+    // renovation, which a double carries exactly at this scale — but the parse
+    // has to happen somewhere, and doing it once here is better than every
+    // caller discovering it separately.
+    budget: numberOrNull(row.budget),
+    budgetInclGst: row.budget_incl_gst !== false,
+    photoPaths: row.photo_paths ?? [],
+    documentPaths: row.document_paths ?? [],
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    propertyName: row.property_name,
+    createdByName: row.created_by_name,
+    elementCount: row.element_count ?? 0,
+    shownElementCount: row.shown_element_count ?? 0,
+    fileCount: row.file_count ?? 0,
+    snagCount: row.snag_count ?? 0,
+    openSnagCount: row.open_snag_count ?? 0,
+    thingCount: row.thing_count ?? 0,
+    itemCount: row.item_count ?? 0,
+    pricedCount: row.priced_count ?? 0,
+    quotedCount: row.quoted_count ?? 0,
+    chosenTotal: numberOrNull(row.chosen_total),
+    rangeLow: numberOrNull(row.range_low),
+    rangeHigh: numberOrNull(row.range_high),
+    spentTotal: numberOrNull(row.spent_total),
+  };
+}
+
+/**
+ * Null stays null, and that is the whole job.
+ *
+ * `Number(null)` is 0, which is exactly the lie this feature cannot tell: an
+ * item nobody has priced must not read as an item that costs nothing.
+ */
+function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function mapElement(row: Row): ProjectElement {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    room: row.room ?? null,
+    implicit: !!row.implicit,
+    sortOrder: row.sort_order ?? 0,
+    notes: row.notes ?? null,
+    photoPaths: row.photo_paths ?? [],
+    documentPaths: row.document_paths ?? [],
+    createdAt: row.created_at,
+    itemCount: row.item_count ?? 0,
+    pricedCount: row.priced_count ?? 0,
+    quotedCount: row.quoted_count ?? 0,
+    chosenTotal: numberOrNull(row.chosen_total),
+    rangeLow: numberOrNull(row.range_low),
+    rangeHigh: numberOrNull(row.range_high),
+    spentTotal: numberOrNull(row.spent_total),
+  };
+}
+
+function mapItem(row: Row): ProjectItem {
+  return {
+    id: row.id,
+    elementId: row.element_id,
+    name: row.name,
+    status: row.status,
+    sortOrder: row.sort_order ?? 0,
+    notes: row.notes ?? null,
+    photoPaths: row.photo_paths ?? [],
+    documentPaths: row.document_paths ?? [],
+    createdAt: row.created_at,
+    quoteCount: row.quote_count ?? 0,
+    chosenAmount: numberOrNull(row.chosen_amount),
+    quotedLow: numberOrNull(row.quoted_low),
+    quotedHigh: numberOrNull(row.quoted_high),
+    spent: numberOrNull(row.spent),
+  };
+}
+
+function mapQuote(row: Row): ProjectQuote {
+  return {
+    id: row.id,
+    itemId: row.item_id,
+    supplier: row.supplier ?? null,
+    detail: row.detail ?? null,
+    amount: numberOrNull(row.amount),
+    amountInclGst: row.amount_incl_gst !== false,
+    kind: row.kind,
+    chosen: !!row.chosen,
+    dated: row.dated ?? null,
+    notes: row.notes ?? null,
+    photoPaths: row.photo_paths ?? [],
+    documentPaths: row.document_paths ?? [],
+    createdAt: row.created_at,
+  };
+}
+
+function mapProjectFile(row: Row): ProjectFile {
+  return {
+    projectId: row.project_id,
+    level: row.level,
+    ownerId: row.owner_id,
+    ownerName: row.owner_name,
+    kind: row.kind,
+    path: row.path,
+  };
+}
+
+// ------------------------------------------------------------- money, purely
+
+/**
+ * The client's copy of `home.incl_gst`, and the two must agree.
+ *
+ * An amount is always a pair — the figure as typed, and whether it already
+ * includes GST. Rollups normalise to inclusive because that is what leaves the
+ * bank account; a screen showing one quote shows what was typed, with the pill
+ * beside it saying which it was.
+ */
+export function inclGst(amount: number | null, alreadyIncl: boolean): number | null {
+  if (amount === null) return null;
+  const gross = alreadyIncl ? amount : amount * (1 + GST_RATE);
+  return Math.round(gross * 100) / 100;
+}
+
+/**
+ * "$8,990" — whole dollars unless there are cents to show.
+ *
+ * A renovation is argued about in dollars, and `$8,990.00` on a card is two
+ * characters of noise on every row. Cents survive when they are there, because
+ * an invoice for $1,240.55 is a number somebody will reconcile against a bank
+ * statement.
+ */
+export function formatMoney(amount: number | null): string | null {
+  if (amount === null || !Number.isFinite(amount)) return null;
+  const rounded = Math.round(amount * 100) / 100;
+  const hasCents = Math.abs(rounded % 1) > 0.004;
+  return `$${rounded.toLocaleString('en-NZ', {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: hasCents ? 2 : 0,
+  })}`;
+}
+
+/**
+ * What it looks like it will come to: one figure when there is nothing left to
+ * decide, a range while there is.
+ *
+ * The range is not a guess — it is the cheapest and dearest quotes actually on
+ * the table, which is exactly the decision still outstanding.
+ */
+export function rangeLabel(totals: ProjectTotals): string | null {
+  const low = formatMoney(totals.rangeLow);
+  const high = formatMoney(totals.rangeHigh);
+  if (low === null || high === null) return low ?? high;
+  if (totals.rangeLow === totals.rangeHigh) return low;
+  // The second figure drops its dollar sign: "$11,400–13,900" reads as one
+  // span, where "$11,400–$13,900" reads as two separate prices.
+  return `${low}–${high.replace('$', '')}`;
+}
+
+/**
+ * The line that has to sit under every total, and the reason this function
+ * exists rather than each screen writing its own.
+ *
+ * Never `$8,990` on its own. Always `$8,990 · 5 of 9 items priced`. Returns
+ * null only when there is nothing at all to count, because a denominator over
+ * an empty project is noise rather than honesty.
+ */
+export function describeTotals(totals: ProjectTotals): string | null {
+  if (totals.itemCount === 0) return null;
+  const parts = [`${totals.pricedCount} of ${totals.itemCount} items priced`];
+  if (totals.quotedCount > 0) {
+    parts.push(
+      totals.quotedCount === 1
+        ? '1 quoted, not chosen'
+        : `${totals.quotedCount} quoted, not chosen`
+    );
+  }
+  const unpriced = totals.itemCount - totals.pricedCount - totals.quotedCount;
+  if (unpriced > 0) {
+    // Said out loud rather than left as arithmetic the reader has to do. An
+    // item nobody has asked about is the gap between the total and the truth.
+    parts.push(unpriced === 1 ? '1 not priced' : `${unpriced} not priced`);
+  }
+  return parts.join(' · ');
+}
+
+/** True while there is still a decision on the table that would move the total. */
+export function hasOpenRange(totals: ProjectTotals): boolean {
+  return (
+    totals.rangeLow !== null &&
+    totals.rangeHigh !== null &&
+    totals.rangeLow !== totals.rangeHigh
+  );
+}
+
+/**
+ * What an item's price line says.
+ *
+ * Three states, three different sentences, and the difference between them is
+ * the difference between a decision made, a decision waiting, and a question
+ * nobody has asked yet.
+ */
+export function itemPriceLabel(item: ProjectItem): {
+  text: string;
+  state: 'chosen' | 'range' | 'none';
+} {
+  if (item.chosenAmount !== null) {
+    return { text: formatMoney(item.chosenAmount) ?? '', state: 'chosen' };
+  }
+  if (item.quotedLow !== null && item.quotedHigh !== null) {
+    const low = formatMoney(item.quotedLow) ?? '';
+    const high = formatMoney(item.quotedHigh) ?? '';
+    return {
+      text: item.quotedLow === item.quotedHigh ? low : `${low}–${high.replace('$', '')}`,
+      state: 'range',
+    };
+  }
+  return { text: 'Not priced', state: 'none' };
+}
+
+/**
+ * Whether the client draws the element layer at all.
+ *
+ * A project whose only element is `implicit` shows its items directly and never
+ * says the word "element" — the layer has not earned its place. The server
+ * reports this as `shownElementCount`, and this reads the elements themselves
+ * for the screens that already have them in hand.
+ */
+export function showsElements(elements: ProjectElement[]): boolean {
+  return elements.some((element) => !element.implicit);
+}
+
+/** Projects grouped for the tab, in `PROJECT_STATUS_ORDER`, empty groups dropped. */
+export function groupProjectsByStatus(
+  projects: Project[]
+): { status: ProjectStatus; projects: Project[] }[] {
+  return PROJECT_STATUS_ORDER.map((status) => ({
+    status,
+    projects: projects.filter((project) => project.status === status),
+  })).filter((group) => group.projects.length > 0);
+}
+
+/**
+ * The line under a project's name on a card.
+ *
+ * The rooms it touches, then when — because "which part of the house" and
+ * "when" are the two things that tell two renovations apart at a glance, and
+ * neither of them is the budget.
+ */
+export function projectSubtitle(project: Project, rooms: string[] = []): string {
+  const parts: string[] = [];
+  if (rooms.length) parts.push(rooms.join(' · '));
+  if (project.status === 'done' && project.finishedOn) {
+    parts.push(`finished ${formatLooseDate(project.finishedOn)}`);
+  } else if (project.status === 'underway' && project.targetOn) {
+    parts.push(`aiming for ${formatLooseDate(project.targetOn)}`);
+  } else if (project.status === 'planned' && project.targetOn) {
+    parts.push(formatLooseDate(project.targetOn));
+  } else if (project.status === 'planned') {
+    parts.push('no date yet');
+  }
+  return parts.join(' · ');
+}
+
+// ------------------------------------------------------------- reads
+
+export async function getProjects(
+  client: SupabaseClient,
+  propertyId: string
+): Promise<Project[]> {
+  const { data, error } = await client
+    .from('projects_with_totals')
+    .select('*')
+    .eq('property_id', propertyId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw asError(error, "Couldn't load the projects");
+  return (data ?? []).map(mapProject);
+}
+
+export async function getProject(client: SupabaseClient, projectId: string): Promise<Project> {
+  const { data, error } = await client
+    .from('projects_with_totals')
+    .select('*')
+    .eq('id', projectId)
+    .single();
+
+  return mapProject(unwrap<Row>(data, error, "Couldn't load that project"));
+}
+
+/**
+ * Everything under a project, in three reads rather than one per element.
+ *
+ * A renovation with four elements and twenty items is one page, and fetching
+ * its items element by element would be five round trips on a kitchen-bench
+ * connection. The items and quotes are filtered by their parents' ids, which
+ * RLS would enforce anyway — the `in` is about the size of the answer, not
+ * about permission.
+ */
+export async function getProjectContents(
+  client: SupabaseClient,
+  projectId: string
+): Promise<{ elements: ProjectElement[]; items: ProjectItem[]; quotes: ProjectQuote[] }> {
+  const { data: elementRows, error: elementError } = await client
+    .from('project_elements_with_totals')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('sort_order', { ascending: true });
+
+  if (elementError) throw asError(elementError, "Couldn't load the parts of this job");
+  const elements = (elementRows ?? []).map(mapElement);
+  if (elements.length === 0) return { elements, items: [], quotes: [] };
+
+  const { data: itemRows, error: itemError } = await client
+    .from('project_items_with_totals')
+    .select('*')
+    .in('element_id', elements.map((element) => element.id))
+    .order('sort_order', { ascending: true });
+
+  if (itemError) throw asError(itemError, "Couldn't load what this job takes");
+  const items = (itemRows ?? []).map(mapItem);
+  if (items.length === 0) return { elements, items, quotes: [] };
+
+  const { data: quoteRows, error: quoteError } = await client
+    .from('project_quotes')
+    .select('*')
+    .in('item_id', items.map((item) => item.id))
+    .order('created_at', { ascending: true });
+
+  if (quoteError) throw asError(quoteError, "Couldn't load the quotes");
+  return { elements, items, quotes: (quoteRows ?? []).map(mapQuote) };
+}
+
+/**
+ * Every file under a project, whichever level owns it.
+ *
+ * Files roll up and never down, so this is the project's whole folder — and
+ * each row says which level it came from, so the list can show where a file
+ * lives rather than presenting a consent and a tile quote as the same kind of
+ * thing.
+ */
+export async function getProjectFiles(
+  client: SupabaseClient,
+  projectId: string
+): Promise<ProjectFile[]> {
+  const { data, error } = await client
+    .from('project_files')
+    .select('*')
+    .eq('project_id', projectId);
+
+  if (error) throw asError(error, "Couldn't load the paperwork");
+  return (data ?? []).map(mapProjectFile);
+}
+
+// ------------------------------------------------------------- writes
+
+export interface ProjectInput {
+  propertyId: string;
+  name: string;
+  status?: ProjectStatus;
+  summary?: string | null;
+  /**
+   * Which rooms it touches, and where elements come from.
+   *
+   * Two or more makes the element layer real, one or none creates the implicit
+   * element the client never draws. Elements are not a concept anybody has to
+   * learn — they are a consequence of answering this question.
+   */
+  rooms?: string[];
+  startedOn?: string | null;
+  targetOn?: string | null;
+  finishedOn?: string | null;
+  budget?: number | null;
+  budgetInclGst?: boolean;
+  photoPaths?: string[];
+  documentPaths?: string[];
+}
+
+export async function createProject(
+  client: SupabaseClient,
+  input: ProjectInput
+): Promise<Project> {
+  const { data, error } = await client.rpc('create_project', {
+    p_property_id: input.propertyId,
+    p_name: input.name,
+    p_status: input.status ?? 'planned',
+    p_summary: input.summary ?? null,
+    p_rooms: input.rooms ?? [],
+    p_started_on: input.startedOn ?? null,
+    p_target_on: input.targetOn ?? null,
+    p_finished_on: input.finishedOn ?? null,
+    p_budget: input.budget ?? null,
+    p_budget_incl_gst: input.budgetInclGst ?? true,
+    p_photo_paths: input.photoPaths ?? [],
+    p_document_paths: input.documentPaths ?? [],
+  });
+
+  const row = unwrap<Row>(data, error, "Couldn't start that");
+  // create_project returns the base row, not the view with its totals.
+  return getProject(client, row.id);
+}
+
+export interface ProjectUpdate {
+  name?: string;
+  summary?: string | null;
+  status?: ProjectStatus;
+  startedOn?: string | null;
+  targetOn?: string | null;
+  finishedOn?: string | null;
+  budget?: number | null;
+  budgetInclGst?: boolean;
+  photoPaths?: string[];
+  documentPaths?: string[];
+}
+
+const PROJECT_CLEARABLE: Record<string, string> = {
+  summary: 'summary',
+  startedOn: 'started_on',
+  targetOn: 'target_on',
+  finishedOn: 'finished_on',
+  budget: 'budget',
+};
+
+export async function updateProject(
+  client: SupabaseClient,
+  projectId: string,
+  update: ProjectUpdate
+): Promise<Project> {
+  const clear: string[] = [];
+  for (const [key, column] of Object.entries(PROJECT_CLEARABLE)) {
+    if (key in update && update[key as keyof ProjectUpdate] === null) clear.push(column);
+  }
+
+  const { error } = await client.rpc('update_project', {
+    p_project_id: projectId,
+    p_name: update.name ?? null,
+    p_summary: update.summary ?? null,
+    p_status: update.status ?? null,
+    p_started_on: update.startedOn ?? null,
+    p_target_on: update.targetOn ?? null,
+    p_finished_on: update.finishedOn ?? null,
+    p_budget: update.budget ?? null,
+    p_budget_incl_gst: update.budgetInclGst ?? null,
+    p_photo_paths: update.photoPaths ?? null,
+    p_document_paths: update.documentPaths ?? null,
+    p_clear: clear,
+  });
+
+  if (error) throw asError(error, "That didn’t save");
+  return getProject(client, projectId);
+}
+
+/**
+ * Returns the storage keys the cascade orphaned, for the caller to clear.
+ *
+ * It has to be the caller: `storage.protect_delete()` raises 42501 on a direct
+ * delete of a `storage.objects` row. Safe to return them afterwards here —
+ * unlike a household delete — because your membership of the property survives,
+ * so `home.can_use_photo_folder` still says yes when you act on them.
+ */
+export async function deleteProject(
+  client: SupabaseClient,
+  projectId: string
+): Promise<string[]> {
+  const { data, error } = await client.rpc('delete_project', { p_project_id: projectId });
+  if (error) throw asError(error, "Couldn't delete that project");
+  return (data as string[] | null) ?? [];
+}
+
+export async function createElement(
+  client: SupabaseClient,
+  projectId: string,
+  name: string,
+  room?: string | null
+): Promise<void> {
+  const { error } = await client.rpc('create_element', {
+    p_project_id: projectId,
+    p_name: name,
+    p_room: room ?? null,
+  });
+  if (error) throw asError(error, "Couldn't add that");
+}
+
+export interface ElementUpdate {
+  name?: string;
+  room?: string | null;
+  notes?: string | null;
+  photoPaths?: string[];
+  documentPaths?: string[];
+}
+
+export async function updateElement(
+  client: SupabaseClient,
+  elementId: string,
+  update: ElementUpdate
+): Promise<void> {
+  const clear: string[] = [];
+  if ('room' in update && update.room === null) clear.push('room');
+  if ('notes' in update && update.notes === null) clear.push('notes');
+
+  const { error } = await client.rpc('update_element', {
+    p_element_id: elementId,
+    p_name: update.name ?? null,
+    p_room: update.room ?? null,
+    p_notes: update.notes ?? null,
+    p_photo_paths: update.photoPaths ?? null,
+    p_document_paths: update.documentPaths ?? null,
+    p_clear: clear,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+export async function deleteElement(
+  client: SupabaseClient,
+  elementId: string
+): Promise<string[]> {
+  const { data, error } = await client.rpc('delete_element', { p_element_id: elementId });
+  if (error) throw asError(error, "Couldn't remove that");
+  return (data as string[] | null) ?? [];
+}
+
+export async function createItem(
+  client: SupabaseClient,
+  elementId: string,
+  name: string,
+  notes?: string | null
+): Promise<ProjectItem> {
+  const { data, error } = await client.rpc('create_item', {
+    p_element_id: elementId,
+    p_name: name,
+    p_notes: notes ?? null,
+    p_status: 'considering',
+  });
+  const row = unwrap<Row>(data, error, "Couldn't add that");
+  return mapItem({ ...row, quote_count: 0 });
+}
+
+export interface ItemUpdate {
+  name?: string;
+  status?: ProjectItemStatus;
+  notes?: string | null;
+  photoPaths?: string[];
+  documentPaths?: string[];
+}
+
+export async function updateItem(
+  client: SupabaseClient,
+  itemId: string,
+  update: ItemUpdate
+): Promise<void> {
+  const clear: string[] = [];
+  if ('notes' in update && update.notes === null) clear.push('notes');
+
+  const { error } = await client.rpc('update_item', {
+    p_item_id: itemId,
+    p_name: update.name ?? null,
+    p_status: update.status ?? null,
+    p_notes: update.notes ?? null,
+    p_photo_paths: update.photoPaths ?? null,
+    p_document_paths: update.documentPaths ?? null,
+    p_clear: clear,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+export async function deleteItem(client: SupabaseClient, itemId: string): Promise<string[]> {
+  const { data, error } = await client.rpc('delete_item', { p_item_id: itemId });
+  if (error) throw asError(error, "Couldn't remove that");
+  return (data as string[] | null) ?? [];
+}
+
+export interface QuoteInput {
+  itemId: string;
+  supplier?: string | null;
+  detail?: string | null;
+  amount?: number | null;
+  /** The pill. Every amount carries one; there is no household-wide default. */
+  amountInclGst?: boolean;
+  kind?: ProjectQuoteKind;
+  dated?: string | null;
+  notes?: string | null;
+  chosen?: boolean;
+  photoPaths?: string[];
+  documentPaths?: string[];
+}
+
+export async function createQuote(
+  client: SupabaseClient,
+  input: QuoteInput
+): Promise<ProjectQuote> {
+  const { data, error } = await client.rpc('create_quote', {
+    p_item_id: input.itemId,
+    p_supplier: input.supplier ?? null,
+    p_detail: input.detail ?? null,
+    p_amount: input.amount ?? null,
+    p_amount_incl_gst: input.amountInclGst ?? true,
+    p_kind: input.kind ?? 'quote',
+    p_dated: input.dated ?? null,
+    p_notes: input.notes ?? null,
+    p_chosen: input.chosen ?? false,
+    p_photo_paths: input.photoPaths ?? [],
+    p_document_paths: input.documentPaths ?? [],
+  });
+  return mapQuote(unwrap<Row>(data, error, "Couldn't save that"));
+}
+
+export interface QuoteUpdate {
+  supplier?: string | null;
+  detail?: string | null;
+  amount?: number | null;
+  amountInclGst?: boolean;
+  kind?: ProjectQuoteKind;
+  dated?: string | null;
+  notes?: string | null;
+  photoPaths?: string[];
+  documentPaths?: string[];
+}
+
+const QUOTE_CLEARABLE: Record<string, string> = {
+  supplier: 'supplier',
+  detail: 'detail',
+  amount: 'amount',
+  dated: 'dated',
+  notes: 'notes',
+};
+
+export async function updateQuote(
+  client: SupabaseClient,
+  quoteId: string,
+  update: QuoteUpdate
+): Promise<void> {
+  const clear: string[] = [];
+  for (const [key, column] of Object.entries(QUOTE_CLEARABLE)) {
+    if (key in update && update[key as keyof QuoteUpdate] === null) clear.push(column);
+  }
+
+  const { error } = await client.rpc('update_quote', {
+    p_quote_id: quoteId,
+    p_supplier: update.supplier ?? null,
+    p_detail: update.detail ?? null,
+    p_amount: update.amount ?? null,
+    p_amount_incl_gst: update.amountInclGst ?? null,
+    p_kind: update.kind ?? null,
+    p_dated: update.dated ?? null,
+    p_notes: update.notes ?? null,
+    p_photo_paths: update.photoPaths ?? null,
+    p_document_paths: update.documentPaths ?? null,
+    p_clear: clear,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+/**
+ * Choosing between three prices, and deliberately not part of `updateQuote`.
+ *
+ * The same argument that keeps `setPartBought` out of `updateSnag`: this is one
+ * decision that is its own confirmation, and it is the only write in the whole
+ * feature that changes what a project's total says. Alone, the sibling-clearing
+ * can never be skipped by a caller passing `chosen` among eight other fields.
+ */
+export async function setQuoteChosen(
+  client: SupabaseClient,
+  quoteId: string,
+  chosen: boolean
+): Promise<void> {
+  const { error } = await client.rpc('set_quote_chosen', {
+    p_quote_id: quoteId,
+    p_chosen: chosen,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+export async function deleteQuote(client: SupabaseClient, quoteId: string): Promise<string[]> {
+  const { data, error } = await client.rpc('delete_quote', { p_quote_id: quoteId });
+  if (error) throw asError(error, "Couldn't remove that");
+  return (data as string[] | null) ?? [];
+}
+
+// ---------------------------------------------------------- taking one out
+//
+// **One table, two renderers**, exactly as the list and the house record do:
+// these build rows and `toCsv` / `renderPdf` only format them, so a CSV and a
+// PDF of the same extract can never disagree about what is in it.
+//
+// The rule about money follows the extract out of the app: **every figure a
+// project exports is GST-inclusive and says so**, and every total is printed
+// beside its denominator. A PDF handed to a valuer or an insurer is the one
+// copy of these numbers nobody can ask a follow-up question about, so it is the
+// last place a total should be able to be read as more settled than it is.
+
+/** "$8,990 · 5 of 9 priced" — a figure never leaves the app without its denominator. */
+function exportTotal(totals: ProjectTotals): string {
+  const figure = formatMoney(totals.chosenTotal) ?? rangeLabel(totals);
+  if (!figure) return totals.itemCount > 0 ? `nothing priced of ${totals.itemCount}` : '';
+  return `${figure} · ${totals.pricedCount} of ${totals.itemCount} priced`;
+}
+
+/**
+ * Every project as a row — the high-level extract, from the tab's footer.
+ *
+ * What it is for is the question a valuer, an insurer or a buyer asks: what has
+ * been done to this house, when, and what did it cost.
+ */
+export function projectExportTable(
+  projects: Project[],
+  meta: { household: string; place: string; scope: string; stamp: string }
+): ExportTable {
+  return {
+    name: `${meta.household} projects`,
+    subtitle: `${meta.place} · ${meta.scope} · ${meta.stamp} · all figures incl GST`,
+    columns: [
+      'Project', 'Status', 'Started', 'Target', 'Finished', 'Budget',
+      'Quoted', 'Chosen', 'Spent', 'Items', 'Priced', 'Files', 'Jobs open', 'Started by',
+    ],
+    rows: projects.map((project) => [
+      project.name,
+      PROJECT_STATUS_LABELS[project.status] ?? project.status,
+      formatLooseDate(project.startedOn),
+      formatLooseDate(project.targetOn),
+      formatLooseDate(project.finishedOn),
+      project.budget !== null
+        ? `${formatMoney(project.budget)}${project.budgetInclGst ? '' : ' excl GST'}`
+        : '',
+      rangeLabel(project) ?? '',
+      formatMoney(project.chosenTotal) ?? '',
+      formatMoney(project.spentTotal) ?? '',
+      String(project.itemCount),
+      // Never a bare count: "5" beside "9 items" is the denominator, in the
+      // shape a spreadsheet can sort on.
+      `${project.pricedCount} of ${project.itemCount}`,
+      String(project.fileCount),
+      String(project.openSnagCount),
+      project.createdByName,
+    ]),
+  };
+}
+
+/**
+ * One project, opened right out — the dossier.
+ *
+ * A row per item, carrying the part of the job it belongs to, the supplier that
+ * won it, and what was actually paid. This is the artefact that gets handed to
+ * somebody: a renovation, itemised, with the paperwork behind it named.
+ *
+ * **An item nobody has priced still gets a row**, saying so in words. Dropping
+ * it would make the file's total look complete, which is the single thing this
+ * whole feature is built not to do.
+ */
+export function projectDossierTable(
+  project: Project,
+  elements: ProjectElement[],
+  items: ProjectItem[],
+  quotes: ProjectQuote[],
+  meta: { household: string; stamp: string }
+): ExportTable {
+  const elementsById = new Map(elements.map((element) => [element.id, element]));
+  const drawn = showsElements(elements);
+
+  const rows = items.map((item) => {
+    const element = elementsById.get(item.elementId);
+    const mine = quotes.filter((quote) => quote.itemId === item.id);
+    const chosen = mine.find((quote) => quote.chosen);
+    const paid = mine.filter((quote) => SPENT_QUOTE_KINDS.includes(quote.kind));
+
+    return [
+      // An implicit element has no name anybody chose, so printing it would
+      // invent a structure the reader never saw on screen.
+      drawn ? element?.name ?? '' : '',
+      element?.room ?? '',
+      item.name,
+      PROJECT_ITEM_STATUS_LABELS[item.status] ?? item.status,
+      chosen?.supplier ?? '',
+      chosen?.detail ?? '',
+      item.chosenAmount !== null ? formatMoney(item.chosenAmount) ?? '' : 'Not priced',
+      mine.length > 1 ? rangeLabel({ ...EMPTY_TOTALS, rangeLow: item.quotedLow, rangeHigh: item.quotedHigh }) ?? '' : '',
+      String(mine.length),
+      formatMoney(item.spent) ?? '',
+      paid.map((quote) => PROJECT_QUOTE_KIND_LABELS[quote.kind]).join('; '),
+      item.photoPaths.length + item.documentPaths.length > 0
+        ? String(item.photoPaths.length + item.documentPaths.length)
+        : '',
+      item.notes ?? '',
+    ];
+  });
+
+  // The totals ride as a final row rather than as prose, so a spreadsheet can
+  // see them and the PDF prints them in the same place every time.
+  rows.push([
+    '', '', 'TOTAL', '', '', '',
+    formatMoney(project.chosenTotal) ?? '',
+    rangeLabel(project) ?? '',
+    String(quotes.length),
+    formatMoney(project.spentTotal) ?? '',
+    `${project.pricedCount} of ${project.itemCount} priced`,
+    String(project.fileCount),
+    project.quotedCount > 0
+      ? `${project.quotedCount} quoted and not chosen`
+      : '',
+  ]);
+
+  return {
+    name: `${meta.household} ${project.name}`,
+    subtitle: [
+      PROJECT_STATUS_LABELS[project.status],
+      project.finishedOn ? `finished ${formatLooseDate(project.finishedOn)}` : null,
+      project.propertyName,
+      meta.stamp,
+      'all figures incl GST',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    columns: [
+      'Part of the job', 'Room', 'Item', 'Where it’s up to', 'Supplier', 'What exactly',
+      'Chosen', 'Quoted range', 'Quotes', 'Spent', 'Paid by', 'Files', 'Notes',
+    ],
+    rows,
+  };
+}
+
+/** A shape to hand `rangeLabel` when only the two ends are known. */
+const EMPTY_TOTALS: ProjectTotals = {
+  itemCount: 0,
+  pricedCount: 0,
+  quotedCount: 0,
+  chosenTotal: null,
+  rangeLow: null,
+  rangeHigh: null,
+  spentTotal: null,
+};
+
+/**
+ * The photographs on a project extract, round-robin so one item photographed
+ * from five angles cannot spend a quarter of the allowance.
+ *
+ * The project's own photographs come first — those are the before-and-afters,
+ * the thing somebody actually wants to see — and the items' follow.
+ */
+export function projectExportPhotos(
+  project: Project,
+  items: ProjectItem[],
+  elements: ProjectElement[],
+  limit = EXPORT_PHOTO_LIMIT
+): ExportPhoto[] {
+  const elementsById = new Map(elements.map((element) => [element.id, element]));
+  const sources: { photos: string[]; caption: string; detail: string }[] = [
+    { photos: project.photoPaths ?? [], caption: project.name, detail: project.propertyName },
+    ...items.map((item) => ({
+      photos: item.photoPaths ?? [],
+      caption: item.name,
+      detail: [elementsById.get(item.elementId)?.name, elementsById.get(item.elementId)?.room]
+        .filter(Boolean)
+        .join(' · '),
+    })),
+  ];
+
+  return roundRobin(
+    sources,
+    (source) => source.photos,
+    (source, path) => ({ path, caption: source.caption, detail: source.detail }),
+    limit
+  );
 }

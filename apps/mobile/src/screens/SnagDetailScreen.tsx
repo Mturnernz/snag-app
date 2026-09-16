@@ -19,6 +19,7 @@ import AdviceCard from '../components/AdviceCard';
 import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
 import LinkThingSheet from '../components/LinkThingSheet';
+import LinkProjectSheet from '../components/LinkProjectSheet';
 import AddThingSheet from '../components/AddThingSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
@@ -109,6 +110,8 @@ export default function SnagDetailScreen() {
   const [celebrating, setCelebrating] = useState(false);
   /** Editing what the job says — its words and its room, together. */
   const [editing, setEditing] = useState(false);
+  /** Which renovation this job belongs to. Read only when the sheet opens. */
+  const [projectOpen, setProjectOpen] = useState(false);
   /** Choosing what it is about, and the record that choice reads from. */
   const [linking, setLinking] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -363,6 +366,65 @@ export default function SnagDetailScreen() {
             </View>
           ) : null}
         </View>
+
+        {/* ── Part of ──
+            The punch list, in the app's own word: the defects list at the end
+            of a renovation is literally a snag list, which is where the word
+            comes from. So a project does not get a to-do list of its own — it
+            gets these, and they sit on the List tab in their rooms with
+            everything else.
+
+            **Saying so does not start the job.** `project_id` is excluded from
+            `v_started` in `update_snag`, exactly as `thing_id` is: naming which
+            renovation a dripping cistern belongs to is the tail of capture, the
+            same gesture as tagging the room. A link that marked twelve jobs
+            'doing' at once would empty the status from the other end than the
+            retired *Start it* button did.
+
+            Above *What it's about* because it is the broader fact — which job
+            this belongs to, then which appliance it is about. */}
+        {snag.projectId && snag.projectName ? (
+          <View style={styles.aboutRow}>
+            <Pressable
+              onPress={() => navigation.navigate('ProjectDetail', { projectId: snag.projectId! })}
+              style={styles.about}
+              accessibilityRole="button"
+              accessibilityLabel={`Part of ${snag.projectName}`}
+            >
+              <Icon name="construct-outline" size="sm" color={Colors.textMuted} />
+              <Text style={styles.aboutName} numberOfLines={1}>{snag.projectName}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setProjectOpen(true)}
+              disabled={busy}
+              style={styles.aboutClear}
+              accessibilityRole="button"
+              accessibilityLabel="Change which job it is part of"
+            >
+              <Icon name="swap-horizontal-outline" size="sm" color={Colors.textMuted} />
+            </Pressable>
+            <Pressable
+              onPress={() => patch({ projectId: null })}
+              disabled={busy}
+              style={styles.aboutClear}
+              accessibilityRole="button"
+              accessibilityLabel="Not part of that"
+            >
+              <Icon name="close" size="sm" color={Colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            onPress={() => setProjectOpen(true)}
+            disabled={busy}
+            style={styles.aboutAdd}
+            accessibilityRole="button"
+            accessibilityLabel="Part of a bigger job?"
+          >
+            <Icon name="construct-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.aboutAddLabel}>Part of a bigger job?</Text>
+          </Pressable>
+        )}
 
         {/* ── What it's about ──
             The payoff for the one question the capture sheet asks that has no
@@ -784,6 +846,19 @@ export default function SnagDetailScreen() {
           await patch(update);
         }}
         onCancel={() => setEditing(false)}
+      />
+
+      <LinkProjectSheet
+        visible={projectOpen}
+        propertyId={snag.propertyId}
+        linkedId={snag.projectId}
+        onClose={() => setProjectOpen(false)}
+        onPick={async (projectId) => {
+          setProjectOpen(false);
+          // A second press on the one it already belongs to unlinks it — the
+          // same gesture the thing link uses, so the two rows behave alike.
+          await patch({ projectId: projectId === snag.projectId ? null : projectId });
+        }}
       />
 
       <LinkThingSheet

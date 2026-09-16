@@ -266,6 +266,16 @@ export interface Snag {
    */
   thingId: string | null;
 
+  /**
+   * The renovation this job belongs to, if any — the punch list, in the app's
+   * own word.
+   *
+   * Like `thingId`, setting it does **not** move the snag to 'doing': saying
+   * which renovation a dripping cistern belongs to is the tail of capture, the
+   * same gesture as tagging the room.
+   */
+  projectId: string | null;
+
   reporterId: string;
   createdAt: string;
   updatedAt: string;
@@ -282,6 +292,7 @@ export interface Snag {
   thingName: string | null;
   thingMake: string | null;
   thingModel: string | null;
+  projectName: string | null;
 }
 
 /**
@@ -322,6 +333,14 @@ export interface SnagFilter {
   /** Only items with a due date at or before now. */
   dueOnly?: boolean;
   needsParts?: boolean;
+  /**
+   * Jobs filed against one renovation — the punch list.
+   *
+   * A project does not get a to-do list of its own; it gets this filter over
+   * `home.snags`, and those snags sit on the List tab in their rooms with
+   * everything else. One place work lives, or neither is trustworthy.
+   */
+  projectId?: string | null;
 }
 
 export type SnagSort = 'newest' | 'oldest' | 'due' | 'priority';
@@ -417,6 +436,17 @@ export interface Thing {
 
   /** What you re-buy for it. This is what a snag's parts list inherits. */
   consumables: string[];
+
+  /**
+   * The renovation that put it here, if it came from one.
+   *
+   * `on delete set null`, never cascade: deleting the record of the laundry
+   * renovation must not delete the washing machine it installed.
+   */
+  projectId?: string | null;
+  /** Joined in by `home.things_with_details`, for the *Installed during* row. */
+  projectName?: string | null;
+  projectFinishedOn?: string | null;
 
   installedAt: string | null;
   warrantyUntil: string | null;
@@ -658,6 +688,262 @@ export interface SnagAdvice {
 
 
 
+// ---------------------------------------------------------------- projects
+
+/**
+ * What we're *changing*, beside what's wrong (a snag) and what's there (a thing).
+ *
+ * A project is a body of work on a place: a renovation, a rebuild, a heat pump
+ * going in. Planned or already finished — recording the bathroom you did in
+ * 2024 is worth as much as planning the one you haven't, because it is where
+ * the receipts and the guarantee live.
+ */
+export type ProjectStatus = 'planned' | 'underway' | 'done';
+
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  planned: 'Planned',
+  underway: 'Underway',
+  done: 'Done',
+};
+
+/** What the tab groups by, in the order the sections read down the screen. */
+export const PROJECT_STATUS_ORDER: ProjectStatus[] = ['underway', 'planned', 'done'];
+
+/**
+ * Where one item has got to.
+ *
+ * Deliberately never `done`. That word belongs to snags, and an item that has
+ * been installed is not the same claim as a job that has been finished — the
+ * renovation can be installed and still wrong, which is what the snags hanging
+ * off it are for.
+ */
+export type ProjectItemStatus = 'considering' | 'chosen' | 'ordered' | 'installed';
+
+export const PROJECT_ITEM_STATUS_LABELS: Record<ProjectItemStatus, string> = {
+  considering: 'Deciding',
+  chosen: 'Chosen',
+  ordered: 'Ordered',
+  installed: 'In',
+};
+
+export const PROJECT_ITEM_STATUS_ORDER: ProjectItemStatus[] = [
+  'considering',
+  'chosen',
+  'ordered',
+  'installed',
+];
+
+/**
+ * What a piece of paper *is*.
+ *
+ * A quote is what something might cost; an invoice and a receipt are what it
+ * did. Only the second two count towards "spent", which is why this is an enum
+ * rather than a note somebody writes.
+ */
+export type ProjectQuoteKind = 'quote' | 'invoice' | 'receipt';
+
+export const PROJECT_QUOTE_KIND_LABELS: Record<ProjectQuoteKind, string> = {
+  quote: 'Quote',
+  invoice: 'Invoice',
+  receipt: 'Receipt',
+};
+
+export const PROJECT_QUOTE_KINDS: ProjectQuoteKind[] = ['quote', 'invoice', 'receipt'];
+
+/** The kinds that have actually been paid, and so count towards `spentTotal`. */
+export const SPENT_QUOTE_KINDS: ProjectQuoteKind[] = ['invoice', 'receipt'];
+
+/**
+ * New Zealand GST, and the one number this app does arithmetic with.
+ *
+ * **Every amount is a pair**: the figure as it was typed, and whether that
+ * figure already includes GST. Quotes come both ways here and the difference is
+ * 15% — which on a renovation is the difference between on budget and $2,000
+ * over — so asking once at the household level and assuming it forever is how a
+ * total ends up quietly wrong. The pill sits beside the box, on every box.
+ *
+ * Rollups normalise to **inclusive**, because that is what leaves the bank
+ * account. `home.incl_gst` is the server's copy of this and the two must agree;
+ * `projects.test.ts` pins the arithmetic on this side.
+ */
+export const GST_RATE = 0.15;
+
+/**
+ * The figures every level of a project carries, and the rule that comes with
+ * them.
+ *
+ * **A total always ships its denominator.** `itemCount` and `pricedCount` are
+ * in this shape rather than fetched separately precisely so that no screen can
+ * render `chosenTotal` without having been handed "5 of 9 items priced" in the
+ * same object. A renovation total assembled from half the items is the most
+ * misleading number this app could show, and it misleads in the direction that
+ * costs money.
+ *
+ * **An unpriced item is not zero.** It is counted in `itemCount`, excluded from
+ * every sum, and that gap is the whole point of reporting both.
+ *
+ * Nulls are meant: `sum` over nothing is "nobody has said", never $0.
+ */
+export interface ProjectTotals {
+  /** How many items exist at this level, priced or not. */
+  itemCount: number;
+  /** How many have a chosen quote — the denominator's numerator. */
+  pricedCount: number;
+  /** Quoted and still undecided. A different state from "nobody has asked". */
+  quotedCount: number;
+  /** The sum of the chosen quotes, GST-inclusive. Null when nothing is chosen. */
+  chosenTotal: number | null;
+  /**
+   * What it looks like it will come to. A settled item contributes its chosen
+   * amount to both ends; an unsettled one contributes its cheapest and dearest
+   * quote. When the two are equal there is nothing left to decide.
+   */
+  rangeLow: number | null;
+  rangeHigh: number | null;
+  /** Invoices and receipts only — what has actually gone out. */
+  spentTotal: number | null;
+}
+
+export interface Project extends ProjectTotals {
+  id: string;
+  householdId: string;
+  propertyId: string;
+  name: string;
+  summary: string | null;
+  status: ProjectStatus;
+
+  /** Three dates, none of them a schedule. This app has one scheduler and it is a snag's. */
+  startedOn: string | null;
+  targetOn: string | null;
+  finishedOn: string | null;
+
+  budget: number | null;
+  budgetInclGst: boolean;
+
+  photoPaths: string[];
+  documentPaths: string[];
+
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+
+  /** Joined in by `home.projects_with_totals`. */
+  propertyName: string;
+  createdByName: string;
+  elementCount: number;
+  /**
+   * How many elements the client should actually draw.
+   *
+   * Zero means the project's one element is implicit — a layer that has not
+   * earned its place — so the items hang directly off the project and the word
+   * "element" is never said.
+   */
+  shownElementCount: number;
+  /** Every file under the project, at any level. Files roll up, never down. */
+  fileCount: number;
+  snagCount: number;
+  openSnagCount: number;
+  thingCount: number;
+}
+
+/**
+ * A part of a project, usually a room.
+ *
+ * `implicit` is the layer's visibility, and it is stored rather than derived
+ * from "is this the only one". Derived was the first shape and it is wrong:
+ * deleting the second of two elements would silently re-hide the first, which
+ * by then had a name somebody chose and paperwork attached to it. Once a person
+ * has seen the layer, it stays.
+ */
+export interface ProjectElement extends ProjectTotals {
+  id: string;
+  projectId: string;
+  name: string;
+  room: string | null;
+  implicit: boolean;
+  sortOrder: number;
+  notes: string | null;
+  photoPaths: string[];
+  documentPaths: string[];
+  createdAt: string;
+}
+
+/** One thing to decide or buy. Its price is whichever quote was chosen. */
+export interface ProjectItem {
+  id: string;
+  elementId: string;
+  name: string;
+  status: ProjectItemStatus;
+  sortOrder: number;
+  notes: string | null;
+  photoPaths: string[];
+  documentPaths: string[];
+  createdAt: string;
+
+  /** Joined in by `home.project_items_with_totals`, all GST-inclusive. */
+  quoteCount: number;
+  /** Null when nothing is chosen — never zero. */
+  chosenAmount: number | null;
+  quotedLow: number | null;
+  quotedHigh: number | null;
+  spent: number | null;
+}
+
+/**
+ * One supplier's number, with the paper behind it.
+ *
+ * `amount` is exactly what was typed and `amountInclGst` says what it meant.
+ * Nothing in this app ever reads a figure out of an attachment: a scraped total
+ * has a source nobody can check, and it will be wrong about GST, about
+ * provisional sums, and about which of three revisions it read.
+ */
+export interface ProjectQuote {
+  id: string;
+  itemId: string;
+  supplier: string | null;
+  /** What is being offered — "Methven Krome". The item's name is usually enough. */
+  detail: string | null;
+  amount: number | null;
+  amountInclGst: boolean;
+  kind: ProjectQuoteKind;
+  /** At most one per item, enforced by a partial unique index rather than hoped for. */
+  chosen: boolean;
+  dated: string | null;
+  notes: string | null;
+  photoPaths: string[];
+  documentPaths: string[];
+  createdAt: string;
+}
+
+/**
+ * Which level a file belongs to.
+ *
+ * **Files roll up, never down.** A file is owned by exactly one level — the
+ * council consent by the project, the tiling quote by the item it prices — and
+ * a project's paperwork list gathers everything beneath it, saying where each
+ * came from. Opening the bathroom element does *not* show the project's
+ * consent, because that document is not about the bathroom.
+ */
+export type ProjectFileLevel = 'project' | 'element' | 'item' | 'quote';
+
+export const PROJECT_FILE_LEVEL_LABELS: Record<ProjectFileLevel, string> = {
+  project: 'The project',
+  element: 'Part of the job',
+  item: 'An item',
+  quote: 'A quote',
+};
+
+export interface ProjectFile {
+  projectId: string;
+  level: ProjectFileLevel;
+  /** The row it is attached to — the project, element, item or quote id. */
+  ownerId: string;
+  /** What to call that row on screen, so a list can say where a file lives. */
+  ownerName: string;
+  kind: 'photo' | 'document';
+  path: string;
+}
+
 // ---------------------------------------------------------------- navigation
 
 export type RootStackParamList = {
@@ -668,6 +954,16 @@ export type RootStackParamList = {
   LocationTags: undefined;
   /** A thing's spec sheet. Presented as a sheet, like SnagDetail. */
   ThingDetail: { thingId: string };
+  /**
+   * One renovation: the money, the parts of it, the paperwork.
+   *
+   * A push rather than a sheet, unlike SnagDetail and ThingDetail. Those are a
+   * dozen small decisions each taken against a list still visible underneath. A
+   * project is a page you read — three figures, a set of elements that open,
+   * and a folder — and it is deep enough that a sheet would spend its height on
+   * the list it is covering.
+   */
+  ProjectDetail: { projectId: string };
   /**
    * Where an answer to a briefed extract comes back in.
    *
@@ -707,5 +1003,20 @@ export type MainTabParamList = {
    * trustworthy. It still sends nobody a reminder.
    */
   Schedule: undefined;
+  /**
+   * What we're changing about the place — renovations, rebuilds, the heat pump
+   * going in — planned or already done.
+   *
+   * A fifth tab rather than a mode on the House tab. Both describe the fabric
+   * of the place, which is why it sits beside it, but a tab with two minds is
+   * how a tab becomes two tabs badly — see the `By room / By kind` rail this
+   * app already removed for that reason.
+   *
+   * **Five is the ceiling.** At 375pt each tab gets 75pt, and `Projects` and
+   * `Schedule` are both eight characters. If a sixth noun ever arrives, the
+   * answer is not a sixth tab; it is that two of these five were never really
+   * different.
+   */
+  Projects: undefined;
   Profile: undefined;
 };

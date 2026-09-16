@@ -332,6 +332,71 @@ export const deleteThing = (thingId: string) => queries.deleteThing(supabase, th
 
 export const getAbsentThings = (propertyId: string) => queries.getAbsentThings(supabase, propertyId);
 
+// ------------------------------------------------------------------ projects
+//
+// What we're *changing*, beside what's wrong and what's there. Every one of
+// these is the query package's function bound to this app's client; the logic
+// lives there so `apps/web` could read the same rows.
+
+export const getProjects = (propertyId: string) => queries.getProjects(supabase, propertyId);
+
+export const getProject = (projectId: string) => queries.getProject(supabase, projectId);
+
+export const getProjectContents = (projectId: string) =>
+  queries.getProjectContents(supabase, projectId);
+
+export const getProjectFiles = (projectId: string) =>
+  queries.getProjectFiles(supabase, projectId);
+
+export const createProject = (input: queries.ProjectInput) =>
+  queries.createProject(supabase, input);
+
+export const updateProject = (projectId: string, update: queries.ProjectUpdate) =>
+  queries.updateProject(supabase, projectId, update);
+
+export const deleteProject = (projectId: string) => queries.deleteProject(supabase, projectId);
+
+export const createElement = (projectId: string, name: string, room?: string | null) =>
+  queries.createElement(supabase, projectId, name, room);
+
+export const updateElement = (elementId: string, update: queries.ElementUpdate) =>
+  queries.updateElement(supabase, elementId, update);
+
+export const deleteElement = (elementId: string) => queries.deleteElement(supabase, elementId);
+
+export const createItem = (elementId: string, name: string, notes?: string | null) =>
+  queries.createItem(supabase, elementId, name, notes);
+
+export const updateItem = (itemId: string, update: queries.ItemUpdate) =>
+  queries.updateItem(supabase, itemId, update);
+
+export const deleteItem = (itemId: string) => queries.deleteItem(supabase, itemId);
+
+export const createQuote = (input: queries.QuoteInput) => queries.createQuote(supabase, input);
+
+export const updateQuote = (quoteId: string, update: queries.QuoteUpdate) =>
+  queries.updateQuote(supabase, quoteId, update);
+
+export const setQuoteChosen = (quoteId: string, chosen: boolean) =>
+  queries.setQuoteChosen(supabase, quoteId, chosen);
+
+export const deleteQuote = (quoteId: string) => queries.deleteQuote(supabase, quoteId);
+
+// The pure ones, re-exported so screens import money formatting from the same
+// place they import the reads. Nothing here touches the client.
+export {
+  inclGst,
+  formatMoney,
+  rangeLabel,
+  describeTotals,
+  hasOpenRange,
+  itemPriceLabel,
+  showsElements,
+  groupProjectsByStatus,
+  projectSubtitle,
+} from '@snag/supabase-queries';
+export { GST_RATE } from '@snag/shared-types';
+
 export const markThingAbsent = (propertyId: string, room: string, name: string) =>
   queries.markThingAbsent(supabase, propertyId, room, name);
 

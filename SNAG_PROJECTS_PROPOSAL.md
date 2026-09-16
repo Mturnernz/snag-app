@@ -1,6 +1,7 @@
 # The Projects tab — a proposal
 
-**Status: nothing built.** This is the argument. The mockups live in the artifact published
+**Status: built.** This is the argument that preceded it; the decisions taken since are recorded
+at the foot. The feature itself is documented in `CLAUDE.md` under *Projects: what we're changing*. The mockups live in the artifact published
 alongside it; this file is where the reasoning goes, beside `SNAG_HOME_PIVOT_REVIEW.md`.
 
 ## The short answer
@@ -146,16 +147,32 @@ whole request, which reads on screen as an empty tab. This is the one that bit t
 
 ## Five things only the household can answer
 
-1. **Is five tabs acceptable?** The alternative is folding Projects into House behind a switch,
-   which this document argues against.
+1. ~~**Is five tabs acceptable?**~~ **Answered: yes.** Built as a fifth tab, third in the bar.
 2. **Does "element" survive contact with your mouth?** Accurate, but nobody says "the bathroom
    element" out loud. *Parts* is taken by the shopping list; *stages* implies an order renovations
    don't have. Proposal: the heading reads **"What it takes"** and the word stays in the schema.
-3. **GST — in or out?** NZ quotes come both ways and the difference is 15%. Proposal: one number and
-   a flag per quote, with the mixed case shown as a warning rather than silently adding apples to
-   oranges.
+3. ~~**GST — in or out?**~~ **Answered: both, per amount.** Every money box carries a sliding
+   incl/excl pill, defaulted to incl, and the line beneath shows the other figure as it is typed.
+   Nothing is converted on save; the rollups normalise to inclusive, and every extract says so.
 4. **Labour tracked separately from materials?** One more field on an item, and how a renovation
    budget is actually argued about — but also the first step towards a spreadsheet, and this app's
    whole discipline is not being one.
-5. **Can a project span properties?** Assumed no: a project belongs to one place, like everything
-   else. Solar across the house and the bach would be two projects.
+5. ~~**Can a project span properties?**~~ **Answered: no**, as assumed — a project belongs to one
+   place, and `create_snag`, `update_snag`, `create_thing` and `update_thing` all refuse a link
+   across places rather than leaving it to be noticed later.
+
+Two remain open and neither blocks anything: whether **"element"** survives being said out loud
+(shipped as *Parts of the job* on screen, with the word left in the schema), and whether **labour
+should be tracked separately from materials** (not built — it is the first step towards being a
+spreadsheet).
+
+## What changed between the proposal and the build
+
+- **Files at every level**, not just the project: elements, items and quotes each take photos and
+  PDFs through one shared `Attachments` component. They **roll up** into the project's folder and
+  never roll down, so the council consent is not shown inside the bathroom.
+- **GST is per amount**, as above — the proposal had assumed one household-wide answer.
+- **Quoted became a range rather than a single figure.** Summing per-item maxima produced a number
+  nobody could defend; low-and-high is the decision actually outstanding.
+- **An implicit element with nothing in it is deleted** when the first real element arrives, rather
+  than lingering as a phantom part named after the project.

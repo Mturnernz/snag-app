@@ -842,9 +842,20 @@ later, in an aisle, needing one exact string. So:
 
 ### Five kinds, two built
 
-`home.thing_kind` is `appliance | finish | fitting | fabric | contact`, all five in the enum from
-the first migration so adding the rest is a screen and not a migration. `THING_KINDS` is the two
-that are offered: appliances and paint, the two with the sharpest read moments.
+`home.thing_kind` is `appliance | finish | tile | fitting | fabric | contact`. `THING_KINDS` is
+the three that are offered: appliances, paint and tiles.
+
+**A tile takes paint's shape, not an appliance's**, and for paint's reason: a bathroom holds one
+tile on the floor and another on the walls, the colour is what somebody came to read, and the
+only thing telling the two apart is where each went. So `THING_KIND_FIELD_LABELS` gives it
+*Range* / *Colour or code* / *Where it went*, and the note renders on the card as a finish's
+does. It arrived with the projects work, because a renovation's most durable answer is which tile
+went on the bathroom floor.
+
+**`alter type ... add value` must be alone in its migration.** Postgres will not let a new enum
+value be used in the same transaction that added it, and a migration runs in one — so
+`20260918092000` adds `tile` and does nothing else. A file that both adds a value and refers to
+it fails whole.
 
 `make`/`model` carry the paint case as readily as the appliance one — Resene / 7BB 83/018 sits in
 the same two columns as Bosch / SMS46MI01A, and both are strings read aloud to somebody else.
@@ -1006,7 +1017,7 @@ they buy that back with three rules:
 
 - **A total always ships its denominator.** Never `$8,990` on its own; always `$8,990 · 5 of 9
   items priced`. `ProjectTotals` carries `itemCount` and `pricedCount` in the same object as
-  `chosenTotal`, and every rollup view computes all three in the same row, so no screen *can*
+  `committedTotal`, and every rollup view computes all three in the same row, so no screen *can*
   render a figure without having been handed its denominator. `describeTotals` writes the line and
   there is no path through either project screen that draws a total without it.
 - **An unpriced item is not zero.** It is counted in `itemCount`, excluded from every sum, and the
@@ -1018,17 +1029,113 @@ they buy that back with three rules:
   a scraped total has a source nobody can check, and it will be wrong about GST, about provisional
   sums, and about which of three revisions it read.
 
-**Three figures, never one.** *Quoted* is the range of what suppliers have said including options
-not taken; *Chosen* is the sum of the picked quotes — what it is going to cost; *Spent* is invoices
-and receipts only — how far in we are. A quote is never "spent", or every project would read as
-fully paid the day it was priced. All three are **derived in the views**, never stored — the
-`needs_parts` argument applied to a far more dangerous number, since a maintained total and the
-quotes it describes will disagree the first time somebody edits an amount from the other phone.
+**Four figures, and a budget line under them.** *Committed* is what has been agreed; *Invoiced*
+is what has been charged; *Paid* is what has gone out; *Outstanding* is committed less paid.
+Then a rule, the budget, and one sentence saying which side of it committed has landed. All of
+them are **derived in the views**, never stored — the `needs_parts` argument applied to a far
+more dangerous number, since a maintained total and the quotes it describes will disagree the
+first time somebody edits an amount from the other phone.
 
-**And the three are stacked down the page, not laid across it.** They were three cells in a row,
-which works until a renovation gets past five figures and *Quoted* has to hold something like
-`$188,352.22–191,583.72` in a third of 390pt — it wrapped mid-number and the whole strip went
-ragged. It is the same failure the thing page's spec sheet already fixed by un-columning itself: a
+Three rules inside that, and each answers a way the first pass was wrong:
+
+- **Charged and paid are different figures.** `spent` summed invoices and receipts together, so
+  an $84,000 invoice and the payment settling it read as $168,000. It had not yet produced a
+  wrong number only because `receipt` was being used to mean "paid in full, no invoice" — the
+  bug was latent, not absent. A payment now hangs off the invoice it settles
+  (`home.project_payments`), so a deposit and a balance are two payments against one bill and
+  the double-count is unrepresentable rather than merely fixed. `receipt` leaves the vocabulary:
+  existing rows became an invoice plus a payment, and the enum value stays unused because
+  Postgres cannot drop one.
+- **An invoice is the commitment when nothing was ever quoted.** A consultant billing time by
+  the month has no quote and never will. Reading that as "not priced" while money goes out of
+  the door is how `committed - paid` comes out negative — it did, on the live project, against
+  three suppliers at once. So `committed` is the accepted quote at a level, *or* its invoices
+  when nothing was quoted there.
+- **Quoted is gone.** The low-to-high band across undecided quotes answered a question nobody
+  asks after the first fortnight, and per-line allowance variance (below) answers the same
+  thing far better and against real numbers. `rangeLabel` and `hasOpenRange` are deleted.
+
+### A builder's number is not one number
+
+The load-bearing rule of the money model, and the one everything else hangs off.
+
+ReliaBuilder's $176,755 is a list: demolition, labour, waterproofing — and, against the fittings
+and the tiles, an **allowance**. A figure the builder wrote down for something they are not
+themselves supplying, or have not yet priced. In a New Zealand building contract these are
+provisional and PC sums, and they are the lines that move.
+
+So a quote carries **lines** (`home.project_quote_lines`), a line may be an allowance, and a
+later quote **supersedes** the line it was got for (`supersedes_line_id`). When the plumbing
+merchant quotes $890 for the toilet, that quote points at the *Bathroom fittings* line; once it
+is accepted, the line contributes what was actually quoted instead of what was allowed. The
+price build gets more granular as real numbers arrive.
+
+Four rules make that honest, and each prevents one failure:
+
+- **Money is summed from exactly one place.** A quote that supersedes a line contributes only
+  through that line, never also on its own account. That is the whole answer to "is the toilet
+  inside the contract" — linking is the answer, and linking is the same act that produces the
+  breakdown. A price pointing at nothing is a separate purchase and sums normally. The failure
+  it prevents is the one the element layer already names: *a rollup with two paths to sum
+  through is how a total starts disagreeing with itself.*
+- **A quote says whether its number can move.** `basis` is `fixed` or `estimate`. A fixed-price
+  contract stays what it says whatever the fittings cost — the variance is the builder's, and a
+  real change costs a variation, which is a new quote. An estimate moves. The app cannot infer
+  which it is holding and guessing would be a lie about somebody's contract, so it asks once,
+  defaulting to **fixed**: the answer that does not silently move.
+- **A recomputed total says how much of itself is still a guess.** `allowance_open` rides beside
+  every build-up for the same reason `item_count` rides beside every sum. It is worded *"still
+  an allowance"* and never *"not priced"* — **an allowance is not an unpriced item**: an
+  unpriced item contributes nothing and is counted in the denominator; an allowance is somebody's
+  written number and it counts. Collapsing the wording collapses the distinction.
+- **Per-line variance is the early warning, and there is no forecast anywhere.** *"Tiles were
+  allowed $12,400; Tile Depot has quoted $15,900 — $3,500 over, if you accept it"* is a real
+  number from a real quote, months before the invoice, and nothing had to be estimated to
+  produce it. That is why the app never puts a figure on work nobody has priced.
+
+**A quote attaches to one level — an item, a part, or the whole project.** A main contractor's
+contract covers the bathroom *and* the laundry, so it belongs to neither; forcing it onto the
+item layer meant inventing an item called "Main contract — ReliaBuilder" sitting beside the
+vanity, which is how the item layer stops meaning "a thing being bought". Exactly one of
+`item_id` / `element_id` / `project_id` is set, enforced by a check constraint and said in words
+by `create_quote`.
+
+**Accepted / TBC / Declined, where there was a `chosen` boolean.** A boolean could only ever say
+"not chosen", which read the same whether nobody had decided or somebody had said no. A declined
+price leaves every total and **stays on the record**, dimmed: what you were quoted and by whom is
+what makes the next renovation's numbers credible. `set_quote_status` is its own RPC for the
+reason `set_part_bought` is — it is the only write that changes what a total says, and alone it
+cannot have its sibling-clearing skipped by a caller passing a status among eight other fields.
+
+### Who is owed what
+
+One row per supplier on the project page — committed, invoiced, paid, and what is still to go to
+them — absent entirely when nobody is owed anything, the same rule as the shopping pill at zero.
+**The check worth keeping: these rows sum to the project's committed total.** They are two views
+over one rule, and if they ever disagree one of them is lying about who is owed money.
+
+The fallback belongs to the **scope**, not the supplier, and getting that wrong is subtle: group
+by supplier and then ask "accepted quotes, or failing that the invoices" and a consultant who has
+only ever invoiced comes out owed nothing, while a builder with a contract *and* a separate
+pre-start invoice has that invoice swallowed. `20260918090500` exists for exactly that.
+
+Supplier stays **free text**, because a supplier list somebody has to fill in before they can
+record a quote is setup, and this app does not do setup. It groups on the trimmed, lower-cased
+name and displays the spelling used most recently, and `home.rename_supplier` fixes a typo across
+a whole job — a rollup nobody can correct is a rollup nobody trusts.
+
+### A budget has parts, and the gap is named rather than resolved
+
+`project_elements.budget` carries each part's share. **`projects.budget` stays and stays typed.**
+A renovation is budgeted top-down and broken down later, the breakdown deliberately does not add
+up (the contingency lives nowhere), and a derived figure that silently replaced the typed one
+would be the app insisting somebody did not mean what they typed. So both exist and the page says
+*"parts budgeted $172,000 of $180,000 · $8,000 unallocated"* — the denominator rule, applied to
+budget.
+
+**And they are stacked down the page, not laid across it.** They were cells in a row, which works
+until a renovation gets past five figures and one of them has to hold `$192,354.22` in a third of
+390pt — it wrapped mid-number and the whole strip went ragged. It is the same failure the thing page's spec sheet already fixed by un-columning itself: a
 two-column row has nowhere to put a long answer, and a project's totals are the longest answers in
 the app. Label left in a fixed column, figure right-aligned and pinned to `numberOfLines={1}`, so
 the three share an edge the way a column of money is read. The same rule covers an item's own price
@@ -1080,13 +1187,17 @@ bathroom. No second bucket: `home-photos` under `<household_id>/docs/`, through
   in `update_snag`, exactly as `thing_id` is: naming which renovation a dripping cistern belongs to
   is the tail of capture, the same gesture as tagging the room. A link that marked twelve jobs
   'doing' at once would empty the status from the other end than the retired *Start it* button did.
-- **`things.project_id`** — what the project left behind, and the payoff for keeping the record at
-  all. Three years on nobody asks what the laundry cost; they ask what the model number of the
-  machine is and whether it is still under warranty. The thing page carries an *Installed during*
-  row through to the project, where the invoice is attached to the quote that bought it, and an
-  item is promoted to a thing in one tap through `AddThingSheet` with the room pre-filled. Carried
-  into `create_thing` rather than written afterwards — a create-then-update is two chances to write
-  half of it.
+- **`things.project_id`** and **`things.project_item_id`** — what the project left behind, and the
+  payoff for keeping the record at all. Three years on nobody asks what the laundry cost; they ask
+  what the model number of the machine is and whether it is still under warranty. The thing page
+  carries an *Installed during* row through to the project, where the invoice is attached to the
+  quote that bought it. Both are carried into `create_thing` rather than written afterwards — a
+  create-then-update is two chances to write half of it.
+
+  **`project_item_id` is what lets the handover stop asking.** `project_id` alone could say a
+  record came out of a renovation but not *which* item it came out of, so a checklist had no way
+  to stop offering the dishwasher it put in the record last week. Not unique: a tiled bathroom
+  leaves a tile record and a grout record from one line item.
 - Both are **`on delete set null`, never cascade**: deleting the record of the renovation must not
   delete the washing machine, and what was wrong with the cistern is still what was wrong.
 
@@ -1145,14 +1256,42 @@ what a total says, and alone it cannot have its sibling-clearing skipped by a ca
 `chosen` among eight other fields. The server clears the sibling *first*, because
 `project_quotes_one_chosen` is a plain unique index and not a deferred constraint.
 
-### Nobody types Quoted, Chosen or Spent
+### Hand it over — what the renovation puts in the house record
 
-All three are derived, and the only thing anybody enters is **one amount per quote** plus two
-decisions: which quote is *chosen*, and what kind of paper each one is. The kind is what drives
-*Spent* — a `quote` never counts, or every project would read as fully paid the day it was priced,
-so recording money that has actually gone out means a second row on the same item marked **Invoice**
-or **Receipt**. That is how a deposit works: a chosen $4,600 quote beside an $1,840 receipt reads as
-Chosen $4,600, Spent $1,840.
+A standing section on the project page, not a prompt at the end. The model number gets recorded
+the week the thing goes in and the invoice is in somebody's hand — not eight months later, and
+not only if the project ever gets marked done.
+
+**It offers what is installed, and nothing else.** The items are already listed above under
+*What it takes*, and offering all eighteen again puts the same list on the page twice; an item
+nobody has fitted has nothing to record, because the model number is on the box. It is also the
+subtraction the You tab's loose ends already make (`installed_count - thing_count`), so the two
+screens cannot disagree about what is outstanding. Absent entirely while nothing is installed,
+and capped at five with a *Show all* — the same sitting's-worth the loose-end list is capped at.
+
+**Each row opens the walkthrough filled in, and you confirm.** Not a bulk write, and the rule is
+the one the snag page already states about creating a thing from a job, with more force because
+there are twelve of them: *a record created from here has to be as strong as one created on the
+House tab, or this is the back door that fills the house record with rows nobody can read in a
+shop.* Twelve confirmations is slower than one tap; an 8%-complete house record is worse than
+none, and this is the exact door it would come through.
+
+What is pre-filled: the name, the room from the part, the make from the accepted quote's
+supplier, the model from its detail, the invoice as paperwork, and the installed date from the
+invoice. **The supplier is not the make** — "Plumbing World" is the merchant and "Caroma" is the
+maker — which is precisely why there is a confirm step rather than a bulk write. Photos are
+deliberately not carried: a photo of a quote document is not a photo of the fitting, and the
+thing page's strip is the one part of it that has to be worth opening.
+
+### Nobody types Committed, Invoiced or Paid
+
+All four are derived, and the only thing anybody enters is **one amount per price** plus three
+decisions: whether it is accepted, what kind of paper it is, and — on a contract — whether its
+number can move. Recording money that has actually gone out is a **payment against the invoice it
+settles**, never a sibling row: a chosen $4,600 quote, a $4,600 invoice and an $1,840 payment
+read as Committed $4,600, Invoiced $4,600, Paid $1,840, Outstanding $2,760. That is how a deposit
+works, and it is why `home.add_payment` refuses a payment against anything but an invoice, in
+words.
 
 **A saved price can be corrected**, through a pencil beside the amount — the same affordance the
 snag headline carries for the same job. It reuses the one form rather than opening a second sheet,
@@ -1164,7 +1303,7 @@ Three things about it are load-bearing:
 - **The box loads the figure as it was typed, never the normalised one.** The rollups work in
   GST-inclusive dollars, so a form that loaded $1,150 for a $1,000 ex-GST trade price would raise it
   by 15% every time somebody opened it to fix a typo in the supplier's name. Pinned.
-- **A correction never carries `chosen`.** Choosing stays on `set_quote_chosen` for the reason
+- **A correction never carries `status`.** Accepting stays on `set_quote_status` for the reason
   above; a correction is not a decision, and routing it through the general update would be exactly
   the caller-with-eight-other-fields that function exists to prevent.
 - **An emptied box clears the column** rather than leaving the old value — `updateQuote` turns a
@@ -1180,8 +1319,13 @@ along, the emptied field clearing, the way out, and the add control hiding while
 open.
 
 `projects.test.ts` pins the money rules as properties rather than examples — the denominator, the
-unpriced item that is never zero, the GST gross-up, the range collapsing when nothing is left to
-decide, and that an extract states its GST basis and gives an unpriced item its own row.
+unpriced item that is never zero, the GST gross-up, and that an extract states its GST basis and
+gives an unpriced item its own row. It also pins the second pass: outstanding as committed less
+paid rather than invoiced less paid and never negative, a bill and its payment never summing
+together, a fixed price whose build-up is ignored beside an estimate's that is not, the allowance
+variance in both tenses, "still an allowance" never collapsing into "not priced", the budget line
+grossing an ex-GST budget before comparing, the parts budget naming what is unallocated rather
+than rewriting the total, and an item committed on an invoice nobody ever quoted for.
 `MoneyField.test.tsx` pins the two named halves and the other-figure line.
 `AddProjectSheet.test.tsx` pins the new-room chip writing through the shared vocabulary rather than
 keeping its own, the field staying shut until asked for and open when a name is refused, the new
@@ -1191,9 +1335,15 @@ untouched step still passing through untouched.
 `ProjectsScreen.test.tsx` pins the grouping order, the dimmed done card, the empty day-one screen
 inventing nothing, the absence of a compose bar, and that no total renders without its denominator.
 `ProjectDetailScreen.test.tsx` pins the implicit layer staying hidden, the layer appearing once a
-real element exists, the three figures, that files roll up without rolling down, the + opening the
+real element exists, charged and paid staying apart with no "Spent" anywhere, outstanding being
+committed less paid, the budget line and which side of it, the allowance said out loud, six-figure
+totals on one line, the supplier section absent at zero and saying *Settled* rather than a zero,
+the page surviving a failed rollup read, the handover list offering only what is installed and
+stopping once something is recorded, that files roll up without rolling down, the + opening the
 room picker rather than a naming box, the × naming what goes with a part, and no × while the layer
 is still implicit.
+`ItemSheet.test.tsx` also pins the three named states where a tick could only say "not chosen", a
+declined price staying on the record, and a correction never carrying one.
 
 ## Why the app exists at all
 

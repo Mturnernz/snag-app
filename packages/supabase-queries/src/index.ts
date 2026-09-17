@@ -53,9 +53,14 @@ import type {
   ProjectFile,
   ProjectItem,
   ProjectItemStatus,
+  ProjectPayment,
   ProjectQuote,
+  ProjectQuoteBasis,
   ProjectQuoteKind,
+  ProjectQuoteLine,
+  ProjectQuoteStatus,
   ProjectStatus,
+  ProjectSupplierTotals,
   ProjectTotals,
 } from '@snag/shared-types';
 import {
@@ -69,7 +74,7 @@ import {
   PROJECT_STATUS_LABELS,
   PROJECT_ITEM_STATUS_LABELS,
   PROJECT_QUOTE_KIND_LABELS,
-  SPENT_QUOTE_KINDS,
+  PROJECT_QUOTE_STATUS_LABELS,
 } from '@snag/shared-types';
 
 /** Supabase row shapes are snake_case `any`; this is the one place that's true. */
@@ -137,6 +142,7 @@ function mapThing(row: Row): Thing {
     spec: (row.spec ?? {}) as ThingSpec,
     notes: row.notes ?? null,
     projectId: row.project_id ?? null,
+    projectItemId: row.project_item_id ?? null,
     projectName: row.project_name ?? null,
     projectFinishedOn: row.project_finished_on ?? null,
     createdBy: row.created_by,
@@ -1347,6 +1353,13 @@ export interface ThingInput {
    * half of it.
    */
   projectId?: string | null;
+  /**
+   * Which item of that project it came out of.
+   *
+   * What `projectId` alone could not say, and what lets the handover list stop
+   * offering something it has already put in the record.
+   */
+  projectItemId?: string | null;
 }
 
 /**
@@ -1372,6 +1385,7 @@ export async function createThing(client: SupabaseClient, input: ThingInput): Pr
     p_spec: input.spec ?? null,
     p_notes: input.notes ?? null,
     p_project_id: input.projectId ?? null,
+    p_project_item_id: input.projectItemId ?? null,
   });
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_thing returns the base row, not the joined view.
@@ -2718,7 +2732,7 @@ export function adviceSource(now = new Date()): string {
 //
 // Everything below obeys one rule that the rest of this file does not have to
 // think about: **a total always ships its denominator**. `ProjectTotals` carries
-// `itemCount` and `pricedCount` in the same object as `chosenTotal`, the view
+// `itemCount` and `pricedCount` in the same object as `committedTotal`, the view
 // computes all three in the same row, and `describeTotals` is what a screen
 // renders under a figure. A renovation total assembled from half the items is
 // the most misleading number this app could show.
@@ -2758,10 +2772,12 @@ function mapProject(row: Row): Project {
     itemCount: row.item_count ?? 0,
     pricedCount: row.priced_count ?? 0,
     quotedCount: row.quoted_count ?? 0,
-    chosenTotal: numberOrNull(row.chosen_total),
-    rangeLow: numberOrNull(row.range_low),
-    rangeHigh: numberOrNull(row.range_high),
-    spentTotal: numberOrNull(row.spent_total),
+    committedTotal: numberOrNull(row.committed_total),
+    invoicedTotal: numberOrNull(row.invoiced_total),
+    paidTotal: numberOrNull(row.paid_total),
+    allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
+    partsBudgetTotal: numberOrNull(row.parts_budget_total),
+    partsBudgetedCount: row.parts_budgeted_count ?? 0,
   };
 }
 
@@ -2786,16 +2802,18 @@ function mapElement(row: Row): ProjectElement {
     implicit: !!row.implicit,
     sortOrder: row.sort_order ?? 0,
     notes: row.notes ?? null,
+    budget: numberOrNull(row.budget),
+    budgetInclGst: row.budget_incl_gst !== false,
     photoPaths: row.photo_paths ?? [],
     documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
     itemCount: row.item_count ?? 0,
     pricedCount: row.priced_count ?? 0,
     quotedCount: row.quoted_count ?? 0,
-    chosenTotal: numberOrNull(row.chosen_total),
-    rangeLow: numberOrNull(row.range_low),
-    rangeHigh: numberOrNull(row.range_high),
-    spentTotal: numberOrNull(row.spent_total),
+    committedTotal: numberOrNull(row.committed_total),
+    invoicedTotal: numberOrNull(row.invoiced_total),
+    paidTotal: numberOrNull(row.paid_total),
+    allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
   };
 }
 
@@ -2811,28 +2829,78 @@ function mapItem(row: Row): ProjectItem {
     documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
     quoteCount: row.quote_count ?? 0,
-    chosenAmount: numberOrNull(row.chosen_amount),
-    quotedLow: numberOrNull(row.quoted_low),
-    quotedHigh: numberOrNull(row.quoted_high),
-    spent: numberOrNull(row.spent),
+    tbcCount: row.tbc_count ?? 0,
+    committed: numberOrNull(row.committed),
+    invoiced: numberOrNull(row.invoiced),
+    paid: numberOrNull(row.paid),
+    allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
   };
 }
 
 function mapQuote(row: Row): ProjectQuote {
   return {
     id: row.id,
-    itemId: row.item_id,
+    itemId: row.item_id ?? null,
+    elementId: row.element_id ?? null,
+    projectId: row.project_id ?? null,
     supplier: row.supplier ?? null,
     detail: row.detail ?? null,
     amount: numberOrNull(row.amount),
     amountInclGst: row.amount_incl_gst !== false,
     kind: row.kind,
-    chosen: !!row.chosen,
+    status: row.status ?? 'tbc',
+    basis: row.basis ?? 'fixed',
     dated: row.dated ?? null,
     notes: row.notes ?? null,
+    supersedesLineId: row.supersedes_line_id ?? null,
     photoPaths: row.photo_paths ?? [],
     documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
+    amountIncl: numberOrNull(row.amount_incl),
+    lineCount: row.line_count ?? 0,
+    linesTotal: numberOrNull(row.lines_total),
+    buildUp: numberOrNull(row.build_up),
+    allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
+    effectiveAmount: numberOrNull(row.effective_amount),
+    paidTotal: numberOrNull(row.paid_total),
+  };
+}
+
+function mapQuoteLine(row: Row): ProjectQuoteLine {
+  return {
+    id: row.id,
+    quoteId: row.quote_id,
+    name: row.name,
+    detail: row.detail ?? null,
+    amount: numberOrNull(row.amount),
+    amountInclGst: row.amount_incl_gst !== false,
+    isAllowance: !!row.is_allowance,
+    sortOrder: row.sort_order ?? 0,
+  };
+}
+
+function mapPayment(row: Row): ProjectPayment {
+  return {
+    id: row.id,
+    quoteId: row.quote_id,
+    amount: numberOrNull(row.amount) ?? 0,
+    amountInclGst: row.amount_incl_gst !== false,
+    paidOn: row.paid_on ?? null,
+    reference: row.reference ?? null,
+    notes: row.notes ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+function mapSupplierTotals(row: Row): ProjectSupplierTotals {
+  return {
+    projectId: row.project_id,
+    supplierKey: row.supplier_key ?? '',
+    supplier: row.supplier ?? null,
+    committed: numberOrNull(row.committed),
+    invoiced: numberOrNull(row.invoiced),
+    paid: numberOrNull(row.paid),
+    tbcCount: row.tbc_count ?? 0,
   };
 }
 
@@ -2882,20 +2950,86 @@ export function formatMoney(amount: number | null): string | null {
 }
 
 /**
- * What it looks like it will come to: one figure when there is nothing left to
- * decide, a range while there is.
+ * What is still to go out on work already agreed.
  *
- * The range is not a guess — it is the cheapest and dearest quotes actually on
- * the table, which is exactly the decision still outstanding.
+ * Committed less paid, and deliberately not invoiced less paid — that is a
+ * different and shorter-horizon question, and the one this answers is "how much
+ * of this renovation have we still to find".
+ *
+ * Null only when nothing has been committed at all. Never negative: a supplier
+ * paid more than they are owed is a data-entry mistake, not a negative debt, and
+ * showing it as one would be the screen doing arithmetic instead of reporting.
  */
-export function rangeLabel(totals: ProjectTotals): string | null {
-  const low = formatMoney(totals.rangeLow);
-  const high = formatMoney(totals.rangeHigh);
-  if (low === null || high === null) return low ?? high;
-  if (totals.rangeLow === totals.rangeHigh) return low;
-  // The second figure drops its dollar sign: "$11,400–13,900" reads as one
-  // span, where "$11,400–$13,900" reads as two separate prices.
-  return `${low}–${high.replace('$', '')}`;
+export function outstanding(totals: {
+  committedTotal: number | null;
+  paidTotal: number | null;
+}): number | null {
+  if (totals.committedTotal === null) return null;
+  return Math.max(0, totals.committedTotal - (totals.paidTotal ?? 0));
+}
+
+/**
+ * The budget line: what was set, and whether what has been agreed is over it.
+ *
+ * Null when no budget was ever typed — the same rule as everywhere else here,
+ * that an absent number is not a zero. The count of unpriced items is *not*
+ * repeated in it: `describeTotals` already says that, immediately underneath,
+ * and saying it twice reads as two different facts.
+ */
+export function describeBudget(project: {
+  budget: number | null;
+  budgetInclGst: boolean;
+  committedTotal: number | null;
+}): string | null {
+  const budget = inclGst(project.budget, project.budgetInclGst);
+  if (budget === null) return null;
+  if (project.committedTotal === null) return 'nothing committed yet';
+  const gap = project.committedTotal - budget;
+  if (Math.abs(gap) < 0.005) return 'committed is exactly on it';
+  const figure = formatMoney(Math.abs(gap));
+  return gap > 0 ? `committed is ${figure} over it` : `committed is ${figure} under it`;
+}
+
+/**
+ * What the parts have been budgeted, against what the project was.
+ *
+ * Both numbers are kept and this names the gap rather than resolving it. A
+ * renovation is budgeted top-down and broken down later, and the breakdown
+ * deliberately does not add up — the contingency lives nowhere. Silence when no
+ * part carries a budget, because there is nothing to reconcile.
+ */
+export function describePartsBudget(project: {
+  budget: number | null;
+  budgetInclGst: boolean;
+  partsBudgetTotal: number | null;
+  partsBudgetedCount: number;
+}): string | null {
+  if (project.partsBudgetedCount === 0 || project.partsBudgetTotal === null) return null;
+  const parts = formatMoney(project.partsBudgetTotal);
+  const whole = inclGst(project.budget, project.budgetInclGst);
+  if (whole === null) return `parts budgeted ${parts}`;
+  const gap = project.partsBudgetTotal - whole;
+  if (Math.abs(gap) < 0.005) return `parts budgeted ${parts}, the whole of the budget`;
+  if (gap < 0) return `parts budgeted ${parts} of ${formatMoney(whole)} · ${formatMoney(-gap)} unallocated`;
+  return `parts budgeted ${parts} — ${formatMoney(gap)} more than the budget`;
+}
+
+/**
+ * How much of a recomputed figure is still somebody's guess.
+ *
+ * Rule 3 of the money model, and the reason it is a function rather than a
+ * sentence each screen writes: a build-up a third of which the builder made up
+ * is exactly as misleading as a total assembled from half the items, and the
+ * denominator has to travel with it in both cases.
+ *
+ * Deliberately worded "still an allowance" and never "not priced" — an allowance
+ * is somebody's written number and it counts towards the total; an unpriced item
+ * is nothing and does not. Collapsing the two wordings collapses the
+ * distinction.
+ */
+export function describeAllowance(totals: { allowanceOpen: number }): string | null {
+  if (!(totals.allowanceOpen > 0)) return null;
+  return `${formatMoney(totals.allowanceOpen)} still an allowance`;
 }
 
 /**
@@ -2907,13 +3041,13 @@ export function rangeLabel(totals: ProjectTotals): string | null {
  * an empty project is noise rather than honesty.
  */
 export function describeTotals(totals: ProjectTotals): string | null {
-  if (totals.itemCount === 0) return null;
+  if (totals.itemCount === 0) return describeAllowance(totals);
   const parts = [`${totals.pricedCount} of ${totals.itemCount} items priced`];
   if (totals.quotedCount > 0) {
     parts.push(
       totals.quotedCount === 1
-        ? '1 quoted, not chosen'
-        : `${totals.quotedCount} quoted, not chosen`
+        ? '1 quoted, not decided'
+        : `${totals.quotedCount} quoted, not decided`
     );
   }
   const unpriced = totals.itemCount - totals.pricedCount - totals.quotedCount;
@@ -2922,16 +3056,56 @@ export function describeTotals(totals: ProjectTotals): string | null {
     // item nobody has asked about is the gap between the total and the truth.
     parts.push(unpriced === 1 ? '1 not priced' : `${unpriced} not priced`);
   }
+  const allowance = describeAllowance(totals);
+  if (allowance) parts.push(allowance);
   return parts.join(' · ');
 }
 
-/** True while there is still a decision on the table that would move the total. */
-export function hasOpenRange(totals: ProjectTotals): boolean {
-  return (
-    totals.rangeLow !== null &&
-    totals.rangeHigh !== null &&
-    totals.rangeLow !== totals.rangeHigh
-  );
+/**
+ * What a quote reads once its allowances have been answered, when that differs
+ * from what it says.
+ *
+ * Silence when the two agree, or when there are no lines at all: a build-up
+ * identical to the amount above it is a figure repeated, and this screen has
+ * enough numbers on it.
+ */
+export function describeBuildUp(quote: {
+  amountIncl: number | null;
+  buildUp: number | null;
+  basis: ProjectQuoteBasis;
+}): string | null {
+  if (quote.basis === 'fixed') return null;
+  if (quote.buildUp === null || quote.amountIncl === null) return null;
+  if (Math.abs(quote.buildUp - quote.amountIncl) < 0.005) return null;
+  return formatMoney(quote.buildUp);
+}
+
+/**
+ * An allowance against what has actually been quoted for it — and the earliest
+ * honest warning this app can give that a renovation is going over.
+ *
+ * It is a real number from a real quote, months before the invoice, and nothing
+ * had to be estimated to produce it. Which is why there is no forecast anywhere
+ * in this feature: this answers the same question without inventing anything.
+ *
+ * `accepted` decides the tense. A quote nobody has decided about is what it
+ * *would* cost; an accepted one is what it does.
+ */
+export function describeLineVariance(line: {
+  amount: number | null;
+  amountInclGst: boolean;
+  isAllowance: boolean;
+}, answeredWith: number | null, accepted: boolean): string | null {
+  if (!line.isAllowance) return null;
+  const allowed = inclGst(line.amount, line.amountInclGst);
+  if (allowed === null || answeredWith === null) return null;
+  const gap = answeredWith - allowed;
+  if (Math.abs(gap) < 0.005) return accepted ? 'exactly what was allowed' : null;
+  const figure = formatMoney(Math.abs(gap));
+  if (gap > 0) {
+    return accepted ? `${figure} over the allowance` : `${figure} over, if you accept it`;
+  }
+  return accepted ? `${figure} under the allowance` : `${figure} under, if you accept it`;
 }
 
 /**
@@ -2943,17 +3117,18 @@ export function hasOpenRange(totals: ProjectTotals): boolean {
  */
 export function itemPriceLabel(item: ProjectItem): {
   text: string;
-  state: 'chosen' | 'range' | 'none';
+  state: 'committed' | 'undecided' | 'none';
 } {
-  if (item.chosenAmount !== null) {
-    return { text: formatMoney(item.chosenAmount) ?? '', state: 'chosen' };
+  if (item.committed !== null) {
+    return { text: formatMoney(item.committed) ?? '', state: 'committed' };
   }
-  if (item.quotedLow !== null && item.quotedHigh !== null) {
-    const low = formatMoney(item.quotedLow) ?? '';
-    const high = formatMoney(item.quotedHigh) ?? '';
+  // Prices on the table with nobody deciding. It says how many rather than what
+  // they come to: a band across quotes nobody has picked reads as a figure, and
+  // the decision is what is outstanding here, not the money.
+  if (item.tbcCount > 0) {
     return {
-      text: item.quotedLow === item.quotedHigh ? low : `${low}–${high.replace('$', '')}`,
-      state: 'range',
+      text: item.tbcCount === 1 ? '1 price in' : `${item.tbcCount} prices in`,
+      state: 'undecided',
     };
   }
   return { text: 'Not priced', state: 'none' };
@@ -3060,7 +3235,7 @@ export async function getProject(client: SupabaseClient, projectId: string): Pro
 export async function getProjectContents(
   client: SupabaseClient,
   projectId: string
-): Promise<{ elements: ProjectElement[]; items: ProjectItem[]; quotes: ProjectQuote[] }> {
+): Promise<ProjectContents> {
   const { data: elementRows, error: elementError } = await client
     .from('project_elements_with_totals')
     .select('*')
@@ -3069,7 +3244,7 @@ export async function getProjectContents(
 
   if (elementError) throw asError(elementError, "Couldn't load the parts of this job");
   const elements = (elementRows ?? []).map(mapElement);
-  if (elements.length === 0) return { elements, items: [], quotes: [] };
+  if (elements.length === 0) return { elements, items: [], quotes: [], lines: [], payments: [] };
 
   const { data: itemRows, error: itemError } = await client
     .from('project_items_with_totals')
@@ -3079,16 +3254,93 @@ export async function getProjectContents(
 
   if (itemError) throw asError(itemError, "Couldn't load what this job takes");
   const items = (itemRows ?? []).map(mapItem);
-  if (items.length === 0) return { elements, items, quotes: [] };
 
+  // One read for every price on the job, at whichever level it hangs off.
+  // `reach_project_id` is why this is one round trip rather than three `in`
+  // lists — and why the item one does not put forty ids in a URL.
   const { data: quoteRows, error: quoteError } = await client
-    .from('project_quotes')
+    .from('project_quotes_with_totals')
     .select('*')
-    .in('item_id', items.map((item) => item.id))
+    .eq('reach_project_id', projectId)
     .order('created_at', { ascending: true });
 
-  if (quoteError) throw asError(quoteError, "Couldn't load the quotes");
-  return { elements, items, quotes: (quoteRows ?? []).map(mapQuote) };
+  if (quoteError) throw asError(quoteError, "Couldn't load the prices");
+  const quotes = (quoteRows ?? []).map(mapQuote);
+  if (quotes.length === 0) return { elements, items, quotes, lines: [], payments: [] };
+
+  const quoteIds = quotes.map((quote) => quote.id);
+
+  const [lineResult, paymentResult] = await Promise.all([
+    client
+      .from('project_quote_lines')
+      .select('*')
+      .in('quote_id', quoteIds)
+      .order('sort_order', { ascending: true }),
+    client
+      .from('project_payments')
+      .select('*')
+      .in('quote_id', quoteIds)
+      .order('paid_on', { ascending: true }),
+  ]);
+
+  if (lineResult.error) throw asError(lineResult.error, "Couldn't load what the prices cover");
+  if (paymentResult.error) throw asError(paymentResult.error, "Couldn't load what has been paid");
+
+  return {
+    elements,
+    items,
+    quotes,
+    lines: (lineResult.data ?? []).map(mapQuoteLine),
+    payments: (paymentResult.data ?? []).map(mapPayment),
+  };
+}
+
+export interface ProjectContents {
+  elements: ProjectElement[];
+  items: ProjectItem[];
+  quotes: ProjectQuote[];
+  lines: ProjectQuoteLine[];
+  payments: ProjectPayment[];
+}
+
+/**
+ * What this renovation has already put in the house record.
+ *
+ * Read for the handover list, which needs to know *which* items are done rather
+ * than how many — `project_item_id` is the column that makes that answerable,
+ * and without it the list offers the dishwasher again every time.
+ */
+export async function getProjectThings(
+  client: SupabaseClient,
+  projectId: string
+): Promise<Thing[]> {
+  const { data, error } = await client
+    .from('things_with_details')
+    .select('*')
+    .eq('project_id', projectId);
+
+  if (error) throw asError(error, "Couldn't load what this job left behind");
+  return (data ?? []).map(mapThing);
+}
+
+/**
+ * Who is owed what, on one job.
+ *
+ * **Not fatal**, in the caller: the money strip above it is the answer to the
+ * page's main question, and a rollup that will not load must not take the page
+ * down with it — the same rule the thing page's history card follows.
+ */
+export async function getSupplierTotals(
+  client: SupabaseClient,
+  projectId: string
+): Promise<ProjectSupplierTotals[]> {
+  const { data, error } = await client
+    .from('project_supplier_totals')
+    .select('*')
+    .eq('project_id', projectId);
+
+  if (error) throw asError(error, "Couldn't work out who is owed what");
+  return (data ?? []).map(mapSupplierTotals);
 }
 
 /**
@@ -3245,6 +3497,9 @@ export interface ElementUpdate {
   name?: string;
   room?: string | null;
   notes?: string | null;
+  /** This part's share of the budget, with its own GST pill like every amount. */
+  budget?: number | null;
+  budgetInclGst?: boolean;
   photoPaths?: string[];
   documentPaths?: string[];
 }
@@ -3257,12 +3512,17 @@ export async function updateElement(
   const clear: string[] = [];
   if ('room' in update && update.room === null) clear.push('room');
   if ('notes' in update && update.notes === null) clear.push('notes');
+  // An emptied budget box is somebody saying this part no longer has one — the
+  // same convention every other write here uses.
+  if ('budget' in update && update.budget === null) clear.push('budget');
 
   const { error } = await client.rpc('update_element', {
     p_element_id: elementId,
     p_name: update.name ?? null,
     p_room: update.room ?? null,
     p_notes: update.notes ?? null,
+    p_budget: update.budget ?? null,
+    p_budget_incl_gst: update.budgetInclGst ?? null,
     p_photo_paths: update.photoPaths ?? null,
     p_document_paths: update.documentPaths ?? null,
     p_clear: clear,
@@ -3330,16 +3590,22 @@ export async function deleteItem(client: SupabaseClient, itemId: string): Promis
 }
 
 export interface QuoteInput {
-  itemId: string;
+  /** Exactly one of these three. The RPC refuses the other counts, in words. */
+  itemId?: string | null;
+  elementId?: string | null;
+  projectId?: string | null;
   supplier?: string | null;
   detail?: string | null;
   amount?: number | null;
   /** The pill. Every amount carries one; there is no household-wide default. */
   amountInclGst?: boolean;
   kind?: ProjectQuoteKind;
+  status?: ProjectQuoteStatus;
+  basis?: ProjectQuoteBasis;
   dated?: string | null;
   notes?: string | null;
-  chosen?: boolean;
+  /** The allowance this answers. Counted through that line and never twice. */
+  supersedesLineId?: string | null;
   photoPaths?: string[];
   documentPaths?: string[];
 }
@@ -3349,19 +3615,25 @@ export async function createQuote(
   input: QuoteInput
 ): Promise<ProjectQuote> {
   const { data, error } = await client.rpc('create_quote', {
-    p_item_id: input.itemId,
+    p_item_id: input.itemId ?? null,
+    p_element_id: input.elementId ?? null,
+    p_project_id: input.projectId ?? null,
     p_supplier: input.supplier ?? null,
     p_detail: input.detail ?? null,
     p_amount: input.amount ?? null,
     p_amount_incl_gst: input.amountInclGst ?? true,
     p_kind: input.kind ?? 'quote',
+    p_status: input.status ?? 'tbc',
+    p_basis: input.basis ?? 'fixed',
     p_dated: input.dated ?? null,
     p_notes: input.notes ?? null,
-    p_chosen: input.chosen ?? false,
+    p_supersedes_line_id: input.supersedesLineId ?? null,
     p_photo_paths: input.photoPaths ?? [],
     p_document_paths: input.documentPaths ?? [],
   });
-  return mapQuote(unwrap<Row>(data, error, "Couldn't save that"));
+  // The RPC returns the table row, which carries none of the view's derived
+  // columns. Defaulted here rather than re-read: the caller reloads the page.
+  return mapQuote({ ...unwrap<Row>(data, error, "Couldn't save that"), line_count: 0 });
 }
 
 export interface QuoteUpdate {
@@ -3370,8 +3642,10 @@ export interface QuoteUpdate {
   amount?: number | null;
   amountInclGst?: boolean;
   kind?: ProjectQuoteKind;
+  basis?: ProjectQuoteBasis;
   dated?: string | null;
   notes?: string | null;
+  supersedesLineId?: string | null;
   photoPaths?: string[];
   documentPaths?: string[];
 }
@@ -3382,6 +3656,7 @@ const QUOTE_CLEARABLE: Record<string, string> = {
   amount: 'amount',
   dated: 'dated',
   notes: 'notes',
+  supersedesLineId: 'supersedes_line_id',
 };
 
 export async function updateQuote(
@@ -3401,8 +3676,10 @@ export async function updateQuote(
     p_amount: update.amount ?? null,
     p_amount_incl_gst: update.amountInclGst ?? null,
     p_kind: update.kind ?? null,
+    p_basis: update.basis ?? null,
     p_dated: update.dated ?? null,
     p_notes: update.notes ?? null,
+    p_supersedes_line_id: update.supersedesLineId ?? null,
     p_photo_paths: update.photoPaths ?? null,
     p_document_paths: update.documentPaths ?? null,
     p_clear: clear,
@@ -3411,23 +3688,142 @@ export async function updateQuote(
 }
 
 /**
- * Choosing between three prices, and deliberately not part of `updateQuote`.
+ * Accepting, un-deciding, or turning one down — deliberately not part of
+ * `updateQuote`.
  *
  * The same argument that keeps `setPartBought` out of `updateSnag`: this is one
  * decision that is its own confirmation, and it is the only write in the whole
  * feature that changes what a project's total says. Alone, the sibling-clearing
- * can never be skipped by a caller passing `chosen` among eight other fields.
+ * can never be skipped by a caller passing a status among eight other fields.
  */
-export async function setQuoteChosen(
+export async function setQuoteStatus(
   client: SupabaseClient,
   quoteId: string,
-  chosen: boolean
+  status: ProjectQuoteStatus
 ): Promise<void> {
-  const { error } = await client.rpc('set_quote_chosen', {
+  const { error } = await client.rpc('set_quote_status', {
     p_quote_id: quoteId,
-    p_chosen: chosen,
+    p_status: status,
   });
   if (error) throw asError(error, "That didn’t save");
+}
+
+// ------------------------------------------------------------- lines
+
+export interface QuoteLineInput {
+  name: string;
+  detail?: string | null;
+  amount?: number | null;
+  amountInclGst?: boolean;
+  isAllowance?: boolean;
+}
+
+export async function addQuoteLine(
+  client: SupabaseClient,
+  quoteId: string,
+  input: QuoteLineInput
+): Promise<ProjectQuoteLine> {
+  const { data, error } = await client.rpc('add_quote_line', {
+    p_quote_id: quoteId,
+    p_name: input.name,
+    p_detail: input.detail ?? null,
+    p_amount: input.amount ?? null,
+    p_amount_incl_gst: input.amountInclGst ?? true,
+    p_is_allowance: input.isAllowance ?? false,
+  });
+  return mapQuoteLine(unwrap<Row>(data, error, "Couldn't add that line"));
+}
+
+const LINE_CLEARABLE: Record<string, string> = {
+  detail: 'detail',
+  amount: 'amount',
+};
+
+export async function updateQuoteLine(
+  client: SupabaseClient,
+  lineId: string,
+  update: Partial<QuoteLineInput>
+): Promise<void> {
+  const clear: string[] = [];
+  for (const [key, column] of Object.entries(LINE_CLEARABLE)) {
+    if (key in update && update[key as keyof QuoteLineInput] === null) clear.push(column);
+  }
+
+  const { error } = await client.rpc('update_quote_line', {
+    p_line_id: lineId,
+    p_name: update.name ?? null,
+    p_detail: update.detail ?? null,
+    p_amount: update.amount ?? null,
+    p_amount_incl_gst: update.amountInclGst ?? null,
+    p_is_allowance: update.isAllowance ?? null,
+    p_clear: clear,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+export async function deleteQuoteLine(client: SupabaseClient, lineId: string): Promise<void> {
+  const { error } = await client.rpc('delete_quote_line', { p_line_id: lineId });
+  if (error) throw asError(error, "Couldn't remove that line");
+}
+
+// ------------------------------------------------------------- payments
+
+export interface PaymentInput {
+  amount: number;
+  amountInclGst?: boolean;
+  paidOn?: string | null;
+  reference?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Money out, against the bill it settles.
+ *
+ * `quoteId` must name an invoice; the RPC says so in words rather than letting a
+ * payment against a quote quietly count as money spent on a price nobody has
+ * been billed for.
+ */
+export async function addPayment(
+  client: SupabaseClient,
+  quoteId: string,
+  input: PaymentInput
+): Promise<ProjectPayment> {
+  const { data, error } = await client.rpc('add_payment', {
+    p_quote_id: quoteId,
+    p_amount: input.amount,
+    p_amount_incl_gst: input.amountInclGst ?? true,
+    p_paid_on: input.paidOn ?? null,
+    p_reference: input.reference ?? null,
+    p_notes: input.notes ?? null,
+  });
+  return mapPayment(unwrap<Row>(data, error, "Couldn't record that payment"));
+}
+
+export async function deletePayment(client: SupabaseClient, paymentId: string): Promise<void> {
+  const { error } = await client.rpc('delete_payment', { p_payment_id: paymentId });
+  if (error) throw asError(error, "Couldn't remove that payment");
+}
+
+/**
+ * One spelling of a supplier's name, across a whole job.
+ *
+ * Without it a typo noticed at $176,755 is fixable only quote by quote, and a
+ * rollup nobody can correct is a rollup nobody trusts. Matched the way the
+ * rollup groups: trimmed and case-insensitive.
+ */
+export async function renameSupplier(
+  client: SupabaseClient,
+  projectId: string,
+  from: string,
+  to: string
+): Promise<number> {
+  const { data, error } = await client.rpc('rename_supplier', {
+    p_project_id: projectId,
+    p_from: from,
+    p_to: to,
+  });
+  if (error) throw asError(error, "Couldn't rename them");
+  return (data as number | null) ?? 0;
 }
 
 export async function deleteQuote(client: SupabaseClient, quoteId: string): Promise<string[]> {
@@ -3450,9 +3846,15 @@ export async function deleteQuote(client: SupabaseClient, quoteId: string): Prom
 
 /** "$8,990 · 5 of 9 priced" — a figure never leaves the app without its denominator. */
 function exportTotal(totals: ProjectTotals): string {
-  const figure = formatMoney(totals.chosenTotal) ?? rangeLabel(totals);
-  if (!figure) return totals.itemCount > 0 ? `nothing priced of ${totals.itemCount}` : '';
-  return `${figure} · ${totals.pricedCount} of ${totals.itemCount} priced`;
+  const figure = formatMoney(totals.committedTotal);
+  if (!figure) return totals.itemCount > 0 ? `nothing committed of ${totals.itemCount}` : '';
+  const allowance = describeAllowance(totals);
+  return [
+    `${figure} · ${totals.pricedCount} of ${totals.itemCount} priced`,
+    allowance,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /**
@@ -3470,7 +3872,8 @@ export function projectExportTable(
     subtitle: `${meta.place} · ${meta.scope} · ${meta.stamp} · all figures incl GST`,
     columns: [
       'Project', 'Status', 'Started', 'Target', 'Finished', 'Budget',
-      'Quoted', 'Chosen', 'Spent', 'Items', 'Priced', 'Files', 'Jobs open', 'Started by',
+      'Committed', 'Invoiced', 'Paid', 'Outstanding', 'Still an allowance',
+      'Items', 'Priced', 'Files', 'Jobs open', 'Started by',
     ],
     rows: projects.map((project) => [
       project.name,
@@ -3481,9 +3884,13 @@ export function projectExportTable(
       project.budget !== null
         ? `${formatMoney(project.budget)}${project.budgetInclGst ? '' : ' excl GST'}`
         : '',
-      rangeLabel(project) ?? '',
-      formatMoney(project.chosenTotal) ?? '',
-      formatMoney(project.spentTotal) ?? '',
+      formatMoney(project.committedTotal) ?? '',
+      formatMoney(project.invoicedTotal) ?? '',
+      formatMoney(project.paidTotal) ?? '',
+      formatMoney(outstanding(project)) ?? '',
+      // Zero is written out rather than left blank: an empty cell reads as
+      // "unknown", and "nothing is an allowance any more" is a real answer.
+      formatMoney(project.allowanceOpen) ?? '',
       String(project.itemCount),
       // Never a bare count: "5" beside "9 items" is the denominator, in the
       // shape a spreadsheet can sort on.
@@ -3519,8 +3926,10 @@ export function projectDossierTable(
   const rows = items.map((item) => {
     const element = elementsById.get(item.elementId);
     const mine = quotes.filter((quote) => quote.itemId === item.id);
-    const chosen = mine.find((quote) => quote.chosen);
-    const paid = mine.filter((quote) => SPENT_QUOTE_KINDS.includes(quote.kind));
+    const accepted = mine.find(
+      (quote) => quote.kind === 'quote' && quote.status === 'accepted'
+    );
+    const bills = mine.filter((quote) => quote.kind === 'invoice');
 
     return [
       // An implicit element has no name anybody chose, so printing it would
@@ -3529,13 +3938,16 @@ export function projectDossierTable(
       element?.room ?? '',
       item.name,
       PROJECT_ITEM_STATUS_LABELS[item.status] ?? item.status,
-      chosen?.supplier ?? '',
-      chosen?.detail ?? '',
-      item.chosenAmount !== null ? formatMoney(item.chosenAmount) ?? '' : 'Not priced',
-      mine.length > 1 ? rangeLabel({ ...EMPTY_TOTALS, rangeLow: item.quotedLow, rangeHigh: item.quotedHigh }) ?? '' : '',
+      accepted?.supplier ?? bills[0]?.supplier ?? '',
+      accepted?.detail ?? bills[0]?.detail ?? '',
+      // "Not priced" in words rather than an empty cell, because a blank in a
+      // money column reads as zero to anybody skimming.
+      item.committed !== null ? formatMoney(item.committed) ?? '' : 'Not priced',
+      formatMoney(item.invoiced) ?? '',
+      formatMoney(item.paid) ?? '',
       String(mine.length),
-      formatMoney(item.spent) ?? '',
-      paid.map((quote) => PROJECT_QUOTE_KIND_LABELS[quote.kind]).join('; '),
+      item.tbcCount > 0 ? String(item.tbcCount) : '',
+      bills.map((quote) => PROJECT_QUOTE_KIND_LABELS[quote.kind]).join('; '),
       item.photoPaths.length + item.documentPaths.length > 0
         ? String(item.photoPaths.length + item.documentPaths.length)
         : '',
@@ -3547,15 +3959,14 @@ export function projectDossierTable(
   // see them and the PDF prints them in the same place every time.
   rows.push([
     '', '', 'TOTAL', '', '', '',
-    formatMoney(project.chosenTotal) ?? '',
-    rangeLabel(project) ?? '',
+    formatMoney(project.committedTotal) ?? '',
+    formatMoney(project.invoicedTotal) ?? '',
+    formatMoney(project.paidTotal) ?? '',
     String(quotes.length),
-    formatMoney(project.spentTotal) ?? '',
-    `${project.pricedCount} of ${project.itemCount} priced`,
+    project.quotedCount > 0 ? `${project.quotedCount} not decided` : '',
+    describeAllowance(project) ?? '',
     String(project.fileCount),
-    project.quotedCount > 0
-      ? `${project.quotedCount} quoted and not chosen`
-      : '',
+    `${project.pricedCount} of ${project.itemCount} priced`,
   ]);
 
   return {
@@ -3571,22 +3982,11 @@ export function projectDossierTable(
       .join(' · '),
     columns: [
       'Part of the job', 'Room', 'Item', 'Where it’s up to', 'Supplier', 'What exactly',
-      'Chosen', 'Quoted range', 'Quotes', 'Spent', 'Paid by', 'Files', 'Notes',
+      'Committed', 'Invoiced', 'Paid', 'Prices', 'Not decided', 'Bills', 'Files', 'Notes',
     ],
     rows,
   };
 }
-
-/** A shape to hand `rangeLabel` when only the two ends are known. */
-const EMPTY_TOTALS: ProjectTotals = {
-  itemCount: 0,
-  pricedCount: 0,
-  quotedCount: 0,
-  chosenTotal: null,
-  rangeLow: null,
-  rangeHigh: null,
-  spentTotal: null,
-};
 
 /**
  * The photographs on a project extract, round-robin so one item photographed

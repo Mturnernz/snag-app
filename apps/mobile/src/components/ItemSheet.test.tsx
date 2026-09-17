@@ -30,9 +30,13 @@ const item = (over: Partial<any> = {}): any => ({
 });
 
 const quote = (over: Partial<any> = {}): any => ({
-  id: 'q1', itemId: 'i1', supplier: 'Mico', detail: 'Methven Krome',
-  amount: 1000, amountInclGst: false, kind: 'quote', chosen: false,
-  dated: '2026-08-28', notes: null, photoPaths: [], documentPaths: [], createdAt: '',
+  id: 'q1', itemId: 'i1', elementId: null, projectId: null,
+  supplier: 'Mico', detail: 'Methven Krome',
+  amount: 1000, amountInclGst: false, kind: 'quote', status: 'tbc', basis: 'fixed',
+  dated: '2026-08-28', notes: null, supersedesLineId: null,
+  photoPaths: [], documentPaths: [], createdAt: '',
+  amountIncl: 1150, lineCount: 0, linesTotal: null, buildUp: null, allowanceOpen: 0,
+  effectiveAmount: 1150, paidTotal: null,
   ...over,
 });
 
@@ -52,7 +56,7 @@ const boxByLabel = (r: ReturnType<typeof render>, label: string) =>
 
 function arrange(quotes: any[] = [quote()]) {
   const onUpdateQuote = jest.fn().mockResolvedValue(undefined);
-  const onChooseQuote = jest.fn().mockResolvedValue(undefined);
+  const onSetQuoteStatus = jest.fn().mockResolvedValue(undefined);
   const onAddQuote = jest.fn().mockResolvedValue(undefined);
   const r = render(
     <ItemSheet
@@ -64,13 +68,13 @@ function arrange(quotes: any[] = [quote()]) {
       onUpdateItem={jest.fn().mockResolvedValue(undefined)}
       onDeleteItem={jest.fn().mockResolvedValue(undefined)}
       onAddQuote={onAddQuote}
-      onChooseQuote={onChooseQuote}
+      onSetQuoteStatus={onSetQuoteStatus}
       onUpdateQuote={onUpdateQuote}
       onDeleteQuote={jest.fn().mockResolvedValue(undefined)}
       onUpdateQuoteFiles={jest.fn().mockResolvedValue(undefined)}
     />
   );
-  return { r, onUpdateQuote, onChooseQuote, onAddQuote };
+  return { r, onUpdateQuote, onSetQuoteStatus, onAddQuote };
 }
 
 const openEdit = async (r: ReturnType<typeof render>) =>
@@ -117,17 +121,37 @@ it('saves the correction through updateQuote, not as a new price', async () => {
   }));
 });
 
-it('never carries the chosen flag through a correction', async () => {
-  const { r, onUpdateQuote, onChooseQuote } = arrange([quote({ chosen: true })]);
+it('never carries the status through a correction', async () => {
+  const { r, onUpdateQuote, onSetQuoteStatus } = arrange([quote({ status: 'accepted' })]);
   await openEdit(r);
   await TestRenderer.act(async () => boxByLabel(r, 'Amount').props.onChangeText('1080'));
   await TestRenderer.act(async () => byLabel(r, 'Save the correction').props.onPress());
 
-  // Choosing stays on set_quote_chosen, which is its own RPC precisely so the
-  // sibling-clearing can never be skipped by a caller passing `chosen` among
+  // Accepting stays on set_quote_status, which is its own RPC precisely so the
+  // sibling-clearing can never be skipped by a caller passing a status among
   // eight other fields. A correction is not a decision.
-  expect(Object.keys(onUpdateQuote.mock.calls[0][1])).not.toContain('chosen');
-  expect(onChooseQuote).not.toHaveBeenCalled();
+  expect(Object.keys(onUpdateQuote.mock.calls[0][1])).not.toContain('status');
+  expect(onSetQuoteStatus).not.toHaveBeenCalled();
+});
+
+it('offers three named states where a tick could only ever say "not chosen"', async () => {
+  const { r, onSetQuoteStatus } = arrange([quote({ status: 'tbc' })]);
+
+  // "We have not decided" and "we said no" are different answers, and a tick
+  // rendered them identically.
+  expect(byLabel(r, 'Accepted')).toBeDefined();
+  expect(byLabel(r, 'TBC')).toBeDefined();
+  expect(byLabel(r, 'Declined')).toBeDefined();
+
+  await TestRenderer.act(async () => byLabel(r, 'Declined').props.onPress());
+  expect(onSetQuoteStatus).toHaveBeenCalledWith('q1', 'declined');
+});
+
+it('keeps a declined price on the record rather than dropping it', async () => {
+  // What you were quoted and by whom is what makes the next renovation's
+  // numbers credible. It leaves every total; it does not leave the page.
+  const { r } = arrange([quote({ status: 'declined', supplier: 'Mico' })]);
+  expect(byLabel(r, 'Correct the Mico price')).toBeDefined();
 });
 
 it('clears a field that is emptied rather than leaving the old value', async () => {

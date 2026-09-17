@@ -14,8 +14,8 @@ import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } 
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createLocation, createProject, describeTotals, formatMoney, getProjects, projectSubtitle,
-  rangeLabel,
+  createLocation, createProject, describeTotals, formatMoney, getProjects, outstanding,
+  projectSubtitle,
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
 import { exportDateStamp, groupProjectsByStatus, projectExportTable } from '@snag/supabase-queries';
@@ -353,19 +353,26 @@ function ProjectCard({
   dim: boolean;
   onPress: () => void;
 }) {
-  const spent = formatMoney(project.spentTotal);
-  const chosen = formatMoney(project.chosenTotal);
-  const range = rangeLabel(project);
+  const committed = formatMoney(project.committedTotal);
+  const paid = formatMoney(project.paidTotal);
+  const owing = formatMoney(outstanding(project));
   const denominator = describeTotals(project);
 
   // Three sentences for three states, because "what has this cost" and "what
-  // will this cost" are different questions and a project answers whichever it
+  // is still to pay" are different questions and a project answers whichever it
   // can. Nothing is invented when it can answer neither.
+  //
+  // Outstanding leads the card rather than Paid: on a list of renovations the
+  // question is what is still to find, and a card that said "$88,600 paid" of a
+  // $192,354 job would read as nearly done.
   let money: string | null = null;
-  if (spent && chosen) money = `${spent} spent of ${chosen} chosen`;
-  else if (chosen) money = `${chosen} chosen`;
-  else if (range) money = `${range} quoted`;
-  else if (spent) money = `${spent} spent`;
+  if (committed && owing && owing !== committed) {
+    money = `${committed} committed · ${owing} still to pay`;
+  } else if (committed) {
+    money = `${committed} committed`;
+  } else if (paid) {
+    money = `${paid} paid`;
+  }
 
   return (
     <Pressable

@@ -20,22 +20,34 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
 import {
-  createElement, createItem, createLocation, createQuote, createThing, deleteElement, deleteItem,
-  deleteProject, deleteQuote,
-  deleteStoredFiles, describeTotals, formatMoney, getProject, getProjectContents, getProjectFiles,
-  getSnags, rangeLabel, setQuoteChosen, showsElements, updateElement, updateItem, updateProject,
+  addPayment, createElement, createItem, createLocation, createQuote, createThing, deleteElement,
+  deleteItem, deletePayment, deleteProject, deleteQuote,
+  deleteStoredFiles, describeBudget, describePartsBudget, describeTotals, formatMoney, getProject,
+  getProjectContents, getProjectFiles, getProjectThings, getSupplierTotals,
+  getSnags, outstanding, setQuoteStatus, showsElements, updateElement, updateItem, updateProject,
   updateQuote,
 } from '../lib/supabase';
 import {
-  documentName, exportDateStamp, formatLooseDate, itemPriceLabel, projectDossierTable,
+  documentName, exportDateStamp, formatLooseDate, inclGst, itemPriceLabel, projectDossierTable,
   projectExportPhotos, type ThingInput,
 } from '@snag/supabase-queries';
 import { getFileUrls } from '../lib/supabase';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import {
-  Project, ProjectElement, ProjectFile, ProjectItem, ProjectQuote, ProjectStatus,
-  PROJECT_FILE_LEVEL_LABELS, PROJECT_STATUS_LABELS, RootStackParamList, Snag,
+  Project, ProjectElement, ProjectFile, ProjectItem, ProjectPayment, ProjectQuote,
+  ProjectQuoteLine, ProjectQuoteStatus, ProjectStatus, ProjectSupplierTotals,
+  PROJECT_FILE_LEVEL_LABELS, PROJECT_QUOTE_STATUS_LABELS, PROJECT_STATUS_LABELS,
+  RootStackParamList, Snag, Thing,
 } from '../types';
+
+/**
+ * How much of the handover list is shown before it asks.
+ *
+ * Five is the same sitting's-worth the You tab's loose ends are capped at. A
+ * renovation with forty items would otherwise put a forty-row checklist between
+ * the money and the paperwork on every visit.
+ */
+const HANDOVER_PREVIEW = 5;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProjectDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -92,6 +104,11 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [openItem, setOpenItem] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [thingFor, setThingFor] = useState<ProjectItem | null>(null);
+  const [lines, setLines] = useState<ProjectQuoteLine[]>([]);
+  const [payments, setPayments] = useState<ProjectPayment[]>([]);
+  const [suppliers, setSuppliers] = useState<ProjectSupplierTotals[]>([]);
+  const [handoverOpen, setHandoverOpen] = useState(false);
+  const [recorded, setRecorded] = useState<Thing[]>([]);
   const [busy, setBusy] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -107,7 +124,24 @@ export default function ProjectDetailScreen({ route }: Props) {
       setElements(contents.elements);
       setItems(contents.items);
       setQuotes(contents.quotes);
+      setLines(contents.lines);
+      setPayments(contents.payments);
       setFiles(loadedFiles);
+      // Who is owed what. **Not fatal**: the money strip above it is the answer
+      // to this page's main question, and a rollup that will not load must not
+      // take the page down — the same rule the thing page's history card
+      // follows.
+      try {
+        setSuppliers(await getSupplierTotals(projectId));
+      } catch {
+        setSuppliers([]);
+      }
+      // Same rule: the handover list is an offer, not the page.
+      try {
+        setRecorded(await getProjectThings(projectId));
+      } catch {
+        setRecorded([]);
+      }
       // The punch list is an ordinary read of the ordinary list. A failure here
       // must not take the page down — the same rule the thing-history card
       // follows on the snag page.
@@ -152,9 +186,56 @@ export default function ProjectDetailScreen({ route }: Props) {
   }, [items]);
   const quotesByItem = useMemo(() => {
     const map: Record<string, ProjectQuote[]> = {};
-    for (const quote of quotes) (map[quote.itemId] ??= []).push(quote);
+    for (const quote of quotes) {
+      if (quote.itemId) (map[quote.itemId] ??= []).push(quote);
+    }
     return map;
   }, [quotes]);
+  /** Prices that cover a whole part, or the whole job — the contracts. */
+  const contracts = useMemo(
+    () => quotes.filter((quote) => quote.elementId !== null || quote.projectId !== null),
+    [quotes]
+  );
+  const linesByQuote = useMemo(() => {
+    const map: Record<string, ProjectQuoteLine[]> = {};
+    for (const line of lines) (map[line.quoteId] ??= []).push(line);
+    return map;
+  }, [lines]);
+  const paymentsByQuote = useMemo(() => {
+    const map: Record<string, ProjectPayment[]> = {};
+    for (const payment of payments) (map[payment.quoteId] ??= []).push(payment);
+    return map;
+  }, [payments]);
+  /**
+   * What this renovation has not handed over yet.
+   *
+   * Keyed on `projectItemId` rather than on a count, so a record made from an
+   * item stops being offered — which is the whole reason that column exists.
+   */
+  const handedOver = useMemo(
+    () => new Set(recorded.map((thing) => thing.projectItemId).filter(Boolean) as string[]),
+    [recorded]
+  );
+  /**
+   * What is installed, so it can be recorded — not every item on the job.
+   *
+   * Two reasons it is the installed ones. A renovation's items are already
+   * listed above under *What it takes*, and offering all eighteen again would
+   * put the same list on the page twice. And an item nobody has fitted yet has
+   * nothing to record: the model number is on the box, not in the house.
+   *
+   * It is also the subtraction the You tab's loose ends already make —
+   * `installed_count - thing_count` — so the two screens cannot disagree about
+   * what is outstanding.
+   */
+  const installed = useMemo(
+    () => items.filter((item) => item.status === 'installed'),
+    [items]
+  );
+  const handedOverCount = useMemo(
+    () => installed.filter((item) => handedOver.has(item.id)).length,
+    [installed, handedOver]
+  );
 
   async function patchProject(update: Parameters<typeof updateProject>[1], toast: string) {
     if (!project) return;
@@ -278,7 +359,14 @@ export default function ProjectDetailScreen({ route }: Props) {
   async function recordAsThing(input: Omit<ThingInput, 'propertyId'>) {
     if (!project) return;
     try {
-      await createThing({ ...input, propertyId: project.propertyId, projectId: project.id });
+      await createThing({
+        ...input,
+        propertyId: project.propertyId,
+        projectId: project.id,
+        // Which item it came out of, carried at creation rather than written
+        // afterwards — and the reason the handover list can stop offering it.
+        projectItemId: thingFor?.id ?? null,
+      });
       setThingFor(null);
       showToast('Added to the house record');
       await load();
@@ -295,11 +383,21 @@ export default function ProjectDetailScreen({ route }: Props) {
     );
   }
 
-  const spent = formatMoney(project.spentTotal);
-  const chosen = formatMoney(project.chosenTotal);
-  const range = rangeLabel(project);
+  const committed = formatMoney(project.committedTotal);
+  const invoiced = formatMoney(project.invoicedTotal);
+  const paid = formatMoney(project.paidTotal);
+  const owing = formatMoney(outstanding(project));
   const denominator = describeTotals(project);
-  const budget = formatMoney(project.budget);
+  const budget = formatMoney(inclGst(project.budget, project.budgetInclGst));
+  const budgetLine = describeBudget(project);
+  const partsLine = describePartsBudget(project);
+  // Clay is the one hue on a household list that has earned red, and it is a
+  // fact about a number rather than a judgement: this is over what you said you
+  // would spend.
+  const overBudget =
+    project.budget !== null &&
+    project.committedTotal !== null &&
+    project.committedTotal > (inclGst(project.budget, project.budgetInclGst) ?? 0) + 0.005;
   const activeItem = items.find((item) => item.id === openItem) ?? null;
 
   return (
@@ -359,34 +457,110 @@ export default function ProjectDetailScreen({ route }: Props) {
             right edge, which is how a column of money is read. */}
         <View style={styles.strip}>
           <View style={styles.row}>
-            <Text style={styles.rowKey}>Quoted</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{range ?? '—'}</Text>
+            <Text style={styles.rowKey}>Committed</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{committed ?? '—'}</Text>
+          </View>
+          {/* Charged and paid are different figures, and seven invoices with no
+              payment recorded against them is the ordinary middle of a job. */}
+          <View style={styles.row}>
+            <Text style={styles.rowKey}>Invoiced</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{invoiced ?? '—'}</Text>
           </View>
           <View style={styles.row}>
-            <Text style={styles.rowKey}>Chosen</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{chosen ?? '—'}</Text>
+            <Text style={styles.rowKey}>Paid</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{paid ?? '—'}</Text>
           </View>
           <View style={[styles.row, styles.rowLast]}>
-            <Text style={styles.rowKey}>Spent</Text>
+            <Text style={styles.rowKey}>Outstanding</Text>
             <Text
-              style={[styles.rowValue, spent ? styles.rowValueSpent : null]}
+              style={[styles.rowValue, owing ? styles.rowValueOwing : null]}
               numberOfLines={1}
             >
-              {spent ?? '—'}
+              {owing ?? '—'}
             </Text>
           </View>
+          {budget ? (
+            <>
+              <View style={styles.stripRule} />
+              <View style={styles.row}>
+                <Text style={styles.rowKey}>Budget</Text>
+                <Text style={styles.rowValue} numberOfLines={1}>{budget}</Text>
+              </View>
+              {budgetLine ? (
+                <Text style={[styles.budgetLine, overBudget && styles.budgetLineOver]}>
+                  {budgetLine}
+                </Text>
+              ) : null}
+            </>
+          ) : null}
         </View>
         {denominator ? (
-          <Text style={styles.denominator}>
-            {denominator}
-            {budget ? ` · budget ${budget}${project.budgetInclGst ? '' : ' excl GST'}` : ''}
-          </Text>
+          <Text style={styles.denominator}>{denominator}</Text>
         ) : (
-          <Text style={styles.denominator}>
-            Nothing priced yet{budget ? ` · budget ${budget}` : ''}
-          </Text>
+          <Text style={styles.denominator}>Nothing priced yet</Text>
         )}
+        {partsLine ? <Text style={styles.denominator}>{partsLine}</Text> : null}
         <Text style={styles.gstNote}>Every figure here is GST-inclusive.</Text>
+
+        {/* ── who's owed what ────────────────────────────────────────────
+            Absent entirely when nobody is owed anything, the same rule as the
+            shopping pill at zero and *Fit* in the photo viewer: a section that
+            can only say "nothing" is a control dressed as a choice.
+
+            The check worth keeping, pinned in `projects.test.ts`: these rows
+            sum to Committed above. They are two views over one rule. */}
+        {suppliers.length > 0 ? (
+          <>
+            <View style={styles.sectionRow}>
+              <Text style={styles.section}>Who&rsquo;s owed what</Text>
+              <View style={styles.rule} />
+            </View>
+            {suppliers
+              .slice()
+              .sort((a, b) => (b.committed ?? 0) - (a.committed ?? 0))
+              .map((supplier) => {
+                const still = outstanding({
+                  committedTotal: supplier.committed,
+                  paidTotal: supplier.paid,
+                });
+                const settled = supplier.committed !== null && (still ?? 0) < 0.005;
+                return (
+                  <View key={supplier.supplierKey} style={styles.supplier}>
+                    <View style={styles.supplierTitles}>
+                      <Text style={styles.supplierName}>
+                        {supplier.supplier ?? 'Nobody named'}
+                      </Text>
+                      <Text style={styles.supplierUnder}>
+                        {[
+                          supplier.committed !== null
+                            ? `committed ${formatMoney(supplier.committed)}`
+                            : null,
+                          supplier.invoiced !== null
+                            ? `invoiced ${formatMoney(supplier.invoiced)}`
+                            : null,
+                          supplier.paid !== null ? `paid ${formatMoney(supplier.paid)}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Text>
+                    </View>
+                    {settled ? (
+                      <View style={styles.settledPill}>
+                        <Text style={styles.settledLabel}>Settled</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.supplierMoney}>
+                        <Text style={styles.supplierKey}>OUTSTANDING</Text>
+                        <Text style={styles.supplierOwing} numberOfLines={1}>
+                          {formatMoney(still) ?? '—'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+          </>
+        ) : null}
 
         {/* ── what it takes ──────────────────────────────────────────────
             One element and it is implicit: the items hang straight off the
@@ -470,8 +644,8 @@ export default function ProjectDetailScreen({ route }: Props) {
                         {/* The tick is *decided*, not *done* — the same
                             distinction the shopping list draws between buying
                             a part and doing the job. */}
-                        <View style={[styles.tick, item.chosenAmount !== null && styles.tickOn]}>
-                          {item.chosenAmount !== null ? (
+                        <View style={[styles.tick, item.committed !== null && styles.tickOn]}>
+                          {item.committed !== null ? (
                             <Icon name="checkmark" size="sm" color={Colors.white} />
                           ) : null}
                         </View>
@@ -480,20 +654,29 @@ export default function ProjectDetailScreen({ route }: Props) {
                           <Text style={styles.itemSub} numberOfLines={1}>
                             {itemQuotes.length === 0
                               ? 'Nobody asked yet'
-                              : item.chosenAmount !== null
+                              : item.committed !== null
                                 ? [
-                                    itemQuotes.find((q) => q.chosen)?.supplier,
-                                    item.spent !== null ? 'paid' : 'chosen',
+                                    itemQuotes.find(
+                                      (q) => q.kind === 'quote' && q.status === 'accepted'
+                                    )?.supplier ??
+                                      itemQuotes.find((q) => q.kind === 'invoice')?.supplier,
+                                    // Paid, billed, or merely agreed — three
+                                    // different answers to "where is this up to".
+                                    item.paid !== null
+                                      ? 'paid'
+                                      : item.invoiced !== null
+                                        ? 'invoiced'
+                                        : 'accepted',
                                   ]
                                     .filter(Boolean)
                                     .join(' · ')
-                                : `${itemQuotes.length} ${itemQuotes.length === 1 ? 'quote' : 'quotes'} · none chosen`}
+                                : `${itemQuotes.length} ${itemQuotes.length === 1 ? 'price' : 'prices'} · nothing decided`}
                           </Text>
                         </View>
                         <Text
                           style={[
                             styles.itemPrice,
-                            price.state === 'range' && styles.itemPriceRange,
+                            price.state === 'undecided' && styles.itemPriceRange,
                             price.state === 'none' && styles.itemPriceNone,
                           ]}
                           numberOfLines={1}
@@ -535,7 +718,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                   {drawElements && element.itemCount > 0 ? (
                     <View style={styles.elementFoot}>
                       <Text style={styles.elementTotal}>
-                        {formatMoney(element.chosenTotal) ?? rangeLabel(element) ?? '—'} chosen
+                        {formatMoney(element.committedTotal) ?? '—'} committed
                       </Text>
                       <Text style={styles.elementDenominator}>{describeTotals(element)}</Text>
                     </View>
@@ -560,7 +743,7 @@ export default function ProjectDetailScreen({ route }: Props) {
               ) : (
                 <View style={styles.elementFoot}>
                   <Text style={styles.elementTotal}>
-                    {formatMoney(element.chosenTotal) ?? rangeLabel(element) ?? '—'} chosen
+                    {formatMoney(element.committedTotal) ?? '—'} committed
                   </Text>
                   <Text style={styles.elementDenominator}>{describeTotals(element)}</Text>
                 </View>
@@ -599,21 +782,78 @@ export default function ProjectDetailScreen({ route }: Props) {
           </>
         ) : null}
 
-        {/* ── what it left behind ────────────────────────────────────────
+        {/* ── hand it over ───────────────────────────────────────────────
             The payoff, and the reason to keep the record at all: three years
-            on, the question is the model number and the warranty, not the
-            cost. */}
-        {project.thingCount > 0 ? (
+            on, the question is the model number and the warranty, not the cost.
+
+            **A standing section, not a prompt at the end.** The model number
+            gets recorded the week the thing goes in and the invoice is in
+            somebody's hand — not eight months later, and not only if the
+            project ever gets marked done.
+
+            **Each row opens the walkthrough filled in, and you confirm.** Not a
+            bulk write: the rule the snag page already states about creating a
+            thing from a job holds here with more force, because there are
+            twelve of them — a record created from here has to be as strong as
+            one created on the House tab, or this is the back door that fills
+            the house record with rows nobody can read in a shop. */}
+        {installed.length > 0 ? (
           <>
             <View style={styles.sectionRow}>
-              <Text style={styles.section}>What it left behind</Text>
+              <Text style={styles.section}>Hand it over</Text>
               <View style={styles.rule} />
             </View>
             <Text style={styles.hint}>
-              {project.thingCount === 1
-                ? '1 thing in the house record came from this project.'
-                : `${project.thingCount} things in the house record came from this project.`}
+              {handedOverCount === 0
+                ? `None of the ${installed.length} installed are in the house record yet.`
+                : `${handedOverCount} of ${installed.length} installed are in the house record.`}
             </Text>
+            {(handoverOpen ? installed : installed.slice(0, HANDOVER_PREVIEW)).map((item) => {
+              const done = handedOver.has(item.id);
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={done ? undefined : () => setThingFor(item)}
+                  disabled={done}
+                  style={[styles.handoverRow, done && styles.handoverDone]}
+                  accessibilityRole="button"
+                  accessibilityState={{ checked: done, disabled: done }}
+                  accessibilityLabel={
+                    done
+                      ? `${item.name} is in the house record`
+                      : `Record ${item.name} in the house record`
+                  }
+                >
+                  <Icon
+                    name={done ? 'checkbox-outline' : 'square-outline'}
+                    size="md"
+                    color={done ? Colors.primary : Colors.textMuted}
+                  />
+                  <View style={styles.handoverTitles}>
+                    <Text style={styles.handoverName}>{item.name}</Text>
+                    <Text style={styles.handoverSub} numberOfLines={1}>
+                      {[
+                        elementRoom(elements, item),
+                        done ? 'in the house record' : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+            {installed.length > HANDOVER_PREVIEW ? (
+              <Pressable
+                onPress={() => setHandoverOpen((open) => !open)}
+                style={styles.moreTap}
+                accessibilityRole="button"
+              >
+                <Text style={styles.link}>
+                  {handoverOpen ? 'Show fewer' : `Show all ${installed.length}`}
+                </Text>
+              </Pressable>
+            ) : null}
           </>
         ) : null}
 
@@ -754,9 +994,11 @@ export default function ProjectDetailScreen({ route }: Props) {
           // at three levels at once and every one of them is derived in a view.
           await load();
         }}
-        onChooseQuote={async (quoteId, chosen) => {
-          await setQuoteChosen(quoteId, chosen);
-          showToast(chosen ? 'Chosen' : 'Unchosen');
+        onSetQuoteStatus={async (quoteId: string, status: ProjectQuoteStatus) => {
+          await setQuoteStatus(quoteId, status);
+          showToast(PROJECT_QUOTE_STATUS_LABELS[status]);
+          // Re-read: accepting moves Committed and Outstanding at three levels
+          // at once, and every one of them is derived in a view.
           await load();
         }}
         onDeleteQuote={async (quoteId) => {
@@ -891,6 +1133,83 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   rowValueSpent: { color: Colors.primary },
+  // Brass: a fact about a date has earned brass elsewhere, and money still to go
+  // out is the same kind of fact. Never clay — being owed money on a renovation
+  // under way is the normal state, not an alarm.
+  rowValueOwing: { color: Colors.status.doing },
+  stripRule: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginHorizontal: -Spacing.lg,
+    marginVertical: 2,
+  },
+  budgetLine: {
+    fontSize: Typography.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    paddingBottom: Spacing.md,
+  },
+  // Clay is the one hue on a household list that has earned red. Over budget is
+  // a fact about a number, not a judgement about the renovation.
+  budgetLineOver: { color: Colors.priority.high, fontWeight: Typography.semibold },
+  supplier: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.card,
+    padding: Spacing.lg,
+    marginBottom: Spacing.sm,
+  },
+  supplierTitles: { flex: 1, minWidth: 0 },
+  supplierName: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  supplierUnder: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 3 },
+  supplierMoney: { alignItems: 'flex-end', paddingLeft: Spacing.md },
+  supplierKey: { fontSize: 10, letterSpacing: 0.4, color: Colors.textMuted },
+  supplierOwing: {
+    fontSize: Typography.lg,
+    fontWeight: Typography.semibold,
+    color: Colors.status.doing,
+  },
+  settledPill: {
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.chip,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 5,
+    marginLeft: Spacing.md,
+  },
+  settledLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    color: Colors.textSecondary,
+  },
+  handoverRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.card,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  handoverDone: { opacity: 0.62 },
+  handoverTitles: { flex: 1, minWidth: 0 },
+  handoverName: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  handoverSub: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },
+  moreTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  link: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.semibold },
   // Not optional, anywhere. The figures above mean nothing without it.
   denominator: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: Spacing.sm },
   gstNote: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },

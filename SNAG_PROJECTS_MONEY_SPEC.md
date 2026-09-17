@@ -1,8 +1,9 @@
 # The money a renovation actually costs — a specification
 
-**Status: specification only. Nothing here is built.** It is written to be read before a
-line of code exists, because the decisions below cost three or four migrations and two of
-them are hard to reverse once there is data behind them.
+**Status: built.** This was written as a specification and is kept as the record of why the
+money model is shaped the way it is. Nine migrations (`20260918090000` … `20260918092000`) are
+applied to the live project; the client, the tests and CLAUDE.md are updated. Where the build
+diverged from what was specified, §7 says so and why, and §8 says what is left.
 
 It answers a piece of feedback about the Projects tab:
 
@@ -30,7 +31,7 @@ with a supplier and an amount and a GST pill, a `quote | invoice | receipt` kind
 derived figures — Quoted, Chosen, Spent — and one-at-a-time promotion of a project item
 into a House-tab thing.
 
-**`spent_total` double-counts, and it is live.**
+**`spent_total` double-counts, and the bug is live in the code.**
 
 ```sql
 (select sum(home.incl_gst(q.amount, q.amount_incl_gst))
@@ -41,8 +42,11 @@ into a House-tab thing.
   as spent
 ```
 
-Record Reliabuilder's $84,000 invoice, then record the $84,000 payment against it as a
-receipt, and the project reads **$168,000 spent**. That is the single most misleading
+It had not yet produced a wrong number. `receipt` was being used to mean "paid in full, no
+invoice" and never alongside an invoice for the same money, so the figure on screen was
+right — the bug was latent, not manifest. The first deposit-then-balance would have sprung
+it: record ReliaBuilder's $84,000 invoice, then the $84,000 payment against it as a receipt,
+and the project reads **$168,000 spent**. That is the single most misleading
 number this app can produce and it misleads in the direction that costs money. It is not a
 display bug — the arithmetic is wrong in the view, so it is wrong in the CSV, wrong in the
 PDF, and wrong in the You tab's reads.
@@ -489,11 +493,20 @@ room and correctly become nothing on the House tab.
 
 | File | What |
 |---|---|
-| `20260918090000_a_payment_is_not_a_bill.sql` | `project_payments`; `project_quote_status`; `chosen` → `status`; `receipt` rows → invoice + payment; rollups rewritten to Committed / Paid / Outstanding; range columns dropped. **Fixes the live double-count.** |
-| `20260918091000_a_quote_can_cover_more_than_one_thing.sql` | `element_id` / `project_id` on quotes with exactly-one check; `project_quote_lines`; `supersedes_line_id`; quote `basis`; rollups recomputed under §3 |
-| `20260918092000_a_budget_has_parts.sql` | Element budgets; the unallocated line; `project_supplier_totals`; `rename_supplier` |
-| `20260918093000_a_thing_knows_which_item_it_came_from.sql` | `things.project_item_id`; `create_thing` gains it; the handover read |
-| `20260918094000_a_tile_is_not_paint.sql` | `alter type home.thing_kind add value 'tile'` — **alone in its file** |
+| `20260918090000_money_that_cannot_lie_about_itself.sql` | The statuses, the basis, the three levels, `project_quote_lines`, `project_payments`, the receipt conversion. Drops the four rollup views first, because every one of them reads `chosen` |
+| `20260918090100_one_walk_to_the_project.sql` | The policies and helpers that walked quote → item → project, rewritten for the three shapes a quote can now have |
+| `20260918090200_the_build_up_and_the_rollups.sql` | Element budgets, `nsum`, `quote_reach`, and every rollup view rebuilt |
+| `20260918090300_writing_a_price_down.sql` | `create_quote` / `update_quote` / `set_quote_status`, and the first supplier rollup |
+| `20260918090400_lines_payments_and_budgets.sql` | The line and payment writes, `update_element`'s budget, `rename_supplier` |
+| `20260918090500_who_is_owed_what.sql` | The supplier rollup corrected: the fallback belongs to the scope, not the supplier |
+| `20260918090600_a_quote_says_which_job_it_is_under.sql` | `reach_project_id`, appended, so a project's prices are one read rather than three `in` lists |
+| `20260918091000_a_thing_knows_which_item_it_came_from.sql` | `things.project_item_id`; `create_thing` gains it |
+| `20260918092000_a_tile_is_not_paint.sql` | `alter type home.thing_kind add value 'tile'` — **alone in its file** |
+
+Two of these exist because the first attempt was wrong, and both are kept rather than folded
+back in: `090500` because the supplier fallback was applied at the wrong granularity, and
+`090600` because a quote had no way to name its project. Editing a migration that has been
+applied is how the folder and the database stop agreeing.
 
 Every view is rewritten with its columns **written out one by one**, never `select t.*`, and
 every new column is added to `things_with_details` / the project rollups by name. `create or
@@ -559,13 +572,90 @@ handover. Three reviewable pushes, each independently useful.
 
 ---
 
-## 7. What is still open
+## 7. What the build changed, and why
 
-| | Question | Recommendation |
+Six things came out differently from what is written above. Each was found by building it
+or by putting it in front of real data, and each is the kind of thing a specification cannot
+know.
+
+### A project-level quote stays — open question A resolved the other way
+
+The spec recommended dropping it. Drawing a worked example is what settled it: ReliaBuilder's
+contract covers the bathroom *and* the laundry, so it belongs to neither. A main contractor's
+contract is the ordinary case and it has no part to sit on. All three levels are built.
+
+### Invoiced is a figure on the strip — open question B resolved
+
+Not a sub-figure on an expanded supplier row. The live data decided it: seven invoices,
+$97,753.22 charged, and nothing yet recorded as paid. Collapsing that to "Paid" would have
+dropped the project from $97,753 to $1,952 overnight and been *right* to, which is exactly
+why both have to show. The feedback asked for it in those words too — "what has been charged
+so far and what has been paid".
+
+### An invoice is the commitment when nothing was ever quoted
+
+The biggest correction, and the live data found it. MSC Consulting, Gibson Architects and
+ReliaBuilder's pre-start have invoices with **no quote behind them** — a consultant billing
+time by the month has no quote and never will. Under the specified rule those items read
+"not priced" with money going out of the door, and `committed - paid` came out negative.
+
+So `committed` is the accepted quote at a level, *or*, when nothing was ever quoted there,
+its invoices. `priced_count` on the live project went 10 → 13 the moment it was applied.
+
+### The fallback belongs to the scope, not the supplier
+
+Caught by reading the first supplier rollup against real rows. Grouping by supplier and then
+applying that fallback is wrong at both ends: a consultant who has only ever invoiced came
+out committed `null` and owed nothing, while a builder with a contract *and* a separate
+pre-start invoice had the $839.50 swallowed. `20260918090500` fixes it by attributing each
+*scope's* committed money to whoever it is owed to.
+
+The check that now holds, and is worth keeping: **the supplier rows sum to the project's
+committed total** — $192,354.22 on both sides.
+
+### Supplier is not the make
+
+Found by drawing the handover sheet. The spec said supplier → make, and the mockup rendered
+"Plumbing World" in a Brand box where the answer is "Caroma". The merchant is not the
+manufacturer, and the maker is usually in the line's detail. The handover pre-fills make from
+the accepted quote's supplier only as a starting point, and the confirm step is where that
+gets corrected — which is the whole argument for there being a confirm step.
+
+### Hand it over offers what is installed, not every item
+
+Found by a test: the item name rendered twice on the page, once under *What it takes* and
+once under *Hand it over*. Offering all eighteen items again puts the same list on the page
+twice, and an item nobody has fitted has nothing to record — the model number is on the box.
+
+It offers `status = 'installed'` and nothing else, which is also the subtraction the You tab's
+loose ends already make (`installed_count - thing_count`), so the two screens cannot disagree
+about what is outstanding. Absent entirely while nothing is installed.
+
+### Photos do not carry across
+
+Left out of the handover deliberately, against decision 14. A photo of a quote document is
+not a photo of the fitting, and the thing page's strip is the one part of it that has to be
+worth opening.
+
+## 8. What is still open
+
+| | Question | Where it stands |
 |---|---|---|
-| A | Is a project-level quote needed, now that linking exists? | Drop it; item and part only |
-| B | Invoiced-but-unpaid as a fourth per-supplier figure? | Not on the strip; on the expanded supplier row |
-| C | A house-wide "who do we owe" across projects? | Wait until one project's version has been lived with |
-| D | A Tile ghost in `ROOM_SUGGESTIONS`? | Yes, after the kind has shipped |
-| E | §4.7 keeps `projects.budget` as a typed number, against the wording of decision 7 | Keep both and name the gap — but this is the one divergence worth arguing about |
-| F | Count live `receipt` rows before writing their migration | — |
+| A | Is a project-level quote needed? | **Resolved: yes.** A main contract covers more than one part. §7 |
+| B | Invoiced as its own figure? | **Resolved: yes, on the strip.** §7 |
+| C | A house-wide "who do we owe" across projects? | Still open. Wait until one project's version has been lived with |
+| D | A Tile ghost in `ROOM_SUGGESTIONS`? | Still open. The kind is built; the prompt is not |
+| E | `projects.budget` stays typed beside per-part budgets | **Built that way**, and the gap is named rather than resolved — §4.7 |
+| F | Count live `receipt` rows before migrating them | **Done: one.** Tile Space, converted to an invoice plus a payment settling it in full |
+
+Two things the build did not do, and neither is an oversight:
+
+- **A quote's lines have no editor yet.** The table, the RPCs and every rollup rule are
+  built and pinned, and `describeBuildUp` and `describeLineVariance` write the sentences —
+  but nothing on screen adds a line or links a price to one. A builder's contract can be
+  recorded and its build-up will be read correctly the moment its lines exist. The screen is
+  the next piece of work, and it is the one that makes the provisional-sum rule reachable
+  rather than merely correct.
+- **Nothing says *lines account for $164,100 of $168,000*.** §4.2 is explicit that lines need
+  not sum to the quote, and that the page should say so quietly where they differ. There is
+  nowhere to say it until the editor above exists.

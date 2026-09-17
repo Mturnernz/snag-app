@@ -15,9 +15,10 @@ import {
   formatDayFirst, formatLooseDate, formatMoney, inclGst, parseLooseDate,
 } from '@snag/supabase-queries';
 import {
-  ProjectItem, ProjectItemStatus, ProjectQuote, ProjectQuoteKind,
+  ProjectItem, ProjectItemStatus, ProjectQuote, ProjectQuoteKind, ProjectQuoteStatus,
   PROJECT_ITEM_STATUS_LABELS, PROJECT_ITEM_STATUS_ORDER,
   PROJECT_QUOTE_KIND_LABELS, PROJECT_QUOTE_KINDS,
+  PROJECT_QUOTE_STATUS_LABELS, PROJECT_QUOTE_STATUSES,
 } from '../types';
 
 interface Props {
@@ -36,12 +37,12 @@ interface Props {
     kind: ProjectQuoteKind;
     dated: string | null;
   }) => Promise<void>;
-  onChooseQuote: (quoteId: string, chosen: boolean) => Promise<void>;
+  onSetQuoteStatus: (quoteId: string, status: ProjectQuoteStatus) => Promise<void>;
   /**
    * Corrects a price already saved.
    *
-   * Deliberately does **not** carry `chosen`: choosing stays on
-   * `set_quote_chosen`, which is its own RPC precisely so the sibling-clearing
+   * Deliberately does **not** carry `status`: accepting stays on
+   * `set_quote_status`, which is its own RPC precisely so the sibling-clearing
    * can never be skipped by a caller passing it among eight other fields. A
    * correction is not a decision.
    */
@@ -86,7 +87,7 @@ interface Props {
  */
 export default function ItemSheet({
   visible, householdId, item, quotes, onClose,
-  onUpdateItem, onDeleteItem, onAddQuote, onChooseQuote, onUpdateQuote, onDeleteQuote,
+  onUpdateItem, onDeleteItem, onAddQuote, onSetQuoteStatus, onUpdateQuote, onDeleteQuote,
   onUpdateQuoteFiles, onRecordAsThing,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -267,7 +268,17 @@ export default function ItemSheet({
             const gross = formatMoney(inclGst(quote.amount, quote.amountInclGst));
             const open = expandedQuote === quote.id;
             return (
-              <View key={quote.id} style={[styles.quote, quote.chosen && styles.quoteOn]}>
+              <View
+                key={quote.id}
+                style={[
+                  styles.quote,
+                  quote.status === 'accepted' && styles.quoteOn,
+                  // A declined price stays on the record and leaves every
+                  // total. Dimmed for the same reason a finished card is: there
+                  // is nothing to do about it.
+                  quote.status === 'declined' && styles.quoteOff,
+                ]}
+              >
                 <View style={styles.quoteTop}>
                   <View style={styles.quoteTitles}>
                     <Text style={styles.quoteSupplier}>{quote.supplier ?? 'No supplier named'}</Text>
@@ -312,20 +323,34 @@ export default function ItemSheet({
                   </Pressable>
                 </View>
 
+                {/* Three named states where there was a tick.
+                    A tick could only ever say "not chosen", which read the same
+                    whether nobody had decided or somebody had said no — and the
+                    second is worth keeping, because what you were quoted and by
+                    whom is what makes the next renovation's numbers credible.
+
+                    The same argument that made capture's priority two named
+                    pills rather than one chip that toggles. */}
                 <View style={styles.quoteFoot}>
-                  <Pressable
-                    onPress={() => onChooseQuote(quote.id, !quote.chosen)}
-                    style={styles.chipTap}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: quote.chosen }}
-                    accessibilityLabel={quote.chosen ? 'Chosen' : 'Choose this'}
-                  >
-                    <View style={[styles.chip, quote.chosen && styles.chipOn]}>
-                      <Text style={[styles.chipLabel, quote.chosen && styles.chipLabelOn]}>
-                        {quote.chosen ? 'Chosen' : 'Choose this'}
-                      </Text>
-                    </View>
-                  </Pressable>
+                  {PROJECT_QUOTE_STATUSES.map((option) => {
+                    const on = quote.status === option;
+                    return (
+                      <Pressable
+                        key={option}
+                        onPress={() => onSetQuoteStatus(quote.id, option)}
+                        style={styles.chipTap}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={PROJECT_QUOTE_STATUS_LABELS[option]}
+                      >
+                        <View style={[styles.chip, on && styles.chipOn]}>
+                          <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
+                            {PROJECT_QUOTE_STATUS_LABELS[option]}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
                   <Pressable
                     onPress={() => setExpandedQuote(open ? null : quote.id)}
                     style={styles.quoteFiles}
@@ -571,6 +596,10 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   quoteOn: { borderColor: Colors.successBorder, backgroundColor: Colors.primaryLight },
+  // The same 0.62 a finished card and a parked repeat take, and for the same
+  // reason: there is nothing to do about it. No strike-through — it is a price
+  // that was real, not a mistake.
+  quoteOff: { opacity: 0.62 },
   quoteTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   quoteTitles: { flex: 1, minWidth: 0 },
   quoteSupplier: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },

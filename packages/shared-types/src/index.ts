@@ -374,15 +374,29 @@ export type SnagSort = 'newest' | 'oldest' | 'due' | 'priority';
  * colour code read in a hardware aisle. The other three are in the enum from
  * the first migration so that adding them is a screen and not a migration.
  */
-export type ThingKind = 'appliance' | 'finish' | 'fitting' | 'fabric' | 'contact';
+export type ThingKind =
+  | 'appliance'
+  | 'finish'
+  | 'tile'
+  | 'fitting'
+  | 'fabric'
+  | 'contact';
 
-/** The two that are built. Everything else is deliberately not offered yet. */
-export const THING_KINDS: ThingKind[] = ['appliance', 'finish'];
+/**
+ * The three that are built. Everything else is deliberately not offered yet.
+ *
+ * `tile` arrived with the projects work, because a renovation's most durable
+ * answer is which tile went on the bathroom floor and a tile is not paint: it
+ * has a size and a grout colour, and "Paint" over a tile code is the wrong word
+ * on the one page whose job is to be believed in a shop eight months later.
+ */
+export const THING_KINDS: ThingKind[] = ['appliance', 'finish', 'tile'];
 
 /** On a chip, where it names one thing. */
 export const THING_KIND_LABELS: Record<ThingKind, string> = {
   appliance: 'Appliance',
   finish: 'Paint',
+  tile: 'Tile',
   fitting: 'Fitting',
   fabric: 'The house',
   contact: 'Who to call',
@@ -405,6 +419,11 @@ export const THING_KIND_FIELD_LABELS: Record<
   // on the windows, and "Notes" is the wrong word for the only thing
   // distinguishing them.
   finish: { make: 'Brand', model: 'Colour code', notes: 'Where it went' },
+  // A tile takes paint's shape rather than an appliance's, and for paint's
+  // reason: a bathroom holds one tile on the floor and another on the walls,
+  // the colour is what somebody came to read, and the only thing telling the
+  // two apart is where each went.
+  tile: { make: 'Range', model: 'Colour or code', notes: 'Where it went' },
   fitting: { make: 'Brand', model: 'Part', notes: 'Notes' },
   fabric: { make: 'Type', model: 'Spec', notes: 'Notes' },
   contact: { make: 'Trade', model: 'Phone', notes: 'What they did' },
@@ -463,6 +482,15 @@ export interface Thing {
    * renovation must not delete the washing machine it installed.
    */
   projectId?: string | null;
+  /**
+   * Which item of that project this record came out of.
+   *
+   * What `projectId` alone could not say, and without it the handover list has
+   * no way to stop offering the dishwasher it put in the record last week. Not
+   * unique: a tiled bathroom leaves a tile record and a grout record from one
+   * line item.
+   */
+  projectItemId?: string | null;
   /** Joined in by `home.things_with_details`, for the *Installed during* row. */
   projectName?: string | null;
   projectFinishedOn?: string | null;
@@ -755,22 +783,73 @@ export const PROJECT_ITEM_STATUS_ORDER: ProjectItemStatus[] = [
 /**
  * What a piece of paper *is*.
  *
- * A quote is what something might cost; an invoice and a receipt are what it
- * did. Only the second two count towards "spent", which is why this is an enum
- * rather than a note somebody writes.
+ * A quote is what something might cost; an invoice is what has been charged.
+ *
+ * **`receipt` is no longer offered.** A receipt is a payment's evidence, not a
+ * third kind of paper — see `ProjectPayment`. It stays in the type because it
+ * stays in the database enum, which Postgres cannot drop a value from, and
+ * because rows migrated from it keep their history. Nothing writes it.
  */
 export type ProjectQuoteKind = 'quote' | 'invoice' | 'receipt';
 
 export const PROJECT_QUOTE_KIND_LABELS: Record<ProjectQuoteKind, string> = {
   quote: 'Quote',
   invoice: 'Invoice',
-  receipt: 'Receipt',
+  receipt: 'Invoice',
 };
 
-export const PROJECT_QUOTE_KINDS: ProjectQuoteKind[] = ['quote', 'invoice', 'receipt'];
+export const PROJECT_QUOTE_KINDS: ProjectQuoteKind[] = ['quote', 'invoice'];
 
-/** The kinds that have actually been paid, and so count towards `spentTotal`. */
-export const SPENT_QUOTE_KINDS: ProjectQuoteKind[] = ['invoice', 'receipt'];
+/**
+ * Where a price sits, and the reason there are three answers.
+ *
+ * A builder's contract covers a whole renovation; a tiling quote covers one
+ * room; a toilet's price covers one item. Forcing all three onto the item layer
+ * meant inventing an item called "Main contract — ReliaBuilder" and watching it
+ * sit beside the vanity, which is how the item layer stops meaning "a thing
+ * being bought".
+ */
+export type ProjectQuoteLevel = 'item' | 'element' | 'project';
+
+/**
+ * Accepted, still deciding, or turned down.
+ *
+ * This was a `chosen` boolean, and a boolean could only ever say "not chosen" —
+ * which conflated "we have not decided" with "we said no". The second is worth
+ * keeping: what you were quoted and by whom is what makes the next renovation's
+ * numbers credible. A declined price leaves every total and stays on the record.
+ */
+export type ProjectQuoteStatus = 'tbc' | 'accepted' | 'declined';
+
+export const PROJECT_QUOTE_STATUS_LABELS: Record<ProjectQuoteStatus, string> = {
+  tbc: 'TBC',
+  accepted: 'Accepted',
+  declined: 'Declined',
+};
+
+/** Accepted first: it is the answer somebody is usually reaching for. */
+export const PROJECT_QUOTE_STATUSES: ProjectQuoteStatus[] = ['accepted', 'tbc', 'declined'];
+
+/**
+ * Whether this number can move.
+ *
+ * A fixed-price contract stays what it says whatever the fittings actually cost
+ * — the variance is the builder's, and a real change costs a variation, which is
+ * a new quote. An estimate moves as its allowances are answered.
+ *
+ * The app cannot infer which it is holding, and guessing would be a lie about
+ * somebody's contract, so it asks once. **The default is `fixed`**, because a
+ * householder who has not met the distinction almost certainly has a fixed-price
+ * quote, and because it is the answer that does not silently move.
+ */
+export type ProjectQuoteBasis = 'fixed' | 'estimate';
+
+export const PROJECT_QUOTE_BASIS_LABELS: Record<ProjectQuoteBasis, string> = {
+  fixed: 'Fixed price',
+  estimate: 'Estimate',
+};
+
+export const PROJECT_QUOTE_BASES: ProjectQuoteBasis[] = ['fixed', 'estimate'];
 
 /**
  * New Zealand GST, and the one number this app does arithmetic with.
@@ -806,21 +885,35 @@ export const GST_RATE = 0.15;
 export interface ProjectTotals {
   /** How many items exist at this level, priced or not. */
   itemCount: number;
-  /** How many have a chosen quote — the denominator's numerator. */
+  /** How many have a committed figure — the denominator's numerator. */
   pricedCount: number;
   /** Quoted and still undecided. A different state from "nobody has asked". */
   quotedCount: number;
-  /** The sum of the chosen quotes, GST-inclusive. Null when nothing is chosen. */
-  chosenTotal: number | null;
   /**
-   * What it looks like it will come to. A settled item contributes its chosen
-   * amount to both ends; an unsettled one contributes its cheapest and dearest
-   * quote. When the two are equal there is nothing left to decide.
+   * What has been agreed, GST-inclusive. Null when nothing has been.
+   *
+   * The accepted quote at each level — or, when nothing was ever quoted there,
+   * its invoices. A consultant billing time by the month has no quote and never
+   * will, and reading that as "not priced" while money goes out of the door is
+   * how `committed - paid` comes out negative.
    */
-  rangeLow: number | null;
-  rangeHigh: number | null;
-  /** Invoices and receipts only — what has actually gone out. */
-  spentTotal: number | null;
+  committedTotal: number | null;
+  /** What has been charged. Invoices, whether or not they have been paid. */
+  invoicedTotal: number | null;
+  /** What has actually gone out — payments against those invoices. */
+  paidTotal: number | null;
+  /**
+   * How much of `committedTotal` is still somebody's guess.
+   *
+   * The unanswered allowances inside accepted quotes. It rides beside the total
+   * for the same reason `itemCount` does: a figure a third of which the builder
+   * made up is exactly as misleading as a total assembled from half the items.
+   *
+   * **An allowance is not an unpriced item.** An unpriced item contributes
+   * nothing and is counted in the denominator; an allowance is somebody's
+   * written number and it counts. The two are never worded the same.
+   */
+  allowanceOpen: number;
 }
 
 export interface Project extends ProjectTotals {
@@ -838,6 +931,18 @@ export interface Project extends ProjectTotals {
 
   budget: number | null;
   budgetInclGst: boolean;
+
+  /**
+   * What the parts have been budgeted, against what the project was.
+   *
+   * Both are kept and the gap is named on screen rather than resolved. A
+   * renovation is budgeted top-down and broken down later, the breakdown
+   * deliberately does not add up (the contingency lives nowhere), and a derived
+   * figure that silently replaced the typed one would be the app insisting
+   * somebody did not mean what they typed.
+   */
+  partsBudgetTotal: number | null;
+  partsBudgetedCount: number;
 
   photoPaths: string[];
   documentPaths: string[];
@@ -892,6 +997,9 @@ export interface ProjectElement extends ProjectTotals {
   implicit: boolean;
   sortOrder: number;
   notes: string | null;
+  /** This part's share of the budget. See `Project.partsBudgetTotal`. */
+  budget: number | null;
+  budgetInclGst: boolean;
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
@@ -911,11 +1019,13 @@ export interface ProjectItem {
 
   /** Joined in by `home.project_items_with_totals`, all GST-inclusive. */
   quoteCount: number;
-  /** Null when nothing is chosen — never zero. */
-  chosenAmount: number | null;
-  quotedLow: number | null;
-  quotedHigh: number | null;
-  spent: number | null;
+  /** Prices on the table that nobody has decided about. */
+  tbcCount: number;
+  /** Null when nothing has been agreed — never zero. */
+  committed: number | null;
+  invoiced: number | null;
+  paid: number | null;
+  allowanceOpen: number;
 }
 
 /**
@@ -928,20 +1038,119 @@ export interface ProjectItem {
  */
 export interface ProjectQuote {
   id: string;
-  itemId: string;
+  /** Exactly one of these three is set. See `ProjectQuoteLevel`. */
+  itemId: string | null;
+  elementId: string | null;
+  projectId: string | null;
   supplier: string | null;
   /** What is being offered — "Methven Krome". The item's name is usually enough. */
   detail: string | null;
   amount: number | null;
   amountInclGst: boolean;
   kind: ProjectQuoteKind;
-  /** At most one per item, enforced by a partial unique index rather than hoped for. */
-  chosen: boolean;
+  /** At most one accepted *quote* per item, enforced by a partial unique index. */
+  status: ProjectQuoteStatus;
+  basis: ProjectQuoteBasis;
   dated: string | null;
   notes: string | null;
+  /**
+   * The allowance this price was got for.
+   *
+   * **A quote that supersedes a line contributes only through that line**, never
+   * also on its own account. That is the whole answer to "is the toilet inside
+   * the contract" — linking is the answer, and linking is the same act that
+   * produces the breakdown. A price pointing at nothing is a separate purchase
+   * and sums normally.
+   */
+  supersedesLineId: string | null;
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
+
+  /** Joined in by `home.project_quotes_with_totals`, all GST-inclusive. */
+  amountIncl: number | null;
+  lineCount: number;
+  /** What the lines add up to. Not required to equal the quote — see below. */
+  linesTotal: number | null;
+  /**
+   * What the quote reads once its allowances have been answered.
+   *
+   * Null when it has no lines, in which case the amount as typed is the whole
+   * story.
+   */
+  buildUp: number | null;
+  allowanceOpen: number;
+  /** What this quote actually contributes: `basis` decides. */
+  effectiveAmount: number | null;
+  /** Payments recorded against it. Only an invoice can carry any. */
+  paidTotal: number | null;
+}
+
+/**
+ * One line of a quote — and the reason a renovation goes over.
+ *
+ * A builder's number is not one number. It is a list, and against the fittings
+ * and the tiles it carries an **allowance**: a figure written down for something
+ * they are not themselves supplying, or have not yet priced. In a New Zealand
+ * building contract these are provisional and PC sums, and they are the lines
+ * that move.
+ *
+ * **The quote's own amount stays the authority.** Lines explain it and are not
+ * required to sum to it: trade quotes round, bundle, and carry a margin line
+ * that is nobody's business, and a form that refuses a quote whose lines do not
+ * balance teaches people to fudge a line until it does. Where the two differ the
+ * page says so quietly and corrects neither.
+ */
+export interface ProjectQuoteLine {
+  id: string;
+  quoteId: string;
+  name: string;
+  /** "Caroma Luna Cleanflush" — where a model number for the house record lives. */
+  detail: string | null;
+  amount: number | null;
+  amountInclGst: boolean;
+  isAllowance: boolean;
+  sortOrder: number;
+}
+
+/**
+ * Money that has actually gone out, against the bill it settles.
+ *
+ * A deposit and a balance are two payments against one invoice, which is what
+ * happens and what sibling rows could not say. It is also what makes the old
+ * double-count unrepresentable: a payment is no longer the sort of row that can
+ * be summed alongside a bill.
+ */
+export interface ProjectPayment {
+  id: string;
+  /** Always an invoice. `home.add_payment` refuses anything else, in words. */
+  quoteId: string;
+  amount: number;
+  amountInclGst: boolean;
+  paidOn: string | null;
+  /** "Deposit", "Progress claim 2" — what the bank statement will call it. */
+  reference: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+/**
+ * "ReliaBuilder — committed $177,594, paid $84,000, outstanding $93,594."
+ *
+ * The check worth keeping, and the one `projects.test.ts` pins: **these rows sum
+ * to the project's committed total.** They are two views over one rule, and if
+ * they disagree one of them is lying about who is owed money.
+ */
+export interface ProjectSupplierTotals {
+  projectId: string;
+  /** The trimmed, lower-cased name the rollup groups on. */
+  supplierKey: string;
+  /** Displayed with the spelling used most recently. Null when nobody was named. */
+  supplier: string | null;
+  committed: number | null;
+  invoiced: number | null;
+  paid: number | null;
+  tbcCount: number;
 }
 
 /**

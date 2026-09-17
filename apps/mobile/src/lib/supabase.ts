@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as queries from '@snag/supabase-queries';
+import type { ProjectQuoteStatus } from '@snag/shared-types';
 import { PORTAL_URL } from './appUrl';
 import { readForUpload } from './uploadBody';
 import { withDeadline } from './deadline';
@@ -379,19 +380,44 @@ export const createQuote = (input: queries.QuoteInput) => queries.createQuote(su
 export const updateQuote = (quoteId: string, update: queries.QuoteUpdate) =>
   queries.updateQuote(supabase, quoteId, update);
 
-export const setQuoteChosen = (quoteId: string, chosen: boolean) =>
-  queries.setQuoteChosen(supabase, quoteId, chosen);
+export const setQuoteStatus = (quoteId: string, status: ProjectQuoteStatus) =>
+  queries.setQuoteStatus(supabase, quoteId, status);
 
 export const deleteQuote = (quoteId: string) => queries.deleteQuote(supabase, quoteId);
+
+export const addQuoteLine = (quoteId: string, input: queries.QuoteLineInput) =>
+  queries.addQuoteLine(supabase, quoteId, input);
+
+export const updateQuoteLine = (lineId: string, update: Partial<queries.QuoteLineInput>) =>
+  queries.updateQuoteLine(supabase, lineId, update);
+
+export const deleteQuoteLine = (lineId: string) => queries.deleteQuoteLine(supabase, lineId);
+
+export const addPayment = (quoteId: string, input: queries.PaymentInput) =>
+  queries.addPayment(supabase, quoteId, input);
+
+export const deletePayment = (paymentId: string) => queries.deletePayment(supabase, paymentId);
+
+export const getProjectThings = (projectId: string) => queries.getProjectThings(supabase, projectId);
+
+export const getSupplierTotals = (projectId: string) =>
+  queries.getSupplierTotals(supabase, projectId);
+
+export const renameSupplier = (projectId: string, from: string, to: string) =>
+  queries.renameSupplier(supabase, projectId, from, to);
 
 // The pure ones, re-exported so screens import money formatting from the same
 // place they import the reads. Nothing here touches the client.
 export {
   inclGst,
   formatMoney,
-  rangeLabel,
   describeTotals,
-  hasOpenRange,
+  describeAllowance,
+  describeBudget,
+  describePartsBudget,
+  describeBuildUp,
+  describeLineVariance,
+  outstanding,
   itemPriceLabel,
   showsElements,
   groupProjectsByStatus,

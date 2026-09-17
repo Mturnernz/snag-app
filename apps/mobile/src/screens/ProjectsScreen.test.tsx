@@ -40,7 +40,7 @@ jest.mock('../lib/supabase', () => {
     // away the exact rule these specs exist to hold.
     describeTotals: real.describeTotals,
     formatMoney: real.formatMoney,
-    rangeLabel: real.rangeLabel,
+    outstanding: real.outstanding,
     projectSubtitle: real.projectSubtitle,
   };
 });
@@ -61,8 +61,9 @@ const project = (over: Partial<any> = {}): any => ({
   propertyName: 'Home', createdByName: 'Kate',
   elementCount: 1, shownElementCount: 0, fileCount: 0,
   snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
+  partsBudgetTotal: null, partsBudgetedCount: 0,
   itemCount: 0, pricedCount: 0, quotedCount: 0,
-  chosenTotal: null, rangeLow: null, rangeHigh: null, spentTotal: null,
+  committedTotal: null, invoicedTotal: null, paidTotal: null, allowanceOpen: 0,
   ...over,
 });
 
@@ -120,9 +121,12 @@ describe('the tab', () => {
 
   it('never shows a total without the line that says what it is of', async () => {
     const r = await arrange([
-      project({ chosenTotal: 8990, spentTotal: 3990, itemCount: 9, pricedCount: 5 }),
+      project({ committedTotal: 8990, paidTotal: 3990, itemCount: 9, pricedCount: 5 }),
     ]);
-    r.getByText('$3,990 spent of $8,990 chosen');
+    // Outstanding leads rather than paid: on a list of renovations the question
+    // is what is still to find, and "$3,990 paid" of an $8,990 job reads as
+    // nearly done.
+    r.getByText('$8,990 committed · $5,000 still to pay');
     // The denominator is not decoration and not optional. Without it, $8,990
     // reads as the cost of the renovation rather than as the cost of five
     // ninths of it.

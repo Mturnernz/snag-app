@@ -19,8 +19,9 @@ const project = (over: Partial<Project> = {}): Project => ({
   propertyName: 'Home', createdByName: 'Kate',
   elementCount: 1, shownElementCount: 0, fileCount: 0,
   snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
+  partsBudgetTotal: null, partsBudgetedCount: 0,
   itemCount: 0, pricedCount: 0, quotedCount: 0,
-  chosenTotal: null, rangeLow: null, rangeHigh: null, spentTotal: null,
+  committedTotal: null, invoicedTotal: null, paidTotal: null, allowanceOpen: 0,
   ...over,
 });
 

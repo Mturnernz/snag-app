@@ -49,7 +49,9 @@ const mock_getProject = jest.fn();
 const mock_getProjectContents = jest.fn();
 const mock_getProjectFiles = jest.fn();
 const mock_getSnags = jest.fn();
-const mock_setQuoteChosen = jest.fn();
+const mock_setQuoteStatus = jest.fn();
+const mock_getSupplierTotals = jest.fn();
+const mock_getProjectThings = jest.fn();
 const mock_updateItem = jest.fn();
 const mock_createElement = jest.fn();
 const mock_deleteElement = jest.fn().mockResolvedValue([]);
@@ -60,7 +62,7 @@ jest.mock('../lib/supabase', () => {
     getProjectContents: (...a: unknown[]) => mock_getProjectContents(...a),
     getProjectFiles: (...a: unknown[]) => mock_getProjectFiles(...a),
     getSnags: (...a: unknown[]) => mock_getSnags(...a),
-    setQuoteChosen: (...a: unknown[]) => mock_setQuoteChosen(...a),
+    setQuoteStatus: (...a: unknown[]) => mock_setQuoteStatus(...a),
     updateItem: (...a: unknown[]) => mock_updateItem(...a),
     createElement: (...a: unknown[]) => mock_createElement(...a),
     createItem: jest.fn(), createQuote: jest.fn(), createThing: jest.fn(),
@@ -69,10 +71,15 @@ jest.mock('../lib/supabase', () => {
     deleteItem: jest.fn(), deleteProject: jest.fn(), deleteQuote: jest.fn(),
     deleteStoredFiles: jest.fn(), updateElement: jest.fn(), updateProject: jest.fn(),
     updateQuote: jest.fn(), getFileUrls: jest.fn().mockResolvedValue({}),
+    addPayment: jest.fn(), deletePayment: jest.fn(),
+    getSupplierTotals: (...a: unknown[]) => mock_getSupplierTotals(...a),
+    getProjectThings: (...a: unknown[]) => mock_getProjectThings(...a),
     // The pure ones are real: mocking `describeTotals` would mock away the rule.
     describeTotals: real.describeTotals,
+    describeBudget: real.describeBudget,
+    describePartsBudget: real.describePartsBudget,
+    outstanding: real.outstanding,
     formatMoney: real.formatMoney,
-    rangeLabel: real.rangeLabel,
     showsElements: real.showsElements,
   };
 });
@@ -86,7 +93,7 @@ jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).
 
 const totals = (over: any = {}) => ({
   itemCount: 0, pricedCount: 0, quotedCount: 0,
-  chosenTotal: null, rangeLow: null, rangeHigh: null, spentTotal: null, ...over,
+  committedTotal: null, invoicedTotal: null, paidTotal: null, allowanceOpen: 0, ...over,
 });
 const project = (over: any = {}): any => ({
   id: 'p1', householdId: 'h', propertyId: 'prop', name: 'Downstairs laundry',
@@ -95,17 +102,20 @@ const project = (over: any = {}): any => ({
   createdBy: 'me', createdAt: '2026-08-04T00:00:00Z', updatedAt: '2026-08-04T00:00:00Z',
   propertyName: 'Home', createdByName: 'Kate',
   elementCount: 1, shownElementCount: 0, fileCount: 0,
-  snagCount: 0, openSnagCount: 0, thingCount: 0, ...totals(), ...over,
+  snagCount: 0, openSnagCount: 0, thingCount: 0,
+  partsBudgetTotal: null, partsBudgetedCount: 0, ...totals(), ...over,
 });
 const element = (over: any = {}): any => ({
   id: 'e1', projectId: 'p1', name: 'Downstairs laundry', room: null, implicit: true,
-  sortOrder: 0, notes: null, photoPaths: [], documentPaths: [],
+  sortOrder: 0, notes: null, budget: null, budgetInclGst: true,
+  photoPaths: [], documentPaths: [],
   createdAt: '2026-08-04T00:00:00Z', ...totals(), ...over,
 });
 const item = (over: any = {}): any => ({
   id: 'i1', elementId: 'e1', name: 'Toilet suite', status: 'considering', sortOrder: 0,
   notes: null, photoPaths: [], documentPaths: [], createdAt: '2026-08-04T00:00:00Z',
-  quoteCount: 0, chosenAmount: null, quotedLow: null, quotedHigh: null, spent: null, ...over,
+  quoteCount: 0, tbcCount: 0, committed: null, invoiced: null, paid: null,
+  allowanceOpen: 0, ...over,
 });
 
 beforeEach(() => {
@@ -123,20 +133,32 @@ beforeEach(() => {
 });
 
 async function arrange(opts: {
-  project?: any; elements?: any[]; items?: any[]; quotes?: any[]; files?: any[]; snags?: any[];
+  project?: any; elements?: any[]; items?: any[]; quotes?: any[]; lines?: any[];
+  payments?: any[]; files?: any[]; snags?: any[]; suppliers?: any[]; things?: any[];
 } = {}) {
   mock_getProject.mockResolvedValue(opts.project ?? project());
   mock_getProjectContents.mockResolvedValue({
     elements: opts.elements ?? [element()],
     items: opts.items ?? [],
     quotes: opts.quotes ?? [],
+    lines: opts.lines ?? [],
+    payments: opts.payments ?? [],
   });
   mock_getProjectFiles.mockResolvedValue(opts.files ?? []);
   mock_getSnags.mockResolvedValue(opts.snags ?? []);
+  mock_getSupplierTotals.mockResolvedValue(opts.suppliers ?? []);
+  mock_getProjectThings.mockResolvedValue(opts.things ?? []);
   const r = render(<ProjectDetailScreen route={{ params: { projectId: 'p1' } } as any} navigation={{} as any} />);
   await TestRenderer.act(async () => {});
   return r;
 }
+
+/** Any pressable carrying this label — used by the specs that reach for one. */
+const byLabel = (r: ReturnType<typeof render>, label: string) =>
+  r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label,
+    { deep: true }
+  )[0];
 
 describe('the middle layer', () => {
   it('is not drawn while the only part of the job is implicit', async () => {
@@ -162,23 +184,45 @@ describe('the middle layer', () => {
 });
 
 describe('the money', () => {
-  it('shows three figures rather than one total', async () => {
+  it('keeps what has been charged apart from what has been paid', async () => {
+    // The old strip had one "Spent" that summed invoices and receipts together,
+    // so a bill and the payment settling it both counted. Seven invoices with
+    // nothing yet recorded as paid is the ordinary middle of a job.
     const r = await arrange({
-      project: project({ chosenTotal: 8990, spentTotal: 3990, rangeLow: 9380, rangeHigh: 9380,
-        itemCount: 9, pricedCount: 5 }),
+      project: project({
+        committedTotal: 8990, invoicedTotal: 4200, paidTotal: 3990,
+        itemCount: 9, pricedCount: 5,
+      }),
     });
-    r.getByText('Quoted');
-    r.getByText('Chosen');
-    r.getByText('Spent');
+    r.getByText('Committed');
+    r.getByText('Invoiced');
+    r.getByText('Paid');
+    r.getByText('Outstanding');
+    expect(r.queryByText('Spent')).toBeNull();
     r.getByText('$8,990');
+    r.getByText('$4,200');
     r.getByText('$3,990');
+    // 8,990 - 3,990, which is committed less paid rather than invoiced less paid.
+    r.getByText('$5,000');
   });
 
   it('carries the denominator under them, always', async () => {
     const r = await arrange({
-      project: project({ chosenTotal: 8990, itemCount: 9, pricedCount: 5, quotedCount: 1 }),
+      project: project({ committedTotal: 8990, itemCount: 9, pricedCount: 5, quotedCount: 1 }),
     });
-    r.getByText('5 of 9 items priced · 1 quoted, not chosen · 3 not priced');
+    r.getByText('5 of 9 items priced · 1 quoted, not decided · 3 not priced');
+  });
+
+  it('puts the budget under the figures and says which side of it we are', async () => {
+    const r = await arrange({
+      project: project({
+        budget: 180000, budgetInclGst: true, committedTotal: 192354.22,
+        itemCount: 18, pricedCount: 13,
+      }),
+    });
+    r.getByText('Budget');
+    r.getByText('$180,000');
+    r.getByText('committed is $12,354.22 over it');
   });
 
   it('says so in words when nothing has been priced, rather than showing zero', async () => {
@@ -192,22 +236,104 @@ describe('the money', () => {
     r.getByText('Every figure here is GST-inclusive.');
   });
 
-  it('keeps a six-figure range on one line rather than wrapping mid-number', async () => {
-    // A third of 390pt cannot hold "$188,352.22–191,583.72". Three figures
-    // across is what made the strip go ragged the moment a job got past five
-    // figures, so they stack and each one is pinned to a single line — half a
-    // number read off a wrapped row is worse than no number at all.
+  it('keeps a six-figure total on one line rather than wrapping mid-number', async () => {
+    // A third of 390pt cannot hold "$192,354.22". Figures across is what made
+    // the strip go ragged the moment a job got past five figures, so they stack
+    // and each is pinned to a single line — half a number read off a wrapped
+    // row is worse than no number at all.
     const r = await arrange({
       project: project({
-        rangeLow: 188352.22, rangeHigh: 191583.72,
-        chosenTotal: 184528.47, spentTotal: 97753.22,
-        itemCount: 18, pricedCount: 10,
+        committedTotal: 192354.22, invoicedTotal: 97753.22, paidTotal: 1952.47,
+        itemCount: 18, pricedCount: 13,
       }),
     });
-    const figure = r.getByText('$188,352.22–191,583.72');
-    expect(figure.props.numberOfLines).toBe(1);
-    expect(r.getByText('$184,528.47').props.numberOfLines).toBe(1);
+    expect(r.getByText('$192,354.22').props.numberOfLines).toBe(1);
     expect(r.getByText('$97,753.22').props.numberOfLines).toBe(1);
+    expect(r.getByText('$190,401.75').props.numberOfLines).toBe(1);
+  });
+
+  it('says how much of the total is still somebody’s guess', async () => {
+    const r = await arrange({
+      project: project({ committedTotal: 167240, allowanceOpen: 22300, itemCount: 0 }),
+    });
+    r.getByText('$22,300 still an allowance');
+  });
+});
+
+describe('who is owed what', () => {
+  it('is absent entirely when nobody is owed anything', async () => {
+    const r = await arrange();
+    expect(r.queryByText('Who’s owed what')).toBeNull();
+  });
+
+  it('names each supplier, and what is still to go to them', async () => {
+    const r = await arrange({
+      suppliers: [
+        { projectId: 'p1', supplierKey: 'reliabuilder', supplier: 'ReliaBuilder',
+          committed: 177594.5, invoiced: 88814.5, paid: 84000, tbcCount: 0 },
+      ],
+    });
+    r.getByText('Who’s owed what');
+    r.getByText('ReliaBuilder');
+    r.getByText('$93,594.50');
+  });
+
+  it('says settled rather than showing a zero', async () => {
+    const r = await arrange({
+      suppliers: [
+        { projectId: 'p1', supplierKey: 'tile space', supplier: 'Tile Space',
+          committed: 1952.47, invoiced: 1952.47, paid: 1952.47, tbcCount: 0 },
+      ],
+    });
+    r.getByText('Settled');
+    expect(r.queryByText('$0')).toBeNull();
+  });
+
+  it('still renders the page when the rollup will not load', async () => {
+    // The money strip above it is the answer to this page's main question. A
+    // rollup that fails must not take the page down with it.
+    mock_getSupplierTotals.mockRejectedValueOnce(new Error('no'));
+    const r = await arrange();
+    r.getByText('Downstairs laundry');
+  });
+});
+
+describe('handing it over to the house record', () => {
+  const fitted = (over: any = {}) => item({ status: 'installed', ...over });
+
+  it('lists what has been installed, and says how many are recorded', async () => {
+    const r = await arrange({
+      items: [fitted({ id: 'i1', name: 'Toilet suite' }), fitted({ id: 'i2', name: 'Vanity' })],
+      things: [{ id: 't1', projectItemId: 'i1' }],
+    });
+    r.getByText('Hand it over');
+    r.getByText('1 of 2 installed are in the house record.');
+  });
+
+  it('stops offering an item once it is in the record', async () => {
+    // What `project_item_id` exists for. Without it the list offers the
+    // dishwasher again every time.
+    const r = await arrange({
+      items: [fitted({ id: 'i1', name: 'Toilet suite' })],
+      things: [{ id: 't1', projectItemId: 'i1' }],
+    });
+    expect(byLabel(r, 'Record Toilet suite in the house record')).toBeUndefined();
+    expect(byLabel(r, 'Toilet suite is in the house record')).toBeDefined();
+  });
+
+  it('offers only what is installed, never the whole job twice', async () => {
+    // The items are already listed above under what it takes. An item nobody
+    // has fitted has nothing to record: the model number is on the box.
+    const r = await arrange({
+      items: [fitted({ id: 'i1', name: 'Toilet suite' }), item({ id: 'i2', name: 'Vanity' })],
+    });
+    expect(byLabel(r, 'Record Toilet suite in the house record')).toBeDefined();
+    expect(byLabel(r, 'Record Vanity in the house record')).toBeUndefined();
+  });
+
+  it('is absent while nothing has been installed', async () => {
+    const r = await arrange({ items: [item()] });
+    expect(r.queryByText('Hand it over')).toBeNull();
   });
 });
 
@@ -268,7 +394,7 @@ describe('the punch list', () => {
     const r = await arrange();
     // A punch list nobody can fetch must not take the page down — the same rule
     // the thing-history card follows on the snag page.
-    r.getByText('Quoted');
+    r.getByText('Committed');
   });
 });
 

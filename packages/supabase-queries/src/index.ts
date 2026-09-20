@@ -87,6 +87,7 @@ function mapSnag(row: Row): Snag {
     propertyId: row.property_id,
     room: row.room ?? null,
     photoPaths: row.photo_paths ?? [],
+    linkedThings: row.linked_things ?? [],
     description: row.description ?? null,
     status: row.status,
     parts: row.parts ?? [],
@@ -876,6 +877,27 @@ export async function createSnag(
   return getSnag(client, row.id);
 }
 
+/**
+ * Replacing what a job is about, in one call.
+ *
+ * Its own function rather than a field on `updateSnag`, for the reason
+ * `setPartBought` and `setQuoteStatus` are: saying what something is about is
+ * the tail of capture and must not start the job, and a link riding in beside
+ * eight other fields is one refactor away from doing exactly that. The server
+ * says so too — `set_snag_things` touches neither `status` nor `updated_at`.
+ */
+export async function setSnagThings(
+  client: SupabaseClient,
+  snagId: string,
+  thingIds: string[]
+): Promise<void> {
+  const { error } = await client.rpc('set_snag_things', {
+    p_snag_id: snagId,
+    p_thing_ids: thingIds,
+  });
+  if (error) throw asError(error, "Couldn't save what this is about");
+}
+
 export interface SnagUpdate {
   room?: string | null;
   description?: string | null;
@@ -1346,6 +1368,41 @@ export function searchThings(things: Thing[], query: string): Thing[] {
     const haystack = thingSearchText(thing);
     return words.every((word) => haystack.includes(word));
   });
+}
+
+/**
+ * The order the asset picker offers a house in.
+ *
+ * Three bands, and each earns its place by how likely the next tap is:
+ *
+ * 1. **Already linked**, pinned, so the answer somebody is amending is never
+ *    somewhere they have to hunt for — and so unlinking is as cheap as linking.
+ * 2. **This job's room**, because the room is already on the snag and is the
+ *    single best guess available: a kitchen job is about a kitchen appliance
+ *    far more often than not.
+ * 3. **Everything else**, because houses are not laid out the way a catalogue
+ *    thinks — a study can hold a heat pump, a flat can keep the washing machine
+ *    in the bathroom — and a picker that only ever offers the room quietly
+ *    insists otherwise. The same argument the walkthrough's step two makes.
+ *
+ * Alphabetical inside each band, because a card is read rather than ranked.
+ * Pure and exported so the bands can be pinned as a property; the sheet only
+ * renders what this decides.
+ */
+export function assetPickerOrder(
+  things: Thing[],
+  linkedIds: string[],
+  room: string | null
+): Thing[] {
+  const linked = new Set(linkedIds);
+  const here = (thing: Thing) =>
+    !!room && (thing.room ?? '').toLowerCase() === room.toLowerCase();
+
+  const band = (thing: Thing) => (linked.has(thing.id) ? 0 : here(thing) ? 1 : 2);
+
+  return [...things].sort((a, b) =>
+    band(a) - band(b) || thingHeadline(a).localeCompare(thingHeadline(b))
+  );
 }
 
 export interface ThingInput {

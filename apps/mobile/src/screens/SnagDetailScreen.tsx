@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, Image, TextInput, Pressable, Modal, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -20,6 +20,7 @@ import AdviceCard from '../components/AdviceCard';
 import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
 import DateField, { CalendarSheet } from '../components/DateField';
+import LinkAssetsSheet from '../components/LinkAssetsSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -27,16 +28,16 @@ import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
   deleteStoredFiles, getSnagAdvice, deleteSnagAdvice, setPartBought,
-  getThingNotes, getThings,
+  getThingNotes, getThings, setSnagThings,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { addPhotos } from '../lib/addPhotos';
 import LinkedText from '../components/LinkedText';
 import {
-  dayKey, describeCycle, formatLooseDate, parseLooseDate, snagHeadline, thingsInArea, thingHeadline,
+  dayKey, describeCycle, formatLooseDate, parseLooseDate, snagHeadline,
 } from '@snag/supabase-queries';
 import {
-  Comment, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote, REPEAT_PRESETS,
+  Comment, LinkedThing, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote, REPEAT_PRESETS,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -61,17 +62,39 @@ function isDueIn(dueAt: string | null, days: number): boolean {
   return Math.abs(new Date(dueAt).getTime() - wanted) < DAY_MS / 2;
 }
 
+/**
+ * `thingHeadline`'s rule, against the trimmed row the view hands over.
+ *
+ * `LinkedThing` is deliberately not a `Thing` — the card needs a name, a model
+ * and a room, and a job carrying whole spec sheets would pay for one per link
+ * on a page people open constantly — so the shared helper cannot take it.
+ */
+function linkedHeadline(thing: LinkedThing): string {
+  if (thing.name) return thing.name;
+  const spec = [thing.make, thing.model].filter(Boolean).join(' ');
+  if (spec) return spec;
+  return thing.room ? `Something in the ${thing.room.toLowerCase()}` : 'Something in the house';
+}
+
 /** The thing page's words for the same fact, so two screens do not invent two. */
 function unsavedHint(count: number): string {
   return count === 1 ? '1 unsaved change' : `${count} unsaved changes`;
 }
 
-/** The whole arrangement, in one sentence, so nobody has to infer it. */
+/**
+ * The arrangement, in one sentence.
+ *
+ * **It no longer repeats the date.** The due-date field sits directly above
+ * this card, so "Due 8/10/2026, then every 6 months" put the same day on
+ * screen twice, a card apart — which read as two date controls stacked and had
+ * somebody asking which one was real. The date is stated once, where it can be
+ * changed; this says only the part that field cannot: what happens next.
+ */
 function describeRepeat(snag: Snag): string {
   if (!snag.repeatDays) return '';
   const every = describeCycle(snag.repeatDays);
-  const when = snag.dueAt ? new Date(snag.dueAt).toLocaleDateString() : 'once you set a date';
-  return `Due ${when}, then every ${every} after it's marked done.`;
+  if (!snag.dueAt) return `Set a date above, then every ${every} after it's marked done.`;
+  return `Then every ${every} after it's marked done.`;
 }
 
 export default function SnagDetailScreen() {
@@ -115,8 +138,11 @@ export default function SnagDetailScreen() {
   const [editing, setEditing] = useState(false);
   /** The day the first one lands, when none of the three presets is the answer. */
   const [dueOpen, setDueOpen] = useState(false);
-  /** The place's record, for the read-only list of what is in this room. */
+  /** The place's record, read when the picker opens rather than on page load. */
   const [things, setThings] = useState<Thing[]>([]);
+  const [thingsLoading, setThingsLoading] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const thingsFor = useRef<string | null>(null);
   /** What has been written about the same asset, on its other jobs. */
   const [thingNotes, setThingNotes] = useState<ThingNote[]>([]);
 
@@ -141,12 +167,6 @@ export default function SnagDetailScreen() {
         ? await getThingNotes(next.thingId, next.id).catch(() => [])
         : []);
       setPhotoUrls(await getFileUrls(next.photoPaths));
-
-      // What is recorded in this place, for the read-only list of what is in
-      // this room. Never fatal and never awaited by anything that renders the
-      // job itself: a list of the room's appliances is the least important
-      // thing on this page and must not be what stops the notes appearing.
-      getThings(next.propertyId).then(setThings).catch(() => setThings([]));
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'It may have been deleted.');
       navigation.goBack();
@@ -158,16 +178,59 @@ export default function SnagDetailScreen() {
   }, [load]);
 
   /**
-   * What is recorded in this job's room.
+   * What this job says it is about, straight off the row.
    *
-   * `thingsInArea` takes `Thing[]`, which is what keeps a ghost out of here:
-   * a suggestion is a `RoomSuggestion` with no id, so the kitchen's dashed
-   * "Rangehood" prompt can never be listed as something the house has.
+   * It used to be `thingsInArea(things, snag.room)` — the room's whole record,
+   * printed inline. That answered a question nobody asked and read as things
+   * already attached. `snags_with_details.linked_things` is the answer itself,
+   * so the card needs no second read to draw itself and cannot drift from what
+   * the database holds.
    */
-  const linked = useMemo(
-    () => (snag ? thingsInArea(things, snag.room) : []),
-    [things, snag?.room]
-  );
+  const linked = snag?.linkedThings ?? [];
+
+  /**
+   * The picker reads the place's record, and only when it is opened.
+   *
+   * A once-in-a-job's-life decision on a page people open constantly: spending
+   * a request on every visit to answer a question nobody asked is the waste the
+   * inline list already charged. Keyed by the snag's own property, so it can
+   * never offer the bach's appliances for a job at the house.
+   */
+  async function openAssets() {
+    if (!snag || busy) return;
+    setPicking(true);
+    if (thingsFor.current === snag.propertyId) return;
+    setThingsLoading(true);
+    try {
+      setThings(await getThings(snag.propertyId));
+      thingsFor.current = snag.propertyId;
+    } catch {
+      // The sheet still opens, with its own words for an empty record. A failed
+      // read here must not be a dead modal.
+    } finally {
+      setThingsLoading(false);
+    }
+  }
+
+  /** Replacing the whole set, which is the one call the server offers. */
+  async function saveAssets(ids: string[]) {
+    if (!snag) return;
+    setBusy(true);
+    try {
+      await setSnagThings(snag.id, ids);
+      setSnag(await getSnag(snag.id));
+      setPicking(false);
+    } catch (err: any) {
+      showAlert("Couldn't save that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The × on a row: the same call, one short. */
+  async function unlink(id: string) {
+    await saveAssets(linked.filter((one) => one.id !== id).map((one) => one.id));
+  }
 
   /**
    * The typed date, committed once somebody leaves the box.
@@ -502,32 +565,225 @@ export default function SnagDetailScreen() {
 
 
 
-        {/* ── Status ──
-            No "Start it". Nobody pressed it: people commented on things and
-            assigned them to each other while the list went on claiming nothing
-            had been touched. Doing something about a snag is the evidence that
-            it has been started, so the server moves it — see
-            20260912140000_work_starts_itself.sql. Finishing is the one state
-            change that still needs saying out loud. */}
-        <View style={styles.statusRow}>
-          {snag.status !== 'done' ? (
-            <Button
-              label="Mark done"
-              onPress={() => handleStatus('done')}
+        {/* ── Linked assets ──
+            **What the job is about, not what the room holds.** This card
+            printed the whole room's record inline — nine appliances, a screen
+            of vertical rent on a page people open constantly — which read as
+            nine things already attached to this snag when it was really the
+            inventory answering a question nobody had asked. A list of what is
+            *selected* belongs on the page; a list of what *could be* belongs
+            behind a control. See `LinkAssetsSheet`.
+
+            It holds many now rather than one: a leak under the sink is about
+            the mixer *and* the waste trap. `home.snag_things` carries it, and
+            saying so still does not start the job — that is the tail of
+            capture, and `set_snag_things` touches neither `status` nor
+            `updated_at`.
+
+            The room chip on each row is what makes the card legible without
+            opening anything: the noun, the model somebody came to read, and
+            where it is. */}
+        <Card elevation="md" style={styles.section}>
+          <View style={styles.assetHead}>
+            <Text style={styles.sectionTitle}>
+              {linked.length > 0 ? `Linked assets (${linked.length})` : 'Linked assets'}
+            </Text>
+            {linked.length > 0 ? (
+              <Pressable
+                onPress={openAssets}
+                disabled={busy}
+                style={styles.assetAdd}
+                accessibilityRole="button"
+                accessibilityLabel="Add asset"
+              >
+                <Icon name="add" size="sm" color={Colors.primary} />
+                <Text style={styles.assetAddLabel}>Add asset</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          {linked.length === 0 ? (
+            /* Dashed rather than filled, for the reason a House-tab suggestion
+               is dashed: it is an offer, and nothing is wrong with a job that
+               never takes it. Most jobs are about nothing in the record. */
+            <Pressable
+              onPress={openAssets}
               disabled={busy}
-              icon="checkmark-circle-outline"
-              style={styles.statusButton}
-            />
+              style={styles.assetEmpty}
+              accessibilityRole="button"
+              accessibilityLabel="Link an appliance or fixture"
+            >
+              <Icon name="add" size="sm" color={Colors.primary} />
+              <Text style={styles.assetAddLabel}>Link an appliance or fixture</Text>
+            </Pressable>
           ) : (
-            <Button
-              label="Reopen"
-              variant="outline"
-              onPress={() => handleStatus('open')}
-              disabled={busy}
-              style={styles.statusButton}
-            />
+            linked.map((item) => (
+              <View key={item.id} style={styles.assetRow}>
+                <Pressable
+                  onPress={() => navigation.navigate('ThingDetail', { thingId: item.id })}
+                  style={styles.assetOpen}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${linkedHeadline(item)}`}
+                >
+                  <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
+                  <View style={styles.assetBody}>
+                    <Text style={styles.assetName} numberOfLines={1}>
+                      {linkedHeadline(item)}
+                    </Text>
+                    {item.make || item.model ? (
+                      <Text style={styles.assetSpec} numberOfLines={1}>
+                        {[item.make, item.model].filter(Boolean).join(' ')}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {item.room ? <Text style={styles.assetRoom}>{item.room}</Text> : null}
+                  <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+                </Pressable>
+                {/* A sibling of the door rather than a child of it — a
+                    Pressable inside a Pressable is a coin toss about which one
+                    gets the tap, the rule the photo tile already pays. */}
+                <Pressable
+                  onPress={() => unlink(item.id)}
+                  disabled={busy}
+                  style={styles.assetClear}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Unlink ${linkedHeadline(item)}`}
+                >
+                  <Icon name="close" size="sm" color={Colors.textMuted} />
+                </Pressable>
+              </View>
+            ))
           )}
-        </View>
+        </Card>
+
+        {/* ── Anything to pick up ──
+            Its own card, under the notes, where a card of three unrelated
+            triage controls used to stand.
+
+            *Sort it out* held urgency, this list, and who was doing it. Two of
+            those are gone — priority because a household list is a dozen small
+            jobs none of which is an emergency, and an assignee because two
+            people in one house tell each other out loud — and a card holding
+            one thing is not a card, it is a heading pretending to be a
+            category.
+
+            **It belongs under the notes and nowhere else.** The trip to the
+            shop is the single most common reason a small job sits for weeks, so
+            this is the part of triage that actually moves work; the note above
+            it is why the screen was opened. Everything else on the page reads
+            in that order now.
+
+            Changing the list is one of the four things that start a job
+            (`v_started`), because deciding what to buy is deciding to do the
+            work. Ticking one off is not — that is `set_part_bought`, which
+            touches neither the status nor `updated_at`, and is a separate
+            function precisely so it cannot. */}
+        <Card elevation="md" style={styles.section}>
+          <Text style={styles.sectionTitle}>Anything to pick up?</Text>
+          {/* A tick told you a trip was needed and not what for, which is the
+              half that actually blocks a small job for weeks. Optional: most
+              jobs need nothing, and an empty list is the resting state. */}
+          {snag.parts.length > 0 ? (
+            <View style={styles.partsList}>
+              {snag.parts.map((item, index) => {
+                const got = snag.bought.includes(item);
+                return (
+                  <View key={`${item}-${index}`} style={styles.partRow}>
+                    {/* Ticking is its own write and deliberately not a `patch`:
+                        changing the list starts the job, and buying something
+                        off it is not starting anything. It is also where a
+                        mis-tap in an aisle gets undone, which is why the row
+                        stays on the trip sheet rather than vanishing. */}
+                    <Pressable
+                      onPress={() => tick(item, !got)}
+                      disabled={busy}
+                      style={styles.partTick}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: got }}
+                      accessibilityLabel={got ? `${item}, got it` : `${item}, tick off`}
+                    >
+                      <Icon
+                        name={got ? 'checkmark-circle' : 'ellipse-outline'}
+                        size="sm"
+                        color={got ? Colors.primary : Colors.textMuted}
+                      />
+                    </Pressable>
+                    <Text style={[styles.partText, got && styles.partTextGot]}>{item}</Text>
+                    <Pressable
+                      onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
+                      disabled={busy}
+                      style={styles.partRemove}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${item}`}
+                    >
+                      <Icon name="close" size="sm" color={Colors.textMuted} />
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+          <View style={styles.partAddRow}>
+            <TextInput
+              style={styles.partInput}
+              value={partDraft}
+              onChangeText={setPartDraft}
+              placeholder="Hinge, wall plugs, a filter…"
+              placeholderTextColor={Colors.textMuted}
+              maxLength={60}
+              returnKeyType="done"
+              onSubmitEditing={addPart}
+              blurOnSubmit={false}
+              accessibilityLabel="Something to pick up"
+            />
+            {/* A word rather than a bare +. The box beside it takes a noun
+                nobody has typed before, so the control next to it has to say
+                what pressing it does — and the + was a 48px target carrying no
+                label on the one card that is a list somebody adds to. */}
+            <Pressable
+              onPress={addPart}
+              disabled={busy || !partDraft.trim()}
+              style={[styles.partAdd, (busy || !partDraft.trim()) && styles.partAddOff]}
+              accessibilityRole="button"
+              accessibilityLabel="Add to the shopping list"
+            >
+              <Text
+                style={[
+                  styles.partAddLabel,
+                  (busy || !partDraft.trim()) && styles.partAddLabelOff,
+                ]}
+              >
+                Add
+              </Text>
+            </Pressable>
+          </View>
+        </Card>
+
+        {/* ── What came back ──
+            Below the notes and above triage: the note the other person left is
+            still the most common reason this screen is open, and this is the
+            thing that answers the controls underneath it. A suggested part is
+            an offer with a + beside it — accepting one is what puts it on the
+            shopping list, and that tap is what starts the job. */}
+        {advice ? (
+          <AdviceCard
+            advice={advice}
+            parts={snag.parts}
+            busy={busy}
+            onAccept={(item) => patch({ parts: [...snag.parts, item] })}
+            onRemove={async () => {
+              setBusy(true);
+              try {
+                await deleteSnagAdvice(snag.id);
+                setAdvice(null);
+              } catch (err: any) {
+                showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        ) : null}
 
         {/* ── Notes ──
             Above triage, not below it. What the other person wrote is the
@@ -623,200 +879,6 @@ export default function SnagDetailScreen() {
           </Card>
         ) : null}
 
-        {/* ── What came back ──
-            Below the notes and above triage: the note the other person left is
-            still the most common reason this screen is open, and this is the
-            thing that answers the controls underneath it. A suggested part is
-            an offer with a + beside it — accepting one is what puts it on the
-            shopping list, and that tap is what starts the job. */}
-        {advice ? (
-          <AdviceCard
-            advice={advice}
-            parts={snag.parts}
-            busy={busy}
-            onAccept={(item) => patch({ parts: [...snag.parts, item] })}
-            onRemove={async () => {
-              setBusy(true);
-              try {
-                await deleteSnagAdvice(snag.id);
-                setAdvice(null);
-              } catch (err: any) {
-                showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
-              } finally {
-                setBusy(false);
-              }
-            }}
-          />
-        ) : null}
-
-        {/* ── Anything to pick up ──
-            Its own card, under the notes, where a card of three unrelated
-            triage controls used to stand.
-
-            *Sort it out* held urgency, this list, and who was doing it. Two of
-            those are gone — priority because a household list is a dozen small
-            jobs none of which is an emergency, and an assignee because two
-            people in one house tell each other out loud — and a card holding
-            one thing is not a card, it is a heading pretending to be a
-            category.
-
-            **It belongs under the notes and nowhere else.** The trip to the
-            shop is the single most common reason a small job sits for weeks, so
-            this is the part of triage that actually moves work; the note above
-            it is why the screen was opened. Everything else on the page reads
-            in that order now.
-
-            Changing the list is one of the four things that start a job
-            (`v_started`), because deciding what to buy is deciding to do the
-            work. Ticking one off is not — that is `set_part_bought`, which
-            touches neither the status nor `updated_at`, and is a separate
-            function precisely so it cannot. */}
-        <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Anything to pick up?</Text>
-          {/* A tick told you a trip was needed and not what for, which is the
-              half that actually blocks a small job for weeks. Optional: most
-              jobs need nothing, and an empty list is the resting state. */}
-          {snag.parts.length > 0 ? (
-            <View style={styles.partsList}>
-              {snag.parts.map((item, index) => {
-                const got = snag.bought.includes(item);
-                return (
-                  <View key={`${item}-${index}`} style={styles.partRow}>
-                    {/* Ticking is its own write and deliberately not a `patch`:
-                        changing the list starts the job, and buying something
-                        off it is not starting anything. It is also where a
-                        mis-tap in an aisle gets undone, which is why the row
-                        stays on the trip sheet rather than vanishing. */}
-                    <Pressable
-                      onPress={() => tick(item, !got)}
-                      disabled={busy}
-                      style={styles.partTick}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: got }}
-                      accessibilityLabel={got ? `${item}, got it` : `${item}, tick off`}
-                    >
-                      <Icon
-                        name={got ? 'checkmark-circle' : 'ellipse-outline'}
-                        size="sm"
-                        color={got ? Colors.primary : Colors.textMuted}
-                      />
-                    </Pressable>
-                    <Text style={[styles.partText, got && styles.partTextGot]}>{item}</Text>
-                    <Pressable
-                      onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
-                      disabled={busy}
-                      style={styles.partRemove}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove ${item}`}
-                    >
-                      <Icon name="close" size="sm" color={Colors.textMuted} />
-                    </Pressable>
-                  </View>
-                );
-              })}
-            </View>
-          ) : null}
-          <View style={styles.partAddRow}>
-            <TextInput
-              style={styles.partInput}
-              value={partDraft}
-              onChangeText={setPartDraft}
-              placeholder="Hinge, wall plugs, a filter…"
-              placeholderTextColor={Colors.textMuted}
-              maxLength={60}
-              returnKeyType="done"
-              onSubmitEditing={addPart}
-              blurOnSubmit={false}
-              accessibilityLabel="Something to pick up"
-            />
-            <Pressable
-              onPress={addPart}
-              disabled={busy || !partDraft.trim()}
-              style={[styles.partAdd, (busy || !partDraft.trim()) && styles.partAddOff]}
-              accessibilityRole="button"
-              accessibilityLabel="Add to the shopping list"
-            >
-              <Icon
-                name="add"
-                size="md"
-                color={busy || !partDraft.trim() ? Colors.textMuted : Colors.white}
-              />
-            </Pressable>
-          </View>
-        </Card>
-
-        {/* ── Linked assets ──
-            What is recorded in this room, as a list to read.
-
-            It replaced two controls that both *wrote*: *Part of a bigger job*,
-            which set `project_id`, and *Say what it's about*, which set
-            `thing_id` through a picker over the whole house record. Neither
-            question was one somebody standing on this page arrives wanting to
-            answer — they were tagging, and tagging is capture's job — and both
-            put a chooser on a page that is otherwise read far more often than
-            it is edited.
-
-            **The payoff was never the tag, it was the model number.** A snag
-            about the heat pump was worth linking because eight months later
-            somebody is in a shop wanting `MSZ-AP50VGK`. This gives them that
-            without asking for anything: the room is already on the job, and the
-            things in that room are the shortlist a human would have picked
-            from. One line each, tapping through to the full record.
-
-            Three rules:
-
-            - **It writes nothing.** No tag, no link, no status — the same rule
-              the Schedule tab holds to, and for the same reason: the moment
-              there are two ways to say what a job is about, neither is
-              trustworthy.
-            - **Ghosts cannot appear here, and that is the type rather than a
-              filter.** `thingsInArea` takes `Thing[]`; a suggestion is a
-              `RoomSuggestion` with no id, so a dashed prompt for a rangehood
-              nobody has recorded can never be offered as an answer.
-            - **It is absent entirely when the room holds nothing**, rather than
-              an empty heading. A section with nothing in it is the app asking
-              somebody to read a question it cannot answer.
-
-            The read is not fatal and is not awaited by anything on the page: a
-            list of what is in the room is the least important thing here, and
-            it must never be what stops a job's notes rendering. */}
-        {linked.length > 0 ? (
-          <Card elevation="md" style={styles.section}>
-            <Text style={styles.sectionTitle}>Linked assets</Text>
-            {linked.map((item) => (
-              <Pressable
-                key={item.id}
-                onPress={() => navigation.navigate('ThingDetail', { thingId: item.id })}
-                style={styles.assetRow}
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${thingHeadline(item)}`}
-              >
-                <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
-                {/* Stacked, not laid across. Side by side, the mono spec took
-                    its intrinsic width and the name — flexed, `minWidth: 0` —
-                    shrank to fit whatever was left: "Microwave" came out as
-                    **M** beside `Samsung MS32J5133B/MS40J5133B`, and the
-                    rangehood as **Ra…**. That is the two-column row having
-                    nowhere to put a long answer, which is the same failure the
-                    thing page's spec sheet and a project's totals both fixed by
-                    un-columning themselves.
-                    Both lines matter here and neither can be the one that
-                    gives way: the noun is how you find the row, the model is
-                    what you came to read. So each gets a line of its own. */}
-                <View style={styles.assetBody}>
-                  <Text style={styles.assetName} numberOfLines={1}>{thingHeadline(item)}</Text>
-                  {item.make || item.model ? (
-                    <Text style={styles.assetSpec} numberOfLines={1}>
-                      {[item.make, item.model].filter(Boolean).join(' ')}
-                    </Text>
-                  ) : null}
-                </View>
-                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
-              </Pressable>
-            ))}
-          </Card>
-        ) : null}
-
         {/* ── When it's due ──
             Its own field, and it was not reachable at all except through the
             repeat card — so a one-off job could never be given a date. That
@@ -896,6 +958,33 @@ export default function SnagDetailScreen() {
             </Pressable>
           ) : null}
         </Card>
+        {/* ── Status ──
+            No "Start it". Nobody pressed it: people commented on things and
+            assigned them to each other while the list went on claiming nothing
+            had been touched. Doing something about a snag is the evidence that
+            it has been started, so the server moves it — see
+            20260912140000_work_starts_itself.sql. Finishing is the one state
+            change that still needs saying out loud. */}
+        <View style={styles.statusRow}>
+          {snag.status !== 'done' ? (
+            <Button
+              label="Mark done"
+              onPress={() => handleStatus('done')}
+              disabled={busy}
+              icon="checkmark-circle-outline"
+              style={styles.statusButton}
+            />
+          ) : (
+            <Button
+              label="Reopen"
+              variant="outline"
+              onPress={() => handleStatus('open')}
+              disabled={busy}
+              style={styles.statusButton}
+            />
+          )}
+        </View>
+
       </ScrollView>
 
       {/* ── Save ──
@@ -1070,6 +1159,18 @@ export default function SnagDetailScreen() {
         </View>
       </Modal>
 
+      <LinkAssetsSheet
+        visible={picking}
+        things={things}
+        loading={thingsLoading}
+        linkedIds={linked.map((one) => one.id)}
+        room={snag.room}
+        locations={locations}
+        busy={busy}
+        onSave={saveAssets}
+        onCancel={() => setPicking(false)}
+      />
+
       {/* One button, and it goes back to the list — which is where the reward
           actually is, because the snag has just left it. */}
       <DoneDialog
@@ -1142,13 +1243,61 @@ const styles = StyleSheet.create({
     fontWeight: Typography.medium,
     color: Colors.primary,
   },
+  assetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
+  assetAdd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingLeft: Spacing.sm,
+  },
+  assetAddLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.primary,
+  },
+  // Dashed and sunken: an offer rather than an instruction. Most jobs are
+  // about nothing in the record, and an empty state that shouts is an empty
+  // state that reads as an unfinished form.
+  assetEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+    marginTop: Spacing.sm,
+    borderRadius: Radius.button,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.border,
+    backgroundColor: Colors.sunken,
+  },
   assetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  assetOpen: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
     minHeight: MIN_TOUCH_TARGET,
     paddingVertical: Spacing.xs,
   },
+  assetClear: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assetRoom: { fontSize: Typography.xs, color: Colors.textMuted },
   // `minWidth: 0` so a long model number wraps its own line rather than
   // pushing the chevron off the card — the same trap anything flexed beside
   // mono text or a TextInput falls into on web.
@@ -1302,14 +1451,23 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   partAdd: {
-    width: MIN_TOUCH_TARGET,
+    minWidth: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.md,
     borderRadius: Radius.input,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Neutral rather than faded when there is nothing to add: fern at half
+  // strength is a pale sage that reads as broken rather than as not-ready.
   partAddOff: { backgroundColor: Colors.sunken },
+  partAddLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
+  },
+  partAddLabelOff: { color: Colors.textMuted },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',

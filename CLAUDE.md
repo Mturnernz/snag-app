@@ -296,15 +296,20 @@ iOS-only — and `Keyboard` is an empty stub in react-native-web.
 **There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
 two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
 be a category. The order down the screen is now: photo strip, headline, status, **Notes**, the
-asset's own history, what came back from an assessment, **Anything to pick up?**, **Linked
-assets**, **When's it due?**, **Schedule a recurring job**.
+**Linked assets**, **Anything to pick up?**, what came back from an assessment, **Notes**, the
+asset's own history, **When's it due?**, **Schedule a recurring job**, and *Mark done* last.
 
-**The shopping list reads before the asset list**, and the assessment card stays directly above
-it. The trip to the shop is the single most common reason a small job sits for weeks, so that list
-is the part of this page that moves work, where the asset list is reference somebody consults. The
-assessment card rode up with it rather than staying put: the parts it offers with a `+` land in
-the list underneath, and a card whose suggestions are two cards away from where they go is a card
-nobody connects to anything.
+**The order is the order of inspecting and fixing something**: what the job is about, then what to
+do about it, then when, then the one state change a person still makes by hand. The asset card
+earned the top slot by shrinking — as a nine-row inventory it belonged below the work, as a
+two-line summary of what this job concerns it is the first thing worth knowing. The assessment
+card stays directly above the shopping list, because the parts it offers with a `+` land in that
+list and a card whose suggestions are two cards away is one nobody connects to anything.
+
+**Mark done sits at the foot, not near the top.** Pinned high it competed with Save in the sticky
+footer — two primary actions, one of which is a state change and the other a way out. Finishing is
+the one state change only a person can make, and it is the *last* thing that happens, so it reads
+last.
 
 **Notes sit near the top, above every control.** This product has no notifications and never
 will, so a note is the only way one person tells the other anything — "ordered the part, arriving
@@ -557,45 +562,59 @@ job**, which is the existing rule and the reason editing is safe: `update_snag` 
 refuses to leave a photo-less snag with no words, in those words, rather than letting
 `snags_has_something` surface as a constraint name.
 
-**Linked assets is a list to read, and it writes nothing.** It replaced two controls that both
-*wrote*: *Part of a bigger job*, which set `project_id` through a picker over the renovations, and
-*Say what it's about*, which set `thing_id` through a picker over the whole house record. Neither
-question is one somebody standing on this page arrives wanting to answer — that is tagging, and
-tagging is capture's job — and both put a chooser on a page read far more often than it is edited.
+**Linked assets is what the job is about — many of them, chosen behind a picker.**
 
-**But the payoff was never the tag, it was the model number.** A snag about the heat pump was
-worth linking because eight months later somebody is in a shop wanting `MSZ-AP50VGK`. The room is
-already on the job, so the things recorded *in that room* are the shortlist a person would have
-picked from, and the card offers them without asking for anything: tapping through to the full
-record.
+It began as a list *to read*: the room's whole record printed inline, replacing two controls that
+wrote (*Part of a bigger job* and *Say what it's about*). That fixed the right problem and created
+another. Nine appliances rendered on the page read as **nine things already attached to this
+snag**, when they were really the inventory answering a question nobody had asked — and they cost
+a screen of vertical rent on a page people open constantly. **A list of what is *selected* belongs
+on the page; a list of what *could be* belongs behind a control.**
 
-**A row is stacked — the noun, then the model beneath it.** It was one line with the name flexed
-and the mono spec beside it, which meant the spec took its intrinsic width and the name shrank to
-whatever was left: *Microwave* rendered as **M** next to `Samsung MS32J5133B/MS40J5133B`, and the
-rangehood as **Ra…**. That is a two-column row having nowhere to put a long answer — the same
-failure the thing page's spec sheet and a project's totals both fixed by un-columning themselves.
-Here **neither line can be the one that gives way**: the noun is how you find the row and the
-model is what you came to read, so each gets a line.
+So the card shows only what is linked, with a counter, and the record moved into
+`LinkAssetsSheet`. And it is **many now rather than one**: a leak under the sink is about the
+mixer *and* the waste trap, and a kitchen job is very often about two appliances side by side.
+`home.snag_things` holds that (`20260920100000`), with `snags.thing_id`'s rows backfilled into it.
 
-Three rules:
+- **A join table, not a second column.** Two writers of one fact is the failure this schema keeps
+  naming, and a `thing_id` kept in step with the first row of a set is exactly that. The old column
+  is left unread on the same terms as `priority`: `thing_name`/`make`/`model` still read from it
+  for the extract's *About* column, and deleting it would rewrite what somebody said.
+- **`set_snag_things` replaces the whole set in one call.** A picker with checkboxes and a Done
+  button is answering one question, and two RPCs would let a half-finished answer reach the row. It
+  refuses things recorded at another place — the read policy would hide half of what was just
+  written — and it **touches neither `status` nor `updated_at`**, because saying what a job is
+  about is the tail of capture. It is its own function so nobody can smuggle the link in beside
+  eight other fields, the argument `set_part_bought` and `set_quote_status` are separate for.
+- **The card draws itself from the row.** `snags_with_details.linked_things` carries id, name,
+  room, make, model and kind, so the page needs no second read and cannot drift from what the
+  database holds. Deliberately not whole `Thing` rows: a job carrying a spec sheet per link pays
+  for it on every open.
+- **Cascade, unlike `snags.thing_id`.** That column is `on delete set null` because what was wrong
+  with the old dishwasher is still what was wrong — the *job* outlives its subject. A row in the
+  join table is not a job, it is the statement that two things are related, and that statement
+  outliving one of them is worth nothing.
 
-- **It writes nothing** — no tag, no link, no status. The Schedule tab's rule one screen further
-  on: the moment there are two ways to say what a job is about, neither is trustworthy.
-- **Ghosts cannot appear, and that is the type rather than a filter.** `thingsInArea` takes
-  `Thing[]`; a suggestion is a `RoomSuggestion` with no id, so a dashed prompt for a rangehood
-  nobody has recorded can never be listed as something the house has.
-- **It is absent entirely when the room holds nothing**, rather than an empty heading, and the
-  read is **never fatal and never awaited** by anything that renders the job itself. A list of the
-  room's appliances is the least important thing on this page and must not be what stops the notes
-  appearing.
+The picker itself: **checkboxes rather than chevrons**, because the row's job there is to be
+chosen and a chevron promises navigation; **nothing written until Done**; **opens filtered to the
+job's room** and says so, with *Everywhere* as the way out, since houses are not laid out the way
+a catalogue thinks; and a **search that reaches the whole house past that filter**, because
+somebody typing a model number has named the thing precisely and answering "not in the Kitchen"
+would be the filter overruling the better signal. `assetPickerOrder` puts what is already linked
+first, then the room, then the rest — alphabetical inside each band, because a card is read rather
+than ranked.
 
-**So nothing in the app sets `snags.thing_id` or `snags.project_id` any more**, and that is the
-cost, stated plainly. Rows linked before this keep their link: the *Also said about…* history card
-and the extract's *About* column still render for them, and `on delete set null` still means what
-was wrong with the old dishwasher is still what was wrong. But the link can only shrink from here.
-`LinkThingSheet`, `LinkProjectSheet` and the create-a-thing-from-a-job path are gone with the
-controls that opened them. If the link is ever wanted back, it belongs where the answer is cheap —
-at capture, with the room already chosen — and not as a picker on the page people open constantly.
+**A ghost still cannot appear, and that is the type rather than a filter.** The sheet takes
+`Thing[]`; a suggestion is a `RoomSuggestion` with no id, so a dashed prompt for a rangehood nobody
+has recorded can never be checked.
+
+**A row is stacked — the noun, then the model beneath it**, with the room as a muted chip and the
+× as a sibling of the door rather than a child of it. It was one line with the name flexed and the
+mono spec beside it, which meant the spec took its intrinsic width and the name shrank to whatever
+was left: *Microwave* rendered as **M** next to `Samsung MS32J5133B/MS40J5133B`. That is a
+two-column row having nowhere to put a long answer — the same failure the thing page's spec sheet
+and a project's totals both fixed by un-columning themselves. Neither line can be the one that
+gives way: the noun is how you find the row and the model is what you came to read.
 
 **And the asset's own history is pulled through.** A card under Notes — *Also said about the heat
 pump* — carries the comments from that asset's **other** jobs, each naming the snag it came from and
@@ -609,6 +628,11 @@ read that fails is **not fatal**, because history nobody can fetch must not take
 RLS does the filtering rather than the query pretending to: the comments policy asks each snag's
 property, so this returns exactly what this person could have read by opening those jobs one at a
 time.
+
+**And the repeat card no longer repeats the date.** The due-date field sits directly above it, so
+*"Due 8/10/2026, then every 6 months"* put the same day on screen twice a card apart — which read
+as two stacked date controls and had somebody asking which was real. The date is stated once,
+where it can be changed; the card says only what that field cannot: what happens next.
 
 **And the repeat card asks one word.** The heading is **Schedule a recurring job** — it says what
 the card *does*, because *Does it come round again?* made somebody hunting for a way to schedule

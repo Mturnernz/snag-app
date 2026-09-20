@@ -207,7 +207,7 @@ describe('choosing the room', () => {
   // every other one.
   it('opens the job when the last step is finished with', async () => {
     const { result, onOpenDetail } = await openOnRoom();
-    await TestRenderer.act(async () => { byLabel(result, 'Sort it out').props.onPress(); });
+    await TestRenderer.act(async () => { byLabel(result, 'Submit').props.onPress(); });
     expect(onOpenDetail).toHaveBeenCalled();
   });
 });

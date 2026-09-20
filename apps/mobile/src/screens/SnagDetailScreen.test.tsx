@@ -93,6 +93,19 @@ async function arrange(row = snag()) {
 const button = (r: ReturnType<typeof render>, label: string) =>
   r.root.findAll((n: any) => typeof n.type !== 'string' && n.props?.label === label)[0];
 
+/**
+ * The last button with this label, which is the one in the sheet on top.
+ *
+ * The page itself now carries a pinned **Save**, and the edit sheet carries its
+ * own — two controls with the same word on two surfaces, one of which is a
+ * modal covering the other. Only one is ever visible to a person, but both are
+ * in the tree, and the sheet renders after the page it sits over.
+ */
+const topButton = (r: ReturnType<typeof render>, label: string) => {
+  const all = r.root.findAll((n: any) => typeof n.type !== 'string' && n.props?.label === label);
+  return all[all.length - 1];
+};
+
 const press = async (node: any) => {
   await TestRenderer.act(async () => { await node.props.onPress(); });
 };
@@ -170,7 +183,7 @@ describe('editing a job after it was filed', () => {
     // question. The snag is in the Bathroom, so that is what the field reads.
     await press(byLabel(r, 'Room: Bathroom. Change it'));
     await press(byLabel(r, 'Kitchen'));
-    await press(button(r, 'Save'));
+    await press(topButton(r, 'Save'));
 
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', {
       description: 'The cistern drips',
@@ -188,7 +201,7 @@ describe('editing a job after it was filed', () => {
       && n.props?.accessibilityLabel === "What's wrong?")[0];
     await TestRenderer.act(async () => { input.props.onChangeText('   '); });
 
-    expect(button(r, 'Save').props.disabled).toBe(true);
+    expect(topButton(r, 'Save').props.disabled).toBe(true);
     expect(r.queryByText(
       'This one has no photo, so it needs a few words — otherwise there is nothing to go on.',
     )).not.toBeNull();
@@ -440,5 +453,75 @@ describe('scheduling a recurring job', () => {
 
     await press(button(r, 'No'));
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: null });
+  });
+});
+
+// ------------------------------------------------------------------ saving
+//
+// It closes; it does not collect. Every control on this page still writes when
+// it is pressed — triage is a series of small independent decisions, and a
+// Save that held them would turn sorting twelve jobs into forty taps and put
+// the tick you make in a shop aisle behind a second press.
+//
+// What it adds is a way out that reads as finished, and the page finally
+// saying that the taps landed.
+
+describe('the Save button', () => {
+  const texts = (r: ReturnType<typeof render>) =>
+    r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
+
+  const field = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && !!n.props?.onChangeText
+        && n.props?.accessibilityLabel === label,
+      { deep: true },
+    )[0];
+
+  it('sits on the page and returns to the list', async () => {
+    const r = await arrange();
+    await press(button(r, 'Save'));
+    expect(mock_goBack).toHaveBeenCalled();
+  });
+
+  it('writes nothing of its own when nothing was typed', async () => {
+    mock_updateSnag.mockClear();
+    const r = await arrange();
+    await press(button(r, 'Save'));
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+  });
+
+  it('says the taps already landed', async () => {
+    const r = await arrange();
+    expect(texts(r)).toContain('All changes saved');
+  });
+
+  // The due-date box is the only control here holding typed text, so it is the
+  // only branch in which "All changes saved" would be a lie.
+  it('admits when the typed date is still behind the row', async () => {
+    const r = await arrange(snag({ dueAt: null }));
+    await TestRenderer.act(async () => {
+      field(r, "When's it due?").props.onChangeText('8/11/2026');
+    });
+
+    expect(texts(r)).toContain('The date is not saved yet');
+    expect(texts(r)).not.toContain('All changes saved');
+  });
+
+  // `onBlur` is not guaranteed to have fired — on native, pressing a Pressable
+  // does not reliably blur a TextInput — so Save must not be the one button
+  // here that discards what somebody typed.
+  it('commits a typed date that was never blurred', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ dueAt: '2026-11-08T00:00:00.000Z' }));
+    const r = await arrange(snag({ dueAt: null }));
+
+    await TestRenderer.act(async () => {
+      field(r, "When's it due?").props.onChangeText('8/11/2026');
+    });
+    await press(button(r, 'Save'));
+
+    const [, update] = mock_updateSnag.mock.calls[0];
+    expect(new Date(update.dueAt).getDate()).toBe(8);
+    expect(mock_goBack).toHaveBeenCalled();
   });
 });

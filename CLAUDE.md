@@ -231,7 +231,11 @@ Five things about capture are load-bearing, and two of them are things it stoppe
 
   **Finishing the sheet opens the job**, rather than dropping back onto the list. The one moment
   somebody is certainly thinking about this job should not end by showing them every other one,
-  and everything the sheet stopped asking is decided on that page.
+  and everything the sheet stopped asking is decided on that page. The button says **Submit** —
+  not "Done", which would describe the sheet's own dismissal while it is actually navigating
+  somewhere, and not "Sort it out", which named the destination rather than the act. Note the snag
+  was already created before the sheet opened, which is the arrangement's whole point: Submit ends
+  capture rather than performing it.
 - **Priority is gone from the app, not moved.** It was a capture decision, defended as the one
   judgement only the person standing there can make; nearly everything was filed Low, which is the
   premise of this product rather than a finding. Moving it to triage did not save it — urgency is
@@ -256,6 +260,27 @@ immediately rather than collecting into a form with a Save button, because triag
 small independent decisions and a Save button turns sorting twelve items into forty taps. It is a
 **sheet rather than a push** for the same reason — though note react-native-web renders a modal
 presentation as a full screen, so that particular benefit is native-only.
+
+**There is a Save button, and it closes rather than collects.** Every control here still writes
+when it is pressed: a Save that held them would turn sorting twelve jobs into forty taps, and would
+put the tick somebody makes standing in a shop aisle behind a second press. So it buys two things
+this page could not do. It is a **way out that reads as finished** — a back chevron in the header
+is navigation, and somebody who has just set a date and added two parts wants somewhere to press
+meaning "done here". And its hint is the page **saying the taps landed**, which nothing ever did:
+the same silence the thing page's spec sheet was reversed to fix, where "the rows called `patch`
+without the toast it takes, so edits saved in silence".
+
+The hint is honest in both branches rather than always reassuring. The due-date box is the only
+control holding typed text, so it is the only thing a Save could still be waiting on: until it
+matches the row the bar reads *"The date is not saved yet"* rather than *"All changes saved"*.
+Pressing Save commits it first — `commitDue` is a no-op when the box matches — because **Save must
+not be the one button on this page that loses a typed value**, and `onBlur` is not guaranteed to
+have fired: on native, pressing a Pressable does not reliably blur a `TextInput`.
+
+It is a `StickyActionBar`, the same component and the same rules the thing page uses: the last flex
+child rather than absolutely positioned, so it can never overlap what it belongs to, and the
+keyboard inset applied by the screen because the bar's own handling is `Keyboard`-based and
+iOS-only — and `Keyboard` is an empty stub in react-native-web.
 
 **There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
 two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
@@ -578,8 +603,10 @@ twice already is the app asking a question that was answered a year ago.
 `SnagDetailScreen.test.tsx` pins the edit sheet writing both fields in one call, the refusal on a
 photo-less job with no words, the linked-assets list offering this room only and writing nothing,
 its absence when the room is empty, the page surviving a failed record read, the history card and
-its exclusion, the due date's day-first parse and its refusal of `31/02/2026`, and the repeat card
-explaining nothing until the answer is yes.
+its exclusion, the due date's day-first parse and its refusal of `31/02/2026`, the repeat card
+explaining nothing until the answer is yes, and the Save button — returning to the list, writing
+nothing of its own, saying which of the two things is true about the date, and committing a typed
+one that was never blurred.
 
 ### Finishing says so, and a repeat cannot finish
 

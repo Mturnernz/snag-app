@@ -140,14 +140,27 @@ export default function SnagListScreen() {
   const seenThisVisit = useRef(false);
 
   const propertyId = properties.length > 1 ? activeProperty?.id ?? null : null;
+  /**
+   * Projects off means the punch list goes too.
+   *
+   * A job filed against a renovation is reachable from that renovation's page,
+   * and with the tab gone there is no page — so what is left on the list is a
+   * row that names a job nothing can open. Asked of Postgres rather than
+   * filtered here, so the header count, the shopping pill and both extracts get
+   * the same answer rather than four subtractions that have to agree.
+   */
+  const excludeProjectSnags = !profile.projectsEnabled;
 
   const load = useCallback(async () => {
     try {
       const [open, finished] = await Promise.all([
-        getSnags({ propertyId, status: ['open', 'doing'] }, sort === 'due' ? 'due' : 'newest'),
+        getSnags(
+          { propertyId, excludeProjectSnags, status: ['open', 'doing'] },
+          sort === 'due' ? 'due' : 'newest',
+        ),
         // Small by construction — a household finishes a handful a week, and
         // only the last week of them is ever rendered.
-        getSnags({ propertyId, status: ['done'] }, 'newest'),
+        getSnags({ propertyId, excludeProjectSnags, status: ['done'] }, 'newest'),
       ]);
       setSnags(open);
       setDone(finished);
@@ -161,7 +174,7 @@ export default function SnagListScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propertyId, sort]);
+  }, [propertyId, sort, excludeProjectSnags]);
 
   useEffect(() => {
     setLoading(true);

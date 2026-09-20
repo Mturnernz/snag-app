@@ -26,12 +26,14 @@ const mock_signOut = jest.fn().mockResolvedValue({ forced: false });
 const mock_getAllProjects = jest.fn().mockResolvedValue([]);
 const mock_getSnags = jest.fn().mockResolvedValue([]);
 
+const mock_setProjectsEnabled = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => ({
   deleteMyAccount: (...a: unknown[]) => mock_deleteMyAccount(...a),
   getMyOrphanFilePaths: (...a: unknown[]) => mock_getMyOrphanFilePaths(...a),
   deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
   signOut: (...a: unknown[]) => mock_signOut(...a),
   upsertProfile: jest.fn().mockResolvedValue(undefined),
+  setProjectsEnabled: (...a: unknown[]) => mock_setProjectsEnabled(...a),
   getAllProjects: (...a: unknown[]) => mock_getAllProjects(...a),
   getSnags: (...a: unknown[]) => mock_getSnags(...a),
 }));
@@ -42,7 +44,7 @@ jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).
 function arrange() {
   (global as any).__household = {
     household: { id: 'h', name: 'Home', createdAt: '2026-01-01T00:00:00Z' },
-    profile: { id: 'me', displayName: 'Mike', createdAt: '2026-01-01T00:00:00Z' },
+    profile: { id: 'me', displayName: 'Mike', createdAt: '2026-01-01T00:00:00Z', projectsEnabled: true },
     members: [{ householdId: 'h', profileId: 'me', displayName: 'Mike', role: 'owner' }],
     properties: [],
     activeProperty: null,
@@ -234,5 +236,64 @@ describe('worth finishing', () => {
     mock_getSnags.mockRejectedValue(new Error('offline'));
     const r = await renderProfile();
     expect(r.getByText('Sign out')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------- projects off
+//
+// The one setting in this app that belongs to a person rather than to the
+// house. Everything else the schema remembers is per household or per property,
+// because there is one house and two people disagreeing about whether it has a
+// dryer is not a state worth modelling. A renovation is not that: not every
+// household has one, and a tab that answers nothing is a fifth of the only
+// navigation this app has.
+
+describe('putting projects away', () => {
+  const byLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+        && !!n.props?.onPress,
+      { deep: true }
+    )[0];
+
+  it('offers two named halves, with the one already true lit', async () => {
+    const r = await renderProfile();
+    expect(byLabel(r, 'Show projects').props.accessibilityState.selected).toBe(true);
+    expect(byLabel(r, 'Hide projects').props.accessibilityState.selected).toBe(false);
+  });
+
+  it('writes nothing when the answer already on screen is pressed again', async () => {
+    mock_setProjectsEnabled.mockClear();
+    const r = await renderProfile();
+    await TestRenderer.act(async () => { await byLabel(r, 'Show projects').props.onPress(); });
+    expect(mock_setProjectsEnabled).not.toHaveBeenCalled();
+  });
+
+  it('turns them off, and re-reads the account so the tab can go', async () => {
+    mock_setProjectsEnabled.mockClear();
+    const r = await renderProfile();
+    await TestRenderer.act(async () => { await byLabel(r, 'Hide projects').props.onPress(); });
+
+    expect(mock_setProjectsEnabled).toHaveBeenCalledWith(false);
+    // The navigator reads the answer off the profile in context, so the one
+    // that came back from the write has to be the one everything reads.
+    expect((global as any).__household.reloadAccount).toHaveBeenCalled();
+  });
+
+  it('says the jobs go too, because that is the surprising half', async () => {
+    const r = await renderProfile();
+    const said = r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
+    expect(said.some((t: string) => t.includes('jobs filed against a renovation'))).toBe(true);
+    expect(said.some((t: string) => t.includes('Nothing is deleted'))).toBe(true);
+  });
+
+  it('asks for neither the renovations nor their jobs once they are off', async () => {
+    mock_getAllProjects.mockClear();
+    mock_getSnags.mockClear();
+    (global as any).__household.profile.projectsEnabled = false;
+    await renderProfile();
+
+    expect(mock_getAllProjects).not.toHaveBeenCalled();
+    expect(mock_getSnags).toHaveBeenCalledWith({ excludeProjectSnags: true });
   });
 });

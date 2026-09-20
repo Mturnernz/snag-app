@@ -14,6 +14,7 @@ import Icon from '../components/Icon';
 import StatusBadge from '../components/StatusBadge';
 import DueBadge from '../components/DueBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
+import StickyActionBar from '../components/StickyActionBar';
 import PhotoViewer from '../components/PhotoViewer';
 import AdviceCard from '../components/AdviceCard';
 import DoneDialog from '../components/DoneDialog';
@@ -189,6 +190,29 @@ export default function SnagDetailScreen() {
       return;
     }
     await patch({ dueAt: new Date(`${parsed}T00:00:00`).toISOString() });
+  }
+
+  /**
+   * Whether the one box on this page that holds typed text is behind the row.
+   *
+   * Every other control wrote when it was pressed, so this is the only thing a
+   * Save button could still be waiting on — and the only branch in which
+   * "All changes saved" would be a lie.
+   */
+  const dueDirty = !!snag && dueDraft.trim() !== formatLooseDate(snag.dueAt);
+
+  /**
+   * Finishing with the page.
+   *
+   * Commits the typed date first, because `onBlur` is not guaranteed to have
+   * fired: on native, pressing a Pressable does not reliably blur a TextInput,
+   * so Save would otherwise be the one button here that discards what somebody
+   * typed. It is a no-op when the box already matches the row.
+   */
+  async function saveAndClose() {
+    if (busy) return;
+    await commitDue();
+    navigation.goBack();
   }
 
   /** Another angle, or the plate you went back for. */
@@ -805,6 +829,42 @@ export default function SnagDetailScreen() {
           ) : null}
         </Card>
       </ScrollView>
+
+      {/* ── Save ──
+          **It closes; it does not collect.** Every control on this page still
+          writes when it is pressed, because triage is a series of small
+          independent decisions and a Save button that held them would turn
+          sorting twelve jobs into forty taps — and would put the tick you make
+          standing in a shop aisle behind a second press.
+
+          So what is it for? Two things this page could not do before. It is a
+          **way out that reads as finished**: a back chevron in the header is
+          navigation, and somebody who has just set a date and added two parts
+          wants somewhere to press that means "done here". And the hint above it
+          is the page finally **saying that the taps landed** — nothing ever
+          confirmed a write, which is the exact failure the thing page's spec
+          sheet was reversed to fix ("the rows called `patch` without the toast
+          it takes, so edits saved in silence").
+
+          The hint is honest in both branches rather than always reassuring: the
+          due-date box is the one control that holds typed text, and until it is
+          committed there *is* something unsaved. Pressing Save commits it
+          first — `commitDue` is a no-op when the box matches the row — because
+          Save must not be the one button on this page that loses a typed value.
+
+          Last flex child rather than absolutely positioned, so it can never
+          overlap the content it belongs to. The keyboard inset is applied here
+          because StickyActionBar's own handling is `Keyboard`-based and
+          iOS-only, and `Keyboard` is an empty stub in react-native-web — which
+          is the build people install. */}
+      <View style={{ marginBottom: keyboard }}>
+        <StickyActionBar
+          hint={dueDirty ? 'The date is not saved yet' : 'All changes saved'}
+          hintTone={dueDirty ? 'warn' : 'muted'}
+        >
+          <Button label="Save" onPress={saveAndClose} loading={busy} fullWidth />
+        </StickyActionBar>
+      </View>
 
       <PhotoViewer
         visible={viewing !== null}

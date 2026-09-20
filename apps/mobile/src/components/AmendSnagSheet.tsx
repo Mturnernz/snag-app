@@ -207,13 +207,18 @@ export default function AmendSnagSheet({
  * same call `AddThingSheet` makes, and for the same reason: a Next beside a Skip
  * was two controls with one outcome.
  *
- * The room step's button says **Sort it out** rather than Done, because that is
- * what it does: it opens the job. "Done" would be the sheet describing its own
- * dismissal while actually navigating somewhere, which is the one thing a
- * button's words must not do.
+ * The last step's button says **Submit**. Not "Done", which would describe the
+ * sheet's own dismissal while it is actually navigating somewhere, and not
+ * "Sort it out", which named the destination rather than the act — somebody
+ * answering two questions about a thing they have just photographed is
+ * finishing filing it, and that is the word for it.
+ *
+ * Note the snag itself was already created before this sheet opened, which is
+ * the arrangement's whole point: nothing here can block anybody. So Submit ends
+ * capture rather than performing it.
  */
 function nextLabel(step: AmendStep, note: string): string {
-  if (step === 'room') return 'Sort it out';
+  if (step === 'room') return 'Submit';
   if (step === 'note' && note.trim() === '') return 'Skip for now';
   return 'Next';
 }

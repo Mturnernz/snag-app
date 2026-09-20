@@ -95,7 +95,10 @@ describe('ComposeBar', () => {
     const result = render(<ComposeBar pathPrefix="house-1" onAdd={onAdd} />);
 
     // The prompt never changes meaning, and the send button says one thing.
-    expect(field(result).props.placeholder).toBe('Add something…');
+    // It reads as the alternative to the camera now rather than as the bar's
+    // main offer, because a photograph *is* the snag and typing is the one
+    // with a keyboard in front of it.
+    expect(field(result).props.placeholder).toBe('or type it…');
 
     await TestRenderer.act(async () => field(result).props.onChangeText('Gutters'));
     await TestRenderer.act(async () => labelled(result, 'Add to the list').props.onPress());
@@ -121,5 +124,29 @@ describe('ComposeBar', () => {
     // 34 + padding would lift it a whole home indicator too far: the keyboard
     // already covers the inset it would otherwise clear.
     expect(style.paddingBottom).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------- camera first
+//
+// It was an icon-only circle the same size as the send button, beside a field
+// inviting words — which made photographing and typing read as two equal
+// offers. Nearly everything worth filing is in front of somebody when they
+// file it, so the shutter carries a word and the field is the alternative.
+
+describe('which way of filing is the default', () => {
+  it('names the camera on the button rather than leaving it an icon', () => {
+    const result = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
+    const camera = labelled(result, 'Take a photo');
+
+    const words = camera.findAllByType('Text' as any).map((n: any) => n.props.children);
+    expect(words).toContain('Photo');
+  });
+
+  it('still reaches the camera in one tap, never a chooser', async () => {
+    mock_takePhoto.mockClear();
+    const result = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
+    await TestRenderer.act(async () => labelled(result, 'Take a photo').props.onPress());
+    expect(mock_takePhoto).toHaveBeenCalled();
   });
 });

@@ -71,7 +71,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
   const off = busy || !pathPrefix;
 
   const cameraLabel = words?.cameraLabel ?? 'Take a photo';
-  const prompt = words?.placeholder ?? 'Add something…';
+  const prompt = words?.placeholder ?? 'or type it…';
   // The accessible name is the prompt without its trailing ellipsis: a screen
   // reader saying "Say what it is dot dot dot" is reading punctuation aloud.
   const promptLabel = prompt.replace(/[….]+$/, '');
@@ -128,6 +128,18 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
         },
       ]}
     >
+      {/* **The camera is the default way to log something, and it says so.**
+          It was an icon-only circle the same size as the send button beside a
+          field inviting words, which made photographing and typing read as two
+          equal offers — and typing is the one with a keyboard in front of it.
+          Nearly everything worth filing here is in front of somebody when they
+          file it, and a photograph *is* the snag: there is no title column
+          because a picture of the broken seat says what a title would. So the
+          shutter carries a word and the field is the alternative to it.
+
+          Still bottom-left, which is the easiest place on a phone to reach
+          one-handed — the old Add screen had it at the top, which is the
+          hardest — and still one tap to the camera, not to a chooser. */}
       <Pressable
         onPress={handlePhoto}
         disabled={off}
@@ -138,7 +150,10 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
         {busy ? (
           <ActivityIndicator color={Colors.white} />
         ) : (
-          <Icon name="camera" size="md" color={off ? Colors.textMuted : Colors.white} />
+          <>
+            <Icon name="camera" size="md" color={off ? Colors.textMuted : Colors.white} />
+            <Text style={[styles.cameraLabel, off && styles.cameraLabelOff]}>Photo</Text>
+          </>
         )}
       </Pressable>
 
@@ -182,14 +197,26 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
   },
   camera: {
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
-    borderRadius: MIN_TOUCH_TARGET / 2,
-    backgroundColor: Colors.primary,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.xs,
+    minWidth: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.md,
+    borderRadius: MIN_TOUCH_TARGET / 2,
+    backgroundColor: Colors.primary,
   },
+  // Disabled goes neutral rather than faded: fern at half strength is a pale
+  // sage that reads as broken rather than as not-ready, and white on pale sage
+  // fails contrast on the way past.
   cameraOff: { backgroundColor: Colors.sunken },
+  cameraLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
+  },
+  cameraLabelOff: { color: Colors.textMuted },
   field: {
     flex: 1,
     minHeight: MIN_TOUCH_TARGET,

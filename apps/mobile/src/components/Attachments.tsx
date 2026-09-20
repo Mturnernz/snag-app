@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, Image, ScrollView, Linking, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Image, ScrollView, StyleSheet } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 
+import { openUrl } from '../lib/openUrl';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { documentFileName, documentName } from '@snag/supabase-queries';
 import { getFileUrl, getFileUrls, uploadFile } from '../lib/supabase';
-import { PHOTO_PICK_LIMIT, compressAndUpload, photoFileName, pickPhotos } from '../lib/photoUpload';
+import { addPhotos } from '../lib/addPhotos';
 import { showAlert } from '../lib/alert';
 import Icon from './Icon';
 import PhotoViewer from './PhotoViewer';
@@ -93,45 +94,14 @@ export default function Attachments({
 
   async function attachPhotos() {
     if (busy || disabled) return;
-    const { uris, dropped } = await pickPhotos();
-    if (uris.length === 0) return;
-
     setBusy(true);
-    const added: string[] = [];
-    let lastError: unknown = null;
     try {
-      for (const uri of uris) {
-        try {
-          const { path, error } = await compressAndUpload(uri, photoFileName(householdId));
-          if (error || !path) throw error ?? new Error('The photo did not upload');
-          added.push(path);
-        } catch (err: unknown) {
-          lastError = err;
-        }
-      }
-      if (added.length > 0) {
-        await onChange(
-          { photoPaths: [...photoPaths, ...added] },
-          added.length === 1 ? 'Photo added' : `${added.length} photos added`
-        );
-      }
-    } catch (err: unknown) {
-      lastError = err;
+      await addPhotos(householdId, (added) => onChange(
+        { photoPaths: [...photoPaths, ...added] },
+        added.length === 1 ? 'Photo added' : `${added.length} photos added`
+      ));
     } finally {
       setBusy(false);
-    }
-
-    const missed = uris.length - added.length;
-    if (missed > 0) {
-      showAlert(
-        added.length > 0 ? `${missed} of ${uris.length} didn't save` : "That photo didn't save",
-        failureReason(lastError)
-      );
-    } else if (dropped > 0) {
-      showAlert(
-        `${PHOTO_PICK_LIMIT} at a time`,
-        `${added.length} added. Choose the other ${dropped} in another go.`
-      );
     }
   }
 
@@ -167,9 +137,7 @@ export default function Attachments({
       showAlert("Couldn't open that", 'The link to this document could not be made.');
       return;
     }
-    Linking.openURL(url).catch(() => {
-      showAlert("Couldn't open that", 'Nothing on this device offered to open the file.');
-    });
+    openUrl(url);
   }
 
   const shown = photoPaths.map((path) => urls[path]).filter(Boolean);

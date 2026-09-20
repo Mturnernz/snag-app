@@ -154,7 +154,7 @@ const MONTHS = [
 export default function ScheduleScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { household, properties } = useHousehold();
+  const { household, properties, profile } = useHousehold();
 
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
@@ -188,7 +188,10 @@ export default function ScheduleScreen() {
    */
   const load = useCallback(async () => {
     try {
-      setSnags(await getSnags({}, 'newest'));
+      // Projects off takes the punch list with it, exactly as on the List tab:
+      // a mark whose row is a door back to a renovation nothing can open is a
+      // mark that lies about what it leads to.
+      setSnags(await getSnags({ excludeProjectSnags: !profile.projectsEnabled }, 'newest'));
     } catch (err) {
       console.error('Failed to load the schedule:', err);
     }
@@ -197,13 +200,16 @@ export default function ScheduleScreen() {
       // renovations is still a calendar, and taking the whole tab down over the
       // addition would be the worse trade. Same rule as the thing-history card
       // on the snag page.
-      setProjects(await getAllProjects());
+      //
+      // Skipped entirely with projects off — the fifth kind of mark is a read
+      // of dates set on a page that is no longer reachable.
+      setProjects(profile.projectsEnabled ? await getAllProjects() : []);
     } catch (err) {
       console.error('Failed to load the projects:', err);
     }
     setLoading(false);
     setRefreshing(false);
-  }, []);
+  }, [profile.projectsEnabled]);
 
   useEffect(() => {
     setLoading(true);

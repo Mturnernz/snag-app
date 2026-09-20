@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, TextInput, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { Modal, View, Text, TextInput, StyleSheet } from 'react-native';
 import Button from './Button';
+import RoomPicker from './RoomPicker';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { Location, Snag } from '../types';
@@ -84,30 +85,20 @@ export default function EditSnagSheet({
           ) : null}
 
           <Text style={styles.fieldLabel}>Where is it?</Text>
-          <ScrollView style={styles.roomScroll} keyboardShouldPersistTaps="handled">
-            <View style={styles.chips}>
-              {/* Every room, not a shortlist, and the same order the list groups
-                  by — the one you want is the one you are standing in. */}
-              {locations.map((location) => (
-                <Pressable
-                  key={location.id}
-                  onPress={() => setRoom(room === location.name ? null : location.name)}
-                  style={styles.chipTap}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: room === location.name }}
-                  accessibilityLabel={location.name}
-                >
-                  <View style={[styles.chip, room === location.name && styles.chipOn]}>
-                    <Text
-                      style={[styles.chipLabel, room === location.name && styles.chipLabelOn]}
-                    >
-                      {location.name}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
+          {/* Every room, never a shortlist — the one you want is the one you
+              are standing in, and that is as likely to be the Roof as the
+              Kitchen. It was a rail of chips, which makes that claim in a way
+              that stops scaling the moment a household adds rooms to the
+              seeded twelve. The picker searches instead, and it is the same
+              control capture uses, so the two places a room is chosen cannot
+              behave differently. */}
+          <RoomPicker
+            locations={locations}
+            value={room}
+            onChange={setRoom}
+            disabled={busy}
+            placeholder="Nowhere in particular"
+          />
 
           <View style={styles.actions}>
             <Button
@@ -165,18 +156,5 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   warn: { fontSize: Typography.xs, color: Colors.danger, lineHeight: 17 },
-  roomScroll: { maxHeight: 132 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
-  chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
-  chip: {
-    height: 34,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.button,
-    backgroundColor: Colors.sunken,
-  },
-  chipOn: { backgroundColor: Colors.primary },
-  chipLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
-  chipLabelOn: { color: Colors.white },
   actions: { gap: Spacing.xs, marginTop: Spacing.md },
 });

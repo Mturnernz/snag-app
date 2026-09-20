@@ -2,6 +2,7 @@ import React from 'react';
 import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import SnagListScreen from './SnagListScreen';
+import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 
 // The list is the app's home now, and two pieces of logic carry the concept:
 // what counts as "new", and grouping by room. With no notifications anywhere in
@@ -435,5 +436,106 @@ describe('a job that comes round again', () => {
 
     expect(sectionTitles(r)).toContain('Outside · 1');
     expect(r.queryByText('1 to do')).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------- folding
+//
+// The list groups by room because that is how work is batched — you do the
+// garage once — and a household with a dozen rooms and forty jobs scrolls a
+// long way to reach the one it came for. Folding keeps the answer the grouping
+// gives ("there are three things in the Garage") while costing none of the
+// height.
+
+describe('folding a room away', () => {
+  // The fold is remembered on the device, which means it survives a remount —
+  // including the one the *next* test does. Cleared between them so each starts
+  // from the open list everybody actually opens the app to.
+  beforeEach(async () => { await writeCollapsed([]); });
+
+  const byLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && !!n.props?.onPress
+        && n.props?.accessibilityLabel === label,
+      { deep: true },
+    )[0];
+
+  const press = async (node: any) => {
+    await TestRenderer.act(async () => { await node.props.onPress(); });
+  };
+
+  async function withRooms() {
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done') ? [] : [
+        snag({ id: 'a', description: 'Rangehood filter', room: 'Kitchen' }),
+        snag({ id: 'b', description: 'Shelf brackets', room: 'Garage' }),
+      ]
+    ));
+    const r = render(<SnagListScreen />);
+    await settle();
+    return r;
+  }
+
+  it('opens with everything showing', async () => {
+    const r = await withRooms();
+    expect(texts(r)).toContain('Rangehood filter');
+    expect(texts(r)).toContain('Shelf brackets');
+  });
+
+  // A fold that took the heading with it would be a filter rather than a fold:
+  // "there are three things in the Garage" is what the grouping exists to say.
+  it('keeps the heading and its count when a room is folded', async () => {
+    const r = await withRooms();
+    await press(byLabel(r, 'Kitchen · 1, hide'));
+
+    expect(texts(r)).toContain('Kitchen · 1');
+    expect(texts(r)).not.toContain('Rangehood filter');
+    // Only the one that was folded.
+    expect(texts(r)).toContain('Shelf brackets');
+  });
+
+  it('unfolds on a second press', async () => {
+    const r = await withRooms();
+    await press(byLabel(r, 'Kitchen · 1, hide'));
+    await press(byLabel(r, 'Kitchen · 1, show'));
+    expect(texts(r)).toContain('Rangehood filter');
+  });
+
+  // It says what pressing it does, and decides that from whether anything is
+  // still open — so the press on offer is never a no-op.
+  it('offers to collapse everything, then to expand everything', async () => {
+    const r = await withRooms();
+    expect(byLabel(r, 'Collapse all')).toBeDefined();
+
+    await press(byLabel(r, 'Collapse all'));
+    expect(texts(r)).not.toContain('Rangehood filter');
+    expect(texts(r)).not.toContain('Shelf brackets');
+    expect(texts(r)).toContain('Kitchen · 1');
+
+    expect(byLabel(r, 'Expand all')).toBeDefined();
+    await press(byLabel(r, 'Expand all'));
+    expect(texts(r)).toContain('Rangehood filter');
+  });
+
+  it('remembers the fold for next time, on this device', async () => {
+    const r = await withRooms();
+    await press(byLabel(r, 'Garage · 1, hide'));
+
+    // Through the helper rather than the storage behind it: which store that
+    // is differs between the phone and the browser, and what matters is that
+    // the fold comes back.
+    const kept = await readCollapsed();
+    expect(kept).toContain('room:Garage');
+    expect(kept).not.toContain('room:Kitchen');
+  });
+
+  it('comes back folded when the screen is opened again', async () => {
+    const first = await withRooms();
+    await press(byLabel(first, 'Garage · 1, hide'));
+
+    const again = render(<SnagListScreen />);
+    await settle();
+    expect(texts(again)).toContain('Garage · 1');
+    expect(texts(again)).not.toContain('Shelf brackets');
   });
 });

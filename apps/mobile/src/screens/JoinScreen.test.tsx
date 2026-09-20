@@ -33,7 +33,7 @@ jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 
 const TOKEN = '8f1d3c2e-0000-4000-8000-000000000000';
 
-const PROFILE = { id: 'me', displayName: 'Alyssa', createdAt: '2026-09-15T00:00:00Z' };
+const PROFILE = { id: 'me', displayName: 'Alyssa', createdAt: '2026-09-15T00:00:00Z', projectsEnabled: true };
 
 const LIVE = {
   id: 'i1',

@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, Pressable, Modal, ScrollView, ActivityIndicator, StyleSheet,
+  View, Text, TextInput, Pressable, Modal, ActivityIndicator, StyleSheet,
 } from 'react-native';
 
 import Icon from './Icon';
+import RoomPicker from './RoomPicker';
 import { Colors, Radius, Spacing, Typography, Shadow, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
-import { thingHeadline, thingsInArea } from '@snag/supabase-queries';
-import { Location, Snag, Thing } from '../types';
+import { Location, Snag } from '../types';
 
 /**
  * What is asked straight after a snag is filed.
@@ -24,7 +24,18 @@ import { Location, Snag, Thing } from '../types';
  * filed a photo and then opened the snag again to describe it — which is the
  * one journey the arrangement existed to remove.
  *
- * Three things about it:
+ * **It asks two things, and it used to ask four.** What went is instructive.
+ * *Is it about one of these?* offered the room's recorded appliances and wrote
+ * `snags.thing_id`; the job's own page now shows what is in the room as a list
+ * to read rather than a tag to apply. And *Does it need doing now?* is gone
+ * with priority itself — nearly everything on a household list is filed as not
+ * urgent, which is the premise of the product rather than a finding, so the
+ * question spent a whole step of the one sheet that has ten seconds of patience
+ * collecting the answer it already assumed.
+ *
+ * What is left is the two things that are **only** answerable here, with the
+ * thing still in front of you, and unanswerable afterwards without opening the
+ * job again:
  *
  * - **Notes first, when there are none.** A photo with no words and no room is
  *   the weakest thing this app can hold: `snagHeadline` has nothing to work with
@@ -35,9 +46,11 @@ import { Location, Snag, Thing } from '../types';
  *   defers everything to its last step because nothing exists yet. Here the row
  *   exists, so deferring would reintroduce exactly the loss this replaced.
  * - **Dismissing is finishing.** The backdrop, the ×, and Done all mean the
- *   same thing, because at every point the snag is already complete enough.
+ *   same thing, because at every point the snag is already complete enough —
+ *   and finishing normally opens the job, which is where everything else about
+ *   it is now decided.
  */
-export type AmendStep = 'note' | 'room' | 'thing' | 'urgency';
+export type AmendStep = 'note' | 'room';
 
 /** Where to open: the words it hasn't got yet, or straight to where it is. */
 export function firstStep(snag: Snag): AmendStep {
@@ -45,58 +58,46 @@ export function firstStep(snag: Snag): AmendStep {
 }
 
 /**
- * Which steps this snag actually has, in order.
+ * Which steps this snag has, in order.
  *
- * **The "what is it about?" step exists only when there is something to point
- * at.** It comes after the room because the room is what narrows it: a house
- * holds tens of things and a snag is about one of them, so the offer is this
- * room's record and nothing else. A room with nothing recorded in it would give
- * a step with an empty rail and a Skip — a question the app cannot answer
- * asking the person to dismiss it — so the step is simply not there, and the
- * count in the header says three rather than four.
- *
- * That count moves if the room changes mid-sheet, which is correct: tagging the
- * Kitchen is what makes the kitchen's dishwasher offerable in the first place.
+ * Both of them, always. It took a `Thing[]` and counted three or four depending
+ * on whether the room had anything recorded in it — a header that moved
+ * mid-sheet, which was correct then and is one less thing to be correct about
+ * now. Kept as a function rather than inlined as a constant because the header
+ * counts from it and the back button walks it.
  */
-export function amendSteps(snag: Snag, things: Thing[]): AmendStep[] {
-  const offerable = thingsInArea(things, snag.room).length > 0;
-  return offerable
-    ? ['note', 'room', 'thing', 'urgency']
-    : ['note', 'room', 'urgency'];
+export function amendSteps(): AmendStep[] {
+  return ['note', 'room'];
 }
 
 interface Props {
   snag: Snag;
   locations: Location[];
-  /** The property's recorded things. Empty until they arrive, which is fine. */
-  things?: Thing[];
   busy?: boolean;
   onSaveNote: (text: string) => Promise<void>;
   onSetRoom: (room: string | null) => Promise<void>;
-  onSetThing: (thingId: string | null) => Promise<void>;
-  onSetUrgent: (urgent: boolean) => Promise<void>;
+  /**
+   * Where the sheet goes when it is finished with.
+   *
+   * Finishing capture opens the job. Everything the sheet used to ask on steps
+   * three and four is decided there now, and the alternative — dropping back
+   * onto the list — meant the one moment somebody is certainly thinking about
+   * this job ended by showing them every other one.
+   */
   onOpenDetail: () => void;
   onClose: () => void;
 }
 
 export default function AmendSnagSheet({
-  snag, locations, things = [], busy,
-  onSaveNote, onSetRoom, onSetThing, onSetUrgent, onOpenDetail, onClose,
+  snag, locations, busy, onSaveNote, onSetRoom, onOpenDetail, onClose,
 }: Props) {
   const [step, setStep] = useState<AmendStep>(() => firstStep(snag));
   const [note, setNote] = useState(snag.description ?? '');
   const keyboard = useKeyboardInset();
 
-  const order = amendSteps(snag, things);
-  const here = thingsInArea(things, snag.room);
-  // The step can vanish under you — go back, clear the room, and there is
-  // nothing to be about any more. Falling back to the room keeps the header
-  // from reading "0 of 3".
+  const order = amendSteps();
   const index = Math.max(0, order.indexOf(step));
   const total = order.length;
-  // `null` and `'low'` both already mean "not urgent" — only `high` is a
-  // claim, so nothing has to be written for the default to be true.
-  const urgent = snag.priority === 'high';
 
   async function next() {
     if (step === 'note') {
@@ -108,15 +109,8 @@ export default function AmendSnagSheet({
       setStep('room');
       return;
     }
-    if (step === 'room' || step === 'thing') {
-      const at = order.indexOf(step);
-      const following = order[at + 1];
-      if (following) {
-        setStep(following);
-        return;
-      }
-    }
-    onClose();
+    // The last step. Dismissing is finishing, and finishing opens the job.
+    onOpenDetail();
   }
 
   return (
@@ -167,112 +161,24 @@ export default function AmendSnagSheet({
           </>
         ) : null}
 
-        {/* ── 2. where is it ──────────────────────────────────────────── */}
+        {/* ── 2. where is it ──
+            Every room is offered, never a shortlist: the one you want is the
+            one you are standing in, and that is as likely to be the Roof as
+            the Kitchen. It was a rail of every room as a chip, which is the
+            same claim made in a way that stops scaling the moment a household
+            adds a conservatory and a storage area to the seeded twelve — and
+            a wall of grey has to be read before it can be tapped. The picker
+            searches instead. See RoomPicker. */}
         {step === 'room' ? (
           <>
             <Text style={styles.question}>Where is it?</Text>
-            <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
-              <View style={styles.chips}>
-                {locations.map((location) => {
-                  const on = snag.room === location.name;
-                  return (
-                    <Pressable
-                      key={location.id}
-                      onPress={() => onSetRoom(on ? null : location.name)}
-                      style={[styles.chip, on && styles.chipOn]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: on }}
-                    >
-                      <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                        {location.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </>
-        ) : null}
-
-        {/* ── 3. what is it about ─────────────────────────────────────
-            Optional, like everything on this sheet, and offered only because
-            the room has already been answered: these are the things recorded
-            in *this* room, so the rail is three or four chips rather than a
-            house's worth.
-
-            The payoff is somewhere else entirely — in a shop, eight months
-            later, wanting the model number. A snag that knows it is about the
-            heat pump carries the heat pump's make and model with it; one that
-            does not sends somebody back to the house record to search for it.
-
-            **Pointing a snag at a thing does not start the job.** Assignee,
-            due date, repeat and the parts list do; `thing_id` deliberately
-            doesn't, because saying what something is about is the tail of
-            capture — the same gesture as tagging the room — and a brand-new
-            snag reading "Doing" because somebody named the appliance would
-            empty the status from the same end the retired *Start it* button
-            did. The `v_started` expression in `update_snag` says so. */}
-        {step === 'thing' ? (
-          <>
-            <Text style={styles.question}>Is it about one of these?</Text>
-            <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
-              <View style={styles.chips}>
-                {here.map((item) => {
-                  const on = snag.thingId === item.id;
-                  return (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => onSetThing(on ? null : item.id)}
-                      style={[styles.chip, on && styles.chipOn]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: on }}
-                    >
-                      <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                        {thingHeadline(item)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </>
-        ) : null}
-
-        {/* ── 4. how urgent ───────────────────────────────────────────── */}
-        {step === 'urgency' ? (
-          <>
-            <Text style={styles.question}>Does it need doing now?</Text>
-            {/* Two named pills rather than one that toggles, because the
-                answer is already on screen before anybody touches it: a lone
-                "Urgent" chip left "not urgent" as the unlabelled absence of a
-                press, which is a state nothing on the sheet said out loud. Not
-                urgent is where every snag starts — nearly everything here can
-                wait, and that is the premise of the list rather than a
-                judgement it needs from you. */}
-            <View style={styles.chips}>
-              <Pressable
-                onPress={() => urgent && onSetUrgent(false)}
-                style={[styles.chip, !urgent && styles.chipOn]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: !urgent }}
-              >
-                <Text style={[styles.chipLabel, !urgent && styles.chipLabelOn]}>Not urgent</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => !urgent && onSetUrgent(true)}
-                style={[styles.chip, urgent && styles.chipAlert]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: urgent }}
-              >
-                <Text style={[styles.chipLabel, urgent && styles.chipAlertLabel]}>Urgent</Text>
-              </Pressable>
-            </View>
-            {/* Its own line, not a third pill. The pills are one answer to one
-                question; this is the door out of the sheet into triage, and a
-                row mixing the two makes the answer look like three options. */}
-            <Pressable onPress={onOpenDetail} style={styles.triage} accessibilityRole="button">
-              <Text style={styles.triageLabel}>Sort it out…</Text>
-            </Pressable>
+            <RoomPicker
+              locations={locations}
+              value={snag.room}
+              onChange={(room) => { void onSetRoom(room); }}
+              disabled={busy}
+              startOpen
+            />
           </>
         ) : null}
 
@@ -281,12 +187,12 @@ export default function AmendSnagSheet({
           disabled={busy}
           style={styles.next}
           accessibilityRole="button"
-          accessibilityLabel={nextLabel(step, note, !!snag.thingId)}
+          accessibilityLabel={nextLabel(step, note)}
         >
           {busy ? (
             <ActivityIndicator color={Colors.white} />
           ) : (
-            <Text style={styles.nextLabel}>{nextLabel(step, note, !!snag.thingId)}</Text>
+            <Text style={styles.nextLabel}>{nextLabel(step, note)}</Text>
           )}
         </Pressable>
       </View>
@@ -299,15 +205,16 @@ export default function AmendSnagSheet({
  *
  * On the note step with nothing typed that is "Skip for now", not "Next" — the
  * same call `AddThingSheet` makes, and for the same reason: a Next beside a Skip
- * was two controls with one outcome. The "what is it about" step reads the same
- * way until something is chosen.
+ * was two controls with one outcome.
+ *
+ * The room step's button says **Sort it out** rather than Done, because that is
+ * what it does: it opens the job. "Done" would be the sheet describing its own
+ * dismissal while actually navigating somewhere, which is the one thing a
+ * button's words must not do.
  */
-function nextLabel(step: AmendStep, note: string, linked: boolean): string {
-  if (step === 'urgency') return 'Done';
+function nextLabel(step: AmendStep, note: string): string {
+  if (step === 'room') return 'Sort it out';
   if (step === 'note' && note.trim() === '') return 'Skip for now';
-  // Nothing has to be answered here either, and a Next over an untouched rail
-  // is the app implying otherwise.
-  if (step === 'thing' && !linked) return 'Skip for now';
   return 'Next';
 }
 
@@ -354,21 +261,6 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     textAlignVertical: 'top',
   },
-  scroll: { maxHeight: 240 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  chip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.chip,
-    backgroundColor: Colors.sunken,
-  },
-  chipOn: { backgroundColor: Colors.primary },
-  chipAlert: { backgroundColor: Colors.danger },
-  chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
-  chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
-  chipAlertLabel: { color: Colors.white, fontWeight: Typography.semibold },
-  triage: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
-  triageLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   next: {
     minHeight: MIN_TOUCH_TARGET,
     borderRadius: Radius.button,

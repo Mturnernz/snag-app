@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, Image, TextInput, Pressable, StyleSheet,
+  View, Text, ScrollView, Image, TextInput, Pressable, Modal, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
@@ -18,10 +18,7 @@ import PhotoViewer from '../components/PhotoViewer';
 import AdviceCard from '../components/AdviceCard';
 import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
-import LinkThingSheet from '../components/LinkThingSheet';
-import LinkProjectSheet from '../components/LinkProjectSheet';
-import { CalendarSheet } from '../components/DateField';
-import AddThingSheet from '../components/AddThingSheet';
+import DateField, { CalendarSheet } from '../components/DateField';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -29,13 +26,16 @@ import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
   deleteStoredFiles, getSnagAdvice, deleteSnagAdvice, setPartBought,
-  getThingNotes, getThings, createThing, createLocation,
+  getThingNotes, getThings,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { dayKey, describeCycle, snagHeadline } from '@snag/supabase-queries';
+import { addPhotos } from '../lib/addPhotos';
+import LinkedText from '../components/LinkedText';
 import {
-  Comment, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote,
-  PRIORITY_ORDER, PRIORITY_LABELS, REPEAT_PRESETS,
+  dayKey, describeCycle, formatLooseDate, parseLooseDate, snagHeadline, thingsInArea, thingHeadline,
+} from '@snag/supabase-queries';
+import {
+  Comment, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote, REPEAT_PRESETS,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -90,36 +90,27 @@ export default function SnagDetailScreen() {
   const [viewing, setViewing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [partDraft, setPartDraft] = useState('');
-  // Whether the repeat walk-through is open. Seeded from the snag, but kept
-  // separately so answering "Yes" can reveal the cycle questions before any
-  // interval has been chosen — there is nothing to save at that point.
-  const [repeating, setRepeating] = useState(false);
+  /**
+   * What is in the due-date box, as typed.
+   *
+   * A string rather than the snag's own `dueAt`, because a half-typed date is
+   * not a date yet: `8/1` on the way to `8/11/2019` parses to the eighth of
+   * January, and a field that wrote on every keystroke would file the job under
+   * it. It is committed on blur and re-seeded whenever the row changes.
+   */
+  const [dueDraft, setDueDraft] = useState('');
+  /** Whether the recurring arrangement is open. */
+  const [repeatOpen, setRepeatOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  /**
-   * What the walkthrough opens on, held stable.
-   *
-   * `AddThingSheet` resets itself from `start` in an effect that depends on the
-   * object, so a fresh literal per render is an infinite loop — the effect sets
-   * state, the render makes a new object, the effect fires again. It hangs the
-   * screen rather than failing, which is the worst shape of bug this codebase
-   * keeps finding: `SnagDetailScreen.test.tsx` caught it as a timeout.
-   */
-  const createStart = useMemo(() => ({ room: snag?.room ?? null }), [snag?.room]);
-
   /** Whether the congratulations dialog is up. Only a real finish sets it. */
   const [celebrating, setCelebrating] = useState(false);
   /** Editing what the job says — its words and its room, together. */
   const [editing, setEditing] = useState(false);
-  /** Which renovation this job belongs to. Read only when the sheet opens. */
-  const [projectOpen, setProjectOpen] = useState(false);
   /** The day the first one lands, when none of the three presets is the answer. */
   const [dueOpen, setDueOpen] = useState(false);
-  /** Choosing what it is about, and the record that choice reads from. */
-  const [linking, setLinking] = useState(false);
-  const [creating, setCreating] = useState(false);
+  /** The place's record, for the read-only list of what is in this room. */
   const [things, setThings] = useState<Thing[]>([]);
-  const [thingsLoading, setThingsLoading] = useState(false);
   /** What has been written about the same asset, on its other jobs. */
   const [thingNotes, setThingNotes] = useState<ThingNote[]>([]);
 
@@ -133,7 +124,7 @@ export default function SnagDetailScreen() {
         getSnagAdvice(params.snagId).catch(() => null),
       ]);
       setSnag(next);
-      setRepeating((open) => open || next.repeatDays !== null);
+      setDueDraft(formatLooseDate(next.dueAt));
       setComments(nextComments);
       setAdvice(nextAdvice);
 
@@ -144,6 +135,12 @@ export default function SnagDetailScreen() {
         ? await getThingNotes(next.thingId, next.id).catch(() => [])
         : []);
       setPhotoUrls(await getFileUrls(next.photoPaths));
+
+      // What is recorded in this place, for the read-only list of what is in
+      // this room. Never fatal and never awaited by anything that renders the
+      // job itself: a list of the room's appliances is the least important
+      // thing on this page and must not be what stops the notes appearing.
+      getThings(next.propertyId).then(setThings).catch(() => setThings([]));
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'It may have been deleted.');
       navigation.goBack();
@@ -155,35 +152,57 @@ export default function SnagDetailScreen() {
   }, [load]);
 
   /**
-   * The record this place holds, for choosing what the job is about.
+   * What is recorded in this job's room.
    *
-   * Read when the picker is opened rather than when the page loads: this is a
-   * once-in-a-snag's-life decision and the page is opened constantly, so
-   * spending a request on every visit to answer a question nobody asked is the
-   * same waste the list already refuses. Keyed by the snag's own property, so
-   * it can never offer the bach's appliances for a job at the house.
+   * `thingsInArea` takes `Thing[]`, which is what keeps a ghost out of here:
+   * a suggestion is a `RoomSuggestion` with no id, so the kitchen's dashed
+   * "Rangehood" prompt can never be listed as something the house has.
    */
-  async function openLink() {
+  const linked = useMemo(
+    () => (snag ? thingsInArea(things, snag.room) : []),
+    [things, snag?.room]
+  );
+
+  /**
+   * The typed date, committed once somebody leaves the box.
+   *
+   * `parseLooseDate` returns `undefined` for anything it cannot read against a
+   * real calendar — `31/02/2026`, a two-digit year — and that is refused here
+   * in words rather than reaching Postgres as a `22008` raised from inside an
+   * RPC. An emptied box clears the date, which is somebody saying there is no
+   * longer a day for this.
+   */
+  async function commitDue() {
     if (!snag) return;
-    setLinking(true);
-    setThingsLoading(true);
-    try {
-      setThings(await getThings(snag.propertyId));
-    } catch {
-      // The picker still opens, with its own words for an empty list. A failed
-      // read here must not be a dead modal.
-    } finally {
-      setThingsLoading(false);
+    const typed = dueDraft.trim();
+    const already = formatLooseDate(snag.dueAt);
+    if (typed === already) return;
+
+    if (!typed) {
+      await patch({ dueAt: null });
+      return;
     }
+    const parsed = parseLooseDate(typed);
+    if (!parsed) {
+      showAlert("Couldn't read that date", 'Try 8/11/2019, Nov 2019, or tap the calendar.');
+      setDueDraft(already);
+      return;
+    }
+    await patch({ dueAt: new Date(`${parsed}T00:00:00`).toISOString() });
   }
 
-  /** Recording something that was never in the house record, and linking it. */
-  async function handleCreateThing(input: Parameters<typeof createThing>[0]) {
-    if (!snag) return;
-    const thing = await createThing(input);
-    setCreating(false);
-    await patch({ thingId: thing.id });
-    showToast(`${thing.name ?? 'Recorded'} — and this job is about it`);
+  /** Another angle, or the plate you went back for. */
+  async function handleAddPhotos() {
+    if (!snag || busy) return;
+    setBusy(true);
+    try {
+      await addPhotos(snag.householdId, async (added) => {
+        setSnag(await updateSnag(snag.id, { photoPaths: [...snag.photoPaths, ...added] }));
+        showToast(added.length === 1 ? 'Photo added' : `${added.length} photos added`);
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
     /**
@@ -320,28 +339,55 @@ export default function SnagDetailScreen() {
         contentContainerStyle={[styles.content, keyboard > 0 && { paddingBottom: keyboard + Spacing.lg }]}
         keyboardShouldPersistTaps="handled"
       >
-        {snag.photoPaths.length > 0 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
-            {snag.photoPaths.map((path, i) => (
-              // The photo is the snag — there is no title column because a
-              // picture of the broken seat says what a title would. At 220×165
-              // it says roughly that and no more, so it opens.
-              <Pressable
-                key={path}
-                onPress={() => setViewing(i)}
-                disabled={!photoUrls[path]}
-                accessibilityRole="imagebutton"
-                accessibilityLabel="Open this photo"
-              >
-                <Image
-                  source={{ uri: photoUrls[path] }}
-                  style={styles.photo}
-                  resizeMode="cover"
-                />
-              </Pressable>
-            ))}
-          </ScrollView>
-        ) : null}
+        {/* ── The photographs ──
+            The photo *is* the snag: there is no title column because a picture
+            of the broken seat says what a title would. At 220×165 a tile says
+            roughly that and no more, so it opens.
+
+            **A second angle is answerable now.** One photograph was all a job
+            could ever hold, because the only camera that reached a snag was the
+            compose bar's and that files a *new* one — so the crack you noticed
+            afterwards, or the model plate you went back for, became a second
+            job about the same thing. The + is at the end of the strip rather
+            than under it, where a control that grows a row belongs, and it
+            inherits every upload rule the thing page paid for (see
+            `lib/addPhotos.ts`).
+
+            Adding one deliberately does not start the job: `v_started` reads
+            assignee, due date, repeat and parts, and photographing something is
+            not deciding to do it. */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
+          {snag.photoPaths.map((path, i) => (
+            <Pressable
+              key={path}
+              onPress={() => setViewing(i)}
+              disabled={!photoUrls[path]}
+              accessibilityRole="imagebutton"
+              accessibilityLabel="Open this photo"
+            >
+              <Image
+                source={{ uri: photoUrls[path] }}
+                style={styles.photo}
+                resizeMode="cover"
+              />
+            </Pressable>
+          ))}
+
+          <Pressable
+            onPress={handleAddPhotos}
+            disabled={busy}
+            style={[styles.photoAdd, busy && styles.photoAddOff]}
+            accessibilityRole="button"
+            accessibilityLabel={
+              snag.photoPaths.length > 0 ? 'Add another photo' : 'Add a photo'
+            }
+          >
+            <Icon name="camera-outline" size="md" color={Colors.primary} />
+            <Text style={styles.photoAddLabel}>
+              {snag.photoPaths.length > 0 ? 'Add another' : 'Add a photo'}
+            </Text>
+          </Pressable>
+        </ScrollView>
 
         {/* The words and the room were answerable for ten seconds after the
             photo and never again. A pencil on the headline is the way back to
@@ -369,134 +415,6 @@ export default function SnagDetailScreen() {
             </View>
           ) : null}
         </View>
-
-        {/* ── Part of ──
-            The punch list, in the app's own word: the defects list at the end
-            of a renovation is literally a snag list, which is where the word
-            comes from. So a project does not get a to-do list of its own — it
-            gets these, and they sit on the List tab in their rooms with
-            everything else.
-
-            **Saying so does not start the job.** `project_id` is excluded from
-            `v_started` in `update_snag`, exactly as `thing_id` is: naming which
-            renovation a dripping cistern belongs to is the tail of capture, the
-            same gesture as tagging the room. A link that marked twelve jobs
-            'doing' at once would empty the status from the other end than the
-            retired *Start it* button did.
-
-            Above *What it's about* because it is the broader fact — which job
-            this belongs to, then which appliance it is about. */}
-        {snag.projectId && snag.projectName ? (
-          <View style={styles.aboutRow}>
-            <Pressable
-              onPress={() => navigation.navigate('ProjectDetail', { projectId: snag.projectId! })}
-              style={styles.about}
-              accessibilityRole="button"
-              accessibilityLabel={`Part of ${snag.projectName}`}
-            >
-              <Icon name="construct-outline" size="sm" color={Colors.textMuted} />
-              <Text style={styles.aboutName} numberOfLines={1}>{snag.projectName}</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setProjectOpen(true)}
-              disabled={busy}
-              style={styles.aboutClear}
-              accessibilityRole="button"
-              accessibilityLabel="Change which job it is part of"
-            >
-              <Icon name="swap-horizontal-outline" size="sm" color={Colors.textMuted} />
-            </Pressable>
-            <Pressable
-              onPress={() => patch({ projectId: null })}
-              disabled={busy}
-              style={styles.aboutClear}
-              accessibilityRole="button"
-              accessibilityLabel="Not part of that"
-            >
-              <Icon name="close" size="sm" color={Colors.textMuted} />
-            </Pressable>
-          </View>
-        ) : (
-          <Pressable
-            onPress={() => setProjectOpen(true)}
-            disabled={busy}
-            style={styles.aboutAdd}
-            accessibilityRole="button"
-            accessibilityLabel="Part of a bigger job?"
-          >
-            <Icon name="construct-outline" size="sm" color={Colors.primary} />
-            <Text style={styles.aboutAddLabel}>Part of a bigger job?</Text>
-          </Pressable>
-        )}
-
-        {/* ── What it's about ──
-            The payoff for the one question the capture sheet asks that has no
-            effect on the list: a snag that knows it is about the heat pump
-            carries the heat pump's make and model with it, so the answer
-            somebody is standing in a shop needing is on the snag rather than
-            two tabs away. `Fonts.mono` on the number, as everywhere data is
-            read aloud or copied.
-
-            The row is the door to the full record and the × is its sibling
-            rather than its child, for the same reason the photo tile's is: a
-            Pressable inside a Pressable is a coin toss about which one gets
-            the tap. */}
-        {snag.thingId && snag.thingName ? (
-          <View style={styles.aboutRow}>
-            <Pressable
-              onPress={() => navigation.navigate('ThingDetail', { thingId: snag.thingId! })}
-              style={styles.about}
-              accessibilityRole="button"
-              accessibilityLabel={`About ${snag.thingName}`}
-            >
-              <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
-              <Text style={styles.aboutName} numberOfLines={1}>{snag.thingName}</Text>
-              {snag.thingMake || snag.thingModel ? (
-                <Text style={styles.aboutSpec} numberOfLines={1}>
-                  {[snag.thingMake, snag.thingModel].filter(Boolean).join(' ')}
-                </Text>
-              ) : null}
-            </Pressable>
-            {/* Change and remove are siblings of the door rather than children
-                of it — a Pressable inside a Pressable is a coin toss about
-                which one gets the tap. */}
-            <Pressable
-              onPress={openLink}
-              disabled={busy}
-              style={styles.aboutClear}
-              accessibilityRole="button"
-              accessibilityLabel="Change what it is about"
-            >
-              <Icon name="swap-horizontal-outline" size="sm" color={Colors.textMuted} />
-            </Pressable>
-            <Pressable
-              onPress={() => patch({ thingId: null })}
-              disabled={busy}
-              style={styles.aboutClear}
-              accessibilityRole="button"
-              accessibilityLabel="Not about that"
-            >
-              <Icon name="close" size="sm" color={Colors.textMuted} />
-            </Pressable>
-          </View>
-        ) : (
-          /* Capture's fourth step is the *fast* way to answer this and it only
-             offers the room's things; it is also skipped entirely for a room
-             with nothing recorded in it. So the answer has to be reachable
-             afterwards, from the job itself — and "not recorded yet" has to be
-             answerable here too, or the offer is a dead end for exactly the
-             appliance nobody has written down. */
-          <Pressable
-            onPress={openLink}
-            disabled={busy}
-            style={styles.aboutAdd}
-            accessibilityRole="button"
-            accessibilityLabel="Say what it's about"
-          >
-            <Icon name="cube-outline" size="sm" color={Colors.primary} />
-            <Text style={styles.aboutAddLabel}>Say what it's about</Text>
-          </Pressable>
-        )}
 
         <Text style={styles.reportedBy}>
           Added by {snag.reporterId === profile.id ? 'you' : snag.reporterName}
@@ -550,10 +468,17 @@ export default function SnagDetailScreen() {
                   {new Date(comment.createdAt).toLocaleDateString()}
                 </Text>
               </Text>
-              <Text style={styles.commentBody}>{comment.body}</Text>
+              <LinkedText style={styles.commentBody}>{comment.body}</LinkedText>
             </View>
           ))}
           <View style={styles.commentInputRow}>
+            {/* Four lines, not one. This is the only channel by which one
+                person tells the other anything — there are no notifications and
+                never will be — and a single-line box says "a few words" to
+                somebody whose actual message is which part was ordered, from
+                where, arriving when, and what it cost. A note that has to be
+                composed in a slot showing eight words of itself gets written
+                shorter than it needed to be. */}
             <TextInput
               style={styles.commentInput}
               value={draft}
@@ -561,7 +486,9 @@ export default function SnagDetailScreen() {
               placeholder="Ordered the part, arriving Tuesday"
               placeholderTextColor={Colors.textMuted}
               multiline
+              numberOfLines={4}
               maxLength={4000}
+              accessibilityLabel="Add a note"
             />
             <Pressable
               onPress={handleComment}
@@ -611,7 +538,66 @@ export default function SnagDetailScreen() {
                     {new Date(note.createdAt).toLocaleDateString()} · {note.snagReference}
                   </Text>
                 </Text>
-                <Text style={styles.commentBody}>{note.body}</Text>
+                <LinkedText style={styles.commentBody}>{note.body}</LinkedText>
+              </Pressable>
+            ))}
+          </Card>
+        ) : null}
+
+        {/* ── Linked assets ──
+            What is recorded in this room, as a list to read.
+
+            It replaced two controls that both *wrote*: *Part of a bigger job*,
+            which set `project_id`, and *Say what it's about*, which set
+            `thing_id` through a picker over the whole house record. Neither
+            question was one somebody standing on this page arrives wanting to
+            answer — they were tagging, and tagging is capture's job — and both
+            put a chooser on a page that is otherwise read far more often than
+            it is edited.
+
+            **The payoff was never the tag, it was the model number.** A snag
+            about the heat pump was worth linking because eight months later
+            somebody is in a shop wanting `MSZ-AP50VGK`. This gives them that
+            without asking for anything: the room is already on the job, and the
+            things in that room are the shortlist a human would have picked
+            from. One line each, tapping through to the full record.
+
+            Three rules:
+
+            - **It writes nothing.** No tag, no link, no status — the same rule
+              the Schedule tab holds to, and for the same reason: the moment
+              there are two ways to say what a job is about, neither is
+              trustworthy.
+            - **Ghosts cannot appear here, and that is the type rather than a
+              filter.** `thingsInArea` takes `Thing[]`; a suggestion is a
+              `RoomSuggestion` with no id, so a dashed prompt for a rangehood
+              nobody has recorded can never be offered as an answer.
+            - **It is absent entirely when the room holds nothing**, rather than
+              an empty heading. A section with nothing in it is the app asking
+              somebody to read a question it cannot answer.
+
+            The read is not fatal and is not awaited by anything on the page: a
+            list of what is in the room is the least important thing here, and
+            it must never be what stops a job's notes rendering. */}
+        {linked.length > 0 ? (
+          <Card elevation="md" style={styles.section}>
+            <Text style={styles.sectionTitle}>Linked assets</Text>
+            {linked.map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => navigation.navigate('ThingDetail', { thingId: item.id })}
+                style={styles.assetRow}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${thingHeadline(item)}`}
+              >
+                <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
+                <Text style={styles.assetName} numberOfLines={1}>{thingHeadline(item)}</Text>
+                {item.make || item.model ? (
+                  <Text style={styles.assetSpec} numberOfLines={1}>
+                    {[item.make, item.model].filter(Boolean).join(' ')}
+                  </Text>
+                ) : null}
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
               </Pressable>
             ))}
           </Card>
@@ -643,27 +629,33 @@ export default function SnagDetailScreen() {
           />
         ) : null}
 
-        {/* ── Triage ── */}
+        {/* ── Anything to pick up ──
+            Its own card, under the notes, where a card of three unrelated
+            triage controls used to stand.
+
+            *Sort it out* held urgency, this list, and who was doing it. Two of
+            those are gone — priority because a household list is a dozen small
+            jobs none of which is an emergency, and an assignee because two
+            people in one house tell each other out loud — and a card holding
+            one thing is not a card, it is a heading pretending to be a
+            category.
+
+            **It belongs under the notes and nowhere else.** The trip to the
+            shop is the single most common reason a small job sits for weeks, so
+            this is the part of triage that actually moves work; the note above
+            it is why the screen was opened. Everything else on the page reads
+            in that order now.
+
+            Changing the list is one of the four things that start a job
+            (`v_started`), because deciding what to buy is deciding to do the
+            work. Ticking one off is not — that is `set_part_bought`, which
+            touches neither the status nor `updated_at`, and is a separate
+            function precisely so it cannot. */}
         <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Sort it out</Text>
-
-          <Text style={styles.fieldLabel}>How urgent?</Text>
-          <View style={styles.optionRow}>
-            {PRIORITY_ORDER.map((value) => (
-              <Option
-                key={value}
-                label={PRIORITY_LABELS[value]}
-                active={snag.priority === value}
-                onPress={() => patch({ priority: snag.priority === value ? null : value })}
-                disabled={busy}
-              />
-            ))}
-          </View>
-
+          <Text style={styles.sectionTitle}>Anything to pick up?</Text>
           {/* A tick told you a trip was needed and not what for, which is the
               half that actually blocks a small job for weeks. Optional: most
               jobs need nothing, and an empty list is the resting state. */}
-          <Text style={styles.fieldLabel}>Anything to pick up?</Text>
           {snag.parts.length > 0 ? (
             <View style={styles.partsList}>
               {snag.parts.map((item, index) => {
@@ -731,117 +723,85 @@ export default function SnagDetailScreen() {
               />
             </Pressable>
           </View>
+        </Card>
 
-          <Text style={styles.fieldLabel}>Who's doing it?</Text>
-          <View style={styles.optionRow}>
-            {members.map((member) => (
-              <Option
-                key={member.profileId}
-                label={member.profileId === profile.id ? 'Me' : member.displayName}
-                active={snag.assigneeId === member.profileId}
-                onPress={() =>
-                  patch({
-                    assigneeId: snag.assigneeId === member.profileId ? null : member.profileId,
-                  })
-                }
-                disabled={busy}
-              />
-            ))}
-          </View>
+        {/* ── When it's due ──
+            Its own field, and it was not reachable at all except through the
+            repeat card — so a one-off job could never be given a date. That
+            made the Schedule tab's *Due* marks and the overdue badge features
+            only repeating jobs had, which is precisely backwards: a filter that
+            comes round every six months looks after itself, and the gutters
+            before the weekend away are the ones somebody needs reminding of.
+
+            Typed or tapped, through the one `DateField` every date in this app
+            uses — `8/11/2019` is the eighth of November, and a calendar sits in
+            the box because it says what it wants better than grey example text
+            does. Setting a date starts the job, which is right: putting a day
+            on something is deciding to do it. */}
+        <Card elevation="md" style={styles.section}>
+          {/* The label belongs to `DateField` rather than being a card title
+              above it, so the box has an accessible name of its own — a screen
+              reader on a card whose only content is one input should not have
+              to infer what the input is for from a heading it has already
+              passed. Same stacked shape the thing page's spec sheet uses:
+              name above, box below, full width. */}
+          <DateField
+            label="When's it due?"
+            value={dueDraft}
+            onChangeValue={setDueDraft}
+            onBlur={commitDue}
+            placeholder="No date — that's fine"
+            pickerTitle="When's it due?"
+          />
         </Card>
 
         {/* ── Repeat ──
-            A yes/no first, then the cycle. The old version was a row of
-            presets where "One-off" was one of the options, so the common
-            answer — no, it doesn't — looked like a setting rather than the
-            default it is.
+            A yes/no, and nothing else on the card until the answer is yes.
 
-            The heading says what the section *does* rather than asking
+            It used to carry a paragraph under the heading explaining filters
+            and gutters and what marking a repeating job done does, then a
+            question, then two rails of presets — a card that had to be read
+            before the one-word answer it actually wanted could be given. The
+            common answer is no. So the card asks, and the arrangement moves
+            into a modal that only somebody who said yes ever sees.
+
+            The heading still says what the section *does* rather than asking
             whether it applies: "Does it come round again?" made somebody
-            hunting for a way to schedule the filter read past the one card
-            that does it. The question it used to be is now the field label
-            over the two chips, where a question belongs. */}
+            hunting for a way to schedule the filter read straight past the one
+            card that does it. */}
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Schedule a recurring job</Text>
-          <Text style={styles.sectionHint}>
-            Filters, gutters, smoke alarms. Marking a repeating job done schedules the next one
-            instead of closing it.
-          </Text>
-
-          <Text style={styles.fieldLabel}>Does it come round again?</Text>
           <View style={styles.optionRow}>
             <Option
               label="No"
-              active={!repeating}
+              active={!snag.repeatDays}
               onPress={() => {
-                setRepeating(false);
                 if (snag.repeatDays) patch({ repeatDays: null });
               }}
               disabled={busy}
             />
-            <Option label="Yes" active={repeating} onPress={() => setRepeating(true)} disabled={busy} />
+            <Option
+              label="Yes"
+              active={!!snag.repeatDays}
+              onPress={() => setRepeatOpen(true)}
+              disabled={busy}
+            />
           </View>
 
-          {repeating ? (
-            <>
-              <Text style={styles.fieldLabel}>How often?</Text>
-              <View style={styles.optionRow}>
-                {REPEAT_PRESETS.map(({ days, label }) => (
-                  <Option
-                    key={days}
-                    label={label}
-                    active={snag.repeatDays === days}
-                    onPress={() =>
-                      patch({
-                        repeatDays: days,
-                        // A repeat with no date on it would never surface. Set
-                        // one on the first choice, and leave an existing one be.
-                        dueAt: snag.dueAt ?? new Date(Date.now() + days * DAY_MS).toISOString(),
-                      })
-                    }
-                    disabled={busy}
-                  />
-                ))}
-              </View>
-
-              {snag.repeatDays ? (
-                <>
-                  <Text style={styles.fieldLabel}>When's the first one due?</Text>
-                  <View style={styles.optionRow}>
-                    {[
-                      { label: 'Today', at: 0 },
-                      { label: 'In a week', at: 7 },
-                      { label: `A full ${describeCycle(snag.repeatDays)} away`, at: snag.repeatDays },
-                    ].map(({ label, at }) => (
-                      <Option
-                        key={label}
-                        label={label}
-                        active={isDueIn(snag.dueAt, at)}
-                        onPress={() => patch({ dueAt: new Date(Date.now() + at * DAY_MS).toISOString() })}
-                        disabled={busy}
-                      />
-                    ))}
-                    {/* The three presets cover the common answers and cannot
-                        say "the Saturday we're back", which is the answer often
-                        enough that having no way to give it made this rail read
-                        as the only dates on offer. Lit whenever the date set is
-                        not one the presets would have produced. */}
-                    <Option
-                      label="Pick a date…"
-                      active={
-                        !!snag.dueAt &&
-                        ![0, 7, snag.repeatDays].some((at) => isDueIn(snag.dueAt, at ?? -1))
-                      }
-                      onPress={() => setDueOpen(true)}
-                      disabled={busy}
-                    />
-                  </View>
-                  <Text style={styles.sectionHint}>
-                    {describeRepeat(snag)}
-                  </Text>
-                </>
-              ) : null}
-            </>
+          {/* The arrangement, in a sentence, on the card rather than behind the
+              modal — somebody arriving at this page wants to know what it
+              already does, not to re-open the thing that set it. */}
+          {snag.repeatDays ? (
+            <Pressable
+              onPress={() => setRepeatOpen(true)}
+              disabled={busy}
+              style={styles.repeatSummary}
+              accessibilityRole="button"
+              accessibilityLabel="Change how often it comes round"
+            >
+              <Text style={styles.sectionHint}>{describeRepeat(snag)}</Text>
+              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+            </Pressable>
           ) : null}
         </Card>
       </ScrollView>
@@ -873,7 +833,7 @@ export default function SnagDetailScreen() {
       <CalendarSheet
         visible={dueOpen}
         selected={snag.dueAt ? dayKey(snag.dueAt) : null}
-        title="When's the first one due?"
+        title="When's the next one due?"
         onPick={(iso) => {
           setDueOpen(false);
           patch({ dueAt: new Date(`${iso}T00:00:00`).toISOString() });
@@ -881,58 +841,106 @@ export default function SnagDetailScreen() {
         onClose={() => setDueOpen(false)}
       />
 
-      <LinkProjectSheet
-        visible={projectOpen}
-        propertyId={snag.propertyId}
-        linkedId={snag.projectId}
-        onClose={() => setProjectOpen(false)}
-        onPick={async (projectId) => {
-          setProjectOpen(false);
-          // A second press on the one it already belongs to unlinks it — the
-          // same gesture the thing link uses, so the two rows behave alike.
-          await patch({ projectId: projectId === snag.projectId ? null : projectId });
-        }}
-      />
+      {/* ── How often, and when the next one lands ──
+          Behind the Yes rather than on the card, because the card's job is to
+          collect a one-word answer and the common answer is no. Two rails and
+          a paragraph of explanation used to stand permanently under a heading
+          on a page people open constantly, to serve the minority of jobs that
+          come round.
 
-      <LinkThingSheet
-        visible={linking}
-        things={things}
-        loading={thingsLoading}
-        linkedId={snag.thingId}
-        onPick={async (thingId) => {
-          setLinking(false);
-          // The second press on the one it is already about unlinks it, the
-          // same gesture the capture sheet uses.
-          await patch({ thingId: thingId === snag.thingId ? null : thingId });
-        }}
-        onCreate={() => {
-          setLinking(false);
-          setCreating(true);
-        }}
-        onCancel={() => setLinking(false)}
-      />
+          **The date it asks for is the *next* one, not the first.** The rail
+          said "When's the first one due?" whatever the job's history, which on
+          a filter changed twice already is the app asking a question that was
+          answered a year ago. `describeCycle` supplies the words on the third
+          preset so the modal and every other screen say "every 6 months" the
+          same way — `cycles.test.ts` pins that every interval either list
+          offers is a whole number of months or years, precisely so this never
+          reads back "every 26 weeks" at somebody who pressed a chip saying
+          six months. */}
+      <Modal
+        visible={repeatOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRepeatOpen(false)}
+      >
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setRepeatOpen(false)}
+          accessibilityLabel="Close"
+        />
+        <View style={styles.sheet}>
+          <View style={styles.grab} />
+          <Text style={styles.sectionTitle}>How often does it come round?</Text>
 
-      {/* The walkthrough itself, not a second shorter form — a record created
-          from here has to be as strong as one created from the House tab, or
-          this is the back door that fills the house record with rows nobody
-          can read in a shop. The room is pre-filled from the job. */}
-      <AddThingSheet
-        visible={creating}
-        locations={locations}
-        pathPrefix={snag.householdId}
-        start={createStart}
-        onAddRoom={async (name) => {
-          try {
-            await createLocation(snag.propertyId, name);
-            await reloadLocations();
-            return true;
-          } catch {
-            return false;
-          }
-        }}
-        onAdd={(input) => handleCreateThing({ ...input, propertyId: snag.propertyId })}
-        onCancel={() => setCreating(false)}
-      />
+          <View style={styles.optionRow}>
+            {REPEAT_PRESETS.map(({ days, label }) => (
+              <Option
+                key={days}
+                label={label}
+                active={snag.repeatDays === days}
+                onPress={() =>
+                  patch({
+                    repeatDays: days,
+                    // A repeat with no date on it would never surface. Set one
+                    // on the first choice, and leave an existing one alone.
+                    dueAt: snag.dueAt ?? new Date(Date.now() + days * DAY_MS).toISOString(),
+                  })
+                }
+                disabled={busy}
+              />
+            ))}
+          </View>
+
+          {snag.repeatDays ? (
+            <>
+              <Text style={styles.fieldLabel}>When's the next one due?</Text>
+              <View style={styles.optionRow}>
+                {[
+                  { label: 'Today', at: 0 },
+                  { label: 'In a week', at: 7 },
+                  { label: `A full ${describeCycle(snag.repeatDays)} away`, at: snag.repeatDays },
+                ].map(({ label, at }) => (
+                  <Option
+                    key={label}
+                    label={label}
+                    active={isDueIn(snag.dueAt, at)}
+                    onPress={() => patch({ dueAt: new Date(Date.now() + at * DAY_MS).toISOString() })}
+                    disabled={busy}
+                  />
+                ))}
+                {/* The three presets cover the common answers and cannot say
+                    "the Saturday we're back", which is the answer often enough
+                    that having no way to give it made this rail read as the
+                    only dates on offer. Lit whenever the date set is not one
+                    the presets would have produced. */}
+                <Option
+                  label="Pick a date…"
+                  active={
+                    !!snag.dueAt &&
+                    ![0, 7, snag.repeatDays].some((at) => isDueIn(snag.dueAt, at ?? -1))
+                  }
+                  onPress={() => setDueOpen(true)}
+                  disabled={busy}
+                />
+              </View>
+
+              <Text style={styles.sectionHint}>{describeRepeat(snag)}</Text>
+
+              {/* No cron, no second table, no notifications — and the modal
+                  says so, because a thing called "Schedule a recurring job" is
+                  exactly what somebody would expect to remind them. */}
+              <Text style={styles.sectionHint}>
+                Snag doesn't remind anybody. Marking it done schedules the next one instead of
+                closing it.
+              </Text>
+            </>
+          ) : null}
+
+          <View style={styles.repeatDone}>
+            <Button label="Done" onPress={() => setRepeatOpen(false)} disabled={busy} />
+          </View>
+        </View>
+      </Modal>
 
       {/* One button, and it goes back to the list — which is where the reward
           actually is, because the snag has just left it. */}
@@ -984,6 +992,67 @@ const styles = StyleSheet.create({
   },
   content: { padding: Spacing.lg, paddingBottom: Spacing.xxxl, gap: Spacing.sm },
   photoStrip: { marginBottom: Spacing.sm },
+  // The control that grows the strip lives at the end of it. Sunken and
+  // dashed rather than filled: it is an offer, and a solid fern tile among
+  // photographs would be the loudest thing on a page whose whole job is the
+  // picture.
+  photoAdd: {
+    width: 130,
+    height: 165,
+    borderRadius: Radius.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
+    backgroundColor: Colors.sunken,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+  },
+  photoAddOff: { opacity: 0.6 },
+  photoAddLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.medium,
+    color: Colors.primary,
+  },
+  assetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  // One line each. The name is what somebody recognises; the model number is
+  // what they came for, so it takes the mono face `Fonts.mono` is spent on —
+  // data only, never prose.
+  assetName: { flex: 1, minWidth: 0, fontSize: Typography.base, color: Colors.textPrimary },
+  assetSpec: {
+    fontFamily: Fonts.mono,
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+  },
+  repeatSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  repeatDone: { marginTop: Spacing.sm },
+  backdrop: { flex: 1, backgroundColor: 'rgba(43, 39, 36, 0.4)' },
+  sheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.card,
+    borderTopRightRadius: Radius.card,
+    padding: Spacing.lg,
+    paddingTop: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  grab: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.border,
+    alignSelf: 'center',
+    marginBottom: Spacing.xs,
+  },
   photo: {
     width: 220,
     height: 165,
@@ -1135,9 +1204,13 @@ const styles = StyleSheet.create({
   },
   commentDate: { fontWeight: Typography.regular, color: Colors.textMuted },
   commentBody: { fontSize: Typography.base, color: Colors.textPrimary },
-  commentInputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.sm, marginTop: Spacing.sm },
+  commentInputRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginTop: Spacing.sm },
   commentInput: {
     flex: 1,
+    // Anything flexed around a TextInput needs this: on web it is an <input>
+    // with an intrinsic ~20-character width that `min-width: auto` will not
+    // shrink below, so the box grows past the card and off the screen edge.
+    minWidth: 0,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: Radius.input,
@@ -1146,8 +1219,12 @@ const styles = StyleSheet.create({
     fontSize: Typography.base,
     color: Colors.textPrimary,
     backgroundColor: Colors.background,
-    maxHeight: 120,
-    minHeight: MIN_TOUCH_TARGET,
+    // Four lines. `numberOfLines` is an Android-only hint on a multiline
+    // TextInput and does nothing on the build people install, so the height is
+    // stated: four lines of `Typography.base` plus the vertical padding.
+    minHeight: 112,
+    maxHeight: 200,
+    textAlignVertical: 'top',
   },
   commentSend: {
     width: MIN_TOUCH_TARGET,

@@ -216,6 +216,23 @@ export interface Location {
   sortOrder: number;
 }
 
+/**
+ * One of the things a job is about, as the view hands it over.
+ *
+ * Enough to draw the card and no more — the name to recognise it, the model to
+ * read in a shop, the room for the chip. Anything else is a tap away on the
+ * thing's own page, and a job that carried whole `Thing` rows would be paying
+ * for a spec sheet per link on a screen people open constantly.
+ */
+export interface LinkedThing {
+  id: string;
+  name: string | null;
+  room: string | null;
+  make: string | null;
+  model: string | null;
+  kind: ThingKind;
+}
+
 export interface Snag {
   id: string;
   reference: string;
@@ -232,6 +249,16 @@ export interface Snag {
   room: string | null;
   photoPaths: string[];
   description: string | null;
+
+  /**
+   * What the job is about, whole, from `home.snag_things`.
+   *
+   * `snags.thing_id` is the retired single link: its rows were backfilled into
+   * the join table and nothing writes it any more. It stays because
+   * `thing_name`/`make`/`model` still read from it for the extract's *About*
+   * column, and because deleting a column rewrites what somebody said.
+   */
+  linkedThings: LinkedThing[];
 
   /**
    * Triage — added later, from the list.

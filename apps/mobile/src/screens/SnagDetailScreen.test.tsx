@@ -30,6 +30,7 @@ const mock_setSnagStatus = jest.fn();
 const mock_updateSnag = jest.fn();
 const mock_setPartBought = jest.fn().mockResolvedValue(undefined);
 const mock_getThings = jest.fn().mockResolvedValue([]);
+const mock_setSnagThings = jest.fn().mockResolvedValue(undefined);
 const mock_getThingNotes = jest.fn().mockResolvedValue([]);
 jest.mock('../lib/supabase', () => ({
   getSnag: (...a: unknown[]) => mock_getSnag(...a),
@@ -45,6 +46,7 @@ jest.mock('../lib/supabase', () => ({
   deleteSnagAdvice: jest.fn(),
   getThingNotes: (...a: unknown[]) => mock_getThingNotes(...a),
   getThings: (...a: unknown[]) => mock_getThings(...a),
+  setSnagThings: (...a: unknown[]) => mock_setSnagThings(...a),
   createThing: jest.fn(),
   createLocation: jest.fn(),
 }));
@@ -70,6 +72,7 @@ const ahead = (days: number) => new Date(Date.now() + days * DAY).toISOString();
 
 const snag = (over: Partial<any> = {}): any => ({
   id: 's1', reference: 'SNAG-0041', householdId: 'h', propertyId: 'p',
+  linkedThings: [],
   room: 'Bathroom', photoPaths: [], description: 'Toilet cistern keeps running',
   status: 'open', parts: [], bought: [], needsParts: false,
   dueAt: null, repeatDays: null, assigneeId: null, thingId: null,
@@ -229,71 +232,72 @@ const thing = (over: Partial<any> = {}): any => ({
   ...over,
 });
 
-describe('what is in the room', () => {
-  it('lists this room and nothing else, with the number somebody came for', async () => {
-    mock_getThings.mockResolvedValue([
-      thing({ id: 'a', name: 'Heat pump', room: 'Bathroom' }),
-      thing({ id: 'b', name: 'Dryer', room: 'Laundry' }),
-    ]);
-    const r = await arrange(snag({ room: 'Bathroom' }));
+// ---------------------------------------------------------------- linked assets
+//
+// The card printed the whole room's record inline — nine appliances, a screen
+// of vertical rent — which read as nine things already attached to this snag
+// when it was really the inventory answering a question nobody asked. A list of
+// what is *selected* belongs on the page; a list of what *could be* belongs
+// behind a control.
 
-    expect(r.queryByText('Linked assets')).not.toBeNull();
-    expect(byLabel(r, 'Open Heat pump')).toBeDefined();
-    expect(byLabel(r, 'Open Dryer')).toBeUndefined();
+describe('linked assets', () => {
+  const linked = (over: Partial<any> = {}): any => ({
+    id: 't1', name: 'Heat pump', room: 'Bathroom',
+    make: 'Mitsubishi', model: 'MSZ-AP50VGK', kind: 'appliance', ...over,
+  });
+
+  it('offers to link, and reads nothing, when the job is about nothing', async () => {
+    mock_getThings.mockClear();
+    const r = await arrange(snag({ linkedThings: [] }));
+
+    expect(byLabel(r, 'Link an appliance or fixture')).toBeDefined();
+    // A once-in-a-job's-life decision must not cost a request on every visit to
+    // a page people open constantly.
+    expect(mock_getThings).not.toHaveBeenCalled();
+  });
+
+  it('shows what is linked, counted, with the number somebody came for', async () => {
+    const r = await arrange(snag({
+      linkedThings: [linked(), linked({ id: 't2', name: 'Extractor fan', model: 'XF12' })],
+    }));
+
+    expect(r.queryByText('Linked assets (2)')).not.toBeNull();
     expect(r.queryByText('Mitsubishi MSZ-AP50VGK')).not.toBeNull();
+    expect(byLabel(r, 'Open Heat pump')).toBeDefined();
+    // Never the whole inventory: only what the job says it is about.
+    expect(byLabel(r, 'Link an appliance or fixture')).toBeUndefined();
   });
 
-  it('never offers to link, tag or unlink anything', async () => {
-    mock_getThings.mockResolvedValue([thing({ room: 'Bathroom' })]);
-    const r = await arrange(snag({ room: 'Bathroom' }));
+  it('opens the record only when the picker is asked for', async () => {
+    mock_getThings.mockClear();
+    mock_getThings.mockResolvedValue([]);
+    const r = await arrange(snag({ linkedThings: [] }));
 
-    expect(byLabel(r, "Say what it's about")).toBeUndefined();
-    expect(byLabel(r, 'Change what it is about')).toBeUndefined();
-    expect(byLabel(r, 'Not about that')).toBeUndefined();
-    expect(byLabel(r, 'Part of a bigger job?')).toBeUndefined();
+    await press(byLabel(r, 'Link an appliance or fixture'));
+    expect(mock_getThings).toHaveBeenCalledWith('p');
   });
 
-  it('opens the record rather than writing to the job', async () => {
+  it('opens the asset rather than writing to the job', async () => {
     mock_updateSnag.mockClear();
-    mock_getThings.mockResolvedValue([thing({ id: 't9', room: 'Bathroom' })]);
-    const r = await arrange(snag({ room: 'Bathroom' }));
+    const r = await arrange(snag({ linkedThings: [linked({ id: 't9' })] }));
 
     await press(byLabel(r, 'Open Heat pump'));
     expect(mock_navigation.navigate).toHaveBeenCalledWith('ThingDetail', { thingId: 't9' });
     expect(mock_updateSnag).not.toHaveBeenCalled();
   });
 
-  // A section with nothing in it is the app asking somebody to read a question
-  // it cannot answer.
-  // Both lines matter and neither can be the one that gives way: the noun is
-  // how you find the row, the model is what you came to read. Side by side the
-  // mono spec took its intrinsic width and "Microwave" came out as "M".
-  it('shows the whole noun and the whole model, neither clipping the other', async () => {
-    mock_getThings.mockResolvedValue([
-      thing({ id: 'm', name: 'Microwave', room: 'Bathroom',
-        make: 'Samsung', model: 'MS32J5133B/MS40J5133B' }),
-    ]);
-    const r = await arrange(snag({ room: 'Bathroom' }));
+  // The × is the same call one short, never a second RPC: the server replaces
+  // the whole set, so a half-finished answer can never reach the row.
+  it('unlinks through the one call that replaces the set', async () => {
+    mock_setSnagThings.mockClear();
+    const r = await arrange(snag({
+      linkedThings: [linked(), linked({ id: 't2', name: 'Extractor fan' })],
+    }));
 
-    const said = r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
-    expect(said).toContain('Microwave');
-    expect(said).toContain('Samsung MS32J5133B/MS40J5133B');
-  });
-
-  it('is absent entirely when the room holds nothing', async () => {
-    mock_getThings.mockResolvedValue([thing({ room: 'Laundry' })]);
-    const r = await arrange(snag({ room: 'Bathroom' }));
-    expect(r.queryByText('Linked assets')).toBeNull();
-  });
-
-  // The least important thing on the page must never be what stops the notes
-  // appearing.
-  it('renders the whole page when the record cannot be read', async () => {
-    mock_getThings.mockRejectedValue(new Error('Network'));
-    const r = await arrange(snag({ room: 'Bathroom' }));
-
-    expect(r.queryByText('Toilet cistern keeps running')).not.toBeNull();
-    expect(r.queryByText('Linked assets')).toBeNull();
+    await press(byLabel(r, 'Unlink Heat pump'));
+    expect(mock_setSnagThings).toHaveBeenCalledWith('s1', ['t2']);
+    // Saying what a job is about is the tail of capture, not deciding to do it.
+    expect(mock_updateSnag).not.toHaveBeenCalled();
   });
 });
 
@@ -454,12 +458,15 @@ describe('scheduling a recurring job', () => {
     expect(r.queryByText('A full 6 months away')).not.toBeNull();
   });
 
-  it('says the arrangement on the card, without opening anything', async () => {
+  // The due-date field sits directly above this card, so stating the day here
+  // too put it on screen twice a card apart — which read as two date controls
+  // stacked. This says only the part that field cannot: what happens next.
+  it('says what happens next without repeating the date', async () => {
     const r = await arrange(snag({ repeatDays: 180, dueAt: '2026-11-08T00:00:00.000Z' }));
-    expect(
-      r.getAllByType('Text').some((n: any) => String(n.props.children ?? '')
-        .includes('then every 6 months'))
-    ).toBe(true);
+    const said = r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
+
+    expect(said.some((t: string) => t.includes('every 6 months'))).toBe(true);
+    expect(said.some((t: string) => t.includes('8/11/2026') || t.includes('11/8/2026'))).toBe(false);
   });
 
   it('clears the repeat on No rather than opening anything', async () => {
@@ -629,21 +636,34 @@ describe('the Save button', () => {
 // asset list is reference. So it comes first, and the assessment card stays
 // directly above it, because the parts it suggests land in the list underneath.
 
+// The natural order of inspecting and fixing something: what it is about, then
+// what to do about it, then when, then the one state change a person makes.
 describe('the order down the page', () => {
-  it('puts what to pick up above what is in the room', async () => {
-    mock_getThings.mockResolvedValue([
-      { id: 'a', householdId: 'h', propertyId: 'p', kind: 'appliance', name: 'Heat pump',
-        room: 'Bathroom', photoPaths: [], make: null, model: null, serial: null,
-        consumables: [], documentPaths: [], installedAt: null, warrantyUntil: null,
-        serviceDays: null, spec: {}, notes: null, createdBy: 'me', createdAt: '',
-        updatedAt: '', propertyName: 'Home', snagCount: 0, openSnagCount: 0 },
-    ]);
-    const r = await arrange(snag({ room: 'Bathroom' }));
+  it('reads core detail, then action items, then scheduling, then the state change', async () => {
+    const r = await arrange(snag({ room: 'Bathroom', repeatDays: null }));
 
-    const headings = r.getAllByType('Text')
-      .map((n: any) => String(n.props.children ?? ''))
-      .filter((t: string) => t === 'Anything to pick up?' || t === 'Linked assets');
+    // Flattened, because a heading like `Notes {count}` renders as an array of
+    // children and `String(children)` would come back with a comma in it.
+    const flat = (node: any): string =>
+      (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : flat(c))).join('');
 
-    expect(headings).toEqual(['Anything to pick up?', 'Linked assets']);
+    const wanted = ['Linked assets', 'Anything to pick up?', 'Notes', "When's it due?",
+      'Schedule a recurring job'];
+    const seen = r.getAllByType('Text')
+      .map((n: any) => flat(n).trim())
+      .filter((t: string) => wanted.includes(t));
+
+    expect(seen).toEqual(wanted);
+  });
+
+  // Finishing is the one state change a person still makes by hand, so it sits
+  // at the foot of the content rather than competing with Save in the footer.
+  it('puts Mark done below everything it depends on', async () => {
+    const r = await arrange(snag({ repeatDays: null }));
+    const order = r.getAllByType('Text')
+      .map((n: any) => String(n.props.children ?? ''));
+
+    expect(order.indexOf('Mark done')).toBeGreaterThan(order.indexOf('Schedule a recurring job'));
   });
 });
+

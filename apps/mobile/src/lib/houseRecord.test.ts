@@ -1,4 +1,5 @@
 import {
+  assetPickerOrder,
   catalogueSuggestions, describeCycle, documentFileName, documentName, formatLooseDate,
   ghostsForRoom, matchSuggestions, parseLooseDate, searchThings, thingDetailLine,
   thingHeadline, thingSearchText, thingsInArea,
@@ -385,5 +386,52 @@ describe('what a snag can be said to be about', () => {
       thing({ id: 'c', name: 'Dishwasher', room: 'Kitchen' }),
     ], 'Kitchen');
     expect(found.map(thingHeadline)).toEqual(['Bosch SMS46MI01A', 'Dishwasher', 'Rangehood']);
+  });
+});
+
+// ------------------------------------------------------- the picker's order
+//
+// Three bands, each earning its place by how likely the next tap is: what is
+// already linked (so amending is never a hunt), then the job's room (the best
+// guess the row carries), then the rest of the house — because a picker that
+// only ever offers the room insists houses are laid out the way a catalogue
+// thinks, which is the argument the walkthrough's step two already makes.
+
+describe('assetPickerOrder', () => {
+  const t = (id: string, name: string, room: string | null): Thing => ({
+    id, householdId: 'h', propertyId: 'p', kind: 'appliance', name, room,
+    photoPaths: [], make: null, model: null, serial: null, consumables: [],
+    documentPaths: [], installedAt: null, warrantyUntil: null, serviceDays: null,
+    spec: {}, notes: null, createdBy: 'me', createdAt: '', updatedAt: '',
+    propertyName: 'Home', snagCount: 0, openSnagCount: 0,
+  });
+
+  const all = [
+    t('a', 'Washing machine', 'Laundry'),
+    t('b', 'Dishwasher', 'Kitchen'),
+    t('c', 'Alarm', 'Hallway'),
+    t('d', 'Rangehood', 'Kitchen'),
+  ];
+
+  it('pins what is already linked, whatever room it is in', () => {
+    expect(assetPickerOrder(all, ['a'], 'Kitchen').map((one) => one.id)[0]).toBe('a');
+  });
+
+  it('puts the job’s room next, then everything else', () => {
+    expect(assetPickerOrder(all, [], 'Kitchen').map((one) => one.id))
+      .toEqual(['b', 'd', 'c', 'a']);
+  });
+
+  it('offers the whole house rather than only the room', () => {
+    expect(assetPickerOrder(all, [], 'Kitchen')).toHaveLength(all.length);
+  });
+
+  it('is alphabetical inside a band, because a card is read rather than ranked', () => {
+    expect(assetPickerOrder(all, [], null).map((one) => one.name))
+      .toEqual(['Alarm', 'Dishwasher', 'Rangehood', 'Washing machine']);
+  });
+
+  it('matches a room whatever its case', () => {
+    expect(assetPickerOrder(all, [], 'kitchen').map((one) => one.id)[0]).toBe('b');
   });
 });

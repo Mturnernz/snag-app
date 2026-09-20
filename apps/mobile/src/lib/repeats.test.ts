@@ -12,6 +12,7 @@ const at = (days: number) => new Date(Date.now() + days * DAY).toISOString();
 
 const snag = (over: Partial<Snag>): Snag => ({
   id: 'x', reference: 'SNAG-0001', householdId: 'h', propertyId: 'p',
+  linkedThings: [],
   room: 'Outside', photoPaths: [], description: 'Gutters', status: 'open',
   parts: [], bought: [], needsParts: false, dueAt: null, repeatDays: null,
   assigneeId: null, thingId: null, thingName: null, thingMake: null, thingModel: null,

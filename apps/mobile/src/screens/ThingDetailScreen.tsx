@@ -4,7 +4,6 @@ import {
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
-import { Linking } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import Icon from '../components/Icon';
@@ -14,6 +13,7 @@ import DateField from '../components/DateField';
 import PhotoViewer from '../components/PhotoViewer';
 import Button from '../components/Button';
 import StickyActionBar from '../components/StickyActionBar';
+import { openUrl } from '../lib/openUrl';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -432,9 +432,7 @@ export default function ThingDetailScreen() {
       showAlert("Couldn't open that", 'The link to this document could not be made.');
       return;
     }
-    Linking.openURL(url).catch(() => {
-      showAlert("Couldn't open that", 'Nothing on this device offered to open the file.');
-    });
+    openUrl(url);
   }
 
   async function copy(label: string, value: string) {

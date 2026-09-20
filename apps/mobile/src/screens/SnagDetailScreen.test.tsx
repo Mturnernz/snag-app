@@ -190,28 +190,77 @@ describe('editing a job after it was filed', () => {
   });
 });
 
-describe('what the job is about', () => {
-  it('offers to say so when nothing is linked', async () => {
-    const r = await arrange(snag({ thingId: null, thingName: null }));
-    expect(byLabel(r, "Say what it's about")).toBeDefined();
+// ---------------------------------------------------------------- linked assets
+//
+// It replaced two controls that both *wrote* — *Part of a bigger job*, which
+// set `project_id`, and *Say what it's about*, which set `thing_id` through a
+// picker over the whole house record. Neither question is one somebody standing
+// on this page arrives wanting to answer.
+//
+// The payoff was never the tag, it was the model number. The room is already on
+// the job, so the things in that room are the shortlist a human would have
+// picked from — offered as a list to read, writing nothing.
+
+const thing = (over: Partial<any> = {}): any => ({
+  id: 't1', householdId: 'h', propertyId: 'p', kind: 'appliance',
+  name: 'Heat pump', room: 'Bathroom', photoPaths: [], make: 'Mitsubishi',
+  model: 'MSZ-AP50VGK', serial: null, consumables: [], documentPaths: [],
+  installedAt: null, warrantyUntil: null, serviceDays: null, spec: {}, notes: null,
+  createdBy: 'me', createdAt: '', updatedAt: '',
+  propertyName: 'Home', snagCount: 0, openSnagCount: 0,
+  ...over,
+});
+
+describe('what is in the room', () => {
+  it('lists this room and nothing else, with the number somebody came for', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: 'a', name: 'Heat pump', room: 'Bathroom' }),
+      thing({ id: 'b', name: 'Dryer', room: 'Laundry' }),
+    ]);
+    const r = await arrange(snag({ room: 'Bathroom' }));
+
+    expect(r.queryByText('Linked assets')).not.toBeNull();
+    expect(byLabel(r, 'Open Heat pump')).toBeDefined();
+    expect(byLabel(r, 'Open Dryer')).toBeUndefined();
+    expect(r.queryByText('Mitsubishi MSZ-AP50VGK')).not.toBeNull();
   });
 
-  it('offers to change it or remove it once something is', async () => {
-    const r = await arrange(snag({ thingId: 't1', thingName: 'Heat pump' }));
+  it('never offers to link, tag or unlink anything', async () => {
+    mock_getThings.mockResolvedValue([thing({ room: 'Bathroom' })]);
+    const r = await arrange(snag({ room: 'Bathroom' }));
 
-    expect(byLabel(r, 'Change what it is about')).toBeDefined();
-    await press(byLabel(r, 'Not about that'));
-    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { thingId: null });
+    expect(byLabel(r, "Say what it's about")).toBeUndefined();
+    expect(byLabel(r, 'Change what it is about')).toBeUndefined();
+    expect(byLabel(r, 'Not about that')).toBeUndefined();
+    expect(byLabel(r, 'Part of a bigger job?')).toBeUndefined();
   });
 
-  it('reads the house record only when the picker is opened', async () => {
-    // A once-in-a-job's-life decision must not cost a request on every visit
-    // to a page people open constantly.
-    const r = await arrange(snag({ thingId: null, thingName: null }));
-    expect(mock_getThings).not.toHaveBeenCalled();
+  it('opens the record rather than writing to the job', async () => {
+    mock_updateSnag.mockClear();
+    mock_getThings.mockResolvedValue([thing({ id: 't9', room: 'Bathroom' })]);
+    const r = await arrange(snag({ room: 'Bathroom' }));
 
-    await press(byLabel(r, "Say what it's about"));
-    expect(mock_getThings).toHaveBeenCalledWith('p');
+    await press(byLabel(r, 'Open Heat pump'));
+    expect(mock_navigation.navigate).toHaveBeenCalledWith('ThingDetail', { thingId: 't9' });
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+  });
+
+  // A section with nothing in it is the app asking somebody to read a question
+  // it cannot answer.
+  it('is absent entirely when the room holds nothing', async () => {
+    mock_getThings.mockResolvedValue([thing({ room: 'Laundry' })]);
+    const r = await arrange(snag({ room: 'Bathroom' }));
+    expect(r.queryByText('Linked assets')).toBeNull();
+  });
+
+  // The least important thing on the page must never be what stops the notes
+  // appearing.
+  it('renders the whole page when the record cannot be read', async () => {
+    mock_getThings.mockRejectedValue(new Error('Network'));
+    const r = await arrange(snag({ room: 'Bathroom' }));
+
+    expect(r.queryByText('Toilet cistern keeps running')).not.toBeNull();
+    expect(r.queryByText('Linked assets')).toBeNull();
   });
 });
 
@@ -252,5 +301,139 @@ describe("the asset's own history", () => {
 
     expect(r.queryByText('Toilet cistern keeps running')).not.toBeNull();
     expect(r.queryByText('Also said about Heat pump')).toBeNull();
+  });
+});
+
+// ------------------------------------------------------------ what came away
+//
+// *Sort it out* held three unrelated controls: how urgent, what to pick up, and
+// who is doing it. Two of them have gone — priority because a household list is
+// a dozen small jobs none of which is an emergency, an assignee because two
+// people in one house tell each other out loud — and the one that remains is
+// the one that actually moves work, so it is its own card under the notes.
+
+describe('what the page no longer asks', () => {
+  it('has no Sort it out card, no urgency and nobody to assign it to', async () => {
+    const r = await arrange();
+    expect(r.queryByText('Sort it out')).toBeNull();
+    expect(r.queryByText('How urgent?')).toBeNull();
+    expect(r.queryByText("Who's doing it?")).toBeNull();
+    expect(r.queryByText('Me')).toBeNull();
+  });
+
+  it('keeps the shopping list, as a card of its own', async () => {
+    const r = await arrange(snag({ parts: ['Hinge'], bought: [] }));
+    expect(r.queryByText('Anything to pick up?')).not.toBeNull();
+    expect(r.queryByText('Hinge')).not.toBeNull();
+  });
+});
+
+// ------------------------------------------------------------------- the date
+//
+// It was reachable only through the repeat card, so a one-off job could never
+// be given a date at all — which made the Schedule tab's Due marks and the
+// overdue badge features only repeating jobs had. Precisely backwards: a filter
+// that comes round every six months looks after itself.
+
+describe("when it's due", () => {
+  const field = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && !!n.props?.onChangeText
+        && n.props?.accessibilityLabel === label,
+      { deep: true },
+    )[0];
+
+  it('is a field on the page, whether or not the job repeats', async () => {
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
+    expect(r.queryByText("When's it due?")).not.toBeNull();
+  });
+
+  it('writes a typed date day-first, on leaving the box', async () => {
+    mock_updateSnag.mockResolvedValue(snag({ dueAt: '2026-11-08T00:00:00.000Z' }));
+    const r = await arrange(snag({ dueAt: null }));
+
+    const box = field(r, "When's it due?");
+    await TestRenderer.act(async () => { box.props.onChangeText('8/11/2026'); });
+    await TestRenderer.act(async () => { await box.props.onBlur(); });
+
+    const [, update] = mock_updateSnag.mock.calls[0];
+    // The eighth of November, never the eleventh of August.
+    expect(new Date(update.dueAt).getMonth()).toBe(10);
+    expect(new Date(update.dueAt).getDate()).toBe(8);
+  });
+
+  it('refuses a date no calendar has rather than raising a 22008 from the RPC', async () => {
+    mock_updateSnag.mockClear();
+    const r = await arrange(snag({ dueAt: null }));
+
+    const box = field(r, "When's it due?");
+    await TestRenderer.act(async () => { box.props.onChangeText('31/02/2026'); });
+    await TestRenderer.act(async () => { await box.props.onBlur(); });
+
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing when the box is left exactly as it was found', async () => {
+    mock_updateSnag.mockClear();
+    const r = await arrange(snag({ dueAt: '2026-11-08T00:00:00.000Z' }));
+
+    const box = field(r, "When's it due?");
+    await TestRenderer.act(async () => { await box.props.onBlur(); });
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+  });
+});
+
+// ------------------------------------------------------------------ repeating
+//
+// The card carried a paragraph, a question and two rails of presets, permanently,
+// on a page people open constantly — to serve the minority of jobs that come
+// round. The common answer is no, so the card asks and the arrangement moves
+// behind the Yes.
+
+describe('scheduling a recurring job', () => {
+  it('asks yes or no, and explains nothing until the answer is yes', async () => {
+    const r = await arrange(snag({ repeatDays: null }));
+
+    expect(r.queryByText('Schedule a recurring job')).not.toBeNull();
+    expect(r.queryByText('How often does it come round?')).toBeNull();
+    expect(r.queryByText('Does it come round again?')).toBeNull();
+    expect(
+      r.getAllByType('Text').some((n: any) => String(n.props.children ?? '')
+        .includes('Filters, gutters, smoke alarms'))
+    ).toBe(false);
+  });
+
+  it('opens the arrangement on Yes', async () => {
+    const r = await arrange(snag({ repeatDays: null }));
+    await press(button(r, 'Yes'));
+    expect(r.queryByText('How often does it come round?')).not.toBeNull();
+    expect(r.queryByText("When's the next one due?")).toBeNull();
+  });
+
+  it('asks when the next one lands once a cycle is set, never "the first"', async () => {
+    const r = await arrange(snag({ repeatDays: 180, dueAt: null }));
+    await press(button(r, 'Yes'));
+
+    expect(r.queryByText("When's the next one due?")).not.toBeNull();
+    expect(r.queryByText("When's the first one due?")).toBeNull();
+    // One vocabulary for how often: six months is 180 days everywhere, and
+    // `describeCycle` says it in months rather than coming back "26 weeks".
+    expect(r.queryByText('A full 6 months away')).not.toBeNull();
+  });
+
+  it('says the arrangement on the card, without opening anything', async () => {
+    const r = await arrange(snag({ repeatDays: 180, dueAt: '2026-11-08T00:00:00.000Z' }));
+    expect(
+      r.getAllByType('Text').some((n: any) => String(n.props.children ?? '')
+        .includes('then every 6 months'))
+    ).toBe(true);
+  });
+
+  it('clears the repeat on No rather than opening anything', async () => {
+    mock_updateSnag.mockResolvedValue(snag({ repeatDays: null }));
+    const r = await arrange(snag({ repeatDays: 180 }));
+
+    await press(button(r, 'No'));
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: null });
   });
 });

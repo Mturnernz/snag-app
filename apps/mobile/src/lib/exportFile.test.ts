@@ -75,27 +75,44 @@ describe('what a row says', () => {
   // A photo-only snag has no words of its own, and a spreadsheet cannot show
   // the photo — so the headline the list uses has to carry into the file, or
   // the row is blank where it matters most.
+  /**
+   * The column by its name, never by its position.
+   *
+   * These read `rows[0][8]` until a column was removed from the middle of the
+   * header and every one of them started asserting about its neighbour. A
+   * spreadsheet's columns are named; the test can be too.
+   */
+  const cell = (table: ReturnType<typeof snagExportTable>, column: string) =>
+    table.rows[0][table.columns.indexOf(column)];
+
+  // Urgency left the app: nothing sets it, nothing shows it, and a column that
+  // is blank on every row somebody files from here on is noise in a document
+  // read at a desk.
+  it('has no Priority column', () => {
+    expect(snagExportTable([snag()], META).columns).not.toContain('Priority');
+  });
+
   it('gives a photo-only snag the headline the list gives it', () => {
     const table = snagExportTable(
       [snag({ description: null, photoPaths: ['h/one.jpg'] })],
       META,
     );
-    expect(table.rows[0][1]).not.toBe('');
-    expect(table.rows[0][14]).toBe('1');
+    expect(cell(table, 'What')).not.toBe('');
+    expect(cell(table, 'Photos')).toBe('1');
   });
 
   it('writes a repeat in the words the app uses, not a number of days', () => {
-    expect(snagExportTable([snag({ repeatDays: 90 })], META).rows[0][8]).toBe('3 months');
-    expect(snagExportTable([snag({ repeatDays: 365 })], META).rows[0][8]).toBe('year');
+    expect(cell(snagExportTable([snag({ repeatDays: 90 })], META), 'Repeats')).toBe('3 months');
+    expect(cell(snagExportTable([snag({ repeatDays: 365 })], META), 'Repeats')).toBe('year');
 
     // Six months, from either the repeat chips or the service sheet — the two
     // used to disagree about what number that was. See cycles.test.ts.
-    expect(snagExportTable([snag({ repeatDays: 180 })], META).rows[0][8]).toBe('6 months');
+    expect(cell(snagExportTable([snag({ repeatDays: 180 })], META), 'Repeats')).toBe('6 months');
 
     // The fallback is still there for a hand-set interval: create_snag takes
     // any 1..3650, and an extract should say what the row holds rather than
     // round it into a lie.
-    expect(snagExportTable([snag({ repeatDays: 45 })], META).rows[0][8]).toBe('45 days');
+    expect(cell(snagExportTable([snag({ repeatDays: 45 })], META), 'Repeats')).toBe('45 days');
   });
 
   it('names the house, the place, the scope and the day at the top', () => {

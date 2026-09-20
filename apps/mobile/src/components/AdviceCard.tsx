@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Linking } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Card from './Card';
 import Icon from './Icon';
+import { openUrl } from '../lib/openUrl';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { ADVICE_VERDICT_LABELS, type SnagAdvice } from '../types';
 
@@ -49,7 +50,7 @@ export default function AdviceCard({ advice, parts, busy = false, onAccept, onRe
   const [showTradies, setShowTradies] = useState(false);
   const accepted = new Set(parts.map((part) => part.toLowerCase()));
 
-  const open = (url: string) => { Linking.openURL(url).catch(() => {}); };
+  const open = openUrl;
 
   return (
     <Card elevation="md" style={styles.card}>

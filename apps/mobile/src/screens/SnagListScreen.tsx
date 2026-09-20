@@ -57,14 +57,17 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  *   the product has to offer.
  */
 
-type Lens = 'all' | 'mine' | 'parts' | 'urgent';
+type Lens = 'all' | 'parts';
 type Sort = 'room' | 'newest' | 'due';
 
+// Two, where there were four. **Mine** read `assignee_id` and **Urgent** read
+// `priority`, and nothing in the app writes either any more — a lens over a
+// column nothing can set is a filter that comes back empty for ever and tells
+// nobody why. What is left is the one that answers a question somebody actually
+// arrives with: is there a trip to the shop in this.
 const LENSES: { key: Lens; label: string }[] = [
   { key: 'all', label: 'Everything' },
-  { key: 'mine', label: 'Mine' },
   { key: 'parts', label: 'Needs parts' },
-  { key: 'urgent', label: 'Urgent' },
 ];
 
 const SORTS: { key: Sort; label: string }[] = [
@@ -169,12 +172,10 @@ export default function SnagListScreen() {
 
   const visible = useMemo(() => {
     switch (lens) {
-      case 'mine': return snags.filter((s) => s.assigneeId === profile.id);
       case 'parts': return snags.filter((s) => s.needsParts);
-      case 'urgent': return snags.filter((s) => s.priority === 'high');
       default: return snags;
     }
-  }, [snags, lens, profile.id]);
+  }, [snags, lens]);
 
   /**
    * An extract of the list.
@@ -361,17 +362,8 @@ export default function SnagListScreen() {
       propertyId: activeProperty.id,
       description: input.description,
       photoPaths: input.photoPath ? [input.photoPath] : [],
-      // Priority is not asked at capture any more. Nearly everything was filed
-      // Low, and urgency is comparative — it belongs where twelve things are
-      // visible at once. The amend row offers it for the case that isn't.
-      priority: null,
     });
     setJustAdded(snag);
-    // Started here rather than awaited: the sheet opens on "What's wrong?" and
-    // the step this feeds is two taps away, so the read has the whole of that
-    // to arrive in. If it is slow the step appears late; if it fails the step
-    // never appears. Neither can block a snag that is already filed.
-    void loadThings(activeProperty.id);
     await load();
   }
 
@@ -593,12 +585,6 @@ export default function SnagListScreen() {
           busy={amending}
           onSaveNote={(text) => amend({ description: text }, 'Added')}
           onSetRoom={(room) => amend({ room }, room ?? 'Tag removed')}
-          things={things}
-          onSetThing={(thingId) => amend(
-            { thingId },
-            thingId ? 'Noted what it\'s about' : 'No longer about that',
-          )}
-          onSetUrgent={(urgent) => amend({ priority: urgent ? 'high' : null }, urgent ? 'Marked urgent' : 'No longer urgent')}
           onOpenDetail={() => {
             const id = justAdded.id;
             setJustAdded(null);

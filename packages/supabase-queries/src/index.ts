@@ -40,7 +40,6 @@ import type {
   SnagAdvice,
   ThingNote,
   SnagFilter,
-  SnagPriority,
   SnagSort,
   SnagStatus,
   Thing,
@@ -64,8 +63,6 @@ import type {
   ProjectTotals,
 } from '@snag/shared-types';
 import {
-  PRIORITY_LABELS,
-  PRIORITY_ORDER,
   ROOM_SUGGESTIONS,
   STATUS_LABELS,
   THING_KIND_LABELS,
@@ -92,7 +89,6 @@ function mapSnag(row: Row): Snag {
     photoPaths: row.photo_paths ?? [],
     description: row.description ?? null,
     status: row.status,
-    priority: row.priority ?? null,
     parts: row.parts ?? [],
     bought: row.bought ?? [],
     needsParts: !!row.needs_parts,
@@ -219,18 +215,55 @@ export async function getMyProfile(client: SupabaseClient): Promise<Profile | nu
 
   const { data, error } = await client
     .from('profiles')
-    .select('id, display_name, created_at, deleted_at')
+    .select('id, display_name, created_at, deleted_at, projects_enabled')
     .eq('id', auth.user.id)
     .maybeSingle();
 
   if (error) throw asError(error, "Couldn't load your profile");
   if (!data) return null;
+  return mapProfile(data);
+}
+
+/**
+ * One place a profile row becomes a `Profile`.
+ *
+ * Three functions returned this shape by hand and the fourth column was the
+ * one that showed why that is a trap: a mapping written out three times is
+ * three chances to add a column to two of them. `projects_enabled` decides
+ * whether a whole tab renders, so a reader that quietly dropped it would hide
+ * Projects from somebody who never asked for that — and would do it only on
+ * the screen whose copy was missed.
+ *
+ * It defaults to `true` rather than `false` for the same reason the column
+ * does: an absent answer is not somebody asking for the tab to go.
+ */
+function mapProfile(row: Row): Profile {
   return {
-    id: data.id,
-    displayName: data.display_name,
-    createdAt: data.created_at,
-    deletedAt: data.deleted_at ?? null,
+    id: row.id,
+    displayName: row.display_name,
+    createdAt: row.created_at,
+    deletedAt: row.deleted_at ?? null,
+    projectsEnabled: row.projects_enabled ?? true,
   };
+}
+
+/**
+ * Turning the Projects tab off, or back on.
+ *
+ * Its own RPC rather than a field on `upsert_profile`, which is the sign-up
+ * path: that one runs before a household exists and is called with a display
+ * name and nothing else, and routing a preference through it would mean every
+ * caller of it having an opinion about the Projects tab.
+ *
+ * The row that comes back is what the caller should re-read from, so the toggle
+ * can never show a state the database does not hold.
+ */
+export async function setProjectsEnabled(
+  client: SupabaseClient,
+  enabled: boolean
+): Promise<Profile> {
+  const { data, error } = await client.rpc('set_projects_enabled', { p_enabled: enabled });
+  return mapProfile(unwrap<Row>(data, error, "Couldn't change that"));
 }
 
 export async function upsertProfile(
@@ -238,13 +271,7 @@ export async function upsertProfile(
   displayName: string
 ): Promise<Profile> {
   const { data, error } = await client.rpc('upsert_profile', { p_display_name: displayName });
-  const row = unwrap<Row>(data, error, "Couldn't save your name");
-  return {
-    id: row.id,
-    displayName: row.display_name,
-    createdAt: row.created_at,
-    deletedAt: row.deleted_at ?? null,
-  };
+  return mapProfile(unwrap<Row>(data, error, "Couldn't save your name"));
 }
 
 /**
@@ -750,7 +777,10 @@ export async function getSnags(
   if (filter.room) query = query.eq('room', filter.room);
   if (filter.assigneeId) query = query.eq('assignee_id', filter.assigneeId);
   if (filter.projectId) query = query.eq('project_id', filter.projectId);
-  if (filter.priority?.length) query = query.in('priority', filter.priority);
+  // Projects off. Asked of Postgres rather than filtered afterwards, so the
+  // header count, the shopping pill, the Schedule tab and both extracts cannot
+  // disagree about how much there is to do.
+  if (filter.excludeProjectSnags) query = query.is('project_id', null);
   if (filter.needsParts !== undefined) query = query.eq('needs_parts', filter.needsParts);
   if (filter.dueOnly) query = query.not('due_at', 'is', null).lte('due_at', new Date().toISOString());
 
@@ -760,11 +790,6 @@ export async function getSnags(
       break;
     case 'due':
       query = query.order('due_at', { ascending: true, nullsFirst: false });
-      break;
-    case 'priority':
-      // Postgres orders enums by declaration order, which is now → soon →
-      // someday. Unset priority sorts last rather than first.
-      query = query.order('priority', { ascending: true, nullsFirst: false });
       break;
     default:
       query = query.order('created_at', { ascending: false });
@@ -815,7 +840,6 @@ export async function createSnag(
     room?: string | null;
     description?: string | null;
     photoPaths?: string[];
-    priority?: SnagPriority | null;
     thingId?: string | null;
     /** The renovation it belongs to, when a job is filed from a project's page. */
     projectId?: string | null;
@@ -836,7 +860,11 @@ export async function createSnag(
     p_room: input.room ?? null,
     p_description: input.description ?? null,
     p_photo_paths: input.photoPaths ?? [],
-    p_priority: input.priority ?? null,
+    // The RPC still takes a priority and the column still exists; nothing in
+    // this app has an opinion about it any more. Always null rather than
+    // removed from the call, because the argument is part of the server's
+    // signature and a positional gap is a different function.
+    p_priority: null,
     p_thing_id: input.thingId ?? null,
     p_due_at: input.dueAt ?? null,
     p_repeat_days: input.repeatDays ?? null,
@@ -851,7 +879,6 @@ export async function createSnag(
 export interface SnagUpdate {
   room?: string | null;
   description?: string | null;
-  priority?: SnagPriority | null;
   /** Replaces the whole list. `needs_parts` follows from it, server-side. */
   parts?: string[];
   dueAt?: string | null;
@@ -875,7 +902,6 @@ export interface SnagUpdate {
 const CLEARABLE: Record<string, string> = {
   room: 'room',
   description: 'description',
-  priority: 'priority',
   dueAt: 'due_at',
   repeatDays: 'repeat_days',
   assigneeId: 'assignee_id',
@@ -902,7 +928,7 @@ export async function updateSnag(
     p_snag_id: snagId,
     p_room: update.room ?? null,
     p_description: update.description ?? null,
-    p_priority: update.priority ?? null,
+    p_priority: null,
     p_due_at: update.dueAt ?? null,
     p_repeat_days: update.repeatDays ?? null,
     p_assignee_id: update.assigneeId ?? null,
@@ -1557,6 +1583,25 @@ export function matchSuggestions(
   return suggestions.filter((one) => one.name.toLowerCase().includes(wanted));
 }
 
+/**
+ * The rooms whose names contain what somebody typed.
+ *
+ * The same rule `matchSuggestions` uses, against the room vocabulary rather
+ * than the thing catalogue: substring, anywhere in the name, any case. Nobody
+ * hunting the laundry types "wash", but somebody hunting "Under the house"
+ * types "house" — and a prefix match would answer that with nothing.
+ *
+ * Its own function rather than a generic over `{ name: string }`, because a
+ * room is a `Location` with an id that a snag's TEXT `room` column does not
+ * store, and a matcher that took either would be one edit away from filing a
+ * snag under a suggestion's name.
+ */
+export function matchRooms(locations: Location[], query: string): Location[] {
+  const wanted = query.trim().toLowerCase();
+  if (!wanted) return locations;
+  return locations.filter((one) => one.name.toLowerCase().includes(wanted));
+}
+
 export function ghostsForRoom(
   room: string,
   things: Thing[],
@@ -2073,7 +2118,7 @@ export function snagExportTable(
     name: `${meta.household} list`,
     subtitle: `${meta.place} · ${meta.scope} · ${meta.stamp}`,
     columns: [
-      'Reference', 'What', 'Room', 'Status', 'Priority', 'Needs parts', 'Parts',
+      'Reference', 'What', 'Room', 'Status', 'Needs parts', 'Parts',
       'Due', 'Repeats', 'About', 'Assigned to', 'Filed by', 'Filed', 'Done', 'Photos',
     ],
     rows: snags.map((snag) => [
@@ -2081,7 +2126,6 @@ export function snagExportTable(
       snagHeadline(snag),
       snag.room ?? '',
       STATUS_LABELS[snag.status] ?? snag.status,
-      snag.priority ? PRIORITY_LABELS[snag.priority] : '',
       yesNo(snag.needsParts),
       (snag.parts ?? []).join('; '),
       formatLooseDate(snag.dueAt),

@@ -2,7 +2,6 @@ import React from 'react';
 import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 import Icon from './Icon';
 import StatusBadge from './StatusBadge';
-import PriorityBadge from './PriorityBadge';
 import DueBadge from './DueBadge';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Snag } from '../types';
@@ -71,7 +70,6 @@ export default function SnagCard({ snag, photoUrl, onPress }: Props) {
 
         <View style={styles.badges}>
           <StatusBadge status={snag.status} />
-          <PriorityBadge priority={snag.priority} />
           <DueBadge snag={snag} />
           {/* What is still to get, never what was listed: a card claiming it
               needs the seal you bought on Saturday is a card you stop

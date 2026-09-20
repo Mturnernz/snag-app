@@ -33,7 +33,7 @@ jest.mock('../lib/supabase', () => ({
 }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 
-const PROFILE = { id: 'me', displayName: 'Alyssa', createdAt: '2026-09-01T00:00:00Z' };
+const PROFILE = { id: 'me', displayName: 'Alyssa', createdAt: '2026-09-01T00:00:00Z', projectsEnabled: true };
 
 const INVITATION = {
   id: 'i1',

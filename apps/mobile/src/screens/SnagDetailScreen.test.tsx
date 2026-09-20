@@ -265,6 +265,21 @@ describe('what is in the room', () => {
 
   // A section with nothing in it is the app asking somebody to read a question
   // it cannot answer.
+  // Both lines matter and neither can be the one that gives way: the noun is
+  // how you find the row, the model is what you came to read. Side by side the
+  // mono spec took its intrinsic width and "Microwave" came out as "M".
+  it('shows the whole noun and the whole model, neither clipping the other', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: 'm', name: 'Microwave', room: 'Bathroom',
+        make: 'Samsung', model: 'MS32J5133B/MS40J5133B' }),
+    ]);
+    const r = await arrange(snag({ room: 'Bathroom' }));
+
+    const said = r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
+    expect(said).toContain('Microwave');
+    expect(said).toContain('Samsung MS32J5133B/MS40J5133B');
+  });
+
   it('is absent entirely when the room holds nothing', async () => {
     mock_getThings.mockResolvedValue([thing({ room: 'Laundry' })]);
     const r = await arrange(snag({ room: 'Bathroom' }));
@@ -495,16 +510,97 @@ describe('the Save button', () => {
     expect(texts(r)).toContain('All changes saved');
   });
 
-  // The due-date box is the only control here holding typed text, so it is the
-  // only branch in which "All changes saved" would be a lie.
-  it('admits when the typed date is still behind the row', async () => {
+  // Two boxes hold typed text — the date, and the item being added to the
+  // shopping list — so those are the only branches in which "All changes
+  // saved" would be a lie. The wording is the thing page's, so two screens do
+  // not invent two for the same fact.
+  it('admits when a typed date is still behind the row', async () => {
     const r = await arrange(snag({ dueAt: null }));
     await TestRenderer.act(async () => {
       field(r, "When's it due?").props.onChangeText('8/11/2026');
     });
 
-    expect(texts(r)).toContain('The date is not saved yet');
+    expect(texts(r)).toContain('1 unsaved change');
     expect(texts(r)).not.toContain('All changes saved');
+  });
+
+  it('counts both boxes', async () => {
+    const r = await arrange(snag({ dueAt: null }));
+    await TestRenderer.act(async () => {
+      field(r, "When's it due?").props.onChangeText('8/11/2026');
+    });
+    await TestRenderer.act(async () => {
+      field(r, 'Something to pick up').props.onChangeText('Hinge');
+    });
+
+    expect(texts(r)).toContain('2 unsaved changes');
+  });
+
+  // The item half-typed into the shopping box has no blur commit at all — it
+  // waits on the + beside it — so without this, Save is the one button on the
+  // page that silently discards what somebody typed.
+  it('adds an item left sitting in the shopping box', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ parts: ['Hinge'] }));
+    const r = await arrange(snag({ parts: [] }));
+
+    await TestRenderer.act(async () => {
+      field(r, 'Something to pick up').props.onChangeText('Hinge');
+    });
+    await press(button(r, 'Save'));
+
+    const [, update] = mock_updateSnag.mock.calls[0];
+    expect(update.parts).toEqual(['Hinge']);
+    expect(mock_goBack).toHaveBeenCalled();
+  });
+
+  // Two round trips and two re-reads for one press is the thing `addPhotos`
+  // and `create_snag`'s own date already refuse.
+  it('writes a pending date and a pending item in one call', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag());
+    const r = await arrange(snag({ dueAt: null, parts: [] }));
+
+    await TestRenderer.act(async () => {
+      field(r, "When's it due?").props.onChangeText('8/11/2026');
+    });
+    await TestRenderer.act(async () => {
+      field(r, 'Something to pick up').props.onChangeText('Hinge');
+    });
+    await press(button(r, 'Save'));
+
+    expect(mock_updateSnag).toHaveBeenCalledTimes(1);
+    const [, update] = mock_updateSnag.mock.calls[0];
+    expect(update.parts).toEqual(['Hinge']);
+    expect(new Date(update.dueAt).getDate()).toBe(8);
+  });
+
+  // Closing over a failed write would read as having saved.
+  it('stays put when the write fails', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockRejectedValue(new Error('Network'));
+    const r = await arrange(snag({ parts: [] }));
+
+    await TestRenderer.act(async () => {
+      field(r, 'Something to pick up').props.onChangeText('Hinge');
+    });
+    await press(button(r, 'Save'));
+
+    expect(mock_goBack).not.toHaveBeenCalled();
+  });
+
+  it('stays put on a date no calendar has, keeping the words in the box', async () => {
+    mock_updateSnag.mockClear();
+    const r = await arrange(snag({ dueAt: null }));
+
+    await TestRenderer.act(async () => {
+      field(r, "When's it due?").props.onChangeText('31/02/2026');
+    });
+    await press(button(r, 'Save'));
+
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(mock_goBack).not.toHaveBeenCalled();
+    expect(field(r, "When's it due?").props.value).toBe('31/02/2026');
   });
 
   // `onBlur` is not guaranteed to have fired — on native, pressing a Pressable
@@ -523,5 +619,31 @@ describe('the Save button', () => {
     const [, update] = mock_updateSnag.mock.calls[0];
     expect(new Date(update.dueAt).getDate()).toBe(8);
     expect(mock_goBack).toHaveBeenCalled();
+  });
+});
+
+// ------------------------------------------------------------- what reads first
+//
+// The shopping list is the part of this page that moves work — the trip to the
+// shop is the single most common reason a small job sits for weeks — where the
+// asset list is reference. So it comes first, and the assessment card stays
+// directly above it, because the parts it suggests land in the list underneath.
+
+describe('the order down the page', () => {
+  it('puts what to pick up above what is in the room', async () => {
+    mock_getThings.mockResolvedValue([
+      { id: 'a', householdId: 'h', propertyId: 'p', kind: 'appliance', name: 'Heat pump',
+        room: 'Bathroom', photoPaths: [], make: null, model: null, serial: null,
+        consumables: [], documentPaths: [], installedAt: null, warrantyUntil: null,
+        serviceDays: null, spec: {}, notes: null, createdBy: 'me', createdAt: '',
+        updatedAt: '', propertyName: 'Home', snagCount: 0, openSnagCount: 0 },
+    ]);
+    const r = await arrange(snag({ room: 'Bathroom' }));
+
+    const headings = r.getAllByType('Text')
+      .map((n: any) => String(n.props.children ?? ''))
+      .filter((t: string) => t === 'Anything to pick up?' || t === 'Linked assets');
+
+    expect(headings).toEqual(['Anything to pick up?', 'Linked assets']);
   });
 });

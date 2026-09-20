@@ -61,6 +61,11 @@ function isDueIn(dueAt: string | null, days: number): boolean {
   return Math.abs(new Date(dueAt).getTime() - wanted) < DAY_MS / 2;
 }
 
+/** The thing page's words for the same fact, so two screens do not invent two. */
+function unsavedHint(count: number): string {
+  return count === 1 ? '1 unsaved change' : `${count} unsaved changes`;
+}
+
 /** The whole arrangement, in one sentence, so nobody has to infer it. */
 function describeRepeat(snag: Snag): string {
   if (!snag.repeatDays) return '';
@@ -175,43 +180,85 @@ export default function SnagDetailScreen() {
    */
   async function commitDue() {
     if (!snag) return;
-    const typed = dueDraft.trim();
-    const already = formatLooseDate(snag.dueAt);
-    if (typed === already) return;
-
-    if (!typed) {
-      await patch({ dueAt: null });
-      return;
-    }
-    const parsed = parseLooseDate(typed);
-    if (!parsed) {
+    const pending = pendingDue();
+    if (!pending) return;
+    if (pending.unreadable) {
       showAlert("Couldn't read that date", 'Try 8/11/2019, Nov 2019, or tap the calendar.');
-      setDueDraft(already);
+      setDueDraft(formatLooseDate(snag.dueAt));
       return;
     }
-    await patch({ dueAt: new Date(`${parsed}T00:00:00`).toISOString() });
+    await patch({ dueAt: pending.dueAt });
   }
 
   /**
-   * Whether the one box on this page that holds typed text is behind the row.
+   * What the date box holds that the row does not, read rather than written.
    *
-   * Every other control wrote when it was pressed, so this is the only thing a
-   * Save button could still be waiting on — and the only branch in which
+   * Shared by the blur commit and by Save, so the two cannot disagree about
+   * what counts as a change or about which strings are readable. `undefined`
+   * means the box matches the row; `unreadable` means somebody typed something
+   * no calendar has, which `parseLooseDate` refuses rather than letting it
+   * reach Postgres as a `22008` from inside an RPC.
+   */
+  function pendingDue(): { dueAt: string | null; unreadable?: true } | undefined {
+    if (!snag) return undefined;
+    const typed = dueDraft.trim();
+    if (typed === formatLooseDate(snag.dueAt)) return undefined;
+    if (!typed) return { dueAt: null };
+    const parsed = parseLooseDate(typed);
+    if (!parsed) return { dueAt: null, unreadable: true };
+    return { dueAt: new Date(`${parsed}T00:00:00`).toISOString() };
+  }
+
+  /**
+   * How much is typed into a box and not yet on the row.
+   *
+   * Two boxes can be: the date, and the item being added to the shopping list.
+   * Everything else here wrote when it was pressed, so these are the only
+   * things a Save could still be waiting on — and the only branches in which
    * "All changes saved" would be a lie.
    */
-  const dueDirty = !!snag && dueDraft.trim() !== formatLooseDate(snag.dueAt);
+  const unsaved = (pendingDue() ? 1 : 0) + (partDraft.trim() ? 1 : 0);
 
   /**
    * Finishing with the page.
    *
-   * Commits the typed date first, because `onBlur` is not guaranteed to have
-   * fired: on native, pressing a Pressable does not reliably blur a TextInput,
-   * so Save would otherwise be the one button here that discards what somebody
-   * typed. It is a no-op when the box already matches the row.
+   * **It commits what is sitting in a box, and that is the whole reason it is
+   * not merely a Close.** `onBlur` is not guaranteed to have fired — on native,
+   * pressing a Pressable does not reliably blur a `TextInput` — and the item
+   * half-typed into the shopping box has no blur commit at all: it waits on the
+   * `+` beside it. Without this, Save would be the one button on the page that
+   * silently discards what somebody typed, which is precisely the failure a
+   * button called Save exists to prevent.
+   *
+   * **One write, not two.** A date and an item both pending are one
+   * `update_snag` rather than two round trips and two re-reads.
+   *
+   * A date it cannot read holds the page open rather than closing over it: the
+   * words stay in the box so they can be fixed, unlike the blur path, which has
+   * somewhere to put them back to.
    */
   async function saveAndClose() {
-    if (busy) return;
-    await commitDue();
+    if (busy || !snag) return;
+
+    const update: Parameters<typeof updateSnag>[1] = {};
+    const due = pendingDue();
+    if (due?.unreadable) {
+      showAlert("Couldn't read that date", 'Try 8/11/2019, Nov 2019, or tap the calendar.');
+      return;
+    }
+    if (due) update.dueAt = due.dueAt;
+
+    // Adding an item is one of the four things that start a job, which is
+    // right: deciding what to buy is deciding to do the work. Pressing Save
+    // with a word in the box is adding it.
+    const item = partDraft.trim();
+    if (item) update.parts = [...snag.parts, item];
+
+    if (Object.keys(update).length > 0) {
+      const ok = await patch(update);
+      if (!ok) return;
+      setPartDraft('');
+    }
     navigation.goBack();
   }
 
@@ -249,15 +296,23 @@ export default function SnagDetailScreen() {
     }
   }
 
-  /** Every triage control goes through here: write, then re-read. */
-  async function patch(update: Parameters<typeof updateSnag>[1]) {
-    if (!snag) return;
+  /**
+   * Every triage control goes through here: write, then re-read.
+   *
+   * Returns whether the write landed. Every control that fires and forgets
+   * ignores it — the alert is the report — but Save must not navigate away
+   * from a page whose last write failed, which would read as having saved.
+   */
+  async function patch(update: Parameters<typeof updateSnag>[1]): Promise<boolean> {
+    if (!snag) return false;
     setBusy(true);
     try {
       setSnag(await updateSnag(snag.id, update));
       if ('room' in update) refreshHousehold();
+      return true;
     } catch (err: any) {
       showAlert("Couldn't save that", err?.message ?? 'Please try again.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -568,65 +623,6 @@ export default function SnagDetailScreen() {
           </Card>
         ) : null}
 
-        {/* ── Linked assets ──
-            What is recorded in this room, as a list to read.
-
-            It replaced two controls that both *wrote*: *Part of a bigger job*,
-            which set `project_id`, and *Say what it's about*, which set
-            `thing_id` through a picker over the whole house record. Neither
-            question was one somebody standing on this page arrives wanting to
-            answer — they were tagging, and tagging is capture's job — and both
-            put a chooser on a page that is otherwise read far more often than
-            it is edited.
-
-            **The payoff was never the tag, it was the model number.** A snag
-            about the heat pump was worth linking because eight months later
-            somebody is in a shop wanting `MSZ-AP50VGK`. This gives them that
-            without asking for anything: the room is already on the job, and the
-            things in that room are the shortlist a human would have picked
-            from. One line each, tapping through to the full record.
-
-            Three rules:
-
-            - **It writes nothing.** No tag, no link, no status — the same rule
-              the Schedule tab holds to, and for the same reason: the moment
-              there are two ways to say what a job is about, neither is
-              trustworthy.
-            - **Ghosts cannot appear here, and that is the type rather than a
-              filter.** `thingsInArea` takes `Thing[]`; a suggestion is a
-              `RoomSuggestion` with no id, so a dashed prompt for a rangehood
-              nobody has recorded can never be offered as an answer.
-            - **It is absent entirely when the room holds nothing**, rather than
-              an empty heading. A section with nothing in it is the app asking
-              somebody to read a question it cannot answer.
-
-            The read is not fatal and is not awaited by anything on the page: a
-            list of what is in the room is the least important thing here, and
-            it must never be what stops a job's notes rendering. */}
-        {linked.length > 0 ? (
-          <Card elevation="md" style={styles.section}>
-            <Text style={styles.sectionTitle}>Linked assets</Text>
-            {linked.map((item) => (
-              <Pressable
-                key={item.id}
-                onPress={() => navigation.navigate('ThingDetail', { thingId: item.id })}
-                style={styles.assetRow}
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${thingHeadline(item)}`}
-              >
-                <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
-                <Text style={styles.assetName} numberOfLines={1}>{thingHeadline(item)}</Text>
-                {item.make || item.model ? (
-                  <Text style={styles.assetSpec} numberOfLines={1}>
-                    {[item.make, item.model].filter(Boolean).join(' ')}
-                  </Text>
-                ) : null}
-                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
-              </Pressable>
-            ))}
-          </Card>
-        ) : null}
-
         {/* ── What came back ──
             Below the notes and above triage: the note the other person left is
             still the most common reason this screen is open, and this is the
@@ -749,6 +745,78 @@ export default function SnagDetailScreen() {
           </View>
         </Card>
 
+        {/* ── Linked assets ──
+            What is recorded in this room, as a list to read.
+
+            It replaced two controls that both *wrote*: *Part of a bigger job*,
+            which set `project_id`, and *Say what it's about*, which set
+            `thing_id` through a picker over the whole house record. Neither
+            question was one somebody standing on this page arrives wanting to
+            answer — they were tagging, and tagging is capture's job — and both
+            put a chooser on a page that is otherwise read far more often than
+            it is edited.
+
+            **The payoff was never the tag, it was the model number.** A snag
+            about the heat pump was worth linking because eight months later
+            somebody is in a shop wanting `MSZ-AP50VGK`. This gives them that
+            without asking for anything: the room is already on the job, and the
+            things in that room are the shortlist a human would have picked
+            from. One line each, tapping through to the full record.
+
+            Three rules:
+
+            - **It writes nothing.** No tag, no link, no status — the same rule
+              the Schedule tab holds to, and for the same reason: the moment
+              there are two ways to say what a job is about, neither is
+              trustworthy.
+            - **Ghosts cannot appear here, and that is the type rather than a
+              filter.** `thingsInArea` takes `Thing[]`; a suggestion is a
+              `RoomSuggestion` with no id, so a dashed prompt for a rangehood
+              nobody has recorded can never be offered as an answer.
+            - **It is absent entirely when the room holds nothing**, rather than
+              an empty heading. A section with nothing in it is the app asking
+              somebody to read a question it cannot answer.
+
+            The read is not fatal and is not awaited by anything on the page: a
+            list of what is in the room is the least important thing here, and
+            it must never be what stops a job's notes rendering. */}
+        {linked.length > 0 ? (
+          <Card elevation="md" style={styles.section}>
+            <Text style={styles.sectionTitle}>Linked assets</Text>
+            {linked.map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => navigation.navigate('ThingDetail', { thingId: item.id })}
+                style={styles.assetRow}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${thingHeadline(item)}`}
+              >
+                <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
+                {/* Stacked, not laid across. Side by side, the mono spec took
+                    its intrinsic width and the name — flexed, `minWidth: 0` —
+                    shrank to fit whatever was left: "Microwave" came out as
+                    **M** beside `Samsung MS32J5133B/MS40J5133B`, and the
+                    rangehood as **Ra…**. That is the two-column row having
+                    nowhere to put a long answer, which is the same failure the
+                    thing page's spec sheet and a project's totals both fixed by
+                    un-columning themselves.
+                    Both lines matter here and neither can be the one that
+                    gives way: the noun is how you find the row, the model is
+                    what you came to read. So each gets a line of its own. */}
+                <View style={styles.assetBody}>
+                  <Text style={styles.assetName} numberOfLines={1}>{thingHeadline(item)}</Text>
+                  {item.make || item.model ? (
+                    <Text style={styles.assetSpec} numberOfLines={1}>
+                      {[item.make, item.model].filter(Boolean).join(' ')}
+                    </Text>
+                  ) : null}
+                </View>
+                <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+              </Pressable>
+            ))}
+          </Card>
+        ) : null}
+
         {/* ── When it's due ──
             Its own field, and it was not reachable at all except through the
             repeat card — so a one-off job could never be given a date. That
@@ -859,8 +927,8 @@ export default function SnagDetailScreen() {
           is the build people install. */}
       <View style={{ marginBottom: keyboard }}>
         <StickyActionBar
-          hint={dueDirty ? 'The date is not saved yet' : 'All changes saved'}
-          hintTone={dueDirty ? 'warn' : 'muted'}
+          hint={unsaved > 0 ? unsavedHint(unsaved) : 'All changes saved'}
+          hintTone={unsaved > 0 ? 'warn' : 'muted'}
         >
           <Button label="Save" onPress={saveAndClose} loading={busy} fullWidth />
         </StickyActionBar>
@@ -1079,11 +1147,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
     minHeight: MIN_TOUCH_TARGET,
+    paddingVertical: Spacing.xs,
   },
-  // One line each. The name is what somebody recognises; the model number is
-  // what they came for, so it takes the mono face `Fonts.mono` is spent on —
-  // data only, never prose.
-  assetName: { flex: 1, minWidth: 0, fontSize: Typography.base, color: Colors.textPrimary },
+  // `minWidth: 0` so a long model number wraps its own line rather than
+  // pushing the chevron off the card — the same trap anything flexed beside
+  // mono text or a TextInput falls into on web.
+  assetBody: { flex: 1, minWidth: 0 },
+  // The name is what somebody recognises; the model number is what they came
+  // for, so it takes the mono face `Fonts.mono` is spent on — data only, never
+  // prose — and sits under the noun rather than competing with it for width.
+  assetName: { fontSize: Typography.base, color: Colors.textPrimary },
   assetSpec: {
     fontFamily: Fonts.mono,
     fontSize: Typography.sm,

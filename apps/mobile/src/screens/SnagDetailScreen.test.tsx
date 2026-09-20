@@ -667,3 +667,94 @@ describe('the order down the page', () => {
   });
 });
 
+
+// ─── the three facts at the top, and the way in to each ───────────────────────
+
+describe('the meta row', () => {
+  // Two of the three had their one control most of a screen down. The row now
+  // reaches both — without becoming a second place either is written, which is
+  // the failure this page has already been through once with the date.
+  it('names the room and when it is due, and says so when neither is set', async () => {
+    const dated = await arrange(snag({ dueAt: ahead(3), room: 'Bathroom' }));
+    expect(dated.queryByText('Bathroom')).not.toBeNull();
+    expect(dated.queryByText('No date')).toBeNull();
+
+    const bare = await arrange(snag({ dueAt: null, room: null }));
+    expect(bare.queryByText('No date')).not.toBeNull();
+    expect(bare.queryByText('No room')).not.toBeNull();
+  });
+
+  // The chip is a way in, not a control. Pressing it must not write anything —
+  // a chip that set the date itself is the duplicate date control again.
+  it('scrolls to the date field rather than setting a date', async () => {
+    const r = await arrange(snag({ dueAt: null }));
+    await press(byLabel(r, 'Give it a date'));
+
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    // Still exactly one control that writes the date.
+    expect(r.getAllByText("When's it due?").length).toBe(1);
+  });
+
+  // The room's one writer is the edit sheet, which is what the pencil opens.
+  // The chip is a second door to it, never a second sheet.
+  it('opens the edit sheet for the room, writing nothing on the way', async () => {
+    const r = await arrange(snag({ room: 'Kitchen' }));
+    await press(byLabel(r, 'In the Kitchen — change it'));
+
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(r.queryByText('Edit this job')).not.toBeNull();
+  });
+
+  // Status is derived, and the one state change made by hand is at the foot
+  // deliberately. A tappable status chip would be Mark done arriving at the
+  // top by another door.
+  it('leaves status alone — it is stated, not offered', async () => {
+    const r = await arrange(snag({ status: 'open' }));
+    const pressables = r.root.findAll(
+      (n: any) => typeof n.type !== 'string'
+        && !!n.props?.onPress
+        && typeof n.props?.accessibilityLabel === 'string'
+        && /status|mark.*(done|open)|start/i.test(n.props.accessibilityLabel),
+      { deep: true },
+    );
+    // `Mark done` is a Button with a label, not an accessibilityLabel, and it
+    // lives at the foot; nothing up here offers to change the status.
+    expect(pressables).toEqual([]);
+    expect(mock_setSnagStatus).not.toHaveBeenCalled();
+  });
+});
+
+// ─── the notes box ────────────────────────────────────────────────────────────
+
+describe('the notes box', () => {
+  // With no notifications anywhere in this product a note is the only way one
+  // person tells the other anything, so the placeholder says what the box is
+  // for. An example message would read as something already sent — the same
+  // rule that keeps `7A204871` out of the SERIAL box, on the one box where
+  // being believed matters most.
+  it('names what the box is for rather than showing a message', async () => {
+    const r = await arrange();
+    const box = r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Add a note',
+      { deep: true },
+    )[0];
+
+    expect(box.props.placeholder).toBe('Add a note, or what you did');
+    expect(box.props.multiline).toBe(true);
+  });
+
+  // A word, not a glyph — the same correction the shopping list's `+` took.
+  // A 48px square centred against a four-line box is a chat affordance, and
+  // this is not a chat.
+  it('commits with a labelled control under the box, not a send arrow', async () => {
+    const r = await arrange();
+    expect(r.queryByText('Add note')).not.toBeNull();
+
+    const send = byLabel(r, 'Add note');
+    const arrows = send.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.name === 'arrow-up',
+      { deep: true },
+    );
+    expect(arrows).toEqual([]);
+  });
+});

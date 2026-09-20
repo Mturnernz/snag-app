@@ -71,7 +71,7 @@ const ahead = (days: number) => new Date(Date.now() + days * DAY).toISOString();
 const snag = (over: Partial<any> = {}): any => ({
   id: 's1', reference: 'SNAG-0041', householdId: 'h', propertyId: 'p',
   room: 'Bathroom', photoPaths: [], description: 'Toilet cistern keeps running',
-  status: 'open', priority: null, parts: [], bought: [], needsParts: false,
+  status: 'open', parts: [], bought: [], needsParts: false,
   dueAt: null, repeatDays: null, assigneeId: null, thingId: null,
   thingName: null, thingMake: null, thingModel: null,
   projectId: null, projectName: null,
@@ -164,6 +164,11 @@ describe('editing a job after it was filed', () => {
     const input = r.root.findAll((n: any) => typeof n.type !== 'string'
       && n.props?.accessibilityLabel === "What's wrong?")[0];
     await TestRenderer.act(async () => { input.props.onChangeText('The cistern drips'); });
+
+    // The room rail became a searchable picker, which is closed until asked
+    // for: the field says the answer, and opening it is what turns it into a
+    // question. The snag is in the Bathroom, so that is what the field reads.
+    await press(byLabel(r, 'Room: Bathroom. Change it'));
     await press(byLabel(r, 'Kitchen'));
     await press(button(r, 'Save'));
 

@@ -20,6 +20,7 @@ import {
   createSnag, getFileUrls, getSnags, getThings, markListSeen, setPartBought, updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import {
   assessmentBrief, exportDateStamp, isDoneForNow, shoppingCount, shoppingList,
   snagExportPhotos, snagExportTable,
@@ -97,6 +98,15 @@ export default function SnagListScreen() {
   } = useHousehold();
   const { showToast } = useToast();
 
+  /**
+   * Which sections are folded away, by key.
+   *
+   * Read once on mount and written on every change. Opens expanded whatever
+   * happens — a storage read that fails, or a first run — because the first
+   * thing this screen has to say is what the other person added, and a list
+   * that opens folded says nothing at all until somebody unfolds it.
+   */
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [lens, setLens] = useState<Lens>('all');
   const [sort, setSort] = useState<Sort>('room');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -168,6 +178,16 @@ export default function SnagListScreen() {
     if (seenThisVisit.current) return;
     seenThisVisit.current = true;
     markListSeen().then(setSeenBefore);
+  }, []);
+
+  useEffect(() => {
+    readCollapsed().then((keys) => setCollapsed(new Set(keys)));
+  }, []);
+
+  /** One place the fold is changed, so the device's copy can never fall behind. */
+  const fold = useCallback((next: Set<string>) => {
+    setCollapsed(next);
+    void writeCollapsed([...next]);
   }, []);
 
   const visible = useMemo(() => {
@@ -314,12 +334,15 @@ export default function SnagListScreen() {
     const settledIds = new Set(settled.map((s) => s.id));
     const rest = visible.filter((s) =>
       !freshIds.has(s.id) && s.id !== pinnedId && !settledIds.has(s.id));
-    const out: { title: string; isNew?: boolean; data: Snag[] }[] = [];
+    // A key that survives the count in the title changing, and the section
+    // moving up or down the list as work is filed and finished. Folding by
+    // index would fold whatever slid into that position.
+    const out: { key: string; title: string; isNew?: boolean; data: Snag[] }[] = [];
 
-    if (pinned.length > 0) out.push({ title: 'Just added', isNew: true, data: pinned });
+    if (pinned.length > 0) out.push({ key: 'just-added', title: 'Just added', isNew: true, data: pinned });
     if (fresh.length > 0) {
       const others = fresh.filter((s) => s.id !== pinnedId);
-      if (others.length > 0) out.push({ title: 'New', isNew: true, data: others });
+      if (others.length > 0) out.push({ key: 'new', title: 'New', isNew: true, data: others });
     }
 
     if (sort === 'room') {
@@ -335,23 +358,61 @@ export default function SnagListScreen() {
       const known = order.filter((name) => byRoom.has(name));
       const extra = [...byRoom.keys()].filter((n) => !order.includes(n) && n !== NO_ROOM).sort();
       for (const name of [...known, ...extra, ...(byRoom.has(NO_ROOM) ? [NO_ROOM] : [])]) {
-        out.push({ title: `${name} · ${byRoom.get(name)!.length}`, data: byRoom.get(name)! });
+        out.push({
+          key: `room:${name}`,
+          title: `${name} · ${byRoom.get(name)!.length}`,
+          data: byRoom.get(name)!,
+        });
       }
     } else if (rest.length > 0) {
-      out.push({ title: sort === 'due' ? 'By when' : 'Everything else', data: rest });
+      out.push({
+        key: 'rest',
+        title: sort === 'due' ? 'By when' : 'Everything else',
+        data: rest,
+      });
     }
 
     if (settled.length > 0) {
       // The Schedule tab's words for the same fact, so the two screens do not
       // invent two names for one mechanism.
-      out.push({ title: `Comes round again · ${settled.length}`, data: settled });
+      out.push({ key: 'settled', title: `Comes round again · ${settled.length}`, data: settled });
     }
 
     if (showDone && recentlyDone.length > 0) {
-      out.push({ title: 'Done this week', data: recentlyDone });
+      out.push({ key: 'done', title: 'Done this week', data: recentlyDone });
     }
     return out;
   }, [fresh, visible, sort, locations, showDone, recentlyDone, justAdded]);
+
+  /**
+   * The same sections, with the folded ones emptied rather than removed.
+   *
+   * The heading stays — that is the whole point of folding: "there are three
+   * things in the Garage" is what the grouping exists to say, and a fold that
+   * took the heading with it would be a filter rather than a fold. Emptying
+   * `data` is also what keeps the fold free: `SectionList` renders no rows, so
+   * a long list costs nothing to scroll past.
+   */
+  const shownSections = useMemo(
+    () => sections.map((section) => (
+      collapsed.has(section.key) ? { ...section, data: [] } : section
+    )),
+    [sections, collapsed]
+  );
+
+  /**
+   * Whether the control at the top offers to open everything or shut it.
+   *
+   * It says the thing it will *do*, and it decides from whether anything is
+   * still open — so the one press that is never a no-op is the one on offer.
+   * With every section already folded it reads *Expand all*; with any section
+   * open it reads *Collapse all*, which is what somebody scanning a long list
+   * reaches for.
+   */
+  const anyOpen = useMemo(
+    () => sections.some((section) => !collapsed.has(section.key)),
+    [sections, collapsed]
+  );
 
   async function handleAdd(input: { photoPath: string | null; description: string | null }) {
     if (!activeProperty) {
@@ -463,13 +524,38 @@ export default function SnagListScreen() {
         </Pressable>
       </View>
 
-      <Text style={styles.since}>
-        {toDo} to do
-        {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
-      </Text>
+      {/* The count, and the one control that reaches every section at once.
+          On the same line because both are *about* the list rather than in it,
+          and because this screen has already evicted two filter rails for
+          charging vertical rent on every visit — a row of its own for one
+          control would be the third.
+
+          It says what pressing it does and decides that from whether anything
+          is still open, so the press on offer is never a no-op. */}
+      <View style={styles.sinceRow}>
+        <Text style={styles.since}>
+          {toDo} to do
+          {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
+        </Text>
+        {sections.length > 1 ? (
+          <Pressable
+            onPress={() => fold(anyOpen ? new Set(sections.map((one) => one.key)) : new Set())}
+            style={styles.foldAll}
+            accessibilityRole="button"
+            accessibilityLabel={anyOpen ? 'Collapse all' : 'Expand all'}
+          >
+            <Icon
+              name={anyOpen ? 'chevron-up' : 'chevron-down'}
+              size="sm"
+              color={Colors.textMuted}
+            />
+            <Text style={styles.foldAllLabel}>{anyOpen ? 'Collapse all' : 'Expand all'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <SectionList
-        sections={sections}
+        sections={shownSections}
         ListHeaderComponent={
           shopping.length > 0 ? (
             <View style={styles.shopping}>
@@ -512,12 +598,30 @@ export default function SnagListScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.listContent, sections.length === 0 && styles.listEmpty]}
         stickySectionHeadersEnabled={false}
-        renderSectionHeader={({ section }) => (
-          <View style={styles.groupRow}>
-            <Text style={[styles.group, section.isNew && styles.groupNew]}>{section.title}</Text>
-            <View style={styles.groupRule} />
-          </View>
-        )}
+        renderSectionHeader={({ section }) => {
+          const shut = collapsed.has(section.key);
+          return (
+            <Pressable
+              onPress={() => {
+                const next = new Set(collapsed);
+                if (shut) next.delete(section.key); else next.add(section.key);
+                fold(next);
+              }}
+              style={styles.groupRow}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: !shut }}
+              accessibilityLabel={`${section.title}, ${shut ? 'show' : 'hide'}`}
+            >
+              <Icon
+                name={shut ? 'chevron-forward' : 'chevron-down'}
+                size="sm"
+                color={section.isNew ? Colors.primary : Colors.textMuted}
+              />
+              <Text style={[styles.group, section.isNew && styles.groupNew]}>{section.title}</Text>
+              <View style={styles.groupRule} />
+            </Pressable>
+          );
+        }}
         renderItem={({ item }) => (
           <SnagCard
             snag={item}
@@ -724,7 +828,29 @@ const styles = StyleSheet.create({
   since: { fontSize: Typography.sm, color: Colors.textMuted, paddingHorizontal: Spacing.lg },
   listContent: { padding: Spacing.lg, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
-  groupRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingTop: Spacing.sm },
+  sinceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
+  foldAll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingLeft: Spacing.sm,
+  },
+  foldAllLabel: { fontSize: Typography.sm, color: Colors.textMuted },
+  // The whole heading is the tap target, so folding a room is the same gesture
+  // wherever on the rule somebody happens to reach.
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingTop: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+  },
   group: {
     fontSize: Typography.xs,
     fontWeight: Typography.semibold,

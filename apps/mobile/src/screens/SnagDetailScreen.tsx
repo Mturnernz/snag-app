@@ -34,7 +34,7 @@ import { showAlert } from '../lib/alert';
 import { addPhotos } from '../lib/addPhotos';
 import LinkedText from '../components/LinkedText';
 import {
-  dayKey, describeCycle, formatLooseDate, parseLooseDate, snagHeadline,
+  dayKey, describeCycle, dueState, formatLooseDate, parseLooseDate, snagHeadline,
 } from '@snag/supabase-queries';
 import {
   Comment, LinkedThing, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote, REPEAT_PRESETS,
@@ -143,6 +143,17 @@ export default function SnagDetailScreen() {
   const [thingsLoading, setThingsLoading] = useState(false);
   const [picking, setPicking] = useState(false);
   const thingsFor = useRef<string | null>(null);
+
+  /* The due chip up in the meta row is a way in, not a second control, so it
+     has to reach the one field that writes the date. `onLayout` on a direct
+     child of the content container reports y against that container, which is
+     exactly what `scrollTo` wants — no `measureLayout`, which needs a node
+     handle react-native-web would rather not give. */
+  const scrollRef = useRef<ScrollView>(null);
+  const dueY = useRef(0);
+  const goToDue = useCallback(() => {
+    scrollRef.current?.scrollTo({ y: Math.max(0, dueY.current - Spacing.lg), animated: true });
+  }, []);
   /** What has been written about the same asset, on its other jobs. */
   const [thingNotes, setThingNotes] = useState<ThingNote[]>([]);
 
@@ -478,6 +489,7 @@ export default function SnagDetailScreen() {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.content, keyboard > 0 && { paddingBottom: keyboard + Spacing.lg }]}
         keyboardShouldPersistTaps="handled"
       >
@@ -547,15 +559,60 @@ export default function SnagDetailScreen() {
           </Pressable>
         </View>
 
+        {/* ── The three facts, and a way in to each ──
+            What it is, when it is due and which room it is in are what
+            somebody wants off the top of this page — and two of the three had
+            their one control most of a screen further down. So the row states
+            all three, and the two a person actually sets are a **way in**
+            rather than a second way to write: the due chip scrolls to the date
+            field, the room chip opens the same sheet the pencil does. One
+            writer per fact. A chip that set the date itself would be the
+            duplicate date control this page has already been through once.
+
+            Status is deliberately not one of them. It is derived — a job
+            starts when somebody dates it or decides what to buy — and the one
+            state change made by hand is *Mark done*, which sits at the foot
+            because finishing is the last thing that happens. A tappable status
+            chip up here would be that button arriving at the top by another
+            door.
+
+            Both chips say what they are for when the fact is missing rather
+            than rendering nothing: a snag with no date and no room is the
+            weakest thing this app can hold, and an empty row says so where a
+            row of two badges quietly doesn't. */}
         <View style={styles.metaRow}>
           <StatusBadge status={snag.status} />
-          <DueBadge snag={snag} />
-          {snag.room ? (
+
+          <Pressable
+            onPress={goToDue}
+            style={styles.metaChip}
+            accessibilityRole="button"
+            accessibilityLabel={
+              dueState(snag) === 'none' ? 'Give it a date' : "Change when it's due"
+            }
+          >
+            {dueState(snag) === 'none' ? (
+              <View style={styles.metaItem}>
+                <Icon name="calendar-outline" size="sm" color={Colors.textMuted} />
+                <Text style={styles.metaText}>No date</Text>
+              </View>
+            ) : (
+              <DueBadge snag={snag} />
+            )}
+          </Pressable>
+
+          <Pressable
+            onPress={() => setEditing(true)}
+            disabled={busy}
+            style={styles.metaChip}
+            accessibilityRole="button"
+            accessibilityLabel={snag.room ? `In the ${snag.room} — change it` : 'Say which room'}
+          >
             <View style={styles.metaItem}>
               <Icon name="location-outline" size="sm" color={Colors.textMuted} />
-              <Text style={styles.metaText}>{snag.room}</Text>
+              <Text style={styles.metaText}>{snag.room || 'No room'}</Text>
             </View>
-          ) : null}
+          </Pressable>
         </View>
 
         <Text style={styles.reportedBy}>
@@ -806,38 +863,55 @@ export default function SnagDetailScreen() {
               <LinkedText style={styles.commentBody}>{comment.body}</LinkedText>
             </View>
           ))}
-          <View style={styles.commentInputRow}>
-            {/* Four lines, not one. This is the only channel by which one
-                person tells the other anything — there are no notifications and
-                never will be — and a single-line box says "a few words" to
-                somebody whose actual message is which part was ordered, from
-                where, arriving when, and what it cost. A note that has to be
-                composed in a slot showing eight words of itself gets written
-                shorter than it needed to be. */}
+          {/* An ordinary multiline box with its own control underneath, not a
+              chat row. Four lines, not one: this is the only channel by which
+              one person tells the other anything — there are no notifications
+              and never will be — and a slot showing eight words of itself gets
+              a message written shorter than it needed to be.
+
+              The box is full width and the button sits under it, because a
+              48px square vertically centred against a 112px box is a *chat*
+              affordance and this is not a chat. It is the same correction the
+              shopping list's `+` already took: a word rather than a glyph, on
+              the one control that commits what somebody has just written.
+
+              The placeholder names what the box is for rather than showing a
+              message somebody might have sent. "Ordered the part, arriving
+              Tuesday" is an example, and this app's rule about example values
+              is that they read as something already entered — which on the one
+              box holding what the other person said is the worst place for it.
+              A placeholder earns its place by saying something an example never
+              could. */}
+          <View style={styles.commentBox}>
             <TextInput
               style={styles.commentInput}
               value={draft}
               onChangeText={setDraft}
-              placeholder="Ordered the part, arriving Tuesday"
+              placeholder="Add a note, or what you did"
               placeholderTextColor={Colors.textMuted}
               multiline
               numberOfLines={4}
               maxLength={4000}
               accessibilityLabel="Add a note"
             />
-            <Pressable
-              onPress={handleComment}
-              disabled={!draft.trim() || busy}
-              style={[styles.commentSend, (!draft.trim() || busy) && styles.commentSendDisabled]}
-              accessibilityRole="button"
-              accessibilityLabel="Add note"
-            >
-              <Icon
-                name="arrow-up"
-                size="md"
-                color={!draft.trim() || busy ? Colors.textMuted : Colors.white}
-              />
-            </Pressable>
+            <View style={styles.commentActions}>
+              <Pressable
+                onPress={handleComment}
+                disabled={!draft.trim() || busy}
+                style={[styles.commentSend, (!draft.trim() || busy) && styles.commentSendOff]}
+                accessibilityRole="button"
+                accessibilityLabel="Add note"
+              >
+                <Text
+                  style={[
+                    styles.commentSendLabel,
+                    (!draft.trim() || busy) && styles.commentSendLabelOff,
+                  ]}
+                >
+                  Add note
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </Card>
 
@@ -892,7 +966,11 @@ export default function SnagDetailScreen() {
             the box because it says what it wants better than grey example text
             does. Setting a date starts the job, which is right: putting a day
             on something is deciding to do it. */}
-        <Card elevation="md" style={styles.section}>
+        <Card
+          elevation="md"
+          style={styles.section}
+          onLayout={(e) => { dueY.current = e.nativeEvent.layout.y; }}
+        >
           {/* The label belongs to `DateField` rather than being a card title
               above it, so the box has an accessible name of its own — a screen
               reader on a card whose only content is one input should not have
@@ -1370,6 +1448,11 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.sm },
+  // The pill and its tap area are different sizes on purpose, as everywhere
+  // else a chip row appears in this app: the visible thing stays a badge so it
+  // does not outweigh the headline above it, and the Pressable around it
+  // carries the minimum target.
+  metaChip: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   metaText: { fontSize: Typography.sm, color: Colors.textMuted },
   reportedBy: { fontSize: Typography.sm, color: Colors.textMuted },
@@ -1495,12 +1578,14 @@ const styles = StyleSheet.create({
   },
   commentDate: { fontWeight: Typography.regular, color: Colors.textMuted },
   commentBody: { fontSize: Typography.base, color: Colors.textPrimary },
-  commentInputRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginTop: Spacing.sm },
+  commentBox: { gap: Spacing.sm, marginTop: Spacing.sm },
+  commentActions: { flexDirection: 'row', justifyContent: 'flex-end' },
   commentInput: {
-    flex: 1,
-    // Anything flexed around a TextInput needs this: on web it is an <input>
-    // with an intrinsic ~20-character width that `min-width: auto` will not
-    // shrink below, so the box grows past the card and off the screen edge.
+    // Full width, with the control underneath rather than beside it. Nothing
+    // is flexed around it any more, so the `minWidth: 0` that a flexed
+    // TextInput needs on web is no longer load-bearing here — it is kept
+    // because an <input>'s intrinsic ~20-character width is still what a
+    // narrow phone would otherwise measure against.
     minWidth: 0,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -1518,14 +1603,21 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   commentSend: {
-    width: MIN_TOUCH_TARGET,
+    minWidth: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
-    borderRadius: Radius.button,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.input,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   // Neutral, not a faded fern — see the note on Button's disabled state. Half
   // strength on this ground is a pale sage that reads as broken.
-  commentSendDisabled: { backgroundColor: Colors.sunken },
+  commentSendOff: { backgroundColor: Colors.sunken },
+  commentSendLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.white,
+  },
+  commentSendLabelOff: { color: Colors.textMuted },
 });

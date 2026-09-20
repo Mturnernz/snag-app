@@ -295,7 +295,7 @@ iOS-only — and `Keyboard` is an empty stub in react-native-web.
 
 **There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
 two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
-be a category. The order down the screen is now: photo strip, headline, status, **Notes**, the
+be a category. The order down the screen is now: photo strip, headline, the meta row,
 **Linked assets**, **Anything to pick up?**, what came back from an assessment, **Notes**, the
 asset's own history, **When's it due?**, **Schedule a recurring job**, and *Mark done* last.
 
@@ -320,9 +320,39 @@ message is which part was ordered, from where, arriving when, and what it cost. 
 `numberOfLines` is an Android-only hint on a multiline `TextInput` and does nothing on the build
 people install, so the height is stated outright.
 
-**Anything to pick up sits directly under the notes**, and that placement is the argument for it
+**It is an ordinary box with its own control underneath, not a chat row.** A 48px fern square
+holding an up-arrow, vertically centred against a four-line box, is a *messaging* affordance, and
+this is not a messaging app — so the box goes full width and the control sits under it reading
+**Add note**. That is the same correction the shopping list's `+` already took: a word rather than
+a glyph, on the control that commits what somebody has just written.
+
+**Its placeholder names the box rather than showing a message.** It read "Ordered the part,
+arriving Tuesday", which is an example — and this file's rule about example values is that they
+read as something already entered, which on the one box holding what the other person said is the
+worst place in the app for it. *"Add a note, or what you did"* says what an example never could:
+that the box takes both halves of its job, the news and the record of the repair.
+
+**Anything to pick up sits directly above the notes**, and that placement is the argument for it
 having survived: the trip to the shop is the single most common reason a small job sits for weeks,
-so it is the part of triage that actually moves work.
+so it is the part of triage that actually moves work, and it sits with the two cards saying what
+the job *is* rather than below the conversation about it.
+
+**The three facts at the top are a way in, never a second way to write.** Status, when it's due
+and which room it's in are what somebody wants off the top of this page — and two of the three had
+their one control the better part of a screen further down. So the meta row states all three and
+the two a person actually sets are doors: the due chip scrolls to the date field, the room chip
+opens the same `EditSnagSheet` the pencil does. **One writer per fact**, which is the whole
+constraint — a chip that set the date itself would be the duplicate date control this page has
+already been through once, and the room has exactly one sheet precisely so two cannot disagree.
+
+Two rules inside it. **Status is stated, not offered**: it is derived — a job starts when somebody
+dates it or decides what to buy — and the one state change made by hand is *Mark done*, at the
+foot, so a tappable status chip up here would be that button arriving at the top by another door.
+And **both chips speak when the fact is missing**, reading *No date* and *No room* rather than
+rendering nothing: a snag with neither is named elsewhere in this file as the weakest thing this
+app can hold, and a row of two badges says that quietly where a row of three says it out loud.
+The visible pill stays a badge and the `Pressable` around it carries `MIN_TOUCH_TARGET`, the same
+split every chip row in this app makes.
 
 **A job can hold more than one photograph.** One was all it could ever have, because the only
 camera that reached a snag was the compose bar's and that files a *new* one — so the crack noticed
@@ -2407,6 +2437,44 @@ production. `webManifest.test.ts` asserts each token appears exactly once.
 
 The manifest's `Content-Type` is pinned in `netlify.toml`: served as anything but a JSON media
 type it's rejected outright, and the symptom is the old blurry favicon quietly coming back.
+
+### The app fills the screen, and the black band was a system bar
+
+In `standalone`, Chrome keeps Android's navigation bar **outside** the viewport and paints it
+black — so an app whose ground is plaster ended at a black strip holding the back, home and
+recents controls. Nothing in the page could reach it: it is not the page's background showing
+through, it is a system bar, and no amount of CSS on `html` gets behind one.
+
+`display_override: ["fullscreen", "standalone"]` in `manifest.webmanifest` is what removes it.
+Both bars go, the viewport reaches the screen edge, and a swipe from either edge brings them
+back — which is exactly `visibility: 'hidden'` plus `behavior: 'overlay-swipe'`, the pair
+`app.json` has configured through `expo-navigation-bar` for the **native** build all along. The
+web export is what people actually install, and it was the one build not asking for it.
+
+Four things about the change:
+
+- **It is stated in `display_override`, not by moving `display`.** The override is an ordered
+  preference and `display: standalone` stays the answer for anything that does not read one —
+  iOS, which has no fullscreen display mode at all, and older Chrome. Nothing regresses on the
+  way past.
+- **Every inset goes to zero with the bars, and that is correct.** `env(safe-area-inset-top)` and
+  `-bottom` describe bars that are no longer there, so the eleven screens padding by `insets.top`
+  stop padding and the compose bar moves down to sit against the screen edge — where the camera
+  button is *meant* to be, since it is bottom-left for one-handed reach. Android reserves the
+  bottom strip for the home **swipe**; a tap on a 48px target passes straight through.
+- **iOS is deliberately left alone.** `apple-mobile-web-app-status-bar-style` stays `default`
+  rather than becoming `black-translucent`: translucent is how a web app gets under the iOS
+  status bar, and it also forces light status-bar content, which on a `#FAF7F2` ground is a clock
+  nobody can see. The complaint was Android's, and the fix is Android's.
+- **An installed WebAPK updates lazily.** Chrome re-requests it in the background rather than on
+  the next launch, so the band survives a deploy by a day or so on a phone that already has the
+  app. Reinstalling from the browser is the way to see it immediately — worth knowing before
+  concluding the change did not land.
+
+`webManifest.test.ts` pins the override and its order, and pins it *against* `app.json`'s
+navigation-bar plugin — two builds of one app disagreeing about whether Android's controls are on
+screen is drift nothing else would catch, since each is configured in a different file, in a
+different vocabulary, and neither build renders the other.
 
 ## Environment Setup
 

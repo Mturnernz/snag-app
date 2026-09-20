@@ -79,6 +79,45 @@ describe('web app manifest', () => {
     expect(manifest.background_color).toBe(web.backgroundColor);
   });
 
+  // The Android system bars, and the black band that is their absence.
+  //
+  // In `standalone`, Chrome keeps the navigation bar outside the viewport and
+  // paints it black — so an app whose ground is plaster ends at a black strip
+  // holding the back/home/recents controls, and nothing in the page can reach
+  // it: it is not the page's background showing through, it is a system bar.
+  //
+  // `fullscreen` is what removes it. Both bars go, the viewport reaches the
+  // screen edge, and a swipe from either edge brings them back — which is
+  // exactly `visibility: 'hidden'` + `behavior: 'overlay-swipe'`, the pair
+  // app.json already configures for the *native* build through
+  // expo-navigation-bar. The web export is what people actually install, and
+  // until now it was the one build not asking for it.
+  //
+  // Stated in `display_override` rather than by moving `display`, because the
+  // override is the ordered preference and `display` stays the answer for
+  // anything that doesn't read one — iOS, which has no fullscreen mode, and
+  // older Chrome. Losing this line is silent: the app still installs, still
+  // launches without browser chrome, and quietly grows the band back.
+  it('asks Android for the whole screen, falling back to standalone', () => {
+    expect(manifest.display_override).toEqual(['fullscreen', 'standalone']);
+    expect(manifest.display).toBe('standalone');
+  });
+
+  it('agrees with the native build about hiding the system bars', () => {
+    // Two builds of one app disagreeing about whether Android's controls are
+    // on screen is the kind of drift nothing else would catch: each is
+    // configured in a different file, in a different vocabulary, and neither
+    // build renders the other. If the plugin goes or its visibility flips,
+    // this is where it gets said.
+    const navBar = (appJson.expo.plugins as unknown[])
+      .filter((entry): entry is [string, Record<string, unknown>] => Array.isArray(entry))
+      .find(([name]) => name === 'expo-navigation-bar');
+
+    expect(navBar).toBeDefined();
+    expect(navBar![1].visibility).toBe('hidden');
+    expect(manifest.display_override[0]).toBe('fullscreen');
+  });
+
   it('starts at the root, which is the tab the navigator falls back to', () => {
     // "/" is deliberately unmapped in linking.ts, so it lands on the tab
     // navigator's initialRouteName rather than a matched route. See CLAUDE.md.

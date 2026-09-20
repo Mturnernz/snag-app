@@ -172,7 +172,13 @@ destination once, and the cost was that the app opened on a form rather than on 
 person had added. The camera is bottom-left because that is the easiest place on a phone to
 reach one-handed; the old Add screen had it at the top, which is the hardest.
 
-Four things about capture are load-bearing:
+**The camera is the default, and the bar says so.** It was an icon-only circle the same size as
+the send button beside a field inviting words, which made photographing and typing read as two
+equal offers — and typing is the one with a keyboard in front of it. The shutter carries a word
+now and the field reads *"or type it…"*. Still one tap to the camera rather than to a chooser,
+and still bottom-left.
+
+Five things about capture are load-bearing, and two of them are things it stopped asking:
 
 - **There is no title column.** A photo says what a title would, and requiring one put a keyboard
   between someone and the problem in front of them. A snag needs a photo *or* a description
@@ -181,9 +187,10 @@ Four things about capture are load-bearing:
 - **A line of text is a complete snag.** "Gutters" typed into the bar is a perfectly good entry,
   and making that the same gesture as sending a message is the point of the bar existing.
 - **Nothing is asked before it is filed, and everything is asked straight after.** Taking a photo
-  saves the snag and *then* opens `AmendSnagSheet`: what is wrong, then where, then whether it is
-  urgent, with a way into triage at the end. Every room tag is offered, not a shortlist — the one
-  you want is the one you're standing in, and that is as likely to be the Roof as the Kitchen.
+  saves the snag and *then* opens `AmendSnagSheet`: what is wrong, then where, then the job itself.
+  Every room is offered, never a shortlist — the one you want is the one you're standing in, and
+  that is as likely to be the Roof as the Kitchen — through the searchable `RoomPicker` rather
+  than a rail of chips.
 
   It used to be a row of chips above the compose bar, with the note typed into the bar itself.
   That row was right about what to ask and wrong about how: the bar's field quietly changed
@@ -208,52 +215,82 @@ Four things about capture are load-bearing:
   to walk away from cannot also be three screens of reading, and a question worth asking at that
   moment is one that answers itself.
 
-  **There is a fourth step, and it is only sometimes there.** After the room, *Is it about one of
-  these?* offers the things recorded **in that room** — the kitchen's dishwasher and rangehood, not
-  the house's forty things — and writes `snags.thing_id`. The room is what makes the offer short
-  enough to be a two-second tag rather than a search, which is why it comes after it and not
-  before. A room with nothing recorded in it has no step at all: an empty rail over a *Skip for
-  now* is the app asking somebody to dismiss a question it cannot answer, so `amendSteps` leaves
-  it out and the header counts three instead of four. The count moves if the room changes
-  mid-sheet, which is right — tagging the Kitchen is what makes the kitchen's dishwasher offerable.
+  **It asks two things, and it used to ask four.** What went is instructive, because both
+  departures were defended here once.
 
-  **The payoff is somewhere else entirely**, and that is the point of asking at capture: a snag
-  that knows it is about the heat pump carries `thing_name`, `thing_make` and `thing_model` from
-  `snags_with_details`, so the model number is on the snag in the shop rather than two tabs away.
-  Those three columns existed and were read by nothing but the extract's *About* column — nothing
-  in the app could set `thing_id` from the snag's side at all. `SnagDetailScreen` now shows it as
-  a row under the badges, mono-faced, tapping through to the thing, with a × to unlink; without
-  that the answer would be written and never shown, which is the silent failure this codebase
-  keeps catching.
+  *Is it about one of these?* offered the things recorded **in that room** and wrote
+  `snags.thing_id`. The payoff was real — a snag that knows it is about the heat pump carries
+  `thing_name`, `thing_make` and `thing_model` from `snags_with_details`, so the model number is
+  on the job in the shop rather than two tabs away — but the *question* was tagging, at the one
+  moment with ten seconds of patience. The job's own page gets the same answer without asking for
+  anything: the room is already on the snag, so **Linked assets** lists what is recorded in that
+  room, which is the shortlist a person would have picked from. See *Linked assets* below.
 
-  **Ghosts cannot appear here, and that is the type rather than a filter.** `thingsInArea` takes
-  `Thing[]`; a suggestion is a `RoomSuggestion` from a constant with no id for `thing_id` to point
-  at. And **pointing a snag at a thing does not start the job** — see the four joins below.
+  *Does it need doing now?* went with priority itself. See below.
 
-  Step four is **two named pills — *Not urgent* and *Urgent*** — with Not urgent lit before
-  anybody touches anything. It was one *Urgent* chip that toggled, which left the common answer as
-  the unlabelled absence of a press: a state nothing on the sheet ever said out loud. Nothing is
-  written to make the default true, because `null` and `'low'` both already mean not urgent —
-  pressing the pill that is already lit is a no-op, deliberately, rather than a write that touches
-  `updated_at` to say what the row already said.
-- **Priority is not a capture decision any more.** It used to be, defended as the one judgement
-  only the person standing there can make — but nearly everything was filed Low, which is the
-  premise of the product, and urgency is *comparative*. It belongs where a dozen things are
-  visible at once. `create_snag` still takes it; the capture sheet and the detail sheet set it.
+  **Finishing the sheet opens the job**, rather than dropping back onto the list. The one moment
+  somebody is certainly thinking about this job should not end by showing them every other one,
+  and everything the sheet stopped asking is decided on that page.
+- **Priority is gone from the app, not moved.** It was a capture decision, defended as the one
+  judgement only the person standing there can make; nearly everything was filed Low, which is the
+  premise of this product rather than a finding. Moving it to triage did not save it — urgency is
+  comparative, a household list is a dozen small jobs none of which is an emergency, and a badge
+  that is grey on every row is a column of noise. What actually sorts this list is a date and a
+  trip to the shop.
+
+  So `PriorityBadge`, `PRIORITY_LABELS`, `PRIORITY_ORDER`, the extract's *Priority* column, the
+  priority sort and the **Urgent** lens are all deleted. **`home.snags.priority` is left unread
+  rather than dropped**: rows hold answers somebody gave, and dropping the column would rewrite
+  what they said. `create_snag` and `update_snag` still take the argument and are always passed
+  null — the signature is the server's, and a positional gap is a different function.
+- **Nobody is assigned anything either.** *Who's doing it?* went for the same kind of reason: two
+  people in one house tell each other out loud, and the field mostly recorded that somebody had
+  tapped it. `assignee_id` is unread on the same terms as `priority`, and the **Mine** lens went
+  with it — a lens over a column nothing can write comes back empty for ever and tells nobody why.
+  `update_snag` still validates an assignee against `property_members` if one is ever passed.
 
 **Triage** (`SnagDetailScreen`, presented as a modal over the list) is everything else — what it
-needs from the shop, due date, repeat, assignee, priority. Each control writes immediately rather
-than collecting into a form with a Save button, because triage is a series of small independent
-decisions and a Save button turns sorting twelve items into forty taps. It is a **sheet rather
-than a push** for the same reason — though note react-native-web renders a modal presentation as
-a full screen, so that particular benefit is native-only.
+needs from the shop, when it is due, and whether it comes round again. Each control writes
+immediately rather than collecting into a form with a Save button, because triage is a series of
+small independent decisions and a Save button turns sorting twelve items into forty taps. It is a
+**sheet rather than a push** for the same reason — though note react-native-web renders a modal
+presentation as a full screen, so that particular benefit is native-only.
 
-**Notes sit above *Sort it out*, not below it.** This product has no notifications and never will,
-so a note is the only way one person tells the other anything — "ordered the part, arriving
+**There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
+two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
+be a category. The order down the screen is now: photo strip, headline, status, **Notes**, the
+asset's own history, **Linked assets**, **Anything to pick up?**, **When's it due?**, **Schedule a
+recurring job**.
+
+**Notes sit near the top, above every control.** This product has no notifications and never
+will, so a note is the only way one person tells the other anything — "ordered the part, arriving
 Tuesday" is usually the entire reason the screen was opened. Two cards of controls standing
-between the photo and it made the one piece of news on the page the last thing anybody read. The
-order down the screen is now: photo, headline, status, **Notes**, *Sort it out*, *Does it come
-round again?*.
+between the photo and it made the one piece of news on the page the last thing anybody read.
+**The box is four lines**, because a single-line slot says "a few words" to somebody whose actual
+message is which part was ordered, from where, arriving when, and what it cost. Note that
+`numberOfLines` is an Android-only hint on a multiline `TextInput` and does nothing on the build
+people install, so the height is stated outright.
+
+**Anything to pick up sits directly under the notes**, and that placement is the argument for it
+having survived: the trip to the shop is the single most common reason a small job sits for weeks,
+so it is the part of triage that actually moves work.
+
+**A job can hold more than one photograph.** One was all it could ever have, because the only
+camera that reached a snag was the compose bar's and that files a *new* one — so the crack noticed
+afterwards became a second job about the same thing. The + is at the end of the strip rather than
+under it, and it inherits every upload rule the thing page paid for, now extracted into
+`lib/addPhotos.ts` rather than copied a third time: one write at the end, one upload after
+another, what arrived is kept, and the cap said out loud. Adding one deliberately does not start
+the job — photographing something is not deciding to do it.
+
+**A due date is its own field, and it is not only for repeats.** `due_at` used to be reachable
+only from inside the repeat card, so a one-off job could never be given a date at all — which made
+the Schedule tab's *Due* marks and the overdue badge features only repeating jobs had. Precisely
+backwards: a filter that comes round every six months looks after itself, and the gutters before
+the weekend away are what somebody needs reminding of. It is a `DateField` like every other date
+in the app, committed on blur rather than on every keystroke — `8/1` on the way to `8/11/2019`
+parses to the eighth of January, and a field that wrote as it was typed would file the job under
+it.
 
 **Nobody moves a job to "doing" by hand.** There was a *Start it* button and it went unpressed:
 people commented on things and assigned them to each other while the list went on claiming
@@ -261,10 +298,15 @@ nothing had been touched. Doing something about a snag is the evidence it has st
 `home.update_snag` and `home.add_comment` move it — server-side, so no client can forget.
 
 The rule is narrower than "any update", deliberately. Only **assignee, due date, repeat and the
-parts list** start a job; room, description and priority don't. Those three are the tail of
-capture — the capture sheet sets them seconds after the photo — and marking a brand-new snag "doing"
-because somebody tagged it *Bathroom* would empty the status of meaning from the other end.
-Finishing is the one state change still made by hand, because only a person knows.
+parts list** start a job; room, description, `thing_id`, `project_id` and photographs don't. Those
+are the tail of capture — the sheet sets the first two seconds after the photo — and marking a
+brand-new snag "doing" because somebody tagged it *Bathroom* would empty the status of meaning
+from the other end. Finishing is the one state change still made by hand, because only a person
+knows.
+
+Two of the four are now unreachable from the UI: nothing sets an assignee, and priority is gone
+entirely. So in practice a job starts when somebody puts a date on it or decides what to buy —
+which is, if anything, a truer reading of "deciding to do the work" than the four ever were.
 
 **There is no "how long will it take".** Effort was the only question in the app whose answer
 nobody could check, asked before the job was understood, and it existed mainly to feed a screen
@@ -384,8 +426,9 @@ that a caller passing no projects gets exactly what it got before.
 ## The list is the app's home
 
 `SnagListScreen` is `initialRouteName`, and there are five tabs: List, House, Projects, Schedule
-and You. Projects sits beside House because both describe the fabric of the place; Schedule stays
-last because it is the one you go to with a question, where the others are where work is done.
+and You — **or four, if this person has put Projects away.** Projects sits beside House because
+both describe the fabric of the place; Schedule stays last because it is the one you go to with a
+question, where the others are where work is done. See *Projects can be put away* below.
 
 **This product has no notifications and deliberately never will** (two people in one house do not
 need an email per snag; see `notify-snag` in the archive). So this screen is the only channel by
@@ -401,36 +444,68 @@ they last looked.
   entire backlog marked unread.
 - **The rest groups by room**, in `locations` order — which is how work gets batched, and which
   is why there is no room filter: you can see there are three things in the Garage without asking.
+- **A room can be folded away, and the heading stays.** That is the whole point — "three things in
+  the Garage" is what the grouping exists to say, and a fold that took the heading with it would
+  be a filter rather than a fold. A folded section keeps its heading and empties its `data`, so
+  `SectionList` renders no rows. One control on the count's own line reaches every section, and it
+  says what pressing it *does*, deciding from whether anything is still open, so the press on offer
+  is never a no-op. It is on that line rather than a row of its own because this screen has already
+  evicted two filter rails for charging vertical rent on every visit.
+
+  The fold is remembered **per device** (`lib/collapsed.ts`) and keyed **by section, never by
+  index**: sections come and go as work is filed and finished, and an index would fold whatever
+  slid into that position. Per device rather than per account because this is where you are in a
+  list rather than a fact about the house — the other person folding the Garage away on their
+  phone must not fold it away on yours. Every read and write is guarded and failure is always
+  "everything is open": a list that will not render because it could not remember which room was
+  folded is far worse than one that opens expanded.
 - **Done leaves.** One line at the foot, not a lens. Finishing something should make the list
   shorter; that is the whole reward on offer. Only the last seven days are rendered. A repeating
   job cannot leave — see *Finishing says so* below.
 - **Both filter rails became one button.** Filtering is occasional and was charging 96px of
-  vertical rent on every visit to a screen people now open constantly.
+  vertical rent on every visit to a screen people now open constantly. **Two lenses, where there
+  were four**: *Mine* read `assignee_id` and *Urgent* read `priority`, and nothing writes either
+  any more — a lens over a column nothing can set comes back empty for ever and tells nobody why.
+  What is left is *Everything* and *Needs parts*, which is the one somebody actually arrives with.
 - **The shopping list rides the "Needs parts" lens**, and a pill in the header says how much of it
   there is. One card above the cards, listing every item the visible jobs are waiting on — the only
   elevated surface on the screen, and the only thing the retired Weekend tab left behind. See
   *A list you can tick* below for the pill and the ticking.
 
-`SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering and the done
-window. `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, and the
-keyboard lift. `AmendSnagSheet.test.tsx` pins which question a new snag is asked first, that the
-sheet opens on *Not urgent* without having written anything to say so, that no step explains
-itself, and the whole of the *Is it about one of these?* step — absent for a room with nothing in
-it, absent while the house record is still on its way, this room's things and no other, the second
-press unlinking, *Skip for now* until something is chosen, and the header counting four.
+`SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering, the done
+window, and the whole of the fold — the heading and its count surviving, only the folded section
+emptying, the all-control saying what it will do, and the fold coming back on the next mount.
+`ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, the keyboard
+lift, and the camera being the named default rather than an icon. `AmendSnagSheet.test.tsx` pins
+which question a new snag is asked first, that it asks two things and never four, that it never
+asks what the job is about or how urgent it is, that no step explains itself, the room picker's
+substring match and its worded miss, and that finishing the sheet opens the job.
 `houseRecord.test.ts` pins `thingsInArea` itself: one room only, `Whole house` for a snag with no
-room, and the chip order being the order of the words on the chips.
+room, and the order being the order of the words.
 
-### A filed job can be edited, and can say what it is about
+### A filed job can be edited, and the room it is in can be searched for
 
 Two things were answerable for ten seconds after the shutter and never again: **the words and the
 room**. The amend sheet asks both straight after the photo and then it is gone, so "Gutters" typed a
 fortnight ago stayed "Gutters" — and a snag filed in the wrong room stayed there. A pencil on the
-headline opens `EditSnagSheet`: the description, every room chip, and **one Save**.
+headline opens `EditSnagSheet`: the description, a searchable room picker, and **one Save**.
+
+**The room rail became a picker, in both places a room is chosen.** Every room is still offered
+and never a shortlist — the one you want is the one you're standing in, as likely the Roof as the
+Kitchen — but a rail of chips makes that claim in a way that stops scaling the moment a household
+adds a conservatory and a storage area under the house to the seeded twelve, and a wall of grey
+has to be *read* before it can be tapped. `RoomPicker` is one component used by the capture sheet
+and this one, so the two cannot behave differently. `matchRooms` is `matchSuggestions`' substring
+rule applied to the room vocabulary: "house" finds *Under the house*, which a prefix match answers
+with silence. A miss says which rooms there are and where rooms are added, rather than offering to
+make one — somebody filing a snag in ten seconds is not describing the place, and a half-made room
+is a worse outcome than a snag filed under Elsewhere. Tapping the chosen room again clears it;
+there is deliberately no separate "no room" row, because `Elsewhere` is already the seed's escape
+hatch and a second way to say *nowhere in particular* is two answers to one question.
 
 One Save rather than the write-on-press every other control here uses, and the reason is the
-distinction the thing page's spec sheet already draws. Priority, parts, assignee, due date and
-repeat are each one small decision that is its own confirmation. The words and the room are the
+distinction the thing page's spec sheet already draws. Parts, the due date and the repeat are each
+one small decision that is its own confirmation. The words and the room are the
 job's *description* rather than a decision about it, typed and chosen together — and a half-typed
 sentence saving itself on every keystroke is not an edit, it is a race. **Neither field starts the
 job**, which is the existing rule and the reason editing is safe: `update_snag` moves a snag to
@@ -438,28 +513,37 @@ job**, which is the existing rule and the reason editing is safe: `update_snag` 
 refuses to leave a photo-less snag with no words, in those words, rather than letting
 `snags_has_something` surface as a constraint name.
 
-**What it is about is answerable from the job now, all three ways.** Capture's fourth step is the
-fast way — that room's things, a two-second tag — and it is skipped entirely for a room with
-nothing recorded in it, so the answer had to be reachable afterwards. On the snag: *Say what it's
-about* when nothing is linked; a **swap** and a **×** beside the row when something is.
+**Linked assets is a list to read, and it writes nothing.** It replaced two controls that both
+*wrote*: *Part of a bigger job*, which set `project_id` through a picker over the renovations, and
+*Say what it's about*, which set `thing_id` through a picker over the whole house record. Neither
+question is one somebody standing on this page arrives wanting to answer — that is tagging, and
+tagging is capture's job — and both put a chooser on a page read far more often than it is edited.
 
-- **The picker offers the whole record and a search**, not the room's shortlist (`LinkThingSheet`).
-  By the time somebody is doing this from the job, the room is not what narrows it — the noun is.
-  A ghost still cannot appear: `searchThings` takes `Thing[]`, and a suggestion has no id for
-  `thing_id` to point at.
-- **"Not recorded yet" is not a dead end.** *Create one instead* opens `AddThingSheet` — the
-  walkthrough itself, with the room pre-filled from the job — and links what comes back. Not a
-  second shorter form: a record created from here has to be as strong as one created from the House
-  tab, or this is the back door that fills the house record with rows nobody can read in a shop.
-- **The house record is read when the picker opens**, never on page load. This is a
-  once-in-a-job's-life decision on a page people open constantly, and it is keyed by the snag's own
-  property so it can never offer the bach's appliances for a job at the house.
-- **`start` must be memoised.** `AddThingSheet` resets itself from that prop in an effect that
-  depends on the object, so a fresh literal per render is an infinite loop — the effect sets state,
-  the render makes a new object, the effect fires again. It **hangs** the screen rather than failing.
-  `SnagDetailScreen.test.tsx` caught it as a timeout, which is the only way this shape of bug ever
-  announces itself. The same trap is in the tests themselves: a `useNavigation` mock returning a
-  fresh object per call spins any screen whose loader depends on it.
+**But the payoff was never the tag, it was the model number.** A snag about the heat pump was
+worth linking because eight months later somebody is in a shop wanting `MSZ-AP50VGK`. The room is
+already on the job, so the things recorded *in that room* are the shortlist a person would have
+picked from, and the card offers them without asking for anything: one line each, the make and
+model mono-faced, tapping through to the full record.
+
+Three rules:
+
+- **It writes nothing** — no tag, no link, no status. The Schedule tab's rule one screen further
+  on: the moment there are two ways to say what a job is about, neither is trustworthy.
+- **Ghosts cannot appear, and that is the type rather than a filter.** `thingsInArea` takes
+  `Thing[]`; a suggestion is a `RoomSuggestion` with no id, so a dashed prompt for a rangehood
+  nobody has recorded can never be listed as something the house has.
+- **It is absent entirely when the room holds nothing**, rather than an empty heading, and the
+  read is **never fatal and never awaited** by anything that renders the job itself. A list of the
+  room's appliances is the least important thing on this page and must not be what stops the notes
+  appearing.
+
+**So nothing in the app sets `snags.thing_id` or `snags.project_id` any more**, and that is the
+cost, stated plainly. Rows linked before this keep their link: the *Also said about…* history card
+and the extract's *About* column still render for them, and `on delete set null` still means what
+was wrong with the old dishwasher is still what was wrong. But the link can only shrink from here.
+`LinkThingSheet`, `LinkProjectSheet` and the create-a-thing-from-a-job path are gone with the
+controls that opened them. If the link is ever wanted back, it belongs where the answer is cheap —
+at capture, with the room already chosen — and not as a picker on the page people open constantly.
 
 **And the asset's own history is pulled through.** A card under Notes — *Also said about the heat
 pump* — carries the comments from that asset's **other** jobs, each naming the snag it came from and
@@ -474,15 +558,27 @@ RLS does the filtering rather than the query pretending to: the comments policy 
 property, so this returns exactly what this person could have read by opening those jobs one at a
 time.
 
-**And the repeat card says what it does.** *Does it come round again?* was the heading, which made
-somebody hunting for a way to schedule the filter read straight past the one card that does it. The
-heading is **Schedule a recurring job**; the question it used to be is now the field label over the
-two chips, where a question belongs. The list's *Comes round again* section keeps its name
-deliberately — that one describes a state, this one names an action.
+**And the repeat card asks one word.** The heading is **Schedule a recurring job** — it says what
+the card *does*, because *Does it come round again?* made somebody hunting for a way to schedule
+the filter read straight past the one card that does it. The list's *Comes round again* section
+keeps its name deliberately: that one describes a state, this one names an action.
+
+Under the heading there is a **Yes and a No and nothing else**. It used to carry a paragraph about
+filters and gutters, then the question, then two rails of presets — permanently, on a page people
+open constantly, to serve the minority of jobs that come round. The common answer is no. So the
+arrangement moved into a modal that only somebody who said Yes ever sees: how often, when the next
+one lands, the sentence stating what will happen, and the line saying **Snag reminds nobody**,
+which belongs there because a card called *Schedule a recurring job* is exactly what somebody
+would expect to remind them.
+
+**It asks for the *next* one, not the first.** "When's the first one due?" on a filter changed
+twice already is the app asking a question that was answered a year ago.
 
 `SnagDetailScreen.test.tsx` pins the edit sheet writing both fields in one call, the refusal on a
-photo-less job with no words, the three about-offers, the record being read only when the picker
-opens, the history card and its exclusion, and that a failed history read still renders the page.
+photo-less job with no words, the linked-assets list offering this room only and writing nothing,
+its absence when the room is empty, the page surviving a failed record read, the history card and
+its exclusion, the due date's day-first parse and its refusal of `31/02/2026`, and the repeat card
+explaining nothing until the answer is yes.
 
 ### Finishing says so, and a repeat cannot finish
 
@@ -879,16 +975,16 @@ three unbuilt ones will want it.
 ### Four joins, all using mechanisms that already exist
 
 - **`snags.thing_id`** — what a snag is about. `on delete set null`, never cascade: what was wrong
-  with the old dishwasher is still what was wrong. It is set at capture (the amend sheet's fourth
-  step, above) and cleared from the snag's own page; the house record it needs is read **when a
-  snag is filed, not when the list loads**, because the list is the screen people open constantly
-  and this serves a sheet that only appears after capture. Keyed by property, so moving between
-  the house and the bach re-reads rather than offering the wrong place's appliances. If that read
-  is slow the step appears late and if it fails the step never appears — neither can block a snag
-  that is already on the list.
-- **Pointing a snag at a thing does NOT start the job.** Saying what something is about is the
+  with the old dishwasher is still what was wrong. **Nothing in the app sets it any more**: the
+  capture step that wrote it and the picker on the job's page have both gone, and *Linked assets*
+  answers the question they existed for without asking anything (see above). Rows linked before
+  that keep their link, and everything that *reads* it still works — the *Also said about…*
+  history card, the extract's *About* column, `thing_name`/`thing_make`/`thing_model` on
+  `snags_with_details`. The column and the join stay because the data is real and because the
+  cheap place to ask is capture, with the room already chosen, if it is ever wanted back.
+- **Pointing a snag at a thing would NOT start the job.** Saying what something is about is the
   tail of capture, the same gesture as tagging the room. Assignee, due date, repeat and parts
-  start it; `thing_id` doesn't, and the `v_started` expression in `update_snag` says so.
+  start it; `thing_id` doesn't, and the `v_started` expression in `update_snag` still says so.
 - **Nothing copies a thing's consumables onto a snag's parts list.** The client offers them as
   taps. Filling the parts list is what moves a snag to 'doing', so a job that started itself
   because somebody named the appliance would empty the status from the same end the *Start it*
@@ -1150,7 +1246,7 @@ So **every money column is a pair**: the number as it was typed, and `*_incl_gst
 that number meant. `MoneyField` puts the pill beside every box, defaulted to *incl*, as **two named
 halves rather than one chip that toggles** — one chip leaves the other answer as the unlabelled
 absence of a press, and here that unlabelled answer is worth 15%. The same argument that made
-capture's priority step two named pills.
+capture's priority step two named pills, back when it had one.
 
 The line under the box shows the *other* figure as it is typed, which is what makes it trustworthy.
 **Nothing is converted on save**: the figure stored is the figure typed. The rollups normalise to
@@ -1200,6 +1296,50 @@ bathroom. No second bucket: `home-photos` under `<household_id>/docs/`, through
   leaves a tile record and a grout record from one line item.
 - Both are **`on delete set null`, never cascade**: deleting the record of the renovation must not
   delete the washing machine, and what was wrong with the cistern is still what was wrong.
+
+### Projects can be put away, per person
+
+`profiles.projects_enabled` (`20260920090000`), written by `home.set_projects_enabled`. A
+renovation is a third noun and not every household has one, so somebody with no project in
+progress was paying a tab — a fifth of the only navigation this app has — for a feature answering
+nothing about their house.
+
+**It is the one setting in this schema that belongs to a person rather than to the house**, and
+that exception is the thing to hold on to. Everything else it remembers is per household or per
+property, because there is one house and two people disagreeing about whether it has a dryer is
+not a state worth modelling. This is not that: it is a statement about what one person wants on
+their screen, and one member putting Projects away must not take it off the other's phone. Stored
+server-side rather than on the device for the reason `last_reported_property` is — a preference
+kept in a browser resets on the next phone. Default true, so nothing changes for anybody who never
+opens the setting.
+
+Three things follow from the answer:
+
+- **The tab is not registered**, rather than hidden with a null tab button. A route that exists but
+  cannot be reached is one deep link away from a screen the person has said they do not want, and
+  both `snag://` and the web build have deep links. `ProjectDetail` *does* stay on the root stack,
+  though: a `/projects/<id>` link somebody was sent before they turned it off should open the page
+  rather than fall through to the list with no explanation. The setting is about what the app
+  offers, not what it refuses when asked directly.
+- **The punch list goes with it.** A job filed against a renovation is reachable from that
+  renovation's page, and with the tab gone there is no page — so what would be left is a row naming
+  something nothing can open. `excludeProjectSnags` on `SnagFilter` adds `.is('project_id', null)`.
+- **It is asked of Postgres, never filtered afterwards.** The header count, the shopping pill, the
+  Schedule tab, the loose-end list and both extracts each read snags separately, and a subtraction
+  applied in one of them is five screens disagreeing about how much there is to do. The Schedule
+  tab also skips `getAllProjects()` entirely, since the fifth kind of mark is a read of dates set
+  on a page that is no longer reachable.
+
+Two named halves on the You tab rather than a switch, the same argument the GST pill and capture's
+priority pills made: one control leaves the other answer as the unlabelled absence of a press, and
+here that unlabelled answer removes a tab. Pressing the half that is already lit writes nothing.
+The write goes through `reloadAccount()` rather than local state, because the answer decides
+whether a *tab* exists and the navigator reads it off the profile in context.
+
+`ProfileScreen.test.tsx` pins the two halves, the no-op press, the re-read after the write, the
+hint naming what else goes, and both reads being skipped once it is off.
+`ScheduleScreen.test.tsx` pins the filter reaching `getSnags` and `getAllProjects` not being
+called.
 
 ### Four things that stay exactly as they are
 
@@ -1972,7 +2112,7 @@ spending the brand hue on completion would make the list's calmest state its lou
 
 - **Ground** `#FAF7F2` · **Surface** `#FFFFFF` · **Sunken** `#F4EFE7` · **Border** `#E7DFD3`
 - **Fern** `#2E6A4F` — every primary action and the active tab. Tint `#E4EFE7`.
-- **Clay** `#9E3522` — priority high, and overdue. Tint `#F9E7E1`.
+- **Clay** `#9E3522` — overdue, and nothing else since priority left. Tint `#F9E7E1`.
 - **Brass** `#825611` — doing, and due within a week. Tint `#F7EEDC`.
 - **Slate** `#35526E` — open. A state, not a warning. Tint `#E9EFF6`.
 - **Text**: ink `#2B2724` (warm near-black, not blue-black), secondary `#5C554C`, muted `#6A6156`.
@@ -1990,11 +2130,13 @@ palette failed three pairings for exactly that reason. The tightest pair shipped
 muted-on-sunken at 5.31:1. If the ground is warmed further, re-run the numbers rather than
 trusting how it looks.
 
-Three badges carry the triage vocabulary, and their colour budget is deliberate:
+Two badges carry the triage vocabulary, and their colour budget is deliberate:
 
 - **`StatusBadge`** — open (slate) / doing (brass) / done (neutral).
-- **`PriorityBadge`** — only `high` gets an alert colour; `low` is a neutral pill, so a second
-  saturated hue can't collide with status on the same card.
+- **`PriorityBadge` is deleted**, with priority itself. It gave `high` an alert colour and `low` a
+  neutral pill, so a second saturated hue could not collide with status on the same card — which
+  was the right answer to a question the list no longer asks. Clay now appears on exactly one
+  thing: an overdue date.
 - **The parts pill** on a card — deliberately colourless. What a job needs from the shop is a fact
   about a trip, not an alarm. One item is named ("L-brackets"), more are counted: the name is what
   tells you what the trip is for, and a count never did.
@@ -2003,9 +2145,9 @@ Three badges carry the triage vocabulary, and their colour budget is deliberate:
 
 ### One chip, every rail
 
-The amend chips and the "Show me" sheet on `SnagListScreen`, and every control in *Sort it out* on
-`SnagDetailScreen`, all say the same thing the same way: **a sunken well when off, solid fern when
-on, no border either way.** Two rules follow from that:
+The "Show me" sheet on `SnagListScreen`, the repeat modal's rails on `SnagDetailScreen`, the
+project-mode pair on `ProfileScreen` and the room rows in `RoomPicker` all say the same thing the
+same way: **a sunken well when off, solid fern when on, no border either way.** Two rules follow from that:
 
 - **Never put an inactive control on `surface` with a border.** On a plaster ground a white
   bordered box is a *card*, so a row of filters styled that way reads as a row of things to read
@@ -2014,8 +2156,9 @@ on, no border either way.** Two rules follow from that:
   capture tag chip, an avatar). Using it for one rail and solid fern for another made two controls
   doing the same job look like two different controls.
 
-Priority is the one exception: **Urgent** fills with clay, because it is the only alert in the
-capture path. Nothing else in a chip row gets a hue.
+**Nothing in a chip row gets a hue.** *Urgent* filling with clay used to be the one exception,
+because it was the only alert in the capture path; with priority gone there is no exception left,
+and clay is spent solely on an overdue date.
 
 **A chip's tap area and its visible pill are different sizes on purpose.** The pill is ~34px,
 because a rail of 48px lozenges outweighs the list it filters; the `Pressable` around it carries
@@ -2045,6 +2188,24 @@ grey mid-press reads as the action having failed.
   react-native-web's `Alert` is `static alert() {}`, so on the web build (which is what people
   actually install) a direct call does nothing: the dialog never appears and any action behind a
   confirmation never runs. `showAlert` takes **two buttons at most**.
+- **Never call `Linking.openURL` directly — use `openUrl` from `src/lib/openUrl.ts`.**
+  react-native-web implements `openURL` by assigning `window.location`, which *replaces the app*.
+  That is right for a `tel:` and wrong for a link in a note: this is a single-page app holding
+  unsent state — a half-typed note, an open sheet, a scroll position somebody spent a minute
+  reaching — and navigating away drops all of it to show a supplier's website, while stripping the
+  app from the back stack in exactly the way that makes people think they have lost their work. So
+  web gets `window.open(url, '_blank', 'noopener,noreferrer')`, guarded because a blocked popup
+  returns null rather than throwing; native keeps `Linking.openURL`, which is the OS handler and
+  therefore the default browser. `noopener` is not optional — without it the opened page gets a
+  live `window.opener` handle back into a signed-in session.
+
+  **An address typed into prose is tappable** (`LinkedText`, over `linkify`). With no
+  notifications anywhere in this product a note is the only way one person tells the other
+  anything, and what they are most often telling them is *where*. Where a link stops is pure and
+  pinned as a property rather than a screenshot: a trailing full stop belongs to the sentence, a
+  closing bracket counts only if the link opened it, and a bare `www.` gets a scheme — because
+  `window.open` resolves a schemeless string against the app's own origin, which re-opens the app
+  and reads as nothing having happened.
 - The same trap applies to every native-only module. `apps/mobile` runs in the browser as well as
   on phones, so check a platform API has a web implementation before using it — `expo-file-system`
   has none, and its stub throws rather than no-oping. See TESTING.md.

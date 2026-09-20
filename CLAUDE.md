@@ -270,12 +270,23 @@ meaning "done here". And its hint is the page **saying the taps landed**, which 
 the same silence the thing page's spec sheet was reversed to fix, where "the rows called `patch`
 without the toast it takes, so edits saved in silence".
 
-The hint is honest in both branches rather than always reassuring. The due-date box is the only
-control holding typed text, so it is the only thing a Save could still be waiting on: until it
-matches the row the bar reads *"The date is not saved yet"* rather than *"All changes saved"*.
-Pressing Save commits it first — `commitDue` is a no-op when the box matches — because **Save must
-not be the one button on this page that loses a typed value**, and `onBlur` is not guaranteed to
-have fired: on native, pressing a Pressable does not reliably blur a `TextInput`.
+**It commits what is sitting in a box, and that is the whole reason it is not merely a Close.**
+Two boxes can be holding something: the date, whose `onBlur` is not guaranteed to have fired — on
+native, pressing a Pressable does not reliably blur a `TextInput` — and the item typed into the
+shopping list, which has no blur commit at all because it waits on the `+` beside it. Without
+this, **Save is the one button on the page that silently discards what somebody typed**, which is
+precisely the failure a button called Save exists to prevent. Adding that item starts the job, and
+that is right: deciding what to buy is deciding to do the work.
+
+**One write, not two.** A date and an item both pending are one `update_snag` rather than two round
+trips and two re-reads. And Save does not navigate away from a write that failed, or from a date no
+calendar has: the words stay in the box so they can be fixed, unlike the blur path, which has
+somewhere to put them back to. `patch` returns whether the write landed for that one caller —
+every control that fires and forgets ignores it, because the alert is the report.
+
+The hint counts those two boxes and is honest in both branches rather than always reassuring,
+in the thing page's own words (*"1 unsaved change"*) so two screens do not invent two for one
+fact.
 
 It is a `StickyActionBar`, the same component and the same rules the thing page uses: the last flex
 child rather than absolutely positioned, so it can never overlap what it belongs to, and the
@@ -285,8 +296,15 @@ iOS-only — and `Keyboard` is an empty stub in react-native-web.
 **There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
 two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
 be a category. The order down the screen is now: photo strip, headline, status, **Notes**, the
-asset's own history, **Linked assets**, **Anything to pick up?**, **When's it due?**, **Schedule a
-recurring job**.
+asset's own history, what came back from an assessment, **Anything to pick up?**, **Linked
+assets**, **When's it due?**, **Schedule a recurring job**.
+
+**The shopping list reads before the asset list**, and the assessment card stays directly above
+it. The trip to the shop is the single most common reason a small job sits for weeks, so that list
+is the part of this page that moves work, where the asset list is reference somebody consults. The
+assessment card rode up with it rather than staying put: the parts it offers with a `+` land in
+the list underneath, and a card whose suggestions are two cards away from where they go is a card
+nobody connects to anything.
 
 **Notes sit near the top, above every control.** This product has no notifications and never
 will, so a note is the only way one person tells the other anything — "ordered the part, arriving
@@ -548,8 +566,16 @@ tagging is capture's job — and both put a chooser on a page read far more ofte
 **But the payoff was never the tag, it was the model number.** A snag about the heat pump was
 worth linking because eight months later somebody is in a shop wanting `MSZ-AP50VGK`. The room is
 already on the job, so the things recorded *in that room* are the shortlist a person would have
-picked from, and the card offers them without asking for anything: one line each, the make and
-model mono-faced, tapping through to the full record.
+picked from, and the card offers them without asking for anything: tapping through to the full
+record.
+
+**A row is stacked — the noun, then the model beneath it.** It was one line with the name flexed
+and the mono spec beside it, which meant the spec took its intrinsic width and the name shrank to
+whatever was left: *Microwave* rendered as **M** next to `Samsung MS32J5133B/MS40J5133B`, and the
+rangehood as **Ra…**. That is a two-column row having nowhere to put a long answer — the same
+failure the thing page's spec sheet and a project's totals both fixed by un-columning themselves.
+Here **neither line can be the one that gives way**: the noun is how you find the row and the
+model is what you came to read, so each gets a line.
 
 Three rules:
 

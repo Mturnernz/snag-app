@@ -95,10 +95,9 @@ describe('ComposeBar', () => {
     const result = render(<ComposeBar pathPrefix="house-1" onAdd={onAdd} />);
 
     // The prompt never changes meaning, and the send button says one thing.
-    // It reads as the alternative to the camera now rather than as the bar's
-    // main offer, because a photograph *is* the snag and typing is the one
-    // with a keyboard in front of it.
-    expect(field(result).props.placeholder).toBe('or type it…');
+    // It names what the whole bar does rather than describing the field, which
+    // is what lets the camera beside it go back to being an icon.
+    expect(field(result).props.placeholder).toBe('Capture new issue');
 
     await TestRenderer.act(async () => field(result).props.onChangeText('Gutters'));
     await TestRenderer.act(async () => labelled(result, 'Add to the list').props.onPress());
@@ -129,18 +128,32 @@ describe('ComposeBar', () => {
 
 // ---------------------------------------------------------------- camera first
 //
-// It was an icon-only circle the same size as the send button, beside a field
-// inviting words — which made photographing and typing read as two equal
-// offers. Nearly everything worth filing is in front of somebody when they
-// file it, so the shutter carries a word and the field is the alternative.
+// A photograph *is* the snag — there is no title column because a picture of
+// the broken seat says what a title would — so the shutter is what this bar is
+// for, and typing is the alternative. The field carries those words; the
+// button does not, because a camera glyph on a fern circle at the foot of a
+// list is not something anybody has to read.
 
 describe('which way of filing is the default', () => {
-  it('names the camera on the button rather than leaving it an icon', () => {
+  it('puts no label on the camera button', () => {
     const result = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
-    const camera = labelled(result, 'Take a photo');
 
-    const words = camera.findAllByType('Text' as any).map((n: any) => n.props.children);
-    expect(words).toContain('Photo');
+    // Deliberately "no *label*" rather than "no Text nodes": Ionicons renders
+    // its glyph as a one-character <Text>, and once the icon font has loaded
+    // that character is real content. Counting nodes would pass or fail
+    // depending on whether an earlier test had warmed the font — which is
+    // exactly the shape of flake this suite should not grow.
+    const words = result
+      .getAllByType('Text')
+      .map((n: any) => String(n.props.children ?? ''));
+    expect(words).not.toContain('Photo');
+  });
+
+  // The glyph is the whole control, so the accessible name is the only thing
+  // saying what it does to somebody who cannot see it.
+  it('still names itself for a screen reader', () => {
+    const result = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
+    expect(labelled(result, 'Take a photo')).toBeDefined();
   });
 
   it('still reaches the camera in one tap, never a chooser', async () => {

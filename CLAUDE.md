@@ -172,11 +172,12 @@ destination once, and the cost was that the app opened on a form rather than on 
 person had added. The camera is bottom-left because that is the easiest place on a phone to
 reach one-handed; the old Add screen had it at the top, which is the hardest.
 
-**The camera is the default, and the bar says so.** It was an icon-only circle the same size as
-the send button beside a field inviting words, which made photographing and typing read as two
-equal offers — and typing is the one with a keyboard in front of it. The shutter carries a word
-now and the field reads *"or type it…"*. Still one tap to the camera rather than to a chooser,
-and still bottom-left.
+**The camera is the default, and the *field* says so.** A photograph is the snag, so the shutter
+is what the bar is for and typing is the alternative — but the words for that belong in the
+field, which reads **"Capture new issue"**, not on the button. The button carried the word
+"Photo" for one commit, which put a label on the control whose meaning is least in doubt: a
+camera glyph on a fern circle at the foot of a list is not something anybody has to read. Still
+one tap to the camera rather than to a chooser, and still bottom-left.
 
 Five things about capture are load-bearing, and two of them are things it stopped asking:
 
@@ -476,7 +477,7 @@ they last looked.
 window, and the whole of the fold — the heading and its count surviving, only the folded section
 emptying, the all-control saying what it will do, and the fold coming back on the next mount.
 `ComposeBar.test.tsx` pins the text-only path, the words coming back on failure, the keyboard
-lift, and the camera being the named default rather than an icon. `AmendSnagSheet.test.tsx` pins
+lift, the field naming what the bar does, and no label on the camera button. `AmendSnagSheet.test.tsx` pins
 which question a new snag is asked first, that it asks two things and never four, that it never
 asks what the job is about or how urgent it is, that no step explains itself, the room picker's
 substring match and its worded miss, and that finishing the sheet opens the job.

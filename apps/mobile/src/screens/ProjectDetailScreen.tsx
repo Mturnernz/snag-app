@@ -63,6 +63,12 @@ import {
  */
 const HANDOVER_PREVIEW = 5;
 
+/**
+ * One array, shared. A fresh `[]` per render is a new prop identity, which is
+ * the thing grouping the prices was meant to stop.
+ */
+const EMPTY_QUOTES: ProjectQuote[] = [];
+
 type Props = NativeStackScreenProps<RootStackParamList, 'ProjectDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -264,6 +270,27 @@ export default function ProjectDetailScreen({ route }: Props) {
     for (const payment of payments) (map[payment.quoteId] ??= []).push(payment);
     return map;
   }, [payments]);
+  /**
+   * Prices grouped by who they are owed to, keyed the way the rollup keys them.
+   *
+   * Grouped once rather than filtered inside the suppliers map — the same shape
+   * as the five memos above it. A filter per card also handed every
+   * `CommitmentCard` a new array on every render of this page, which is a
+   * re-render of the densest section for no change in what it says.
+   *
+   * Prices billed *through* a head contract are left out here exactly as they
+   * were: the sub's money is owed to whoever holds the contract, and showing it
+   * against the sub is the bug `20260918090500` fixed in the rollup.
+   */
+  const pricesBySupplier = useMemo(() => {
+    const map: Record<string, ProjectQuote[]> = {};
+    for (const quote of quotes) {
+      if (quote.billedThroughId !== null) continue;
+      const key = (quote.supplier ?? '').trim().toLowerCase();
+      (map[key] ??= []).push(quote);
+    }
+    return map;
+  }, [quotes]);
   const linesByExpectedCost = useMemo(() => {
     const map: Record<string, ProjectExpectedCostLine[]> = {};
     for (const line of expectedCostLines) (map[line.expectedCostId] ??= []).push(line);
@@ -629,11 +656,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                 <CommitmentCard
                   key={supplier.supplierKey}
                   supplier={supplier}
-                  prices={quotes.filter(
-                    (quote) =>
-                      (quote.supplier ?? '').trim().toLowerCase() === supplier.supplierKey &&
-                      quote.billedThroughId === null
-                  )}
+                  prices={pricesBySupplier[supplier.supplierKey] ?? EMPTY_QUOTES}
                   milestones={milestones}
                   bills={bills}
                   onSign={async (quoteId, status) => {

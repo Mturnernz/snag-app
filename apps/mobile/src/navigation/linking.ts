@@ -3,8 +3,9 @@ import { RootStackParamList } from '../types';
 import { APP_URL } from '../lib/appUrl';
 
 /**
- * `/snags/:id` is the only deep link that matters — it's what someone sends
- * the other person when they want them to look at something.
+ * `/snags/:id` is the deep link that matters — it's what someone sends the
+ * other person when they want them to look at something. `/projects/:id` is
+ * the other one that resolves, for the reason given beside it.
  *
  * `snagv1.netlify.app` stays in the prefix list and is not merely tidiness:
  * QR codes encoding it were printed and put on walls, and every notification
@@ -31,6 +32,15 @@ export const linking: LinkingOptions<RootStackParamList> = {
         },
       },
       SnagDetail: 'snags/:snagId',
+      // On the root stack rather than under `Main`, deliberately, and it is the
+      // one path that has to resolve while its *tab* may not exist. Somebody
+      // who has put Projects away still has `ProjectDetail` registered — the
+      // setting is about what the app offers, not what it refuses when asked
+      // directly — so a link sent before they turned it off opens the page
+      // instead of falling through to the list with nothing said. Mapping
+      // `Projects` itself would be the opposite: a tab that is not registered
+      // reachable by typing a URL.
+      ProjectDetail: 'projects/:projectId',
       Household: 'household',
     },
   },

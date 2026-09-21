@@ -6,7 +6,7 @@ import * as queries from '@snag/supabase-queries';
 import type { ProjectFigure, ProjectQuoteStatus } from '@snag/shared-types';
 import { PORTAL_URL } from './appUrl';
 import { readForUpload } from './uploadBody';
-import { withDeadline } from './deadline';
+import { deadlineFor, withDeadline } from './deadline';
 import type { SnagStatus } from '../types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -37,16 +37,20 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * small and quick. Uploads are not: an evidence photo on a bad site connection
  * is slow rather than broken, and cutting it off at 20s would invent a failure
  * where there wasn't one.
+ *
+ * **Signing is not uploading, and it used to be treated as though it were.**
+ * `createSignedUrls` is a small JSON round trip that every photo strip and
+ * every `Attachments` makes on mount — but its URL is under `/storage/v1/`,
+ * so it inherited the 60-second upload deadline. A stalled one therefore hung
+ * a strip for a minute, which is four times the wait anything else in the app
+ * can impose and the opposite of what that number was chosen for. It is a data
+ * call and it takes the data deadline.
  */
-const AUTH_TIMEOUT_MS = 15_000;
-const REQUEST_TIMEOUT_MS = 20_000;
-const UPLOAD_TIMEOUT_MS = 60_000;
-
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-  const ms = url.includes('/auth/v1/') ? AUTH_TIMEOUT_MS
-    : url.includes('/storage/v1/') ? UPLOAD_TIMEOUT_MS
-    : REQUEST_TIMEOUT_MS;
+  // `deadlineFor` lives in lib/deadline.ts so the rule can be asserted: nothing
+  // imports this module for real, because building the client wants env vars.
+  const ms = deadlineFor(url);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);

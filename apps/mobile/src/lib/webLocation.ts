@@ -19,11 +19,16 @@ import { Platform } from 'react-native';
  * So: at the two auth transitions, put the address bar back to `/` unless the
  * URL is one somebody meant to arrive at.
  *
- * Two are kept:
+ * Three are kept:
  *
  * - `/snags/<id>` — what one person sends the other when they want them to look
  *   at something. Following it while signed out means signing in first, and the
  *   snag has to survive the round trip or the link was pointless.
+ * - `/projects/<id>` — the other thing one person sends the other, now that
+ *   `linking.ts` resolves it. It has to be kept for the same reason and it is
+ *   the same failure if it is not: a link that works when you are already
+ *   signed in and drops you on the list when you are not is worse than one
+ *   that never worked, because nobody can tell which they are getting.
  * - `/join/<token>` — a household's QR code. This one is *load-bearing*: the
  *   person scanning has almost certainly never signed in here, so the sign-up
  *   round trip is the normal case rather than the edge one. Lose the token
@@ -51,6 +56,9 @@ export function resetWebPathIfStale(): void {
 export function isPreservedUrl(pathname: string, _search = ''): boolean {
   // A specific snag, not the `/snags` list tab: only the former names a record.
   if (/^\/snags\/[^/]+/.test(pathname)) return true;
+  // A specific project, on the same terms — and `/projects` on its own is the
+  // tab, which somebody may have put away, so it is deliberately not kept.
+  if (/^\/projects\/[^/]+/.test(pathname)) return true;
   // A household's join code. Signing up IS the journey here — somebody who has
   // just scanned a QR has no account yet — so this has to survive both
   // transitions or the code is gone and nothing on screen can recover it.

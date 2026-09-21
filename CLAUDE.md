@@ -1591,6 +1591,21 @@ allowance the builder supplied at $11,800 — comes out ReliaBuilder $139,000, G
 Kitchen Mania $12,000, Elite Bathroomware absent because they bill the builder. $163,000, and
 Committed is $163,000.
 
+**A quote knows its project, and that is a stored column.** `home.quote_reach(id)` is still the
+*definition* — coalesce the quote's own `project_id`, its element's, or its item's element's — but
+it stopped being what the views compute per row. `project_quotes_with_totals` exposed it as
+`reach_project_id` and the client filters on that, so the planner saw `Filter: (home.quote_reach(id)
+= $1)` over a **seq scan of every quote in the table**, running a four-table join once per row;
+`project_bills` and `project_supplier_totals` paid the same. It is
+`home.project_quotes.reach_project_id` now: written by a trigger, indexed, and **safe because the
+join can never change** — exactly one of `item_id`/`element_id`/`project_id` is set at insert, and
+nothing anywhere re-parents a quote, an item or an element, so the trigger is the only writer. That
+is the distinction from `needs_parts`, which was derived precisely because two writers *could*
+disagree. The three views were **replaced, not rebuilt**: each keeps its column list exactly, so
+`create or replace view` took them and the four rollups above them were never touched — and the
+migration was checked by diffing every row of all six views before and after, which came back
+identical.
+
 **A quote attaches to one level — an item, a part, or the whole project.** A main contractor's
 contract covers the bathroom *and* the laundry, so it belongs to neither; forcing it onto the
 item layer meant inventing an item called "Main contract — ReliaBuilder" sitting beside the
@@ -1688,6 +1703,51 @@ sum to committed" — the invariant the whole money model is built to keep — s
 counting money for work the household decided against. `home.set_item_excluded` is its own
 function for the same reason `set_part_bought` and `set_quote_status` are theirs: the only write
 here that changes what a total says, so it cannot have anything else riding along with it.
+
+### What a press costs, and why the page used to think about it
+
+The project page felt slow and the database had nothing to do with it. Every
+query behind it runs in **single-digit milliseconds** — `projects_with_totals`
+at 9.7ms is the worst of them, and it is a view whose *planning* costs seven
+times its execution. The cost was never the SQL. It was asking nine times in a
+row.
+
+**`getProjectContents` was six sequential round trips** — elements, then
+expected-and-bills, then the payment lines, then items, then quotes, then the
+three reads that hang off quotes — and `load()` added three more, awaiting the
+suppliers rollup, the handover list and the punch list one at a time despite
+none of them depending on any other. Against Sydney from a phone in New
+Zealand that is most of a second before anything appears, and **all 29 write
+handlers on the page ended with `await load()`**, so every chip press paid it
+again.
+
+Three rules now, and the first is the one that matters:
+
+- **A toggle answers before the network does.** Include/Exclude, Quote/Invoiced,
+  Accepted/Declined and Paid/Not paid all patch local state on press, write,
+  then reconcile. A refused write **puts it back** and says so — optimistic is
+  not the same as dishonest, and a control that silently keeps a state the
+  server rejected is worse than one that was slow. Only columns the client can
+  predict exactly are patched: `kind` and `status` are plain values, and
+  `unpaid` is set to what paying the outstanding balance must leave. Anything
+  derived in a view is left to the re-read.
+- **Reads that do not depend on each other are asked for together.** Two waves,
+  not six: everything keyed on the project id goes at once (and `quotes` now
+  joins that wave, because `reach_project_id` is a real column), then the items
+  and the three quote-keyed reads go together in the second. `load()` folds the
+  suppliers rollup, the handover list and the punch list into its own
+  `Promise.all`, keeping each one **not fatal** through `allSettled` rather than
+  through three `try` blocks in a row.
+- **A price decision re-reads the money, not the page.** `reloadMoney` is the
+  project, its contents and the suppliers rollup; `load` is that plus the files,
+  the handover offer and the punch list. None of those three can move because
+  somebody excluded an item, so 16 of the write handlers stopped asking. The
+  ones that touch a file, a thing or a snag still call `load`, and the split is
+  by what the write can actually change rather than by how it felt.
+
+`ProjectDetailScreen.test.tsx` pins the flip happening while the write is still
+pending, the revert on a refusal, and a price decision leaving the punch list,
+the handover offer and the files unread.
 
 ### A budget has parts, and the gap is named rather than resolved
 

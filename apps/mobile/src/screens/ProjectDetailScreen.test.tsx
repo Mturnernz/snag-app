@@ -57,6 +57,7 @@ const mock_getProjectThings = jest.fn();
 const mock_updateItem = jest.fn();
 const mock_createElement = jest.fn();
 const mock_deleteElement = jest.fn().mockResolvedValue([]);
+const mock_setItemExcluded = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -70,6 +71,9 @@ jest.mock('../lib/supabase', () => {
     createItem: jest.fn(), createQuote: jest.fn(), createThing: jest.fn(),
     createLocation: jest.fn(),
     deleteElement: (...a: unknown[]) => mock_deleteElement(...a),
+    setItemExcluded: (...a: unknown[]) => mock_setItemExcluded(...a),
+    updateExpectedCost: jest.fn(), addExpectedCostLine: jest.fn(),
+    updateExpectedCostLine: jest.fn(), deleteExpectedCostLine: jest.fn(),
     deleteItem: jest.fn(), deleteProject: jest.fn(), deleteQuote: jest.fn(),
     deleteStoredFiles: jest.fn(), updateElement: jest.fn(), updateProject: jest.fn(),
     updateQuote: jest.fn(), getFileUrls: jest.fn().mockResolvedValue({}),
@@ -656,5 +660,68 @@ describe('the rooms a job touches', () => {
     // nothing to remove and a × would be a control for a concept not on screen.
     const r = await arrange({ elements: [element({ implicit: true })] });
     expect(byLabel(r, 'Remove Downstairs laundry from this job')).toBeUndefined();
+  });
+});
+
+/**
+ * What a press costs.
+ *
+ * The page used to answer a chip by writing, then re-reading the whole of
+ * itself in nine sequential round trips, with nothing on screen changing
+ * until all of them landed. On a phone that reads as a control that did not
+ * register, and it gets pressed again.
+ */
+describe('a toggle answers before the network does', () => {
+  it('flips the moment it is pressed, without waiting for the write', async () => {
+    let release!: () => void;
+    mock_setItemExcluded.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { release = () => resolve(); })
+    );
+    const r = await arrange({ elements: [element()], items: [item({ name: 'Toilet suite' })] });
+
+    expect(byLabel(r, 'Exclude Toilet suite from the price build')).toBeDefined();
+    await TestRenderer.act(async () => {
+      byLabel(r, 'Exclude Toilet suite from the price build').props.onPress();
+    });
+
+    // The write has not resolved and the row already says what it will be.
+    expect(byLabel(r, 'Include Toilet suite in the price build')).toBeDefined();
+    await TestRenderer.act(async () => { release(); });
+  });
+
+  it('puts it back when the write is refused, rather than lying about it', async () => {
+    mock_setItemExcluded.mockRejectedValueOnce(new Error('nope'));
+    const r = await arrange({ elements: [element()], items: [item({ name: 'Toilet suite' })] });
+
+    await TestRenderer.act(async () => {
+      await byLabel(r, 'Exclude Toilet suite from the price build').props.onPress();
+    });
+
+    // Optimistic is not the same as dishonest: a refused write reverts.
+    expect(byLabel(r, 'Exclude Toilet suite from the price build')).toBeDefined();
+  });
+});
+
+describe('a price decision re-reads the money, and not the rest of the page', () => {
+  it('leaves the punch list, the handover offer and the files alone', async () => {
+    mock_setItemExcluded.mockResolvedValueOnce(undefined);
+    const r = await arrange({ elements: [element()], items: [item({ name: 'Toilet suite' })] });
+
+    const snags = mock_getSnags.mock.calls.length;
+    const things = mock_getProjectThings.mock.calls.length;
+    const files = mock_getProjectFiles.mock.calls.length;
+    const contents = mock_getProjectContents.mock.calls.length;
+
+    await TestRenderer.act(async () => {
+      await byLabel(r, 'Exclude Toilet suite from the price build').props.onPress();
+    });
+
+    // None of these can move because somebody excluded an item, so none of
+    // them is asked for again.
+    expect(mock_getSnags.mock.calls.length).toBe(snags);
+    expect(mock_getProjectThings.mock.calls.length).toBe(things);
+    expect(mock_getProjectFiles.mock.calls.length).toBe(files);
+    // The money is derived in a view, so it genuinely has to be re-read.
+    expect(mock_getProjectContents.mock.calls.length).toBeGreaterThan(contents);
   });
 });

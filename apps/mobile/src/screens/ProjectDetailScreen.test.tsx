@@ -27,10 +27,32 @@ jest.mock('../components/AddThingSheet', () => {
   const { Text } = require('react-native');
   return { __esModule: true, default: () => React.createElement(Text, null, 'add thing sheet') };
 });
+// Stood in for, but not blanked: adding an item now opens *this* sheet rather
+// than a smaller one in front of it, so the screen's side of that — which part
+// it is creating on, and that naming it writes — has to be assertable here.
+// `ItemSheet.test.tsx` pins everything inside it.
 jest.mock('../components/ItemSheet', () => {
   const React = require('react');
-  const { Text } = require('react-native');
-  return { __esModule: true, default: () => React.createElement(Text, null, 'item sheet') };
+  const { Text, Pressable } = require('react-native');
+  return {
+    __esModule: true,
+    default: (props: any) =>
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(Text, null, props.visible ? 'item sheet open' : 'item sheet'),
+        props.creatingIn
+          ? React.createElement(
+            Pressable,
+            {
+              accessibilityLabel: `naming a new item on ${props.creatingIn.name}`,
+              onPress: () => props.onCreate(props.creatingIn.id, 'Shower mixer'),
+            },
+            React.createElement(Text, null, 'name it')
+          )
+          : null
+      ),
+  };
 });
 jest.mock('../components/ProjectRoomsSheet', () => {
   const React = require('react');
@@ -58,7 +80,11 @@ const mock_updateItem = jest.fn();
 const mock_createElement = jest.fn();
 const mock_deleteElement = jest.fn().mockResolvedValue([]);
 const mock_setItemExcluded = jest.fn().mockResolvedValue(undefined);
-const mock_createItem = jest.fn().mockResolvedValue(undefined);
+const mock_createItem = jest.fn().mockResolvedValue({
+  id: 'new1', elementId: 'e1', name: 'Shower mixer', status: 'considering', excluded: false,
+  sortOrder: 0, notes: null, photoPaths: [], documentPaths: [], createdAt: '',
+  quoteCount: 0, committed: null, invoiced: null, paid: null, tbcCount: 0,
+});
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -707,34 +733,39 @@ describe('adding an item to a part of the job', () => {
     expect(boxByLabel(r, 'Add an item to Downstairs laundry')).toBeUndefined();
   });
 
-  it('opens a modal that takes the notes the inline box could never carry', async () => {
+  it('opens the item sheet itself, not a smaller one in front of it', async () => {
+    // The second modal asked for a name and a note and then shut, leaving
+    // somebody to open the item they had just made to put a price on it —
+    // two screens for one act, on the page whose redesign was about how many
+    // presses a bill costs. `ItemSheet.test.tsx` pins what is inside it;
+    // this pins that it is what opens, already pointed at the right part.
     const r = await arrange();
+    expect(r.queryByText('item sheet open')).toBeNull();
 
     await TestRenderer.act(async () => {
       byLabel(r, 'Add an item to Downstairs laundry').props.onPress();
     });
 
-    await TestRenderer.act(async () => {
-      boxByLabel(r, 'What the item is').props.onChangeText('Shower mixer');
-    });
-    await TestRenderer.act(async () => {
-      boxByLabel(r, 'Notes about this item').props.onChangeText('Methven, the one Kate liked');
-    });
-    await TestRenderer.act(async () => {
-      await byLabel(r, 'Add it').props.onPress();
-    });
-
-    expect(mock_createItem).toHaveBeenCalledWith('e1', 'Shower mixer', 'Methven, the one Kate liked');
+    r.getByText('item sheet open');
+    expect(byLabel(r, 'naming a new item on Downstairs laundry')).toBeDefined();
   });
 
-  it('will not add something with no name', async () => {
+  it('creates the row against the part the pill was pressed inside', async () => {
     const r = await arrange();
     await TestRenderer.act(async () => {
       byLabel(r, 'Add an item to Downstairs laundry').props.onPress();
     });
     await TestRenderer.act(async () => {
-      await byLabel(r, 'Add it').props.onPress();
+      await byLabel(r, 'naming a new item on Downstairs laundry').props.onPress();
     });
+    // No notes argument: the sheet that opens has a box for them and writes
+    // them itself, so there is nothing for the create call to carry.
+    expect(mock_createItem).toHaveBeenCalledWith('e1', 'Shower mixer');
+  });
+
+  it('is not creating anything until the pill is pressed', async () => {
+    const r = await arrange();
+    expect(byLabel(r, 'naming a new item on Downstairs laundry')).toBeUndefined();
     expect(mock_createItem).not.toHaveBeenCalled();
   });
 

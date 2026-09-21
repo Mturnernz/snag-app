@@ -29,14 +29,27 @@ interface Props {
   visible: boolean;
   householdId: string;
   item: ProjectItem | null;
+  /**
+   * Set while this is a **new** item nobody has named yet — the part it will
+   * go on. `item` is null until the name is committed, and then this is null
+   * and the same open sheet carries on against a real row.
+   */
+  creatingIn: { id: string; name: string } | null;
+  /** Whether the part layer is drawn — an implicit part has no name to say. */
+  showElement?: boolean;
+  /**
+   * Names the item and creates it, returning the row so the gesture that
+   * triggered it can carry straight on against a real id.
+   */
+  onCreate: (elementId: string, name: string) => Promise<ProjectItem | null>;
   /** This item's prices. The first one is the one the header operates on. */
   quotes: ProjectQuote[];
   /** Payments against any invoice among `quotes`. */
   payments: ProjectPayment[];
   onClose: () => void;
-  onUpdateItem: (update: { name?: string; status?: ProjectItem['status']; notes?: string | null; photoPaths?: string[]; documentPaths?: string[] }, toast: string) => Promise<void>;
+  onUpdateItem: (itemId: string, update: { name?: string; status?: ProjectItem['status']; notes?: string | null; photoPaths?: string[]; documentPaths?: string[] }, toast: string) => Promise<void>;
   onDeleteItem: () => Promise<void>;
-  onAddQuote: (input: QuoteFields) => Promise<void>;
+  onAddQuote: (itemId: string, input: QuoteFields) => Promise<void>;
   onSetQuoteStatus: (quoteId: string, status: ProjectQuoteStatus) => Promise<void>;
   /**
    * Corrects a price, or moves it between Quote and Invoiced.
@@ -73,6 +86,23 @@ interface Props {
  *
  * The amount is typed with the GST pill beside it and stored exactly as typed
  * — nothing in this app reads a figure out of an attachment.
+ *
+ * **Adding an item opens this same sheet, not a smaller one.** There was a
+ * second modal in front of it that asked for a name and a note and then shut,
+ * leaving somebody to open the item they had just made to do the thing they
+ * opened it for — put a price on it. Two screens and four taps for one act, on
+ * the page whose whole redesign was about how many presses a bill costs. So
+ * the pill opens this, the title is a box, and everything an item can hold is
+ * on screen from the first keystroke.
+ *
+ * **The row is created the moment the name is committed**, and that is the one
+ * rule to keep. `create_item` will not take an empty name and says so in
+ * words, so a sheet opened by mistake and walked away from writes nothing at
+ * all — the same guarantee the old two-step gave. What changed is only *when*
+ * it happens: on the blur of the title rather than on a button. Every control
+ * below calls `ensureItem` first, because on native a press does not reliably
+ * blur a `TextInput`, so typing a name and going straight for the amount is
+ * one gesture that has to create the row on its way past.
  */
 const emptyPayment = {
   amount: '',
@@ -85,7 +115,8 @@ const emptyPayment = {
 };
 
 export default function ItemSheet({
-  visible, householdId, item, quotes, payments, onClose,
+  visible, householdId, item, creatingIn, showElement = false, onCreate,
+  quotes, payments, onClose,
   onUpdateItem, onDeleteItem, onAddQuote, onSetQuoteStatus, onUpdateQuote, onDeleteQuote,
   onUpdateQuoteFiles, onAddPayment, onUpdatePayment, onDeletePayment, onRecordAsThing,
 }: Props) {
@@ -107,6 +138,10 @@ export default function ItemSheet({
   const [editingPayment, setEditingPayment] = useState<string | 'new' | null>(null);
   const [paymentForm, setPaymentForm] = useState(emptyPayment);
   const [clearingPayments, setClearingPayments] = useState(false);
+  /** What is in the title box. The item's name, or what is being typed for one. */
+  const [title, setTitle] = useState('');
+  /** Said under the box rather than as a toast — it is about the box. */
+  const [titleMissing, setTitleMissing] = useState(false);
 
   // The price the header and the edit pencil operate on. Kept to the first
   // one recorded: an item carries a single active price now, so a second
@@ -130,11 +165,53 @@ export default function ItemSheet({
     setEditingQuote(null);
     setEditingPayment(null);
     setPaymentForm(emptyPayment);
+    setTitle(item?.name ?? '');
+    setTitleMissing(false);
   }, [visible, item?.id]);
 
-  if (!item) return null;
+  // Nothing to show only when there is neither a row nor a part to put one on.
+  if (!item && !creatingIn) return null;
 
   const canSaveQuote = amount.trim().length > 0 || supplier.trim().length > 0;
+  const installed = item?.status === 'installed';
+
+  /**
+   * The row this sheet is about, creating it first if it does not exist yet.
+   *
+   * Everything that writes goes through here. On native a press does not
+   * reliably blur a `TextInput`, so somebody typing "Toilet" and going
+   * straight for the amount never fires the title's own blur — and without
+   * this that gesture would write nothing and say nothing, which is the exact
+   * failure the snag page's Save button already exists to prevent.
+   */
+  async function ensureItem(): Promise<ProjectItem | null> {
+    if (item) return item;
+    if (!creatingIn) return null;
+    const named = title.trim();
+    if (named.length === 0) {
+      setTitleMissing(true);
+      return null;
+    }
+    setTitleMissing(false);
+    return onCreate(creatingIn.id, named);
+  }
+
+  /** Commits the title box: creates the row, or renames the one that exists. */
+  async function commitTitle() {
+    const named = title.trim();
+    if (!item) {
+      if (named.length > 0) await ensureItem();
+      return;
+    }
+    if (named.length === 0) {
+      // An item with no name is not something `update_item` should be asked
+      // to store — the create path refuses it in words, and so does this, by
+      // putting the name back rather than clearing it.
+      setTitle(item.name);
+      return;
+    }
+    if (named !== item.name) await onUpdateItem(item.id, { name: named }, 'Renamed');
+  }
 
   /** Loads a saved price back into the form, exactly as it was typed. */
   function editQuote(quote: ProjectQuote) {
@@ -182,8 +259,13 @@ export default function ItemSheet({
     if (busy || !canSaveQuote) return;
     setBusy(true);
     try {
+      // The row first, if there isn't one: a price has to hang off something,
+      // and somebody who typed a name and went straight for the amount has
+      // plainly told us what this is.
+      const target = await ensureItem();
+      if (!target) return;
       const parsed = amount.trim() ? Number(amount.replace(/[^0-9.]/g, '')) : NaN;
-      await onAddQuote({
+      await onAddQuote(target.id, {
         supplier: supplier.trim() || null,
         detail: detail.trim() || null,
         amount: Number.isFinite(parsed) ? parsed : null,
@@ -327,12 +409,36 @@ export default function ItemSheet({
         ]}
       >
         <View style={styles.grab} />
+        {/* The title is the box. It names a new item and renames an existing
+            one, which is the same act — and it is why adding no longer needs
+            a sheet of its own in front of this one. The placeholder asks the
+            question rather than showing an answer, which is the one case this
+            app's no-example-values rule allows. */}
         <View style={styles.head}>
-          <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+          <TextInput
+            style={styles.name}
+            value={title}
+            onChangeText={(text) => { setTitle(text); if (text.trim()) setTitleMissing(false); }}
+            onBlur={commitTitle}
+            onSubmitEditing={commitTitle}
+            placeholder="What is it?"
+            placeholderTextColor={Colors.textMuted}
+            accessibilityLabel="What the item is"
+            autoFocus={!item}
+            returnKeyType="done"
+          />
           <Pressable onPress={onClose} style={styles.headTap} accessibilityRole="button" accessibilityLabel="Close">
             <Icon name="close" size="md" color={Colors.textMuted} />
           </Pressable>
         </View>
+        {titleMissing ? (
+          <Text style={styles.titleMissing}>Give it a name — what is it you&rsquo;re getting?</Text>
+        ) : null}
+        {/* Where it is going, stated rather than asked: the pill that opened
+            this was inside the part, which has already answered it. */}
+        {!item && creatingIn && showElement ? (
+          <Text style={styles.goingOn}>Going on {creatingIn.name}.</Text>
+        ) : null}
 
         <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
           {primaryQuote && !showForm ? (
@@ -742,24 +848,27 @@ export default function ItemSheet({
               from the price. Installed is what lets the house record offer
               carry this item's model number over once it is actually in. */}
           <Pressable
-            onPress={() =>
-              onUpdateItem(
-                { status: item.status === 'installed' ? 'considering' : 'installed' },
-                item.status === 'installed' ? 'Not installed' : 'Installed'
-              )
-            }
+            onPress={async () => {
+              const target = await ensureItem();
+              if (!target) return;
+              await onUpdateItem(
+                target.id,
+                { status: installed ? 'considering' : 'installed' },
+                installed ? 'Not installed' : 'Installed'
+              );
+            }}
             style={styles.installedRow}
             accessibilityRole="button"
-            accessibilityState={{ selected: item.status === 'installed' }}
-            accessibilityLabel={item.status === 'installed' ? 'Installed' : 'Mark as installed'}
+            accessibilityState={{ selected: installed }}
+            accessibilityLabel={installed ? 'Installed' : 'Mark as installed'}
           >
             <Icon
-              name={item.status === 'installed' ? 'checkmark-circle' : 'ellipse-outline'}
+              name={installed ? 'checkmark-circle' : 'ellipse-outline'}
               size="sm"
-              color={item.status === 'installed' ? Colors.primary : Colors.textMuted}
+              color={installed ? Colors.primary : Colors.textMuted}
             />
-            <Text style={[styles.installedLabel, item.status === 'installed' && styles.installedLabelOn]}>
-              {item.status === 'installed' ? 'Installed' : 'Mark as installed'}
+            <Text style={[styles.installedLabel, installed && styles.installedLabelOn]}>
+              {installed ? 'Installed' : 'Mark as installed'}
             </Text>
           </Pressable>
 
@@ -773,10 +882,11 @@ export default function ItemSheet({
             style={[styles.input, styles.notes]}
             value={notes}
             onChangeText={setNotes}
-            onBlur={() => {
-              if ((item.notes ?? '') !== notes) {
-                onUpdateItem({ notes: notes.trim() || null }, 'Saved');
-              }
+            onBlur={async () => {
+              if ((item?.notes ?? '') === notes) return;
+              const target = await ensureItem();
+              if (!target) return;
+              await onUpdateItem(target.id, { notes: notes.trim() || null }, 'Saved');
             }}
             placeholder="Anything worth remembering about this one"
             placeholderTextColor={Colors.textMuted}
@@ -786,9 +896,13 @@ export default function ItemSheet({
 
           <Attachments
             householdId={householdId}
-            photoPaths={item.photoPaths}
-            documentPaths={item.documentPaths}
-            onChange={(next, toast) => onUpdateItem(next, toast)}
+            photoPaths={item?.photoPaths ?? []}
+            documentPaths={item?.documentPaths ?? []}
+            onChange={async (next, toast) => {
+              const target = await ensureItem();
+              if (!target) return;
+              await onUpdateItem(target.id, next, toast);
+            }}
             emptyLabel="Nothing attached to this item yet."
           />
 
@@ -796,7 +910,7 @@ export default function ItemSheet({
               installed is something the house now has, and the House record is
               where somebody will go looking for its model number in four
               years. Pre-filled, and it carries the project with it. */}
-          {onRecordAsThing && item.status === 'installed' ? (
+          {onRecordAsThing && installed ? (
             <Pressable
               onPress={onRecordAsThing}
               style={styles.record}
@@ -808,11 +922,13 @@ export default function ItemSheet({
             </Pressable>
           ) : null}
 
+          {/* On a row that does not exist yet this is simply the way out —
+              there is nothing to destroy, so there is nothing to confirm. */}
           <Pressable
-            onPress={() => setConfirmDelete(true)}
+            onPress={() => (item ? setConfirmDelete(true) : onClose())}
             style={styles.remove}
             accessibilityRole="button"
-            accessibilityLabel={`Remove ${item.name}`}
+            accessibilityLabel={item ? `Remove ${item.name}` : 'Remove this item'}
           >
             <Text style={styles.removeLabel}>Remove this item</Text>
           </Pressable>
@@ -821,7 +937,7 @@ export default function ItemSheet({
 
       <ConfirmDialog
         visible={confirmDelete}
-        title={`Remove ${item.name}?`}
+        title={`Remove ${item?.name ?? 'this item'}?`}
         message={
           quotes.length > 0
             ? `Its ${quotes.length === 1 ? 'price goes' : `${quotes.length} prices go`} with it, and so does anything attached to them.`
@@ -877,7 +993,15 @@ const styles = StyleSheet.create({
   },
   grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.sm },
-  name: { flex: 1, minWidth: 0, fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
+  // A box that does not look like one until it is being used: the title of the
+  // sheet reads as a title, and turns out to be editable when tapped.
+  name: {
+    flex: 1, minWidth: 0,
+    fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary,
+    paddingVertical: Spacing.xs,
+  },
+  titleMissing: { fontSize: Typography.sm, color: Colors.danger, marginTop: Spacing.xs },
+  goingOn: { fontSize: Typography.sm, color: Colors.textSecondary, marginTop: Spacing.xs },
   headTap: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.md },
   scroll: { marginTop: Spacing.sm },
 

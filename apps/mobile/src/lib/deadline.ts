@@ -77,3 +77,36 @@ export function failureReason(err: unknown): string {
   if (!message) return 'unknown error';
   return message.length > 60 ? `${message.slice(0, 57)}…` : message;
 }
+
+/**
+ * How long a request gets, from what is on the other end of it.
+ *
+ * Lives here rather than inside `fetchWithTimeout` so it can be asserted:
+ * `lib/supabase.ts` builds the Supabase client at module scope and wants
+ * environment variables to do it, so nothing in the suite imports it for real.
+ * The rule is small, it is easy to get subtly wrong, and being wrong is
+ * invisible until somebody is watching a spinner.
+ *
+ * Three answers, and the middle one is the correction:
+ *
+ * - **Auth** is small and quick, and a stalled token refresh poisons every
+ *   later call, so it gets the shortest leash.
+ * - **Signing** is a small JSON round trip that every photo strip and every
+ *   `Attachments` makes on mount. Its URL is under `/storage/v1/`, so it used
+ *   to inherit the upload deadline and a stalled one hung a strip for a full
+ *   minute — four times what anything else in the app can impose, and the
+ *   opposite of what that number exists for.
+ * - **Bytes** are slow rather than broken on a bad connection, and cutting an
+ *   upload off at 20s would invent a failure that was not there.
+ */
+export const AUTH_TIMEOUT_MS = 15_000;
+export const REQUEST_TIMEOUT_MS = 20_000;
+export const UPLOAD_TIMEOUT_MS = 60_000;
+
+export function deadlineFor(url: string): number {
+  if (url.includes('/auth/v1/')) return AUTH_TIMEOUT_MS;
+  // Asking for a signed URL, not sending or fetching the bytes behind one.
+  if (url.includes('/storage/v1/object/sign')) return REQUEST_TIMEOUT_MS;
+  if (url.includes('/storage/v1/')) return UPLOAD_TIMEOUT_MS;
+  return REQUEST_TIMEOUT_MS;
+}

@@ -77,20 +77,45 @@ export default function Attachments({
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [viewerAt, setViewerAt] = useState<number | null>(null);
+  /**
+   * Whether the signing round trip has been made yet, so a strip that is still
+   * waiting is not mistaken for one that came back empty.
+   *
+   * Without this the two are the same state — an empty map — and the line
+   * below would flash "couldn't be loaded" on every mount before the URLs
+   * arrive, which is the opposite failure and a worse one.
+   */
+  const [asked, setAsked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setAsked(false);
     if (photoPaths.length === 0) {
       setUrls({});
       return;
     }
     getFileUrls(photoPaths).then((map) => {
-      if (!cancelled) setUrls(map);
+      if (cancelled) return;
+      setUrls(map);
+      setAsked(true);
     });
     return () => {
       cancelled = true;
     };
   }, [photoPaths.join('|')]);
+
+  /**
+   * Photographs this record holds that nothing can currently show.
+   *
+   * `getFileUrls` keeps whatever signed — the same *what arrived is kept* rule
+   * the upload path follows — and logs the rest to a console nobody on a phone
+   * is reading. So a signing failure rendered as grey tiles: indistinguishable,
+   * from the outside, from photographs that were never there, on the one screen
+   * whose whole job is to be believed later. It costs one line to say which it
+   * is, and saying it is the difference between "this record is thin" and "this
+   * record is fine and the network is not".
+   */
+  const unsigned = asked ? photoPaths.filter((path) => !urls[path]).length : 0;
 
   async function attachPhotos() {
     if (busy || disabled) return;
@@ -209,6 +234,14 @@ export default function Attachments({
         </View>
       ))}
 
+      {unsigned > 0 ? (
+        <Text style={styles.unsigned}>
+          {unsigned === 1
+            ? "1 photo couldn't be loaded just now — it's still on the record."
+            : `${unsigned} photos couldn't be loaded just now — they're still on the record.`}
+        </Text>
+      ) : null}
+
       {photoPaths.length === 0 && documentPaths.length === 0 && emptyLabel ? (
         <Text style={styles.empty}>{emptyLabel}</Text>
       ) : null}
@@ -292,6 +325,14 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textMuted,
     paddingVertical: Spacing.sm,
+  },
+  // Muted, not clay. Clay is spent on an overdue date and an edited figure —
+  // facts about the record. This is a fact about the network, and it says the
+  // photographs are still there, so it must not read as an alarm about them.
+  unsigned: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    paddingTop: Spacing.xs,
   },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.lg, marginTop: Spacing.xs },
   add: {

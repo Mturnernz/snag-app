@@ -6,7 +6,7 @@ import * as queries from '@snag/supabase-queries';
 import type { ProjectFigure, ProjectQuoteStatus } from '@snag/shared-types';
 import { PORTAL_URL } from './appUrl';
 import { readForUpload } from './uploadBody';
-import { withDeadline } from './deadline';
+import { deadlineFor, withDeadline } from './deadline';
 import type { SnagStatus } from '../types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -37,16 +37,20 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * small and quick. Uploads are not: an evidence photo on a bad site connection
  * is slow rather than broken, and cutting it off at 20s would invent a failure
  * where there wasn't one.
+ *
+ * **Signing is not uploading, and it used to be treated as though it were.**
+ * `createSignedUrls` is a small JSON round trip that every photo strip and
+ * every `Attachments` makes on mount — but its URL is under `/storage/v1/`,
+ * so it inherited the 60-second upload deadline. A stalled one therefore hung
+ * a strip for a minute, which is four times the wait anything else in the app
+ * can impose and the opposite of what that number was chosen for. It is a data
+ * call and it takes the data deadline.
  */
-const AUTH_TIMEOUT_MS = 15_000;
-const REQUEST_TIMEOUT_MS = 20_000;
-const UPLOAD_TIMEOUT_MS = 60_000;
-
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-  const ms = url.includes('/auth/v1/') ? AUTH_TIMEOUT_MS
-    : url.includes('/storage/v1/') ? UPLOAD_TIMEOUT_MS
-    : REQUEST_TIMEOUT_MS;
+  // `deadlineFor` lives in lib/deadline.ts so the rule can be asserted: nothing
+  // imports this module for real, because building the client wants env vars.
+  const ms = deadlineFor(url);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -351,11 +355,11 @@ export const getAllProjects = () => queries.getAllProjects(supabase);
 
 export const getProject = (projectId: string) => queries.getProject(supabase, projectId);
 
-export const getProjectContents = (projectId: string) =>
-  queries.getProjectContents(supabase, projectId);
 
-export const getProjectFiles = (projectId: string) =>
-  queries.getProjectFiles(supabase, projectId);
+/** The whole project page in one round trip. See `getProjectPage` for why. */
+export const getProjectPage = (projectId: string) =>
+  queries.getProjectPage(supabase, projectId);
+
 
 export const createProject = (input: queries.ProjectInput) =>
   queries.createProject(supabase, input);
@@ -410,13 +414,8 @@ export const updatePayment = (paymentId: string, input: Partial<queries.PaymentI
 
 export const deletePayment = (paymentId: string) => queries.deletePayment(supabase, paymentId);
 
-export const getProjectThings = (projectId: string) => queries.getProjectThings(supabase, projectId);
 
-export const getSupplierTotals = (projectId: string) =>
-  queries.getSupplierTotals(supabase, projectId);
 
-export const getExpectedCosts = (projectId: string) =>
-  queries.getExpectedCosts(supabase, projectId);
 
 export const createExpectedCost = (projectId: string, input: queries.ExpectedCostInput) =>
   queries.createExpectedCost(supabase, projectId, input);
@@ -427,8 +426,6 @@ export const updateExpectedCost = (expectedId: string, update: queries.ExpectedC
 export const deleteExpectedCost = (expectedId: string) =>
   queries.deleteExpectedCost(supabase, expectedId);
 
-export const getExpectedCostLines = (projectId: string) =>
-  queries.getExpectedCostLines(supabase, projectId);
 
 export const addExpectedCostLine = (expectedCostId: string, input: queries.ExpectedCostLineInput) =>
   queries.addExpectedCostLine(supabase, expectedCostId, input);
@@ -441,8 +438,6 @@ export const updateExpectedCostLine = (
 export const deleteExpectedCostLine = (lineId: string) =>
   queries.deleteExpectedCostLine(supabase, lineId);
 
-export const getProjectBills = (projectId: string) =>
-  queries.getProjectBills(supabase, projectId);
 
 export const setFigure = (
   projectId: string,

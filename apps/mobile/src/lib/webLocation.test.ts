@@ -87,6 +87,11 @@ describe('isPreservedUrl', () => {
   it.each([
     ['/snags/abc', '', true],
     ['/snags', '', false],
+    // A project page is sent the same way a snag is, so it survives the same
+    // round trip. `/projects` bare is the tab, which somebody may have put
+    // away — keeping it would be preserving a path to a screen they removed.
+    ['/projects/abc', '', true],
+    ['/projects', '', false],
     ['/profile', '', false],
     ['/report', '', false],
     ['/admin', '', false],

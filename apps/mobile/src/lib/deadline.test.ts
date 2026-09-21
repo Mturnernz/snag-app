@@ -1,4 +1,7 @@
-import { withDeadline, failureReason, DeadlineError } from './deadline';
+import {
+  withDeadline, failureReason, DeadlineError,
+  deadlineFor, AUTH_TIMEOUT_MS, REQUEST_TIMEOUT_MS, UPLOAD_TIMEOUT_MS,
+} from './deadline';
 
 // The point of this helper is that no job can end in "still going" forever. The
 // cases worth pinning are the ones that have actually shipped: a stage that
@@ -84,5 +87,43 @@ describe('failureReason', () => {
     const reason = failureReason(new Error('x'.repeat(200)));
     expect(reason).toHaveLength(58);
     expect(reason.endsWith('…')).toBe(true);
+  });
+});
+
+/**
+ * How long each kind of request gets.
+ *
+ * The signing case is the one that was wrong, and it was invisible: a signed
+ * URL is asked for by every photo strip and every `Attachments` on mount, its
+ * path is under `/storage/v1/`, and it therefore took the 60-second upload
+ * deadline. Nothing failed — a stalled strip simply sat there for a minute.
+ */
+describe('deadlineFor', () => {
+  const REST = 'https://p.supabase.co/rest/v1/snags_with_details?select=*';
+  const AUTH = 'https://p.supabase.co/auth/v1/token?grant_type=refresh_token';
+  const SIGN = 'https://p.supabase.co/storage/v1/object/sign/home-photos';
+  const UPLOAD = 'https://p.supabase.co/storage/v1/object/home-photos/h/1.jpg';
+
+  it('gives a stalled token refresh the shortest leash', () => {
+    // It poisons every later call: supabase-js resolves a token before each
+    // request, so one that never settles means nothing is ever issued again.
+    expect(deadlineFor(AUTH)).toBe(AUTH_TIMEOUT_MS);
+    expect(deadlineFor(AUTH)).toBeLessThan(deadlineFor(REST));
+  });
+
+  it('treats asking for a signed URL as the data call it is', () => {
+    expect(deadlineFor(SIGN)).toBe(REQUEST_TIMEOUT_MS);
+    // The regression, stated as the thing that must not come back.
+    expect(deadlineFor(SIGN)).not.toBe(UPLOAD_TIMEOUT_MS);
+  });
+
+  it('still lets the bytes themselves take their time', () => {
+    // An upload on a bad connection is slow rather than broken, and cutting it
+    // off at the data deadline would invent a failure that was not there.
+    expect(deadlineFor(UPLOAD)).toBe(UPLOAD_TIMEOUT_MS);
+  });
+
+  it('gives an ordinary read the data deadline', () => {
+    expect(deadlineFor(REST)).toBe(REQUEST_TIMEOUT_MS);
   });
 });

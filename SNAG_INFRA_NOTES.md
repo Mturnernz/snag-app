@@ -14,6 +14,38 @@ rediscovering it is the painful part.
 | Postgres | 17.6 |
 | Created | 20 June 2026 |
 
+### The limits that shape the app, not just the bill
+
+Measured 21 September 2026, and worth knowing before optimising anything:
+
+| | |
+|---|---|
+| PostgREST connection pool | **10** (`postgrest_logs`: "Connection Pool initialized with a maximum size of 10") |
+| `max_connections` | 60 |
+| `shared_buffers` | 224 MB |
+| `statement_timeout` | 8s for `authenticated` and `authenticator`, 3s for `anon` |
+| `jit` | off |
+
+**The pool is the one that bites.** It is not a cost ceiling, it is a concurrency ceiling:
+a screen firing more than ten requests at once queues the rest behind them, and every
+query on this database runs in milliseconds, so the wait is entirely queueing. The
+project page used to fire fourteen on open and eleven per press, which produced 17-second
+responses, 227 PostgREST thread-kill timeouts in a day and ten HTTP 500s — from one
+household. See *What a press costs* in CLAUDE.md.
+
+Checking it for yourself, in the dashboard's logs or through the MCP:
+
+```sql
+-- what each endpoint actually costs, end to end, over 24h
+select log_attributes['request.path'] as path, count(*) n,
+       round(avg(toFloat64OrNull(log_attributes['response.origin_time'])),1) avg_ms,
+       round(quantile(0.95)(toFloat64OrNull(log_attributes['response.origin_time'])),1) p95_ms
+from logs where source='edge_logs' group by path order by n desc
+```
+
+If p95 is orders of magnitude above what `explain analyze` says, it is queueing, and the
+fix is fewer requests rather than a faster query.
+
 ### Two schemas, one project
 
 - **`home`** — the household tracker. Everything new lives here.

@@ -148,6 +148,41 @@ outside a small anon allow-list, and handed ten internal functions — including
 data-deletion job — to any signed-in caller. **A sweep that grants needs both lists; a sweep that
 only revokes needs neither.** The home schema's grants are written out one by one.
 
+### A view without `security_invoker` has no RLS at all
+
+**This is the most dangerous line in the schema and it is invisible.** A view is
+evaluated against its base tables' policies as the *view's owner*. These are owned by
+`postgres`, which is a superuser and therefore exempt from RLS — so a view without
+`with (security_invoker = true)` hands **every row in the table** to anybody holding a
+valid token. It type-checks, it renders, the app works, and nothing anywhere has an
+error to report, because from the client's side more rows are indistinguishable from
+rows it was entitled to.
+
+It happened here. `snags_with_details` and `things_with_details` were both created
+correctly in `20260911*`, and then `20260917090000` and `20260920100000` rewrote them
+with `create or replace view ... as` and no `with` clause. **A replace with no clause
+resets the options rather than keeping them.** Both migrations are about adding a
+column, say nothing about security, and read as obviously safe. Measured before
+`20260921100000` closed it: an account belonging to no household read 0 rows from
+`home.snags` and **36** from `home.snags_with_details`, with the descriptions, rooms
+and reporter names in them.
+
+Nothing in the app reads those tables directly — `getSnags`, `getSnag`, `getThings`
+and `getThing` all name a view — so the List tab, the House tab, the Schedule tab and
+both extracts were every one of them served past RLS.
+
+Three things follow:
+
+- **Every `create or replace view` carries the clause**, even when the change is about
+  a column. It is the same argument as writing a view's columns out one by one rather
+  than `select t.*`: the omission has to be visible in a diff.
+- **`viewSecurity.test.ts` replays every migration in order and asserts where each view
+  *ends up***, rather than checking the two by name. That is what Postgres does, it is
+  what both regressions exploited, and it means the next bare replace fails in CI
+  rather than a day later in somebody else's household.
+- **Don't reason about it from `pg_get_viewdef`** — the option is not in the definition.
+  `select relname, reloptions from pg_class` is where it lives.
+
 ### An RLS policy's functions need EXECUTE
 
 A policy expression is evaluated as the *calling* role. `home.is_member` is called by every read
@@ -1635,6 +1670,14 @@ disagree. The three views were **replaced, not rebuilt**: each keeps its column 
 migration was checked by diffing every row of all six views before and after, which came back
 identical.
 
+**It missed `project_files`, and that was the expensive one.** `20260921100100` finished the job.
+The view is not merely a file list: `projects_with_totals` counts it in a lateral for
+`file_count`, so a project card, the Schedule tab and the You tab's loose ends were each dragging
+a seq scan of every quote through a per-row function to print "3 files". Fixing it took
+`projects_with_totals` from 149ms to 53ms and the whole project-page read from 414ms to 242ms.
+Note the replace had to restate `with (security_invoker = true)` — leaving it off would have
+reopened `20260921100000`'s leak on the file list.
+
 **A quote attaches to one level — an item, a part, or the whole project.** A main contractor's
 contract covers the bathroom *and* the laundry, so it belongs to neither; forcing it onto the
 item layer meant inventing an item called "Main contract — ReliaBuilder" sitting beside the
@@ -1865,24 +1908,42 @@ counting money for work the household decided against. `home.set_item_excluded` 
 function for the same reason `set_part_bought` and `set_quote_status` are theirs: the only write
 here that changes what a total says, so it cannot have anything else riding along with it.
 
-### What a press costs, and why the page used to think about it
+### What a press costs, and why parallelising it made things worse
 
 The project page felt slow and the database had nothing to do with it. Every
-query behind it runs in **single-digit milliseconds** — `projects_with_totals`
-at 9.7ms is the worst of them, and it is a view whose *planning* costs seven
-times its execution. The cost was never the SQL. It was asking nine times in a
-row.
+query behind it runs in single-digit to low-double-digit milliseconds —
+`projects_with_totals` is the worst of them, and it is a view whose *planning*
+costs more than its execution. The cost was never the SQL.
 
-**`getProjectContents` was six sequential round trips** — elements, then
-expected-and-bills, then the payment lines, then items, then quotes, then the
-three reads that hang off quotes — and `load()` added three more, awaiting the
-suppliers rollup, the handover list and the punch list one at a time despite
-none of them depending on any other. Against Sydney from a phone in New
-Zealand that is most of a second before anything appears, and **all 29 write
-handlers on the page ended with `await load()`**, so every chip press paid it
-again.
+**The first fix was the right diagnosis and the wrong prescription.**
+`getProjectContents` had been six sequential round trips and `load()` three
+more, so they were batched: two waves, everything independent fired together.
+That removed the latency and created a far worse failure, because **PostgREST's
+pool on this project is ten connections**. One open of the page fired fourteen
+requests and one chip press eleven. Past ten they queue; a queued page looks
+like a page that ignored the press; the press comes again with eleven more.
 
-Three rules now, and the first is the one that matters:
+It is a congestion collapse and it is in the logs. One minute of the live job,
+21 September 15:43 — a quote recorded, two corrections, then a toggle pressed
+three times in one second:
+
+```
+15:43:10  create_quote      → 14 reads, all 57–452ms
+15:43:15  update_quote      → 11 reads, 190–662ms
+15:43:21  update_quote      → projects_with_totals  17,354ms
+15:43:23  update_quote  ×2  → items 12,945ms, elements 13,847ms
+15:43:29  set_item_excluded ×3 in one second
+15:43:42  add_payment       12,061ms
+15:44:08  still draining
+```
+
+Over 24 hours: 227 PostgREST *Thread killed by timeout manager*, 14 statements
+cancelled at the `authenticated` role's 8s `statement_timeout`, and ten HTTP
+500s — from one household with one project. **Making any single query faster
+would not have touched this**, which is the thing to remember before optimising
+a query here again.
+
+Four rules now, and the second is the one that matters:
 
 - **A toggle answers before the network does.** Include/Exclude, Quote/Invoiced,
   Accepted/Declined and Paid/Not paid all patch local state on press, write,
@@ -1892,23 +1953,52 @@ Three rules now, and the first is the one that matters:
   predict exactly are patched: `kind` and `status` are plain values, and
   `unpaid` is set to what paying the outstanding balance must leave. Anything
   derived in a view is left to the re-read.
-- **Reads that do not depend on each other are asked for together.** Two waves,
-  not six: everything keyed on the project id goes at once (and `quotes` now
-  joins that wave, because `reach_project_id` is a real column), then the items
-  and the three quote-keyed reads go together in the second. `load()` folds the
-  suppliers rollup, the handover list and the punch list into its own
-  `Promise.all`, keeping each one **not fatal** through `allSettled` rather than
-  through three `try` blocks in a row.
-- **A price decision re-reads the money, not the page.** `reloadMoney` is the
-  project, its contents and the suppliers rollup; `load` is that plus the files,
-  the handover offer and the punch list. None of those three can move because
-  somebody excluded an item, so 16 of the write handlers stopped asking. The
-  ones that touch a file, a thing or a snag still call `load`, and the split is
-  by what the write can actually change rather than by how it felt.
+- **The page is one request.** `home.project_page` returns the project, its
+  parts, items, prices, lines, payments, milestones, expected costs, bills,
+  suppliers, files, handover things and punch list as one `jsonb` object —
+  reading **the same views with the same filters and the same orders** the
+  fourteen separate reads used, so no figure can be arrived at a second way. It
+  is SECURITY INVOKER over `security_invoker` views, so RLS filters it exactly
+  as it filtered the REST calls; a non-member gets the refusal `.single()` used
+  to give. plpgsql rather than SQL for two reasons: the raise is what the client
+  already words, and plpgsql caches its statements' plans per session, so
+  `projects_with_totals`' planning is paid once per connection instead of per
+  request.
+- **A refresh is single-flight, and the next one is queued rather than started.**
+  One arriving while another is in flight sets `pending` and returns; the one
+  running loops. However many presses land, there is at most one read on the
+  wire and one more owed. This also removes a bug that had never been noticed:
+  with two reloads in flight the older could land last and silently revert a
+  change the server had accepted.
+- **There is one reload, not two.** `reloadMoney` and `load` are gone. There is
+  nothing to save by fetching less when the whole page is one request, and the
+  split had required all 29 write handlers to answer correctly which of the two
+  they owed. The seven single-purpose reads they used — `getProjectContents`,
+  `getProjectFiles`, `getSupplierTotals`, `getProjectThings`, `getExpectedCosts`,
+  `getProjectBills`, `getExpectedCostLines` — are **deleted rather than left
+  exported**, because a dead one sitting beside `getProjectPage` is an
+  invitation to fetch the page the slow way again without noticing.
+
+**One thing was genuinely given up, rather than preserved quietly.** Three of
+the fourteen reads were `allSettled`, so the suppliers rollup, the handover
+offer and the punch list could each fail while the money strip still drew. That
+guarded against *one endpoint* failing and there is one endpoint now. The page
+says it could not load instead of drawing a renovation's Committed total with
+the supplier rows silently missing — which is the better answer anyway, by this
+file's own rule that a total never appears without what it is made of.
+
+**`project_files` is the view to watch.** `projects_with_totals` counts it in a
+lateral for `file_count`, so every read of a project card, the Schedule tab and
+the You tab's loose ends pays whatever it costs. It was still calling
+`home.quote_reach(q.id)` per row — the four-table join `20260921093000`
+replaced everywhere else with the stored `reach_project_id` — and fixing that
+alone took `projects_with_totals` from 149ms to 53ms and the whole page read
+from 414ms to 242ms.
 
 `ProjectDetailScreen.test.tsx` pins the flip happening while the write is still
-pending, the revert on a refusal, and a price decision leaving the punch list,
-the handover offer and the files unread.
+pending, the revert on a refusal, one read per press, and — with a read that
+does not settle until the test says so — that three presses in one gesture
+still put exactly one write and one read on the wire.
 
 ### A budget has parts, and the gap is named rather than resolved
 
@@ -3048,6 +3138,18 @@ without ever asking for a new password.
 look at something. `apps/mobile/src/navigation/linking.ts`, wired into `NavigationContainer`;
 native uses the `snag://` scheme from `app.json`.
 
+`/projects/:id` is the other one that resolves, and until `20260921` it never did. `ProjectDetail`
+has been on the root stack since projects shipped — deliberately, so a link sent to somebody who has
+since put Projects away still opens the page — but the *path* was never in `linking.ts`, so it
+always fell through to the list with nothing said. **A missing path is not an error**: React
+Navigation simply does not match it. `linking.test.ts` pins both paths now, and pins what stays
+out.
+
+**The Projects tab itself is deliberately not mapped.** With the setting off the tab is not
+registered at all, and a route somebody cannot reach should not be reachable by typing a URL.
+`ProjectDetail` is the exception on purpose: the setting is about what the app offers, not what it
+refuses when asked for a specific page by id.
+
 `/` is deliberately unmapped: an unmatched URL leaves the tab navigator on its `initialRouteName`,
 which is what lands someone on the list.
 
@@ -3059,8 +3161,13 @@ Out lives on the Profile tab, so the address bar always read `/you` when the ses
 signing back in landed everyone on Profile for no reason anything on the page could explain.
 
 `resetWebPathIfStale` (`src/lib/webLocation.ts`) clears the path on `SIGNED_OUT` and `SIGNED_IN`,
-keeping `/snags/<id>` — which has to survive the sign-in round trip. Deliberately not
-`INITIAL_SESSION`: reloading a tab is not logging in.
+keeping `/snags/<id>` and `/projects/<id>` — which have to survive the sign-in round trip.
+Deliberately not `INITIAL_SESSION`: reloading a tab is not logging in.
+
+**A path that resolves and a path that is preserved are one decision, not two.** A link that
+works when you are already signed in and drops you on the list when you are not is worse than one
+that never worked, because nobody can tell which they are getting. Anything added to `linking.ts`
+that somebody might *send* belongs in `isPreservedUrl` in the same change.
 
 ## The home screen icon
 
@@ -3168,6 +3275,10 @@ npm run test:mobile  # jest
 4. Grant explicitly, by name
 5. **Add it to the view as well, by name.** Every list and detail screen reads
    `snags_with_details` or `things_with_details`, never the table.
+6. **Carry `with (security_invoker = true)` on every view you create or replace.** A
+   replace without it resets the option and the view stops asking RLS anything — see
+   *A view without `security_invoker` has no RLS at all*. `viewSecurity.test.ts` fails
+   the build if a migration leaves one off.
 
 **A view created with `select t.*` freezes its column list the moment it is created.** This has
 already cost one silent bug: `document_paths` was added to `home.things` two days after
@@ -3187,3 +3298,12 @@ dropping and recreating the view, which takes the grant with it — re-issue it.
 `packages/supabase-queries/src/index.ts`. Each function takes a `SupabaseClient` so both apps can
 call it with their own; `apps/mobile/src/lib/supabase.ts` re-exports them bound to its client and
 should contain no logic of its own.
+
+**Count the requests a screen will make, not just their cost.** PostgREST's pool on this project
+is **ten connections**, on a two-core instance. A screen that asks for eight things in parallel
+is not eight times faster than one that asks in turn — past ten in flight they queue, and a queued
+screen looks to the person holding it like a screen that ignored them, so they press again. That
+is how the project page ended up taking 17 seconds to answer a query that runs in 16 milliseconds;
+see *What a press costs*. Where a screen genuinely needs many things at once, the answer is one
+`jsonb`-returning RPC over the same views — **SECURITY INVOKER**, so RLS still does the filtering
+— rather than a `Promise.all` of REST calls.

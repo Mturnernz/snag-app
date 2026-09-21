@@ -35,8 +35,8 @@ import {
   deleteProject, deleteQuote,
   deleteQuoteLine,
   clearFigure, setFigure, setItemExcluded,
-  deleteStoredFiles, describeBudget, describeForecast, describeForecastVariance, describeOverrides,
-  describePartsBudget, describeStillToBill, describeToPay, describeTotals, formatMoney, getProject,
+  deleteStoredFiles, describeOverrides,
+  describeTotals, formatMoney, getProject,
   getProjectContents, getProjectFiles, getProjectThings, getSupplierTotals,
   getSnags, outstanding, setQuoteStatus, showsElements, updateElement, updateExpectedCost,
   updateExpectedCostLine, updateItem, updateProject, updateQuote,
@@ -51,8 +51,8 @@ import {
   Project, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectExpectedCostLine, ProjectFigure,
   ProjectFile, ProjectItem,
   ProjectMilestone, ProjectPayment, ProjectQuote,
-  ProjectQuoteLine, ProjectQuoteStatus, ProjectStatus, ProjectSupplierTotals,
-  PROJECT_FILE_LEVEL_LABELS, PROJECT_QUOTE_STATUS_LABELS, PROJECT_STATUS_LABELS,
+  ProjectQuoteLine, ProjectQuoteStatus, ProjectSupplierTotals,
+  PROJECT_FILE_LEVEL_LABELS, PROJECT_QUOTE_STATUS_LABELS,
   RootStackParamList, Snag, Thing,
 } from '../types';
 
@@ -454,14 +454,9 @@ export default function ProjectDetailScreen({ route }: Props) {
   const invoiced = formatMoney(project.invoicedTotal);
   const paid = formatMoney(project.paidTotal);
   const forecast = formatMoney(project.forecastTotal);
-  const forecastLine = describeForecast(project);
-  const varianceLine = describeForecastVariance(project);
-  const toPayLine = describeToPay(project);
-  const stillToBillLine = describeStillToBill(project);
   // Every figure somebody has typed over, and what the prices say instead. Both
   // numbers survive in the view, so this can go on naming the gap for as long as
   // the edit lasts rather than the screen quietly forgetting.
-  const edits = describeOverrides(project);
   /** What the sheet needs to show for whichever figure is being edited. */
   const editing = editingFigure
     ? {
@@ -486,8 +481,6 @@ export default function ProjectDetailScreen({ route }: Props) {
       }
     : null;
   const budget = formatMoney(inclGst(project.budget, project.budgetInclGst));
-  const budgetLine = describeBudget(project);
-  const partsLine = describePartsBudget(project);
   // Clay is the one hue on a household list that has earned red, and it is a
   // fact about a number rather than a judgement: this is over what you said you
   // would spend.
@@ -603,98 +596,6 @@ export default function ProjectDetailScreen({ route }: Props) {
             last
             onPress={() => setEditingFigure('paid')}
           />
-        </View>
-
-        {/* The denominator, which no screen may render a forecast without. */}
-        {forecastLine ? (
-          <Text style={styles.denominator}>{forecastLine}</Text>
-        ) : (
-          <Text style={styles.denominator}>Nothing priced yet</Text>
-        )}
-        {/* Over budget, in words and with its cause. A percentage with no cause
-            is a number people learn to ignore. Silent when under: this is a
-            warning, not a running commentary. */}
-        {varianceLine ? <Text style={styles.variance}>{varianceLine}</Text> : null}
-
-        {/* ── what has been typed over ───────────────────────────────────
-            Absent entirely when nothing has been edited, the same rule as the
-            shopping pill at zero. Every line names **both** numbers, because
-            the whole reason an override is honest rather than a lie is that
-            the derived figure survives — a note saying only "this was edited"
-            would throw away the half that makes it recoverable. */}
-        {edits.length > 0 ? (
-          <View style={styles.edits}>
-            <View style={styles.editsHead}>
-              <Icon name="create-outline" size="sm" color={Colors.danger} />
-              <Text style={styles.editsTitle}>
-                {edits.length === 1 ? 'A figure has been edited' : 'Figures have been edited'}
-              </Text>
-            </View>
-            {edits.map((line) => (
-              <Text key={line} style={styles.editsLine}>{line}</Text>
-            ))}
-          </View>
-        ) : null}
-
-        {budgetLine ? <Text style={styles.denominator}>{budgetLine}</Text> : null}
-        {partsLine ? <Text style={styles.denominator}>{partsLine}</Text> : null}
-
-        {/* ── the two gaps ───────────────────────────────────────────────
-            They sound alike and they are different subtractions. Still to be
-            billed is committed less invoiced — how much of what was agreed is
-            still coming. To pay is invoiced less paid, and it is the only
-            figure on this page that is about *today*, which is why it is the
-            one with a date on it. */}
-        {toPayLine || stillToBillLine ? (
-          <View style={styles.gaps}>
-            {toPayLine ? (
-              <View style={styles.gapRow}>
-                <Icon
-                  name="wallet-outline"
-                  size="sm"
-                  color={project.overdueTotal > 0.005 ? Colors.danger : Colors.textMuted}
-                />
-                <Text
-                  style={[styles.gapText, project.overdueTotal > 0.005 && styles.gapOverdue]}
-                >
-                  {toPayLine}
-                </Text>
-              </View>
-            ) : null}
-            {stillToBillLine ? (
-              <View style={styles.gapRow}>
-                <Icon name="document-text-outline" size="sm" color={Colors.textMuted} />
-                <Text style={styles.gapText}>{stillToBillLine}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
-        <Text style={styles.gstNote}>Every figure here is GST-inclusive.</Text>
-
-        {/* ── where it's up to ───────────────────────────────────────────
-            Writes on press, like every other single decision in this app:
-            three chips, and the one that is lit is the answer. */}
-        <View style={styles.chips}>
-          {(['planned', 'underway', 'done'] as ProjectStatus[]).map((option) => {
-            const on = project.status === option;
-            return (
-              <Pressable
-                key={option}
-                onPress={() => patchProject({ status: option }, PROJECT_STATUS_LABELS[option])}
-                style={styles.chipTap}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-                accessibilityLabel={PROJECT_STATUS_LABELS[option]}
-              >
-                <View style={[styles.chip, on && styles.chipOn]}>
-                  <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                    {PROJECT_STATUS_LABELS[option]}
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })}
         </View>
 
         {/* ── who we're paying ───────────────────────────────────────────
@@ -899,8 +800,8 @@ export default function ProjectDetailScreen({ route }: Props) {
               {open ? (
                 <View style={styles.items}>
                   {elementItems.map((item) => {
-                    const price = itemPriceLabel(item);
                     const itemQuotes = quotesByItem[item.id] ?? [];
+                    const price = itemPriceLabel(item, itemQuotes);
                     return (
                       <View key={item.id} style={styles.itemRow}>
                         <Pressable
@@ -1655,12 +1556,6 @@ const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
   content: { padding: Spacing.lg, paddingBottom: Spacing.xxxl * 2 },
 
-  chips: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: Spacing.sm },
-  chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingRight: Spacing.sm },
-  chip: { backgroundColor: Colors.sunken, borderRadius: Radius.chip, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
-  chipOn: { backgroundColor: Colors.primary },
-  chipLabel: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium },
-  chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
 
   strip: {
     backgroundColor: Colors.surface,
@@ -1727,15 +1622,8 @@ const styles = StyleSheet.create({
     marginHorizontal: -Spacing.lg,
     marginVertical: 2,
   },
-  budgetLine: {
-    fontSize: Typography.xs,
-    color: Colors.textSecondary,
-    textAlign: 'right',
-    paddingBottom: Spacing.md,
-  },
   // Clay is the one hue on a household list that has earned red. Over budget is
   // a fact about a number, not a judgement about the renovation.
-  budgetLineOver: { color: Colors.priority.high, fontWeight: Typography.semibold },
   supplier: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1795,8 +1683,6 @@ const styles = StyleSheet.create({
   moreTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   link: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.semibold },
   // Not optional, anywhere. The figures above mean nothing without it.
-  denominator: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: Spacing.sm },
-  gstNote: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },
 
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xl, marginBottom: Spacing.sm },
   section: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase' },
@@ -1852,7 +1738,11 @@ const styles = StyleSheet.create({
   // `flexShrink: 0` so the name gives way before the price does: the figure is
   // what the row is read for, and half a number is worse than a clipped noun.
   itemPrice: { flexShrink: 0, fontFamily: Fonts.mono, fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
-  itemPriceRange: { color: Colors.status.doing, fontWeight: Typography.regular, fontSize: Typography.xs },
+  // A quote nobody has decided on is a real figure, so it is rendered as one —
+  // the mono face and the weight the committed price gets, in slate. That is
+  // the hue this app already spends on *open*: a state, not a warning. Brass
+  // would say "doing", which is what the job is not until somebody accepts it.
+  itemPriceRange: { color: Colors.status.open },
   itemPriceNone: { color: Colors.textMuted, fontWeight: Typography.regular, fontSize: Typography.xs },
   // Decided against, without deleting it. Greyed rather than struck through —
   // this is not done, it is simply not counted, and strike-through is the
@@ -1930,26 +1820,12 @@ const styles = StyleSheet.create({
   },
   recordLabel: { fontSize: Typography.base, color: Colors.white, fontWeight: Typography.semibold },
 
-  variance: { fontSize: Typography.sm, color: Colors.danger, marginTop: Spacing.sm },
 
   // An edited figure is the third thing in this app to earn clay, after overdue
   // and priority-high, and on the same terms: a fact about a number, not a
   // judgement. This figure is not what the paperwork says.
   rowValueEdited: { color: Colors.danger },
-  edits: {
-    backgroundColor: Colors.due.overdueBg, borderRadius: Radius.card,
-    padding: Spacing.md, marginTop: Spacing.md, gap: Spacing.xs,
-  },
-  editsHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  editsTitle: {
-    fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.danger,
-  },
-  editsLine: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 19 },
 
-  gaps: { marginTop: Spacing.md, gap: Spacing.xs },
-  gapRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  gapText: { flex: 1, minWidth: 0, fontSize: Typography.sm, color: Colors.textSecondary },
-  gapOverdue: { color: Colors.danger, fontWeight: Typography.medium },
 
   expected: {
     flexDirection: 'row', alignItems: 'center',

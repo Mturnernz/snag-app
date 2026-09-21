@@ -1326,13 +1326,33 @@ they buy that back with three rules:
   a scraped total has a source nobody can check, and it will be wrong about GST, about provisional
   sums, and about which of three revisions it read.
 
-**Five figures, and a budget line under them.** *Budget* is what you said you'd spend;
+**Five figures, and nothing under them.** *Budget* is what you said you'd spend;
 **Forecast** is what it is going to cost; *Committed* is what has been agreed; *Invoiced* is what
-has been charged; *Paid* is what has gone out. Then a rule, the budget, and one sentence saying
-which side of it committed has landed. All of
+has been charged; *Paid* is what has gone out. Four of
 them are **derived in the views**, never stored — the `needs_parts` argument applied to a far
 more dangerous number, since a maintained total and the quotes it describes will disagree the
 first time somebody edits an amount from the other phone.
+
+**The prose under the strip is off the page, and the helpers that wrote it are not.** It carried
+eight sentences at once — the denominator, how much of the forecast was a guess, the over-budget
+variance, the discrepancy line for every edited figure, which side of the budget committed had
+landed, what was unallocated across the parts, the two gaps, and the GST basis — permanently, on
+a page whose first question is *a bill arrived, where does it go*. Every rule they state is still
+`projects.test.ts`' to pin and every extract still prints them; what went is the **recital at the
+top of this page**, not the arithmetic.
+
+Two of those readings are still reachable and that is what makes the removal survivable. The
+denominator rule holds **in full on the list** — `ProjectsScreen.test.tsx` still pins that no card
+renders a total without one, which is where somebody meets a figure they have no other way to
+qualify. And an edited figure still renders in clay and still opens `EditFigureSheet`, which
+carries **THE PRICES SAY** the whole time somebody is typing — so the derived figure is one tap
+away rather than on the page. **If the clay or that sheet's derived row ever goes, the
+discrepancy line comes back**: an override whose evidence is unreachable is the one shape this
+feature must not take.
+
+**And there are no status chips.** *Planned / Underway / Done* sat under the figures; the list
+groups on the same column and is where a renovation is read as finished, so a second writer here
+was three taps of vertical rent on a page opened for a different question.
 
 Three rules inside that, and each answers a way the first pass was wrong:
 
@@ -1478,6 +1498,15 @@ dropping it would leave a reader eight months later with no way back to what the
 paperwork actually supports. An edit that happens to match the prices is said
 plainly and **not** reddened — a discrepancy the app manufactures is an alarm
 nobody will believe the next time.
+
+**It is no longer printed on the project page, and the rule is unchanged rather
+than relaxed.** The helper still exists and still words it exactly that way; what
+carries it now is the clay row plus `EditFigureSheet`, which the row opens and
+which shows **THE PRICES SAY** while somebody types. The reader's way back to the
+paperwork is one tap instead of nought — so the two things that must not go are
+the colour and that sheet's derived row. Lose either and the line goes back on the
+page: red on its own says *something was typed here* and never *what the prices
+actually say*, which is the half the rule is about.
 
 Four rules, three of them enforced in the view rather than left to a screen:
 
@@ -1807,6 +1836,18 @@ the three share an edge the way a column of money is read. The same rule covers 
 — it does not shrink, the name beside it does, because the figure is what the row is opened for and
 **half a number is worse than a clipped noun**.
 
+**A row shows a figure wherever there is one to show, and says in colour whether it counts.**
+An item whose one price is still a quote nobody has accepted read **"1 price in"** — a count of
+one, standing where the money goes, on the row somebody is scanning precisely to find out what
+this part costs. The number is right there and was being withheld to say something the row could
+say another way. So `itemPriceLabel` returns the undecided quote's own amount, rendered in
+**slate** — the palette's blue, which already means *open*, against ink for a figure that is
+committed. Two states, one glance, and no hue invented for it.
+
+The count survives for the one case it was ever the honest answer: **more than one price in and
+nobody has decided between them**, where there is no single figure to show and *"3 prices in"* is
+exactly what is true. `Not priced` is still its own answer, because nothing is not zero.
+
 ### GST is a fact about each amount, never a household setting
 
 New Zealand quotes come both ways — a trade supplier writes ex-GST, a retailer writes inc — and the
@@ -2097,10 +2138,12 @@ on overruns never tells anybody they got money back.
 figure rather than only saying something was edited, that it reads in both directions, that a
 typed figure matching the prices is stated plainly rather than reddened, and that edited parts are
 counted rather than listed. `ProjectDetailScreen.test.tsx` pins the edited figure rendering in
-clay, an untouched one not, and the block being absent entirely when nothing has been edited.
+clay, an untouched one not, and the discrepancy line staying off the page now that the sheet
+behind the clay row carries it.
 `ProjectDetailScreen.test.tsx` pins the implicit layer staying hidden, the layer appearing once a
-real element exists, charged and paid staying apart with no "Spent" anywhere, the two gaps
-replacing Outstanding, the budget line and which side of it, the allowance said out loud, six-figure
+real element exists, charged and paid staying apart with no "Spent" anywhere, the strip being five
+figures with none of the eight sentences under them, an unpriced figure reading as blank rather
+than as zero, no status chips anywhere, six-figure
 totals on one line, the supplier section absent at zero and saying *Settled* rather than a zero,
 the page surviving a failed rollup read, the handover list offering only what is installed and
 stopping once something is recorded, that files roll up without rolling down, the + opening the

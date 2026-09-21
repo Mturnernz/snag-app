@@ -3611,16 +3611,33 @@ export function describeLineVariance(line: {
  * the difference between a decision made, a decision waiting, and a question
  * nobody has asked yet.
  */
-export function itemPriceLabel(item: ProjectItem): {
+export function itemPriceLabel(
+  item: ProjectItem,
+  quotes: ProjectQuote[] = []
+): {
   text: string;
   state: 'committed' | 'undecided' | 'none';
 } {
   if (item.committed !== null) {
     return { text: formatMoney(item.committed) ?? '', state: 'committed' };
   }
-  // Prices on the table with nobody deciding. It says how many rather than what
-  // they come to: a band across quotes nobody has picked reads as a figure, and
-  // the decision is what is outstanding here, not the money.
+
+  // **One quote nobody has decided on shows its figure.** An item carries a
+  // single active price now, so "1 price in" was the row refusing to say the
+  // one thing it knew — somebody who has recorded $400 against the birthday
+  // line wants to see $400, not to be told a price exists. It reads as
+  // *undecided* rather than committed, which is what the colour says: slate,
+  // the hue this app already spends on open.
+  const undecided = quotes.filter(
+    (quote) => quote.kind === 'quote' && quote.status === 'tbc'
+  );
+  if (undecided.length === 1 && undecided[0].amountIncl !== null) {
+    return { text: formatMoney(undecided[0].amountIncl) ?? '', state: 'undecided' };
+  }
+
+  // Two or more, which only an item recorded before the single-price sheet can
+  // be: a band across quotes nobody has picked reads as a figure, and what is
+  // outstanding there is the decision rather than the money.
   if (item.tbcCount > 0) {
     return {
       text: item.tbcCount === 1 ? '1 price in' : `${item.tbcCount} prices in`,

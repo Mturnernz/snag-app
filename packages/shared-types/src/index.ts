@@ -1186,6 +1186,12 @@ export interface ProjectItem {
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
+  /**
+   * Decided against, without deleting it. An excluded item and its quotes
+   * stay on the record — its own price still shows on its own row — but it
+   * stops counting in its element's or the project's price build.
+   */
+  excluded: boolean;
 
   /** Joined in by `home.project_items_with_totals`, all GST-inclusive. */
   quoteCount: number;
@@ -1430,6 +1436,29 @@ export interface ProjectExpectedCost {
   note: string | null;
   /** The real price, once it exists. Set, this stops counting. */
   settledBy: string | null;
+  createdAt: string;
+}
+
+/**
+ * A record of money actually moved against an expected cost, before it ever
+ * got a real quote — a payment on account to the architect, with whatever
+ * reference number was on the bank statement.
+ *
+ * Deliberately thin: free text name, free text reference, a value, and
+ * somewhere to put a photo or a document. It is never committed, never
+ * invoiced and never reaches Forecast — the parent expected cost still
+ * carries the one guessed figure that feeds it, and these lines are read the
+ * way a bank statement is read, not priced.
+ */
+export interface ProjectExpectedCostLine {
+  id: string;
+  expectedCostId: string;
+  name: string;
+  reference: string | null;
+  amount: number | null;
+  amountInclGst: boolean;
+  photoPaths: string[];
+  documentPaths: string[];
   createdAt: string;
 }
 

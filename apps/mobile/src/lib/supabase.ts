@@ -381,6 +381,9 @@ export const updateItem = (itemId: string, update: queries.ItemUpdate) =>
 
 export const deleteItem = (itemId: string) => queries.deleteItem(supabase, itemId);
 
+export const setItemExcluded = (itemId: string, excluded: boolean) =>
+  queries.setItemExcluded(supabase, itemId, excluded);
+
 export const createQuote = (input: queries.QuoteInput) => queries.createQuote(supabase, input);
 
 export const updateQuote = (quoteId: string, update: queries.QuoteUpdate) =>
@@ -420,6 +423,20 @@ export const updateExpectedCost = (expectedId: string, update: queries.ExpectedC
 
 export const deleteExpectedCost = (expectedId: string) =>
   queries.deleteExpectedCost(supabase, expectedId);
+
+export const getExpectedCostLines = (expectedCostIds: string[]) =>
+  queries.getExpectedCostLines(supabase, expectedCostIds);
+
+export const addExpectedCostLine = (expectedCostId: string, input: queries.ExpectedCostLineInput) =>
+  queries.addExpectedCostLine(supabase, expectedCostId, input);
+
+export const updateExpectedCostLine = (
+  lineId: string,
+  update: Partial<queries.ExpectedCostLineInput>
+) => queries.updateExpectedCostLine(supabase, lineId, update);
+
+export const deleteExpectedCostLine = (lineId: string) =>
+  queries.deleteExpectedCostLine(supabase, lineId);
 
 export const getProjectBills = (projectId: string) =>
   queries.getProjectBills(supabase, projectId);

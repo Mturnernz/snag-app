@@ -62,7 +62,7 @@ const element = (over: Partial<ProjectElement> = {}): ProjectElement => ({
 });
 
 const item = (over: Partial<ProjectItem> = {}): ProjectItem => ({
-  id: 'i1', elementId: 'e1', name: 'Toilet suite', status: 'considering',
+  id: 'i1', elementId: 'e1', name: 'Toilet suite', status: 'considering', excluded: false,
   sortOrder: 0, notes: null, photoPaths: [], documentPaths: [],
   createdAt: '2026-08-04T00:00:00Z',
   quoteCount: 0, tbcCount: 0, committed: null, invoiced: null, paid: null, allowanceOpen: 0,

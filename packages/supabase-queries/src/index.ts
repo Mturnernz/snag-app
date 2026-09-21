@@ -52,6 +52,7 @@ import type {
   ProjectBill,
   ProjectElement,
   ProjectExpectedCost,
+  ProjectExpectedCostLine,
   ProjectFile,
   ProjectItem,
   ProjectItemStatus,
@@ -2972,6 +2973,7 @@ function mapItem(row: Row): ProjectItem {
     photoPaths: row.photo_paths ?? [],
     documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
+    excluded: row.excluded ?? false,
     quoteCount: row.quote_count ?? 0,
     tbcCount: row.tbc_count ?? 0,
     committed: numberOrNull(row.committed),
@@ -3070,6 +3072,20 @@ function mapExpectedCost(row: Row): ProjectExpectedCost {
     likelySupplier: row.likely_supplier ?? null,
     note: row.note ?? null,
     settledBy: row.settled_by ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+function mapExpectedCostLine(row: Row): ProjectExpectedCostLine {
+  return {
+    id: row.id,
+    expectedCostId: row.expected_cost_id,
+    name: row.name,
+    reference: row.reference ?? null,
+    amount: numberOrNull(row.amount),
+    amountInclGst: row.amount_incl_gst !== false,
+    photoPaths: row.photo_paths ?? [],
+    documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
   };
 }
@@ -3732,10 +3748,15 @@ export async function getProjectContents(
     getExpectedCosts(client, projectId),
     getProjectBills(client, projectId),
   ]);
+  const expectedCostLines = await getExpectedCostLines(
+    client,
+    expected.map((cost) => cost.id)
+  );
 
   if (elements.length === 0) {
     return {
-      elements, items: [], quotes: [], lines: [], payments: [], milestones: [], expected, bills,
+      elements, items: [], quotes: [], lines: [], payments: [], milestones: [],
+      expected, expectedCostLines, bills,
     };
   }
 
@@ -3760,7 +3781,10 @@ export async function getProjectContents(
   if (quoteError) throw asError(quoteError, "Couldn't load the prices");
   const quotes = (quoteRows ?? []).map(mapQuote);
   if (quotes.length === 0) {
-    return { elements, items, quotes, lines: [], payments: [], milestones: [], expected, bills };
+    return {
+      elements, items, quotes, lines: [], payments: [], milestones: [],
+      expected, expectedCostLines, bills,
+    };
   }
 
   const quoteIds = quotes.map((quote) => quote.id);
@@ -3797,6 +3821,7 @@ export async function getProjectContents(
     payments: (paymentResult.data ?? []).map(mapPayment),
     milestones: (milestoneResult.data ?? []).map(mapMilestone),
     expected,
+    expectedCostLines,
     bills,
   };
 }
@@ -3850,6 +3875,8 @@ export interface ProjectContents {
   milestones: ProjectMilestone[];
   /** Costs nobody has quoted. Forecast's, never committed's. */
   expected: ProjectExpectedCost[];
+  /** Payments recorded against an expected cost, before it had a real quote. */
+  expectedCostLines: ProjectExpectedCostLine[];
   /** Live bills with what is still to go out on each, and when. */
   bills: ProjectBill[];
 }
@@ -4138,6 +4165,28 @@ export async function deleteItem(client: SupabaseClient, itemId: string): Promis
   const { data, error } = await client.rpc('delete_item', { p_item_id: itemId });
   if (error) throw asError(error, "Couldn't remove that");
   return (data as string[] | null) ?? [];
+}
+
+/**
+ * Include or exclude, without deleting it.
+ *
+ * Its own dedicated function for the reason `setPartBought` and
+ * `setQuoteStatus` are theirs: the only write in this feature that changes
+ * what a total says, so alone it cannot have its sibling-clearing skipped by
+ * a caller passing it among other fields — there are none here, but the
+ * convention is the same one that keeps every other decision-that-changes-a-
+ * total off `updateItem`.
+ */
+export async function setItemExcluded(
+  client: SupabaseClient,
+  itemId: string,
+  excluded: boolean
+): Promise<void> {
+  const { error } = await client.rpc('set_item_excluded', {
+    p_item_id: itemId,
+    p_excluded: excluded,
+  });
+  if (error) throw asError(error, "That didn’t save");
 }
 
 export interface QuoteInput {
@@ -4483,6 +4532,87 @@ export async function deleteExpectedCost(
   expectedId: string
 ): Promise<void> {
   const { error } = await client.rpc('delete_expected_cost', { p_expected_id: expectedId });
+  if (error) throw asError(error, "Couldn't remove that");
+}
+
+// ------------------------------------------------ payments against a guess
+
+/**
+ * The lines under an expected cost — a payment on account, with a reference
+ * and, optionally, a receipt. Read for a whole project at once, the same
+ * shape `getProjectContents` already reads quote lines in, rather than one
+ * round trip per expected cost.
+ */
+export async function getExpectedCostLines(
+  client: SupabaseClient,
+  expectedCostIds: string[]
+): Promise<ProjectExpectedCostLine[]> {
+  if (expectedCostIds.length === 0) return [];
+  const { data, error } = await client
+    .from('project_expected_cost_lines')
+    .select('*')
+    .in('expected_cost_id', expectedCostIds)
+    .order('created_at', { ascending: true });
+  if (error) throw asError(error, "Couldn't load the payments against that");
+  return (data ?? []).map(mapExpectedCostLine);
+}
+
+export interface ExpectedCostLineInput {
+  name: string;
+  reference?: string | null;
+  amount?: number | null;
+  amountInclGst?: boolean;
+  photoPaths?: string[];
+  documentPaths?: string[];
+}
+
+export async function addExpectedCostLine(
+  client: SupabaseClient,
+  expectedCostId: string,
+  input: ExpectedCostLineInput
+): Promise<ProjectExpectedCostLine> {
+  const { data, error } = await client.rpc('add_expected_cost_line', {
+    p_expected_cost_id: expectedCostId,
+    p_name: input.name,
+    p_reference: input.reference ?? null,
+    p_amount: input.amount ?? null,
+    p_amount_incl_gst: input.amountInclGst ?? true,
+    p_photo_paths: input.photoPaths ?? [],
+    p_document_paths: input.documentPaths ?? [],
+  });
+  return mapExpectedCostLine(unwrap<Row>(data, error, "Couldn't add that"));
+}
+
+const EXPECTED_LINE_CLEARABLE: Record<string, string> = {
+  reference: 'reference',
+  amount: 'amount',
+};
+
+export async function updateExpectedCostLine(
+  client: SupabaseClient,
+  lineId: string,
+  update: Partial<ExpectedCostLineInput>
+): Promise<void> {
+  const clear: string[] = [];
+  for (const [key, column] of Object.entries(EXPECTED_LINE_CLEARABLE)) {
+    if (key in update && update[key as keyof ExpectedCostLineInput] === null) clear.push(column);
+  }
+
+  const { error } = await client.rpc('update_expected_cost_line', {
+    p_line_id: lineId,
+    p_name: update.name ?? null,
+    p_reference: update.reference ?? null,
+    p_amount: update.amount ?? null,
+    p_amount_incl_gst: update.amountInclGst ?? null,
+    p_photo_paths: update.photoPaths ?? null,
+    p_document_paths: update.documentPaths ?? null,
+    p_clear: clear,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+export async function deleteExpectedCostLine(client: SupabaseClient, lineId: string): Promise<void> {
+  const { error } = await client.rpc('delete_expected_cost_line', { p_line_id: lineId });
   if (error) throw asError(error, "Couldn't remove that");
 }
 

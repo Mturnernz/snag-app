@@ -286,9 +286,12 @@ describe('the shopping list', () => {
       all.filter((s) => filter.status.includes(s.status)));
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mock_setPartBought.mockClear();
     mock_updateSnag.mockClear();
+    // The trip sheet's folds persist by design, so a test that folds a room
+    // would otherwise fold it for whatever ran next.
+    await writeCollapsed([], 'shopping');
   });
 
   it('counts what is left across the whole list, not the lens', async () => {
@@ -297,7 +300,7 @@ describe('the shopping list', () => {
     await settle();
 
     // Three items listed, one already got.
-    expect(byLabel(r, '2 things to get')).toBeDefined();
+    expect(byLabel(r, 'View shopping list, 2 things to get')).toBeDefined();
   });
 
   it('is not there at all when there is nothing to get', async () => {
@@ -308,8 +311,8 @@ describe('the shopping list', () => {
     const r = render(<SnagListScreen />);
     await settle();
 
-    expect(byLabel(r, '1 thing to get')).toBeUndefined();
-    expect(byLabel(r, '0 things to get')).toBeUndefined();
+    expect(byLabel(r, 'View shopping list, 1 thing to get')).toBeUndefined();
+    expect(byLabel(r, 'View shopping list, 0 things to get')).toBeUndefined();
   });
 
   it('opens the lens it already has, rather than a second place parts live', async () => {
@@ -318,8 +321,49 @@ describe('the shopping list', () => {
     await settle();
 
     expect(r.queryByText('Pick up on the way')).toBeNull();
-    await TestRenderer.act(async () => byLabel(r, '2 things to get').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'View shopping list, 2 things to get').props.onPress());
     expect(r.queryByText('Pick up on the way')).not.toBeNull();
+  });
+
+  // A cart with a number on it says there is shopping to do; it does not say
+  // that pressing it swaps what the screen is showing. The caption names the
+  // view it goes to, and turns round once you are there.
+  it('names the view it goes to, and says the other one once it is open', async () => {
+    withParts();
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    expect(r.queryByText('View shopping list')).not.toBeNull();
+    expect(r.queryByText('View jobs list')).toBeNull();
+
+    await TestRenderer.act(async () => byLabel(r, 'View shopping list, 2 things to get').props.onPress());
+
+    expect(r.queryByText('View jobs list')).not.toBeNull();
+    expect(r.queryByText('View shopping list')).toBeNull();
+  });
+
+  // "Outside" nine times down the right-hand edge is a column of noise where
+  // one heading would do, and a trip to the shop batches the way the list does.
+  it('groups the trip sheet by room, and folds a room away', async () => {
+    withParts();
+    const r = render(<SnagListScreen />);
+    await settle();
+    await TestRenderer.act(async () => byLabel(r, 'View shopping list, 2 things to get').props.onPress());
+
+    // The room is a heading, and the item sits under it. The count is what is
+    // still to get, not what was ever listed — the Washer is already bought.
+    expect(byLabel(r, 'Seal, tick off')).toBeDefined();
+    const head = byLabel(r, 'Bathroom, 1 to get');
+    expect(head).toBeDefined();
+    // Two rooms, each named once, rather than the room repeated per row.
+    expect(byLabel(r, 'Outside, 1 to get')).toBeDefined();
+
+    await TestRenderer.act(async () => head.props.onPress());
+
+    // The heading stays with its count; only its own rows go.
+    expect(byLabel(r, 'Bathroom, 1 to get')).toBeDefined();
+    expect(byLabel(r, 'Seal, tick off')).toBeUndefined();
+    expect(byLabel(r, 'Brackets, tick off')).toBeDefined();
   });
 
   it('ticks an item off without touching the job', async () => {
@@ -328,7 +372,7 @@ describe('the shopping list', () => {
     withParts();
     const r = render(<SnagListScreen />);
     await settle();
-    await TestRenderer.act(async () => byLabel(r, '2 things to get').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'View shopping list, 2 things to get').props.onPress());
 
     await TestRenderer.act(async () => byLabel(r, 'Seal, tick off').props.onPress());
 
@@ -340,7 +384,7 @@ describe('the shopping list', () => {
     withParts();
     const r = render(<SnagListScreen />);
     await settle();
-    await TestRenderer.act(async () => byLabel(r, '2 things to get').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'View shopping list, 2 things to get').props.onPress());
 
     // Undoing a mis-tap must not mean remembering which job the item was for.
     const got = byLabel(r, 'Washer, got it');

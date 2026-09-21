@@ -16,6 +16,8 @@ import Icon from '../components/Icon';
 import AddThingSheet from '../components/AddThingSheet';
 import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
+import FoldAllPill from '../components/FoldAllPill';
+import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -182,6 +184,25 @@ export default function HouseScreen() {
   }
   const searching = query.trim().length > 0;
 
+  /**
+   * Folded rooms, on their own key.
+   *
+   * Separate from the List tab's folds deliberately: folding the Garage away
+   * here is a statement about the record you are reading, not about the jobs
+   * filed in it, and one key would have each tab silently folding the other.
+   * Per device for the same reason the list's are — this is where you are in a
+   * list rather than a fact about the house — and every read and write is
+   * guarded, so failure is always "everything is open".
+   */
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    readCollapsed('house').then((keys) => setCollapsed(new Set(keys)));
+  }, []);
+  const fold = useCallback((next: Set<string>) => {
+    setCollapsed(next);
+    void writeCollapsed([...next], 'house');
+  }, []);
+
   const sections = useMemo<Section[]>(() => {
     // A search is a flat answer over real records only. Grouping three results
     // across three headings buries the answer under its own filing, and a ghost
@@ -243,6 +264,25 @@ export default function HouseScreen() {
     if (byRoom.has(NO_ROOM)) addRoom(NO_ROOM);
     return out;
   }, [visible, things, absent, searching, locations]);
+
+  /**
+   * A folded room keeps its heading and empties its `data`, so `SectionList`
+   * renders no rows under it — the same shape the List tab uses, so the two
+   * behave identically. A search is one flat section with no room, and folds
+   * never apply to it.
+   */
+  const shownSections = useMemo(
+    () => sections.map((section) =>
+      section.room && collapsed.has(section.title) ? { ...section, data: [] } : section
+    ),
+    [sections, collapsed],
+  );
+
+  /** Decides the pill's word, so the press on offer is never a no-op. */
+  const anyOpen = useMemo(
+    () => sections.some((section) => !!section.room && !collapsed.has(section.title)),
+    [sections, collapsed],
+  );
 
   const recorded = things.length;
 
@@ -376,18 +416,69 @@ export default function HouseScreen() {
       {/* All that is left of the grouping rail. "Recorded", not "things": the
           ghosts on this screen are not things, and counting them here would be
           the first place the two blur. */}
-      {!searching ? <Text style={styles.count}>{recorded} recorded</Text> : null}
+      {/* The count and the one control that reaches every room at once, on the
+          same line: both are *about* the record rather than in it, and a row of
+          its own for one control is vertical rent on every visit. Absent while
+          searching, because a search is one flat answer with nothing to fold.
+
+          Same component the List tab uses. Two tabs that group the same house
+          by the same rooms in the same order must not grow two different
+          controls for closing them. */}
+      {!searching ? (
+        <View style={styles.countRow}>
+          <Text style={styles.count}>{recorded} recorded</Text>
+          {sections.length > 1 ? (
+            <FoldAllPill
+              anyOpen={anyOpen}
+              onPress={() =>
+                fold(anyOpen ? new Set(sections.map((one) => one.title)) : new Set())
+              }
+            />
+          ) : null}
+        </View>
+      ) : null}
 
       <SectionList
-        sections={sections}
+        sections={shownSections}
         keyExtractor={(item) => item.key}
         contentContainerStyle={[styles.listContent, sections.length === 0 && styles.listEmpty]}
         keyboardShouldPersistTaps="handled"
         stickySectionHeadersEnabled={false}
         renderSectionHeader={({ section }) => (
           <View style={styles.groupRow}>
-            <Text style={styles.group}>{section.title}</Text>
-            <View style={styles.groupRule} />
+            {/* The heading folds; the + does not. A `Pressable` inside a
+                `Pressable` is a coin toss about which one gets the tap — the
+                same rule that keeps opening and removing siblings on a photo
+                tile — so the word and the rule are the target and the + sits
+                beside them rather than inside them.
+
+                A folded room keeps its heading and its count, which is the
+                whole point of grouping: "Kitchen · 2" is what the arrangement
+                exists to say, and a fold that took it away would be a filter. */}
+            <Pressable
+              onPress={() => {
+                if (!section.room) return;
+                const next = new Set(collapsed);
+                if (next.has(section.title)) next.delete(section.title);
+                else next.add(section.title);
+                fold(next);
+              }}
+              disabled={!section.room}
+              style={styles.groupTap}
+              accessibilityRole={section.room ? 'button' : undefined}
+              accessibilityState={section.room ? { expanded: !collapsed.has(section.title) } : undefined}
+              accessibilityLabel={section.room ? section.title : undefined}
+            >
+              {section.room ? (
+                <Icon
+                  name={collapsed.has(section.title) ? 'chevron-forward' : 'chevron-down'}
+                  size="sm"
+                  color={Colors.textMuted}
+                />
+              ) : null}
+              <Text style={styles.group}>{section.title}</Text>
+              <View style={styles.groupRule} />
+            </Pressable>
             {/* Subtle on purpose: the ghosts below already say what this room
                 probably has, and this is for the thing they didn't think of.
                 Muted, small, and only under By room — a kind heading is not a
@@ -609,17 +700,29 @@ const styles = StyleSheet.create({
   },
   search: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary, paddingVertical: Spacing.sm },
   clear: { padding: Spacing.xs },
-  count: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    textAlign: 'right',
+  countRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
   },
+  count: { fontSize: Typography.sm, color: Colors.textMuted },
   // Room for the + to float over without covering the last card.
   listContent: { padding: Spacing.lg, paddingBottom: Spacing.xxxl * 2, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
   groupRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingTop: Spacing.sm },
+  // The whole rule is the fold target, so closing a room is the same gesture
+  // wherever along it somebody happens to reach. The + is a sibling, never a
+  // child.
+  groupTap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+  },
   group: {
     fontSize: Typography.xs,
     fontWeight: Typography.bold,

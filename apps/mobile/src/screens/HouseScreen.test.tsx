@@ -2,6 +2,7 @@ import React from 'react';
 import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import HouseScreen from './HouseScreen';
+import { writeCollapsed } from '../lib/collapsed';
 
 // The House tab arrives furnished, and the rule the whole design rests on is
 // that a ghost is never a row. These pin the two places that distinction can
@@ -276,5 +277,72 @@ describe('taking the house record out', () => {
     expect(table.rows).toHaveLength(1);
     expect(table.rows[0]).toContain('Dryer');
     expect(table.name).toBe('Home house');
+  });
+});
+
+// ─── folding a room away ──────────────────────────────────────────────────────
+
+describe('folding rooms on the House tab', () => {
+  const byLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+        && !!n.props?.onPress,
+      { deep: true },
+    )[0];
+
+  // The fold persists by design, so a test that folds a room would otherwise
+  // fold it for whatever ran next.
+  beforeEach(async () => { await writeCollapsed([], 'house'); });
+
+  it('keeps the heading and its count when a room is folded', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
+    ]);
+    const r = render(<HouseScreen />);
+    await settle();
+
+    expect(texts(r)).toContain('Washing machine');
+
+    await TestRenderer.act(async () => byLabel(r, 'Laundry · 1 of 4').props.onPress());
+
+    // The heading is the whole point of the grouping, so a fold keeps it.
+    expect(texts(r)).toContain('Laundry · 1 of 4');
+    expect(texts(r)).not.toContain('Washing machine');
+  });
+
+  // Same component and same words as the List tab, so two tabs grouping the
+  // same house by the same rooms cannot grow two controls for closing them.
+  it('offers to collapse everything, then to expand everything', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
+    ]);
+    const r = render(<HouseScreen />);
+    await settle();
+
+    expect(byLabel(r, 'Collapse all')).toBeDefined();
+    await TestRenderer.act(async () => byLabel(r, 'Collapse all').props.onPress());
+
+    expect(byLabel(r, 'Expand all')).toBeDefined();
+    expect(texts(r)).not.toContain('Washing machine');
+  });
+
+  // A search is one flat answer over real records; there is nothing to fold,
+  // and a control that could only be a no-op is a control dressed as a choice.
+  it('offers no fold control while searching', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
+    ]);
+    const r = render(<HouseScreen />);
+    await settle();
+
+    const box = r.root.findAll(
+      (n: any) => typeof n.type !== 'string'
+        && n.props?.accessibilityLabel === 'Search the house record',
+      { deep: true },
+    )[0];
+    await TestRenderer.act(async () => box.props.onChangeText('washing'));
+
+    expect(byLabel(r, 'Collapse all')).toBeUndefined();
+    expect(byLabel(r, 'Expand all')).toBeUndefined();
   });
 });

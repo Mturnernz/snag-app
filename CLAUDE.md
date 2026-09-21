@@ -559,6 +559,28 @@ they last looked.
   is never a no-op. It is on that line rather than a row of its own because this screen has already
   evicted two filter rails for charging vertical rent on every visit.
 
+  **It is `FoldAllPill`, and the House tab uses the same one.** Both tabs group the same house by
+  the same rooms in the same seeded order — that rule already governs their headings, and it
+  governs the control that closes them too, so there is one component rather than two that drift.
+  It is a **pill** rather than a chevron beside a word: on a plaster ground an unbounded glyph and
+  a line of muted text reads as a *caption*, something the screen is telling you, and this is
+  something to press. The app's one chip shape says so — a sunken well, no border, the label
+  inside it — and it stays sunken in both states, because it is a momentary action rather than a
+  filter that is on or off and solid fern is reserved for the latter. The pill is ~34px inside a
+  48px target, as every chip in this app is.
+
+  On the House tab the heading folds and **the + stays its sibling**: a `Pressable` inside a
+  `Pressable` is a coin toss about which one gets the tap, which is the rule that already keeps
+  opening and removing separate on a photo tile. The fold control is absent while searching, since
+  a search is one flat answer with nothing to fold — the same rule as the shopping pill at zero.
+
+  **Three fold scopes, three keys** (`CollapseScope` in `lib/collapsed.ts`): the list's sections,
+  the trip sheet's rooms, and the House tab's rooms. Separate deliberately — folding the Garage
+  away on the House tab is a statement about the record you are reading, not about the jobs filed
+  there, and one key would have each surface silently folding the others. Namespaced in the module
+  rather than in three callers so the guards stay in one place: every read and write has to survive
+  storage being absent, full or throwing, and that is not a thing to copy out three times.
+
   The fold is remembered **per device** (`lib/collapsed.ts`) and keyed **by section, never by
   index**: sections come and go as work is filed and finished, and an index would fold whatever
   slid into that position. Per device rather than per account because this is where you are in a
@@ -578,6 +600,14 @@ they last looked.
   there is. One card above the cards, listing every item the visible jobs are waiting on — the only
   elevated surface on the screen, and the only thing the retired Weekend tab left behind. See
   *A list you can tick* below for the pill and the ticking.
+
+  **The cart names the view it goes to.** A cart carrying a number says there is shopping to do; it
+  does not say that pressing it swaps what the screen is showing, and a control whose whole job is
+  to change the view has to name the view it changes to. So a caption sits under it reading **View
+  shopping list**, and **View jobs list** once the trip sheet is up — by then the question has
+  turned round. It is the same size as the filter button beside it: the ~34px rule is about a
+  *rail* of chips outweighing the list it filters, and two header controls are not a rail, so a
+  48px square next to a 34px lozenge just reads as ragged.
 
 `SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering, the done
 window, and the whole of the fold — the heading and its count surviving, only the folded section
@@ -796,6 +826,15 @@ Three rules on screen:
   every visit. It counts **unbought items across the whole list**, not the lens, because the pill is
   how somebody finds out there is shopping to do at all. Tapping it is the *Needs parts* lens, never
   a second place parts live.
+- **The trip sheet groups by room, and the room is a heading.** It was a flat run with the room
+  repeated down the right-hand edge, which says "Outside" nine times over where one word would do
+  and groups nothing. Batching is the whole argument for the list grouping by room in the first
+  place — you do the garage once — and a trip to the shop is the same shape: the tomatoes and the
+  basil are one stop. Seeded `locations` order, like everywhere else, so the trip sheet and the
+  rooms below it cannot disagree about how the house is arranged; a room the vocabulary no longer
+  holds sorts after the seeded ones rather than jumping to the top, because `snags.room` is TEXT
+  precisely so history survives a tag being removed. Each room folds, keeping its heading and a
+  count of **what is left to get** rather than what was ever listed — the card's existing rule.
 - **A ticked row stays on the trip sheet, struck through.** "Done leaves" would have it vanish, but a
   tap in an aisle lands on the wrong row often enough that a list which silently drops what you just
   touched is a dead end — you would have to remember which job the item belonged to to put it back.
@@ -859,6 +898,10 @@ Three consequences:
   list. By kind answered "what appliances do we have" — which the search field directly above it
   already answers — and charged a control rail on every visit to do it. One layout also means
   this tab and the List tab cannot drift apart about how the house is organised.
+- **A room folds away here too**, through the same `FoldAllPill` the list uses and on its own
+  storage key. See *A room can be folded away* above for all of it — the heading surviving the
+  fold, the + staying a sibling of the tap rather than a child of it, the control's absence while
+  searching, and why the three scopes are kept apart.
 
 ### Paint is the one suggestion that works differently
 

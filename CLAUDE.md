@@ -1685,6 +1685,63 @@ against it. Nothing here reads a figure out of an attachment, same as everywhere
 feature — the amount is whatever `unpaid` already computed from what was typed and what has
 actually been paid.
 
+### A bill paid in lots, under the price it settles
+
+*Paid* and *Not paid* are the whole answer only when the money went in one transfer. A $15,000
+price gets invoiced in lots — a deposit, a progress claim, the balance — and until now the app had
+two states for that and no way to record the three that actually happened. **Add a payment** sits
+under the price and takes what somebody standing at a bank statement has in front of them: the
+value, the **invoice number**, the day it went out, the bill itself as a photo or a PDF, and a
+line of free text.
+
+The table was already right and did not change shape: `home.project_payments` has always hung off
+the invoice it settles, which is what makes a deposit and a balance two payments against one bill
+rather than two bills. `20260921094000` adds only `photo_paths` and `document_paths`, and
+`update_payment` beside them.
+
+Six rules, and each answers a way this could lie:
+
+- **A payment settles a bill, not a price.** `add_payment` has always refused anything but an
+  invoice, in words, because money recorded as gone out against a price nobody has been billed for
+  is the sibling-row shape the table exists to end. So the control is **absent under a quote**
+  rather than offered and refused — a button whose write the server is going to turn down is worse
+  than no button.
+- **The chips are derived from these rows, not asserted over them.** `unpaid` is computed in the
+  view from exactly the payments recorded, so the last one landing is what flips *Paid*. Nobody
+  can mark a part-paid bill paid, and nobody has to remember to.
+- **The optimistic patch is a subtraction, never a zero.** A $3,000 deposit against $15,000 leaves
+  $12,000 owing, and a chip reading *Paid* on the strength of it would be the page asserting
+  something its own rows flatly contradict. Removing one adds back **that payment's** figure, not
+  the whole bill — the others are still recorded. A correction patches nothing at all and waits for
+  the re-read: it moves `unpaid` by the difference between two figures, one of which is on the row
+  being replaced, and getting that wrong is more expensive than the round trip.
+- **Not paid now asks, when there is something to lose.** It exists to undo the one-tap *Paid*,
+  where what it removes is a figure and nothing else — so a bare payment still goes without
+  ceremony, and one carrying an invoice number, a date or an attachment is **named in counts
+  first**. That is the same distinction removing a part of the job already draws, and the reason
+  it matters is the same: demanding a confirm for a row holding nothing is how people learn to tap
+  through the one that holds something.
+- **A payment can be corrected rather than retyped.** `update_payment` takes `p_clear` like every
+  other update in this schema, so an emptied box is *set it to nothing* rather than *not touched*.
+  The **amount is deliberately not clearable**: a payment with no figure is not a correction, it is
+  a row that should not exist, and `delete_payment` is how that is said. The box loads the figure
+  **as it was typed**, never the GST-inclusive one — the same trap the price form already pays for,
+  where loading the normalised figure raises an ex-GST payment by 15% every time somebody opens it
+  to fix an invoice number.
+- **One column for the reference.** The invoice number goes in `reference`, which already held
+  "Deposit" and "Progress claim 2". A second column beside it would be two writers of one fact,
+  which is the failure this schema keeps naming.
+
+The paperwork reuses everything: `home-photos` under `<household_id>/docs/`, through
+`HOUSEHOLD_FILES_BUCKET`, `getFileUrl` and the one `Attachments` component. Not one storage policy
+changed.
+
+`ItemSheet.test.tsx` pins the control's absence under a quote, the value/invoice-number/day round
+trip with its day-first date, the refusal of a payment with no figure, what is paid and what is
+still to go read off the rows themselves, a correction going through `updatePayment` rather than
+adding a second payment, the un-normalised load, and both halves of *Not paid* — silent on a bare
+row, asking on one somebody typed.
+
 **Editing a price is three fields: who from, what exactly, the amount.** Kind and paid-ness used to
 live in the same form as a chip row and a hint paragraph; both are decisions now made from the
 header, and a correction that could also silently move an invoice to a quote is exactly the

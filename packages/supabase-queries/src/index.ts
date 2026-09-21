@@ -3043,6 +3043,8 @@ function mapPayment(row: Row): ProjectPayment {
     paidOn: row.paid_on ?? null,
     reference: row.reference ?? null,
     notes: row.notes ?? null,
+    photoPaths: row.photo_paths ?? [],
+    documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
   };
 }
@@ -4410,8 +4412,11 @@ export interface PaymentInput {
   amount: number;
   amountInclGst?: boolean;
   paidOn?: string | null;
+  /** The invoice number this settled, or what the bank statement calls it. */
   reference?: string | null;
   notes?: string | null;
+  photoPaths?: string[];
+  documentPaths?: string[];
 }
 
 /**
@@ -4702,8 +4707,46 @@ export async function addPayment(
     p_paid_on: input.paidOn ?? null,
     p_reference: input.reference ?? null,
     p_notes: input.notes ?? null,
+    p_photo_paths: input.photoPaths ?? null,
+    p_document_paths: input.documentPaths ?? null,
   });
   return mapPayment(unwrap<Row>(data, error, "Couldn't record that payment"));
+}
+
+/**
+ * Corrects a payment already recorded.
+ *
+ * A transposed invoice number, a date read off the wrong statement line, a PDF
+ * that turned up a week after the transfer. Without it the only fix is delete
+ * and retype, which throws the attachments away with the typo.
+ *
+ * Omitting a field leaves it alone; emptying one is `clear`, the same
+ * convention `update_snag` and `update_thing` use. The amount is deliberately
+ * not clearable — a payment with no figure is not a correction, it is a row
+ * that should not exist, and `deletePayment` is how that is said.
+ */
+export async function updatePayment(
+  client: SupabaseClient,
+  paymentId: string,
+  input: Partial<PaymentInput>
+): Promise<ProjectPayment> {
+  const clear: string[] = [];
+  if (input.paidOn === null) clear.push('paid_on');
+  if (input.reference === null) clear.push('reference');
+  if (input.notes === null) clear.push('notes');
+
+  const { data, error } = await client.rpc('update_payment', {
+    p_payment_id: paymentId,
+    p_amount: input.amount ?? null,
+    p_amount_incl_gst: input.amountInclGst ?? null,
+    p_paid_on: input.paidOn ?? null,
+    p_reference: input.reference ?? null,
+    p_notes: input.notes ?? null,
+    p_photo_paths: input.photoPaths ?? null,
+    p_document_paths: input.documentPaths ?? null,
+    p_clear: clear,
+  });
+  return mapPayment(unwrap<Row>(data, error, "That didn’t save"));
 }
 
 export async function deletePayment(client: SupabaseClient, paymentId: string): Promise<void> {

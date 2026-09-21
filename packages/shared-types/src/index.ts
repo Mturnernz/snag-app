@@ -1589,9 +1589,16 @@ export interface ProjectPayment {
   amount: number;
   amountInclGst: boolean;
   paidOn: string | null;
-  /** "Deposit", "Progress claim 2" — what the bank statement will call it. */
+  /**
+   * The invoice number on the piece of paper this settled — or "Deposit",
+   * "Progress claim 2", whatever the bank statement will call it. One column,
+   * because two writers of one fact is the failure this schema keeps naming.
+   */
   reference: string | null;
   notes: string | null;
+  /** The bill itself, photographed or attached. Same bucket as everything else. */
+  photoPaths: string[];
+  documentPaths: string[];
   createdAt: string;
 }
 

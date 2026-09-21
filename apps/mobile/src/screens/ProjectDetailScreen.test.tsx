@@ -332,7 +332,7 @@ describe('a figure you can type over', () => {
       }),
     });
     r.getByText('$200,000');
-    expect(r.queryByText(/the prices say \$103,574\.22/)).toBeNull();
+    expect(r.queryByText('the prices say $103,574.22')).toBeNull();
   });
 
   it('renders an edited figure in clay', async () => {

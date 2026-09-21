@@ -31,7 +31,7 @@ import {
   addExpectedCostLine, addMilestone, addPayment, addQuoteLine, createElement, createExpectedCost,
   createItem,
   createLocation, createQuote, createThing, deleteElement,
-  deleteExpectedCost, deleteExpectedCostLine, deleteItem, deleteMilestone, deletePayment,
+  deleteExpectedCost, deleteExpectedCostLine, deleteItem, deleteMilestone, deletePayment, updatePayment,
   deleteProject, deleteQuote,
   deleteQuoteLine,
   clearFigure, setFigure, setItemExcluded,
@@ -1239,39 +1239,60 @@ export default function ProjectDetailScreen({ route }: Props) {
           showToast(toast);
           await load();
         }}
-        onAddPayment={async (quoteId, amount) => {
+        onAddPayment={async (quoteId, input) => {
           // `unpaid` is derived in the view, so it is patched here to what the
-          // view will say rather than left stale: paying what is outstanding
-          // leaves nothing outstanding. The re-read that follows is what makes
-          // it true rather than merely claimed.
+          // view will say rather than left stale — and it is a **subtraction**
+          // rather than a zero, because a payment is not necessarily the whole
+          // bill any more. A deposit against $15,000 leaves $12,000 owing, and
+          // a chip claiming Paid on the strength of it would be the page
+          // asserting something the rows flatly contradict. The re-read that
+          // follows is what makes it true rather than merely predicted.
+          const paid = inclGst(input.amount, input.amountInclGst ?? true) ?? 0;
           const before = quotes;
-          setQuotes((rows) => rows.map(
-            (row) => (row.id === quoteId ? { ...row, unpaid: 0 } : row)
-          ));
+          setQuotes((rows) => rows.map((row) => (
+            row.id === quoteId
+              ? { ...row, unpaid: Math.max(0, (row.unpaid ?? inclGst(row.amount, row.amountInclGst) ?? 0) - paid) }
+              : row
+          )));
           try {
-            await addPayment(quoteId, { amount, amountInclGst: true });
-            showToast('Paid');
+            await addPayment(quoteId, input);
+            showToast('Payment recorded');
             await reloadMoney();
           } catch (err: unknown) {
             setQuotes(before);
             showToast(err instanceof Error ? err.message : "That didn’t save");
           }
         }}
+        onUpdatePayment={async (paymentId, input) => {
+          // Nothing optimistic: correcting an amount moves `unpaid` by the
+          // difference between two figures, one of which is whatever is on the
+          // row being replaced. The re-read is cheaper than getting that wrong.
+          try {
+            await updatePayment(paymentId, input);
+            showToast('Saved');
+            await reloadMoney();
+          } catch (err: unknown) {
+            showToast(err instanceof Error ? err.message : "That didn’t save");
+          }
+        }}
         onDeletePayment={async (paymentId) => {
           const before = quotes;
           const beforePayments = payments;
-          const quoteId = payments.find((payment) => payment.id === paymentId)?.quoteId;
+          const gone = payments.find((payment) => payment.id === paymentId);
           setPayments((rows) => rows.filter((row) => row.id !== paymentId));
-          if (quoteId) {
+          if (gone) {
+            // Add back exactly what this one payment was worth, not the whole
+            // bill: the other payments against it are still recorded.
+            const back = inclGst(gone.amount, gone.amountInclGst) ?? 0;
             setQuotes((rows) => rows.map((row) => (
-              row.id === quoteId
-                ? { ...row, unpaid: inclGst(row.amount, row.amountInclGst) ?? 0 }
+              row.id === gone.quoteId
+                ? { ...row, unpaid: (row.unpaid ?? 0) + back }
                 : row
             )));
           }
           try {
             await deletePayment(paymentId);
-            showToast('Not paid');
+            showToast('Payment removed');
             await reloadMoney();
           } catch (err: unknown) {
             setQuotes(before);

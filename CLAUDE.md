@@ -1326,13 +1326,33 @@ they buy that back with three rules:
   a scraped total has a source nobody can check, and it will be wrong about GST, about provisional
   sums, and about which of three revisions it read.
 
-**Five figures, and a budget line under them.** *Budget* is what you said you'd spend;
+**Five figures, and nothing under them.** *Budget* is what you said you'd spend;
 **Forecast** is what it is going to cost; *Committed* is what has been agreed; *Invoiced* is what
-has been charged; *Paid* is what has gone out. Then a rule, the budget, and one sentence saying
-which side of it committed has landed. All of
+has been charged; *Paid* is what has gone out. Four of
 them are **derived in the views**, never stored — the `needs_parts` argument applied to a far
 more dangerous number, since a maintained total and the quotes it describes will disagree the
 first time somebody edits an amount from the other phone.
+
+**The prose under the strip is off the page, and the helpers that wrote it are not.** It carried
+eight sentences at once — the denominator, how much of the forecast was a guess, the over-budget
+variance, the discrepancy line for every edited figure, which side of the budget committed had
+landed, what was unallocated across the parts, the two gaps, and the GST basis — permanently, on
+a page whose first question is *a bill arrived, where does it go*. Every rule they state is still
+`projects.test.ts`' to pin and every extract still prints them; what went is the **recital at the
+top of this page**, not the arithmetic.
+
+Two of those readings are still reachable and that is what makes the removal survivable. The
+denominator rule holds **in full on the list** — `ProjectsScreen.test.tsx` still pins that no card
+renders a total without one, which is where somebody meets a figure they have no other way to
+qualify. And an edited figure still renders in clay and still opens `EditFigureSheet`, which
+carries **THE PRICES SAY** the whole time somebody is typing — so the derived figure is one tap
+away rather than on the page. **If the clay or that sheet's derived row ever goes, the
+discrepancy line comes back**: an override whose evidence is unreachable is the one shape this
+feature must not take.
+
+**And there are no status chips.** *Planned / Underway / Done* sat under the figures; the list
+groups on the same column and is where a renovation is read as finished, so a second writer here
+was three taps of vertical rent on a page opened for a different question.
 
 Three rules inside that, and each answers a way the first pass was wrong:
 
@@ -1478,6 +1498,15 @@ dropping it would leave a reader eight months later with no way back to what the
 paperwork actually supports. An edit that happens to match the prices is said
 plainly and **not** reddened — a discrepancy the app manufactures is an alarm
 nobody will believe the next time.
+
+**It is no longer printed on the project page, and the rule is unchanged rather
+than relaxed.** The helper still exists and still words it exactly that way; what
+carries it now is the clay row plus `EditFigureSheet`, which the row opens and
+which shows **THE PRICES SAY** while somebody types. The reader's way back to the
+paperwork is one tap instead of nought — so the two things that must not go are
+the colour and that sheet's derived row. Lose either and the line goes back on the
+page: red on its own says *something was typed here* and never *what the prices
+actually say*, which is the half the rule is about.
 
 Four rules, three of them enforced in the view rather than left to a screen:
 
@@ -1656,6 +1685,63 @@ against it. Nothing here reads a figure out of an attachment, same as everywhere
 feature — the amount is whatever `unpaid` already computed from what was typed and what has
 actually been paid.
 
+### A bill paid in lots, under the price it settles
+
+*Paid* and *Not paid* are the whole answer only when the money went in one transfer. A $15,000
+price gets invoiced in lots — a deposit, a progress claim, the balance — and until now the app had
+two states for that and no way to record the three that actually happened. **Add a payment** sits
+under the price and takes what somebody standing at a bank statement has in front of them: the
+value, the **invoice number**, the day it went out, the bill itself as a photo or a PDF, and a
+line of free text.
+
+The table was already right and did not change shape: `home.project_payments` has always hung off
+the invoice it settles, which is what makes a deposit and a balance two payments against one bill
+rather than two bills. `20260921094000` adds only `photo_paths` and `document_paths`, and
+`update_payment` beside them.
+
+Six rules, and each answers a way this could lie:
+
+- **A payment settles a bill, not a price.** `add_payment` has always refused anything but an
+  invoice, in words, because money recorded as gone out against a price nobody has been billed for
+  is the sibling-row shape the table exists to end. So the control is **absent under a quote**
+  rather than offered and refused — a button whose write the server is going to turn down is worse
+  than no button.
+- **The chips are derived from these rows, not asserted over them.** `unpaid` is computed in the
+  view from exactly the payments recorded, so the last one landing is what flips *Paid*. Nobody
+  can mark a part-paid bill paid, and nobody has to remember to.
+- **The optimistic patch is a subtraction, never a zero.** A $3,000 deposit against $15,000 leaves
+  $12,000 owing, and a chip reading *Paid* on the strength of it would be the page asserting
+  something its own rows flatly contradict. Removing one adds back **that payment's** figure, not
+  the whole bill — the others are still recorded. A correction patches nothing at all and waits for
+  the re-read: it moves `unpaid` by the difference between two figures, one of which is on the row
+  being replaced, and getting that wrong is more expensive than the round trip.
+- **Not paid now asks, when there is something to lose.** It exists to undo the one-tap *Paid*,
+  where what it removes is a figure and nothing else — so a bare payment still goes without
+  ceremony, and one carrying an invoice number, a date or an attachment is **named in counts
+  first**. That is the same distinction removing a part of the job already draws, and the reason
+  it matters is the same: demanding a confirm for a row holding nothing is how people learn to tap
+  through the one that holds something.
+- **A payment can be corrected rather than retyped.** `update_payment` takes `p_clear` like every
+  other update in this schema, so an emptied box is *set it to nothing* rather than *not touched*.
+  The **amount is deliberately not clearable**: a payment with no figure is not a correction, it is
+  a row that should not exist, and `delete_payment` is how that is said. The box loads the figure
+  **as it was typed**, never the GST-inclusive one — the same trap the price form already pays for,
+  where loading the normalised figure raises an ex-GST payment by 15% every time somebody opens it
+  to fix an invoice number.
+- **One column for the reference.** The invoice number goes in `reference`, which already held
+  "Deposit" and "Progress claim 2". A second column beside it would be two writers of one fact,
+  which is the failure this schema keeps naming.
+
+The paperwork reuses everything: `home-photos` under `<household_id>/docs/`, through
+`HOUSEHOLD_FILES_BUCKET`, `getFileUrl` and the one `Attachments` component. Not one storage policy
+changed.
+
+`ItemSheet.test.tsx` pins the control's absence under a quote, the value/invoice-number/day round
+trip with its day-first date, the refusal of a payment with no figure, what is paid and what is
+still to go read off the rows themselves, a correction going through `updatePayment` rather than
+adding a second payment, the un-normalised load, and both halves of *Not paid* — silent on a bare
+row, asking on one somebody typed.
+
 **Editing a price is three fields: who from, what exactly, the amount.** Kind and paid-ness used to
 live in the same form as a chip row and a hint paragraph; both are decisions now made from the
 header, and a correction that could also silently move an invoice to a quote is exactly the
@@ -1675,6 +1761,39 @@ from the others, since the rest collapsed into "the price is being sorted out" t
 Invoiced took over that meaning. It is the one state still changed by hand, because only a person
 knows the dishwasher is actually sitting in the kitchen, and it is what lets *Record it in the
 house record* offer itself once something is genuinely in.
+
+### Adding an item is a pill and a modal, not a box and a +
+
+Every part of the job carried a text field reading *Add an item* with a `+`
+beside it, and *Also expecting* carried a bare `+` at the end of its heading
+rule. Both are replaced by **the app's one pill** — sunken well, no border, the
+label inside it, ~34px in a 48px target, exactly as `FoldAllPill` is — reading
+**Add an item**, and both open a modal.
+
+Two reasons, and the first is the one that matters. **The inline box was the
+compose bar's gesture in the wrong place.** That gesture is right for a snag
+filed in ten seconds standing in front of the problem; a renovation's line item
+is named at a desk beside a quote, which is the same argument that keeps the
+compose bar off the House tab and off this one. And it could only ever take the
+**name**: `create_item` accepts notes too, and there was nowhere to type them,
+so anything worth remembering about the item had to be added by opening it
+again straight afterwards — the one journey this app keeps removing.
+
+Second, **a bare `+` at the end of a rule reads as punctuation on the heading**
+rather than as something to press, which is the same thing the list tab already
+decided when a chevron beside muted text turned out to read as a caption.
+
+**The price is deliberately not in that modal.** An item's price carries a
+lifecycle — Quote or Invoiced, then accepted, declined, or paid — and it lives
+on the item's own sheet where the whole of it is visible. A second place to
+enter an amount is two writers of one number, which is the failure this feature
+is built against everywhere else. Only the name is required, for the reason the
+thing walkthrough gives: a field somebody must fill in before they can record
+what is in front of them is how a record ends up empty.
+
+`ProjectDetailScreen.test.tsx` pins the pill replacing the box rather than
+merely relabelling it, the modal writing name *and* notes through `createItem`,
+the refusal of a nameless item, and the same pill under *Also expecting*.
 
 ### Include or exclude, without deleting it
 
@@ -1773,6 +1892,18 @@ the app. Label left in a fixed column, figure right-aligned and pinned to `numbe
 the three share an edge the way a column of money is read. The same rule covers an item's own price
 — it does not shrink, the name beside it does, because the figure is what the row is opened for and
 **half a number is worse than a clipped noun**.
+
+**A row shows a figure wherever there is one to show, and says in colour whether it counts.**
+An item whose one price is still a quote nobody has accepted read **"1 price in"** — a count of
+one, standing where the money goes, on the row somebody is scanning precisely to find out what
+this part costs. The number is right there and was being withheld to say something the row could
+say another way. So `itemPriceLabel` returns the undecided quote's own amount, rendered in
+**slate** — the palette's blue, which already means *open*, against ink for a figure that is
+committed. Two states, one glance, and no hue invented for it.
+
+The count survives for the one case it was ever the honest answer: **more than one price in and
+nobody has decided between them**, where there is no single figure to show and *"3 prices in"* is
+exactly what is true. `Not priced` is still its own answer, because nothing is not zero.
 
 ### GST is a fact about each amount, never a household setting
 
@@ -2064,10 +2195,12 @@ on overruns never tells anybody they got money back.
 figure rather than only saying something was edited, that it reads in both directions, that a
 typed figure matching the prices is stated plainly rather than reddened, and that edited parts are
 counted rather than listed. `ProjectDetailScreen.test.tsx` pins the edited figure rendering in
-clay, an untouched one not, and the block being absent entirely when nothing has been edited.
+clay, an untouched one not, and the discrepancy line staying off the page now that the sheet
+behind the clay row carries it.
 `ProjectDetailScreen.test.tsx` pins the implicit layer staying hidden, the layer appearing once a
-real element exists, charged and paid staying apart with no "Spent" anywhere, the two gaps
-replacing Outstanding, the budget line and which side of it, the allowance said out loud, six-figure
+real element exists, charged and paid staying apart with no "Spent" anywhere, the strip being five
+figures with none of the eight sentences under them, an unpriced figure reading as blank rather
+than as zero, no status chips anywhere, six-figure
 totals on one line, the supplier section absent at zero and saying *Settled* rather than a zero,
 the page surviving a failed rollup read, the handover list offering only what is installed and
 stopping once something is recorded, that files roll up without rolling down, the + opening the

@@ -405,6 +405,9 @@ export const deleteQuoteLine = (lineId: string) => queries.deleteQuoteLine(supab
 export const addPayment = (quoteId: string, input: queries.PaymentInput) =>
   queries.addPayment(supabase, quoteId, input);
 
+export const updatePayment = (paymentId: string, input: Partial<queries.PaymentInput>) =>
+  queries.updatePayment(supabase, paymentId, input);
+
 export const deletePayment = (paymentId: string) => queries.deletePayment(supabase, paymentId);
 
 export const getProjectThings = (projectId: string) => queries.getProjectThings(supabase, projectId);

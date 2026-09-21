@@ -148,11 +148,35 @@ describe('an unpriced item is not a free one', () => {
     expect(label.text).not.toContain('0');
   });
 
-  it('counts the prices in while nobody has decided, rather than pricing it', () => {
-    // A band across quotes nobody has picked reads as a figure. What is
-    // outstanding here is the decision, not the money.
-    const label = itemPriceLabel(item({ quoteCount: 3, tbcCount: 3 }));
+  it('shows the figure of the one quote nobody has decided on', () => {
+    // An item carries a single active price, so "1 price in" was the row
+    // refusing to say the one thing it knew. Still *undecided* — that is what
+    // the colour carries — but the number is on screen.
+    const label = itemPriceLabel(
+      item({ quoteCount: 1, tbcCount: 1 }),
+      [quote({ status: 'tbc', amountIncl: 400 })]
+    );
     expect(label.state).toBe('undecided');
+    expect(label.text).toBe('$400');
+  });
+
+  it('counts them instead once there is more than one to decide between', () => {
+    // A band across quotes nobody has picked reads as a figure, and what is
+    // outstanding there is the decision rather than the money.
+    const label = itemPriceLabel(
+      item({ quoteCount: 3, tbcCount: 3 }),
+      [
+        quote({ id: 'q1', status: 'tbc', amountIncl: 400 }),
+        quote({ id: 'q2', status: 'tbc', amountIncl: 900 }),
+        quote({ id: 'q3', status: 'tbc', amountIncl: 1200 }),
+      ]
+    );
+    expect(label.state).toBe('undecided');
+    expect(label.text).toBe('3 prices in');
+  });
+
+  it('still counts them when the quotes were not handed over', () => {
+    const label = itemPriceLabel(item({ quoteCount: 3, tbcCount: 3 }));
     expect(label.text).toBe('3 prices in');
   });
 

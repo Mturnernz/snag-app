@@ -45,7 +45,8 @@ const quote = (over: Partial<any> = {}): any => ({
 
 const payment = (over: Partial<any> = {}): any => ({
   id: 'pay1', quoteId: 'q1', amount: 1150, amountInclGst: true,
-  paidOn: null, reference: null, notes: null, createdAt: '',
+  paidOn: null, reference: null, notes: null,
+  photoPaths: [], documentPaths: [], createdAt: '',
   ...over,
 });
 
@@ -68,6 +69,7 @@ function arrange(quotes: any[] = [quote()], payments: any[] = []) {
   const onSetQuoteStatus = jest.fn().mockResolvedValue(undefined);
   const onAddQuote = jest.fn().mockResolvedValue(undefined);
   const onAddPayment = jest.fn().mockResolvedValue(undefined);
+  const onUpdatePayment = jest.fn().mockResolvedValue(undefined);
   const onDeletePayment = jest.fn().mockResolvedValue(undefined);
   const onUpdateItem = jest.fn().mockResolvedValue(undefined);
   const r = render(
@@ -86,10 +88,14 @@ function arrange(quotes: any[] = [quote()], payments: any[] = []) {
       onDeleteQuote={jest.fn().mockResolvedValue(undefined)}
       onUpdateQuoteFiles={jest.fn().mockResolvedValue(undefined)}
       onAddPayment={onAddPayment}
+      onUpdatePayment={onUpdatePayment}
       onDeletePayment={onDeletePayment}
     />
   );
-  return { r, onUpdateQuote, onSetQuoteStatus, onAddQuote, onAddPayment, onDeletePayment, onUpdateItem };
+  return {
+    r, onUpdateQuote, onSetQuoteStatus, onAddQuote,
+    onAddPayment, onUpdatePayment, onDeletePayment, onUpdateItem,
+  };
 }
 
 const openEdit = async (r: ReturnType<typeof render>) =>
@@ -229,15 +235,112 @@ describe('the header: quote, then accepted/declined or paid/not paid', () => {
     const q = quote({ kind: 'invoice', amount: 1150, amountInclGst: true, unpaid: 1150 });
     const { r, onAddPayment } = arrange([q]);
     await TestRenderer.act(async () => byLabel(r, 'Paid').props.onPress());
-    expect(onAddPayment).toHaveBeenCalledWith('q1', 1150);
+    expect(onAddPayment).toHaveBeenCalledWith('q1', { amount: 1150, amountInclGst: true });
   });
 
-  it('marking Not paid removes the payments recorded against it', async () => {
+  it('marking Not paid removes a bare payment without asking', async () => {
+    // What the one-tap Paid wrote is a figure and nothing else, so undoing it
+    // throws nothing away and a confirm would be ceremony people learn to tap
+    // through — which is how the gate stops working on the day it matters.
     const q = quote({ kind: 'invoice', amount: 1150, amountInclGst: true, unpaid: 0 });
     const { r, onDeletePayment } = arrange([q], [payment({ id: 'pay1', quoteId: 'q1' })]);
     expect(byLabel(r, 'Paid').props.accessibilityState.selected).toBe(true);
     await TestRenderer.act(async () => byLabel(r, 'Not paid').props.onPress());
     expect(onDeletePayment).toHaveBeenCalledWith('pay1');
+  });
+
+  it('asks before clearing a payment somebody typed', async () => {
+    // An invoice number, a date and the bill itself do not come back. The same
+    // distinction a part of the job already draws: a heading goes on a
+    // two-button confirm, something holding work gets named first.
+    const q = quote({ kind: 'invoice', amount: 1150, amountInclGst: true, unpaid: 0 });
+    const { r, onDeletePayment } = arrange(
+      [q],
+      [payment({ id: 'pay1', quoteId: 'q1', reference: 'INV-0208', paidOn: '2026-09-04' })]
+    );
+    await TestRenderer.act(async () => byLabel(r, 'Not paid').props.onPress());
+    expect(onDeletePayment).not.toHaveBeenCalled();
+    r.getByText('Clear what has been paid?');
+  });
+});
+
+describe('a bill paid in lots', () => {
+  const invoice = (over: Partial<any> = {}) =>
+    quote({ kind: 'invoice', amount: 15000, amountInclGst: true, unpaid: 15000, ...over });
+
+  it('is offered a payment of its own, under the price', async () => {
+    const { r } = arrange([invoice()]);
+    expect(byLabel(r, 'Add a payment')).toBeDefined();
+  });
+
+  it('offers nothing to pay against a price nobody has been billed for', async () => {
+    // `add_payment` refuses it in words, so offering the control would be
+    // offering a write the server is going to turn down.
+    const { r } = arrange([quote({ kind: 'quote' })]);
+    expect(byLabel(r, 'Add a payment')).toBeUndefined();
+  });
+
+  it('records the value, the invoice number and the day it went out', async () => {
+    const { r, onAddPayment } = arrange([invoice()]);
+    await TestRenderer.act(async () => byLabel(r, 'Add a payment').props.onPress());
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'How much').props.onChangeText('3000');
+      boxByLabel(r, 'Invoice number').props.onChangeText('INV-0208');
+      boxByLabel(r, 'Date paid').props.onChangeText('4/9/2026');
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Save the payment').props.onPress());
+    expect(onAddPayment).toHaveBeenCalledWith('q1', expect.objectContaining({
+      amount: 3000,
+      reference: 'INV-0208',
+      // Day-first, because this is a New Zealand app: the fourth of September.
+      paidOn: '2026-09-04',
+    }));
+  });
+
+  it('will not record a payment with no figure', async () => {
+    const { r, onAddPayment } = arrange([invoice()]);
+    await TestRenderer.act(async () => byLabel(r, 'Add a payment').props.onPress());
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'Invoice number').props.onChangeText('INV-0208');
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Save the payment').props.onPress());
+    expect(onAddPayment).not.toHaveBeenCalled();
+  });
+
+  it('says what is paid and what is still to go, from the rows themselves', async () => {
+    const { r } = arrange(
+      [invoice({ unpaid: 12000 })],
+      [payment({ id: 'pay1', quoteId: 'q1', amount: 3000, reference: 'INV-0208' })]
+    );
+    r.getByText('$3,000 paid');
+    r.getByText('$12,000 to go');
+    r.getByText('INV-0208');
+  });
+
+  it('corrects a payment rather than making somebody retype it', async () => {
+    // A transposed invoice number must not cost the PDF attached beside it.
+    const { r, onUpdatePayment } = arrange(
+      [invoice({ unpaid: 12000 })],
+      [payment({ id: 'pay1', quoteId: 'q1', amount: 3000, reference: 'INV-208' })]
+    );
+    await TestRenderer.act(async () => byLabel(r, 'INV-208, correct it').props.onPress());
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'Invoice number').props.onChangeText('INV-0208');
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Save the payment').props.onPress());
+    expect(onUpdatePayment).toHaveBeenCalledWith('pay1', expect.objectContaining({
+      reference: 'INV-0208',
+      amount: 3000,
+    }));
+  });
+
+  it('loads a payment as it was typed, never the GST-inclusive figure', async () => {
+    const { r } = arrange(
+      [invoice()],
+      [payment({ id: 'pay1', quoteId: 'q1', amount: 1000, amountInclGst: false })]
+    );
+    await TestRenderer.act(async () => byLabel(r, 'Payment, correct it').props.onPress());
+    expect(boxByLabel(r, 'How much').props.value).toBe('1000');
   });
 });
 

@@ -58,6 +58,7 @@ const mock_updateItem = jest.fn();
 const mock_createElement = jest.fn();
 const mock_deleteElement = jest.fn().mockResolvedValue([]);
 const mock_setItemExcluded = jest.fn().mockResolvedValue(undefined);
+const mock_createItem = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -68,7 +69,8 @@ jest.mock('../lib/supabase', () => {
     setQuoteStatus: (...a: unknown[]) => mock_setQuoteStatus(...a),
     updateItem: (...a: unknown[]) => mock_updateItem(...a),
     createElement: (...a: unknown[]) => mock_createElement(...a),
-    createItem: jest.fn(), createQuote: jest.fn(), createThing: jest.fn(),
+    createItem: (...a: unknown[]) => mock_createItem(...a),
+    createQuote: jest.fn(), createThing: jest.fn(),
     createLocation: jest.fn(),
     deleteElement: (...a: unknown[]) => mock_deleteElement(...a),
     setItemExcluded: (...a: unknown[]) => mock_setItemExcluded(...a),
@@ -242,73 +244,33 @@ describe('the money', () => {
     r.getByText('$3,990');
   });
 
-  it('splits the one Outstanding figure into the two gaps it was conflating', async () => {
-    // "Outstanding quote vs actual costs" and "what is outstanding to pay" are
-    // different subtractions, and a single figure called Outstanding answered
-    // neither. Still to be billed is committed less invoiced — how much of what
-    // was agreed is still coming. To pay is invoiced less paid, and it is the
-    // only figure on this page that is about today.
+  it('is five figures and nothing under them', async () => {
+    // The strip carried a paragraph: the denominator, the guess, the variance
+    // warning, the discrepancy block, the budget line, the parts line, the two
+    // gaps and the GST basis — eight sentences of prose above a page whose
+    // first question is "a bill arrived, where does it go". Every rule they
+    // stated is still pinned in `projects.test.ts`, where the helpers live and
+    // the extracts still print them; what went is the recital at the top of
+    // this page.
     const r = await arrange({
       project: project({
+        budget: 180000, budgetInclGst: true,
         committedTotal: 8990, invoicedTotal: 4200, paidTotal: 3990,
         stillToBill: 4790, dueToPay: 210, dueCount: 1,
+        forecastTotal: 12000, forecastGuess: 3010,
         itemCount: 9, pricedCount: 5,
       }),
     });
-    r.getByText('$4,790 still to be billed');
-    r.getByText('$210 to pay · 1 bill');
-    expect(r.queryByText('Outstanding')).toBeNull();
+    r.getByText('Budget');
+    r.getByText('Forecast');
+    expect(r.queryByText('5 of 9 items priced')).toBeNull();
+    expect(r.queryByText('$4,790 still to be billed')).toBeNull();
+    expect(r.queryByText('$210 to pay · 1 bill')).toBeNull();
+    expect(r.queryByText('Every figure here is GST-inclusive.')).toBeNull();
+    expect(r.queryByText('committed is $8,990 under it')).toBeNull();
   });
 
-  it('reports an over-claim rather than flooring it away', async () => {
-    // Negative still-to-bill means somebody has billed more than was ever
-    // committed, which is the single most useful thing this subtraction can
-    // say. Tidying it to zero would throw exactly that away.
-    const r = await arrange({
-      project: project({
-        committedTotal: 4000, invoicedTotal: 5200, stillToBill: -1200,
-        itemCount: 2, pricedCount: 2,
-      }),
-    });
-    r.getByText('$1,200 billed beyond what was committed');
-  });
-
-  it('carries the denominator under the forecast, always', async () => {
-    const r = await arrange({
-      project: project({
-        committedTotal: 8990, forecastTotal: 8990,
-        itemCount: 9, pricedCount: 5, quotedCount: 1,
-      }),
-    });
-    r.getByText('5 of 9 items priced');
-  });
-
-  it('never renders a forecast without saying how much of it is a guess', async () => {
-    const r = await arrange({
-      project: project({
-        committedTotal: 103574.22, forecastTotal: 119774.22, forecastGuess: 16200,
-        itemCount: 18, pricedCount: 13,
-      }),
-    });
-    r.getByText('$119,774.22');
-    r.getByText('13 of 18 items priced · $16,200 of it still a guess');
-  });
-
-  it('warns past 5% over, in words and with its cause', async () => {
-    // A percentage with no cause is a number people learn to ignore, so the
-    // line names what is driving it. `projects.test.ts` pins the silence below
-    // the threshold and when under, which are properties rather than pixels.
-    const r = await arrange({
-      project: project({
-        budget: 187000, budgetInclGst: true,
-        committedTotal: 192354.22, forecastTotal: 210000, forecastGuess: 17645.78,
-        itemCount: 18, pricedCount: 13,
-      }),
-    });
-    r.getByText('$23,000 over budget — 5 items aren’t priced and $17,645.78 is still a guess');
-  });
-
-  it('puts the budget under the figures and says which side of it we are', async () => {
+  it('states the budget as a figure of its own, and takes an edit', async () => {
     const r = await arrange({
       project: project({
         budget: 180000, budgetInclGst: true, committedTotal: 192354.22,
@@ -317,18 +279,24 @@ describe('the money', () => {
     });
     r.getByText('Budget');
     r.getByText('$180,000');
-    r.getByText('committed is $12,354.22 over it');
   });
 
-  it('says so in words when nothing has been priced, rather than showing zero', async () => {
+  it('leaves a figure nobody has priced blank rather than showing zero', async () => {
+    // `sum` over nothing is null, never 0, and an unpriced job is not a free
+    // one. The em dash says the app has not been told, which is the truth.
     const r = await arrange({ project: project({ itemCount: 0 }) });
-    r.getByText('Nothing priced yet');
     expect(r.queryByText('$0')).toBeNull();
   });
 
-  it('states the GST basis, because the figures are normalised and the rows are not', async () => {
-    const r = await arrange();
-    r.getByText('Every figure here is GST-inclusive.');
+  it('says nothing about a project’s status, because nothing here sets one', async () => {
+    // Planned / Underway / Done were three chips under the figures. The list
+    // groups on the same column and is where a project is read as finished;
+    // a second writer on the page whose first question is about a bill was
+    // three taps of vertical rent on every visit.
+    const r = await arrange({ project: project({ status: 'underway' }) });
+    expect(r.queryByText('Planned')).toBeNull();
+    expect(r.queryByText('Underway')).toBeNull();
+    expect(r.queryByText('Done')).toBeNull();
   });
 
   it('keeps a six-figure total on one line rather than wrapping mid-number', async () => {
@@ -347,22 +315,14 @@ describe('the money', () => {
     expect(r.getByText('$1,952.47').props.numberOfLines).toBe(1);
   });
 
-  it('keeps “still a guess” and “not priced” as different sentences', async () => {
-    // An allowance is somebody's written number inside a contract and it counts;
-    // an unpriced item contributes nothing. Collapsing the wording collapses the
-    // distinction, which is worth 15% of a renovation when it goes.
-    const r = await arrange({
-      project: project({
-        committedTotal: 167240, forecastTotal: 167240, forecastGuess: 22300,
-        allowanceOpen: 22300, itemCount: 9, pricedCount: 9,
-      }),
-    });
-    r.getByText('9 of 9 items priced · $22,300 of it still a guess');
-  });
 });
 
 describe('a figure you can type over', () => {
-  it('shows the typed figure, and names what the prices say instead', async () => {
+  it('shows the typed figure, and keeps the derived one one tap away', async () => {
+    // The discrepancy paragraph is off the page, but the override is still
+    // honest: the row goes clay, and `EditFigureSheet` — which the row opens —
+    // carries THE PRICES SAY the whole time somebody is typing. What a reader
+    // can get back to is unchanged; what went is the recital.
     const r = await arrange({
       project: project({
         committedDerived: 103574.22, committedOverride: 200000,
@@ -372,9 +332,7 @@ describe('a figure you can type over', () => {
       }),
     });
     r.getByText('$200,000');
-    r.getByText(
-      'Committed is edited: $200,000 typed · the prices say $103,574.22 — $96,425.78 more — variation confirmed by email'
-    );
+    expect(r.queryByText('the prices say $103,574.22')).toBeNull();
   });
 
   it('renders an edited figure in clay', async () => {
@@ -723,5 +681,65 @@ describe('a price decision re-reads the money, and not the rest of the page', ()
     expect(mock_getProjectFiles.mock.calls.length).toBe(files);
     // The money is derived in a view, so it genuinely has to be re-read.
     expect(mock_getProjectContents.mock.calls.length).toBeGreaterThan(contents);
+  });
+});
+
+/**
+ * Adding an item.
+ *
+ * It was a text box and a `+` under the list — the compose bar's gesture on a
+ * page nobody fills in standing in a doorway, and it could only ever take the
+ * name, so the notes `create_item` accepts had nowhere to go.
+ */
+describe('adding an item to a part of the job', () => {
+  const boxByLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+        && !!n.props?.onChangeText,
+      { deep: true }
+    )[0];
+
+  it('offers a pill rather than an inline box', async () => {
+    const r = await arrange();
+
+    expect(byLabel(r, 'Add an item to Downstairs laundry')).toBeDefined();
+    // The box that used to sit there is gone, not merely relabelled.
+    expect(boxByLabel(r, 'Add an item to Downstairs laundry')).toBeUndefined();
+  });
+
+  it('opens a modal that takes the notes the inline box could never carry', async () => {
+    const r = await arrange();
+
+    await TestRenderer.act(async () => {
+      byLabel(r, 'Add an item to Downstairs laundry').props.onPress();
+    });
+
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'What the item is').props.onChangeText('Shower mixer');
+    });
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'Notes about this item').props.onChangeText('Methven, the one Kate liked');
+    });
+    await TestRenderer.act(async () => {
+      await byLabel(r, 'Add it').props.onPress();
+    });
+
+    expect(mock_createItem).toHaveBeenCalledWith('e1', 'Shower mixer', 'Methven, the one Kate liked');
+  });
+
+  it('will not add something with no name', async () => {
+    const r = await arrange();
+    await TestRenderer.act(async () => {
+      byLabel(r, 'Add an item to Downstairs laundry').props.onPress();
+    });
+    await TestRenderer.act(async () => {
+      await byLabel(r, 'Add it').props.onPress();
+    });
+    expect(mock_createItem).not.toHaveBeenCalled();
+  });
+
+  it('is offered under Also expecting too, as the same pill', async () => {
+    const r = await arrange();
+    expect(byLabel(r, "Add something you're expecting")).toBeDefined();
   });
 });

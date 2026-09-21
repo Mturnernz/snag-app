@@ -6,11 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from './Icon';
 import MoneyField from './MoneyField';
+import DateField from './DateField';
 import Attachments from './Attachments';
 import ConfirmDialog from './ConfirmDialog';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
-import { formatMoney, inclGst } from '@snag/supabase-queries';
+import type { PaymentInput } from '@snag/supabase-queries';
+import { formatDayFirst, formatMoney, inclGst, parseLooseDate } from '@snag/supabase-queries';
 import {
   ProjectItem, ProjectPayment, ProjectQuote, ProjectQuoteKind, ProjectQuoteStatus,
   PROJECT_QUOTE_STATUS_LABELS,
@@ -47,7 +49,8 @@ interface Props {
   onUpdateQuote: (quoteId: string, update: Partial<QuoteFields> & { kind?: ProjectQuoteKind }) => Promise<void>;
   onDeleteQuote: (quoteId: string) => Promise<void>;
   onUpdateQuoteFiles: (quoteId: string, next: { photoPaths?: string[]; documentPaths?: string[] }, toast: string) => Promise<void>;
-  onAddPayment: (quoteId: string, amount: number) => Promise<void>;
+  onAddPayment: (quoteId: string, input: PaymentInput) => Promise<void>;
+  onUpdatePayment: (paymentId: string, input: Partial<PaymentInput>) => Promise<void>;
   onDeletePayment: (paymentId: string) => Promise<void>;
   /** Offered once something is in: an item that exists is a thing the house now has. */
   onRecordAsThing?: () => void;
@@ -71,10 +74,20 @@ interface Props {
  * The amount is typed with the GST pill beside it and stored exactly as typed
  * — nothing in this app reads a figure out of an attachment.
  */
+const emptyPayment = {
+  amount: '',
+  incl: true,
+  reference: '',
+  paidOn: '',
+  notes: '',
+  photoPaths: [] as string[],
+  documentPaths: [] as string[],
+};
+
 export default function ItemSheet({
   visible, householdId, item, quotes, payments, onClose,
   onUpdateItem, onDeleteItem, onAddQuote, onSetQuoteStatus, onUpdateQuote, onDeleteQuote,
-  onUpdateQuoteFiles, onAddPayment, onDeletePayment, onRecordAsThing,
+  onUpdateQuoteFiles, onAddPayment, onUpdatePayment, onDeletePayment, onRecordAsThing,
 }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
@@ -90,6 +103,10 @@ export default function ItemSheet({
   const [filesOpen, setFilesOpen] = useState(false);
   /** The quote the form is correcting, or null when it is adding the first one. */
   const [editingQuote, setEditingQuote] = useState<string | null>(null);
+  /** The payment being written: an id to correct one, 'new' to record one. */
+  const [editingPayment, setEditingPayment] = useState<string | 'new' | null>(null);
+  const [paymentForm, setPaymentForm] = useState(emptyPayment);
+  const [clearingPayments, setClearingPayments] = useState(false);
 
   // The price the header and the edit pencil operate on. Kept to the first
   // one recorded: an item carries a single active price now, so a second
@@ -111,6 +128,8 @@ export default function ItemSheet({
     setNotes(item?.notes ?? '');
     setFilesOpen(false);
     setEditingQuote(null);
+    setEditingPayment(null);
+    setPaymentForm(emptyPayment);
   }, [visible, item?.id]);
 
   if (!item) return null;
@@ -191,13 +210,31 @@ export default function ItemSheet({
     if (outstanding === null || outstanding <= 0) return;
     setBusy(true);
     try {
-      await onAddPayment(primaryQuote.id, outstanding);
+      await onAddPayment(primaryQuote.id, { amount: outstanding, amountInclGst: true });
     } finally {
       setBusy(false);
     }
   }
 
-  async function markNotPaid() {
+  /**
+   * *Not paid* still clears the payments, and now it can be asked first.
+   *
+   * It exists for the one-tap *Paid* it undoes, where the row it removes is a
+   * figure and nothing else. A payment somebody typed carries an invoice
+   * number, a date and often the bill itself, and none of that comes back —
+   * so a row with any of that on it is named before it goes, and a bare one
+   * is not, which is the same gate a part of the job already takes.
+   */
+  const paymentsHoldSomething = primaryPayments.some(
+    (payment) =>
+      payment.reference !== null
+      || payment.notes !== null
+      || payment.paidOn !== null
+      || payment.photoPaths.length > 0
+      || payment.documentPaths.length > 0
+  );
+
+  async function clearPayments() {
     if (!primaryQuote || busy || primaryPayments.length === 0) return;
     setBusy(true);
     try {
@@ -209,6 +246,74 @@ export default function ItemSheet({
       setBusy(false);
     }
   }
+
+  function markNotPaid() {
+    if (!primaryQuote || busy || primaryPayments.length === 0) return;
+    if (paymentsHoldSomething) {
+      setClearingPayments(true);
+      return;
+    }
+    void clearPayments();
+  }
+
+  function startPayment() {
+    setEditingPayment('new');
+    setPaymentForm(emptyPayment);
+  }
+
+  function editPayment(payment: ProjectPayment) {
+    setEditingPayment(payment.id);
+    setPaymentForm({
+      // As typed, not the GST-inclusive figure the rollup works in: loading the
+      // normalised one would raise an ex-GST payment by 15% every time somebody
+      // opened it to fix the invoice number.
+      amount: String(payment.amount),
+      incl: payment.amountInclGst,
+      reference: payment.reference ?? '',
+      paidOn: payment.paidOn ? formatDayFirst(payment.paidOn) : '',
+      notes: payment.notes ?? '',
+      photoPaths: payment.photoPaths,
+      documentPaths: payment.documentPaths,
+    });
+  }
+
+  const paymentAmount = paymentForm.amount.trim()
+    ? Number(paymentForm.amount.replace(/[^0-9.]/g, ''))
+    : NaN;
+  const canSavePayment = Number.isFinite(paymentAmount) && paymentAmount > 0;
+
+  async function savePayment() {
+    if (!primaryQuote || busy || !canSavePayment || editingPayment === null) return;
+    setBusy(true);
+    try {
+      const input: PaymentInput = {
+        amount: paymentAmount,
+        amountInclGst: paymentForm.incl,
+        // Empty means clear, which `updatePayment` turns into `p_clear`. A
+        // date that will not parse is left null rather than guessed at —
+        // `parseLooseDate` refuses 31/02 and a two-digit year outright.
+        reference: paymentForm.reference.trim() || null,
+        paidOn: parseLooseDate(paymentForm.paidOn) ?? null,
+        notes: paymentForm.notes.trim() || null,
+        photoPaths: paymentForm.photoPaths,
+        documentPaths: paymentForm.documentPaths,
+      };
+      if (editingPayment === 'new') {
+        await onAddPayment(primaryQuote.id, input);
+      } else {
+        await onUpdatePayment(editingPayment, input);
+      }
+      setEditingPayment(null);
+      setPaymentForm(emptyPayment);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const paidSoFar = primaryPayments.reduce(
+    (total, payment) => total + (inclGst(payment.amount, payment.amountInclGst) ?? 0),
+    0
+  );
 
   const showForm = adding || editingQuote !== null;
 
@@ -340,6 +445,168 @@ export default function ItemSheet({
                   </Pressable>
                 </View>
               )}
+
+              {/* ── what has actually gone out ────────────────────────────
+                  A $15,000 price gets invoiced in lots: a deposit, a progress
+                  claim, the balance. *Paid* and *Not paid* are the whole
+                  answer only when it went in one transfer — the rest of the
+                  time the useful record is three lines with three invoice
+                  numbers against them, which is also what makes the chips
+                  above honest: `unpaid` is derived from exactly these rows, so
+                  the last payment landing is what flips *Paid*, rather than
+                  somebody asserting it.
+
+                  Only under an invoice, because that is the rule the table
+                  exists to keep: a payment settles a bill, not a price, and
+                  `add_payment` refuses anything else in words. Offering the
+                  control against a quote would be offering a write the server
+                  is going to turn down. */}
+              {primaryQuote.kind === 'invoice' || primaryPayments.length > 0 ? (
+                <View style={styles.payments}>
+                  <View style={styles.paymentsHead}>
+                    <Text style={styles.paymentsTitle}>
+                      {primaryPayments.length === 0
+                        ? 'Nothing paid yet'
+                        : `${formatMoney(paidSoFar)} paid`}
+                    </Text>
+                    {primaryQuote.unpaid !== null && primaryQuote.unpaid > 0.005 ? (
+                      <Text style={styles.paymentsGap} numberOfLines={1}>
+                        {formatMoney(primaryQuote.unpaid)} to go
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {primaryPayments.map((payment) =>
+                    editingPayment === payment.id ? null : (
+                      <Pressable
+                        key={payment.id}
+                        onPress={() => editPayment(payment)}
+                        style={styles.payRow}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${payment.reference ?? 'Payment'}, correct it`}
+                      >
+                        <View style={styles.payTitles}>
+                          <Text style={styles.payRef} numberOfLines={1}>
+                            {payment.reference ?? 'No invoice number'}
+                          </Text>
+                          <Text style={styles.payWhen} numberOfLines={1}>
+                            {[
+                              payment.paidOn ? formatDayFirst(payment.paidOn) : 'No date',
+                              payment.photoPaths.length + payment.documentPaths.length > 0
+                                ? `${payment.photoPaths.length + payment.documentPaths.length} attached`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </Text>
+                        </View>
+                        <Text style={styles.payAmount} numberOfLines={1}>
+                          {formatMoney(inclGst(payment.amount, payment.amountInclGst)) ?? '—'}
+                        </Text>
+                        {/* A sibling of the row, never inside it: one Pressable
+                            in another is a coin toss about which gets the tap. */}
+                        <Pressable
+                          onPress={() => onDeletePayment(payment.id)}
+                          style={styles.payRemove}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove the ${payment.reference ?? 'unnumbered'} payment`}
+                        >
+                          <Icon name="close" size="sm" color={Colors.textMuted} />
+                        </Pressable>
+                      </Pressable>
+                    )
+                  )}
+
+                  {editingPayment !== null ? (
+                    <View style={styles.payForm}>
+                      <MoneyField
+                        label="How much"
+                        value={paymentForm.amount}
+                        onChangeValue={(text) => setPaymentForm((f) => ({ ...f, amount: text }))}
+                        inclusive={paymentForm.incl}
+                        onChangeInclusive={(next) => setPaymentForm((f) => ({ ...f, incl: next }))}
+                      />
+
+                      <Text style={styles.fieldLabel}>Invoice number</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={paymentForm.reference}
+                        onChangeText={(text) => setPaymentForm((f) => ({ ...f, reference: text }))}
+                        accessibilityLabel="Invoice number"
+                      />
+
+                      <DateField
+                        label="Date paid"
+                        value={paymentForm.paidOn}
+                        onChangeValue={(text) => setPaymentForm((f) => ({ ...f, paidOn: text }))}
+                        pickerTitle="When did it go out?"
+                      />
+
+                      <View style={styles.spacer} />
+                      <TextInput
+                        style={[styles.input, styles.notes]}
+                        value={paymentForm.notes}
+                        onChangeText={(text) => setPaymentForm((f) => ({ ...f, notes: text }))}
+                        multiline
+                        accessibilityLabel="Anything worth remembering about this payment"
+                      />
+
+                      <Attachments
+                        householdId={householdId}
+                        photoPaths={paymentForm.photoPaths}
+                        documentPaths={paymentForm.documentPaths}
+                        onChange={async (next) => {
+                          setPaymentForm((f) => ({
+                            ...f,
+                            photoPaths: next.photoPaths ?? f.photoPaths,
+                            documentPaths: next.documentPaths ?? f.documentPaths,
+                          }));
+                        }}
+                        emptyLabel="Nothing attached to this payment yet."
+                      />
+
+                      <View style={styles.payFormRow}>
+                        <Pressable
+                          onPress={() => { setEditingPayment(null); setPaymentForm(emptyPayment); }}
+                          disabled={busy}
+                          style={styles.payCancel}
+                          accessibilityRole="button"
+                          accessibilityLabel="Leave it as it was"
+                        >
+                          <Text style={styles.payCancelLabel}>Not now</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={savePayment}
+                          disabled={busy || !canSavePayment}
+                          style={[styles.paySave, (busy || !canSavePayment) && styles.ctaOff]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Save the payment"
+                        >
+                          <Text
+                            style={[
+                              styles.paySaveLabel,
+                              (busy || !canSavePayment) && styles.ctaLabelOff,
+                            ]}
+                          >
+                            {busy ? 'Saving…' : 'Save the payment'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : primaryQuote.kind === 'invoice' ? (
+                    <Pressable
+                      onPress={startPayment}
+                      style={styles.payAddTap}
+                      accessibilityRole="button"
+                      accessibilityLabel="Add a payment"
+                    >
+                      <View style={styles.payAdd}>
+                        <Text style={styles.payAddLabel}>Add a payment</Text>
+                      </View>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
 
               <View style={styles.priceFoot}>
                 <Pressable
@@ -568,6 +835,28 @@ export default function ItemSheet({
           await onDeleteItem();
         }}
       />
+
+      {/* *Not paid* undoes the one-tap *Paid*, where what it removes is a
+          figure and nothing else. Once somebody has typed invoice numbers,
+          dates and attached the bills, it is throwing that away — so it says
+          how much goes first. Two buttons rather than a typed word: this is
+          undoing a state, not deleting a place. */}
+      <ConfirmDialog
+        visible={clearingPayments}
+        title="Clear what has been paid?"
+        message={
+          primaryPayments.length === 1
+            ? 'The payment goes, and so does its invoice number, its date and anything attached to it.'
+            : `All ${primaryPayments.length} payments go, and so do their invoice numbers, their dates and anything attached to them.`
+        }
+        confirmLabel="Clear them"
+        destructive
+        onCancel={() => setClearingPayments(false)}
+        onConfirm={async () => {
+          setClearingPayments(false);
+          await clearPayments();
+        }}
+      />
     </Modal>
   );
 }
@@ -630,6 +919,37 @@ const styles = StyleSheet.create({
   quoteFiles: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, minHeight: MIN_TOUCH_TARGET, flex: 1 },
   quoteRemove: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.xs },
   quoteAttach: { marginTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: Spacing.sm },
+
+  payments: { marginTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: Spacing.sm },
+  paymentsHead: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.sm },
+  paymentsTitle: { flex: 1, minWidth: 0, fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textSecondary },
+  // Brass: money still to go out is a fact about what is owed, the same kind of
+  // fact a due date is. Never clay — being part way through paying a bill is
+  // the ordinary middle of a job, not an alarm.
+  paymentsGap: { flexShrink: 0, fontFamily: Fonts.mono, fontSize: Typography.sm, color: Colors.status.doing },
+  payRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  payTitles: { flex: 1, minWidth: 0 },
+  payRef: { fontSize: Typography.sm, color: Colors.textPrimary, fontWeight: Typography.medium },
+  payWhen: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
+  payAmount: { flexShrink: 0, fontFamily: Fonts.mono, fontSize: Typography.sm, color: Colors.textPrimary },
+  payRemove: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.sm },
+  // The app's one pill: a sunken well, no border, the label inside it.
+  payAddTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignItems: 'flex-start' },
+  payAdd: { backgroundColor: Colors.sunken, borderRadius: Radius.chip, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  payAddLabel: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.semibold },
+  payForm: { marginTop: Spacing.sm },
+  payFormRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
+  payCancel: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.sm },
+  payCancelLabel: { fontSize: Typography.sm, color: Colors.textMuted },
+  paySave: {
+    flex: 1, backgroundColor: Colors.primary, borderRadius: Radius.button,
+    minHeight: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center',
+  },
+  paySaveLabel: { fontSize: Typography.sm, color: Colors.white, fontWeight: Typography.semibold },
 
   legacyBlock: { marginTop: Spacing.md },
   legacyRow: {

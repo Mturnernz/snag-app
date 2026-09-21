@@ -403,6 +403,30 @@ export const getProjectThings = (projectId: string) => queries.getProjectThings(
 export const getSupplierTotals = (projectId: string) =>
   queries.getSupplierTotals(supabase, projectId);
 
+export const getExpectedCosts = (projectId: string) =>
+  queries.getExpectedCosts(supabase, projectId);
+
+export const createExpectedCost = (projectId: string, input: queries.ExpectedCostInput) =>
+  queries.createExpectedCost(supabase, projectId, input);
+
+export const updateExpectedCost = (expectedId: string, update: queries.ExpectedCostUpdate) =>
+  queries.updateExpectedCost(supabase, expectedId, update);
+
+export const deleteExpectedCost = (expectedId: string) =>
+  queries.deleteExpectedCost(supabase, expectedId);
+
+export const getProjectBills = (projectId: string) =>
+  queries.getProjectBills(supabase, projectId);
+
+export const addMilestone = (quoteId: string, input: queries.MilestoneInput) =>
+  queries.addMilestone(supabase, quoteId, input);
+
+export const updateMilestone = (milestoneId: string, update: Partial<queries.MilestoneInput>) =>
+  queries.updateMilestone(supabase, milestoneId, update);
+
+export const deleteMilestone = (milestoneId: string) =>
+  queries.deleteMilestone(supabase, milestoneId);
+
 export const renameSupplier = (projectId: string, from: string, to: string) =>
   queries.renameSupplier(supabase, projectId, from, to);
 
@@ -417,6 +441,13 @@ export {
   describePartsBudget,
   describeBuildUp,
   describeLineVariance,
+  describeForecast,
+  describeForecastVariance,
+  describeStillToBill,
+  describeDue,
+  describeLineMovement,
+  forecastVariance,
+  milestoneAmount,
   outstanding,
   itemPriceLabel,
   showsElements,

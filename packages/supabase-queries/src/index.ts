@@ -49,10 +49,14 @@ import type {
   ThingSuggestion,
   AbsentThing,
   Project,
+  ProjectAllowanceKind,
+  ProjectBill,
   ProjectElement,
+  ProjectExpectedCost,
   ProjectFile,
   ProjectItem,
   ProjectItemStatus,
+  ProjectMilestone,
   ProjectPayment,
   ProjectQuote,
   ProjectQuoteBasis,
@@ -2776,8 +2780,19 @@ function mapProject(row: Row): Project {
     invoicedTotal: numberOrNull(row.invoiced_total),
     paidTotal: numberOrNull(row.paid_total),
     allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
+    additionalOpen: numberOrNull(row.additional_open) ?? 0,
     partsBudgetTotal: numberOrNull(row.parts_budget_total),
     partsBudgetedCount: row.parts_budgeted_count ?? 0,
+    forecastTotal: numberOrNull(row.forecast_total),
+    forecastGuess: numberOrNull(row.forecast_guess) ?? 0,
+    expectedOpen: numberOrNull(row.expected_open) ?? 0,
+    expectedCount: row.expected_count ?? 0,
+    budgetGap: numberOrNull(row.budget_gap) ?? 0,
+    stillToBill: numberOrNull(row.still_to_bill),
+    dueToPay: numberOrNull(row.due_to_pay) ?? 0,
+    overdueTotal: numberOrNull(row.overdue_total) ?? 0,
+    nextDueOn: row.next_due_on ?? null,
+    dueCount: row.due_count ?? 0,
   };
 }
 
@@ -2814,6 +2829,10 @@ function mapElement(row: Row): ProjectElement {
     invoicedTotal: numberOrNull(row.invoiced_total),
     paidTotal: numberOrNull(row.paid_total),
     allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
+    additionalOpen: numberOrNull(row.additional_open) ?? 0,
+    expectedOpen: numberOrNull(row.expected_open) ?? 0,
+    expectedCount: row.expected_count ?? 0,
+    budgetGap: numberOrNull(row.budget_gap) ?? 0,
   };
 }
 
@@ -2834,6 +2853,7 @@ function mapItem(row: Row): ProjectItem {
     invoiced: numberOrNull(row.invoiced),
     paid: numberOrNull(row.paid),
     allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
+    additionalOpen: numberOrNull(row.additional_open) ?? 0,
   };
 }
 
@@ -2853,6 +2873,9 @@ function mapQuote(row: Row): ProjectQuote {
     dated: row.dated ?? null,
     notes: row.notes ?? null,
     supersedesLineId: row.supersedes_line_id ?? null,
+    dueOn: row.due_on ?? null,
+    billedThroughId: row.billed_through_id ?? null,
+    settlesMilestoneId: row.settles_milestone_id ?? null,
     photoPaths: row.photo_paths ?? [],
     documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
@@ -2861,8 +2884,10 @@ function mapQuote(row: Row): ProjectQuote {
     linesTotal: numberOrNull(row.lines_total),
     buildUp: numberOrNull(row.build_up),
     allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
+    additionalOpen: numberOrNull(row.additional_open) ?? 0,
     effectiveAmount: numberOrNull(row.effective_amount),
     paidTotal: numberOrNull(row.paid_total),
+    unpaid: numberOrNull(row.unpaid),
   };
 }
 
@@ -2875,6 +2900,9 @@ function mapQuoteLine(row: Row): ProjectQuoteLine {
     amount: numberOrNull(row.amount),
     amountInclGst: row.amount_incl_gst !== false,
     isAllowance: !!row.is_allowance,
+    allowanceKind: row.allowance_kind ?? null,
+    additional: !!row.additional,
+    attendancePct: numberOrNull(row.attendance_pct),
     sortOrder: row.sort_order ?? 0,
   };
 }
@@ -2900,7 +2928,54 @@ function mapSupplierTotals(row: Row): ProjectSupplierTotals {
     committed: numberOrNull(row.committed),
     invoiced: numberOrNull(row.invoiced),
     paid: numberOrNull(row.paid),
+    unpaid: numberOrNull(row.unpaid),
+    nextDueOn: row.next_due_on ?? null,
     tbcCount: row.tbc_count ?? 0,
+  };
+}
+
+function mapExpectedCost(row: Row): ProjectExpectedCost {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    elementId: row.element_id ?? null,
+    name: row.name,
+    amount: numberOrNull(row.amount),
+    amountInclGst: row.amount_incl_gst !== false,
+    likelySupplier: row.likely_supplier ?? null,
+    note: row.note ?? null,
+    settledBy: row.settled_by ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+function mapMilestone(row: Row): ProjectMilestone {
+  return {
+    id: row.id,
+    quoteId: row.quote_id,
+    name: row.name,
+    percent: numberOrNull(row.percent),
+    amount: numberOrNull(row.amount),
+    amountInclGst: row.amount_incl_gst !== false,
+    dueOn: row.due_on ?? null,
+    sortOrder: row.sort_order ?? 0,
+  };
+}
+
+function mapBill(row: Row): ProjectBill {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    supplier: row.supplier ?? null,
+    detail: row.detail ?? null,
+    dated: row.dated ?? null,
+    dueOn: row.due_on ?? null,
+    billedThroughId: row.billed_through_id ?? null,
+    settlesMilestoneId: row.settles_milestone_id ?? null,
+    amountIncl: numberOrNull(row.amount_incl),
+    paidTotal: numberOrNull(row.paid_total),
+    unpaid: numberOrNull(row.unpaid),
+    overdue: !!row.overdue,
   };
 }
 
@@ -3030,6 +3105,189 @@ export function describePartsBudget(project: {
 export function describeAllowance(totals: { allowanceOpen: number }): string | null {
   if (!(totals.allowanceOpen > 0)) return null;
   return `${formatMoney(totals.allowanceOpen)} still an allowance`;
+}
+
+/**
+ * How far over budget the forecast is, as a fraction.
+ *
+ * Null when either half is missing — there is no variance against a budget
+ * nobody typed, and saying "0%" there would be the screen inventing a
+ * reassurance.
+ */
+export function forecastVariance(project: {
+  budget: number | null;
+  budgetInclGst: boolean;
+  forecastTotal: number | null;
+}): number | null {
+  const budget = inclGst(project.budget, project.budgetInclGst);
+  if (budget === null || budget === 0 || project.forecastTotal === null) return null;
+  return (project.forecastTotal - budget) / budget;
+}
+
+/**
+ * The threshold at which a variance is worth saying out loud.
+ *
+ * Five per cent, from the brief. It is a blunt number and that is the point: on
+ * a $187,000 job it is $9,350, which is about the smallest overrun a household
+ * would want interrupted for and well above the noise of a rounded quote.
+ */
+export const VARIANCE_THRESHOLD = 0.05;
+
+/**
+ * The denominator that has to ride with the forecast.
+ *
+ * Never the figure on its own. `$198,400 · 13 of 18 items priced · $11,200 of it
+ * still a guess` — and the last clause is the one that makes a forecast
+ * honest, because a forecast is by construction partly invented and a reader
+ * cannot tell how much without being told.
+ *
+ * Deliberately says **"still a guess"** rather than reusing "still an
+ * allowance": the guess here is the sum of three different things (an unanswered
+ * allowance inside a contract, a ballpark outside one, and a cost nobody has
+ * quoted) and collapsing them into the allowance's wording would claim they are
+ * all somebody's written number, which two of them are not.
+ */
+export function describeForecast(project: {
+  forecastTotal: number | null;
+  forecastGuess: number;
+  itemCount: number;
+  pricedCount: number;
+}): string | null {
+  if (project.forecastTotal === null) return null;
+  const parts = [`${project.pricedCount} of ${project.itemCount} items priced`];
+  if (project.forecastGuess > 0.005) {
+    parts.push(`${formatMoney(project.forecastGuess)} of it still a guess`);
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * The variance line, in words and with its cause.
+ *
+ * *"$11,400 over — four items aren't priced and $3,500 is still a guess."*
+ * A percentage with no cause is a number people learn to ignore, so this names
+ * what is driving it rather than printing the fraction.
+ *
+ * Silent below the threshold, and silent when the forecast is *under*, which is
+ * deliberate: this is a warning, and a household that is under budget does not
+ * need the app to keep mentioning it. `describeBudget` already says which side
+ * of the line committed has landed, in both directions.
+ */
+export function describeForecastVariance(project: {
+  budget: number | null;
+  budgetInclGst: boolean;
+  forecastTotal: number | null;
+  forecastGuess: number;
+  itemCount: number;
+  pricedCount: number;
+}): string | null {
+  const variance = forecastVariance(project);
+  if (variance === null || variance <= VARIANCE_THRESHOLD) return null;
+
+  const budget = inclGst(project.budget, project.budgetInclGst);
+  const over = (project.forecastTotal ?? 0) - (budget ?? 0);
+  const causes: string[] = [];
+
+  const unpriced = project.itemCount - project.pricedCount;
+  if (unpriced > 0) {
+    causes.push(unpriced === 1 ? "1 item isn't priced" : `${unpriced} items aren't priced`);
+  }
+  if (project.forecastGuess > 0.005) {
+    causes.push(`${formatMoney(project.forecastGuess)} is still a guess`);
+  }
+
+  const head = `${formatMoney(over)} over budget`;
+  return causes.length === 0 ? head : `${head} — ${causes.join(' and ')}`;
+}
+
+/**
+ * How much of what has been agreed is still to come as a bill.
+ *
+ * *"ReliaBuilder have $88,780 of the contract left to claim."* The first of the
+ * two gaps that used to live as one figure called Outstanding.
+ *
+ * **It reports an over-claim rather than hiding it.** A negative means somebody
+ * has billed more than was ever committed, which is the single most useful thing
+ * this subtraction can tell a householder, and flooring it at zero for tidiness
+ * would throw exactly that away.
+ */
+export function describeStillToBill(project: { stillToBill: number | null }): string | null {
+  if (project.stillToBill === null) return null;
+  if (Math.abs(project.stillToBill) < 0.005) return 'everything committed has been billed';
+  if (project.stillToBill < 0) {
+    return `${formatMoney(-project.stillToBill)} billed beyond what was committed`;
+  }
+  return `${formatMoney(project.stillToBill)} still to be billed`;
+}
+
+/**
+ * What is owed right now, and when.
+ *
+ * The only figure in this feature that is about **today** — everything else on
+ * the page is a position, and this is a task. Null at zero, the same rule as
+ * the shopping pill and *Fit* in the photo viewer: a line that can only say
+ * "nothing owed" is a control dressed as a choice.
+ *
+ * Overdue leads when there is any, because that is the part somebody has to act
+ * on first.
+ */
+export function describeDue(project: {
+  dueToPay: number;
+  overdueTotal: number;
+  nextDueOn: string | null;
+  dueCount: number;
+}): string | null {
+  if (!(project.dueToPay > 0.005)) return null;
+  if (project.overdueTotal > 0.005) {
+    return `${formatMoney(project.overdueTotal)} overdue of ${formatMoney(project.dueToPay)}`;
+  }
+  const head = `${formatMoney(project.dueToPay)} to pay`;
+  const when = formatLooseDate(project.nextDueOn);
+  if (when) return `${head} · next due ${when}`;
+  return project.dueCount === 1 ? `${head} · 1 bill` : `${head} · ${project.dueCount} bills`;
+}
+
+/**
+ * What an allowance line is now reading, and by how much it has moved.
+ *
+ * Both tenses and **both directions**. A design that only warns on overruns
+ * never tells anybody they got money back, and coming in under a ballpark is as
+ * real an event as going over one — it is the reason the fittings supplier was
+ * worth ringing.
+ *
+ * `quoted` is what somebody has since been quoted against the line, null while
+ * nobody has.
+ */
+export function describeLineMovement(
+  line: { name: string; amount: number | null; amountInclGst: boolean; additional: boolean },
+  quoted: number | null,
+  accepted: boolean
+): string | null {
+  const allowed = inclGst(line.amount, line.amountInclGst);
+  if (allowed === null || quoted === null) return null;
+  const gap = quoted - allowed;
+  const tail = accepted ? '' : ', if you accept it';
+
+  if (Math.abs(gap) < 0.005) {
+    return `allowed ${formatMoney(allowed)}; quoted the same`;
+  }
+  const direction = gap > 0 ? 'over' : 'under';
+  return `allowed ${formatMoney(allowed)}; quoted ${formatMoney(quoted)} — ${formatMoney(Math.abs(gap))} ${direction}${tail}`;
+}
+
+/**
+ * What a payment schedule says is still to be claimed.
+ *
+ * A milestone carries a percentage or an amount; this resolves it against the
+ * commitment it hangs off so both read the same way on screen.
+ */
+export function milestoneAmount(
+  milestone: { percent: number | null; amount: number | null; amountInclGst: boolean },
+  commitment: number | null
+): number | null {
+  if (milestone.amount !== null) return inclGst(milestone.amount, milestone.amountInclGst);
+  if (milestone.percent === null || commitment === null) return null;
+  return Math.round(commitment * (milestone.percent / 100) * 100) / 100;
 }
 
 /**
@@ -3244,7 +3502,20 @@ export async function getProjectContents(
 
   if (elementError) throw asError(elementError, "Couldn't load the parts of this job");
   const elements = (elementRows ?? []).map(mapElement);
-  if (elements.length === 0) return { elements, items: [], quotes: [], lines: [], payments: [] };
+
+  // Expected costs and bills hang off the project rather than off its parts, so
+  // they are read whatever the shape of the job — a renovation whose only
+  // element is implicit still has council fees and still has bills due.
+  const [expected, bills] = await Promise.all([
+    getExpectedCosts(client, projectId),
+    getProjectBills(client, projectId),
+  ]);
+
+  if (elements.length === 0) {
+    return {
+      elements, items: [], quotes: [], lines: [], payments: [], milestones: [], expected, bills,
+    };
+  }
 
   const { data: itemRows, error: itemError } = await client
     .from('project_items_with_totals')
@@ -3266,11 +3537,13 @@ export async function getProjectContents(
 
   if (quoteError) throw asError(quoteError, "Couldn't load the prices");
   const quotes = (quoteRows ?? []).map(mapQuote);
-  if (quotes.length === 0) return { elements, items, quotes, lines: [], payments: [] };
+  if (quotes.length === 0) {
+    return { elements, items, quotes, lines: [], payments: [], milestones: [], expected, bills };
+  }
 
   const quoteIds = quotes.map((quote) => quote.id);
 
-  const [lineResult, paymentResult] = await Promise.all([
+  const [lineResult, paymentResult, milestoneResult] = await Promise.all([
     client
       .from('project_quote_lines')
       .select('*')
@@ -3281,10 +3554,18 @@ export async function getProjectContents(
       .select('*')
       .in('quote_id', quoteIds)
       .order('paid_on', { ascending: true }),
+    client
+      .from('project_milestones')
+      .select('*')
+      .in('quote_id', quoteIds)
+      .order('sort_order', { ascending: true }),
   ]);
 
   if (lineResult.error) throw asError(lineResult.error, "Couldn't load what the prices cover");
   if (paymentResult.error) throw asError(paymentResult.error, "Couldn't load what has been paid");
+  if (milestoneResult.error) {
+    throw asError(milestoneResult.error, "Couldn't load the payment schedule");
+  }
 
   return {
     elements,
@@ -3292,7 +3573,50 @@ export async function getProjectContents(
     quotes,
     lines: (lineResult.data ?? []).map(mapQuoteLine),
     payments: (paymentResult.data ?? []).map(mapPayment),
+    milestones: (milestoneResult.data ?? []).map(mapMilestone),
+    expected,
+    bills,
   };
+}
+
+/**
+ * The costs somebody has been told to expect on this job.
+ *
+ * Ordered by whether they are still open, because a settled one is history and
+ * an open one is a number in the forecast.
+ */
+export async function getExpectedCosts(
+  client: SupabaseClient,
+  projectId: string
+): Promise<ProjectExpectedCost[]> {
+  const { data, error } = await client
+    .from('project_expected_costs')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw asError(error, "Couldn't load what else is expected");
+  return (data ?? []).map(mapExpectedCost);
+}
+
+/**
+ * Live bills on this job, soonest due first.
+ *
+ * Nulls last, because a bill with no date on it is not more urgent than one
+ * due on Friday — it is just a bill nobody has typed a date for.
+ */
+export async function getProjectBills(
+  client: SupabaseClient,
+  projectId: string
+): Promise<ProjectBill[]> {
+  const { data, error } = await client
+    .from('project_bills')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('due_on', { ascending: true, nullsFirst: false });
+
+  if (error) throw asError(error, "Couldn't load what is due");
+  return (data ?? []).map(mapBill);
 }
 
 export interface ProjectContents {
@@ -3301,6 +3625,11 @@ export interface ProjectContents {
   quotes: ProjectQuote[];
   lines: ProjectQuoteLine[];
   payments: ProjectPayment[];
+  milestones: ProjectMilestone[];
+  /** Costs nobody has quoted. Forecast's, never committed's. */
+  expected: ProjectExpectedCost[];
+  /** Live bills with what is still to go out on each, and when. */
+  bills: ProjectBill[];
 }
 
 /**
@@ -3606,6 +3935,12 @@ export interface QuoteInput {
   notes?: string | null;
   /** The allowance this answers. Counted through that line and never twice. */
   supersedesLineId?: string | null;
+  /** When the money has to leave, as distinct from the date on the paper. */
+  dueOn?: string | null;
+  /** The head contract billing this on. Null means they invoice us direct. */
+  billedThroughId?: string | null;
+  /** The milestone this bill claims against. */
+  settlesMilestoneId?: string | null;
   photoPaths?: string[];
   documentPaths?: string[];
 }
@@ -3630,6 +3965,9 @@ export async function createQuote(
     p_supersedes_line_id: input.supersedesLineId ?? null,
     p_photo_paths: input.photoPaths ?? [],
     p_document_paths: input.documentPaths ?? [],
+    p_due_on: input.dueOn ?? null,
+    p_billed_through_id: input.billedThroughId ?? null,
+    p_settles_milestone_id: input.settlesMilestoneId ?? null,
   });
   // The RPC returns the table row, which carries none of the view's derived
   // columns. Defaulted here rather than re-read: the caller reloads the page.
@@ -3648,6 +3986,9 @@ export interface QuoteUpdate {
   supersedesLineId?: string | null;
   photoPaths?: string[];
   documentPaths?: string[];
+  dueOn?: string | null;
+  billedThroughId?: string | null;
+  settlesMilestoneId?: string | null;
 }
 
 const QUOTE_CLEARABLE: Record<string, string> = {
@@ -3657,6 +3998,9 @@ const QUOTE_CLEARABLE: Record<string, string> = {
   dated: 'dated',
   notes: 'notes',
   supersedesLineId: 'supersedes_line_id',
+  dueOn: 'due_on',
+  billedThroughId: 'billed_through_id',
+  settlesMilestoneId: 'settles_milestone_id',
 };
 
 export async function updateQuote(
@@ -3716,6 +4060,12 @@ export interface QuoteLineInput {
   amount?: number | null;
   amountInclGst?: boolean;
   isAllowance?: boolean;
+  /** Which word the contract used. See `ProjectAllowanceKind`. */
+  allowanceKind?: ProjectAllowanceKind | null;
+  /** On top of the quoted total rather than inside it. Worth the whole allowance. */
+  additional?: boolean;
+  /** The margin the head contractor keeps if this is bought direct. */
+  attendancePct?: number | null;
 }
 
 export async function addQuoteLine(
@@ -3730,6 +4080,9 @@ export async function addQuoteLine(
     p_amount: input.amount ?? null,
     p_amount_incl_gst: input.amountInclGst ?? true,
     p_is_allowance: input.isAllowance ?? false,
+    p_allowance_kind: input.allowanceKind ?? null,
+    p_additional: input.additional ?? false,
+    p_attendance_pct: input.attendancePct ?? null,
   });
   return mapQuoteLine(unwrap<Row>(data, error, "Couldn't add that line"));
 }
@@ -3737,6 +4090,8 @@ export async function addQuoteLine(
 const LINE_CLEARABLE: Record<string, string> = {
   detail: 'detail',
   amount: 'amount',
+  allowanceKind: 'allowance_kind',
+  attendancePct: 'attendance_pct',
 };
 
 export async function updateQuoteLine(
@@ -3757,6 +4112,9 @@ export async function updateQuoteLine(
     p_amount_incl_gst: update.amountInclGst ?? null,
     p_is_allowance: update.isAllowance ?? null,
     p_clear: clear,
+    p_allowance_kind: update.allowanceKind ?? null,
+    p_additional: update.additional ?? null,
+    p_attendance_pct: update.attendancePct ?? null,
   });
   if (error) throw asError(error, "That didn’t save");
 }
@@ -3783,6 +4141,138 @@ export interface PaymentInput {
  * payment against a quote quietly count as money spent on a price nobody has
  * been billed for.
  */
+export interface ExpectedCostInput {
+  name: string;
+  amount?: number | null;
+  amountInclGst?: boolean;
+  elementId?: string | null;
+  likelySupplier?: string | null;
+  note?: string | null;
+}
+
+export async function createExpectedCost(
+  client: SupabaseClient,
+  projectId: string,
+  input: ExpectedCostInput
+): Promise<ProjectExpectedCost> {
+  const { data, error } = await client.rpc('create_expected_cost', {
+    p_project_id: projectId,
+    p_name: input.name,
+    p_amount: input.amount ?? null,
+    p_amount_incl_gst: input.amountInclGst ?? true,
+    p_element_id: input.elementId ?? null,
+    p_likely_supplier: input.likelySupplier ?? null,
+    p_note: input.note ?? null,
+  });
+  return mapExpectedCost(unwrap<Row>(data, error, "Couldn't add that"));
+}
+
+const EXPECTED_CLEARABLE: Record<string, string> = {
+  amount: 'amount',
+  elementId: 'element_id',
+  likelySupplier: 'likely_supplier',
+  note: 'note',
+  settledBy: 'settled_by',
+};
+
+export interface ExpectedCostUpdate extends Partial<ExpectedCostInput> {
+  /** The real price, once one exists. Set, the expectation stops counting. */
+  settledBy?: string | null;
+}
+
+export async function updateExpectedCost(
+  client: SupabaseClient,
+  expectedId: string,
+  update: ExpectedCostUpdate
+): Promise<void> {
+  const clear: string[] = [];
+  for (const [key, column] of Object.entries(EXPECTED_CLEARABLE)) {
+    if (key in update && update[key as keyof ExpectedCostUpdate] === null) clear.push(column);
+  }
+
+  const { error } = await client.rpc('update_expected_cost', {
+    p_expected_id: expectedId,
+    p_name: update.name ?? null,
+    p_amount: update.amount ?? null,
+    p_amount_incl_gst: update.amountInclGst ?? null,
+    p_element_id: update.elementId ?? null,
+    p_likely_supplier: update.likelySupplier ?? null,
+    p_note: update.note ?? null,
+    p_settled_by: update.settledBy ?? null,
+    p_clear: clear,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+export async function deleteExpectedCost(
+  client: SupabaseClient,
+  expectedId: string
+): Promise<void> {
+  const { error } = await client.rpc('delete_expected_cost', { p_expected_id: expectedId });
+  if (error) throw asError(error, "Couldn't remove that");
+}
+
+export interface MilestoneInput {
+  name: string;
+  /** A percentage of the commitment, or an amount — the RPC refuses both, in words. */
+  percent?: number | null;
+  amount?: number | null;
+  amountInclGst?: boolean;
+  dueOn?: string | null;
+}
+
+export async function addMilestone(
+  client: SupabaseClient,
+  quoteId: string,
+  input: MilestoneInput
+): Promise<ProjectMilestone> {
+  const { data, error } = await client.rpc('add_milestone', {
+    p_quote_id: quoteId,
+    p_name: input.name,
+    p_percent: input.percent ?? null,
+    p_amount: input.amount ?? null,
+    p_amount_incl_gst: input.amountInclGst ?? true,
+    p_due_on: input.dueOn ?? null,
+  });
+  return mapMilestone(unwrap<Row>(data, error, "Couldn't add that milestone"));
+}
+
+const MILESTONE_CLEARABLE: Record<string, string> = {
+  percent: 'percent',
+  amount: 'amount',
+  dueOn: 'due_on',
+};
+
+export async function updateMilestone(
+  client: SupabaseClient,
+  milestoneId: string,
+  update: Partial<MilestoneInput>
+): Promise<void> {
+  const clear: string[] = [];
+  for (const [key, column] of Object.entries(MILESTONE_CLEARABLE)) {
+    if (key in update && update[key as keyof MilestoneInput] === null) clear.push(column);
+  }
+
+  const { error } = await client.rpc('update_milestone', {
+    p_milestone_id: milestoneId,
+    p_name: update.name ?? null,
+    p_percent: update.percent ?? null,
+    p_amount: update.amount ?? null,
+    p_amount_incl_gst: update.amountInclGst ?? null,
+    p_due_on: update.dueOn ?? null,
+    p_clear: clear,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+export async function deleteMilestone(
+  client: SupabaseClient,
+  milestoneId: string
+): Promise<void> {
+  const { error } = await client.rpc('delete_milestone', { p_milestone_id: milestoneId });
+  if (error) throw asError(error, "Couldn't remove that");
+}
+
 export async function addPayment(
   client: SupabaseClient,
   quoteId: string,

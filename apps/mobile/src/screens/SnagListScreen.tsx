@@ -467,9 +467,35 @@ export default function SnagListScreen() {
    * reaches for.
    */
   const anyOpen = useMemo(
-    () => sections.some((section) => !collapsed.has(section.key)),
-    [sections, collapsed]
+    () => sections.some((section) => !collapsed.has(section.key))
+      || shoppingRooms.some((one) => !shopShut.has(one.room)),
+    [sections, collapsed, shoppingRooms, shopShut]
   );
+
+  /**
+   * The one control reaches **everything on screen**, the trip sheet included.
+   *
+   * It did not, and the failure was the one a control like this must never
+   * have: with the parts lens up, the card is most of what is visible, so
+   * pressing *Collapse all* folded the rooms underneath it and left the rooms
+   * in front of you exactly as they were — a button that looks like it did
+   * nothing. "Collapse all" has to mean all.
+   *
+   * Expanding clears the shopping folds outright rather than clearing only the
+   * rooms currently listed: a room whose items have all been bought drops out
+   * of the card, and leaving it folded would have it come back shut the next
+   * time something is added to it. Collapsing can only name what is on screen,
+   * which is all collapsing ever means.
+   */
+  const foldEverything = useCallback(() => {
+    const shutting = anyOpen;
+    fold(shutting ? new Set(sections.map((one) => one.key)) : new Set());
+    // Only when the card is up: with the jobs lens on there is no trip sheet,
+    // and writing an empty set would quietly unfold rooms nobody touched.
+    if (shoppingRooms.length > 0) {
+      foldShop(shutting ? new Set(shoppingRooms.map((one) => one.room)) : new Set());
+    }
+  }, [anyOpen, sections, shoppingRooms, fold, foldShop]);
 
   async function handleAdd(input: { photoPath: string | null; description: string | null }) {
     if (!activeProperty) {
@@ -547,50 +573,69 @@ export default function SnagListScreen() {
             dressed as a choice, and the two filter rails were evicted from
             this screen for charging rent on every visit. Tapping it is the
             lens, not a second place parts live. */}
-        {toGet > 0 ? (
-          <Pressable
-            onPress={() => setLens(lens === 'parts' ? 'all' : 'parts')}
-            style={styles.shopTap}
-            accessibilityRole="button"
-            accessibilityLabel={
-              lens === 'parts'
-                ? 'View jobs list'
-                : `View shopping list, ${toGet} ${toGet === 1 ? 'thing' : 'things'} to get`
-            }
-          >
-            <View style={[styles.shopPill, lens === 'parts' && styles.shopPillOn]}>
-              <Icon
-                name="cart-outline"
-                size="md"
-                color={lens === 'parts' ? Colors.white : Colors.textSecondary}
-              />
-              <Text style={[styles.shopCount, lens === 'parts' && styles.shopCountOn]}>
-                {toGet}
+        {/* The two header controls, in a group of their own so they share a
+            **top edge**. The outer row centres its children, and the cart is
+            taller than the filter because of the caption under it — so
+            centring dropped the filter half an inch below the cart and the
+            pair read as misaligned. Nesting them means the whole cluster is
+            centred against the title while the two squares line up with each
+            other, which is the relationship that actually matters. */}
+        <View style={styles.headerBtns}>
+          {toGet > 0 ? (
+            <Pressable
+              onPress={() => setLens(lens === 'parts' ? 'all' : 'parts')}
+              style={styles.shopTap}
+              accessibilityRole="button"
+              accessibilityLabel={
+                lens === 'parts'
+                  ? 'View jobs list'
+                  : `View shopping list, ${toGet} ${toGet === 1 ? 'thing' : 'things'} to get`
+              }
+            >
+              {/* One shape for both buttons, from one style, so they cannot
+                  drift: a 48px square holding a 20px glyph. The count used to
+                  sit inside the cart beside the icon, which made that button
+                  half as wide again as the filter — the count is a *number
+                  about* the button rather than part of it, so it rides the
+                  corner as a badge and leaves the two identical. */}
+              <View style={[styles.iconBtn, lens === 'parts' && styles.iconBtnOn]}>
+                <Icon
+                  name="cart-outline"
+                  size="md"
+                  color={lens === 'parts' ? Colors.white : Colors.textSecondary}
+                />
+                <View style={[styles.shopBadge, lens === 'parts' && styles.shopBadgeOn]}>
+                  <Text
+                    style={[styles.shopBadgeText, lens === 'parts' && styles.shopBadgeTextOn]}
+                  >
+                    {toGet > 99 ? '99+' : toGet}
+                  </Text>
+                </View>
+              </View>
+              {/* A cart with a number on it says there is shopping; it does not
+                  say that pressing it swaps what the screen is showing, and a
+                  control whose whole job is to change the view has to name the
+                  view it changes to. It reads *View jobs list* while the trip
+                  sheet is up, because by then the question has turned round. */}
+              <Text style={styles.shopCaption} numberOfLines={1}>
+                {lens === 'parts' ? 'View jobs list' : 'View shopping list'}
               </Text>
-            </View>
-            {/* A cart with a number on it says there is shopping; it does not
-                say that pressing it swaps what the screen is showing, and a
-                control whose whole job is to change the view has to name the
-                view it changes to. It reads *View jobs list* while the trip
-                sheet is up, because by then the question has turned round. */}
-            <Text style={styles.shopCaption} numberOfLines={1}>
-              {lens === 'parts' ? 'View jobs list' : 'View shopping list'}
-            </Text>
-          </Pressable>
-        ) : null}
+            </Pressable>
+          ) : null}
 
-        <Pressable
-          onPress={() => setFilterOpen(true)}
-          style={[styles.filterBtn, (lens !== 'all' || sort !== 'room') && styles.filterBtnOn]}
-          accessibilityRole="button"
-          accessibilityLabel="Show me"
-        >
-          <Icon
-            name="options-outline"
-            size="md"
-            color={lens !== 'all' || sort !== 'room' ? Colors.white : Colors.textSecondary}
-          />
-        </Pressable>
+          <Pressable
+            onPress={() => setFilterOpen(true)}
+            style={[styles.iconBtn, (lens !== 'all' || sort !== 'room') && styles.iconBtnOn]}
+            accessibilityRole="button"
+            accessibilityLabel="Show me"
+          >
+            <Icon
+              name="options-outline"
+              size="md"
+              color={lens !== 'all' || sort !== 'room' ? Colors.white : Colors.textSecondary}
+            />
+          </Pressable>
+        </View>
       </View>
 
       {/* The count, and the one control that reaches every section at once.
@@ -606,11 +651,8 @@ export default function SnagListScreen() {
           {toDo} to do
           {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
         </Text>
-        {sections.length > 1 ? (
-          <FoldAllPill
-            anyOpen={anyOpen}
-            onPress={() => fold(anyOpen ? new Set(sections.map((one) => one.key)) : new Set())}
-          />
+        {sections.length + shoppingRooms.length > 1 ? (
+          <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
         ) : null}
       </View>
 
@@ -623,9 +665,6 @@ export default function SnagListScreen() {
                 <Icon name="cart-outline" size="md" color={Colors.primary} />
                 <Text style={styles.shoppingTitle}>Pick up on the way</Text>
               </View>
-              <Text style={styles.shoppingHint}>
-                One trip clears {visible.length} {visible.length === 1 ? 'job' : 'jobs'}.
-              </Text>
               {/* Grouped by room, and the room is the heading rather than a
                   label repeated down the right-hand edge — "Outside" nine times
                   over is a column of noise where one word would do, and a trip
@@ -891,7 +930,12 @@ const styles = StyleSheet.create({
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
   title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary },
-  filterBtn: {
+  // Both header buttons, from one style. They were a 48px square beside a
+  // lozenge half as wide again, vertically offset by the caption under the
+  // cart — two controls doing the same kind of job reading as two different
+  // kinds of control.
+  headerBtns: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  iconBtn: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
     borderRadius: Radius.button,
@@ -899,36 +943,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  filterBtnOn: { backgroundColor: Colors.primary },
+  iconBtnOn: { backgroundColor: Colors.primary },
   // The app's one chip: a sunken well when off, solid fern when on, no border
   // either way. The pill is ~34px and the tap area is the full 48 — a rail of
   // lozenges outweighs the list it filters, and a 34px target is invisible
   // until somebody is holding the phone one-handed.
-  // The cart and the filter button are the same size, deliberately. They are
-  // the two controls in this header and the pair reads as ragged when one is a
-  // 48px square and the other a 34px lozenge beside it — the ~34px rule is
-  // about a *rail* of chips outweighing the list it filters, and two header
-  // controls are not a rail.
   shopTap: { alignItems: 'center', gap: Spacing.xs },
-  shopPill: {
-    flexDirection: 'row',
+  shopCaption: { fontSize: Typography.xs, color: Colors.textMuted },
+  // The count rides the corner rather than sitting inside the button. No new
+  // hue: fern when the button is a sunken well, and inverted to white-on-fern
+  // when the button itself has gone fern, so the two never collide.
+  shopBadge: {
+    position: 'absolute',
+    top: -Spacing.xs,
+    right: -Spacing.xs,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    minWidth: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
-    borderRadius: Radius.button,
-    backgroundColor: Colors.sunken,
+    backgroundColor: Colors.primary,
   },
-  shopCaption: { fontSize: Typography.xs, color: Colors.textMuted },
-  shopPillOn: { backgroundColor: Colors.primary },
-  shopCount: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
+  shopBadgeOn: { backgroundColor: Colors.white },
+  shopBadgeText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.white,
   },
-  shopCountOn: { color: Colors.white },
+  shopBadgeTextOn: { color: Colors.primary },
   since: { fontSize: Typography.sm, color: Colors.textMuted, paddingHorizontal: Spacing.lg },
   listContent: { padding: Spacing.lg, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
@@ -968,7 +1011,6 @@ const styles = StyleSheet.create({
   },
   shoppingHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   shoppingTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
-  shoppingHint: { fontSize: Typography.sm, color: Colors.textMuted, marginBottom: Spacing.xs },
   shoppingRow: {
     flexDirection: 'row',
     alignItems: 'center',

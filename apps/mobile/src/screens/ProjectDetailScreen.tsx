@@ -17,7 +17,6 @@ import RecordBillSheet from '../components/RecordBillSheet';
 import BuildUpSheet from '../components/BuildUpSheet';
 import ExpectedCostSheet from '../components/ExpectedCostSheet';
 import EditBudgetSheet from '../components/EditBudgetSheet';
-import AddItemSheet from '../components/AddItemSheet';
 import ScheduleSheet from '../components/ScheduleSheet';
 import CommitmentCard from '../components/CommitmentCard';
 import EditFigureSheet from '../components/EditFigureSheet';
@@ -317,17 +316,25 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
-  async function addItem(elementId: string, name: string, notes: string | null) {
-    if (busy) return;
-    setBusy(true);
+  /**
+   * Names a new item into existence and leaves the sheet open on it.
+   *
+   * The row goes into local state before the re-read so the gesture that
+   * created it — typing a name and reaching straight for the amount box — can
+   * carry on against a real id without waiting for Sydney twice.
+   */
+  async function addItem(elementId: string, name: string): Promise<ProjectItem | null> {
     try {
-      await createItem(elementId, name, notes);
+      const created = await createItem(elementId, name);
+      setItems((rows) => [...rows, created]);
+      setOpenItem(created.id);
+      setAddItemTo(null);
       showToast('Added');
       await reloadMoney();
+      return created;
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't add that");
-    } finally {
-      setBusy(false);
+      return null;
     }
   }
 
@@ -1163,19 +1170,21 @@ export default function ProjectDetailScreen({ route }: Props) {
       />
 
       <ItemSheet
-        visible={openItem !== null}
+        visible={openItem !== null || addItemTo !== null}
         householdId={household.id}
         item={activeItem}
+        creatingIn={addItemTo ? { id: addItemTo.id, name: addItemTo.name } : null}
+        showElement={drawElements}
+        onCreate={addItem}
         quotes={activeItem ? quotesByItem[activeItem.id] ?? [] : []}
         payments={
           activeItem
             ? (quotesByItem[activeItem.id] ?? []).flatMap((quote) => paymentsByQuote[quote.id] ?? [])
             : []
         }
-        onClose={() => setOpenItem(null)}
-        onUpdateItem={async (update, toast) => {
-          if (!activeItem) return;
-          await updateItem(activeItem.id, update);
+        onClose={() => { setOpenItem(null); setAddItemTo(null); }}
+        onUpdateItem={async (itemId, update, toast) => {
+          await updateItem(itemId, update);
           showToast(toast);
           await load();
         }}
@@ -1187,9 +1196,8 @@ export default function ProjectDetailScreen({ route }: Props) {
           showToast('Removed');
           await load();
         }}
-        onAddQuote={async (input) => {
-          if (!activeItem) return;
-          await createQuote({ itemId: activeItem.id, ...input });
+        onAddQuote={async (itemId, input) => {
+          await createQuote({ itemId, ...input });
           showToast('Saved');
           await load();
         }}
@@ -1430,17 +1438,6 @@ export default function ProjectDetailScreen({ route }: Props) {
           await clearFigure(project.id, editingFigure);
           showToast('Back to the prices');
           await reloadMoney();
-        }}
-      />
-
-      <AddItemSheet
-        visible={addItemTo !== null}
-        elementName={addItemTo?.name ?? null}
-        showElement={drawElements}
-        onClose={() => setAddItemTo(null)}
-        onSave={async (name, notes) => {
-          if (!addItemTo) return;
-          await addItem(addItemTo.id, name, notes);
         }}
       />
 

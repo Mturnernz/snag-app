@@ -1783,17 +1783,59 @@ Second, **a bare `+` at the end of a rule reads as punctuation on the heading**
 rather than as something to press, which is the same thing the list tab already
 decided when a chevron beside muted text turned out to read as a caption.
 
-**The price is deliberately not in that modal.** An item's price carries a
-lifecycle — Quote or Invoiced, then accepted, declined, or paid — and it lives
-on the item's own sheet where the whole of it is visible. A second place to
-enter an amount is two writers of one number, which is the failure this feature
-is built against everywhere else. Only the name is required, for the reason the
-thing walkthrough gives: a field somebody must fill in before they can record
-what is in front of them is how a record ends up empty.
+**And the modal the pill opens is `ItemSheet` itself, not a smaller one in
+front of it.** For one commit it was its own sheet asking a name and a note and
+then shutting — which fixed the inline box and immediately bought back the
+journey it was supposed to remove. The next thing anybody does with a new item
+is put a price on it, and that lived one screen further in, so naming a toilet
+was: pill, name, *Add it*, find the row, tap it, and only then the form. Two
+modals and five presses for one act, on the page whose entire redesign was
+about what a bill costs to record.
+
+So the pill opens the item's own sheet, the **title is a box**, and everything
+an item can hold — the price with its GST pill, installed, the notes, the
+paperwork — is on screen from the first keystroke. `AddItemSheet` is deleted
+rather than kept for the create case: two sheets for one noun is how they drift
+about what an item is.
+
+**The row is created the moment the name is committed**, and that is the rule
+to keep. `create_item` refuses an empty name in words, so a sheet opened by
+mistake and walked away from writes **nothing at all** — the same guarantee the
+two-step gave, since what it really turned on was the name and never the button.
+What changed is only *when*: on the blur of the title rather than on a press.
+
+Every control below the title calls `ensureItem` before it writes, and that is
+not belt-and-braces. **On native a press does not reliably blur a `TextInput`**
+— this file already says so about the snag page's Save button — so typing
+"Toilet" and reaching straight for the amount is *one* gesture that has to
+create the row on its way past. Without it that gesture would write nothing and
+say nothing, which is the precise failure a Save button exists to prevent. An
+empty name at that moment is said under the box, in `create_item`'s own words,
+rather than as a toast: it is a fact about the box.
+
+The same box **renames** an existing item, because naming and renaming are one
+act. An emptied name is put back rather than stored — the create path refuses
+one and so does this.
+
+**The price is in the sheet because the sheet is where the price lives**, not
+because adding gained a second place to enter an amount. There is still exactly
+one: `onAddQuote` now takes the item id, so a price saved before the row
+existed creates it first and hangs the quote off the real id. Only the name is
+ever required, for the reason the thing walkthrough gives — a field somebody
+must fill in before they can record what is in front of them is how a record
+ends up empty.
+
+*Also expecting* keeps its own pill and its own sheet: an expected cost is a
+different row with a different shape, and it has never had a second screen in
+front of it.
 
 `ProjectDetailScreen.test.tsx` pins the pill replacing the box rather than
-merely relabelling it, the modal writing name *and* notes through `createItem`,
-the refusal of a nameless item, and the same pill under *Also expecting*.
+merely relabelling it, that the pill opens the item sheet already pointed at
+the part it was pressed inside, that nothing is created until it is, and the
+same pill under *Also expecting*. `ItemSheet.test.tsx` pins the rest: the whole
+sheet being there from the first keystroke, the row created on the title's
+blur, a price saved without blurring creating it on the way past, a sheet
+walked away from writing nothing, the rename, and the emptied name going back.
 
 ### Include or exclude, without deleting it
 

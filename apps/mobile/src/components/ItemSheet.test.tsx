@@ -64,7 +64,7 @@ const boxByLabel = (r: ReturnType<typeof render>, label: string) =>
     { deep: true }
   )[0];
 
-function arrange(quotes: any[] = [quote()], payments: any[] = []) {
+function arrange(quotes: any[] = [quote()], payments: any[] = [], over: any = {}) {
   const onUpdateQuote = jest.fn().mockResolvedValue(undefined);
   const onSetQuoteStatus = jest.fn().mockResolvedValue(undefined);
   const onAddQuote = jest.fn().mockResolvedValue(undefined);
@@ -77,6 +77,8 @@ function arrange(quotes: any[] = [quote()], payments: any[] = []) {
       visible
       householdId="h"
       item={item()}
+      creatingIn={null}
+      onCreate={jest.fn().mockResolvedValue(null)}
       quotes={quotes}
       payments={payments}
       onClose={jest.fn()}
@@ -90,6 +92,7 @@ function arrange(quotes: any[] = [quote()], payments: any[] = []) {
       onAddPayment={onAddPayment}
       onUpdatePayment={onUpdatePayment}
       onDeletePayment={onDeletePayment}
+      {...over}
     />
   );
   return {
@@ -362,6 +365,104 @@ describe('installed, the one state still changed by hand', () => {
     const { r, onUpdateItem } = arrange();
     expect(byLabel(r, 'Mark as installed')).toBeDefined();
     await TestRenderer.act(async () => byLabel(r, 'Mark as installed').props.onPress());
-    expect(onUpdateItem).toHaveBeenCalledWith({ status: 'installed' }, 'Installed');
+    expect(onUpdateItem).toHaveBeenCalledWith('i1', { status: 'installed' }, 'Installed');
+  });
+});
+
+describe('adding an item opens this sheet, not one in front of it', () => {
+  const created = () => item({ id: 'new1', name: 'Toilet' });
+
+  function adding(onCreate = jest.fn().mockResolvedValue(created())) {
+    const onAddQuote = jest.fn().mockResolvedValue(undefined);
+    const onUpdateItem = jest.fn().mockResolvedValue(undefined);
+    const r = render(
+      <ItemSheet
+        visible
+        householdId="h"
+        item={null}
+        creatingIn={{ id: 'e1', name: 'Downstairs laundry' }}
+        showElement
+        onCreate={onCreate}
+        quotes={[]}
+        payments={[]}
+        onClose={jest.fn()}
+        onUpdateItem={onUpdateItem}
+        onDeleteItem={jest.fn().mockResolvedValue(undefined)}
+        onAddQuote={onAddQuote}
+        onSetQuoteStatus={jest.fn().mockResolvedValue(undefined)}
+        onUpdateQuote={jest.fn().mockResolvedValue(undefined)}
+        onDeleteQuote={jest.fn().mockResolvedValue(undefined)}
+        onUpdateQuoteFiles={jest.fn().mockResolvedValue(undefined)}
+        onAddPayment={jest.fn().mockResolvedValue(undefined)}
+        onUpdatePayment={jest.fn().mockResolvedValue(undefined)}
+        onDeletePayment={jest.fn().mockResolvedValue(undefined)}
+      />
+    );
+    return { r, onCreate, onAddQuote, onUpdateItem };
+  }
+
+  it('is the whole item sheet from the first keystroke, not a name-and-note box', async () => {
+    // The thing the second modal could never do: put a price on it without
+    // opening the item you have just made.
+    const { r } = adding();
+    expect(boxByLabel(r, 'What the item is')).toBeDefined();
+    expect(boxByLabel(r, 'Who from')).toBeDefined();
+    expect(boxByLabel(r, 'Amount')).toBeDefined();
+    expect(boxByLabel(r, 'Notes')).toBeDefined();
+    expect(byLabel(r, 'Mark as installed')).toBeDefined();
+  });
+
+  it('creates the row when the title is committed', async () => {
+    const { r, onCreate } = adding();
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'What the item is').props.onChangeText('Toilet');
+    });
+    await TestRenderer.act(async () => boxByLabel(r, 'What the item is').props.onBlur());
+    expect(onCreate).toHaveBeenCalledWith('e1', 'Toilet');
+  });
+
+  it('writes nothing at all from a sheet opened by mistake', async () => {
+    // The guarantee the old two-step gave, kept: walking away without typing
+    // a name leaves no row behind.
+    const { r, onCreate, onUpdateItem } = adding();
+    await TestRenderer.act(async () => boxByLabel(r, 'What the item is').props.onBlur());
+    await TestRenderer.act(async () => byLabel(r, 'Mark as installed').props.onPress());
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(onUpdateItem).not.toHaveBeenCalled();
+    r.getByText('Give it a name — what is it you’re getting?');
+  });
+
+  it('creates the row on the way past when a price is saved without blurring', async () => {
+    // On native a press does not reliably blur a TextInput, so typing a name
+    // and going straight for the amount is one gesture — and without this it
+    // would write nothing and say nothing.
+    const { r, onCreate, onAddQuote } = adding();
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'What the item is').props.onChangeText('Toilet');
+      boxByLabel(r, 'Amount').props.onChangeText('890');
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Save this price').props.onPress());
+
+    expect(onCreate).toHaveBeenCalledWith('e1', 'Toilet');
+    expect(onAddQuote).toHaveBeenCalledWith('new1', expect.objectContaining({ amount: 890 }));
+  });
+
+  it('renames an existing item from the same box', async () => {
+    const { r, onUpdateItem } = arrange();
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'What the item is').props.onChangeText('Shower mixer, chrome');
+    });
+    await TestRenderer.act(async () => boxByLabel(r, 'What the item is').props.onBlur());
+    expect(onUpdateItem).toHaveBeenCalledWith('i1', { name: 'Shower mixer, chrome' }, 'Renamed');
+  });
+
+  it('puts an emptied name back rather than storing one', async () => {
+    const { r, onUpdateItem } = arrange();
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'What the item is').props.onChangeText('');
+    });
+    await TestRenderer.act(async () => boxByLabel(r, 'What the item is').props.onBlur());
+    expect(onUpdateItem).not.toHaveBeenCalled();
+    expect(boxByLabel(r, 'What the item is').props.value).toBe('Shower mixer');
   });
 });

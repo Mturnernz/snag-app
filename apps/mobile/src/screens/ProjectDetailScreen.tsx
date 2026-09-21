@@ -17,6 +17,7 @@ import RecordBillSheet from '../components/RecordBillSheet';
 import BuildUpSheet from '../components/BuildUpSheet';
 import ExpectedCostSheet from '../components/ExpectedCostSheet';
 import EditBudgetSheet from '../components/EditBudgetSheet';
+import AddItemSheet from '../components/AddItemSheet';
 import ScheduleSheet from '../components/ScheduleSheet';
 import CommitmentCard from '../components/CommitmentCard';
 import EditFigureSheet from '../components/EditFigureSheet';
@@ -113,7 +114,7 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [loading, setLoading] = useState(true);
 
   const [openElement, setOpenElement] = useState<string | null>(null);
-  const [itemDraft, setItemDraft] = useState<Record<string, string>>({});
+  const [addItemTo, setAddItemTo] = useState<ProjectElement | null>(null);
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [removingElement, setRemovingElement] = useState<ProjectElement | null>(null);
   const [openItem, setOpenItem] = useState<string | null>(null);
@@ -316,14 +317,13 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
-  async function addItem(elementId: string) {
-    const name = (itemDraft[elementId] ?? '').trim();
-    if (!name || busy) return;
+  async function addItem(elementId: string, name: string, notes: string | null) {
+    if (busy) return;
     setBusy(true);
     try {
-      await createItem(elementId, name);
-      setItemDraft((draft) => ({ ...draft, [elementId]: '' }));
-      await load();
+      await createItem(elementId, name, notes);
+      showToast('Added');
+      await reloadMoney();
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't add that");
     } finally {
@@ -758,18 +758,24 @@ export default function ProjectDetailScreen({ route }: Props) {
         <View style={styles.sectionRow}>
           <Text style={styles.section}>Also expecting</Text>
           <View style={styles.rule} />
-          <Pressable
-            onPress={() => {
-              setEditingExpected(null);
-              setExpectedOpen(true);
-            }}
-            style={styles.plusTap}
-            accessibilityRole="button"
-            accessibilityLabel="Add something you're expecting"
-          >
-            <Icon name="add" size="md" color={Colors.textMuted} />
-          </Pressable>
         </View>
+        {/* The same pill the parts of the job carry, for the same reason: a
+            bare + at the end of a rule reads as punctuation on the heading
+            rather than as something to press. */}
+        <Pressable
+          onPress={() => {
+            setEditingExpected(null);
+            setExpectedOpen(true);
+          }}
+          style={styles.addTap}
+          accessibilityRole="button"
+          accessibilityLabel="Add something you're expecting"
+        >
+          <View style={styles.addPill}>
+            <Icon name="add" size="sm" color={Colors.textSecondary} />
+            <Text style={styles.addPillLabel}>Add an item</Text>
+          </View>
+        </Pressable>
         {expected.filter((cost) => cost.settledBy === null).length === 0 ? (
           <Text style={styles.hint}>
             Nothing yet. The engineer the architect mentioned, the council&rsquo;s share — a
@@ -994,33 +1000,20 @@ export default function ProjectDetailScreen({ route }: Props) {
                     );
                   })}
 
-                  <View style={styles.addRow}>
-                    <TextInput
-                      style={styles.addInput}
-                      value={itemDraft[element.id] ?? ''}
-                      onChangeText={(text) =>
-                        setItemDraft((draft) => ({ ...draft, [element.id]: text }))
-                      }
-                      placeholder="Add an item"
-                      placeholderTextColor={Colors.textMuted}
-                      onSubmitEditing={() => addItem(element.id)}
-                      returnKeyType="done"
-                      accessibilityLabel={`Add an item to ${element.name}`}
-                    />
-                    <Pressable
-                      onPress={() => addItem(element.id)}
-                      disabled={!(itemDraft[element.id] ?? '').trim()}
-                      style={styles.addGo}
-                      accessibilityRole="button"
-                      accessibilityLabel="Add it"
-                    >
-                      <Icon
-                        name="add"
-                        size="md"
-                        color={(itemDraft[element.id] ?? '').trim() ? Colors.primary : Colors.textMuted}
-                      />
-                    </Pressable>
-                  </View>
+                  {/* A pill rather than a box and a +. The inline row was the
+                      compose bar's gesture on a page nobody fills in standing
+                      in a doorway, and it could only ever take the name. */}
+                  <Pressable
+                    onPress={() => setAddItemTo(element)}
+                    style={styles.addTap}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add an item to ${element.name}`}
+                  >
+                    <View style={styles.addPill}>
+                      <Icon name="add" size="sm" color={Colors.textSecondary} />
+                      <Text style={styles.addPillLabel}>Add an item</Text>
+                    </View>
+                  </Pressable>
 
                   {drawElements && element.itemCount > 0 ? (
                     <View style={styles.elementFoot}>
@@ -1518,6 +1511,17 @@ export default function ProjectDetailScreen({ route }: Props) {
         }}
       />
 
+      <AddItemSheet
+        visible={addItemTo !== null}
+        elementName={addItemTo?.name ?? null}
+        showElement={drawElements}
+        onClose={() => setAddItemTo(null)}
+        onSave={async (name, notes) => {
+          if (!addItemTo) return;
+          await addItem(addItemTo.id, name, notes);
+        }}
+      />
+
       <EditBudgetSheet
         visible={budgetOpen}
         budget={project.budget}
@@ -1870,18 +1874,24 @@ const styles = StyleSheet.create({
   includeToggleLabel: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.white },
   includeToggleLabelOff: { color: Colors.textMuted },
 
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
-  addInput: {
-    flex: 1,
-    minWidth: 0,
-    backgroundColor: Colors.sunken,
-    borderRadius: Radius.input,
+  // The app's one pill shape, the same `FoldAllPill` uses: a sunken well, no
+  // border, the label inside it, ~34px inside a 48px target. A control that
+  // adds to a list must not outweigh the list.
+  addTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start' },
+  addPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    height: 34,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    fontSize: Typography.sm,
-    color: Colors.textPrimary,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.sunken,
   },
-  addGo: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },
+  addPillLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.medium,
+    color: Colors.textSecondary,
+  },
 
   elementFoot: { marginTop: Spacing.sm, paddingTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.border },
   elementTotal: { fontFamily: Fonts.mono, fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.semibold },

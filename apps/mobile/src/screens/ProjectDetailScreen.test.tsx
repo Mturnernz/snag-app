@@ -58,6 +58,7 @@ const mock_updateItem = jest.fn();
 const mock_createElement = jest.fn();
 const mock_deleteElement = jest.fn().mockResolvedValue([]);
 const mock_setItemExcluded = jest.fn().mockResolvedValue(undefined);
+const mock_createItem = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -68,7 +69,8 @@ jest.mock('../lib/supabase', () => {
     setQuoteStatus: (...a: unknown[]) => mock_setQuoteStatus(...a),
     updateItem: (...a: unknown[]) => mock_updateItem(...a),
     createElement: (...a: unknown[]) => mock_createElement(...a),
-    createItem: jest.fn(), createQuote: jest.fn(), createThing: jest.fn(),
+    createItem: (...a: unknown[]) => mock_createItem(...a),
+    createQuote: jest.fn(), createThing: jest.fn(),
     createLocation: jest.fn(),
     deleteElement: (...a: unknown[]) => mock_deleteElement(...a),
     setItemExcluded: (...a: unknown[]) => mock_setItemExcluded(...a),
@@ -723,5 +725,65 @@ describe('a price decision re-reads the money, and not the rest of the page', ()
     expect(mock_getProjectFiles.mock.calls.length).toBe(files);
     // The money is derived in a view, so it genuinely has to be re-read.
     expect(mock_getProjectContents.mock.calls.length).toBeGreaterThan(contents);
+  });
+});
+
+/**
+ * Adding an item.
+ *
+ * It was a text box and a `+` under the list — the compose bar's gesture on a
+ * page nobody fills in standing in a doorway, and it could only ever take the
+ * name, so the notes `create_item` accepts had nowhere to go.
+ */
+describe('adding an item to a part of the job', () => {
+  const boxByLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+        && !!n.props?.onChangeText,
+      { deep: true }
+    )[0];
+
+  it('offers a pill rather than an inline box', async () => {
+    const r = await arrange();
+
+    expect(byLabel(r, 'Add an item to Downstairs laundry')).toBeDefined();
+    // The box that used to sit there is gone, not merely relabelled.
+    expect(boxByLabel(r, 'Add an item to Downstairs laundry')).toBeUndefined();
+  });
+
+  it('opens a modal that takes the notes the inline box could never carry', async () => {
+    const r = await arrange();
+
+    await TestRenderer.act(async () => {
+      byLabel(r, 'Add an item to Downstairs laundry').props.onPress();
+    });
+
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'What the item is').props.onChangeText('Shower mixer');
+    });
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'Notes about this item').props.onChangeText('Methven, the one Kate liked');
+    });
+    await TestRenderer.act(async () => {
+      await byLabel(r, 'Add it').props.onPress();
+    });
+
+    expect(mock_createItem).toHaveBeenCalledWith('e1', 'Shower mixer', 'Methven, the one Kate liked');
+  });
+
+  it('will not add something with no name', async () => {
+    const r = await arrange();
+    await TestRenderer.act(async () => {
+      byLabel(r, 'Add an item to Downstairs laundry').props.onPress();
+    });
+    await TestRenderer.act(async () => {
+      await byLabel(r, 'Add it').props.onPress();
+    });
+    expect(mock_createItem).not.toHaveBeenCalled();
+  });
+
+  it('is offered under Also expecting too, as the same pill', async () => {
+    const r = await arrange();
+    expect(byLabel(r, "Add something you're expecting")).toBeDefined();
   });
 });

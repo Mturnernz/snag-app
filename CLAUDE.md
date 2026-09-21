@@ -1676,6 +1676,39 @@ Invoiced took over that meaning. It is the one state still changed by hand, beca
 knows the dishwasher is actually sitting in the kitchen, and it is what lets *Record it in the
 house record* offer itself once something is genuinely in.
 
+### Adding an item is a pill and a modal, not a box and a +
+
+Every part of the job carried a text field reading *Add an item* with a `+`
+beside it, and *Also expecting* carried a bare `+` at the end of its heading
+rule. Both are replaced by **the app's one pill** — sunken well, no border, the
+label inside it, ~34px in a 48px target, exactly as `FoldAllPill` is — reading
+**Add an item**, and both open a modal.
+
+Two reasons, and the first is the one that matters. **The inline box was the
+compose bar's gesture in the wrong place.** That gesture is right for a snag
+filed in ten seconds standing in front of the problem; a renovation's line item
+is named at a desk beside a quote, which is the same argument that keeps the
+compose bar off the House tab and off this one. And it could only ever take the
+**name**: `create_item` accepts notes too, and there was nowhere to type them,
+so anything worth remembering about the item had to be added by opening it
+again straight afterwards — the one journey this app keeps removing.
+
+Second, **a bare `+` at the end of a rule reads as punctuation on the heading**
+rather than as something to press, which is the same thing the list tab already
+decided when a chevron beside muted text turned out to read as a caption.
+
+**The price is deliberately not in that modal.** An item's price carries a
+lifecycle — Quote or Invoiced, then accepted, declined, or paid — and it lives
+on the item's own sheet where the whole of it is visible. A second place to
+enter an amount is two writers of one number, which is the failure this feature
+is built against everywhere else. Only the name is required, for the reason the
+thing walkthrough gives: a field somebody must fill in before they can record
+what is in front of them is how a record ends up empty.
+
+`ProjectDetailScreen.test.tsx` pins the pill replacing the box rather than
+merely relabelling it, the modal writing name *and* notes through `createItem`,
+the refusal of a nameless item, and the same pill under *Also expecting*.
+
 ### Include or exclude, without deleting it
 
 Every item under *Parts of the job* used to carry a tick on its left — *decided*, in the words of

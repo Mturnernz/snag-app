@@ -1,7 +1,24 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY = 'snag.list.collapsed';
+/**
+ * Which list's folds these are. Three surfaces fold rooms away now — the list's
+ * own sections, the shopping card inside it, and the House tab — and they are
+ * deliberately separate: folding the Garage away on the House tab is a
+ * statement about the record you are reading, not about the jobs filed there,
+ * and one key would have each surface silently reaching into the others.
+ *
+ * Namespacing here rather than in three callers keeps the guards in one place:
+ * every read and write below has to survive storage being absent, full or
+ * throwing, and that is not a thing to copy out three times.
+ */
+export type CollapseScope = 'list' | 'shopping' | 'house';
+
+const KEYS: Record<CollapseScope, string> = {
+  list: 'snag.list.collapsed',
+  shopping: 'snag.shopping.collapsed',
+  house: 'snag.house.collapsed',
+};
 
 /**
  * Which sections of the list somebody has folded away.
@@ -23,7 +40,8 @@ const KEY = 'snag.list.collapsed';
  * as work is filed and finished: fold the Garage away, finish everything in the
  * Bathroom, and an index would fold whatever slid into that position.
  */
-export async function readCollapsed(): Promise<string[]> {
+export async function readCollapsed(scope: CollapseScope = 'list'): Promise<string[]> {
+  const KEY = KEYS[scope];
   try {
     const raw = Platform.OS === 'web'
       ? globalThis.localStorage?.getItem(KEY) ?? null
@@ -38,7 +56,11 @@ export async function readCollapsed(): Promise<string[]> {
   }
 }
 
-export async function writeCollapsed(keys: string[]): Promise<void> {
+export async function writeCollapsed(
+  keys: string[],
+  scope: CollapseScope = 'list',
+): Promise<void> {
+  const KEY = KEYS[scope];
   try {
     const raw = JSON.stringify(keys);
     if (Platform.OS === 'web') globalThis.localStorage?.setItem(KEY, raw);

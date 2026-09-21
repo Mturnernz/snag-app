@@ -139,12 +139,62 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  /**
+   * The money and the scope — everything a price can change.
+   *
+   * Deliberately not the whole page: the punch list, the handover offer and
+   * the file roll-up cannot move because somebody accepted a quote, and
+   * re-reading them on every chip press is work nobody asked for. `load` is
+   * still what a focus or a file change calls.
+   */
+  const reloadMoney = useCallback(async () => {
+    try {
+      const [loaded, contents, loadedSuppliers] = await Promise.all([
+        getProject(projectId),
+        getProjectContents(projectId),
+        // Not fatal, the same rule as below.
+        getSupplierTotals(projectId).catch(() => null),
+      ]);
+      setProject(loaded);
+      setElements(contents.elements);
+      setItems(contents.items);
+      setQuotes(contents.quotes);
+      setLines(contents.lines);
+      setPayments(contents.payments);
+      setMilestones(contents.milestones);
+      setExpected(contents.expected);
+      setExpectedCostLines(contents.expectedCostLines);
+      setBills(contents.bills);
+      if (loadedSuppliers) setSuppliers(loadedSuppliers);
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : "Couldn't load that project");
+    }
+  }, [projectId]);
+
+  /**
+   * **One wave, not nine.** Every read here is independent of every other —
+   * `getProjectContents` needs nothing from the suppliers rollup, the punch
+   * list needs nothing from the files — so they are asked for together. They
+   * used to be awaited one at a time, which cost nine sequential round trips
+   * to Sydney before anything appeared.
+   *
+   * The three that are **not fatal** keep that property through
+   * `allSettled` rather than through three `try` blocks in a row: the money
+   * strip is the answer to this page's main question, and a rollup that will
+   * not load must not take the page down — the same rule the thing page's
+   * history card follows.
+   */
   const load = useCallback(async () => {
     try {
-      const [loaded, contents, loadedFiles] = await Promise.all([
+      const [loaded, contents, loadedFiles, extras] = await Promise.all([
         getProject(projectId),
         getProjectContents(projectId),
         getProjectFiles(projectId),
+        Promise.allSettled([
+          getSupplierTotals(projectId),
+          getProjectThings(projectId),
+          getSnags({ projectId }),
+        ]),
       ]);
       setProject(loaded);
       setElements(contents.elements);
@@ -157,29 +207,11 @@ export default function ProjectDetailScreen({ route }: Props) {
       setExpectedCostLines(contents.expectedCostLines);
       setBills(contents.bills);
       setFiles(loadedFiles);
-      // Who is owed what. **Not fatal**: the money strip above it is the answer
-      // to this page's main question, and a rollup that will not load must not
-      // take the page down — the same rule the thing page's history card
-      // follows.
-      try {
-        setSuppliers(await getSupplierTotals(projectId));
-      } catch {
-        setSuppliers([]);
-      }
-      // Same rule: the handover list is an offer, not the page.
-      try {
-        setRecorded(await getProjectThings(projectId));
-      } catch {
-        setRecorded([]);
-      }
-      // The punch list is an ordinary read of the ordinary list. A failure here
-      // must not take the page down — the same rule the thing-history card
-      // follows on the snag page.
-      try {
-        setSnags(await getSnags({ projectId }));
-      } catch {
-        setSnags([]);
-      }
+
+      const [suppliersResult, thingsResult, snagsResult] = extras;
+      setSuppliers(suppliersResult.status === 'fulfilled' ? suppliersResult.value : []);
+      setRecorded(thingsResult.status === 'fulfilled' ? thingsResult.value : []);
+      setSnags(snagsResult.status === 'fulfilled' ? snagsResult.value : []);
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't load that project");
     } finally {
@@ -923,10 +955,21 @@ export default function ProjectDetailScreen({ route }: Props) {
                             is a coin toss about which one gets the tap. */}
                         <Pressable
                           onPress={async () => {
+                            // Shown now, written after, put back if the write
+                            // fails. The round trip and the refresh that
+                            // follows it are around half a second; a toggle
+                            // that waits for them reads as a toggle that did
+                            // not register, and gets pressed again.
+                            const next = !item.excluded;
+                            const before = items;
+                            setItems((rows) => rows.map(
+                              (row) => (row.id === item.id ? { ...row, excluded: next } : row)
+                            ));
                             try {
-                              await setItemExcluded(item.id, !item.excluded);
-                              await load();
+                              await setItemExcluded(item.id, next);
+                              await reloadMoney();
                             } catch (err: unknown) {
+                              setItems(before);
                               showToast(err instanceof Error ? err.message : "That didn’t save");
                             }
                           }}
@@ -1257,18 +1300,39 @@ export default function ProjectDetailScreen({ route }: Props) {
           await load();
         }}
         onUpdateQuote={async (quoteId, update) => {
-          await updateQuote(quoteId, update);
-          showToast('Saved');
-          // Re-read, because a corrected amount moves Quoted, Chosen and Spent
-          // at three levels at once and every one of them is derived in a view.
-          await load();
+          // The header's Quote/Invoiced toggle comes through here, so the
+          // change shows before the round trip. `kind` is a plain column, so
+          // patching it locally cannot disagree with what comes back.
+          const before = quotes;
+          setQuotes((rows) => rows.map(
+            (row) => (row.id === quoteId ? { ...row, ...update } : row)
+          ));
+          try {
+            await updateQuote(quoteId, update);
+            showToast('Saved');
+            // Re-read, because a corrected amount moves Committed, Invoiced
+            // and Paid at three levels at once, all of them derived in a view.
+            await reloadMoney();
+          } catch (err: unknown) {
+            setQuotes(before);
+            showToast(err instanceof Error ? err.message : "That didn’t save");
+          }
         }}
         onSetQuoteStatus={async (quoteId: string, status: ProjectQuoteStatus) => {
-          await setQuoteStatus(quoteId, status);
-          showToast(PROJECT_QUOTE_STATUS_LABELS[status]);
-          // Re-read: accepting moves Committed and Outstanding at three levels
-          // at once, and every one of them is derived in a view.
-          await load();
+          const before = quotes;
+          setQuotes((rows) => rows.map(
+            (row) => (row.id === quoteId ? { ...row, status } : row)
+          ));
+          try {
+            await setQuoteStatus(quoteId, status);
+            showToast(PROJECT_QUOTE_STATUS_LABELS[status]);
+            // Re-read: accepting moves Committed and the two gaps at three
+            // levels at once, and every one of them is derived in a view.
+            await reloadMoney();
+          } catch (err: unknown) {
+            setQuotes(before);
+            showToast(err instanceof Error ? err.message : "That didn’t save");
+          }
         }}
         onDeleteQuote={async (quoteId) => {
           const paths = await deleteQuote(quoteId);
@@ -1282,14 +1346,44 @@ export default function ProjectDetailScreen({ route }: Props) {
           await load();
         }}
         onAddPayment={async (quoteId, amount) => {
-          await addPayment(quoteId, { amount, amountInclGst: true });
-          showToast('Paid');
-          await load();
+          // `unpaid` is derived in the view, so it is patched here to what the
+          // view will say rather than left stale: paying what is outstanding
+          // leaves nothing outstanding. The re-read that follows is what makes
+          // it true rather than merely claimed.
+          const before = quotes;
+          setQuotes((rows) => rows.map(
+            (row) => (row.id === quoteId ? { ...row, unpaid: 0 } : row)
+          ));
+          try {
+            await addPayment(quoteId, { amount, amountInclGst: true });
+            showToast('Paid');
+            await reloadMoney();
+          } catch (err: unknown) {
+            setQuotes(before);
+            showToast(err instanceof Error ? err.message : "That didn’t save");
+          }
         }}
         onDeletePayment={async (paymentId) => {
-          await deletePayment(paymentId);
-          showToast('Not paid');
-          await load();
+          const before = quotes;
+          const beforePayments = payments;
+          const quoteId = payments.find((payment) => payment.id === paymentId)?.quoteId;
+          setPayments((rows) => rows.filter((row) => row.id !== paymentId));
+          if (quoteId) {
+            setQuotes((rows) => rows.map((row) => (
+              row.id === quoteId
+                ? { ...row, unpaid: inclGst(row.amount, row.amountInclGst) ?? 0 }
+                : row
+            )));
+          }
+          try {
+            await deletePayment(paymentId);
+            showToast('Not paid');
+            await reloadMoney();
+          } catch (err: unknown) {
+            setQuotes(before);
+            setPayments(beforePayments);
+            showToast(err instanceof Error ? err.message : "That didn’t save");
+          }
         }}
         onRecordAsThing={() => {
           setThingFor(activeItem);
@@ -1333,7 +1427,7 @@ export default function ProjectDetailScreen({ route }: Props) {
             await createExpectedCost(project.id, input);
             showToast('Added to the forecast');
           }
-          await load();
+          await reloadMoney();
         }}
         onDelete={async () => {
           if (!editingExpected) return;
@@ -1341,23 +1435,23 @@ export default function ProjectDetailScreen({ route }: Props) {
           showToast('Removed');
           setExpectedOpen(false);
           setEditingExpected(null);
-          await load();
+          await reloadMoney();
         }}
         onAddLine={async (input) => {
           if (!editingExpected) return;
           await addExpectedCostLine(editingExpected.id, input);
           showToast('Added');
-          await load();
+          await reloadMoney();
         }}
         onUpdateLine={async (lineId, input) => {
           await updateExpectedCostLine(lineId, input);
           showToast('Saved');
-          await load();
+          await reloadMoney();
         }}
         onDeleteLine={async (lineId) => {
           await deleteExpectedCostLine(lineId);
           showToast('Removed');
-          await load();
+          await reloadMoney();
         }}
       />
 
@@ -1373,12 +1467,12 @@ export default function ProjectDetailScreen({ route }: Props) {
           if (!buildUpFor) return;
           await addQuoteLine(buildUpFor.id, input);
           showToast('Added');
-          await load();
+          await reloadMoney();
         }}
         onDeleteLine={async (lineId) => {
           await deleteQuoteLine(lineId);
           showToast('Removed');
-          await load();
+          await reloadMoney();
         }}
       />
 
@@ -1394,12 +1488,12 @@ export default function ProjectDetailScreen({ route }: Props) {
           if (!scheduleFor) return;
           await addMilestone(scheduleFor.id, input);
           showToast('Added');
-          await load();
+          await reloadMoney();
         }}
         onDelete={async (milestoneId) => {
           await deleteMilestone(milestoneId);
           showToast('Removed');
-          await load();
+          await reloadMoney();
         }}
       />
 
@@ -1414,13 +1508,13 @@ export default function ProjectDetailScreen({ route }: Props) {
           if (!editingFigure) return;
           await setFigure(project.id, editingFigure, { amount, amountInclGst, note });
           showToast('Edited');
-          await load();
+          await reloadMoney();
         }}
         onClear={async () => {
           if (!editingFigure) return;
           await clearFigure(project.id, editingFigure);
           showToast('Back to the prices');
-          await load();
+          await reloadMoney();
         }}
       />
 

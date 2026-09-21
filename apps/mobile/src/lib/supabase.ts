@@ -424,8 +424,8 @@ export const updateExpectedCost = (expectedId: string, update: queries.ExpectedC
 export const deleteExpectedCost = (expectedId: string) =>
   queries.deleteExpectedCost(supabase, expectedId);
 
-export const getExpectedCostLines = (expectedCostIds: string[]) =>
-  queries.getExpectedCostLines(supabase, expectedCostIds);
+export const getExpectedCostLines = (projectId: string) =>
+  queries.getExpectedCostLines(supabase, projectId);
 
 export const addExpectedCostLine = (expectedCostId: string, input: queries.ExpectedCostLineInput) =>
   queries.addExpectedCostLine(supabase, expectedCostId, input);

@@ -3732,81 +3732,73 @@ export async function getProjectContents(
   client: SupabaseClient,
   projectId: string
 ): Promise<ProjectContents> {
-  const { data: elementRows, error: elementError } = await client
-    .from('project_elements_with_totals')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('sort_order', { ascending: true });
-
-  if (elementError) throw asError(elementError, "Couldn't load the parts of this job");
-  const elements = (elementRows ?? []).map(mapElement);
-
-  // Expected costs and bills hang off the project rather than off its parts, so
-  // they are read whatever the shape of the job — a renovation whose only
-  // element is implicit still has council fees and still has bills due.
-  const [expected, bills] = await Promise.all([
+  // **Two waves, not six.** Every read below depends on the project id or on
+  // one of the two id lists the first wave produces, and nothing else — so
+  // what used to be a chain of six sequential round trips is two. On a phone
+  // in Auckland talking to Sydney that was the difference between a page that
+  // felt instant and one that visibly thought about it, because the cost was
+  // never the queries (all of them run in single-digit milliseconds) but the
+  // latency of asking six times in a row.
+  const [elementResult, expected, bills, expectedCostLines, quoteResult] = await Promise.all([
+    client
+      .from('project_elements_with_totals')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('sort_order', { ascending: true }),
+    // Expected costs and bills hang off the project rather than off its parts,
+    // so they are read whatever the shape of the job — a renovation whose only
+    // element is implicit still has council fees and still has bills due.
     getExpectedCosts(client, projectId),
     getProjectBills(client, projectId),
+    getExpectedCostLines(client, projectId),
+    // One read for every price on the job, at whichever level it hangs off.
+    // `reach_project_id` is a stored, indexed column, which is why this needs
+    // neither the elements nor three `in` lists to find them.
+    client
+      .from('project_quotes_with_totals')
+      .select('*')
+      .eq('reach_project_id', projectId)
+      .order('created_at', { ascending: true }),
   ]);
-  const expectedCostLines = await getExpectedCostLines(
-    client,
-    expected.map((cost) => cost.id)
-  );
 
-  if (elements.length === 0) {
-    return {
-      elements, items: [], quotes: [], lines: [], payments: [], milestones: [],
-      expected, expectedCostLines, bills,
-    };
+  if (elementResult.error) {
+    throw asError(elementResult.error, "Couldn't load the parts of this job");
   }
+  if (quoteResult.error) throw asError(quoteResult.error, "Couldn't load the prices");
 
-  const { data: itemRows, error: itemError } = await client
-    .from('project_items_with_totals')
-    .select('*')
-    .in('element_id', elements.map((element) => element.id))
-    .order('sort_order', { ascending: true });
-
-  if (itemError) throw asError(itemError, "Couldn't load what this job takes");
-  const items = (itemRows ?? []).map(mapItem);
-
-  // One read for every price on the job, at whichever level it hangs off.
-  // `reach_project_id` is why this is one round trip rather than three `in`
-  // lists — and why the item one does not put forty ids in a URL.
-  const { data: quoteRows, error: quoteError } = await client
-    .from('project_quotes_with_totals')
-    .select('*')
-    .eq('reach_project_id', projectId)
-    .order('created_at', { ascending: true });
-
-  if (quoteError) throw asError(quoteError, "Couldn't load the prices");
-  const quotes = (quoteRows ?? []).map(mapQuote);
-  if (quotes.length === 0) {
-    return {
-      elements, items, quotes, lines: [], payments: [], milestones: [],
-      expected, expectedCostLines, bills,
-    };
-  }
-
+  const elements = (elementResult.data ?? []).map(mapElement);
+  const quotes = (quoteResult.data ?? []).map(mapQuote);
+  const elementIds = elements.map((element) => element.id);
   const quoteIds = quotes.map((quote) => quote.id);
 
-  const [lineResult, paymentResult, milestoneResult] = await Promise.all([
-    client
+  const empty = { data: [] as Row[], error: null };
+
+  // The second wave hangs off the first and off nothing else, so the items
+  // read and the three quote reads all go together rather than in turn.
+  const [itemResult, lineResult, paymentResult, milestoneResult] = await Promise.all([
+    elementIds.length === 0 ? empty : client
+      .from('project_items_with_totals')
+      .select('*')
+      .in('element_id', elementIds)
+      .order('sort_order', { ascending: true }),
+    quoteIds.length === 0 ? empty : client
       .from('project_quote_lines')
       .select('*')
       .in('quote_id', quoteIds)
       .order('sort_order', { ascending: true }),
-    client
+    quoteIds.length === 0 ? empty : client
       .from('project_payments')
       .select('*')
       .in('quote_id', quoteIds)
       .order('paid_on', { ascending: true }),
-    client
+    quoteIds.length === 0 ? empty : client
       .from('project_milestones')
       .select('*')
       .in('quote_id', quoteIds)
       .order('sort_order', { ascending: true }),
   ]);
 
+  if (itemResult.error) throw asError(itemResult.error, "Couldn't load what this job takes");
   if (lineResult.error) throw asError(lineResult.error, "Couldn't load what the prices cover");
   if (paymentResult.error) throw asError(paymentResult.error, "Couldn't load what has been paid");
   if (milestoneResult.error) {
@@ -3815,7 +3807,7 @@ export async function getProjectContents(
 
   return {
     elements,
-    items,
+    items: (itemResult.data ?? []).map(mapItem),
     quotes,
     lines: (lineResult.data ?? []).map(mapQuoteLine),
     payments: (paymentResult.data ?? []).map(mapPayment),
@@ -4545,13 +4537,17 @@ export async function deleteExpectedCost(
  */
 export async function getExpectedCostLines(
   client: SupabaseClient,
-  expectedCostIds: string[]
+  projectId: string
 ): Promise<ProjectExpectedCostLine[]> {
-  if (expectedCostIds.length === 0) return [];
+  // Filtered through the parent rather than by a list of ids the caller has
+  // to fetch first. `!inner` makes the embed a join rather than a nullable
+  // attachment, so this is one round trip that depends on nothing but the
+  // project — which is what lets it start in the same wave as everything
+  // else `getProjectContents` reads.
   const { data, error } = await client
     .from('project_expected_cost_lines')
-    .select('*')
-    .in('expected_cost_id', expectedCostIds)
+    .select('*, project_expected_costs!inner(project_id)')
+    .eq('project_expected_costs.project_id', projectId)
     .order('created_at', { ascending: true });
   if (error) throw asError(error, "Couldn't load the payments against that");
   return (data ?? []).map(mapExpectedCostLine);

@@ -8,7 +8,8 @@ import type { Snag } from '../types';
 
 const snag = (over: Partial<Snag>): Snag => ({
   id: 'x', reference: 'SNAG-0001', householdId: 'h', propertyId: 'p',
-  room: null, photoPaths: [], description: 'A thing', status: 'open', priority: null,
+  linkedThings: [],
+  room: null, photoPaths: [], description: 'A thing', status: 'open',
   parts: [], bought: [], needsParts: false, dueAt: null, repeatDays: null,
   assigneeId: null, thingId: null, thingName: null, thingMake: null, thingModel: null,
   projectId: null, projectName: null,

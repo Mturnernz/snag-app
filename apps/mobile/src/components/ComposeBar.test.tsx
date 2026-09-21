@@ -95,7 +95,9 @@ describe('ComposeBar', () => {
     const result = render(<ComposeBar pathPrefix="house-1" onAdd={onAdd} />);
 
     // The prompt never changes meaning, and the send button says one thing.
-    expect(field(result).props.placeholder).toBe('Add something…');
+    // It names what the whole bar does rather than describing the field, which
+    // is what lets the camera beside it go back to being an icon.
+    expect(field(result).props.placeholder).toBe('Capture new issue');
 
     await TestRenderer.act(async () => field(result).props.onChangeText('Gutters'));
     await TestRenderer.act(async () => labelled(result, 'Add to the list').props.onPress());
@@ -121,5 +123,43 @@ describe('ComposeBar', () => {
     // 34 + padding would lift it a whole home indicator too far: the keyboard
     // already covers the inset it would otherwise clear.
     expect(style.paddingBottom).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------- camera first
+//
+// A photograph *is* the snag — there is no title column because a picture of
+// the broken seat says what a title would — so the shutter is what this bar is
+// for, and typing is the alternative. The field carries those words; the
+// button does not, because a camera glyph on a fern circle at the foot of a
+// list is not something anybody has to read.
+
+describe('which way of filing is the default', () => {
+  it('puts no label on the camera button', () => {
+    const result = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
+
+    // Deliberately "no *label*" rather than "no Text nodes": Ionicons renders
+    // its glyph as a one-character <Text>, and once the icon font has loaded
+    // that character is real content. Counting nodes would pass or fail
+    // depending on whether an earlier test had warmed the font — which is
+    // exactly the shape of flake this suite should not grow.
+    const words = result
+      .getAllByType('Text')
+      .map((n: any) => String(n.props.children ?? ''));
+    expect(words).not.toContain('Photo');
+  });
+
+  // The glyph is the whole control, so the accessible name is the only thing
+  // saying what it does to somebody who cannot see it.
+  it('still names itself for a screen reader', () => {
+    const result = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
+    expect(labelled(result, 'Take a photo')).toBeDefined();
+  });
+
+  it('still reaches the camera in one tap, never a chooser', async () => {
+    mock_takePhoto.mockClear();
+    const result = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
+    await TestRenderer.act(async () => labelled(result, 'Take a photo').props.onPress());
+    expect(mock_takePhoto).toHaveBeenCalled();
   });
 });

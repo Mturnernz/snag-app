@@ -26,7 +26,11 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 const mock_getSnags = jest.fn();
-jest.mock('../lib/supabase', () => ({ getSnags: (...a: unknown[]) => mock_getSnags(...a) }));
+const mock_getAllProjects = jest.fn().mockResolvedValue([]);
+jest.mock('../lib/supabase', () => ({
+  getSnags: (...a: unknown[]) => mock_getSnags(...a),
+  getAllProjects: (...a: unknown[]) => mock_getAllProjects(...a),
+}));
 jest.mock('../hooks/useHousehold', () => ({
   useHousehold: () => (global as any).__household,
 }));
@@ -39,6 +43,7 @@ function places(count: number) {
   ].slice(0, count);
   (global as any).__household = {
     household: { id: 'h', name: 'Home', createdAt: '' },
+    profile: { id: 'me', displayName: 'Me', createdAt: '', projectsEnabled: true },
     properties: all,
     activeProperty: all[0],
     setActiveProperty: jest.fn(),
@@ -106,9 +111,22 @@ describe('ScheduleScreen', () => {
     places(2);
     await open([]);
 
-    expect(mock_getSnags).toHaveBeenCalledWith({}, 'newest');
     expect(mock_getSnags.mock.calls[0][0].propertyId).toBeUndefined();
     expect(mock_getSnags.mock.calls[0][0].status).toBeUndefined();
+    expect(mock_getSnags.mock.calls[0][1]).toBe('newest');
+    // The one thing it does narrow by, and only when somebody has asked for
+    // it: a mark whose row is a door back to a renovation nothing can open is
+    // a mark that lies about what it leads to.
+    expect(mock_getSnags.mock.calls[0][0].excludeProjectSnags).toBe(false);
+  });
+
+  it('leaves the punch list and the renovations out when projects are off', async () => {
+    places(1);
+    (global as any).__household.profile.projectsEnabled = false;
+    await open([]);
+
+    expect(mock_getSnags.mock.calls[0][0].excludeProjectSnags).toBe(true);
+    expect(mock_getAllProjects).not.toHaveBeenCalled();
   });
 
   it('says which house a row is at, but only when there is a choice', async () => {

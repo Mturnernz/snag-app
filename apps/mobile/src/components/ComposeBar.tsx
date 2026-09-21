@@ -71,7 +71,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
   const off = busy || !pathPrefix;
 
   const cameraLabel = words?.cameraLabel ?? 'Take a photo';
-  const prompt = words?.placeholder ?? 'Add something…';
+  const prompt = words?.placeholder ?? 'Capture new issue';
   // The accessible name is the prompt without its trailing ellipsis: a screen
   // reader saying "Say what it is dot dot dot" is reading punctuation aloud.
   const promptLabel = prompt.replace(/[….]+$/, '');
@@ -128,6 +128,21 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
         },
       ]}
     >
+      {/* **The camera is the default way to log something, and the field says
+          so rather than the button.** A photograph *is* the snag — there is no
+          title column because a picture of the broken seat says what a title
+          would — so the shutter is what this bar is for, and typing is the
+          alternative.
+
+          It carried the word "Photo" for one commit. That put a label on the
+          control whose meaning is least in doubt: a camera glyph on a fern
+          circle at the foot of a list is not something anybody has to read.
+          The words belong in the field instead, where they say what the whole
+          bar does, and the button goes back to the icon.
+
+          Still bottom-left, which is the easiest place on a phone to reach
+          one-handed — the old Add screen had it at the top, which is the
+          hardest — and still one tap to the camera, not to a chooser. */}
       <Pressable
         onPress={handlePhoto}
         disabled={off}
@@ -189,6 +204,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Disabled goes neutral rather than faded: fern at half strength is a pale
+  // sage that reads as broken rather than as not-ready, and white on pale sage
+  // fails contrast on the way past.
   cameraOff: { backgroundColor: Colors.sunken },
   field: {
     flex: 1,

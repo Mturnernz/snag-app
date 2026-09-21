@@ -11,7 +11,6 @@
 // ---------------------------------------------------------------- enums
 
 export type SnagStatus = 'open' | 'doing' | 'done';
-export type SnagPriority = 'high' | 'low';
 
 /**
  * Unused by the UI in v1 — both members are owners and nothing gates on this.
@@ -30,13 +29,6 @@ export const STATUS_LABELS: Record<SnagStatus, string> = {
   doing: 'Doing',
   done: 'Done',
 };
-
-export const PRIORITY_LABELS: Record<SnagPriority, string> = {
-  high: 'High',
-  low: 'Low',
-};
-
-export const PRIORITY_ORDER: SnagPriority[] = ['high', 'low'];
 
 /**
  * The intervals a house actually runs on — one vocabulary, two selections from
@@ -97,6 +89,22 @@ export interface Profile {
    * theirs. See `20260915091000`.
    */
   deletedAt?: string | null;
+  /**
+   * Whether this person wants the Projects tab and the work filed under it.
+   *
+   * **The one setting in this app that belongs to a person rather than to the
+   * house.** Everything else the schema remembers is per household or per
+   * property, because there is one house and two people disagreeing about
+   * whether it has a dryer is not a state worth modelling. This is not that:
+   * a renovation is a third noun and a household without one pays a tab, a set
+   * of reads and a row of controls for a feature that answers nothing. One
+   * member putting that away must not take it off the other's phone.
+   *
+   * Off hides the tab *and* the jobs filed against a project — a punch list
+   * with no way to reach the renovation it belongs to is a row of orphans.
+   * See `excludeProjectSnags`.
+   */
+  projectsEnabled: boolean;
 }
 
 /**
@@ -208,6 +216,23 @@ export interface Location {
   sortOrder: number;
 }
 
+/**
+ * One of the things a job is about, as the view hands it over.
+ *
+ * Enough to draw the card and no more — the name to recognise it, the model to
+ * read in a shop, the room for the chip. Anything else is a tap away on the
+ * thing's own page, and a job that carried whole `Thing` rows would be paying
+ * for a spec sheet per link on a screen people open constantly.
+ */
+export interface LinkedThing {
+  id: string;
+  name: string | null;
+  room: string | null;
+  make: string | null;
+  model: string | null;
+  kind: ThingKind;
+}
+
 export interface Snag {
   id: string;
   reference: string;
@@ -224,10 +249,32 @@ export interface Snag {
   room: string | null;
   photoPaths: string[];
   description: string | null;
-  /** Set at capture — the one judgement only the person standing there can make. */
-  priority: SnagPriority | null;
 
-  /** Triage — added later, from the list. */
+  /**
+   * What the job is about, whole, from `home.snag_things`.
+   *
+   * `snags.thing_id` is the retired single link: its rows were backfilled into
+   * the join table and nothing writes it any more. It stays because
+   * `thing_name`/`make`/`model` still read from it for the extract's *About*
+   * column, and because deleting a column rewrites what somebody said.
+   */
+  linkedThings: LinkedThing[];
+
+  /**
+   * Triage — added later, from the list.
+   *
+   * **There is no priority here any more, and `home.snags.priority` is left
+   * unread rather than dropped.** It was asked at capture, defended as the one
+   * judgement only the person standing there can make — and nearly everything
+   * was filed Low, which is the premise of this product rather than a finding.
+   * Moving it to triage did not save it: urgency is comparative, a household
+   * list is a dozen small jobs none of which is an emergency, and a badge that
+   * is grey on every row is a column of noise. What actually sorts this list is
+   * a date and a trip to the shop.
+   *
+   * The column stays because rows still hold answers somebody gave, and
+   * dropping it would rewrite what they said. Nothing reads it.
+   */
   status: SnagStatus;
   /**
    * What it needs from the shop, in the words you'd read in the aisle.
@@ -348,7 +395,6 @@ export interface SnagFilter {
   status?: SnagStatus[];
   room?: string | null;
   assigneeId?: string | null;
-  priority?: SnagPriority[];
   /** Only items with a due date at or before now. */
   dueOnly?: boolean;
   needsParts?: boolean;
@@ -360,9 +406,20 @@ export interface SnagFilter {
    * everything else. One place work lives, or neither is trustworthy.
    */
   projectId?: string | null;
+  /**
+   * Leave out every job filed against a renovation.
+   *
+   * What *Projects off* means on the list, and it is a filter rather than a
+   * client-side `.filter()` deliberately: the header count, the shopping pill,
+   * the Schedule tab and both extracts each read snags separately, and a
+   * subtraction applied in one of them is four screens disagreeing about how
+   * much there is to do. Asked of Postgres once, every reader gets the same
+   * answer.
+   */
+  excludeProjectSnags?: boolean;
 }
 
-export type SnagSort = 'newest' | 'oldest' | 'due' | 'priority';
+export type SnagSort = 'newest' | 'oldest' | 'due';
 
 // ------------------------------------------------------------- the house record
 

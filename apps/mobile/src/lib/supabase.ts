@@ -195,6 +195,12 @@ export const getMyProfile = () => queries.getMyProfile(supabase);
 export const upsertProfile = (displayName: string) =>
   queries.upsertProfile(supabase, displayName);
 
+export const setSnagThings = (snagId: string, thingIds: string[]) =>
+  queries.setSnagThings(supabase, snagId, thingIds);
+
+export const setProjectsEnabled = (enabled: boolean) =>
+  queries.setProjectsEnabled(supabase, enabled);
+
 export const getMyHousehold = () => queries.getMyHousehold(supabase);
 
 export const createHousehold = (name: string, propertyName?: string) =>

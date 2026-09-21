@@ -20,6 +20,8 @@ import {
   createSnag, getFileUrls, getSnags, getThings, markListSeen, setPartBought, updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { readCollapsed, writeCollapsed } from '../lib/collapsed';
+import FoldAllPill from '../components/FoldAllPill';
 import {
   assessmentBrief, exportDateStamp, isDoneForNow, shoppingCount, shoppingList,
   snagExportPhotos, snagExportTable,
@@ -57,14 +59,17 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  *   the product has to offer.
  */
 
-type Lens = 'all' | 'mine' | 'parts' | 'urgent';
+type Lens = 'all' | 'parts';
 type Sort = 'room' | 'newest' | 'due';
 
+// Two, where there were four. **Mine** read `assignee_id` and **Urgent** read
+// `priority`, and nothing in the app writes either any more — a lens over a
+// column nothing can set is a filter that comes back empty for ever and tells
+// nobody why. What is left is the one that answers a question somebody actually
+// arrives with: is there a trip to the shop in this.
 const LENSES: { key: Lens; label: string }[] = [
   { key: 'all', label: 'Everything' },
-  { key: 'mine', label: 'Mine' },
   { key: 'parts', label: 'Needs parts' },
-  { key: 'urgent', label: 'Urgent' },
 ];
 
 const SORTS: { key: Sort; label: string }[] = [
@@ -94,6 +99,15 @@ export default function SnagListScreen() {
   } = useHousehold();
   const { showToast } = useToast();
 
+  /**
+   * Which sections are folded away, by key.
+   *
+   * Read once on mount and written on every change. Opens expanded whatever
+   * happens — a storage read that fails, or a first run — because the first
+   * thing this screen has to say is what the other person added, and a list
+   * that opens folded says nothing at all until somebody unfolds it.
+   */
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [lens, setLens] = useState<Lens>('all');
   const [sort, setSort] = useState<Sort>('room');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -127,14 +141,27 @@ export default function SnagListScreen() {
   const seenThisVisit = useRef(false);
 
   const propertyId = properties.length > 1 ? activeProperty?.id ?? null : null;
+  /**
+   * Projects off means the punch list goes too.
+   *
+   * A job filed against a renovation is reachable from that renovation's page,
+   * and with the tab gone there is no page — so what is left on the list is a
+   * row that names a job nothing can open. Asked of Postgres rather than
+   * filtered here, so the header count, the shopping pill and both extracts get
+   * the same answer rather than four subtractions that have to agree.
+   */
+  const excludeProjectSnags = !profile.projectsEnabled;
 
   const load = useCallback(async () => {
     try {
       const [open, finished] = await Promise.all([
-        getSnags({ propertyId, status: ['open', 'doing'] }, sort === 'due' ? 'due' : 'newest'),
+        getSnags(
+          { propertyId, excludeProjectSnags, status: ['open', 'doing'] },
+          sort === 'due' ? 'due' : 'newest',
+        ),
         // Small by construction — a household finishes a handful a week, and
         // only the last week of them is ever rendered.
-        getSnags({ propertyId, status: ['done'] }, 'newest'),
+        getSnags({ propertyId, excludeProjectSnags, status: ['done'] }, 'newest'),
       ]);
       setSnags(open);
       setDone(finished);
@@ -148,7 +175,7 @@ export default function SnagListScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propertyId, sort]);
+  }, [propertyId, sort, excludeProjectSnags]);
 
   useEffect(() => {
     setLoading(true);
@@ -167,14 +194,22 @@ export default function SnagListScreen() {
     markListSeen().then(setSeenBefore);
   }, []);
 
+  useEffect(() => {
+    readCollapsed().then((keys) => setCollapsed(new Set(keys)));
+  }, []);
+
+  /** One place the fold is changed, so the device's copy can never fall behind. */
+  const fold = useCallback((next: Set<string>) => {
+    setCollapsed(next);
+    void writeCollapsed([...next]);
+  }, []);
+
   const visible = useMemo(() => {
     switch (lens) {
-      case 'mine': return snags.filter((s) => s.assigneeId === profile.id);
       case 'parts': return snags.filter((s) => s.needsParts);
-      case 'urgent': return snags.filter((s) => s.priority === 'high');
       default: return snags;
     }
-  }, [snags, lens, profile.id]);
+  }, [snags, lens]);
 
   /**
    * An extract of the list.
@@ -250,6 +285,49 @@ export default function SnagListScreen() {
   );
 
   /**
+   * The trip sheet, arranged the way the list itself is: by room.
+   *
+   * A flat run of fifteen items with the room repeated down the right-hand edge
+   * says the room fifteen times and groups nothing — "Outside" nine times over
+   * is a column of noise where one heading would do. Batching is the whole
+   * argument for the list grouping by room in the first place (you do the
+   * garage once), and a shopping trip is the same shape: the tomatoes and the
+   * basil are one stop.
+   *
+   * Seeded `locations` order, like everywhere else, so the trip sheet and the
+   * rooms below it cannot disagree about how the house is arranged.
+   */
+  const shoppingRooms = useMemo(() => {
+    const order = locations.map((one) => one.name);
+    const byRoom = new Map<string, typeof shopping>();
+    for (const row of shopping) {
+      const room = row.snag.room ?? NO_ROOM;
+      if (!byRoom.has(room)) byRoom.set(room, []);
+      byRoom.get(room)!.push(row);
+    }
+    const seen = [...byRoom.keys()];
+    const ranked = [...seen].sort((a, b) => {
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      // A room the vocabulary no longer holds still has items filed under it,
+      // because `snags.room` is TEXT precisely so history survives a tag being
+      // removed. It sorts after the seeded ones rather than jumping to the top.
+      return (ia === -1 ? order.length : ia) - (ib === -1 ? order.length : ib);
+    });
+    return ranked.map((room) => ({ room, rows: byRoom.get(room)! }));
+  }, [shopping, locations]);
+
+  /** Folded rooms on the trip sheet, kept apart from the list's own folds. */
+  const [shopShut, setShopShut] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    readCollapsed('shopping').then((keys) => setShopShut(new Set(keys)));
+  }, []);
+  const foldShop = useCallback((next: Set<string>) => {
+    setShopShut(next);
+    void writeCollapsed([...next], 'shopping');
+  }, []);
+
+  /**
    * How many things are still to get, across the whole list rather than the
    * lens — the pill is how somebody finds out there is shopping to do, so
    * counting only what a filter already reveals would answer a question nobody
@@ -313,12 +391,15 @@ export default function SnagListScreen() {
     const settledIds = new Set(settled.map((s) => s.id));
     const rest = visible.filter((s) =>
       !freshIds.has(s.id) && s.id !== pinnedId && !settledIds.has(s.id));
-    const out: { title: string; isNew?: boolean; data: Snag[] }[] = [];
+    // A key that survives the count in the title changing, and the section
+    // moving up or down the list as work is filed and finished. Folding by
+    // index would fold whatever slid into that position.
+    const out: { key: string; title: string; isNew?: boolean; data: Snag[] }[] = [];
 
-    if (pinned.length > 0) out.push({ title: 'Just added', isNew: true, data: pinned });
+    if (pinned.length > 0) out.push({ key: 'just-added', title: 'Just added', isNew: true, data: pinned });
     if (fresh.length > 0) {
       const others = fresh.filter((s) => s.id !== pinnedId);
-      if (others.length > 0) out.push({ title: 'New', isNew: true, data: others });
+      if (others.length > 0) out.push({ key: 'new', title: 'New', isNew: true, data: others });
     }
 
     if (sort === 'room') {
@@ -334,23 +415,87 @@ export default function SnagListScreen() {
       const known = order.filter((name) => byRoom.has(name));
       const extra = [...byRoom.keys()].filter((n) => !order.includes(n) && n !== NO_ROOM).sort();
       for (const name of [...known, ...extra, ...(byRoom.has(NO_ROOM) ? [NO_ROOM] : [])]) {
-        out.push({ title: `${name} · ${byRoom.get(name)!.length}`, data: byRoom.get(name)! });
+        out.push({
+          key: `room:${name}`,
+          title: `${name} · ${byRoom.get(name)!.length}`,
+          data: byRoom.get(name)!,
+        });
       }
     } else if (rest.length > 0) {
-      out.push({ title: sort === 'due' ? 'By when' : 'Everything else', data: rest });
+      out.push({
+        key: 'rest',
+        title: sort === 'due' ? 'By when' : 'Everything else',
+        data: rest,
+      });
     }
 
     if (settled.length > 0) {
       // The Schedule tab's words for the same fact, so the two screens do not
       // invent two names for one mechanism.
-      out.push({ title: `Comes round again · ${settled.length}`, data: settled });
+      out.push({ key: 'settled', title: `Comes round again · ${settled.length}`, data: settled });
     }
 
     if (showDone && recentlyDone.length > 0) {
-      out.push({ title: 'Done this week', data: recentlyDone });
+      out.push({ key: 'done', title: 'Done this week', data: recentlyDone });
     }
     return out;
   }, [fresh, visible, sort, locations, showDone, recentlyDone, justAdded]);
+
+  /**
+   * The same sections, with the folded ones emptied rather than removed.
+   *
+   * The heading stays — that is the whole point of folding: "there are three
+   * things in the Garage" is what the grouping exists to say, and a fold that
+   * took the heading with it would be a filter rather than a fold. Emptying
+   * `data` is also what keeps the fold free: `SectionList` renders no rows, so
+   * a long list costs nothing to scroll past.
+   */
+  const shownSections = useMemo(
+    () => sections.map((section) => (
+      collapsed.has(section.key) ? { ...section, data: [] } : section
+    )),
+    [sections, collapsed]
+  );
+
+  /**
+   * Whether the control at the top offers to open everything or shut it.
+   *
+   * It says the thing it will *do*, and it decides from whether anything is
+   * still open — so the one press that is never a no-op is the one on offer.
+   * With every section already folded it reads *Expand all*; with any section
+   * open it reads *Collapse all*, which is what somebody scanning a long list
+   * reaches for.
+   */
+  const anyOpen = useMemo(
+    () => sections.some((section) => !collapsed.has(section.key))
+      || shoppingRooms.some((one) => !shopShut.has(one.room)),
+    [sections, collapsed, shoppingRooms, shopShut]
+  );
+
+  /**
+   * The one control reaches **everything on screen**, the trip sheet included.
+   *
+   * It did not, and the failure was the one a control like this must never
+   * have: with the parts lens up, the card is most of what is visible, so
+   * pressing *Collapse all* folded the rooms underneath it and left the rooms
+   * in front of you exactly as they were — a button that looks like it did
+   * nothing. "Collapse all" has to mean all.
+   *
+   * Expanding clears the shopping folds outright rather than clearing only the
+   * rooms currently listed: a room whose items have all been bought drops out
+   * of the card, and leaving it folded would have it come back shut the next
+   * time something is added to it. Collapsing can only name what is on screen,
+   * which is all collapsing ever means.
+   */
+  const foldEverything = useCallback(() => {
+    const shutting = anyOpen;
+    fold(shutting ? new Set(sections.map((one) => one.key)) : new Set());
+    // Only when the card is up: with the jobs lens on there is no trip sheet,
+    // and writing an empty set would quietly unfold rooms nobody touched.
+    if (shoppingRooms.length > 0) {
+      foldShop(shutting ? new Set(shoppingRooms.map((one) => one.room)) : new Set());
+    }
+  }, [anyOpen, sections, shoppingRooms, fold, foldShop]);
 
   async function handleAdd(input: { photoPath: string | null; description: string | null }) {
     if (!activeProperty) {
@@ -361,17 +506,8 @@ export default function SnagListScreen() {
       propertyId: activeProperty.id,
       description: input.description,
       photoPaths: input.photoPath ? [input.photoPath] : [],
-      // Priority is not asked at capture any more. Nearly everything was filed
-      // Low, and urgency is comparative — it belongs where twelve things are
-      // visible at once. The amend row offers it for the case that isn't.
-      priority: null,
     });
     setJustAdded(snag);
-    // Started here rather than awaited: the sheet opens on "What's wrong?" and
-    // the step this feeds is two taps away, so the read has the whole of that
-    // to arrive in. If it is slow the step appears late; if it fails the step
-    // never appears. Neither can block a snag that is already filed.
-    void loadThings(activeProperty.id);
     await load();
   }
 
@@ -437,47 +573,91 @@ export default function SnagListScreen() {
             dressed as a choice, and the two filter rails were evicted from
             this screen for charging rent on every visit. Tapping it is the
             lens, not a second place parts live. */}
-        {toGet > 0 ? (
-          <Pressable
-            onPress={() => setLens(lens === 'parts' ? 'all' : 'parts')}
-            style={styles.shopTap}
-            accessibilityRole="button"
-            accessibilityLabel={`${toGet} ${toGet === 1 ? 'thing' : 'things'} to get`}
-          >
-            <View style={[styles.shopPill, lens === 'parts' && styles.shopPillOn]}>
-              <Icon
-                name="cart-outline"
-                size="sm"
-                color={lens === 'parts' ? Colors.white : Colors.textSecondary}
-              />
-              <Text style={[styles.shopCount, lens === 'parts' && styles.shopCountOn]}>
-                {toGet}
+        {/* The two header controls, in a group of their own so they share a
+            **top edge**. The outer row centres its children, and the cart is
+            taller than the filter because of the caption under it — so
+            centring dropped the filter half an inch below the cart and the
+            pair read as misaligned. Nesting them means the whole cluster is
+            centred against the title while the two squares line up with each
+            other, which is the relationship that actually matters. */}
+        <View style={styles.headerBtns}>
+          {toGet > 0 ? (
+            <Pressable
+              onPress={() => setLens(lens === 'parts' ? 'all' : 'parts')}
+              style={styles.shopTap}
+              accessibilityRole="button"
+              accessibilityLabel={
+                lens === 'parts'
+                  ? 'View jobs list'
+                  : `View shopping list, ${toGet} ${toGet === 1 ? 'thing' : 'things'} to get`
+              }
+            >
+              {/* One shape for both buttons, from one style, so they cannot
+                  drift: a 48px square holding a 20px glyph. The count used to
+                  sit inside the cart beside the icon, which made that button
+                  half as wide again as the filter — the count is a *number
+                  about* the button rather than part of it, so it rides the
+                  corner as a badge and leaves the two identical. */}
+              <View style={[styles.iconBtn, lens === 'parts' && styles.iconBtnOn]}>
+                <Icon
+                  name="cart-outline"
+                  size="md"
+                  color={lens === 'parts' ? Colors.white : Colors.textSecondary}
+                />
+                <View style={[styles.shopBadge, lens === 'parts' && styles.shopBadgeOn]}>
+                  <Text
+                    style={[styles.shopBadgeText, lens === 'parts' && styles.shopBadgeTextOn]}
+                  >
+                    {toGet > 99 ? '99+' : toGet}
+                  </Text>
+                </View>
+              </View>
+              {/* A cart with a number on it says there is shopping; it does not
+                  say that pressing it swaps what the screen is showing, and a
+                  control whose whole job is to change the view has to name the
+                  view it changes to. It reads *View jobs list* while the trip
+                  sheet is up, because by then the question has turned round. */}
+              <Text style={styles.shopCaption} numberOfLines={1}>
+                {lens === 'parts' ? 'View jobs list' : 'View shopping list'}
               </Text>
-            </View>
-          </Pressable>
-        ) : null}
+            </Pressable>
+          ) : null}
 
-        <Pressable
-          onPress={() => setFilterOpen(true)}
-          style={[styles.filterBtn, (lens !== 'all' || sort !== 'room') && styles.filterBtnOn]}
-          accessibilityRole="button"
-          accessibilityLabel="Show me"
-        >
-          <Icon
-            name="options-outline"
-            size="md"
-            color={lens !== 'all' || sort !== 'room' ? Colors.white : Colors.textSecondary}
-          />
-        </Pressable>
+          <Pressable
+            onPress={() => setFilterOpen(true)}
+            style={[styles.iconBtn, (lens !== 'all' || sort !== 'room') && styles.iconBtnOn]}
+            accessibilityRole="button"
+            accessibilityLabel="Show me"
+          >
+            <Icon
+              name="options-outline"
+              size="md"
+              color={lens !== 'all' || sort !== 'room' ? Colors.white : Colors.textSecondary}
+            />
+          </Pressable>
+        </View>
       </View>
 
-      <Text style={styles.since}>
-        {toDo} to do
-        {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
-      </Text>
+      {/* The count, and the one control that reaches every section at once.
+          On the same line because both are *about* the list rather than in it,
+          and because this screen has already evicted two filter rails for
+          charging vertical rent on every visit — a row of its own for one
+          control would be the third.
+
+          It says what pressing it does and decides that from whether anything
+          is still open, so the press on offer is never a no-op. */}
+      <View style={styles.sinceRow}>
+        <Text style={styles.since}>
+          {toDo} to do
+          {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
+        </Text>
+        {sections.length + shoppingRooms.length > 1 ? (
+          <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
+        ) : null}
+      </View>
 
       <SectionList
-        sections={sections}
+        sections={shownSections}
         ListHeaderComponent={
           shopping.length > 0 ? (
             <View style={styles.shopping}>
@@ -485,47 +665,98 @@ export default function SnagListScreen() {
                 <Icon name="cart-outline" size="md" color={Colors.primary} />
                 <Text style={styles.shoppingTitle}>Pick up on the way</Text>
               </View>
-              <Text style={styles.shoppingHint}>
-                One trip clears {visible.length} {visible.length === 1 ? 'job' : 'jobs'}.
-              </Text>
-              {/* A ticked row stays, struck through, rather than vanishing
+              {/* Grouped by room, and the room is the heading rather than a
+                  label repeated down the right-hand edge — "Outside" nine times
+                  over is a column of noise where one word would do, and a trip
+                  to the shop batches the same way the list does.
+
+                  A ticked row stays, struck through, rather than vanishing
                   under the finger that tapped it: otherwise undoing a mis-tap
                   means remembering which job the item belonged to. It leaves on
                   its own terms — a job with nothing left to get stops being
                   `needs_parts`, drops out of this lens, and takes its rows with
                   it, so the card empties as the trip ends. */}
-              {shopping.map(({ item, snag, bought }) => (
-                <Pressable
-                  key={`${snag.id}-${item}`}
-                  onPress={() => tick(snag.id, item, !bought)}
-                  style={styles.shoppingRow}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: bought }}
-                  accessibilityLabel={bought ? `${item}, got it` : `${item}, tick off`}
-                >
-                  <Icon
-                    name={bought ? 'checkmark-circle' : 'ellipse-outline'}
-                    size="sm"
-                    color={bought ? Colors.primary : Colors.textMuted}
-                  />
-                  <Text style={[styles.shoppingItem, bought && styles.shoppingItemGot]}>
-                    {item}
-                  </Text>
-                  <Text style={styles.shoppingFor}>{snag.room ?? '—'}</Text>
-                </Pressable>
-              ))}
+              {shoppingRooms.map(({ room, rows }) => {
+                const shut = shopShut.has(room);
+                const left = rows.filter((one) => !one.bought).length;
+                return (
+                  <View key={room}>
+                    {/* The heading stays when the room is folded, carrying its
+                        count — which is the whole point of the grouping, the
+                        same rule the list's own sections keep. A fold that took
+                        the heading with it would be a filter. */}
+                    <Pressable
+                      onPress={() => {
+                        const next = new Set(shopShut);
+                        if (shut) next.delete(room); else next.add(room);
+                        foldShop(next);
+                      }}
+                      style={styles.shopRoomRow}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: !shut }}
+                      accessibilityLabel={`${room}, ${left} to get`}
+                    >
+                      <Icon
+                        name={shut ? 'chevron-forward' : 'chevron-down'}
+                        size="sm"
+                        color={Colors.textMuted}
+                      />
+                      <Text style={styles.shopRoom}>{room}</Text>
+                      <Text style={styles.shopRoomCount}>{left}</Text>
+                    </Pressable>
+
+                    {shut ? null : rows.map(({ item, snag, bought }) => (
+                      <Pressable
+                        key={`${snag.id}-${item}`}
+                        onPress={() => tick(snag.id, item, !bought)}
+                        style={styles.shoppingRow}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: bought }}
+                        accessibilityLabel={bought ? `${item}, got it` : `${item}, tick off`}
+                      >
+                        <Icon
+                          name={bought ? 'checkmark-circle' : 'ellipse-outline'}
+                          size="sm"
+                          color={bought ? Colors.primary : Colors.textMuted}
+                        />
+                        <Text style={[styles.shoppingItem, bought && styles.shoppingItemGot]}>
+                          {item}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                );
+              })}
             </View>
           ) : null
         }
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.listContent, sections.length === 0 && styles.listEmpty]}
         stickySectionHeadersEnabled={false}
-        renderSectionHeader={({ section }) => (
-          <View style={styles.groupRow}>
-            <Text style={[styles.group, section.isNew && styles.groupNew]}>{section.title}</Text>
-            <View style={styles.groupRule} />
-          </View>
-        )}
+        renderSectionHeader={({ section }) => {
+          const shut = collapsed.has(section.key);
+          return (
+            <Pressable
+              onPress={() => {
+                const next = new Set(collapsed);
+                if (shut) next.delete(section.key); else next.add(section.key);
+                fold(next);
+              }}
+              style={styles.groupRow}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: !shut }}
+              accessibilityLabel={`${section.title}, ${shut ? 'show' : 'hide'}`}
+            >
+              <Icon
+                name={shut ? 'chevron-forward' : 'chevron-down'}
+                size="sm"
+                color={section.isNew ? Colors.primary : Colors.textMuted}
+              />
+              <Text style={[styles.group, section.isNew && styles.groupNew]}>{section.title}</Text>
+              <View style={styles.groupRule} />
+            </Pressable>
+          );
+        }}
         renderItem={({ item }) => (
           <SnagCard
             snag={item}
@@ -593,12 +824,6 @@ export default function SnagListScreen() {
           busy={amending}
           onSaveNote={(text) => amend({ description: text }, 'Added')}
           onSetRoom={(room) => amend({ room }, room ?? 'Tag removed')}
-          things={things}
-          onSetThing={(thingId) => amend(
-            { thingId },
-            thingId ? 'Noted what it\'s about' : 'No longer about that',
-          )}
-          onSetUrgent={(urgent) => amend({ priority: urgent ? 'high' : null }, urgent ? 'Marked urgent' : 'No longer urgent')}
           onOpenDetail={() => {
             const id = justAdded.id;
             setJustAdded(null);
@@ -705,7 +930,12 @@ const styles = StyleSheet.create({
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
   title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary },
-  filterBtn: {
+  // Both header buttons, from one style. They were a 48px square beside a
+  // lozenge half as wide again, vertically offset by the caption under the
+  // cart — two controls doing the same kind of job reading as two different
+  // kinds of control.
+  headerBtns: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  iconBtn: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
     borderRadius: Radius.button,
@@ -713,32 +943,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  filterBtnOn: { backgroundColor: Colors.primary },
+  iconBtnOn: { backgroundColor: Colors.primary },
   // The app's one chip: a sunken well when off, solid fern when on, no border
   // either way. The pill is ~34px and the tap area is the full 48 — a rail of
   // lozenges outweighs the list it filters, and a 34px target is invisible
   // until somebody is holding the phone one-handed.
-  shopTap: { minWidth: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, justifyContent: 'center' },
-  shopPill: {
-    flexDirection: 'row',
+  shopTap: { alignItems: 'center', gap: Spacing.xs },
+  shopCaption: { fontSize: Typography.xs, color: Colors.textMuted },
+  // The count rides the corner rather than sitting inside the button. No new
+  // hue: fern when the button is a sunken well, and inverted to white-on-fern
+  // when the button itself has gone fern, so the two never collide.
+  shopBadge: {
+    position: 'absolute',
+    top: -Spacing.xs,
+    right: -Spacing.xs,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 10,
     alignItems: 'center',
-    gap: Spacing.xs,
-    paddingHorizontal: Spacing.sm,
-    height: 34,
-    borderRadius: Radius.button,
-    backgroundColor: Colors.sunken,
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
   },
-  shopPillOn: { backgroundColor: Colors.primary },
-  shopCount: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
+  shopBadgeOn: { backgroundColor: Colors.white },
+  shopBadgeText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.white,
   },
-  shopCountOn: { color: Colors.white },
+  shopBadgeTextOn: { color: Colors.primary },
   since: { fontSize: Typography.sm, color: Colors.textMuted, paddingHorizontal: Spacing.lg },
   listContent: { padding: Spacing.lg, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
-  groupRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingTop: Spacing.sm },
+  sinceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
+  // The whole heading is the tap target, so folding a room is the same gesture
+  // wherever on the rule somebody happens to reach.
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingTop: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+  },
   group: {
     fontSize: Typography.xs,
     fontWeight: Typography.semibold,
@@ -760,16 +1011,33 @@ const styles = StyleSheet.create({
   },
   shoppingHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   shoppingTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
-  shoppingHint: { fontSize: Typography.sm, color: Colors.textMuted, marginBottom: Spacing.xs },
   shoppingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.md,
+    gap: Spacing.sm,
     paddingVertical: Spacing.sm,
+    paddingLeft: Spacing.lg,
+  },
+  // The room is the heading now, so a row is a tick and a noun. Indented under
+  // it, because a sub-list that shares the heading's left edge is not obviously
+  // under anything.
+  shopRoomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
+  shopRoom: {
+    flex: 1,
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    color: Colors.textMuted,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  shopRoomCount: { fontSize: Typography.sm, color: Colors.textMuted },
   shoppingItem: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
   shoppingItemGot: { color: Colors.textMuted, textDecorationLine: 'line-through' },
   shoppingFor: { fontSize: Typography.sm, color: Colors.textMuted },

@@ -20,7 +20,8 @@ const allLines = (over?: Partial<Parameters<typeof assessmentBrief>[0]>): string
 
 const snag = (over: Partial<Snag>): Snag => ({
   id: 'x', reference: 'SNAG-0001', householdId: 'h', propertyId: 'p',
-  room: null, photoPaths: [], description: null, status: 'open', priority: null,
+  linkedThings: [],
+  room: null, photoPaths: [], description: null, status: 'open',
   needsParts: false, parts: [], bought: [], dueAt: null, repeatDays: null, assigneeId: null,
   thingId: null, thingName: null, thingMake: null, thingModel: null,
   projectId: null, projectName: null,

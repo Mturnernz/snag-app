@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, IconSize, Typography } from '../constants/theme';
+import { useHousehold } from '../hooks/useHousehold';
 import { MainTabParamList, RootStackParamList } from '../types';
 import SnagListScreen from '../screens/SnagListScreen';
 import ScheduleScreen from '../screens/ScheduleScreen';
@@ -30,6 +31,8 @@ const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap,
 };
 
 function MainTabs() {
+  const { profile } = useHousehold();
+
   return (
     <Tab.Navigator
       // The list. Adding something is a bar at the foot of it rather than a
@@ -79,8 +82,19 @@ function MainTabs() {
           and `Projects` and `Schedule` are both eight characters at 11px: they
           fit with nothing to spare. If a sixth noun ever arrives the answer is
           not a sixth tab — it is that two of these five were never really
-          different. */}
-      <Tab.Screen name="Projects" component={ProjectsScreen} options={{ tabBarLabel: 'Projects' }} />
+          different.
+
+          **It can be put away, and then there are four.** Not every household
+          has a renovation, and a tab that answers nothing about your house is
+          a fifth of the only navigation this app has. Turned off it is not
+          registered at all rather than hidden with `tabBarButton: () => null`:
+          a route that exists but cannot be reached is one deep link away from
+          a screen the person has said they do not want, and `snag://` plus the
+          web build both have deep links. The jobs filed against a renovation
+          go with it — see `excludeProjectSnags`. */}
+      {profile.projectsEnabled ? (
+        <Tab.Screen name="Projects" component={ProjectsScreen} options={{ tabBarLabel: 'Projects' }} />
+      ) : null}
       {/* The same work by date rather than by room — when things were added and
           finished, and when the repeating ones come round. It reads the list
           and never writes to it: one scheduling mechanism, or neither is
@@ -107,7 +121,15 @@ export default function RootNavigator() {
           dozen small decisions taken against a list still visible underneath. A
           project is a page you read — three figures, a set of parts that open,
           and a folder — and deep enough that a sheet would spend its height
-          covering the tab it came from. */}
+          covering the tab it came from.
+
+          Registered whatever the setting says, unlike the tab. Nothing routes
+          here with projects off — the tab is gone and the jobs that named a
+          renovation are filtered out of every list — but a `/projects/<id>`
+          link somebody was sent before they turned it off should open the page
+          rather than fall through to the list with no explanation. The setting
+          is about what the app offers, not about what it refuses to show when
+          asked directly. */}
       <Stack.Screen name="ProjectDetail" component={ProjectDetailScreen} />
       <Stack.Screen name="Household" component={HouseholdScreen} />
       <Stack.Screen name="LocationTags" component={LocationTagsScreen} />

@@ -20,8 +20,15 @@ const project = (over: Partial<Project> = {}): Project => ({
   elementCount: 1, shownElementCount: 0, fileCount: 0,
   snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
   partsBudgetTotal: null, partsBudgetedCount: 0,
+  forecastTotal: null, forecastGuess: 0, expectedOpen: 0, expectedCount: 0, budgetGap: 0,
+  forecastDerived: null, committedDerived: null, invoicedDerived: null, paidDerived: null,
+  forecastOverride: null, committedOverride: null, invoicedOverride: null, paidOverride: null,
+  forecastNote: null, committedNote: null, invoicedNote: null, paidNote: null,
+  partsEditedCount: 0,
+  stillToBill: null, dueToPay: 0, overdueTotal: 0, nextDueOn: null, dueCount: 0,
   itemCount: 0, pricedCount: 0, quotedCount: 0,
   committedTotal: null, invoicedTotal: null, paidTotal: null, allowanceOpen: 0,
+  additionalOpen: 0,
   ...over,
 });
 

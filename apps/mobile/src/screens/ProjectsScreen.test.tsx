@@ -39,6 +39,10 @@ jest.mock('../lib/supabase', () => {
     // The pure helpers are the real ones: mocking `describeTotals` would mock
     // away the exact rule these specs exist to hold.
     describeTotals: real.describeTotals,
+    describeForecast: real.describeForecast,
+    describeForecastVariance: real.describeForecastVariance,
+    describeToPay: real.describeToPay,
+    createLocation: jest.fn(),
     formatMoney: real.formatMoney,
     outstanding: real.outstanding,
     projectSubtitle: real.projectSubtitle,
@@ -62,6 +66,9 @@ const project = (over: Partial<any> = {}): any => ({
   elementCount: 1, shownElementCount: 0, fileCount: 0,
   snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
   partsBudgetTotal: null, partsBudgetedCount: 0,
+  forecastTotal: null, forecastGuess: 0, expectedOpen: 0, expectedCount: 0, budgetGap: 0,
+  stillToBill: null, dueToPay: 0, overdueTotal: 0, nextDueOn: null, dueCount: 0,
+  additionalOpen: 0,
   itemCount: 0, pricedCount: 0, quotedCount: 0,
   committedTotal: null, invoicedTotal: null, paidTotal: null, allowanceOpen: 0,
   ...over,

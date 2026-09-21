@@ -1326,9 +1326,10 @@ they buy that back with three rules:
   a scraped total has a source nobody can check, and it will be wrong about GST, about provisional
   sums, and about which of three revisions it read.
 
-**Four figures, and a budget line under them.** *Committed* is what has been agreed; *Invoiced*
-is what has been charged; *Paid* is what has gone out; *Outstanding* is committed less paid.
-Then a rule, the budget, and one sentence saying which side of it committed has landed. All of
+**Five figures, and a budget line under them.** *Budget* is what you said you'd spend;
+**Forecast** is what it is going to cost; *Committed* is what has been agreed; *Invoiced* is what
+has been charged; *Paid* is what has gone out. Then a rule, the budget, and one sentence saying
+which side of it committed has landed. All of
 them are **derived in the views**, never stored — the `needs_parts` argument applied to a far
 more dangerous number, since a maintained total and the quotes it describes will disagree the
 first time somebody edits an amount from the other phone.
@@ -1351,6 +1352,147 @@ Three rules inside that, and each answers a way the first pass was wrong:
 - **Quoted is gone.** The low-to-high band across undecided quotes answered a question nobody
   asks after the first fortnight, and per-line allowance variance (below) answers the same
   thing far better and against real numbers. `rangeLabel` and `hasOpenRange` are deleted.
+
+### Committed is not the answer to "are we over"
+
+It was the headline figure and it is the wrong one, because it lags reality by **everything
+nobody has priced yet**. On the live renovation that read $103,574 against a $187,000 budget with
+five items unpriced and a $176,755 contract nobody had marked accepted — the page reported nearly
+$89,000 of headroom that did not exist. Committed fails in the direction that costs money, and it
+fails quietly right up until the last quote lands.
+
+    forecast = committed + additionalOpen + expectedOpen + budgetGap
+
+**A forecast is by construction partly invented, so it always says how much of itself is.**
+`forecastGuess` rides beside `forecastTotal` exactly as `itemCount` rides beside every sum, and
+`describeForecast` is the only thing that writes the line — there is no path through either
+project screen that renders a forecast without it. It is worded **"still a guess"** and never
+"still an allowance": the guess is three different things and only one of them is somebody's
+written number inside a contract. Collapsing the wording collapses §3.4's distinction.
+
+`budgetGap` is the only term that invents anything and it is fenced hard: a part must have a
+budget, it must still have unpriced items, it is the remainder of that budget or nothing, and a
+part whose items are all priced contributes zero — the money left over there is a **saving**, not
+a cost still to come. A project with no part budgets gets no term at all, which is the honest
+answer when nobody has said what the unpriced work is worth.
+
+**The variance warning names its cause and is silent under.** Past 5% over, `describeForecastVariance`
+writes *"$23,000 over budget — 5 items aren't priced and $17,645.78 is still a guess"*. A
+percentage with no cause is a number people learn to ignore. It says nothing when the forecast is
+under budget, because it is a warning rather than a running commentary, and nothing at all against
+a budget nobody typed — "0% over" there would be the app inventing a reassurance.
+
+### A cost you know about, that nobody has quoted
+
+The architect says *"you'll need an engineer, and the council will want their share."* No vendor,
+no quote, no invoice. That beat had nowhere to go: an **item with no price** contributes nought to
+every figure, so a cost the household knows about read as zero (which is exactly what *Geotech
+engineer* was doing on the live job), and a **quote nobody gave you** is a fabricated commitment
+against a firm that has never heard of you.
+
+`home.project_expected_costs` is the third kind of row and the only one in this feature whose
+number is allowed to be somebody's estimate. **It is never committed and never invoiced** — it
+reaches Forecast alone and is named as a guess everywhere it is summed. The distinction that must
+not blur: an **allowance** is a written number inside a contract you signed, so it counts as
+committed and is merely soft; an **expected cost** is not committed at all, because nobody has
+agreed to anything.
+
+**It is replaced, not added to.** `settled_by` points at the real price when one arrives and the
+expectation stops counting, or the forecast double-counts as the job firms up. It is kept rather
+than deleted because "we thought the engineer would be $4,000 and it was $5,600" is the only way
+this app can make the next renovation's guesses better. **The amount is optional**: "there will be
+council costs" with no figure is still worth recording, as a named gap rather than as silence.
+
+### Two gaps, not one, and only one of them is about today
+
+`Outstanding` was committed less paid, and it answered neither of the two questions people
+actually ask:
+
+| | | Answers |
+|---|---|---|
+| **Still to be billed** | committed − invoiced | *"ReliaBuilder have $88,780 left to claim."* |
+| **To pay** | invoiced − paid | *"$43,987.50, due 20 October."* |
+
+`stillToBill` is deliberately **signed**: negative means somebody has billed more than was ever
+committed, which is the over-billing signal and the last thing to floor away into a tidy zero.
+
+`dueToPay` is **the only figure in this feature that is about today** — everything else on the
+page is a position and this is a task, which is why it is the one with a date. `project_quotes`
+carried `dated` (the date on the paper) and had no due date at all; `due_on` is that column.
+`home.project_bills` lists the live bills with what is still to go out on each, and **its `overdue`
+flag is computed against the server's `current_date`** — comparing to `toISOString().slice(0, 10)`
+is a UTC comparison that reads a bill due today in Auckland as late for half the year, the same
+`dayKey` trap the Schedule tab already pays for once.
+
+The helper is `describeToPay`, not `describeDue` — that name already belongs to the snag list's
+due-date phrasing, and two functions called the same thing on two kinds of due date is how a
+screen ends up saying "3 days overdue" about an invoice. **Nothing sends anything**: a due date is
+a fact a page sorts by, and money does not get an exception to the no-notifications rule.
+
+### Signed, not accepted
+
+The word is the fix for the one genuinely wrong number the live page was showing. ReliaBuilder's
+$176,755 contract sat at `tbc` for five months, so it contributed nothing to Committed and the two
+progress claims against it stood in for it instead. *Accepted / TBC / Declined* is the vocabulary
+of **comparing three prices for a toilet**; nobody looks at a contract they signed in March and
+thinks "I should mark that accepted" — and the control was six levels deep besides.
+
+So a commitment is signed under *Who we're paying*, **two taps from the top of the page**.
+Comparing prices for one item keeps *Accepted / Declined* on the item sheet: those are genuinely
+different moments and they should stop sharing a control. The enum underneath is unchanged.
+
+### A number you can type over, and the app saying so in red
+
+Every figure on the project page is derived, and that is the rule the rest of
+this section rests on. **This breaks it deliberately, on one condition: both
+numbers survive.**
+
+`home.project_overrides` stores an override, never a total. The derivation is
+untouched — `committed_derived` goes on being what the prices add up to — and
+the view carries three columns where it carried one: `*_derived`, `*_override`,
+and `*_total` which is `coalesce(override, derived)`. So the page can say
+*"Committed is edited: $200,000 typed · the prices say $103,574.22 — $96,425.78
+more"* and go on saying it for as long as the edit lasts. A stored total that
+replaced its own evidence would be unrecoverable; this is a sticky note on the
+glass, and *Use the prices again* is a real undo rather than a recovery from
+nothing.
+
+**`describeOverride` always names the derived figure**, never merely that
+something was edited. That is the half that makes an override honest, and
+dropping it would leave a reader eight months later with no way back to what the
+paperwork actually supports. An edit that happens to match the prices is said
+plainly and **not** reddened — a discrepancy the app manufactures is an alarm
+nobody will believe the next time.
+
+Four rules, three of them enforced in the view rather than left to a screen:
+
+- **The page cannot contradict itself.** `still_to_bill`, `due_to_pay` and
+  `forecast_derived` are computed from the **shown** figures. Override Committed
+  and let the gap read off the derived one, and two numbers a line apart stop
+  adding up — which is precisely the incoherence overriding is meant to be
+  honest about rather than cause.
+- **A part's override rolls up.** `parts_committed` sums each element's *shown*
+  total, so the job's figure never contradicts the sum of the parts listed
+  directly under it. A project-level override then sits on top of that.
+- **Suppliers are not overridable.** *Who we're paying* is a second view over the
+  same rule and the check worth keeping is that those rows sum to Committed. An
+  override there could not be reconciled with anything — it would be money owed
+  to a named person that no price supports. Override the total if you must; who
+  you owe stays what the paperwork says.
+- **Clearing is its own function.** `clear_figure`, not `set_figure(null)`, for
+  the reason `set_part_bought` and `set_quote_status` are theirs: putting the
+  derived figure back is the act that changes what the page claims, and it must
+  not be reachable from a form somebody happened to empty.
+
+**An edited figure renders in clay**, and that is the *third* thing in this app
+to earn red after overdue and priority-high. It earns it on exactly the same
+terms: a fact about a number rather than a judgement about importance — this
+figure is not what the paperwork says. The whole row is the tap target rather
+than a pencil beside it, because four stacked 48px rows with a separate
+affordance each is four more controls on the densest part of the page, and the
+label already says which figure is which. `editing` beats `over` for the colour
+when a figure is both, because being typed over is the more surprising of the
+two.
 
 ### A builder's number is not one number
 
@@ -1389,6 +1531,50 @@ Four rules make that honest, and each prevents one failure:
   allowed $12,400; Tile Depot has quoted $15,900 — $3,500 over, if you accept it"* is a real
   number from a real quote, months before the invoice, and nothing had to be estimated to
   produce it. That is why the app never puts a figure on work nobody has priced.
+
+**Three things the app must ask about an allowance and can never infer**, each a number-sized
+lie when guessed:
+
+1. **Is it inside the quoted total, or on top of it?** $150,000 "including a $10,000 laundry
+   allowance" and $150,000 "and budget another $10,000" differ by exactly $10,000. `additional`
+   is that answer, and an additional line nobody has priced is **not committed** — it is a
+   ballpark outside a contract, so it goes to Forecast as `additional_open`, never to Committed.
+2. **Which word did the contract use?** `allowance_kind` is `pc_sum | provisional | ballpark`.
+   The arithmetic does not differ; at final account the argument is the householder's to have and
+   they need to know what they signed.
+3. **Does the head contractor keep a margin on a direct buy?** `attendance_pct`, a percentage of
+   the **actual** and never of the allowance — their cut moves with the real price, which is why
+   they ask for it.
+
+**And a fourth question, which decides who is owed rather than what it costs: who is billing
+you?** `project_quotes.billed_through_id` is null when a supplier invoices the household direct
+and names the head contract when the price is passed through it. The total is the same either
+way; the answer to *what do we owe, and to whom* is completely different, and the supplier rollup
+was silently wrong about it — a cabinetmaker showed as owed $12,000 the household will never pay
+them.
+
+**So an inside allowance resolves four ways**, and the last two are the ones that were wrong
+until `20260921090400`:
+
+- **Not superseded** → contributes what was allowed, counted in `allowance_open`. Committed, and
+  flagged soft.
+- **Additional and not superseded** → contributes nothing to committed; it is Forecast's.
+- **Superseded, billed *through* the contract** → the contract sum adjusts to the real number.
+  That is what a PC sum is *for*. An estimate's build-up already carried it; a fixed price needed
+  `allowance_absorbed`, without which the contract went on carrying the $14,000 it allowed while
+  the $11,800 actually charged landed nowhere and the household's saving was invisible.
+- **Superseded, billed *direct*** → the allowance **leaves** the contract sum and the attendance
+  stays. The sub's own price then counts **on its own account** — which is the clause §3.1 was
+  missing. "A superseding quote never counts on its own account" was right only while the
+  allowance stayed inside the contract; once it leaves, that filter dropped the money entirely.
+  Counted **once** either way, which is all the rule was ever protecting.
+
+The check that holds all of this together, pinned against the live database rather than a mock:
+**the supplier rows sum to the project's committed total.** Mike and Alyssa's scenario — a
+$150,000 contract, a $10,000 allowance bought direct at $12,000 with 10% attendance, a $14,000
+allowance the builder supplied at $11,800 — comes out ReliaBuilder $139,000, Gibson $12,000,
+Kitchen Mania $12,000, Elite Bathroomware absent because they bill the builder. $163,000, and
+Committed is $163,000.
 
 **A quote attaches to one level — an item, a part, or the whole project.** A main contractor's
 contract covers the bathroom *and* the laundry, so it belongs to neither; forcing it onto the
@@ -1562,6 +1748,27 @@ called.
 dozen small decisions taken against a list still visible underneath, where a project is a page you
 *read*.
 
+**And it is ordered by question, not by schema.** It ran status, four figures, who's owed, parts,
+punch list, handover, paperwork — which is the order of the data model and the order of no
+question anybody asks. On a live job the questions are, in frequency order: *a bill arrived, where
+does it go* (several times a month), *are we over* (every time the first one happens), *who have we
+still got to pay*, *what's left to decide*, and — once, at the end, for four years later — *what
+did the bathroom cost*. The first was the deepest buried: six levels down, and only if a scope item
+already existed to hang the bill on, which is why the live job grew a part called "Whole job"
+holding five supplier accounts wearing items' clothes.
+
+So the page runs: **Record a bill or a quote** (the one filled button, and the first thing on it) ·
+the money · **Who we're paying** · **Also expecting** · what we're doing · to sort out · hand it
+over · paperwork. `RecordBillSheet` asks the four things somebody holding a piece of paper can
+answer — what kind, who from, how much, what it's against — and **it never creates scope**. An
+invoice maps to something that already exists or it is a cost against the whole job; it does not
+get to invent a part, which is the rule that stops another "Whole job" appearing.
+
+`BuildUpSheet` is the screen that finally makes the provisional-sum rule reachable. Every rule
+about allowances was written, granted and tested five months before it existed and had **never once
+run against real data**, because nothing anywhere could create a line — the live contract was one
+opaque $176,755 number, so none of the early warnings the feature exists for could ever fire.
+
 **The rooms a job touches are answerable afterwards.** Step two asks once, which froze the answer at
 the moment somebody knew least — a renovation grows a room more often than it loses one, and
 finding out the laundry is coming in too is the normal middle of a job. The + on *Parts of the job*
@@ -1624,6 +1831,26 @@ maker — which is precisely why there is a confirm step rather than a bulk writ
 deliberately not carried: a photo of a quote document is not a photo of the fitting, and the
 thing page's strip is the one part of it that has to be worth opening.
 
+### A schedule of claims, and nothing that reminds anybody
+
+The builder bills 25% at each milestone. That lived in free text on whichever invoice turned up —
+*"INV-0208 — claim 2, 25%"* — where nothing could read it, so the app knew about the claim in
+front of it and nothing about the three still coming.
+
+`home.project_milestones` holds them, and three rules keep it from becoming a second scheduler.
+It is **optional and absent by default** (a tile shop takes payment and that is that), so it is
+offered on a signed commitment and never asked for. **A milestone is not a bill**: it is what
+somebody said would be claimed, and the claim is the invoice that arrives carrying
+`settles_milestone_id` — which is what lets the page say *milestone 3 hasn't been claimed yet*
+rather than only counting what has already landed. A milestone carries a **percentage or an
+amount, never both**, said in words by `add_milestone` rather than left to the check constraint,
+because two ways to say one number is two numbers that can disagree and this one gets multiplied
+by a six-figure contract.
+
+And **nothing sends anything**. This is the same rule as everywhere else and money does not bend
+it — `ScheduleSheet` says so on screen, because a thing called a payment schedule is exactly what
+somebody would expect to remind them.
+
 ### Nobody types Committed, Invoiced or Paid
 
 All four are derived, and the only thing anybody enters is **one amount per price** plus three
@@ -1674,10 +1901,24 @@ room being selected without a second tap, the step still being skippable, and th
 typed-and-not-ticked bug — committed on Next, on Skip and on Back, held open on a refusal, and an
 untouched step still passing through untouched.
 `ProjectsScreen.test.tsx` pins the grouping order, the dimmed done card, the empty day-one screen
-inventing nothing, the absence of a compose bar, and that no total renders without its denominator.
+inventing nothing, the absence of a compose bar, and that no total renders without its denominator
+— which caught a real regression the moment the card started leading with a forecast, because
+`describeForecast` is silent where there is none while the card still shows committed. It falls
+through to `describeTotals` for exactly that reason.
+`projects.test.ts` pins the forecast rules as properties: the denominator that always rides with
+it, "still a guess" never collapsing into "still an allowance", the variance naming its cause and
+staying silent under budget and inside 5%, an ex-GST budget grossed up before comparing, the two
+gaps as separate subtractions with the over-claim reported rather than floored, `describeToPay`
+absent at zero, and an allowance movement read in **both** directions — a design that only warns
+on overruns never tells anybody they got money back.
+`projects.test.ts` also pins the override rules: that a discrepancy line always names the derived
+figure rather than only saying something was edited, that it reads in both directions, that a
+typed figure matching the prices is stated plainly rather than reddened, and that edited parts are
+counted rather than listed. `ProjectDetailScreen.test.tsx` pins the edited figure rendering in
+clay, an untouched one not, and the block being absent entirely when nothing has been edited.
 `ProjectDetailScreen.test.tsx` pins the implicit layer staying hidden, the layer appearing once a
-real element exists, charged and paid staying apart with no "Spent" anywhere, outstanding being
-committed less paid, the budget line and which side of it, the allowance said out loud, six-figure
+real element exists, charged and paid staying apart with no "Spent" anywhere, the two gaps
+replacing Outstanding, the budget line and which side of it, the allowance said out loud, six-figure
 totals on one line, the supplier section absent at zero and saying *Settled* rather than a zero,
 the page surviving a failed rollup read, the handover list offering only what is installed and
 stopping once something is recorded, that files roll up without rolling down, the + opening the

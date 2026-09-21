@@ -971,6 +971,17 @@ export interface ProjectTotals {
    * written number and it counts. The two are never worded the same.
    */
   allowanceOpen: number;
+  /**
+   * Ballparks sitting *outside* a contract that nobody has priced.
+   *
+   * The distinction from `allowanceOpen` is the whole reason both exist, and it
+   * is worth 15% of a renovation when it blurs. An allowance is a written
+   * number **inside** a contract somebody has signed, so it is committed and
+   * merely soft. A builder who says "and budget another $10,000 for the
+   * laundry" has committed to nothing — that number is not in the contract sum
+   * and must not reach `committedTotal`. It goes to forecast, named as a guess.
+   */
+  additionalOpen: number;
 }
 
 export interface Project extends ProjectTotals {
@@ -1000,6 +1011,93 @@ export interface Project extends ProjectTotals {
    */
   partsBudgetTotal: number | null;
   partsBudgetedCount: number;
+
+  /**
+   * Committed, plus every guess that is not already inside it.
+   *
+   *   forecast = committed + additionalOpen + expectedOpen + budgetGap
+   *
+   * Committed answers *what have we agreed to*. Three months into a job with
+   * five items unpriced it is not the answer to *are we over*, and it fails in
+   * the direction that costs money: everything nobody has priced counts as
+   * nought, so the budget looks comfortable until the week it does not.
+   *
+   * Null only when nothing anywhere has been said.
+   */
+  forecastTotal: number | null;
+  /**
+   * What the prices actually add up to, kept whatever anybody typed over it.
+   *
+   * These four are the reason an override is honest rather than a lie: the
+   * derivation is never replaced, so the page can name the discrepancy and go on
+   * naming it for as long as the edit lasts.
+   */
+  forecastDerived: number | null;
+  committedDerived: number | null;
+  invoicedDerived: number | null;
+  paidDerived: number | null;
+  /** What somebody typed, or null where nobody has. GST-normalised. */
+  forecastOverride: number | null;
+  committedOverride: number | null;
+  invoicedOverride: number | null;
+  paidOverride: number | null;
+  forecastNote: string | null;
+  committedNote: string | null;
+  invoicedNote: string | null;
+  paidNote: string | null;
+  /** How many parts carry an edited figure of their own. */
+  partsEditedCount: number;
+  /**
+   * How much of the forecast is somebody's estimate rather than an agreed price.
+   *
+   * Rides beside `forecastTotal` exactly as `itemCount` rides beside every sum,
+   * and for the same reason: **no screen can render the figure without being
+   * handed what it is made of.** It counts `allowanceOpen` (soft, but already
+   * inside committed) as well as the three additions.
+   */
+  forecastGuess: number;
+  /** Costs somebody has been told to expect that nobody has quoted. */
+  expectedOpen: number;
+  expectedCount: number;
+  /**
+   * What the budgeted parts still have to cover for their unpriced items.
+   *
+   * The only term in the forecast that invents anything, and fenced hard: a
+   * part must have a budget, it must still have unpriced items, it is the
+   * remainder of that budget or nothing, and a part whose items are all priced
+   * contributes zero — the money left over there is a saving, not a cost still
+   * to come. A project with no part budgets gets no term at all.
+   */
+  budgetGap: number;
+
+  /**
+   * The first of two gaps that used to be one figure called Outstanding.
+   *
+   *   stillToBill = committed - invoiced
+   *
+   * *"ReliaBuilder have $88,780 of the contract left to claim."* How much of
+   * what was agreed is still coming.
+   *
+   * **Signed, deliberately.** Negative means somebody has billed more than was
+   * ever committed, which is the over-billing signal and the last thing that
+   * should be floored away into a tidy zero.
+   */
+  stillToBill: number | null;
+  /**
+   * The second, and the only figure in this feature that is about **today**.
+   *
+   *   dueToPay = invoiced - paid
+   *
+   * *"$43,987.50 to ReliaBuilder, due 20 October."* Everything else on the page
+   * is a position; this is a task, which is why it is the one with a date.
+   */
+  dueToPay: number;
+  /** Of `dueToPay`, what is already past its date. */
+  overdueTotal: number;
+  /** The soonest a bill is due. Null when nothing is owed or nothing is dated. */
+  nextDueOn: string | null;
+  /** How many bills are waiting on money. */
+  dueCount: number;
 
   photoPaths: string[];
   documentPaths: string[];
@@ -1057,6 +1155,21 @@ export interface ProjectElement extends ProjectTotals {
   /** This part's share of the budget. See `Project.partsBudgetTotal`. */
   budget: number | null;
   budgetInclGst: boolean;
+  /** Costs expected against this part specifically. See `ProjectExpectedCost`. */
+  expectedOpen: number;
+  expectedCount: number;
+  /** See `Project.budgetGap` — this is the term, per part. */
+  budgetGap: number;
+  /** What this part's prices add up to, kept whatever was typed over it. */
+  committedDerived: number | null;
+  invoicedDerived: number | null;
+  paidDerived: number | null;
+  committedOverride: number | null;
+  invoicedOverride: number | null;
+  paidOverride: number | null;
+  committedNote: string | null;
+  invoicedNote: string | null;
+  paidNote: string | null;
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
@@ -1083,6 +1196,8 @@ export interface ProjectItem {
   invoiced: number | null;
   paid: number | null;
   allowanceOpen: number;
+  /** See `ProjectTotals.additionalOpen`. */
+  additionalOpen: number;
 }
 
 /**
@@ -1120,6 +1235,29 @@ export interface ProjectQuote {
    * and sums normally.
    */
   supersedesLineId: string | null;
+  /**
+   * When the money has to leave, as distinct from the date on the paper.
+   *
+   * `dated` is what the invoice says at the top; this is the payment term. The
+   * schema held the first and not the second, so nothing could answer "is there
+   * a bill due this week" — which is the question somebody opens this page with
+   * far more often than any other.
+   */
+  dueOn: string | null;
+  /**
+   * The head contract this price is passed through, if it is.
+   *
+   * Null — the ordinary case — means this supplier bills the household direct.
+   * Set, the money is owed to the contract holder rather than to this supplier:
+   * a cabinetmaker whose $12,000 goes through the builder is owed nothing by the
+   * household, and the supplier rollup was silently saying otherwise.
+   *
+   * **The total is the same either way.** What changes is who is owed, which is
+   * a different question and the one people act on.
+   */
+  billedThroughId: string | null;
+  /** The milestone this bill claims against, when the commitment has a schedule. */
+  settlesMilestoneId: string | null;
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
@@ -1137,10 +1275,217 @@ export interface ProjectQuote {
    */
   buildUp: number | null;
   allowanceOpen: number;
-  /** What this quote actually contributes: `basis` decides. */
+  /** Unpriced ballparks sitting outside this quote's number. Forecast's, not committed's. */
+  additionalOpen: number;
+  /**
+   * What this quote actually contributes, with all four allowance cases resolved.
+   *
+   * `basis` decides whether the build-up or the stated amount leads, and then:
+   * an inside allowance bought **direct** leaves the contract sum (the sub's own
+   * quote already counts it) while its attendance stays; an additional line
+   * bought **through** the contract adds to it. Counting a passed-through price
+   * both here and on the sub's own row is the one remaining way this feature
+   * could have made a total disagree with itself.
+   */
   effectiveAmount: number | null;
   /** Payments recorded against it. Only an invoice can carry any. */
   paidTotal: number | null;
+  /** What is still to go out on this bill. Null unless it is a live invoice. */
+  unpaid: number | null;
+}
+
+/**
+ * Which kind of allowance a line is, in the contract's own word.
+ *
+ * In New Zealand practice these are not interchangeable. A **PC sum** (prime
+ * cost) is money allowed for goods the builder will supply but has not yet
+ * priced — tapware, tiles. A **provisional sum** covers work whose extent is
+ * not yet known — piling, drainage found under the house. A **ballpark** is
+ * neither: it is the builder saying "budget about this", with no contractual
+ * standing at all, which is why it is the one most likely to be `additional`.
+ *
+ * The app does not treat them differently in the arithmetic. It records which
+ * word was used, because at final account the difference is the householder's
+ * to argue and they need to know what they signed.
+ */
+export type ProjectAllowanceKind = 'pc_sum' | 'provisional' | 'ballpark';
+
+export const PROJECT_ALLOWANCE_KIND_LABELS: Record<ProjectAllowanceKind, string> = {
+  pc_sum: 'PC sum',
+  provisional: 'Provisional sum',
+  ballpark: 'Ballpark',
+};
+
+/** Ballpark first: it is what a householder is most often being handed. */
+export const PROJECT_ALLOWANCE_KINDS: ProjectAllowanceKind[] = [
+  'ballpark',
+  'pc_sum',
+  'provisional',
+];
+
+/**
+ * Which of the five figures an edit is standing in for.
+ *
+ * `budget` is absent deliberately — it is already a typed number on the project
+ * itself, so it has nothing to override. These four are the derived ones.
+ */
+export type ProjectFigure = 'forecast' | 'committed' | 'invoiced' | 'paid';
+
+export const PROJECT_FIGURE_LABELS: Record<ProjectFigure, string> = {
+  forecast: 'Forecast',
+  committed: 'Committed',
+  invoiced: 'Invoiced',
+  paid: 'Paid',
+};
+
+/**
+ * A figure somebody typed over the one the prices add up to.
+ *
+ * **Every figure on the project page is derived, and that is the rule the whole
+ * feature rests on** — a maintained total and the quotes beneath it will
+ * disagree the first time somebody edits an amount from the other phone, and
+ * the one people would trust is the wrong one.
+ *
+ * So this does not store a total. It stores an **override beside** the derived
+ * figure, and the derivation is untouched: `committedDerived` is still what the
+ * prices say, `committedOverride` is what somebody typed, and `committedTotal`
+ * is what the page shows. Both survive, so the discrepancy is a fact the schema
+ * holds rather than something the screen forgets — and lifting the edit puts the
+ * truth back rather than recovering it from nowhere.
+ *
+ * **An edited figure renders in clay**, which is the third thing in this app to
+ * earn red after overdue and priority-high, and it earns it on the same terms:
+ * it is a fact about a number, not a judgement. This figure is not what the
+ * paperwork says.
+ */
+export interface ProjectOverride {
+  id: string;
+  projectId: string;
+  /** Null for the job's own figure; set, it is that part's. */
+  elementId: string | null;
+  field: ProjectFigure;
+  amount: number;
+  amountInclGst: boolean;
+  /**
+   * Why — and the one part of this a reader eight months later will want.
+   *
+   * *"Builder confirmed the variation by email, 12 Sept"* is the difference
+   * between a number somebody trusts and a number somebody has to re-derive.
+   */
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A cost somebody has been told to expect, that nobody has quoted.
+ *
+ * The architect says: *"you'll need an engineer, and the council will want
+ * their share."* No vendor, no quote, no invoice — just a number from somebody
+ * who knows the industry.
+ *
+ * Until this existed there were two places to put that and both were wrong. An
+ * **item with no price** contributes nought to every figure, so a cost the
+ * household knows about reads as zero — which is exactly what happened on the
+ * live job with *Geotech engineer*. Or a **quote nobody gave you**, which is a
+ * fabricated commitment against a vendor who has never heard of you, and which
+ * would then appear under who's owed what.
+ *
+ * **It is never committed and never invoiced.** It feeds forecast alone and
+ * every figure it touches names it as a guess. The distinction from an
+ * allowance is the one that must not blur: an allowance is a written number
+ * inside a contract somebody has signed, so it counts as committed and is
+ * merely soft; an expected cost is not committed at all, because nobody has
+ * agreed to anything.
+ *
+ * **It is replaced, not added to.** `settledBy` points at the real price when
+ * one arrives and the expectation stops counting — otherwise the forecast
+ * double-counts as the job firms up. It is kept rather than deleted because
+ * "we thought the engineer would be $4,000 and it was $5,600" is the sentence
+ * that makes the next renovation's guesses better, and this is the only place
+ * the app can learn it.
+ */
+export interface ProjectExpectedCost {
+  id: string;
+  projectId: string;
+  /** Against a part, or null for the job itself — council fees are not the bathroom's. */
+  elementId: string | null;
+  name: string;
+  /**
+   * Nullable, deliberately.
+   *
+   * "There will be council costs" with no figure is still worth recording: it
+   * shows on the page as a named gap rather than being silently absent, and the
+   * forecast says how many such gaps it is holding.
+   */
+  amount: number | null;
+  amountInclGst: boolean;
+  /**
+   * Who it will probably come from, if that is known.
+   *
+   * A hint, not a supplier. It deliberately never reaches the supplier rollup,
+   * because you cannot owe money to a guess.
+   */
+  likelySupplier: string | null;
+  note: string | null;
+  /** The real price, once it exists. Set, this stops counting. */
+  settledBy: string | null;
+  createdAt: string;
+}
+
+/**
+ * One step of a payment schedule — the builder's 25% at each milestone.
+ *
+ * The live job carried this as free text (*"INV-0208 — claim 2, 25%"*) where
+ * nothing could read it, so the app knew about the claim that had arrived and
+ * nothing about the three that were coming.
+ *
+ * Three rules keep it from becoming a second scheduler. It is **optional and
+ * absent by default** — a tile shop takes payment and that is that, so it is
+ * offered on a contract and never asked for. It is **not a bill**: it is what
+ * somebody said would be claimed, and the claim is the invoice that arrives
+ * pointing back at it. And **nothing sends anything** — a due date is a fact on
+ * a row that a page sorts by, not a reminder.
+ */
+export interface ProjectMilestone {
+  id: string;
+  /** The commitment it breaks up. */
+  quoteId: string;
+  name: string;
+  /**
+   * A percentage of the commitment, or a flat amount — one or the other, never
+   * both. Two ways to say the same number is two numbers that can disagree, and
+   * this one gets multiplied by a six-figure contract.
+   */
+  percent: number | null;
+  amount: number | null;
+  amountInclGst: boolean;
+  dueOn: string | null;
+  sortOrder: number;
+}
+
+/**
+ * One live bill on a job, with what is still to go out on it and when.
+ *
+ * A read and nothing else. There is no notification anywhere in this product
+ * and there is not going to be one for money either: this is a list a page can
+ * sort, and a mark the Schedule tab can draw, exactly as it already draws a
+ * project's own dates.
+ */
+export interface ProjectBill {
+  id: string;
+  projectId: string;
+  supplier: string | null;
+  detail: string | null;
+  dated: string | null;
+  dueOn: string | null;
+  billedThroughId: string | null;
+  settlesMilestoneId: string | null;
+  amountIncl: number | null;
+  paidTotal: number | null;
+  /** Floored at zero: a payment larger than the bill is somebody settling two at once. */
+  unpaid: number | null;
+  overdue: boolean;
 }
 
 /**
@@ -1167,6 +1512,36 @@ export interface ProjectQuoteLine {
   amount: number | null;
   amountInclGst: boolean;
   isAllowance: boolean;
+  /**
+   * Which kind of allowance, in the contract's own word.
+   *
+   * A PC sum, a provisional sum and a builder's ballpark behave differently at
+   * final account, and a householder reading the contract back in March wants
+   * the word the contract used. Null on an ordinary line.
+   */
+  allowanceKind: ProjectAllowanceKind | null;
+  /**
+   * Whether this sits **on top of** the quoted total rather than inside it.
+   *
+   * One of the three questions the app must ask and can never infer. A builder
+   * who quotes $150,000 "including a $10,000 laundry allowance" and one who
+   * quotes $150,000 "and budget another $10,000" have said different things, and
+   * the difference is $10,000. Guess it and the forecast is wrong by the whole
+   * allowance.
+   *
+   * An additional line that nobody has priced is **not committed** — see
+   * `ProjectTotals.additionalOpen`.
+   */
+  additional: boolean;
+  /**
+   * The margin the head contractor keeps when this is bought direct.
+   *
+   * A percentage of the **actual**, never of the allowance: their cut moves with
+   * the real price, which is the whole reason they ask for it. Null means none,
+   * and null is also what "nobody has asked yet" looks like — which is why the
+   * sheet asks once, at the moment the line is created.
+   */
+  attendancePct: number | null;
   sortOrder: number;
 }
 
@@ -1207,6 +1582,10 @@ export interface ProjectSupplierTotals {
   committed: number | null;
   invoiced: number | null;
   paid: number | null;
+  /** Still to go out to them — invoiced less paid, across their live bills. */
+  unpaid: number | null;
+  /** The soonest one of their bills is due. */
+  nextDueOn: string | null;
   tbcCount: number;
 }
 

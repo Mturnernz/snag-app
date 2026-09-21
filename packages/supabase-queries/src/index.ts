@@ -2904,6 +2904,7 @@ function mapProject(row: Row): Project {
     forecastGuess: numberOrNull(row.forecast_guess) ?? 0,
     expectedOpen: numberOrNull(row.expected_open) ?? 0,
     expectedCount: row.expected_count ?? 0,
+    expectedConfirmed: numberOrNull(row.expected_confirmed),
     budgetGap: numberOrNull(row.budget_gap) ?? 0,
     stillToBill: numberOrNull(row.still_to_bill),
     dueToPay: numberOrNull(row.due_to_pay) ?? 0,
@@ -2949,6 +2950,7 @@ function mapElement(row: Row): ProjectElement {
     additionalOpen: numberOrNull(row.additional_open) ?? 0,
     expectedOpen: numberOrNull(row.expected_open) ?? 0,
     expectedCount: row.expected_count ?? 0,
+    expectedConfirmed: numberOrNull(row.expected_confirmed),
     budgetGap: numberOrNull(row.budget_gap) ?? 0,
     committedDerived: numberOrNull(row.committed_derived),
     invoicedDerived: numberOrNull(row.invoiced_derived),
@@ -3054,6 +3056,7 @@ function mapSupplierTotals(row: Row): ProjectSupplierTotals {
     projectId: row.project_id,
     supplierKey: row.supplier_key ?? '',
     supplier: row.supplier ?? null,
+    quoted: numberOrNull(row.quoted),
     committed: numberOrNull(row.committed),
     invoiced: numberOrNull(row.invoiced),
     paid: numberOrNull(row.paid),
@@ -3073,6 +3076,7 @@ function mapExpectedCost(row: Row): ProjectExpectedCost {
     amountInclGst: row.amount_incl_gst !== false,
     likelySupplier: row.likely_supplier ?? null,
     note: row.note ?? null,
+    confirmed: !!row.confirmed,
     settledBy: row.settled_by ?? null,
     createdAt: row.created_at,
   };
@@ -3198,6 +3202,56 @@ export function outstanding(totals: {
 }): number | null {
   if (totals.committedTotal === null) return null;
   return Math.max(0, totals.committedTotal - (totals.paidTotal ?? 0));
+}
+
+/**
+ * What the suppliers have said, which is the line above Committed.
+ *
+ * **It is the sum of the supplier rows, deliberately, and it is the only thing
+ * that writes the figure.** Every money line on the project page opens to show
+ * the rows it is made of, and that is honest only while the rows add up to the
+ * line. A second expression in `projects_with_totals` would be a second path to
+ * one number, which is how a number starts disagreeing with itself — the
+ * failure this money model names about `needs_parts` and about the element
+ * layer, one figure further on.
+ *
+ * Null when nobody has quoted anything, never zero: a job where three prices
+ * are in and a job where nobody has been asked are different states, and the
+ * whole reason this line sits above Committed is to tell them apart.
+ */
+export function projectQuoted(
+  suppliers: readonly { quoted: number | null }[]
+): number | null {
+  const priced = suppliers.filter((s) => s.quoted !== null);
+  if (priced.length === 0) return null;
+  return priced.reduce((sum, s) => sum + (s.quoted ?? 0), 0);
+}
+
+/**
+ * Which supplier figure a money line opens onto.
+ *
+ * Budget and Forecast are absent on purpose. A budget is what somebody typed
+ * and no supplier has said anything about it; a forecast is committed plus
+ * three kinds of guess, two of which are by definition money nobody has quoted
+ * — attributing either to named suppliers would be the page inventing a debt.
+ */
+export type SupplierFigure = 'quoted' | 'committed' | 'invoiced' | 'paid';
+
+/**
+ * The rows under one money line: who it is made of, largest first.
+ *
+ * A supplier with nothing against that figure is left out rather than drawn as
+ * a zero — "Tile Space, nothing invoiced" is not part of what Invoiced is made
+ * of, and a list of noughts is how a breakdown stops being read.
+ */
+export function supplierBreakdown<T extends Record<SupplierFigure, number | null>>(
+  suppliers: readonly T[],
+  figure: SupplierFigure
+): { row: T; amount: number }[] {
+  return suppliers
+    .filter((s) => s[figure] !== null && Math.abs(s[figure] as number) > 0.005)
+    .map((row) => ({ row, amount: row[figure] as number }))
+    .sort((a, b) => b.amount - a.amount);
 }
 
 /**
@@ -4354,6 +4408,12 @@ export interface ExpectedCostInput {
   elementId?: string | null;
   likelySupplier?: string | null;
   note?: string | null;
+  /**
+   * Answered at creation, where there is no total to change yet — the row is
+   * being made. Changing it afterwards goes through `setExpectedCostConfirmed`
+   * and nothing else, because from then on it moves Committed.
+   */
+  confirmed?: boolean;
 }
 
 export async function createExpectedCost(
@@ -4369,8 +4429,31 @@ export async function createExpectedCost(
     p_element_id: input.elementId ?? null,
     p_likely_supplier: input.likelySupplier ?? null,
     p_note: input.note ?? null,
+    p_confirmed: input.confirmed ?? false,
   });
   return mapExpectedCost(unwrap<Row>(data, error, "Couldn't add that"));
+}
+
+/**
+ * Says whether somebody has agreed an expected cost, or it is still a guess.
+ *
+ * **Its own call, and deliberately not part of `updateExpectedCost`.** This is
+ * the only write on an expected cost that changes what a total says — a
+ * confirmed one counts in Committed and is owed to its supplier — and the rule
+ * `setPartBought`, `setQuoteStatus` and `setItemExcluded` all follow is that
+ * such a write cannot be smuggled in beside eight other fields by a caller
+ * correcting a name.
+ */
+export async function setExpectedCostConfirmed(
+  client: SupabaseClient,
+  expectedId: string,
+  confirmed: boolean
+): Promise<void> {
+  const { error } = await client.rpc('set_expected_cost_confirmed', {
+    p_expected_id: expectedId,
+    p_confirmed: confirmed,
+  });
+  if (error) throw asError(error, "That didn’t save");
 }
 
 const EXPECTED_CLEARABLE: Record<string, string> = {
@@ -4381,7 +4464,16 @@ const EXPECTED_CLEARABLE: Record<string, string> = {
   settledBy: 'settled_by',
 };
 
-export interface ExpectedCostUpdate extends Partial<ExpectedCostInput> {
+/**
+ * `confirmed` is deliberately not here.
+ *
+ * `update_expected_cost` does not take it, so a caller passing it would have
+ * it silently dropped — which is the two-writers-of-one-fact shape this schema
+ * keeps naming. `setExpectedCostConfirmed` is the one way, and omitting it
+ * from this type makes trying anything else a type error rather than a write
+ * that quietly does nothing.
+ */
+export interface ExpectedCostUpdate extends Partial<Omit<ExpectedCostInput, 'confirmed'>> {
   /** The real price, once one exists. Set, the expectation stops counting. */
   settledBy?: string | null;
 }

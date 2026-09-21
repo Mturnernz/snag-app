@@ -31,7 +31,7 @@ import {
   createItem,
   createLocation, createQuote, createThing, deleteElement,
   deleteExpectedCost, deleteExpectedCostLine, deleteItem, deleteMilestone, deletePayment, updatePayment,
-  deleteProject, deleteQuote,
+  deleteProject, deleteQuote, setExpectedCostConfirmed,
   deleteQuoteLine,
   clearFigure, setFigure, setItemExcluded,
   deleteStoredFiles, describeOverrides,
@@ -41,7 +41,8 @@ import {
 } from '../lib/supabase';
 import {
   documentName, exportDateStamp, formatLooseDate, inclGst, itemPriceLabel, projectDossierTable,
-  projectExportPhotos, type ThingInput,
+  projectExportPhotos, projectQuoted, supplierBreakdown,
+  type SupplierFigure, type ThingInput,
 } from '@snag/supabase-queries';
 import { getFileUrls } from '../lib/supabase';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
@@ -117,7 +118,24 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [snags, setSnags] = useState<Snag[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [openElement, setOpenElement] = useState<string | null>(null);
+  /**
+   * Which money line is showing who it is made of.
+   *
+   * One at a time, unlike the parts of the job below: this is a five-row strip
+   * at the very top of the page, and two breakdowns open at once pushes the
+   * work itself off the screen. The parts are the opposite case — see
+   * `openElements`.
+   */
+  const [openFigure, setOpenFigure] = useState<SupplierFigure | null>(null);
+  /**
+   * Which parts of the job are open, as a set rather than a single id.
+   *
+   * It was one id, so opening the laundry shut the bathroom — which is the
+   * wrong model for a page somebody reads two parts of side by side, and it
+   * made the second tap feel like the first one had been undone. Each heading
+   * is now its own answer.
+   */
+  const [openElements, setOpenElements] = useState<Set<string>>(() => new Set());
   const [addItemTo, setAddItemTo] = useState<ProjectElement | null>(null);
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [removingElement, setRemovingElement] = useState<ProjectElement | null>(null);
@@ -139,6 +157,15 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [editingFigure, setEditingFigure] = useState<ProjectFigure | null>(null);
   const [scheduleFor, setScheduleFor] = useState<ProjectQuote | null>(null);
   const [handoverOpen, setHandoverOpen] = useState(false);
+  /**
+   * Whether the supplier cards are drawn.
+   *
+   * Shut by default. Five of them is most of a page, and what somebody arrives
+   * with is *a bill arrived, where does it go* — which is the button above the
+   * money, not this. The heading keeps the count and what is still to go out,
+   * so folding it hides the detail and never the fact.
+   */
+  const [suppliersOpen, setSuppliersOpen] = useState(false);
   const [recorded, setRecorded] = useState<Thing[]>([]);
   const [busy, setBusy] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -485,6 +512,39 @@ export default function ProjectDetailScreen({ route }: Props) {
   const invoiced = formatMoney(project.invoicedTotal);
   const paid = formatMoney(project.paidTotal);
   const forecast = formatMoney(project.forecastTotal);
+  // Quoted is the sum of the supplier rows and nothing else — see
+  // `projectQuoted`. That is what makes the rows the toggle opens add up to
+  // the line they are under rather than nearly to it.
+  const quoted = formatMoney(projectQuoted(suppliers));
+
+  /** Who one figure is made of, largest first, ready to draw. */
+  function breakdownRows(figure: SupplierFigure) {
+    return supplierBreakdown(suppliers, figure).map(({ row, amount }) => ({
+      key: row.supplierKey,
+      // The one row nobody named still has to say whose it is, and "no
+      // supplier named" is the honest answer rather than a blank.
+      name: row.supplier ?? 'No supplier named',
+      amount: formatMoney(amount) ?? '—',
+    }));
+  }
+
+  /**
+   * What to say under the rows when they cannot add up to the line.
+   *
+   * An override is the only thing that can do that, and it does it by design:
+   * the rows are the prices and the line is what somebody typed instead. Saying
+   * so is the same rule `describeOverride` follows — never merely that
+   * something was edited, always what the prices actually say — because a
+   * reader who notices the gap unaided concludes the breakdown is broken.
+   */
+  function overrideNote(
+    label: string,
+    override: number | null,
+    derived: number | null
+  ): string | null {
+    if (override === null) return null;
+    return `These are the prices, and they come to ${formatMoney(derived) ?? 'nothing'}. ${label[0].toUpperCase()}${label.slice(1)} above was typed in.`;
+  }
   // Every figure somebody has typed over, and what the prices say instead. Both
   // numbers survive in the view, so this can go on naming the gap for as long as
   // the edit lasts rather than the screen quietly forgetting.
@@ -569,15 +629,17 @@ export default function ProjectDetailScreen({ route }: Props) {
         </Pressable>
 
         {/* ── the money ──────────────────────────────────────────────────
-            Five figures now, and the new one is the answer to the question
-            people actually open this page with.
+            Six figures, and each of the four with suppliers behind it opens to
+            show who it is made of.
 
             Committed answers *what have we agreed to*. Three months in with
             five items unpriced it is not the answer to *are we over*, and it
             fails in the direction that costs money: everything nobody has
             priced counts as nought, so the budget looks comfortable until the
             week it does not. Forecast adds the guesses — and says how much of
-            itself is one.
+            itself is one. Quoted, directly above Committed, is the other half
+            of that pair: what the suppliers have actually said, against what
+            has been agreed out of it.
 
             Stacked rather than columned, because a third of 390pt cannot hold
             "$192,354.22". The label holds a fixed column so the figures line
@@ -592,11 +654,11 @@ export default function ProjectDetailScreen({ route }: Props) {
             <Text style={styles.rowKey} numberOfLines={1}>Budget</Text>
             <Text style={styles.rowValue} numberOfLines={1}>{budget ?? 'Not set'}</Text>
           </Pressable>
-          {/* Every one of the four is tappable, and an edited one renders in
-              clay. That is the third thing in this app to earn red, after
-              overdue and priority-high, and it earns it on the same terms: it
-              is a fact about a number rather than a judgement — this figure is
-              not what the paperwork says. */}
+          {/* Every one of the four overridable figures is tappable, and an
+              edited one renders in clay. That is the third thing in this app
+              to earn red, after overdue and priority-high, and it earns it on
+              the same terms: it is a fact about a number rather than a
+              judgement — this figure is not what the paperwork says. */}
           <FigureRow
             label="Forecast"
             value={forecast}
@@ -606,11 +668,31 @@ export default function ProjectDetailScreen({ route }: Props) {
             onPress={() => setEditingFigure('forecast')}
           />
           <View style={styles.stripRule} />
+          {/* Quoted, directly above Committed and reading off the same supplier
+              rows. Committed on its own cannot tell a job nobody has priced
+              from one where three contractors have quoted and nobody has
+              signed — both read as nothing agreed. This line says which, and
+              the gap between the two is what is still to decide.
+
+              It does not open an editor, because there is no override field for
+              it: this figure is the prices and nothing else. */}
+          <FigureRow
+            label="Quoted"
+            value={quoted}
+            edited={false}
+            open={openFigure === 'quoted'}
+            onToggle={() => setOpenFigure(openFigure === 'quoted' ? null : 'quoted')}
+            rows={breakdownRows('quoted')}
+          />
           <FigureRow
             label="Committed"
             value={committed}
             edited={project.committedOverride !== null}
             onPress={() => setEditingFigure('committed')}
+            open={openFigure === 'committed'}
+            onToggle={() => setOpenFigure(openFigure === 'committed' ? null : 'committed')}
+            rows={breakdownRows('committed')}
+            unaccounted={overrideNote('committed', project.committedOverride, project.committedDerived)}
           />
           {/* Charged and paid are different figures, and seven invoices with no
               payment recorded against them is the ordinary middle of a job. */}
@@ -619,6 +701,10 @@ export default function ProjectDetailScreen({ route }: Props) {
             value={invoiced}
             edited={project.invoicedOverride !== null}
             onPress={() => setEditingFigure('invoiced')}
+            open={openFigure === 'invoiced'}
+            onToggle={() => setOpenFigure(openFigure === 'invoiced' ? null : 'invoiced')}
+            rows={breakdownRows('invoiced')}
+            unaccounted={overrideNote('invoiced', project.invoicedOverride, project.invoicedDerived)}
           />
           <FigureRow
             label="Paid"
@@ -626,6 +712,10 @@ export default function ProjectDetailScreen({ route }: Props) {
             edited={project.paidOverride !== null}
             last
             onPress={() => setEditingFigure('paid')}
+            open={openFigure === 'paid'}
+            onToggle={() => setOpenFigure(openFigure === 'paid' ? null : 'paid')}
+            rows={breakdownRows('paid')}
+            unaccounted={overrideNote('paid', project.paidOverride, project.paidDerived)}
           />
         </View>
 
@@ -645,11 +735,44 @@ export default function ProjectDetailScreen({ route }: Props) {
             Committed above. */}
         {suppliers.length > 0 ? (
           <>
-            <View style={styles.sectionRow}>
+            {/* Folded by default, and that is the change. Every supplier is a
+                card the better part of a screen tall, so five of them put the
+                parts of the job — and the punch list, and the handover —
+                several screens down on a page whose first question is *a bill
+                arrived, where does it go*. The heading still says how many
+                there are and what is still to go out, which is the whole of
+                what a fold is allowed to take: the list's own rule is that a
+                folded section keeps its heading and its count, or it is a
+                filter rather than a fold.
+
+                The chevron is a sibling of the heading rather than inside it,
+                for the reason every pair of controls in this app is. */}
+            <Pressable
+              onPress={() => setSuppliersOpen((open) => !open)}
+              style={styles.sectionRow}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: suppliersOpen }}
+              accessibilityLabel={`Who we're paying, ${suppliers.length === 1 ? '1 supplier' : `${suppliers.length} suppliers`}`}
+            >
               <Text style={styles.section}>Who we&rsquo;re paying</Text>
+              <Text style={styles.sectionCount}>
+                {[
+                  suppliers.length === 1 ? '1' : String(suppliers.length),
+                  formatMoney(project.dueToPay) && project.dueToPay > 0.005
+                    ? `${formatMoney(project.dueToPay)} to pay`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Text>
               <View style={styles.rule} />
-            </View>
-            {suppliers
+              <Icon
+                name={suppliersOpen ? 'chevron-up' : 'chevron-down'}
+                size="sm"
+                color={Colors.textMuted}
+              />
+            </Pressable>
+            {suppliersOpen ? suppliers
               .slice()
               .sort((a, b) => (b.committed ?? 0) - (a.committed ?? 0))
               .map((supplier) => (
@@ -672,7 +795,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                     if (quote.itemId) setOpenItem(quote.itemId);
                   }}
                 />
-              ))}
+              )) : null}
           </>
         ) : null}
 
@@ -728,17 +851,25 @@ export default function ProjectDetailScreen({ route }: Props) {
                 >
                   <View style={styles.expectedTitles}>
                     <Text style={styles.expectedName}>{cost.name}</Text>
+                    {/* The row says which of the two it is, in words, because
+                        the difference is whether the figure beside it is in
+                        Committed or only in the forecast — and a reader who
+                        has to work that out from the total is a reader who
+                        stops trusting the total. */}
                     <Text style={styles.expectedSub} numberOfLines={1}>
                       {[
                         cost.likelySupplier,
                         elements.find((e) => e.id === cost.elementId)?.name,
-                        'nobody has quoted this',
+                        cost.confirmed ? 'confirmed — counts as committed' : 'unconfirmed — forecast only',
                       ]
                         .filter(Boolean)
                         .join(' · ')}
                     </Text>
                   </View>
-                  <Text style={styles.expectedAmount} numberOfLines={1}>
+                  <Text
+                    style={[styles.expectedAmount, cost.confirmed && styles.expectedAmountCounts]}
+                    numberOfLines={1}
+                  >
                     {formatMoney(inclGst(cost.amount, cost.amountInclGst)) ?? 'no figure'}
                   </Text>
                 </Pressable>
@@ -781,14 +912,21 @@ export default function ProjectDetailScreen({ route }: Props) {
 
         {elements.map((element) => {
           const elementItems = itemsByElement[element.id] ?? [];
-          const open = !drawElements || openElement === element.id;
+          const open = !drawElements || openElements.has(element.id);
 
           return (
             <View key={element.id} style={[styles.element, drawElements && styles.elementCard]}>
               <View style={styles.elementTop}>
               {drawElements ? (
                 <Pressable
-                  onPress={() => setOpenElement(open ? null : element.id)}
+                  onPress={() => setOpenElements((current) => {
+                    // A copy, because a Set mutated in place is the same
+                    // identity and React has nothing to compare.
+                    const next = new Set(current);
+                    if (next.has(element.id)) next.delete(element.id);
+                    else next.add(element.id);
+                    return next;
+                  })}
                   style={styles.elementHead}
                   accessibilityRole="button"
                   accessibilityState={{ expanded: open }}
@@ -1383,8 +1521,16 @@ export default function ProjectDetailScreen({ route }: Props) {
             showToast('Saved');
           } else {
             await createExpectedCost(project.id, input);
-            showToast('Added to the forecast');
+            showToast(input.confirmed ? 'Added to what you’ve agreed' : 'Added to the forecast');
           }
+          await refresh();
+        }}
+        onConfirm={async (confirmed) => {
+          if (!editingExpected) return;
+          await setExpectedCostConfirmed(editingExpected.id, confirmed);
+          showToast(confirmed ? 'Confirmed' : 'Back to a guess');
+          // Confirming moves Committed, both gaps and who is owed what at
+          // once, and every one of them is derived.
           await refresh();
         }}
         onDelete={async () => {
@@ -1546,24 +1692,41 @@ export function elementHoldsSomething(element: ProjectElement): boolean {
  * a figure can be both typed over and above budget, and the edit is the more
  * surprising of the two, so it wins the colour.
  */
+/**
+ * One figure, and — where the figure is made of suppliers — who it is made of.
+ *
+ * **The breakdown is a sibling of the row, never nested in it.** Opening a
+ * figure and editing it are two different acts, and a `Pressable` inside a
+ * `Pressable` is a coin toss about which one gets the tap — the same rule that
+ * keeps opening and removing a photograph apart everywhere else in this app.
+ * So the label and the value are one target and the chevron beside them is
+ * another, and a row with nothing to break down draws no chevron rather than a
+ * dead one.
+ *
+ * **The rows add up to the line, or they are not a breakdown.** They come from
+ * `project_supplier_totals`, which is the same rule the figure itself is
+ * derived from rather than a second reading of the prices — and where somebody
+ * has typed over the figure, the line underneath says so instead of letting a
+ * reader conclude the rows are wrong.
+ */
 function FigureRow({
-  label, value, edited, onPress, lead, last, over,
+  label, value, edited, onPress, lead, last, over, open, onToggle, rows, unaccounted,
 }: {
   label: string;
   value: string | null;
   edited: boolean;
-  onPress: () => void;
+  onPress?: () => void;
   lead?: boolean;
   last?: boolean;
   over?: boolean;
+  open?: boolean;
+  onToggle?: () => void;
+  rows?: { key: string; name: string; amount: string }[];
+  /** Said in words when an override means the rows cannot add up to the line. */
+  unaccounted?: string | null;
 }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.row, last && styles.rowLast]}
-      accessibilityRole="button"
-      accessibilityLabel={`${label}, ${value ?? 'nothing yet'}${edited ? ', edited' : ''}. Edit it.`}
-    >
+  const body = (
+    <>
       <Text style={[styles.rowKey, lead && styles.rowKeyLead]} numberOfLines={1}>{label}</Text>
       <Text
         style={[
@@ -1579,7 +1742,66 @@ function FigureRow({
       {edited ? (
         <Icon name="create-outline" size="sm" color={Colors.danger} />
       ) : null}
-    </Pressable>
+    </>
+  );
+
+  return (
+    <View style={[styles.rowWrap, last && !open && styles.rowLast]}>
+      <View style={styles.rowInner}>
+        {onPress ? (
+          <Pressable
+            onPress={onPress}
+            style={styles.rowTap}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${value ?? 'nothing yet'}${edited ? ', edited' : ''}. Edit it.`}
+          >
+            {body}
+          </Pressable>
+        ) : (
+          // Quoted has nothing to override: there is no `project_overrides`
+          // field for it, and a row that looked tappable and did nothing would
+          // be worse than one that plainly is not.
+          <View style={styles.rowTap} accessibilityLabel={`${label}, ${value ?? 'nothing yet'}`}>
+            {body}
+          </View>
+        )}
+        {onToggle ? (
+          <Pressable
+            onPress={onToggle}
+            style={styles.rowToggle}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: !!open }}
+            accessibilityLabel={
+              open ? `Hide who ${label.toLowerCase()} is made of` : `Show who ${label.toLowerCase()} is made of`
+            }
+          >
+            <Icon
+              name={open ? 'chevron-up' : 'chevron-down'}
+              size="sm"
+              color={Colors.textMuted}
+            />
+          </Pressable>
+        ) : (
+          <View style={styles.rowToggle} />
+        )}
+      </View>
+
+      {open ? (
+        <View style={[styles.breakdown, last && styles.rowLast]}>
+          {(rows ?? []).length === 0 ? (
+            <Text style={styles.breakdownEmpty}>Nobody yet.</Text>
+          ) : (
+            (rows ?? []).map((row) => (
+              <View key={row.key} style={styles.breakdownRow}>
+                <Text style={styles.breakdownName} numberOfLines={1}>{row.name}</Text>
+                <Text style={styles.breakdownAmount} numberOfLines={1}>{row.amount}</Text>
+              </View>
+            ))
+          )}
+          {unaccounted ? <Text style={styles.breakdownNote}>{unaccounted}</Text> : null}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -1617,6 +1839,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.card,
     overflow: 'hidden',
   },
+  // The Budget row, which is a Pressable in its own right and keeps the rule.
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1626,6 +1849,56 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  // The rule now belongs to the wrapper, so an open breakdown sits inside the
+  // figure it belongs to rather than after the line that closes it.
+  rowWrap: { borderBottomWidth: 1, borderBottomColor: Colors.border },
+  rowInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.sm,
+  },
+  // The label and the figure: one target, with the chevron beside it as its
+  // sibling rather than its child.
+  rowTap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  rowToggle: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -Spacing.sm,
+  },
+  breakdown: {
+    backgroundColor: Colors.sunken,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: 5,
+  },
+  breakdownName: { flex: 1, minWidth: 0, fontSize: Typography.sm, color: Colors.textSecondary },
+  breakdownAmount: {
+    fontFamily: Fonts.mono,
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
+    textAlign: 'right',
+  },
+  breakdownEmpty: { fontSize: Typography.sm, color: Colors.textMuted, paddingVertical: 5 },
+  // Never silent about a gap: an override means the rows below genuinely do
+  // not add up to the line above, and a reader left to notice that themselves
+  // concludes the breakdown is broken.
+  breakdownNote: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: Spacing.xs },
   rowLast: { borderBottomWidth: 0 },
   // Wide enough for "COMMITTED" and "FORECAST" — the two longest labels here —
   // to sit on one line at this size and letter-spacing. 58px wrapped both of
@@ -1737,8 +2010,11 @@ const styles = StyleSheet.create({
   link: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.semibold },
   // Not optional, anywhere. The figures above mean nothing without it.
 
-  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xl, marginBottom: Spacing.sm },
+  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xl, marginBottom: Spacing.sm, minHeight: MIN_TOUCH_TARGET },
   section: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase' },
+  // What a folded section still says. A fold that took the count with it would
+  // be a filter rather than a fold — the list tab's own rule, one screen over.
+  sectionCount: { fontSize: Typography.xs, color: Colors.textMuted },
   rule: { flex: 1, height: 1, backgroundColor: Colors.border },
   plusTap: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.md },
 
@@ -1896,6 +2172,10 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm, fontFamily: Fonts.mono, color: Colors.textMuted,
     marginLeft: Spacing.sm,
   },
+  // A confirmed figure is in Committed, so it reads like one: ink against the
+  // muted default the unconfirmed rows keep. Not a hue — the palette's four are
+  // spent on state, and this is a fact about whether a number counts.
+  expectedAmountCounts: { color: Colors.textPrimary, fontWeight: Typography.semibold },
   expectedRemove: {
     width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET,
     alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.md,

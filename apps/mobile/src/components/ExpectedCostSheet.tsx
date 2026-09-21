@@ -25,6 +25,12 @@ interface Props {
   lines: ProjectExpectedCostLine[];
   householdId: string;
   onSave: (input: ExpectedCostInput) => Promise<void>;
+  /**
+   * Says whether somebody has agreed this. Its own call, never part of
+   * `onSave` — it is the only write here that changes what a total says.
+   * Absent while the row does not exist yet: the answer rides in `onSave`.
+   */
+  onConfirm?: (confirmed: boolean) => Promise<void>;
   onDelete?: () => Promise<void>;
   onAddLine: (input: ExpectedCostLineInput) => Promise<void>;
   onUpdateLine: (lineId: string, input: Partial<ExpectedCostLineInput>) => Promise<void>;
@@ -67,7 +73,7 @@ const emptyLine = { name: '', reference: '', amount: '', incl: true, photoPaths:
  */
 export default function ExpectedCostSheet({
   visible, elements, showElements, existing, lines, householdId,
-  onSave, onDelete, onAddLine, onUpdateLine, onDeleteLine, onClose,
+  onSave, onConfirm, onDelete, onAddLine, onUpdateLine, onDeleteLine, onClose,
 }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
@@ -77,6 +83,16 @@ export default function ExpectedCostSheet({
   const [incl, setIncl] = useState(true);
   const [likelySupplier, setLikelySupplier] = useState('');
   const [elementId, setElementId] = useState<string | null>(null);
+  /**
+   * Whether somebody has agreed this.
+   *
+   * Held locally as well as written, because a new row has no id to write
+   * against yet — the answer rides into `create_expected_cost`. On a row that
+   * exists the press writes immediately through `onConfirm`, the way every
+   * other single decision on this feature's pages does, and puts the pill back
+   * if the server refuses.
+   */
+  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -84,6 +100,8 @@ export default function ExpectedCostSheet({
   const [lineForm, setLineForm] = useState(emptyLine);
   const [lineBusy, setLineBusy] = useState(false);
   const [removingLine, setRemovingLine] = useState<ProjectExpectedCostLine | null>(null);
+  /** Said under the payment's name box when Save cannot take what is in it. */
+  const [lineMissing, setLineMissing] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -92,16 +110,37 @@ export default function ExpectedCostSheet({
     setIncl(existing?.amountInclGst ?? true);
     setLikelySupplier(existing?.likelySupplier ?? '');
     setElementId(existing?.elementId ?? null);
+    setConfirmed(existing?.confirmed ?? false);
     setLineEditing(null);
     setLineForm(emptyLine);
+    setLineMissing(false);
   }, [visible, existing?.id]);
 
   const canSave = name.trim().length > 0;
 
+  /**
+   * Saves the row — **and the payment still sitting in the box**.
+   *
+   * This shipped broken, in exactly the shape the project sheet's second step
+   * already paid for once: the only thing that wrote a payment was the little
+   * *Save* beside it, so somebody who filled in the value and an invoice
+   * number and then pressed the sheet's own Save had it discarded, silently,
+   * with nothing anywhere saying so. On the live job that is every payment
+   * ever typed under *Also expecting* — the table has no rows at all.
+   *
+   * A half-typed answer in a box is still an answer, and the only honest
+   * readings of Save are "take it" or "say why you can't". So the line is
+   * committed first and a refusal **holds the sheet open** with the words
+   * still there, rather than closing over a payment it did not take.
+   */
   async function save() {
     if (busy || !canSave) return;
     setBusy(true);
     try {
+      if (lineEditing !== null) {
+        const committed = await commitLine();
+        if (!committed) return;
+      }
       const parsed = amount.trim() ? Number(amount.replace(/[^0-9.]/g, '')) : NaN;
       await onSave({
         name: name.trim(),
@@ -109,6 +148,10 @@ export default function ExpectedCostSheet({
         amountInclGst: incl,
         likelySupplier: likelySupplier.trim() || null,
         elementId,
+        // Only on the create path. On an existing row this has already been
+        // written by the pill, through the one call that is allowed to move a
+        // total — `onSave` must not be a second writer of it.
+        confirmed: existing ? undefined : confirmed,
       });
       onClose();
     } finally {
@@ -133,28 +176,78 @@ export default function ExpectedCostSheet({
     setLineForm(emptyLine);
   }
 
-  async function saveLine() {
-    if (lineBusy || lineForm.name.trim().length === 0) return;
-    setLineBusy(true);
-    try {
-      const parsed = lineForm.amount.trim() ? Number(lineForm.amount.replace(/[^0-9.]/g, '')) : NaN;
-      const input: ExpectedCostLineInput = {
-        name: lineForm.name.trim(),
-        reference: lineForm.reference.trim() || null,
-        amount: Number.isFinite(parsed) ? parsed : null,
-        amountInclGst: lineForm.incl,
-        photoPaths: lineForm.photoPaths,
-        documentPaths: lineForm.documentPaths,
-      };
-      if (lineEditing && lineEditing !== 'new') {
-        await onUpdateLine(lineEditing, input);
-      } else {
-        await onAddLine(input);
-      }
+  /**
+   * Writes whatever is in the payment box, and says so when it cannot.
+   *
+   * Returns whether the write landed, because the sheet's own Save has to
+   * decide from it whether to close. A box holding nothing at all is not a
+   * refusal — there is nothing to lose — so it passes.
+   */
+  async function commitLine(): Promise<boolean> {
+    const named = lineForm.name.trim();
+    const typed = lineForm.amount.trim();
+    if (named.length === 0 && typed.length === 0
+        && lineForm.reference.trim().length === 0
+        && lineForm.photoPaths.length === 0
+        && lineForm.documentPaths.length === 0) {
       setLineEditing(null);
       setLineForm(emptyLine);
+      setLineMissing(false);
+      return true;
+    }
+    // The name is what a bank statement's line is *called*, and the row is
+    // unreadable without it. Said under the box rather than as a toast,
+    // because it is a fact about the box.
+    if (named.length === 0) {
+      setLineMissing(true);
+      return false;
+    }
+    setLineMissing(false);
+    const parsed = typed ? Number(typed.replace(/[^0-9.]/g, '')) : NaN;
+    const input: ExpectedCostLineInput = {
+      name: named,
+      reference: lineForm.reference.trim() || null,
+      amount: Number.isFinite(parsed) ? parsed : null,
+      amountInclGst: lineForm.incl,
+      photoPaths: lineForm.photoPaths,
+      documentPaths: lineForm.documentPaths,
+    };
+    if (lineEditing && lineEditing !== 'new') {
+      await onUpdateLine(lineEditing, input);
+    } else {
+      await onAddLine(input);
+    }
+    setLineEditing(null);
+    setLineForm(emptyLine);
+    return true;
+  }
+
+  async function saveLine() {
+    if (lineBusy) return;
+    setLineBusy(true);
+    try {
+      await commitLine();
     } finally {
       setLineBusy(false);
+    }
+  }
+
+  /**
+   * Answers before the network does, and puts it back when refused.
+   *
+   * The same rule the project page's other toggles follow: a toggle that waits
+   * for a round trip reads as one that did not register, and gets pressed
+   * again. `confirmed` is a plain boolean, so the client can predict it
+   * exactly; everything it moves is derived in a view and left to the re-read.
+   */
+  async function setConfirmedTo(next: boolean) {
+    if (next === confirmed) return;
+    setConfirmed(next);
+    if (!existing || !onConfirm) return;
+    try {
+      await onConfirm(next);
+    } catch {
+      setConfirmed(!next);
     }
   }
 
@@ -185,7 +278,7 @@ export default function ExpectedCostSheet({
         <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
           <Text style={styles.blurb}>
             A cost somebody has warned you about but nobody has quoted — the engineer, the council.
-            It counts towards the forecast and never towards what you&rsquo;ve agreed to.
+            Until it&rsquo;s confirmed it counts towards the forecast and nothing else.
           </Text>
 
           <Text style={styles.label}>WHAT IS IT</Text>
@@ -217,8 +310,47 @@ export default function ExpectedCostSheet({
             accessibilityLabel="Who it will probably come from"
           />
           <Text style={styles.hint}>
-            A hint, not a supplier — you can&rsquo;t owe money to a guess, so this never reaches
-            who&rsquo;s owed what.
+            {confirmed
+              ? 'Confirmed, so this is who the money is owed to — the row shows under who we’re paying.'
+              : 'A hint, not a supplier — you can’t owe money to a guess, so this doesn’t reach who’s owed what yet.'}
+          </Text>
+
+          {/* ── the one answer that moves a total ─────────────────────────
+              Two named halves, in the app's one chip shape: a sunken well, a
+              solid fern half for the answer that is true, ~34px inside a 48px
+              target. One chip that toggled would leave the other answer as the
+              unlabelled absence of a press, and here that unlabelled answer is
+              the difference between a guess and a commitment — the same
+              argument the GST pill and *Is it in?* both make.
+
+              Unconfirmed is the default and is exactly what an expected cost
+              has always been. Confirming is a deliberate act, which is why
+              nothing on any page changes until somebody presses it. */}
+          <Text style={styles.question}>Has anybody agreed this?</Text>
+          <View style={styles.pill}>
+            <Pressable
+              onPress={() => setConfirmedTo(true)}
+              style={[styles.half, confirmed && styles.halfOn]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: confirmed }}
+              accessibilityLabel="Confirmed"
+            >
+              <Text style={[styles.halfLabel, confirmed && styles.halfLabelOn]}>Confirmed</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setConfirmedTo(false)}
+              style={[styles.half, !confirmed && styles.halfOn]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: !confirmed }}
+              accessibilityLabel="Unconfirmed"
+            >
+              <Text style={[styles.halfLabel, !confirmed && styles.halfLabelOn]}>Not yet</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.hint}>
+            {confirmed
+              ? 'It counts as committed, and it’s still not invoiced or paid — so it sits in what’s left to be billed.'
+              : 'It counts towards the forecast alone, and every figure that holds it says it’s a guess.'}
           </Text>
 
           {showElements && elements.length > 0 ? (
@@ -320,10 +452,18 @@ export default function ExpectedCostSheet({
                   <TextInput
                     style={styles.input}
                     value={lineForm.name}
-                    onChangeText={(text) => setLineForm((f) => ({ ...f, name: text }))}
+                    onChangeText={(text) => {
+                      setLineForm((f) => ({ ...f, name: text }));
+                      if (text.trim()) setLineMissing(false);
+                    }}
                     accessibilityLabel="Who it was paid to, or what for"
                     autoFocus
                   />
+                  {lineMissing ? (
+                    <Text style={styles.lineMissing}>
+                      Give it a name — &ldquo;Deposit&rdquo;, or who it went to.
+                    </Text>
+                  ) : null}
 
                   <Text style={styles.label}>REFERENCE NUMBER</Text>
                   <TextInput
@@ -356,7 +496,7 @@ export default function ExpectedCostSheet({
 
                   <View style={styles.lineFormRow}>
                     <Pressable
-                      onPress={() => { setLineEditing(null); setLineForm(emptyLine); }}
+                      onPress={() => { setLineEditing(null); setLineForm(emptyLine); setLineMissing(false); }}
                       disabled={lineBusy}
                       style={styles.lineCancel}
                       accessibilityRole="button"
@@ -364,22 +504,19 @@ export default function ExpectedCostSheet({
                     >
                       <Text style={styles.lineCancelLabel}>Cancel</Text>
                     </Pressable>
+                    {/* Live even with the name empty, deliberately. A dead
+                        button is indistinguishable from a button that did
+                        nothing, and on this sheet that difference is a payment
+                        somebody typed and lost — so it presses, and says what
+                        it wants. */}
                     <Pressable
                       onPress={saveLine}
-                      disabled={lineBusy || lineForm.name.trim().length === 0}
-                      style={[
-                        styles.lineSave,
-                        (lineBusy || lineForm.name.trim().length === 0) && styles.ctaOff,
-                      ]}
+                      disabled={lineBusy}
+                      style={[styles.lineSave, lineBusy && styles.ctaOff]}
                       accessibilityRole="button"
                       accessibilityLabel="Save the payment"
                     >
-                      <Text
-                        style={[
-                          styles.lineSaveLabel,
-                          (lineBusy || lineForm.name.trim().length === 0) && styles.ctaLabelOff,
-                        ]}
-                      >
+                      <Text style={[styles.lineSaveLabel, lineBusy && styles.ctaLabelOff]}>
                         {lineBusy ? 'Saving…' : 'Save'}
                       </Text>
                     </Pressable>
@@ -478,10 +615,29 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET, minWidth: 0,
   },
   hint: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: Spacing.xs },
+  lineMissing: { fontSize: Typography.sm, color: Colors.danger, marginTop: Spacing.xs },
   question: {
     fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary,
     marginTop: Spacing.lg, marginBottom: Spacing.sm,
   },
+  // The app's one chip shape, as `MoneyField` and the item sheet's *Is it in?*
+  // draw it: a sunken well when off, solid fern when on, no border either way.
+  pill: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.chip,
+    overflow: 'hidden',
+  },
+  half: {
+    paddingHorizontal: Spacing.md,
+    // The visible pill is ~34px; the tap area is the full target.
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+  },
+  halfOn: { backgroundColor: Colors.primary },
+  halfLabel: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textSecondary },
+  halfLabelOn: { color: Colors.white },
   chips: { flexDirection: 'row', flexWrap: 'wrap' },
   chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingRight: Spacing.sm },
   chip: {

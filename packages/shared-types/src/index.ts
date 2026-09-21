@@ -1056,9 +1056,20 @@ export interface Project extends ProjectTotals {
    * inside committed) as well as the three additions.
    */
   forecastGuess: number;
-  /** Costs somebody has been told to expect that nobody has quoted. */
+  /**
+   * Costs somebody has been told to expect that nobody has quoted **and
+   * nobody has confirmed**. A confirmed one has moved into `committedTotal`.
+   */
   expectedOpen: number;
   expectedCount: number;
+  /**
+   * How much of Committed is a confirmed expectation rather than a price.
+   *
+   * The denominator rule, applied to the one row type whose figure was never
+   * on paper: a reader of Committed can ask how much of it anybody actually
+   * quoted for. Null when none of it is.
+   */
+  expectedConfirmed: number | null;
   /**
    * What the budgeted parts still have to cover for their unpriced items.
    *
@@ -1155,9 +1166,14 @@ export interface ProjectElement extends ProjectTotals {
   /** This part's share of the budget. See `Project.partsBudgetTotal`. */
   budget: number | null;
   budgetInclGst: boolean;
-  /** Costs expected against this part specifically. See `ProjectExpectedCost`. */
+  /**
+   * Costs expected against this part specifically, still unconfirmed. See
+   * `ProjectExpectedCost` — a confirmed one has moved into `committedTotal`.
+   */
   expectedOpen: number;
   expectedCount: number;
+  /** How much of this part's committed figure is a confirmed expectation. */
+  expectedConfirmed: number | null;
   /** See `Project.budgetGap` — this is the term, per part. */
   budgetGap: number;
   /** What this part's prices add up to, kept whatever was typed over it. */
@@ -1429,11 +1445,27 @@ export interface ProjectExpectedCost {
   /**
    * Who it will probably come from, if that is known.
    *
-   * A hint, not a supplier. It deliberately never reaches the supplier rollup,
-   * because you cannot owe money to a guess.
+   * A hint while this is unconfirmed — you cannot owe money to a guess, so an
+   * unconfirmed row never reaches the supplier rollup. **Confirmed, it is the
+   * supplier**, because the money is now owed to somebody and *who we're
+   * paying* has to be able to say to whom.
    */
   likelySupplier: string | null;
   note: string | null;
+  /**
+   * Whether somebody has agreed this, or it is still a guess.
+   *
+   * The whole of the distinction. **Unconfirmed** is what an expected cost has
+   * always been: Forecast alone, counted in `expectedOpen`, worded as a guess,
+   * owed to nobody. **Confirmed** counts in Committed, is owed to
+   * `likelySupplier`, and leaves `expectedOpen` so the forecast stops calling
+   * it a guess.
+   *
+   * It still never reaches Invoiced or Paid: nobody has billed for it and no
+   * money has moved. So confirming one widens *still to be billed*, which is
+   * the true reading — agreed work nobody has claimed for yet.
+   */
+  confirmed: boolean;
   /** The real price, once it exists. Set, this stops counting. */
   settledBy: string | null;
   createdAt: string;
@@ -1615,6 +1647,15 @@ export interface ProjectSupplierTotals {
   supplierKey: string;
   /** Displayed with the spelling used most recently. Null when nobody was named. */
   supplier: string | null;
+  /**
+   * Everything they have quoted that has not been declined — accepted prices
+   * included, because an accepted quote was still quoted.
+   *
+   * The line above Committed on the project page, broken down by who said it.
+   * Null where this supplier has only ever invoiced, which is not zero: a
+   * consultant billing time by the month has no quote and never will.
+   */
+  quoted: number | null;
   committed: number | null;
   invoiced: number | null;
   paid: number | null;

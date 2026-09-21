@@ -3138,8 +3138,8 @@ without ever asking for a new password.
 look at something. `apps/mobile/src/navigation/linking.ts`, wired into `NavigationContainer`;
 native uses the `snag://` scheme from `app.json`.
 
-`/projects/:id` is the other one that resolves, and for two years it didn't. `ProjectDetail` has
-been on the root stack since projects shipped — deliberately, so a link sent to somebody who has
+`/projects/:id` is the other one that resolves, and until `20260921` it never did. `ProjectDetail`
+has been on the root stack since projects shipped — deliberately, so a link sent to somebody who has
 since put Projects away still opens the page — but the *path* was never in `linking.ts`, so it
 always fell through to the list with nothing said. **A missing path is not an error**: React
 Navigation simply does not match it. `linking.test.ts` pins both paths now, and pins what stays

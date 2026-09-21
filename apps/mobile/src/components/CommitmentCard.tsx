@@ -8,7 +8,7 @@ import {
   outstanding,
 } from '@snag/supabase-queries';
 import {
-  ProjectMilestone, ProjectQuote, ProjectQuoteStatus, ProjectSupplierTotals,
+  ProjectBill, ProjectMilestone, ProjectQuote, ProjectQuoteStatus, ProjectSupplierTotals,
 } from '../types';
 
 interface Props {
@@ -16,6 +16,16 @@ interface Props {
   /** Everything this supplier has sent — contracts and bills alike. */
   prices: ProjectQuote[];
   milestones: ProjectMilestone[];
+  /**
+   * The live bills, carrying what is still to go out and whether it is late.
+   *
+   * `overdue` is computed in `home.project_bills` against the **server's**
+   * `current_date` rather than re-derived here. Comparing an ISO date to
+   * `new Date().toISOString().slice(0, 10)` is a UTC comparison, and a bill due
+   * today in Auckland reads as overdue for half the year — the same
+   * `dayKey` trap the Schedule tab already pays for once.
+   */
+  bills: ProjectBill[];
   onSign: (quoteId: string, status: ProjectQuoteStatus) => void;
   onOpenBuildUp: (quote: ProjectQuote) => void;
   onOpenSchedule: (quote: ProjectQuote) => void;
@@ -45,8 +55,9 @@ interface Props {
  * those are genuinely different moments and they should stop sharing a control.
  */
 export default function CommitmentCard({
-  supplier, prices, milestones, onSign, onOpenBuildUp, onOpenSchedule, onOpenPrice,
+  supplier, prices, milestones, bills, onSign, onOpenBuildUp, onOpenSchedule, onOpenPrice,
 }: Props) {
+  const overdueIds = new Set(bills.filter((bill) => bill.overdue).map((bill) => bill.id));
   const still = outstanding({
     committedTotal: supplier.committed,
     paidTotal: supplier.paid,
@@ -54,7 +65,7 @@ export default function CommitmentCard({
   const settled = supplier.committed !== null && (still ?? 0) < 0.005;
 
   const contracts = prices.filter((price) => price.kind === 'quote');
-  const bills = prices.filter((price) => price.kind === 'invoice');
+  const claims = prices.filter((price) => price.kind === 'invoice');
 
   return (
     <View style={styles.card}>
@@ -212,10 +223,9 @@ export default function CommitmentCard({
         );
       })}
 
-      {bills.map((bill) => {
+      {claims.map((bill) => {
         const owing = bill.unpaid ?? 0;
-        const overdue =
-          owing > 0.005 && bill.dueOn !== null && bill.dueOn < new Date().toISOString().slice(0, 10);
+        const overdue = overdueIds.has(bill.id);
         return (
           <Pressable
             key={bill.id}

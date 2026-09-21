@@ -444,7 +444,7 @@ export {
   describeForecast,
   describeForecastVariance,
   describeStillToBill,
-  describeDue,
+  describeToPay,
   describeLineMovement,
   forecastVariance,
   milestoneAmount,

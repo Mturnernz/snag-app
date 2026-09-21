@@ -3190,7 +3190,7 @@ export function describeForecastVariance(project: {
 
   const unpriced = project.itemCount - project.pricedCount;
   if (unpriced > 0) {
-    causes.push(unpriced === 1 ? "1 item isn't priced" : `${unpriced} items aren't priced`);
+    causes.push(unpriced === 1 ? '1 item isn\u2019t priced' : `${unpriced} items aren\u2019t priced`);
   }
   if (project.forecastGuess > 0.005) {
     causes.push(`${formatMoney(project.forecastGuess)} is still a guess`);
@@ -3223,6 +3223,10 @@ export function describeStillToBill(project: { stillToBill: number | null }): st
 /**
  * What is owed right now, and when.
  *
+ * Named `describeToPay` rather than `describeDue`, which is already the snag
+ * list's due-date phrasing. Two functions called the same thing on two kinds of
+ * due date is how a screen ends up saying "3 days overdue" about an invoice.
+ *
  * The only figure in this feature that is about **today** — everything else on
  * the page is a position, and this is a task. Null at zero, the same rule as
  * the shopping pill and *Fit* in the photo viewer: a line that can only say
@@ -3231,7 +3235,7 @@ export function describeStillToBill(project: { stillToBill: number | null }): st
  * Overdue leads when there is any, because that is the part somebody has to act
  * on first.
  */
-export function describeDue(project: {
+export function describeToPay(project: {
   dueToPay: number;
   overdueTotal: number;
   nextDueOn: string | null;

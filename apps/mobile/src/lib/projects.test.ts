@@ -22,6 +22,7 @@ import type {
 const totals = (over: Partial<ProjectTotals> = {}): ProjectTotals => ({
   itemCount: 0, pricedCount: 0, quotedCount: 0,
   committedTotal: null, invoicedTotal: null, paidTotal: null, allowanceOpen: 0,
+  additionalOpen: 0,
   ...over,
 });
 
@@ -36,12 +37,15 @@ const project = (over: Partial<Project> = {}): Project => ({
   elementCount: 1, shownElementCount: 0, fileCount: 0,
   snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
   partsBudgetTotal: null, partsBudgetedCount: 0,
+  forecastTotal: null, forecastGuess: 0, expectedOpen: 0, expectedCount: 0, budgetGap: 0,
+  stillToBill: null, dueToPay: 0, overdueTotal: 0, nextDueOn: null, dueCount: 0,
   ...totals(), ...over,
 });
 
 const element = (over: Partial<ProjectElement> = {}): ProjectElement => ({
   id: 'e1', projectId: 'p1', name: 'Downstairs laundry', room: null,
   implicit: true, sortOrder: 0, notes: null, budget: null, budgetInclGst: true,
+  expectedOpen: 0, expectedCount: 0, budgetGap: 0,
   photoPaths: [], documentPaths: [],
   createdAt: '2026-08-04T00:00:00Z',
   ...totals(), ...over,
@@ -52,6 +56,7 @@ const item = (over: Partial<ProjectItem> = {}): ProjectItem => ({
   sortOrder: 0, notes: null, photoPaths: [], documentPaths: [],
   createdAt: '2026-08-04T00:00:00Z',
   quoteCount: 0, tbcCount: 0, committed: null, invoiced: null, paid: null, allowanceOpen: 0,
+  additionalOpen: 0,
   ...over,
 });
 
@@ -59,9 +64,11 @@ const quote = (over: Partial<ProjectQuote> = {}): ProjectQuote => ({
   id: 'q1', itemId: 'i1', elementId: null, projectId: null, supplier: 'Mico', detail: null,
   amount: 1000, amountInclGst: true, kind: 'quote', status: 'tbc', basis: 'fixed',
   dated: null, notes: null, supersedesLineId: null, photoPaths: [], documentPaths: [],
+  dueOn: null, billedThroughId: null, settlesMilestoneId: null,
   createdAt: '2026-08-04T00:00:00Z',
   amountIncl: 1000, lineCount: 0, linesTotal: null, buildUp: null, allowanceOpen: 0,
-  effectiveAmount: 1000, paidTotal: null,
+  additionalOpen: 0,
+  effectiveAmount: 1000, paidTotal: null, unpaid: null,
   ...over,
 });
 

@@ -72,12 +72,24 @@ jest.mock('../lib/supabase', () => {
     deleteStoredFiles: jest.fn(), updateElement: jest.fn(), updateProject: jest.fn(),
     updateQuote: jest.fn(), getFileUrls: jest.fn().mockResolvedValue({}),
     addPayment: jest.fn(), deletePayment: jest.fn(),
+    addQuoteLine: jest.fn(), deleteQuoteLine: jest.fn(),
+    addMilestone: jest.fn(), deleteMilestone: jest.fn(),
+    createExpectedCost: jest.fn(), deleteExpectedCost: jest.fn(),
     getSupplierTotals: (...a: unknown[]) => mock_getSupplierTotals(...a),
     getProjectThings: (...a: unknown[]) => mock_getProjectThings(...a),
     // The pure ones are real: mocking `describeTotals` would mock away the rule.
     describeTotals: real.describeTotals,
     describeBudget: real.describeBudget,
     describePartsBudget: real.describePartsBudget,
+    describeForecast: real.describeForecast,
+    describeForecastVariance: real.describeForecastVariance,
+    describeStillToBill: real.describeStillToBill,
+    describeToPay: real.describeToPay,
+    describeAllowance: real.describeAllowance,
+    describeBuildUp: real.describeBuildUp,
+    describeLineMovement: real.describeLineMovement,
+    milestoneAmount: real.milestoneAmount,
+    inclGst: real.inclGst,
     outstanding: real.outstanding,
     formatMoney: real.formatMoney,
     showsElements: real.showsElements,
@@ -93,7 +105,8 @@ jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).
 
 const totals = (over: any = {}) => ({
   itemCount: 0, pricedCount: 0, quotedCount: 0,
-  committedTotal: null, invoicedTotal: null, paidTotal: null, allowanceOpen: 0, ...over,
+  committedTotal: null, invoicedTotal: null, paidTotal: null, allowanceOpen: 0,
+  additionalOpen: 0, ...over,
 });
 const project = (over: any = {}): any => ({
   id: 'p1', householdId: 'h', propertyId: 'prop', name: 'Downstairs laundry',
@@ -103,11 +116,15 @@ const project = (over: any = {}): any => ({
   propertyName: 'Home', createdByName: 'Kate',
   elementCount: 1, shownElementCount: 0, fileCount: 0,
   snagCount: 0, openSnagCount: 0, thingCount: 0,
-  partsBudgetTotal: null, partsBudgetedCount: 0, ...totals(), ...over,
+  partsBudgetTotal: null, partsBudgetedCount: 0,
+  forecastTotal: null, forecastGuess: 0, expectedOpen: 0, expectedCount: 0, budgetGap: 0,
+  stillToBill: null, dueToPay: 0, overdueTotal: 0, nextDueOn: null, dueCount: 0,
+  ...totals(), ...over,
 });
 const element = (over: any = {}): any => ({
   id: 'e1', projectId: 'p1', name: 'Downstairs laundry', room: null, implicit: true,
   sortOrder: 0, notes: null, budget: null, budgetInclGst: true,
+  expectedOpen: 0, expectedCount: 0, budgetGap: 0,
   photoPaths: [], documentPaths: [],
   createdAt: '2026-08-04T00:00:00Z', ...totals(), ...over,
 });
@@ -115,7 +132,7 @@ const item = (over: any = {}): any => ({
   id: 'i1', elementId: 'e1', name: 'Toilet suite', status: 'considering', sortOrder: 0,
   notes: null, photoPaths: [], documentPaths: [], createdAt: '2026-08-04T00:00:00Z',
   quoteCount: 0, tbcCount: 0, committed: null, invoiced: null, paid: null,
-  allowanceOpen: 0, ...over,
+  allowanceOpen: 0, additionalOpen: 0, ...over,
 });
 
 beforeEach(() => {
@@ -135,6 +152,7 @@ beforeEach(() => {
 async function arrange(opts: {
   project?: any; elements?: any[]; items?: any[]; quotes?: any[]; lines?: any[];
   payments?: any[]; files?: any[]; snags?: any[]; suppliers?: any[]; things?: any[];
+  milestones?: any[]; expected?: any[]; bills?: any[];
 } = {}) {
   mock_getProject.mockResolvedValue(opts.project ?? project());
   mock_getProjectContents.mockResolvedValue({
@@ -143,6 +161,9 @@ async function arrange(opts: {
     quotes: opts.quotes ?? [],
     lines: opts.lines ?? [],
     payments: opts.payments ?? [],
+    milestones: opts.milestones ?? [],
+    expected: opts.expected ?? [],
+    bills: opts.bills ?? [],
   });
   mock_getProjectFiles.mockResolvedValue(opts.files ?? []);
   mock_getSnags.mockResolvedValue(opts.snags ?? []);
@@ -197,20 +218,76 @@ describe('the money', () => {
     r.getByText('Committed');
     r.getByText('Invoiced');
     r.getByText('Paid');
-    r.getByText('Outstanding');
     expect(r.queryByText('Spent')).toBeNull();
     r.getByText('$8,990');
     r.getByText('$4,200');
     r.getByText('$3,990');
-    // 8,990 - 3,990, which is committed less paid rather than invoiced less paid.
-    r.getByText('$5,000');
   });
 
-  it('carries the denominator under them, always', async () => {
+  it('splits the one Outstanding figure into the two gaps it was conflating', async () => {
+    // "Outstanding quote vs actual costs" and "what is outstanding to pay" are
+    // different subtractions, and a single figure called Outstanding answered
+    // neither. Still to be billed is committed less invoiced — how much of what
+    // was agreed is still coming. To pay is invoiced less paid, and it is the
+    // only figure on this page that is about today.
     const r = await arrange({
-      project: project({ committedTotal: 8990, itemCount: 9, pricedCount: 5, quotedCount: 1 }),
+      project: project({
+        committedTotal: 8990, invoicedTotal: 4200, paidTotal: 3990,
+        stillToBill: 4790, dueToPay: 210, dueCount: 1,
+        itemCount: 9, pricedCount: 5,
+      }),
     });
-    r.getByText('5 of 9 items priced · 1 quoted, not decided · 3 not priced');
+    r.getByText('$4,790 still to be billed');
+    r.getByText('$210 to pay · 1 bill');
+    expect(r.queryByText('Outstanding')).toBeNull();
+  });
+
+  it('reports an over-claim rather than flooring it away', async () => {
+    // Negative still-to-bill means somebody has billed more than was ever
+    // committed, which is the single most useful thing this subtraction can
+    // say. Tidying it to zero would throw exactly that away.
+    const r = await arrange({
+      project: project({
+        committedTotal: 4000, invoicedTotal: 5200, stillToBill: -1200,
+        itemCount: 2, pricedCount: 2,
+      }),
+    });
+    r.getByText('$1,200 billed beyond what was committed');
+  });
+
+  it('carries the denominator under the forecast, always', async () => {
+    const r = await arrange({
+      project: project({
+        committedTotal: 8990, forecastTotal: 8990,
+        itemCount: 9, pricedCount: 5, quotedCount: 1,
+      }),
+    });
+    r.getByText('5 of 9 items priced');
+  });
+
+  it('never renders a forecast without saying how much of it is a guess', async () => {
+    const r = await arrange({
+      project: project({
+        committedTotal: 103574.22, forecastTotal: 119774.22, forecastGuess: 16200,
+        itemCount: 18, pricedCount: 13,
+      }),
+    });
+    r.getByText('$119,774.22');
+    r.getByText('13 of 18 items priced · $16,200 of it still a guess');
+  });
+
+  it('warns past 5% over, in words and with its cause', async () => {
+    // A percentage with no cause is a number people learn to ignore, so the
+    // line names what is driving it. `projects.test.ts` pins the silence below
+    // the threshold and when under, which are properties rather than pixels.
+    const r = await arrange({
+      project: project({
+        budget: 187000, budgetInclGst: true,
+        committedTotal: 192354.22, forecastTotal: 210000, forecastGuess: 17645.78,
+        itemCount: 18, pricedCount: 13,
+      }),
+    });
+    r.getByText('$23,000 over budget — 5 items aren’t priced and $17,645.78 is still a guess');
   });
 
   it('puts the budget under the figures and says which side of it we are', async () => {
@@ -249,14 +326,20 @@ describe('the money', () => {
     });
     expect(r.getByText('$192,354.22').props.numberOfLines).toBe(1);
     expect(r.getByText('$97,753.22').props.numberOfLines).toBe(1);
-    expect(r.getByText('$190,401.75').props.numberOfLines).toBe(1);
+    expect(r.getByText('$1,952.47').props.numberOfLines).toBe(1);
   });
 
-  it('says how much of the total is still somebody’s guess', async () => {
+  it('keeps “still a guess” and “not priced” as different sentences', async () => {
+    // An allowance is somebody's written number inside a contract and it counts;
+    // an unpriced item contributes nothing. Collapsing the wording collapses the
+    // distinction, which is worth 15% of a renovation when it goes.
     const r = await arrange({
-      project: project({ committedTotal: 167240, allowanceOpen: 22300, itemCount: 0 }),
+      project: project({
+        committedTotal: 167240, forecastTotal: 167240, forecastGuess: 22300,
+        allowanceOpen: 22300, itemCount: 9, pricedCount: 9,
+      }),
     });
-    r.getByText('$22,300 still an allowance');
+    r.getByText('9 of 9 items priced · $22,300 of it still a guess');
   });
 });
 
@@ -264,16 +347,18 @@ describe('who is owed what', () => {
   it('is absent entirely when nobody is owed anything', async () => {
     const r = await arrange();
     expect(r.queryByText('Who’s owed what')).toBeNull();
+    expect(r.queryByText('Who we’re paying')).toBeNull();
   });
 
   it('names each supplier, and what is still to go to them', async () => {
     const r = await arrange({
       suppliers: [
         { projectId: 'p1', supplierKey: 'reliabuilder', supplier: 'ReliaBuilder',
-          committed: 177594.5, invoiced: 88814.5, paid: 84000, tbcCount: 0 },
+          committed: 177594.5, invoiced: 88814.5, paid: 84000, unpaid: 4814.5,
+          nextDueOn: null, tbcCount: 0 },
       ],
     });
-    r.getByText('Who’s owed what');
+    r.getByText('Who we’re paying');
     r.getByText('ReliaBuilder');
     r.getByText('$93,594.50');
   });

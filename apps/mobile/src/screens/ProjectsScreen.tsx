@@ -14,7 +14,9 @@ import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } 
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createLocation, createProject, describeTotals, formatMoney, getProjects, outstanding,
+  createLocation, createProject, describeForecast, describeForecastVariance, describeToPay,
+  describeTotals,
+  formatMoney, getProjects, outstanding,
   projectSubtitle,
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
@@ -356,7 +358,22 @@ function ProjectCard({
   const committed = formatMoney(project.committedTotal);
   const paid = formatMoney(project.paidTotal);
   const owing = formatMoney(outstanding(project));
-  const denominator = describeTotals(project);
+  const forecast = formatMoney(project.forecastTotal);
+  /**
+   * The denominator, and it must never be absent while a figure is present.
+   *
+   * `describeForecast` is silent when there is no forecast to describe — which
+   * is right for the forecast and wrong for the card, because the card still
+   * shows *committed* in that case. Falling through to `describeTotals` keeps
+   * the rule absolute: **no total renders here without the line that says what
+   * it is of.** Caught by the spec that exists for exactly this.
+   */
+  const denominator = describeForecast(project) ?? describeTotals(project);
+  // Over budget, in words and against **forecast** rather than committed —
+  // committed lags reality by everything nobody has priced, so a card that only
+  // reddened on committed would stay calm until the last quote landed.
+  const varianceLine = describeForecastVariance(project);
+  const toPayLine = describeToPay(project);
 
   // Three sentences for three states, because "what has this cost" and "what
   // is still to pay" are different questions and a project answers whichever it
@@ -365,8 +382,14 @@ function ProjectCard({
   // Outstanding leads the card rather than Paid: on a list of renovations the
   // question is what is still to find, and a card that said "$88,600 paid" of a
   // $192,354 job would read as nearly done.
+  //
+  // Forecast leads where there is one, because *are we over* is the question a
+  // list of renovations is scanned with, and it is the one committed cannot
+  // answer while items are unpriced.
   let money: string | null = null;
-  if (committed && owing && owing !== committed) {
+  if (forecast && committed && forecast !== committed) {
+    money = `${forecast} forecast · ${committed} committed`;
+  } else if (committed && owing && owing !== committed) {
     money = `${committed} committed · ${owing} still to pay`;
   } else if (committed) {
     money = `${committed} committed`;
@@ -397,9 +420,24 @@ function ProjectCard({
 
       {money ? <Text style={styles.money}>{money}</Text> : null}
       {denominator ? <Text style={styles.denominator}>{denominator}</Text> : null}
+      {varianceLine ? <Text style={styles.variance}>{varianceLine}</Text> : null}
 
-      {project.openSnagCount > 0 || project.fileCount > 0 ? (
+      {project.openSnagCount > 0 || project.fileCount > 0 || toPayLine ? (
         <View style={styles.cardFoot}>
+          {/* Is there a bill due. The only thing on this card about today, and
+              worth answering without opening anything. */}
+          {toPayLine ? (
+            <View style={[styles.pill, project.overdueTotal > 0.005 && styles.pillOverdue]}>
+              <Text
+                style={[
+                  styles.pillLabel,
+                  project.overdueTotal > 0.005 && styles.pillLabelOverdue,
+                ]}
+              >
+                {toPayLine}
+              </Text>
+            </View>
+          ) : null}
           {project.openSnagCount > 0 ? (
             <View style={styles.pill}>
               <Text style={styles.pillLabel}>
@@ -486,6 +524,11 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   pillLabel: { fontSize: Typography.xs, color: Colors.effort.fg, fontWeight: Typography.medium },
+  // Overdue is the one thing on a renovation card that has earned clay: it is a
+  // fact about a date somebody has gone past, not a judgement about the job.
+  pillOverdue: { backgroundColor: Colors.due.overdueBg },
+  pillLabelOverdue: { color: Colors.danger },
+  variance: { fontSize: Typography.xs, color: Colors.danger, marginTop: 2 },
 
   empty: { alignItems: 'center', paddingHorizontal: Spacing.xl },
   emptyTitle: {

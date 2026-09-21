@@ -13,6 +13,11 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import AddThingSheet from '../components/AddThingSheet';
 import ExportFooter from '../components/ExportFooter';
 import ProjectRoomsSheet from '../components/ProjectRoomsSheet';
+import RecordBillSheet from '../components/RecordBillSheet';
+import BuildUpSheet from '../components/BuildUpSheet';
+import ExpectedCostSheet from '../components/ExpectedCostSheet';
+import ScheduleSheet from '../components/ScheduleSheet';
+import CommitmentCard from '../components/CommitmentCard';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import StatusBadge from '../components/StatusBadge';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -20,12 +25,15 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
 import {
-  addPayment, createElement, createItem, createLocation, createQuote, createThing, deleteElement,
-  deleteItem, deletePayment, deleteProject, deleteQuote,
-  deleteStoredFiles, describeBudget, describePartsBudget, describeTotals, formatMoney, getProject,
+  addMilestone, addPayment, addQuoteLine, createElement, createExpectedCost, createItem,
+  createLocation, createQuote, createThing, deleteElement,
+  deleteExpectedCost, deleteItem, deleteMilestone, deletePayment, deleteProject, deleteQuote,
+  deleteQuoteLine,
+  deleteStoredFiles, describeBudget, describeForecast, describeForecastVariance,
+  describePartsBudget, describeStillToBill, describeToPay, describeTotals, formatMoney, getProject,
   getProjectContents, getProjectFiles, getProjectThings, getSupplierTotals,
-  getSnags, outstanding, setQuoteStatus, showsElements, updateElement, updateItem, updateProject,
-  updateQuote,
+  getSnags, outstanding, setQuoteStatus, showsElements, updateElement, updateItem,
+  updateProject, updateQuote,
 } from '../lib/supabase';
 import {
   documentName, exportDateStamp, formatLooseDate, inclGst, itemPriceLabel, projectDossierTable,
@@ -34,7 +42,8 @@ import {
 import { getFileUrls } from '../lib/supabase';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import {
-  Project, ProjectElement, ProjectFile, ProjectItem, ProjectPayment, ProjectQuote,
+  Project, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectFile, ProjectItem,
+  ProjectMilestone, ProjectPayment, ProjectQuote,
   ProjectQuoteLine, ProjectQuoteStatus, ProjectStatus, ProjectSupplierTotals,
   PROJECT_FILE_LEVEL_LABELS, PROJECT_QUOTE_STATUS_LABELS, PROJECT_STATUS_LABELS,
   RootStackParamList, Snag, Thing,
@@ -107,6 +116,13 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [lines, setLines] = useState<ProjectQuoteLine[]>([]);
   const [payments, setPayments] = useState<ProjectPayment[]>([]);
   const [suppliers, setSuppliers] = useState<ProjectSupplierTotals[]>([]);
+  const [milestones, setMilestones] = useState<ProjectMilestone[]>([]);
+  const [expected, setExpected] = useState<ProjectExpectedCost[]>([]);
+  const [bills, setBills] = useState<ProjectBill[]>([]);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [expectedOpen, setExpectedOpen] = useState(false);
+  const [buildUpFor, setBuildUpFor] = useState<ProjectQuote | null>(null);
+  const [scheduleFor, setScheduleFor] = useState<ProjectQuote | null>(null);
   const [handoverOpen, setHandoverOpen] = useState(false);
   const [recorded, setRecorded] = useState<Thing[]>([]);
   const [busy, setBusy] = useState(false);
@@ -126,6 +142,9 @@ export default function ProjectDetailScreen({ route }: Props) {
       setQuotes(contents.quotes);
       setLines(contents.lines);
       setPayments(contents.payments);
+      setMilestones(contents.milestones);
+      setExpected(contents.expected);
+      setBills(contents.bills);
       setFiles(loadedFiles);
       // Who is owed what. **Not fatal**: the money strip above it is the answer
       // to this page's main question, and a rollup that will not load must not
@@ -386,19 +405,37 @@ export default function ProjectDetailScreen({ route }: Props) {
   const committed = formatMoney(project.committedTotal);
   const invoiced = formatMoney(project.invoicedTotal);
   const paid = formatMoney(project.paidTotal);
-  const owing = formatMoney(outstanding(project));
-  const denominator = describeTotals(project);
+  const forecast = formatMoney(project.forecastTotal);
+  const forecastLine = describeForecast(project);
+  const varianceLine = describeForecastVariance(project);
+  const toPayLine = describeToPay(project);
+  const stillToBillLine = describeStillToBill(project);
   const budget = formatMoney(inclGst(project.budget, project.budgetInclGst));
   const budgetLine = describeBudget(project);
   const partsLine = describePartsBudget(project);
   // Clay is the one hue on a household list that has earned red, and it is a
   // fact about a number rather than a judgement: this is over what you said you
   // would spend.
+  //
+  // Measured against **forecast** rather than committed, which is the change
+  // that matters. Committed lags reality by everything nobody has priced yet,
+  // so a page that only reddened on committed would stay calm right up until
+  // the last quote landed — which is exactly what the live job did.
   const overBudget =
     project.budget !== null &&
-    project.committedTotal !== null &&
-    project.committedTotal > (inclGst(project.budget, project.budgetInclGst) ?? 0) + 0.005;
+    project.forecastTotal !== null &&
+    project.forecastTotal > (inclGst(project.budget, project.budgetInclGst) ?? 0) + 0.005;
   const activeItem = items.find((item) => item.id === openItem) ?? null;
+  /**
+   * Prices that could be passed through — a sub's bill goes to whoever holds one.
+   *
+   * Signed quotes only: an unsigned one is not a contract anybody can bill
+   * through, and offering it would invite somebody to route money through a
+   * price that was never agreed.
+   */
+  const passThroughs = quotes.filter(
+    (quote) => quote.kind === 'quote' && quote.status === 'accepted'
+  );
 
   return (
     <View style={styles.container}>
@@ -417,6 +454,114 @@ export default function ProjectDetailScreen({ route }: Props) {
       />
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {/* ── the one thing people came to do ─────────────────────────
+            A bill arrived; where does it go. The most frequent action on a
+            live job, and until this rebuild the deepest buried — six levels
+            down, and only if a scope item already existed to hang it on. It is
+            the only filled button on the page. */}
+        <Pressable
+          onPress={() => setRecordOpen(true)}
+          style={styles.record}
+          accessibilityRole="button"
+          accessibilityLabel="Record a bill or a quote"
+        >
+          <Icon name="add" size="md" color={Colors.white} />
+          <Text style={styles.recordLabel}>Record a bill or a quote</Text>
+        </Pressable>
+
+        {/* ── the money ──────────────────────────────────────────────────
+            Five figures now, and the new one is the answer to the question
+            people actually open this page with.
+
+            Committed answers *what have we agreed to*. Three months in with
+            five items unpriced it is not the answer to *are we over*, and it
+            fails in the direction that costs money: everything nobody has
+            priced counts as nought, so the budget looks comfortable until the
+            week it does not. Forecast adds the guesses — and says how much of
+            itself is one.
+
+            Stacked rather than columned, because a third of 390pt cannot hold
+            "$192,354.22". The label holds a fixed column so the figures line
+            up on their right edge, which is how money is read. */}
+        <View style={styles.strip}>
+          {budget ? (
+            <View style={styles.row}>
+              <Text style={styles.rowKey}>Budget</Text>
+              <Text style={styles.rowValue} numberOfLines={1}>{budget}</Text>
+            </View>
+          ) : null}
+          <View style={styles.row}>
+            <Text style={[styles.rowKey, styles.rowKeyLead]}>Forecast</Text>
+            <Text
+              style={[styles.rowValue, styles.rowValueLead, overBudget && styles.rowValueOver]}
+              numberOfLines={1}
+            >
+              {forecast ?? '—'}
+            </Text>
+          </View>
+          <View style={styles.stripRule} />
+          <View style={styles.row}>
+            <Text style={styles.rowKey}>Committed</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{committed ?? '—'}</Text>
+          </View>
+          {/* Charged and paid are different figures, and seven invoices with no
+              payment recorded against them is the ordinary middle of a job. */}
+          <View style={styles.row}>
+            <Text style={styles.rowKey}>Invoiced</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{invoiced ?? '—'}</Text>
+          </View>
+          <View style={[styles.row, styles.rowLast]}>
+            <Text style={styles.rowKey}>Paid</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{paid ?? '—'}</Text>
+          </View>
+        </View>
+
+        {/* The denominator, which no screen may render a forecast without. */}
+        {forecastLine ? (
+          <Text style={styles.denominator}>{forecastLine}</Text>
+        ) : (
+          <Text style={styles.denominator}>Nothing priced yet</Text>
+        )}
+        {/* Over budget, in words and with its cause. A percentage with no cause
+            is a number people learn to ignore. Silent when under: this is a
+            warning, not a running commentary. */}
+        {varianceLine ? <Text style={styles.variance}>{varianceLine}</Text> : null}
+        {budgetLine ? <Text style={styles.denominator}>{budgetLine}</Text> : null}
+        {partsLine ? <Text style={styles.denominator}>{partsLine}</Text> : null}
+
+        {/* ── the two gaps ───────────────────────────────────────────────
+            They sound alike and they are different subtractions. Still to be
+            billed is committed less invoiced — how much of what was agreed is
+            still coming. To pay is invoiced less paid, and it is the only
+            figure on this page that is about *today*, which is why it is the
+            one with a date on it. */}
+        {toPayLine || stillToBillLine ? (
+          <View style={styles.gaps}>
+            {toPayLine ? (
+              <View style={styles.gapRow}>
+                <Icon
+                  name="wallet-outline"
+                  size="sm"
+                  color={project.overdueTotal > 0.005 ? Colors.danger : Colors.textMuted}
+                />
+                <Text
+                  style={[styles.gapText, project.overdueTotal > 0.005 && styles.gapOverdue]}
+                >
+                  {toPayLine}
+                </Text>
+              </View>
+            ) : null}
+            {stillToBillLine ? (
+              <View style={styles.gapRow}>
+                <Icon name="document-text-outline" size="sm" color={Colors.textMuted} />
+                <Text style={styles.gapText}>{stillToBillLine}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        <Text style={styles.gstNote}>Every figure here is GST-inclusive.</Text>
+
         {/* ── where it's up to ───────────────────────────────────────────
             Writes on press, like every other single decision in this app:
             three chips, and the one that is lit is the answer. */}
@@ -442,125 +587,116 @@ export default function ProjectDetailScreen({ route }: Props) {
           })}
         </View>
 
-        {/* ── the money ──────────────────────────────────────────────────
-            Three figures, never one, and never without the line beneath.
+        {/* ── who we're paying ───────────────────────────────────────────
+            The section that did not exist, and whose absence bent the live job
+            out of shape: money arrives by vendor and contract, scope is by
+            room, and with nowhere to put a contract somebody invented a part
+            called "Whole job" to hold five supplier accounts.
 
-            Stacked rather than three columns across, and that is a fix rather
-            than a preference: a third of 390pt cannot hold
-            "$188,352.22–191,583.72", so the range wrapped mid-number and the
-            strip went ragged the moment a job got past five figures. It is the
-            same argument the thing page's spec sheet already made when it
-            un-columned itself — a two-column row has nowhere to put a long
-            answer, and a renovation's totals are the longest answers here.
+            Second on the page rather than sixth, because this is where a
+            contract gets *Signed* — the control whose depth and wording left a
+            $176,755 contract sitting unsigned for five months while the page
+            reported $89,000 of headroom that did not exist.
 
-            The label holds a fixed column so the three figures line up on their
-            right edge, which is how a column of money is read. */}
-        <View style={styles.strip}>
-          <View style={styles.row}>
-            <Text style={styles.rowKey}>Committed</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{committed ?? '—'}</Text>
-          </View>
-          {/* Charged and paid are different figures, and seven invoices with no
-              payment recorded against them is the ordinary middle of a job. */}
-          <View style={styles.row}>
-            <Text style={styles.rowKey}>Invoiced</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{invoiced ?? '—'}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.rowKey}>Paid</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{paid ?? '—'}</Text>
-          </View>
-          <View style={[styles.row, styles.rowLast]}>
-            <Text style={styles.rowKey}>Outstanding</Text>
-            <Text
-              style={[styles.rowValue, owing ? styles.rowValueOwing : null]}
-              numberOfLines={1}
-            >
-              {owing ?? '—'}
-            </Text>
-          </View>
-          {budget ? (
-            <>
-              <View style={styles.stripRule} />
-              <View style={styles.row}>
-                <Text style={styles.rowKey}>Budget</Text>
-                <Text style={styles.rowValue} numberOfLines={1}>{budget}</Text>
-              </View>
-              {budgetLine ? (
-                <Text style={[styles.budgetLine, overBudget && styles.budgetLineOver]}>
-                  {budgetLine}
-                </Text>
-              ) : null}
-            </>
-          ) : null}
-        </View>
-        {denominator ? (
-          <Text style={styles.denominator}>{denominator}</Text>
-        ) : (
-          <Text style={styles.denominator}>Nothing priced yet</Text>
-        )}
-        {partsLine ? <Text style={styles.denominator}>{partsLine}</Text> : null}
-        <Text style={styles.gstNote}>Every figure here is GST-inclusive.</Text>
-
-        {/* ── who's owed what ────────────────────────────────────────────
             Absent entirely when nobody is owed anything, the same rule as the
-            shopping pill at zero and *Fit* in the photo viewer: a section that
-            can only say "nothing" is a control dressed as a choice.
-
-            The check worth keeping, pinned in `projects.test.ts`: these rows
-            sum to Committed above. They are two views over one rule. */}
+            shopping pill at zero. The check worth keeping: these rows sum to
+            Committed above. */}
         {suppliers.length > 0 ? (
           <>
             <View style={styles.sectionRow}>
-              <Text style={styles.section}>Who&rsquo;s owed what</Text>
+              <Text style={styles.section}>Who we&rsquo;re paying</Text>
               <View style={styles.rule} />
             </View>
             {suppliers
               .slice()
               .sort((a, b) => (b.committed ?? 0) - (a.committed ?? 0))
-              .map((supplier) => {
-                const still = outstanding({
-                  committedTotal: supplier.committed,
-                  paidTotal: supplier.paid,
-                });
-                const settled = supplier.committed !== null && (still ?? 0) < 0.005;
-                return (
-                  <View key={supplier.supplierKey} style={styles.supplier}>
-                    <View style={styles.supplierTitles}>
-                      <Text style={styles.supplierName}>
-                        {supplier.supplier ?? 'Nobody named'}
-                      </Text>
-                      <Text style={styles.supplierUnder}>
-                        {[
-                          supplier.committed !== null
-                            ? `committed ${formatMoney(supplier.committed)}`
-                            : null,
-                          supplier.invoiced !== null
-                            ? `invoiced ${formatMoney(supplier.invoiced)}`
-                            : null,
-                          supplier.paid !== null ? `paid ${formatMoney(supplier.paid)}` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </Text>
-                    </View>
-                    {settled ? (
-                      <View style={styles.settledPill}>
-                        <Text style={styles.settledLabel}>Settled</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.supplierMoney}>
-                        <Text style={styles.supplierKey}>OUTSTANDING</Text>
-                        <Text style={styles.supplierOwing} numberOfLines={1}>
-                          {formatMoney(still) ?? '—'}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
+              .map((supplier) => (
+                <CommitmentCard
+                  key={supplier.supplierKey}
+                  supplier={supplier}
+                  prices={quotes.filter(
+                    (quote) =>
+                      (quote.supplier ?? '').trim().toLowerCase() === supplier.supplierKey &&
+                      quote.billedThroughId === null
+                  )}
+                  milestones={milestones}
+                  bills={bills}
+                  onSign={async (quoteId, status) => {
+                    await setQuoteStatus(quoteId, status);
+                    showToast(PROJECT_QUOTE_STATUS_LABELS[status]);
+                    // Signing moves Committed, Forecast and both gaps at three
+                    // levels at once, and every one of them is derived.
+                    await load();
+                  }}
+                  onOpenBuildUp={setBuildUpFor}
+                  onOpenSchedule={setScheduleFor}
+                  onOpenPrice={(quote) => {
+                    if (quote.itemId) setOpenItem(quote.itemId);
+                  }}
+                />
+              ))}
           </>
         ) : null}
+
+        {/* ── what else is coming ────────────────────────────────────────
+            Costs somebody has been warned about that nobody has quoted. The
+            beat the money model could not hold, and the reason Forecast can be
+            honest before the quotes land.
+
+            They are never committed and never invoiced — every figure they
+            touch names them as a guess. */}
+        <View style={styles.sectionRow}>
+          <Text style={styles.section}>Also expecting</Text>
+          <View style={styles.rule} />
+          <Pressable
+            onPress={() => setExpectedOpen(true)}
+            style={styles.plusTap}
+            accessibilityRole="button"
+            accessibilityLabel="Add something you're expecting"
+          >
+            <Icon name="add" size="md" color={Colors.textMuted} />
+          </Pressable>
+        </View>
+        {expected.filter((cost) => cost.settledBy === null).length === 0 ? (
+          <Text style={styles.hint}>
+            Nothing yet. The engineer the architect mentioned, the council&rsquo;s share — a
+            figure nobody has quoted still belongs in the forecast.
+          </Text>
+        ) : (
+          expected
+            .filter((cost) => cost.settledBy === null)
+            .map((cost) => (
+              <View key={cost.id} style={styles.expected}>
+                <View style={styles.expectedTitles}>
+                  <Text style={styles.expectedName}>{cost.name}</Text>
+                  <Text style={styles.expectedSub} numberOfLines={1}>
+                    {[
+                      cost.likelySupplier,
+                      elements.find((e) => e.id === cost.elementId)?.name,
+                      'nobody has quoted this',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                </View>
+                <Text style={styles.expectedAmount} numberOfLines={1}>
+                  {formatMoney(inclGst(cost.amount, cost.amountInclGst)) ?? 'no figure'}
+                </Text>
+                <Pressable
+                  onPress={async () => {
+                    await deleteExpectedCost(cost.id);
+                    showToast('Removed');
+                    await load();
+                  }}
+                  style={styles.expectedRemove}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${cost.name}`}
+                >
+                  <Icon name="close" size="sm" color={Colors.textMuted} />
+                </Pressable>
+              </View>
+            ))
+        )}
 
         {/* ── what it takes ──────────────────────────────────────────────
             One element and it is implicit: the items hang straight off the
@@ -1018,6 +1154,77 @@ export default function ProjectDetailScreen({ route }: Props) {
         }}
       />
 
+      {/* The one primary action. It never creates scope: a bill maps to
+          something that exists, or it is a cost against the job as a whole. */}
+      <RecordBillSheet
+        visible={recordOpen}
+        elements={elements}
+        items={items}
+        contracts={passThroughs}
+        projectId={project.id}
+        showElements={drawElements}
+        onClose={() => setRecordOpen(false)}
+        onSave={async (input) => {
+          await createQuote(input);
+          showToast('Saved');
+          await load();
+        }}
+      />
+
+      <ExpectedCostSheet
+        visible={expectedOpen}
+        elements={elements}
+        showElements={drawElements}
+        onClose={() => setExpectedOpen(false)}
+        onSave={async (input) => {
+          await createExpectedCost(project.id, input);
+          showToast('Added to the forecast');
+          await load();
+        }}
+      />
+
+      {/* What a builder's number is actually made of — and the screen without
+          which the provisional-sum rule was correct but unreachable. */}
+      <BuildUpSheet
+        visible={buildUpFor !== null}
+        quote={buildUpFor}
+        lines={buildUpFor ? linesByQuote[buildUpFor.id] ?? [] : []}
+        quotes={quotes}
+        onClose={() => setBuildUpFor(null)}
+        onAddLine={async (input) => {
+          if (!buildUpFor) return;
+          await addQuoteLine(buildUpFor.id, input);
+          showToast('Added');
+          await load();
+        }}
+        onDeleteLine={async (lineId) => {
+          await deleteQuoteLine(lineId);
+          showToast('Removed');
+          await load();
+        }}
+      />
+
+      <ScheduleSheet
+        visible={scheduleFor !== null}
+        quote={scheduleFor}
+        milestones={scheduleFor ? milestones.filter((m) => m.quoteId === scheduleFor.id) : []}
+        claimedIds={quotes
+          .map((quote) => quote.settlesMilestoneId)
+          .filter((id): id is string => id !== null)}
+        onClose={() => setScheduleFor(null)}
+        onAdd={async (input) => {
+          if (!scheduleFor) return;
+          await addMilestone(scheduleFor.id, input);
+          showToast('Added');
+          await load();
+        }}
+        onDelete={async (milestoneId) => {
+          await deleteMilestone(milestoneId);
+          showToast('Removed');
+          await load();
+        }}
+      />
+
       <AddThingSheet
         visible={thingFor !== null}
         locations={locations}
@@ -1137,6 +1344,11 @@ const styles = StyleSheet.create({
   // out is the same kind of fact. Never clay — being owed money on a renovation
   // under way is the normal state, not an alarm.
   rowValueOwing: { color: Colors.status.doing },
+  // Forecast leads: it is the figure the page is opened to read, and the one
+  // that answers "are we over". Committed sits underneath as its evidence.
+  rowKeyLead: { color: Colors.textSecondary, fontWeight: Typography.semibold },
+  rowValueLead: { fontSize: Typography.lg, color: Colors.textPrimary },
+  rowValueOver: { color: Colors.danger },
   stripRule: {
     height: 1,
     backgroundColor: Colors.border,
@@ -1314,6 +1526,39 @@ const styles = StyleSheet.create({
   fileWhere: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
 
   hint: { fontSize: Typography.xs, color: Colors.textMuted, lineHeight: 17, marginTop: Spacing.xs },
+
+  // The one filled button on the page, because it is the one thing people came
+  // to do. Everything else here writes on press or opens a sheet.
+  record: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.primary, borderRadius: Radius.button,
+    minHeight: MIN_TOUCH_TARGET, marginBottom: Spacing.lg,
+  },
+  recordLabel: { fontSize: Typography.base, color: Colors.white, fontWeight: Typography.semibold },
+
+  variance: { fontSize: Typography.sm, color: Colors.danger, marginTop: Spacing.sm },
+
+  gaps: { marginTop: Spacing.md, gap: Spacing.xs },
+  gapRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  gapText: { flex: 1, minWidth: 0, fontSize: Typography.sm, color: Colors.textSecondary },
+  gapOverdue: { color: Colors.danger, fontWeight: Typography.medium },
+
+  expected: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  expectedTitles: { flex: 1, minWidth: 0 },
+  expectedName: { fontSize: Typography.base, color: Colors.textPrimary },
+  expectedSub: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },
+  expectedAmount: {
+    fontSize: Typography.sm, fontFamily: Fonts.mono, color: Colors.textMuted,
+    marginLeft: Spacing.sm,
+  },
+  expectedRemove: {
+    width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET,
+    alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.md,
+  },
   remove: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', marginTop: Spacing.xxl },
   removeLabel: { fontSize: Typography.sm, color: Colors.danger },
 });

@@ -1,0 +1,37 @@
+-- Two views were reading as postgres, so every signed-in account could read
+-- every household's snags and things.
+--
+-- A view without `security_invoker` evaluates the RLS on its base tables as the
+-- **view's owner**, not as the caller. These two are owned by `postgres`, which
+-- is a superuser and therefore exempt from RLS — so `home.snags_with_details`
+-- and `home.things_with_details` returned every row in the table to anybody
+-- holding any valid token. Measured before this ran: an account belonging to no
+-- household at all read 0 rows from `home.snags` and **36** from
+-- `home.snags_with_details`, with the descriptions, rooms and reporter names in
+-- them; 0 from `home.things` and **23** from `home.things_with_details`, with
+-- the makes, models and serial numbers.
+--
+-- The policies were never the problem and are unchanged. Every read policy on
+-- `snags`, `things`, `properties` and `comments` goes through
+-- `home.is_property_member` exactly as it always did — the views simply never
+-- asked them. Nothing in the app reads those tables directly, so the whole of
+-- the List tab, the House tab, the Schedule tab and both extracts were served
+-- past RLS: `getSnags`, `getSnag`, `getThings` and `getThing` all name a view.
+--
+-- **This is the one that is easy to reintroduce.** `security_invoker` is off by
+-- default, it cannot be seen in `pg_get_viewdef`, and a view that leaks
+-- everything looks exactly like a view that works. Every other view in `home`
+-- was already created with it; these two predate that habit — they are the
+-- schema's two oldest views, written in `20260911*` before the projects work
+-- established the pattern. So `20260921100100` adds a test that asserts the
+-- property for every view in the schema rather than for these two by name.
+--
+-- Verified in a rolled-back transaction before being applied, in both
+-- directions, because the failure mode of getting this wrong is the opposite
+-- one and is just as quiet: a view that asks RLS a question the caller cannot
+-- answer returns an empty screen rather than an error. A member of the live
+-- household reads 36 snags and 23 things after this, which is every row they
+-- read before; the non-member reads none.
+
+alter view home.snags_with_details set (security_invoker = true);
+alter view home.things_with_details set (security_invoker = true);

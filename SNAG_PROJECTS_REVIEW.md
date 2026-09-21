@@ -360,3 +360,214 @@ And the first thing to do, before any of it: **mark ReliaBuilder's contract
 accepted.** One row. It moves Committed from $103,574.22 to $192,354.22 and the
 job from comfortably-under to 2.9% over with five items still to price. Every
 decision above is easier to judge once the page is telling the truth.
+
+---
+
+## 7. The scenario, walked
+
+> Mike and Alyssa set a budget. An architect quotes, and advises there will be
+> engineer and council costs. A builder quotes the work plus ballpark figures for
+> the laundry and bathroom fitout. Cabinetmakers and fittings suppliers then quote
+> higher or lower than those ballparks. Architect and engineer invoices arrive. The
+> builder bills 25% at each milestone.
+
+Seven beats. Four of them the model already holds, and three it cannot express at
+all. Taking them in order, because the order is the point — the thing that makes
+this hard is that **money arrives in a different sequence from the certainty
+about it.**
+
+### Beat 1 — the budget
+
+`projects.budget` + `budget_incl_gst`, and `project_elements.budget` for the
+parts. **Holds today.** The only change is that the budget stops being compared
+against Committed (which lags reality badly, see beat 2) and starts being
+compared against Forecast.
+
+### Beat 2 — the architect quotes, and warns of two costs nobody has quoted
+
+The quote is straightforward: a vendor, an amount, a scope of the whole job. A
+commitment once signed.
+
+**"There will also be engineer costs and council costs" is the beat that breaks
+the current model.** There is no vendor, no quote, and no invoice — just a
+number somebody who knows the industry told you to expect. Today there are two
+places to put that and both are wrong:
+
+- Type it as an **item with no price** — which is what happened on the live job
+  with *Geotech engineer*. An unpriced item contributes **zero** to every figure
+  on the page. The cost is known and the app pretends it is nought.
+- Type it as a **quote nobody gave you**, which is a fabricated commitment
+  against a vendor who has never heard of you.
+
+So the first missing element:
+
+> **An expected cost.** A name, a rough amount, and who it will probably come
+> from if that is known. Not a commitment, not a bill, and never counted as
+> either. It exists so that Forecast can be honest before the quotes land, and
+> it is the only row in this feature whose number is allowed to be somebody's
+> estimate — which is why it is drawn the way a Schedule-tab projection and a
+> House-tab ghost are drawn, and why it is **named as a guess everywhere it is
+> summed**.
+
+Council costs are the same shape and worth their own prompt, because they are
+the one cost with no vendor to choose: consent fees, development contributions,
+inspections. You cannot get a competing quote for the council.
+
+An expected cost is **replaced, not added to**, the moment a real quote or
+invoice arrives against it. That is what stops the forecast double-counting as
+the job firms up, and it is the same rule as an allowance being superseded.
+
+### Beat 3 — the builder quotes, with ballparks inside it
+
+The builder's number is not one number. It is fixed work plus two ballparks —
+in New Zealand contract language a PC sum or a provisional sum, and the lines
+that move. `project_quote_lines` with `is_allowance` already models this and
+already computes correctly. Nothing on screen creates one, which is why there
+are **zero** of them on a job whose whole cost structure depends on it.
+
+Two things the line needs that it has not got, and both are questions the app
+**must ask because it cannot infer them**:
+
+- **Is the ballpark inside the quoted total, or on top of it?** A builder who
+  quotes $150,000 "including a $10,000 laundry allowance" and a builder who
+  quotes $150,000 "and budget another $10,000 for the laundry" have said
+  different things, and the difference is $10,000. Guess it and the forecast is
+  wrong by the whole allowance. Ask once, at the moment the line is typed.
+- **Does the builder charge attendance or margin on it?** If the cabinetmaker is
+  paid direct, the $10,000 leaves the contract — but a 10% attendance fee may
+  not. Asked once per allowance, remembered, and never guessed.
+
+### Beat 4 — the real quotes come in higher and lower
+
+This is the beat the whole feature exists for, and it is nearly built.
+
+A cabinetmaker's $12,000 **points at** the builder's $10,000 laundry line
+(`supersedes_line_id`, which exists and computes). The line then contributes
+$12,000 instead of $10,000, the builder's total recomputes from its build-up
+rather than its face value, and the variance is stated in words in both
+directions — *"allowed $10,000; Kitchen Mania have quoted $12,000 — $2,000 over,
+if you accept it"* and equally *"$2,200 under"* for the fittings coming in below
+the ballpark. **Under matters as much as over**, and a design that only warns on
+overruns is a design that never tells anybody they got money back.
+
+Several competing quotes can point at the same line; one gets accepted; the
+declined ones stay on the record dimmed, because who quoted what is what makes
+the next renovation's numbers credible.
+
+One element missing here, and it decides *who is owed what* rather than *what it
+costs*:
+
+> **Who pays whom.** A sub quoting $12,000 may invoice Mike and Alyssa direct, or
+> invoice the builder who passes it through. The total is the same either way;
+> the answer to "what do we owe, and to whom" is completely different. Today the
+> supplier roll-up would list the cabinetmaker as owed $12,000 even in the case
+> where the builder is paying them and billing it on.
+
+### Beat 5 — the architect and engineer actually invoice
+
+An invoice against a commitment that exists (the architect's quote) and an
+invoice against one that never existed (the engineer, who was an expected cost).
+Both work today — §4.3's *"an invoice is the commitment when nothing was ever
+quoted"* was written for exactly the second case and is correct.
+
+What is missing is that the architect bills **progressively**. The live job shows
+it already: *"Architectural services to date"*. So the page needs to answer *how
+much of the architect's $12,000 has been billed, and how much is still to come* —
+which is the first half of what you called "outstanding quote vs actual costs",
+and which no figure on the current strip provides.
+
+### Beat 6 — 25% at each milestone
+
+Nothing in the app knows this. Invoices arrive and are recorded one at a time;
+nothing knows three more are coming, roughly when, or roughly how much. The live
+job has *"INV-0208 — claim 2, 25%"* with the percentage sitting in free text
+where nothing can read it.
+
+> **A payment schedule.** Optional, on a commitment: a set of milestones, each a
+> percentage or an amount. Most vendors have none — a tile shop takes payment and
+> that is that — so it is absent by default and never asked for. A builder's
+> contract has one, and it is the difference between "we owe $43,987" and "we owe
+> $43,987 now and $87,975 more before Christmas."
+
+> **A due date on every bill.** `project_quotes` carries `dated` — the date on
+> the paper — and has **no due date at all**. That is the single cheapest missing
+> column in the feature and it is the one you asked for by name.
+
+### Beat 7 — money leaves
+
+`project_payments` against the invoice it settles. Deposit and balance are two
+payments against one bill. **Holds today**, and is the one part of the money
+model that is both built and correctly shaped.
+
+---
+
+## 8. The two gaps that are not the same gap
+
+You named two things that sound alike:
+
+> *"Outstanding quote vs actual costs get tracked."*
+> *"Identify what is outstanding to pay."*
+
+They are different subtractions and the current strip conflates them into one
+figure called Outstanding (committed − paid). Split:
+
+| | | Answers |
+|---|---|---|
+| **Still to be billed** | committed − invoiced | *"ReliaBuilder have $88,780 of the contract left to claim."* How much of the job is still coming |
+| **Due to pay** | invoiced − paid | *"$43,987.50 to ReliaBuilder, due 20 October."* What to do this week |
+
+The second is the one with a date on it, and it is the only figure in this
+feature that is **about today**. Everything else on the page is a position; this
+is a task. It belongs at the top of the project page and probably on the
+Projects tab card as well, because "is there a bill due" is a question you
+should not have to open anything to answer.
+
+Note what it is **not**: a notification. Nothing emails anybody, and nothing
+speaks unasked — that rule does not bend for money. A due date is a fact on a
+row that the page can sort by, and the Schedule tab can draw as a fifth kind of
+mark, which is exactly what the Schedule tab already does for a project's own
+dates: a read, never a second way to write.
+
+---
+
+## 9. The elements, in full
+
+What the scenario needs, and where each stands:
+
+| | Element | Status |
+|---|---|---|
+| 1 | **Budget**, project and per part | Built |
+| 2 | **Expected cost** — named, rough amount, no vendor, never committed | **Missing entirely** |
+| 3 | **Commitment** — a vendor and an amount you have agreed to | Exists as a quote; needs to become a noun, and to be **signed** rather than *accepted* |
+| 4 | **Allowance line** inside a commitment's build-up | Table and arithmetic built; **no editor, zero rows** |
+| 5 | Allowance **inside-the-total or on top of it** | **Missing** — must be asked |
+| 6 | Allowance **attendance / margin** | **Missing** — must be asked |
+| 7 | **Competing quote superseding an allowance**, over and under | Arithmetic built; no editor |
+| 8 | **Who pays whom** — direct, or through the head contractor | **Missing** |
+| 9 | **Claim / invoice** against a commitment | Built |
+| 10 | **Due date** on a bill | **Missing** — one column |
+| 11 | **Payment schedule** — the 25% × 4 | **Missing** |
+| 12 | **Payment** settling a bill | Built |
+| 13 | **Still to be billed** (committed − invoiced) | **Missing** |
+| 14 | **Due to pay**, with its date | **Missing** |
+| 15 | **Forecast** = committed + open allowances + expected costs + unpriced scope at budget | **Missing** |
+| 16 | **Variance**, per allowance line and forecast vs budget | Sentences written; nothing to run them on |
+
+Six built, ten missing — but **the ten are mostly columns, rows and screens
+rather than new arithmetic.** The engine that turns a build-up into a total,
+normalises GST, keeps an allowance apart from an unpriced item and refuses to sum
+a superseded line twice is written, granted and tested. What it has never had is
+anybody able to put a line into it.
+
+### The three questions the app must ask and must never infer
+
+Worth stating separately, because each one is a number-sized lie if guessed:
+
+1. **Is this ballpark inside the quoted total, or additional to it?**
+2. **Is this sub invoicing us, or the builder?**
+3. **Is the builder charging margin on it?**
+
+Each is asked once, at the moment the line is created, in a sentence a
+householder can answer without looking anything up. That is the same standard
+`basis` already meets — *fixed or estimate*, asked once, defaulted to the answer
+that does not silently move.

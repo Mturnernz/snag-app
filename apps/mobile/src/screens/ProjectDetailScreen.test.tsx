@@ -1,5 +1,7 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import TestRenderer from 'react-test-renderer';
+import { Colors } from '../constants/theme';
 import { render } from '../test/render';
 import ProjectDetailScreen from './ProjectDetailScreen';
 
@@ -86,6 +88,9 @@ jest.mock('../lib/supabase', () => {
     describeStillToBill: real.describeStillToBill,
     describeToPay: real.describeToPay,
     describeAllowance: real.describeAllowance,
+    describeOverride: real.describeOverride,
+    describeOverrides: real.describeOverrides,
+    setFigure: jest.fn(), clearFigure: jest.fn(),
     describeBuildUp: real.describeBuildUp,
     describeLineMovement: real.describeLineMovement,
     milestoneAmount: real.milestoneAmount,
@@ -119,12 +124,19 @@ const project = (over: any = {}): any => ({
   partsBudgetTotal: null, partsBudgetedCount: 0,
   forecastTotal: null, forecastGuess: 0, expectedOpen: 0, expectedCount: 0, budgetGap: 0,
   stillToBill: null, dueToPay: 0, overdueTotal: 0, nextDueOn: null, dueCount: 0,
+  forecastDerived: null, committedDerived: null, invoicedDerived: null, paidDerived: null,
+  forecastOverride: null, committedOverride: null, invoicedOverride: null, paidOverride: null,
+  forecastNote: null, committedNote: null, invoicedNote: null, paidNote: null,
+  partsEditedCount: 0,
   ...totals(), ...over,
 });
 const element = (over: any = {}): any => ({
   id: 'e1', projectId: 'p1', name: 'Downstairs laundry', room: null, implicit: true,
   sortOrder: 0, notes: null, budget: null, budgetInclGst: true,
   expectedOpen: 0, expectedCount: 0, budgetGap: 0,
+  committedDerived: null, invoicedDerived: null, paidDerived: null,
+  committedOverride: null, invoicedOverride: null, paidOverride: null,
+  committedNote: null, invoicedNote: null, paidNote: null,
   photoPaths: [], documentPaths: [],
   createdAt: '2026-08-04T00:00:00Z', ...totals(), ...over,
 });
@@ -340,6 +352,53 @@ describe('the money', () => {
       }),
     });
     r.getByText('9 of 9 items priced · $22,300 of it still a guess');
+  });
+});
+
+describe('a figure you can type over', () => {
+  it('shows the typed figure, and names what the prices say instead', async () => {
+    const r = await arrange({
+      project: project({
+        committedDerived: 103574.22, committedOverride: 200000,
+        committedTotal: 200000, invoicedTotal: 97753.22,
+        committedNote: 'variation confirmed by email',
+        itemCount: 18, pricedCount: 13,
+      }),
+    });
+    r.getByText('$200,000');
+    r.getByText(
+      'Committed is edited: $200,000 typed · the prices say $103,574.22 — $96,425.78 more — variation confirmed by email'
+    );
+  });
+
+  it('renders an edited figure in clay', async () => {
+    // The third thing in this app to earn red, after overdue and
+    // priority-high, and on the same terms: a fact about a number rather than a
+    // judgement — this figure is not what the paperwork says.
+    const r = await arrange({
+      project: project({
+        committedDerived: 103574.22, committedOverride: 200000, committedTotal: 200000,
+        itemCount: 18, pricedCount: 13,
+      }),
+    });
+    const flat = StyleSheet.flatten(r.getByText('$200,000').props.style);
+    expect(flat.color).toBe(Colors.danger);
+  });
+
+  it('leaves an untouched figure alone', async () => {
+    const r = await arrange({
+      project: project({ committedDerived: 8990, committedTotal: 8990, itemCount: 9, pricedCount: 9 }),
+    });
+    const flat = StyleSheet.flatten(r.getByText('$8,990').props.style);
+    expect(flat.color).not.toBe(Colors.danger);
+  });
+
+  it('says nothing at all when nothing has been edited', async () => {
+    const r = await arrange({
+      project: project({ committedDerived: 8990, committedTotal: 8990, itemCount: 9, pricedCount: 9 }),
+    });
+    expect(r.queryByText('A figure has been edited')).toBeNull();
+    expect(r.queryByText('Figures have been edited')).toBeNull();
   });
 });
 

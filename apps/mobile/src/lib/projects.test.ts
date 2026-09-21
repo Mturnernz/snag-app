@@ -1,6 +1,7 @@
 import {
   describeAllowance, describeBudget, describeBuildUp, describeForecast, describeForecastVariance,
   describeLineMovement, describeLineVariance, describePartsBudget, describeStillToBill,
+  describeOverride, describeOverrides,
   describeToPay, describeTotals, forecastVariance, formatMoney, groupProjectsByStatus, inclGst,
   itemPriceLabel, milestoneAmount, outstanding,
   projectDossierTable, projectExportPhotos, projectExportTable, showsElements,
@@ -40,6 +41,10 @@ const project = (over: Partial<Project> = {}): Project => ({
   snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
   partsBudgetTotal: null, partsBudgetedCount: 0,
   forecastTotal: null, forecastGuess: 0, expectedOpen: 0, expectedCount: 0, budgetGap: 0,
+  forecastDerived: null, committedDerived: null, invoicedDerived: null, paidDerived: null,
+  forecastOverride: null, committedOverride: null, invoicedOverride: null, paidOverride: null,
+  forecastNote: null, committedNote: null, invoicedNote: null, paidNote: null,
+  partsEditedCount: 0,
   stillToBill: null, dueToPay: 0, overdueTotal: 0, nextDueOn: null, dueCount: 0,
   ...totals(), ...over,
 });
@@ -47,6 +52,9 @@ const project = (over: Partial<Project> = {}): Project => ({
 const element = (over: Partial<ProjectElement> = {}): ProjectElement => ({
   id: 'e1', projectId: 'p1', name: 'Downstairs laundry', room: null,
   implicit: true, sortOrder: 0, notes: null, budget: null, budgetInclGst: true,
+  committedDerived: null, invoicedDerived: null, paidDerived: null,
+  committedOverride: null, invoicedOverride: null, paidOverride: null,
+  committedNote: null, invoicedNote: null, paidNote: null,
   expectedOpen: 0, expectedCount: 0, budgetGap: 0,
   photoPaths: [], documentPaths: [],
   createdAt: '2026-08-04T00:00:00Z',
@@ -611,5 +619,86 @@ describe('a milestone resolves against the commitment it hangs off', () => {
 
   it('cannot invent a figure from a percentage of nothing', () => {
     expect(milestoneAmount({ percent: 25, amount: null, amountInclGst: true }, null)).toBeNull();
+  });
+});
+
+/**
+ * A number you can type over, and the app saying so.
+ *
+ * Every figure here is derived precisely so a stored total cannot disagree with
+ * the quotes beneath it. An override is allowed to break that — but only on the
+ * condition that **both numbers survive** and the gap is stated. These pin the
+ * condition rather than the feature.
+ */
+describe('an edited figure names what it is standing in for', () => {
+  it('always states the derived figure, never merely that something was edited', () => {
+    expect(describeOverride('Committed', 200000, 103574.22)).toBe(
+      'Committed is edited: $200,000 typed · the prices say $103,574.22 — $96,425.78 more'
+    );
+  });
+
+  it('reads the other direction too', () => {
+    expect(describeOverride('Paid', 4000, 9000)).toBe(
+      'Paid is edited: $4,000 typed · the prices say $9,000 — $5,000 less'
+    );
+  });
+
+  it('carries the note, because in eight months it is the only provenance there is', () => {
+    expect(describeOverride('Committed', 200000, 190000, 'variation confirmed by email')).toContain(
+      '— variation confirmed by email'
+    );
+  });
+
+  it('says nothing where nothing was typed', () => {
+    expect(describeOverride('Committed', null, 103574.22)).toBeNull();
+  });
+
+  it('does not manufacture a discrepancy when the typed figure matches', () => {
+    // An edit that changes nothing is not a discrepancy, and reddening it would
+    // be the screen inventing an alarm.
+    expect(describeOverride('Committed', 8990, 8990)).toBe(
+      'Committed is edited: $8,990 typed · the same as the prices'
+    );
+  });
+
+  it('is honest when there is no derived figure to compare against', () => {
+    expect(describeOverride('Committed', 5000, null)).toBe(
+      'Committed is edited: $5,000 typed · nothing priced yet to compare it with'
+    );
+  });
+});
+
+describe('the discrepancy block', () => {
+  const clean = project({
+    forecastDerived: 103574.22, committedDerived: 103574.22,
+    invoicedDerived: 97753.22, paidDerived: 1952.47,
+  });
+
+  it('is empty when nothing has been edited', () => {
+    expect(describeOverrides(clean)).toEqual([]);
+  });
+
+  it('lists the figures in the order the page reads them', () => {
+    const lines = describeOverrides(
+      project({
+        ...clean,
+        forecastOverride: 210000, forecastDerived: 103574.22,
+        committedOverride: 200000, committedDerived: 103574.22,
+      })
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('Forecast is edited');
+    expect(lines[1]).toContain('Committed is edited');
+  });
+
+  it('counts edited parts rather than naming them', () => {
+    // Naming four rooms here would put the parts list on the page twice; the
+    // count is enough to send somebody looking.
+    expect(describeOverrides(project({ ...clean, partsEditedCount: 2 }))).toEqual([
+      '2 parts also have edited figures.',
+    ]);
+    expect(describeOverrides(project({ ...clean, partsEditedCount: 1 }))).toEqual([
+      '1 part also has an edited figure.',
+    ]);
   });
 });

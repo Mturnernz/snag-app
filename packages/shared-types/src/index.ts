@@ -969,6 +969,28 @@ export interface Project extends ProjectTotals {
    */
   forecastTotal: number | null;
   /**
+   * What the prices actually add up to, kept whatever anybody typed over it.
+   *
+   * These four are the reason an override is honest rather than a lie: the
+   * derivation is never replaced, so the page can name the discrepancy and go on
+   * naming it for as long as the edit lasts.
+   */
+  forecastDerived: number | null;
+  committedDerived: number | null;
+  invoicedDerived: number | null;
+  paidDerived: number | null;
+  /** What somebody typed, or null where nobody has. GST-normalised. */
+  forecastOverride: number | null;
+  committedOverride: number | null;
+  invoicedOverride: number | null;
+  paidOverride: number | null;
+  forecastNote: string | null;
+  committedNote: string | null;
+  invoicedNote: string | null;
+  paidNote: string | null;
+  /** How many parts carry an edited figure of their own. */
+  partsEditedCount: number;
+  /**
    * How much of the forecast is somebody's estimate rather than an agreed price.
    *
    * Rides beside `forecastTotal` exactly as `itemCount` rides beside every sum,
@@ -1081,6 +1103,16 @@ export interface ProjectElement extends ProjectTotals {
   expectedCount: number;
   /** See `Project.budgetGap` — this is the term, per part. */
   budgetGap: number;
+  /** What this part's prices add up to, kept whatever was typed over it. */
+  committedDerived: number | null;
+  invoicedDerived: number | null;
+  paidDerived: number | null;
+  committedOverride: number | null;
+  invoicedOverride: number | null;
+  paidOverride: number | null;
+  committedNote: string | null;
+  invoicedNote: string | null;
+  paidNote: string | null;
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
@@ -1233,6 +1265,60 @@ export const PROJECT_ALLOWANCE_KINDS: ProjectAllowanceKind[] = [
   'pc_sum',
   'provisional',
 ];
+
+/**
+ * Which of the five figures an edit is standing in for.
+ *
+ * `budget` is absent deliberately — it is already a typed number on the project
+ * itself, so it has nothing to override. These four are the derived ones.
+ */
+export type ProjectFigure = 'forecast' | 'committed' | 'invoiced' | 'paid';
+
+export const PROJECT_FIGURE_LABELS: Record<ProjectFigure, string> = {
+  forecast: 'Forecast',
+  committed: 'Committed',
+  invoiced: 'Invoiced',
+  paid: 'Paid',
+};
+
+/**
+ * A figure somebody typed over the one the prices add up to.
+ *
+ * **Every figure on the project page is derived, and that is the rule the whole
+ * feature rests on** — a maintained total and the quotes beneath it will
+ * disagree the first time somebody edits an amount from the other phone, and
+ * the one people would trust is the wrong one.
+ *
+ * So this does not store a total. It stores an **override beside** the derived
+ * figure, and the derivation is untouched: `committedDerived` is still what the
+ * prices say, `committedOverride` is what somebody typed, and `committedTotal`
+ * is what the page shows. Both survive, so the discrepancy is a fact the schema
+ * holds rather than something the screen forgets — and lifting the edit puts the
+ * truth back rather than recovering it from nowhere.
+ *
+ * **An edited figure renders in clay**, which is the third thing in this app to
+ * earn red after overdue and priority-high, and it earns it on the same terms:
+ * it is a fact about a number, not a judgement. This figure is not what the
+ * paperwork says.
+ */
+export interface ProjectOverride {
+  id: string;
+  projectId: string;
+  /** Null for the job's own figure; set, it is that part's. */
+  elementId: string | null;
+  field: ProjectFigure;
+  amount: number;
+  amountInclGst: boolean;
+  /**
+   * Why — and the one part of this a reader eight months later will want.
+   *
+   * *"Builder confirmed the variation by email, 12 Sept"* is the difference
+   * between a number somebody trusts and a number somebody has to re-derive.
+   */
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 /**
  * A cost somebody has been told to expect, that nobody has quoted.

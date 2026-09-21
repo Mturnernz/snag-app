@@ -18,6 +18,7 @@ import BuildUpSheet from '../components/BuildUpSheet';
 import ExpectedCostSheet from '../components/ExpectedCostSheet';
 import ScheduleSheet from '../components/ScheduleSheet';
 import CommitmentCard from '../components/CommitmentCard';
+import EditFigureSheet from '../components/EditFigureSheet';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import StatusBadge from '../components/StatusBadge';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -29,7 +30,8 @@ import {
   createLocation, createQuote, createThing, deleteElement,
   deleteExpectedCost, deleteItem, deleteMilestone, deletePayment, deleteProject, deleteQuote,
   deleteQuoteLine,
-  deleteStoredFiles, describeBudget, describeForecast, describeForecastVariance,
+  clearFigure, setFigure,
+  deleteStoredFiles, describeBudget, describeForecast, describeForecastVariance, describeOverrides,
   describePartsBudget, describeStillToBill, describeToPay, describeTotals, formatMoney, getProject,
   getProjectContents, getProjectFiles, getProjectThings, getSupplierTotals,
   getSnags, outstanding, setQuoteStatus, showsElements, updateElement, updateItem,
@@ -42,7 +44,7 @@ import {
 import { getFileUrls } from '../lib/supabase';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import {
-  Project, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectFile, ProjectItem,
+  Project, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectFigure, ProjectFile, ProjectItem,
   ProjectMilestone, ProjectPayment, ProjectQuote,
   ProjectQuoteLine, ProjectQuoteStatus, ProjectStatus, ProjectSupplierTotals,
   PROJECT_FILE_LEVEL_LABELS, PROJECT_QUOTE_STATUS_LABELS, PROJECT_STATUS_LABELS,
@@ -122,6 +124,7 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [recordOpen, setRecordOpen] = useState(false);
   const [expectedOpen, setExpectedOpen] = useState(false);
   const [buildUpFor, setBuildUpFor] = useState<ProjectQuote | null>(null);
+  const [editingFigure, setEditingFigure] = useState<ProjectFigure | null>(null);
   const [scheduleFor, setScheduleFor] = useState<ProjectQuote | null>(null);
   const [handoverOpen, setHandoverOpen] = useState(false);
   const [recorded, setRecorded] = useState<Thing[]>([]);
@@ -410,6 +413,33 @@ export default function ProjectDetailScreen({ route }: Props) {
   const varianceLine = describeForecastVariance(project);
   const toPayLine = describeToPay(project);
   const stillToBillLine = describeStillToBill(project);
+  // Every figure somebody has typed over, and what the prices say instead. Both
+  // numbers survive in the view, so this can go on naming the gap for as long as
+  // the edit lasts rather than the screen quietly forgetting.
+  const edits = describeOverrides(project);
+  /** What the sheet needs to show for whichever figure is being edited. */
+  const editing = editingFigure
+    ? {
+        derived: {
+          forecast: project.forecastDerived,
+          committed: project.committedDerived,
+          invoiced: project.invoicedDerived,
+          paid: project.paidDerived,
+        }[editingFigure],
+        override: {
+          forecast: project.forecastOverride,
+          committed: project.committedOverride,
+          invoiced: project.invoicedOverride,
+          paid: project.paidOverride,
+        }[editingFigure],
+        note: {
+          forecast: project.forecastNote,
+          committed: project.committedNote,
+          invoiced: project.invoicedNote,
+          paid: project.paidNote,
+        }[editingFigure],
+      }
+    : null;
   const budget = formatMoney(inclGst(project.budget, project.budgetInclGst));
   const budgetLine = describeBudget(project);
   const partsLine = describePartsBudget(project);
@@ -490,30 +520,41 @@ export default function ProjectDetailScreen({ route }: Props) {
               <Text style={styles.rowValue} numberOfLines={1}>{budget}</Text>
             </View>
           ) : null}
-          <View style={styles.row}>
-            <Text style={[styles.rowKey, styles.rowKeyLead]}>Forecast</Text>
-            <Text
-              style={[styles.rowValue, styles.rowValueLead, overBudget && styles.rowValueOver]}
-              numberOfLines={1}
-            >
-              {forecast ?? '—'}
-            </Text>
-          </View>
+          {/* Every one of the four is tappable, and an edited one renders in
+              clay. That is the third thing in this app to earn red, after
+              overdue and priority-high, and it earns it on the same terms: it
+              is a fact about a number rather than a judgement — this figure is
+              not what the paperwork says. */}
+          <FigureRow
+            label="Forecast"
+            value={forecast}
+            edited={project.forecastOverride !== null}
+            lead
+            over={overBudget}
+            onPress={() => setEditingFigure('forecast')}
+          />
           <View style={styles.stripRule} />
-          <View style={styles.row}>
-            <Text style={styles.rowKey}>Committed</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{committed ?? '—'}</Text>
-          </View>
+          <FigureRow
+            label="Committed"
+            value={committed}
+            edited={project.committedOverride !== null}
+            onPress={() => setEditingFigure('committed')}
+          />
           {/* Charged and paid are different figures, and seven invoices with no
               payment recorded against them is the ordinary middle of a job. */}
-          <View style={styles.row}>
-            <Text style={styles.rowKey}>Invoiced</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{invoiced ?? '—'}</Text>
-          </View>
-          <View style={[styles.row, styles.rowLast]}>
-            <Text style={styles.rowKey}>Paid</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{paid ?? '—'}</Text>
-          </View>
+          <FigureRow
+            label="Invoiced"
+            value={invoiced}
+            edited={project.invoicedOverride !== null}
+            onPress={() => setEditingFigure('invoiced')}
+          />
+          <FigureRow
+            label="Paid"
+            value={paid}
+            edited={project.paidOverride !== null}
+            last
+            onPress={() => setEditingFigure('paid')}
+          />
         </View>
 
         {/* The denominator, which no screen may render a forecast without. */}
@@ -526,6 +567,27 @@ export default function ProjectDetailScreen({ route }: Props) {
             is a number people learn to ignore. Silent when under: this is a
             warning, not a running commentary. */}
         {varianceLine ? <Text style={styles.variance}>{varianceLine}</Text> : null}
+
+        {/* ── what has been typed over ───────────────────────────────────
+            Absent entirely when nothing has been edited, the same rule as the
+            shopping pill at zero. Every line names **both** numbers, because
+            the whole reason an override is honest rather than a lie is that
+            the derived figure survives — a note saying only "this was edited"
+            would throw away the half that makes it recoverable. */}
+        {edits.length > 0 ? (
+          <View style={styles.edits}>
+            <View style={styles.editsHead}>
+              <Icon name="create-outline" size="sm" color={Colors.danger} />
+              <Text style={styles.editsTitle}>
+                {edits.length === 1 ? 'A figure has been edited' : 'Figures have been edited'}
+              </Text>
+            </View>
+            {edits.map((line) => (
+              <Text key={line} style={styles.editsLine}>{line}</Text>
+            ))}
+          </View>
+        ) : null}
+
         {budgetLine ? <Text style={styles.denominator}>{budgetLine}</Text> : null}
         {partsLine ? <Text style={styles.denominator}>{partsLine}</Text> : null}
 
@@ -1225,6 +1287,27 @@ export default function ProjectDetailScreen({ route }: Props) {
         }}
       />
 
+      <EditFigureSheet
+        visible={editingFigure !== null}
+        field={editingFigure}
+        derived={editing?.derived ?? null}
+        override={editing?.override ?? null}
+        note={editing?.note ?? null}
+        onClose={() => setEditingFigure(null)}
+        onSave={async (amount, amountInclGst, note) => {
+          if (!editingFigure) return;
+          await setFigure(project.id, editingFigure, { amount, amountInclGst, note });
+          showToast('Edited');
+          await load();
+        }}
+        onClear={async () => {
+          if (!editingFigure) return;
+          await clearFigure(project.id, editingFigure);
+          showToast('Back to the prices');
+          await load();
+        }}
+      />
+
       <AddThingSheet
         visible={thingFor !== null}
         locations={locations}
@@ -1267,6 +1350,55 @@ export function elementHoldsSomething(element: ProjectElement): boolean {
     element.itemCount > 0 ||
     element.photoPaths.length > 0 ||
     element.documentPaths.length > 0
+  );
+}
+
+/**
+ * One line of the money strip: a label, a figure, and a way to type over it.
+ *
+ * **The whole row is the tap target**, not a pencil beside it. There are four of
+ * them stacked at 48px each and a separate affordance per row would be four more
+ * controls on the densest part of the page — where the label already says which
+ * figure is which, the row *is* the label.
+ *
+ * `edited` is what spends the clay. It is deliberately independent of `over`:
+ * a figure can be both typed over and above budget, and the edit is the more
+ * surprising of the two, so it wins the colour.
+ */
+function FigureRow({
+  label, value, edited, onPress, lead, last, over,
+}: {
+  label: string;
+  value: string | null;
+  edited: boolean;
+  onPress: () => void;
+  lead?: boolean;
+  last?: boolean;
+  over?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.row, last && styles.rowLast]}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, ${value ?? 'nothing yet'}${edited ? ', edited' : ''}. Edit it.`}
+    >
+      <Text style={[styles.rowKey, lead && styles.rowKeyLead]}>{label}</Text>
+      <Text
+        style={[
+          styles.rowValue,
+          lead && styles.rowValueLead,
+          over && !edited && styles.rowValueOver,
+          edited && styles.rowValueEdited,
+        ]}
+        numberOfLines={1}
+      >
+        {value ?? '—'}
+      </Text>
+      {edited ? (
+        <Icon name="create-outline" size="sm" color={Colors.danger} />
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -1537,6 +1669,20 @@ const styles = StyleSheet.create({
   recordLabel: { fontSize: Typography.base, color: Colors.white, fontWeight: Typography.semibold },
 
   variance: { fontSize: Typography.sm, color: Colors.danger, marginTop: Spacing.sm },
+
+  // An edited figure is the third thing in this app to earn clay, after overdue
+  // and priority-high, and on the same terms: a fact about a number, not a
+  // judgement. This figure is not what the paperwork says.
+  rowValueEdited: { color: Colors.danger },
+  edits: {
+    backgroundColor: Colors.due.overdueBg, borderRadius: Radius.card,
+    padding: Spacing.md, marginTop: Spacing.md, gap: Spacing.xs,
+  },
+  editsHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  editsTitle: {
+    fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.danger,
+  },
+  editsLine: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 19 },
 
   gaps: { marginTop: Spacing.md, gap: Spacing.xs },
   gapRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },

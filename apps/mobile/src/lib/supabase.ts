@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as queries from '@snag/supabase-queries';
-import type { ProjectQuoteStatus } from '@snag/shared-types';
+import type { ProjectFigure, ProjectQuoteStatus } from '@snag/shared-types';
 import { PORTAL_URL } from './appUrl';
 import { readForUpload } from './uploadBody';
 import { withDeadline } from './deadline';
@@ -418,6 +418,20 @@ export const deleteExpectedCost = (expectedId: string) =>
 export const getProjectBills = (projectId: string) =>
   queries.getProjectBills(supabase, projectId);
 
+export const setFigure = (
+  projectId: string,
+  field: ProjectFigure,
+  input: { amount: number; amountInclGst?: boolean; elementId?: string | null; note?: string | null }
+) => queries.setFigure(supabase, projectId, field, input);
+
+export const clearFigure = (
+  projectId: string,
+  field: ProjectFigure,
+  elementId: string | null = null
+) => queries.clearFigure(supabase, projectId, field, elementId);
+
+export const getOverrides = (projectId: string) => queries.getOverrides(supabase, projectId);
+
 export const addMilestone = (quoteId: string, input: queries.MilestoneInput) =>
   queries.addMilestone(supabase, quoteId, input);
 
@@ -445,6 +459,8 @@ export {
   describeForecastVariance,
   describeStillToBill,
   describeToPay,
+  describeOverride,
+  describeOverrides,
   describeLineMovement,
   forecastVariance,
   milestoneAmount,

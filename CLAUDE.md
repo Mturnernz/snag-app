@@ -1144,6 +1144,59 @@ So a commitment is signed under *Who we're paying*, **two taps from the top of t
 Comparing prices for one item keeps *Accepted / Declined* on the item sheet: those are genuinely
 different moments and they should stop sharing a control. The enum underneath is unchanged.
 
+### A number you can type over, and the app saying so in red
+
+Every figure on the project page is derived, and that is the rule the rest of
+this section rests on. **This breaks it deliberately, on one condition: both
+numbers survive.**
+
+`home.project_overrides` stores an override, never a total. The derivation is
+untouched — `committed_derived` goes on being what the prices add up to — and
+the view carries three columns where it carried one: `*_derived`, `*_override`,
+and `*_total` which is `coalesce(override, derived)`. So the page can say
+*"Committed is edited: $200,000 typed · the prices say $103,574.22 — $96,425.78
+more"* and go on saying it for as long as the edit lasts. A stored total that
+replaced its own evidence would be unrecoverable; this is a sticky note on the
+glass, and *Use the prices again* is a real undo rather than a recovery from
+nothing.
+
+**`describeOverride` always names the derived figure**, never merely that
+something was edited. That is the half that makes an override honest, and
+dropping it would leave a reader eight months later with no way back to what the
+paperwork actually supports. An edit that happens to match the prices is said
+plainly and **not** reddened — a discrepancy the app manufactures is an alarm
+nobody will believe the next time.
+
+Four rules, three of them enforced in the view rather than left to a screen:
+
+- **The page cannot contradict itself.** `still_to_bill`, `due_to_pay` and
+  `forecast_derived` are computed from the **shown** figures. Override Committed
+  and let the gap read off the derived one, and two numbers a line apart stop
+  adding up — which is precisely the incoherence overriding is meant to be
+  honest about rather than cause.
+- **A part's override rolls up.** `parts_committed` sums each element's *shown*
+  total, so the job's figure never contradicts the sum of the parts listed
+  directly under it. A project-level override then sits on top of that.
+- **Suppliers are not overridable.** *Who we're paying* is a second view over the
+  same rule and the check worth keeping is that those rows sum to Committed. An
+  override there could not be reconciled with anything — it would be money owed
+  to a named person that no price supports. Override the total if you must; who
+  you owe stays what the paperwork says.
+- **Clearing is its own function.** `clear_figure`, not `set_figure(null)`, for
+  the reason `set_part_bought` and `set_quote_status` are theirs: putting the
+  derived figure back is the act that changes what the page claims, and it must
+  not be reachable from a form somebody happened to empty.
+
+**An edited figure renders in clay**, and that is the *third* thing in this app
+to earn red after overdue and priority-high. It earns it on exactly the same
+terms: a fact about a number rather than a judgement about importance — this
+figure is not what the paperwork says. The whole row is the tap target rather
+than a pencil beside it, because four stacked 48px rows with a separate
+affordance each is four more controls on the densest part of the page, and the
+label already says which figure is which. `editing` beats `over` for the colour
+when a figure is both, because being typed over is the more surprising of the
+two.
+
 ### A builder's number is not one number
 
 The load-bearing rule of the money model, and the one everything else hangs off.
@@ -1517,6 +1570,11 @@ staying silent under budget and inside 5%, an ex-GST budget grossed up before co
 gaps as separate subtractions with the over-claim reported rather than floored, `describeToPay`
 absent at zero, and an allowance movement read in **both** directions — a design that only warns
 on overruns never tells anybody they got money back.
+`projects.test.ts` also pins the override rules: that a discrepancy line always names the derived
+figure rather than only saying something was edited, that it reads in both directions, that a
+typed figure matching the prices is stated plainly rather than reddened, and that edited parts are
+counted rather than listed. `ProjectDetailScreen.test.tsx` pins the edited figure rendering in
+clay, an untouched one not, and the block being absent entirely when nothing has been edited.
 `ProjectDetailScreen.test.tsx` pins the implicit layer staying hidden, the layer appearing once a
 real element exists, charged and paid staying apart with no "Spent" anywhere, the two gaps
 replacing Outstanding, the budget line and which side of it, the allowance said out loud, six-figure

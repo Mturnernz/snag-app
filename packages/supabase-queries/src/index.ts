@@ -56,7 +56,9 @@ import type {
   ProjectFile,
   ProjectItem,
   ProjectItemStatus,
+  ProjectFigure,
   ProjectMilestone,
+  ProjectOverride,
   ProjectPayment,
   ProjectQuote,
   ProjectQuoteBasis,
@@ -2784,6 +2786,19 @@ function mapProject(row: Row): Project {
     partsBudgetTotal: numberOrNull(row.parts_budget_total),
     partsBudgetedCount: row.parts_budgeted_count ?? 0,
     forecastTotal: numberOrNull(row.forecast_total),
+    forecastDerived: numberOrNull(row.forecast_derived),
+    committedDerived: numberOrNull(row.committed_derived),
+    invoicedDerived: numberOrNull(row.invoiced_derived),
+    paidDerived: numberOrNull(row.paid_derived),
+    forecastOverride: numberOrNull(row.forecast_override),
+    committedOverride: numberOrNull(row.committed_override),
+    invoicedOverride: numberOrNull(row.invoiced_override),
+    paidOverride: numberOrNull(row.paid_override),
+    forecastNote: row.forecast_note ?? null,
+    committedNote: row.committed_note ?? null,
+    invoicedNote: row.invoiced_note ?? null,
+    paidNote: row.paid_note ?? null,
+    partsEditedCount: row.parts_edited_count ?? 0,
     forecastGuess: numberOrNull(row.forecast_guess) ?? 0,
     expectedOpen: numberOrNull(row.expected_open) ?? 0,
     expectedCount: row.expected_count ?? 0,
@@ -2833,6 +2848,15 @@ function mapElement(row: Row): ProjectElement {
     expectedOpen: numberOrNull(row.expected_open) ?? 0,
     expectedCount: row.expected_count ?? 0,
     budgetGap: numberOrNull(row.budget_gap) ?? 0,
+    committedDerived: numberOrNull(row.committed_derived),
+    invoicedDerived: numberOrNull(row.invoiced_derived),
+    paidDerived: numberOrNull(row.paid_derived),
+    committedOverride: numberOrNull(row.committed_override),
+    invoicedOverride: numberOrNull(row.invoiced_override),
+    paidOverride: numberOrNull(row.paid_override),
+    committedNote: row.committed_note ?? null,
+    invoicedNote: row.invoiced_note ?? null,
+    paidNote: row.paid_note ?? null,
   };
 }
 
@@ -2976,6 +3000,20 @@ function mapBill(row: Row): ProjectBill {
     paidTotal: numberOrNull(row.paid_total),
     unpaid: numberOrNull(row.unpaid),
     overdue: !!row.overdue,
+  };
+}
+
+function mapOverride(row: Row): ProjectOverride {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    elementId: row.element_id ?? null,
+    field: row.field,
+    amount: numberOrNull(row.amount) ?? 0,
+    amountInclGst: row.amount_incl_gst !== false,
+    note: row.note ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -3292,6 +3330,85 @@ export function milestoneAmount(
   if (milestone.amount !== null) return inclGst(milestone.amount, milestone.amountInclGst);
   if (milestone.percent === null || commitment === null) return null;
   return Math.round(commitment * (milestone.percent / 100) * 100) / 100;
+}
+
+/**
+ * One edited figure, and what the prices say instead.
+ *
+ * *"Committed is edited: $200,000 typed · the prices say $103,574.22 —
+ * $96,425.78 more."*
+ *
+ * **The derived figure is always named, never merely implied.** The whole reason
+ * an override is honest rather than a lie is that both numbers survive; a note
+ * saying only "this was edited" would throw away the half that makes it
+ * recoverable, and a reader eight months later would have no way back to what
+ * the paperwork actually supports.
+ *
+ * Returns null where nothing was typed, and also where the typed figure happens
+ * to equal the derived one — an edit that changes nothing is not a discrepancy,
+ * and saying so would be the screen manufacturing an alarm.
+ */
+export function describeOverride(
+  label: string,
+  override: number | null,
+  derived: number | null,
+  note?: string | null
+): string | null {
+  if (override === null) return null;
+
+  const head = `${label} is edited: ${formatMoney(override)} typed`;
+  if (derived === null) {
+    return note
+      ? `${head} · nothing priced yet to compare it with — ${note}`
+      : `${head} · nothing priced yet to compare it with`;
+  }
+
+  const gap = override - derived;
+  if (Math.abs(gap) < 0.005) {
+    return note ? `${head} · the same as the prices — ${note}` : `${head} · the same as the prices`;
+  }
+
+  const direction = gap > 0 ? 'more' : 'less';
+  const body = `${head} · the prices say ${formatMoney(derived)} — ${formatMoney(Math.abs(gap))} ${direction}`;
+  return note ? `${body} — ${note}` : body;
+}
+
+/**
+ * Every discrepancy an edited project is carrying, in the order they are read.
+ *
+ * Forecast first because it is the figure the page leads with, then the three
+ * underneath it. A part's own edits are counted rather than listed: naming four
+ * rooms here would put the parts list on the page twice, and the count is enough
+ * to send somebody looking.
+ */
+export function describeOverrides(project: {
+  forecastTotal: number | null; forecastDerived: number | null; forecastOverride: number | null;
+  forecastNote: string | null;
+  committedDerived: number | null; committedOverride: number | null; committedNote: string | null;
+  invoicedDerived: number | null; invoicedOverride: number | null; invoicedNote: string | null;
+  paidDerived: number | null; paidOverride: number | null; paidNote: string | null;
+  partsEditedCount: number;
+}): string[] {
+  const lines = [
+    describeOverride('Forecast', project.forecastOverride, project.forecastDerived, project.forecastNote),
+    describeOverride('Committed', project.committedOverride, project.committedDerived, project.committedNote),
+    describeOverride('Invoiced', project.invoicedOverride, project.invoicedDerived, project.invoicedNote),
+    describeOverride('Paid', project.paidOverride, project.paidDerived, project.paidNote),
+  ].filter((line): line is string => line !== null);
+
+  if (project.partsEditedCount > 0) {
+    lines.push(
+      project.partsEditedCount === 1
+        ? '1 part also has an edited figure.'
+        : `${project.partsEditedCount} parts also have edited figures.`
+    );
+  }
+  return lines;
+}
+
+/** Whether a figure on this level is somebody's rather than the paperwork's. */
+export function isEdited(figure: number | null): boolean {
+  return figure !== null;
 }
 
 /**
@@ -4145,6 +4262,58 @@ export interface PaymentInput {
  * payment against a quote quietly count as money spent on a price nobody has
  * been billed for.
  */
+export async function setFigure(
+  client: SupabaseClient,
+  projectId: string,
+  field: ProjectFigure,
+  input: { amount: number; amountInclGst?: boolean; elementId?: string | null; note?: string | null }
+): Promise<ProjectOverride> {
+  const { data, error } = await client.rpc('set_figure', {
+    p_project_id: projectId,
+    p_field: field,
+    p_amount: input.amount,
+    p_amount_incl_gst: input.amountInclGst ?? true,
+    p_element_id: input.elementId ?? null,
+    p_note: input.note ?? null,
+  });
+  return mapOverride(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/**
+ * Puts the derived figure back on screen.
+ *
+ * Its own function rather than `setFigure(null)`, for the reason
+ * `set_part_bought` and `set_quote_status` are theirs: clearing is the act that
+ * changes what the page claims, and it should not be reachable by accident from
+ * a form that happened to be emptied.
+ */
+export async function clearFigure(
+  client: SupabaseClient,
+  projectId: string,
+  field: ProjectFigure,
+  elementId: string | null = null
+): Promise<void> {
+  const { error } = await client.rpc('clear_figure', {
+    p_project_id: projectId,
+    p_field: field,
+    p_element_id: elementId,
+  });
+  if (error) throw asError(error, "Couldn’t undo that");
+}
+
+export async function getOverrides(
+  client: SupabaseClient,
+  projectId: string
+): Promise<ProjectOverride[]> {
+  const { data, error } = await client
+    .from('project_overrides')
+    .select('*')
+    .eq('project_id', projectId);
+
+  if (error) throw asError(error, "Couldn’t load the edited figures");
+  return (data ?? []).map(mapOverride);
+}
+
 export interface ExpectedCostInput {
   name: string;
   amount?: number | null;

@@ -140,3 +140,14 @@ $$;
 
 revoke execute on function home.project_page(uuid) from public, anon;
 grant execute on function home.project_page(uuid) to authenticated;
+
+-- Everything above is schema-qualified, so pinning the search path costs
+-- nothing and answers Supabase's `function_search_path_mutable` lint. It
+-- matters less on a SECURITY INVOKER function than on a DEFINER one — this
+-- runs as the caller, so a hijacked path could only let somebody shoot
+-- themselves — but "less" is not "not at all", and the three older helpers
+-- that skip it (`incl_gst`, `nsum`, `quote_reach`) are not a pattern worth
+-- copying. `pg_catalog` is always on the path, so `to_jsonb` and
+-- `jsonb_build_object` still resolve. Verified against the live row counts
+-- after setting it.
+alter function home.project_page(uuid) set search_path = '';

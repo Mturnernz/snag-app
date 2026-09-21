@@ -423,6 +423,9 @@ export const createExpectedCost = (projectId: string, input: queries.ExpectedCos
 export const updateExpectedCost = (expectedId: string, update: queries.ExpectedCostUpdate) =>
   queries.updateExpectedCost(supabase, expectedId, update);
 
+export const setExpectedCostConfirmed = (expectedId: string, confirmed: boolean) =>
+  queries.setExpectedCostConfirmed(supabase, expectedId, confirmed);
+
 export const deleteExpectedCost = (expectedId: string) =>
   queries.deleteExpectedCost(supabase, expectedId);
 

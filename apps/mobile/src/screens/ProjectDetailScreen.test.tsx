@@ -78,6 +78,7 @@ const mock_updateItem = jest.fn();
 const mock_createElement = jest.fn();
 const mock_deleteElement = jest.fn().mockResolvedValue([]);
 const mock_setItemExcluded = jest.fn().mockResolvedValue(undefined);
+const mock_setExpectedCostConfirmed = jest.fn().mockResolvedValue(undefined);
 const mock_createItem = jest.fn().mockResolvedValue({
   id: 'new1', elementId: 'e1', name: 'Shower mixer', status: 'considering', excluded: false,
   sortOrder: 0, notes: null, photoPaths: [], documentPaths: [], createdAt: '',
@@ -96,6 +97,7 @@ jest.mock('../lib/supabase', () => {
     deleteElement: (...a: unknown[]) => mock_deleteElement(...a),
     setItemExcluded: (...a: unknown[]) => mock_setItemExcluded(...a),
     updateExpectedCost: jest.fn(), addExpectedCostLine: jest.fn(),
+    setExpectedCostConfirmed: (...a: unknown[]) => mock_setExpectedCostConfirmed(...a),
     updateExpectedCostLine: jest.fn(), deleteExpectedCostLine: jest.fn(),
     deleteItem: jest.fn(), deleteProject: jest.fn(), deleteQuote: jest.fn(),
     deleteStoredFiles: jest.fn(), updateElement: jest.fn(), updateProject: jest.fn(),
@@ -639,6 +641,38 @@ describe('the parts of the job fold independently', () => {
     await TestRenderer.act(async () => byLabel(r, 'Bathroom').props.onPress());
     expect(r.queryByText('Toilet suite')).toBeNull();
     r.getByText('Washing machine tap');
+  });
+});
+
+describe('an expectation says whether anybody has agreed it', () => {
+  const expected = (over: any = {}) => ({
+    id: 'x1', projectId: 'p1', elementId: null, name: 'Architect',
+    likelySupplier: 'Gibson', amount: 4000, amountInclGst: true,
+    confirmed: false, settledBy: null, note: null,
+    createdAt: '2026-09-01T00:00:00Z', ...over,
+  });
+
+  it('says unconfirmed, and what that means for the figure beside it', async () => {
+    const r = await arrange({ expected: [expected()] });
+    r.getByText('Gibson · unconfirmed — forecast only');
+  });
+
+  it('says confirmed once somebody has agreed it', async () => {
+    // The row has to say which, because the difference is whether the figure
+    // beside it is inside Committed or only inside the forecast — and a reader
+    // left to work that out from the total is a reader who stops trusting it.
+    const r = await arrange({ expected: [expected({ confirmed: true })] });
+    r.getByText('Gibson · confirmed — counts as committed');
+  });
+
+  it('writes the answer through its own call, and re-reads', async () => {
+    const r = await arrange({ expected: [expected()] });
+    await TestRenderer.act(async () => byLabel(r, 'Architect, edit it').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Confirmed').props.onPress());
+    expect(mock_setExpectedCostConfirmed).toHaveBeenCalledWith('x1', true);
+    // Confirming moves Committed, both gaps and who is owed what at once, and
+    // every one of them is derived in a view.
+    expect(mock_getProjectPage).toHaveBeenCalledTimes(2);
   });
 });
 

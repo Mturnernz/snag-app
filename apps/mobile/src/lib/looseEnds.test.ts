@@ -21,6 +21,7 @@ const project = (over: Partial<Project> = {}): Project => ({
   snagCount: 0, openSnagCount: 0, thingCount: 0, installedCount: 0,
   partsBudgetTotal: null, partsBudgetedCount: 0,
   forecastTotal: null, forecastGuess: 0, expectedOpen: 0, expectedCount: 0, budgetGap: 0,
+  expectedConfirmed: null,
   forecastDerived: null, committedDerived: null, invoicedDerived: null, paidDerived: null,
   forecastOverride: null, committedOverride: null, invoicedOverride: null, paidOverride: null,
   forecastNote: null, committedNote: null, invoicedNote: null, paidNote: null,

@@ -31,7 +31,7 @@ import {
   createItem,
   createLocation, createQuote, createThing, deleteElement,
   deleteExpectedCost, deleteExpectedCostLine, deleteItem, deleteMilestone, deletePayment, updatePayment,
-  deleteProject, deleteQuote,
+  deleteProject, deleteQuote, setExpectedCostConfirmed,
   deleteQuoteLine,
   clearFigure, setFigure, setItemExcluded,
   deleteStoredFiles, describeOverrides,
@@ -851,17 +851,25 @@ export default function ProjectDetailScreen({ route }: Props) {
                 >
                   <View style={styles.expectedTitles}>
                     <Text style={styles.expectedName}>{cost.name}</Text>
+                    {/* The row says which of the two it is, in words, because
+                        the difference is whether the figure beside it is in
+                        Committed or only in the forecast — and a reader who
+                        has to work that out from the total is a reader who
+                        stops trusting the total. */}
                     <Text style={styles.expectedSub} numberOfLines={1}>
                       {[
                         cost.likelySupplier,
                         elements.find((e) => e.id === cost.elementId)?.name,
-                        'nobody has quoted this',
+                        cost.confirmed ? 'confirmed — counts as committed' : 'unconfirmed — forecast only',
                       ]
                         .filter(Boolean)
                         .join(' · ')}
                     </Text>
                   </View>
-                  <Text style={styles.expectedAmount} numberOfLines={1}>
+                  <Text
+                    style={[styles.expectedAmount, cost.confirmed && styles.expectedAmountCounts]}
+                    numberOfLines={1}
+                  >
                     {formatMoney(inclGst(cost.amount, cost.amountInclGst)) ?? 'no figure'}
                   </Text>
                 </Pressable>
@@ -1513,8 +1521,16 @@ export default function ProjectDetailScreen({ route }: Props) {
             showToast('Saved');
           } else {
             await createExpectedCost(project.id, input);
-            showToast('Added to the forecast');
+            showToast(input.confirmed ? 'Added to what you’ve agreed' : 'Added to the forecast');
           }
+          await refresh();
+        }}
+        onConfirm={async (confirmed) => {
+          if (!editingExpected) return;
+          await setExpectedCostConfirmed(editingExpected.id, confirmed);
+          showToast(confirmed ? 'Confirmed' : 'Back to a guess');
+          // Confirming moves Committed, both gaps and who is owed what at
+          // once, and every one of them is derived.
           await refresh();
         }}
         onDelete={async () => {
@@ -2156,6 +2172,10 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm, fontFamily: Fonts.mono, color: Colors.textMuted,
     marginLeft: Spacing.sm,
   },
+  // A confirmed figure is in Committed, so it reads like one: ink against the
+  // muted default the unconfirmed rows keep. Not a hue — the palette's four are
+  // spent on state, and this is a fact about whether a number counts.
+  expectedAmountCounts: { color: Colors.textPrimary, fontWeight: Typography.semibold },
   expectedRemove: {
     width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET,
     alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.md,

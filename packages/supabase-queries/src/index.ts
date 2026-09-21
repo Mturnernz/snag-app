@@ -2904,6 +2904,7 @@ function mapProject(row: Row): Project {
     forecastGuess: numberOrNull(row.forecast_guess) ?? 0,
     expectedOpen: numberOrNull(row.expected_open) ?? 0,
     expectedCount: row.expected_count ?? 0,
+    expectedConfirmed: numberOrNull(row.expected_confirmed),
     budgetGap: numberOrNull(row.budget_gap) ?? 0,
     stillToBill: numberOrNull(row.still_to_bill),
     dueToPay: numberOrNull(row.due_to_pay) ?? 0,
@@ -2949,6 +2950,7 @@ function mapElement(row: Row): ProjectElement {
     additionalOpen: numberOrNull(row.additional_open) ?? 0,
     expectedOpen: numberOrNull(row.expected_open) ?? 0,
     expectedCount: row.expected_count ?? 0,
+    expectedConfirmed: numberOrNull(row.expected_confirmed),
     budgetGap: numberOrNull(row.budget_gap) ?? 0,
     committedDerived: numberOrNull(row.committed_derived),
     invoicedDerived: numberOrNull(row.invoiced_derived),
@@ -3074,6 +3076,7 @@ function mapExpectedCost(row: Row): ProjectExpectedCost {
     amountInclGst: row.amount_incl_gst !== false,
     likelySupplier: row.likely_supplier ?? null,
     note: row.note ?? null,
+    confirmed: !!row.confirmed,
     settledBy: row.settled_by ?? null,
     createdAt: row.created_at,
   };
@@ -4405,6 +4408,12 @@ export interface ExpectedCostInput {
   elementId?: string | null;
   likelySupplier?: string | null;
   note?: string | null;
+  /**
+   * Answered at creation, where there is no total to change yet — the row is
+   * being made. Changing it afterwards goes through `setExpectedCostConfirmed`
+   * and nothing else, because from then on it moves Committed.
+   */
+  confirmed?: boolean;
 }
 
 export async function createExpectedCost(
@@ -4420,8 +4429,31 @@ export async function createExpectedCost(
     p_element_id: input.elementId ?? null,
     p_likely_supplier: input.likelySupplier ?? null,
     p_note: input.note ?? null,
+    p_confirmed: input.confirmed ?? false,
   });
   return mapExpectedCost(unwrap<Row>(data, error, "Couldn't add that"));
+}
+
+/**
+ * Says whether somebody has agreed an expected cost, or it is still a guess.
+ *
+ * **Its own call, and deliberately not part of `updateExpectedCost`.** This is
+ * the only write on an expected cost that changes what a total says — a
+ * confirmed one counts in Committed and is owed to its supplier — and the rule
+ * `setPartBought`, `setQuoteStatus` and `setItemExcluded` all follow is that
+ * such a write cannot be smuggled in beside eight other fields by a caller
+ * correcting a name.
+ */
+export async function setExpectedCostConfirmed(
+  client: SupabaseClient,
+  expectedId: string,
+  confirmed: boolean
+): Promise<void> {
+  const { error } = await client.rpc('set_expected_cost_confirmed', {
+    p_expected_id: expectedId,
+    p_confirmed: confirmed,
+  });
+  if (error) throw asError(error, "That didn’t save");
 }
 
 const EXPECTED_CLEARABLE: Record<string, string> = {
@@ -4432,7 +4464,16 @@ const EXPECTED_CLEARABLE: Record<string, string> = {
   settledBy: 'settled_by',
 };
 
-export interface ExpectedCostUpdate extends Partial<ExpectedCostInput> {
+/**
+ * `confirmed` is deliberately not here.
+ *
+ * `update_expected_cost` does not take it, so a caller passing it would have
+ * it silently dropped — which is the two-writers-of-one-fact shape this schema
+ * keeps naming. `setExpectedCostConfirmed` is the one way, and omitting it
+ * from this type makes trying anything else a type error rather than a write
+ * that quietly does nothing.
+ */
+export interface ExpectedCostUpdate extends Partial<Omit<ExpectedCostInput, 'confirmed'>> {
   /** The real price, once one exists. Set, the expectation stops counting. */
   settledBy?: string | null;
 }

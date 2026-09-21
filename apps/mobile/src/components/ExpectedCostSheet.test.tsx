@@ -30,6 +30,7 @@ jest.mock('./Attachments', () => {
 const cost = (over: Partial<any> = {}): any => ({
   id: 'x1', projectId: 'p1', elementId: null, name: 'Architect',
   likelySupplier: 'Gibson', amount: 4000, amountInclGst: true,
+  confirmed: false,
   settledBy: null, notes: null, createdAt: '2026-09-01T00:00:00Z', ...over,
 });
 
@@ -49,6 +50,7 @@ function arrange(over: Partial<any> = {}) {
   const onAddLine = jest.fn().mockResolvedValue(undefined);
   const onUpdateLine = jest.fn().mockResolvedValue(undefined);
   const onSave = jest.fn().mockResolvedValue(undefined);
+  const onConfirm = jest.fn().mockResolvedValue(undefined);
   const onClose = jest.fn();
   const r = render(
     <ExpectedCostSheet
@@ -59,6 +61,7 @@ function arrange(over: Partial<any> = {}) {
       lines={[]}
       householdId="h"
       onSave={onSave}
+      onConfirm={onConfirm}
       onDelete={jest.fn().mockResolvedValue(undefined)}
       onAddLine={onAddLine}
       onUpdateLine={onUpdateLine}
@@ -67,7 +70,7 @@ function arrange(over: Partial<any> = {}) {
       {...over}
     />
   );
-  return { r, onAddLine, onUpdateLine, onSave, onClose };
+  return { r, onAddLine, onUpdateLine, onSave, onConfirm, onClose };
 }
 
 const startPayment = async (r: ReturnType<typeof render>) =>
@@ -128,4 +131,67 @@ it('leaves an untouched payment box alone', async () => {
   expect(onAddLine).not.toHaveBeenCalled();
   expect(onSave).toHaveBeenCalled();
   expect(onClose).toHaveBeenCalled();
+});
+
+describe('confirmed, the answer that turns a guess into a commitment', () => {
+  it('is two named halves, and starts on the one every existing row already had', () => {
+    // One chip that toggled would leave the other answer as the unlabelled
+    // absence of a press, and here that unlabelled answer is the difference
+    // between a forecast and a commitment.
+    const { r } = arrange();
+    expect(byLabel(r, 'Confirmed')).toBeDefined();
+    expect(byLabel(r, 'Unconfirmed')).toBeDefined();
+    expect(byLabel(r, 'Unconfirmed').props.accessibilityState.selected).toBe(true);
+  });
+
+  it('writes through its own call, never through Save', async () => {
+    // The only write on an expected cost that changes what a total says, so it
+    // cannot ride along beside a name somebody was correcting.
+    const { r, onConfirm, onSave } = arrange();
+    await TestRenderer.act(async () => byLabel(r, 'Confirmed').props.onPress());
+    expect(onConfirm).toHaveBeenCalledWith(true);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing when the half already lit is pressed', async () => {
+    const { r, onConfirm } = arrange();
+    await TestRenderer.act(async () => byLabel(r, 'Unconfirmed').props.onPress());
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('answers before the network does, and puts it back when refused', async () => {
+    const onConfirm = jest.fn().mockRejectedValue(new Error('nope'));
+    const { r } = arrange({ onConfirm });
+    await TestRenderer.act(async () => byLabel(r, 'Confirmed').props.onPress());
+    // A control that silently keeps a state the server rejected is worse than
+    // one that was slow.
+    expect(byLabel(r, 'Unconfirmed').props.accessibilityState.selected).toBe(true);
+  });
+
+  it('says what each answer means, rather than only naming it', async () => {
+    const { r } = arrange();
+    r.getByText('It counts towards the forecast alone, and every figure that holds it says it’s a guess.');
+    await TestRenderer.act(async () => byLabel(r, 'Confirmed').props.onPress());
+    r.getByText('It counts as committed, and it’s still not invoiced or paid — so it sits in what’s left to be billed.');
+  });
+
+  it('carries the answer into the create rather than writing it twice', async () => {
+    // A new row has no id to write against, so the answer rides in. On a row
+    // that exists it has already been written by the pill, and Save must not
+    // be a second writer of it.
+    const { r, onSave, onConfirm } = arrange({ existing: null, lines: [] });
+    await TestRenderer.act(async () => {
+      boxByLabel(r, 'What the cost is for').props.onChangeText('Engineer');
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Confirmed').props.onPress());
+    expect(onConfirm).not.toHaveBeenCalled();
+    await TestRenderer.act(async () => byLabel(r, 'Add it').props.onPress());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ confirmed: true }));
+  });
+
+  it('leaves confirmed out of Save on a row that already exists', async () => {
+    const { r, onSave } = arrange();
+    await TestRenderer.act(async () => byLabel(r, 'Save').props.onPress());
+    expect(onSave.mock.calls[0][0].confirmed).toBeUndefined();
+  });
 });

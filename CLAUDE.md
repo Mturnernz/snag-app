@@ -1458,11 +1458,62 @@ engineer* was doing on the live job), and a **quote nobody gave you** is a fabri
 against a firm that has never heard of you.
 
 `home.project_expected_costs` is the third kind of row and the only one in this feature whose
-number is allowed to be somebody's estimate. **It is never committed and never invoiced** — it
-reaches Forecast alone and is named as a guess everywhere it is summed. The distinction that must
-not blur: an **allowance** is a written number inside a contract you signed, so it counts as
-committed and is merely soft; an **expected cost** is not committed at all, because nobody has
-agreed to anything.
+number is allowed to be somebody's estimate. The distinction that must not blur: an **allowance**
+is a written number inside a contract you signed, so it counts as committed and is merely soft; an
+**expected cost** is not committed, because nobody has agreed to anything.
+
+**"Because nobody has agreed to anything" is a state, not a property of the row**, and that is
+what `confirmed` (`20260921120000`) finally says. The architect's $4,000 is a guess in week one
+and an agreed fee in week three, and until then the only way to say the second thing was to invent
+a quote from a firm that never sent one — the fabrication this row exists to refuse. So the fence
+does not move; it gains a gate:
+
+- **Unconfirmed** — exactly what an expected cost has always been. Forecast alone, counted in
+  `expectedOpen`, worded as a guess, owed to nobody.
+- **Confirmed** — it counts in **Committed**, it is owed to `likelySupplier` under *Who we're
+  paying*, and it leaves `expectedOpen`, so the forecast stops calling it a guess.
+
+**It still never reaches Invoiced or Paid**, confirmed or not: nobody has billed for it and no
+money has moved. So confirming one widens *still to be billed*, which is the true reading — agreed
+work nobody has claimed for yet. **And it never reaches Quoted**, because that line is what the
+suppliers have actually *said* and nobody said this. Quoted sitting below Committed on a job whose
+costs were agreed rather than quoted is not a contradiction; it is the page saying which of the two
+this money is.
+
+**Summed from exactly one place, as ever.** A confirmed expectation is **added** to a scope's
+committed figure rather than folded into the accepted-or-invoiced fallback beside it — it is a
+different kind of row, not another quote at the same scope, and putting it inside the `coalesce`
+would make one suppress the other:
+
+    committed(scope) = coalesce(accepted, invoiced) + confirmed expectations
+
+A part's confirmed expectations roll into the job through that part's `committed_total` exactly as
+its items do; only the ones belonging to the job rather than to a room are added again at the top.
+And the same figure joins `project_supplier_totals`, because **the supplier rows sum to the
+project's committed total** and money in Committed owed to nobody would break that on the first
+confirmed row. Measured on the live job rather than asserted: confirming the $4,000 architect took
+Committed from $880 to $4,880, left Forecast at $4,880 untouched, took `forecast_guess` to nought,
+and the supplier rows still added to $4,880.
+
+**Default false, so nothing on any page changes until somebody presses it.** Confirming is a
+deliberate act and it is the only write on an expected cost that moves a total, so it is its own
+function — `set_expected_cost_confirmed`, the reason `set_part_bought`, `set_quote_status` and
+`set_item_excluded` are theirs. `update_expected_cost` does not take it and `ExpectedCostUpdate`
+omits it from its type, so trying to send it beside a corrected name is a compile error rather
+than a write that quietly does nothing. The one exception is **creation**, where there is no total
+to change yet because the row is being made: `create_expected_cost` takes `p_confirmed`.
+
+**The sheet asks in two named halves and the row says which it is.** *Has anybody agreed this?* ·
+**Confirmed** · **Not yet**, in the app's one chip shape, with a line under it saying what each
+answer does to the figures. On *Also expecting* the row's own sub-line reads *"confirmed — counts
+as committed"* or *"unconfirmed — forecast only"*, and a confirmed amount renders in ink against
+the muted default, because the difference is whether the figure beside it is inside Committed — and
+a reader left to work that out from the total is a reader who stops trusting the total. The reader
+who wants the rest opens Committed's own breakdown, where a confirmed expectation appears under
+the supplier it is owed to. `ExpectedCostSheet.test.tsx` pins the two halves, the no-op press, the
+write going through its own call rather than Save, the revert on a refusal, the wording of both
+answers, and the create path carrying the answer in rather than writing it twice;
+`ProjectDetailScreen.test.tsx` pins both sub-lines and the re-read after the write.
 
 **It is replaced, not added to.** `settled_by` points at the real price when one arrives and the
 expectation stops counting, or the forecast double-counts as the job firms up. It is kept rather
@@ -1480,7 +1531,7 @@ already been recorded against it. Tapping a row on *Also expecting* opens the sa
 architect, a second instalment — `home.project_expected_cost_lines` holds them, each with a name,
 a reference number, a value, and somewhere to put a photo or a document, because that is what
 somebody standing at a bank statement actually has to record and nothing more. **It never reaches
-Committed, Invoiced or the forecast.** The parent expected cost still carries the one guessed
+Committed, Invoiced or the forecast, confirmed or not.** The parent expected cost still carries the one guessed
 figure that feeds Forecast — a payment on account is a record of what has moved, not a second
 opinion about what the job will cost, and letting it count twice is exactly the double-counting the
 rest of this feature is built to avoid. Read the way a bank statement is read, not priced.

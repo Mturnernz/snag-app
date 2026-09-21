@@ -501,15 +501,46 @@ describe('the Save button', () => {
 
   it('sits on the page and returns to the list', async () => {
     const r = await arrange();
-    await press(button(r, 'Save'));
+    await press(button(r, 'Close'));
     expect(mock_goBack).toHaveBeenCalled();
   });
 
   it('writes nothing of its own when nothing was typed', async () => {
     mock_updateSnag.mockClear();
     const r = await arrange();
-    await press(button(r, 'Save'));
+    await press(button(r, 'Close'));
     expect(mock_updateSnag).not.toHaveBeenCalled();
+  });
+
+  // A button reading Save over a line reading "All changes saved" is the page
+  // contradicting itself — and one that looks like an outstanding obligation
+  // gets reached for on autopilot, which is what puts a thumb next to Mark
+  // done. The word comes off the same count the hint does, so the two cannot
+  // say different things about one fact.
+  it('says Close while nothing is pending, and Save once something is', async () => {
+    const r = await arrange(snag({ dueAt: null }));
+    expect(button(r, 'Close')).toBeDefined();
+    expect(texts(r)).toContain('All changes saved');
+
+    await TestRenderer.act(async () => {
+      field(r, "When's it due?").props.onChangeText('8/11/2026');
+    });
+
+    expect(button(r, 'Save')).toBeDefined();
+    expect(r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.label === 'Close',
+    )).toEqual([]);
+  });
+
+  // The whole point of the pair. Two full-width solid fern buttons stacked at
+  // the foot were told apart by nothing but their words; only one of them has
+  // a consequence, and only that one keeps the brand's colour.
+  it('leaves the solid fern to Mark done and goes tonal itself', async () => {
+    const r = await arrange();
+
+    expect(button(r, 'Close').props.variant).toBe('secondary');
+    // Mark done takes the default, which is the filled primary.
+    expect(button(r, 'Mark done').props.variant).toBeUndefined();
   });
 
   it('says the taps already landed', async () => {

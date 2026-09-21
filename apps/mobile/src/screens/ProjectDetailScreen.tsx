@@ -16,6 +16,7 @@ import ProjectRoomsSheet from '../components/ProjectRoomsSheet';
 import RecordBillSheet from '../components/RecordBillSheet';
 import BuildUpSheet from '../components/BuildUpSheet';
 import ExpectedCostSheet from '../components/ExpectedCostSheet';
+import EditBudgetSheet from '../components/EditBudgetSheet';
 import ScheduleSheet from '../components/ScheduleSheet';
 import CommitmentCard from '../components/CommitmentCard';
 import EditFigureSheet from '../components/EditFigureSheet';
@@ -26,16 +27,18 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
 import {
-  addMilestone, addPayment, addQuoteLine, createElement, createExpectedCost, createItem,
+  addExpectedCostLine, addMilestone, addPayment, addQuoteLine, createElement, createExpectedCost,
+  createItem,
   createLocation, createQuote, createThing, deleteElement,
-  deleteExpectedCost, deleteItem, deleteMilestone, deletePayment, deleteProject, deleteQuote,
+  deleteExpectedCost, deleteExpectedCostLine, deleteItem, deleteMilestone, deletePayment,
+  deleteProject, deleteQuote,
   deleteQuoteLine,
-  clearFigure, setFigure,
+  clearFigure, setFigure, setItemExcluded,
   deleteStoredFiles, describeBudget, describeForecast, describeForecastVariance, describeOverrides,
   describePartsBudget, describeStillToBill, describeToPay, describeTotals, formatMoney, getProject,
   getProjectContents, getProjectFiles, getProjectThings, getSupplierTotals,
-  getSnags, outstanding, setQuoteStatus, showsElements, updateElement, updateItem,
-  updateProject, updateQuote,
+  getSnags, outstanding, setQuoteStatus, showsElements, updateElement, updateExpectedCost,
+  updateExpectedCostLine, updateItem, updateProject, updateQuote,
 } from '../lib/supabase';
 import {
   documentName, exportDateStamp, formatLooseDate, inclGst, itemPriceLabel, projectDossierTable,
@@ -44,7 +47,8 @@ import {
 import { getFileUrls } from '../lib/supabase';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import {
-  Project, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectFigure, ProjectFile, ProjectItem,
+  Project, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectExpectedCostLine, ProjectFigure,
+  ProjectFile, ProjectItem,
   ProjectMilestone, ProjectPayment, ProjectQuote,
   ProjectQuoteLine, ProjectQuoteStatus, ProjectStatus, ProjectSupplierTotals,
   PROJECT_FILE_LEVEL_LABELS, PROJECT_QUOTE_STATUS_LABELS, PROJECT_STATUS_LABELS,
@@ -120,9 +124,12 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [suppliers, setSuppliers] = useState<ProjectSupplierTotals[]>([]);
   const [milestones, setMilestones] = useState<ProjectMilestone[]>([]);
   const [expected, setExpected] = useState<ProjectExpectedCost[]>([]);
+  const [expectedCostLines, setExpectedCostLines] = useState<ProjectExpectedCostLine[]>([]);
   const [bills, setBills] = useState<ProjectBill[]>([]);
   const [recordOpen, setRecordOpen] = useState(false);
   const [expectedOpen, setExpectedOpen] = useState(false);
+  const [editingExpected, setEditingExpected] = useState<ProjectExpectedCost | null>(null);
+  const [budgetOpen, setBudgetOpen] = useState(false);
   const [buildUpFor, setBuildUpFor] = useState<ProjectQuote | null>(null);
   const [editingFigure, setEditingFigure] = useState<ProjectFigure | null>(null);
   const [scheduleFor, setScheduleFor] = useState<ProjectQuote | null>(null);
@@ -147,6 +154,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       setPayments(contents.payments);
       setMilestones(contents.milestones);
       setExpected(contents.expected);
+      setExpectedCostLines(contents.expectedCostLines);
       setBills(contents.bills);
       setFiles(loadedFiles);
       // Who is owed what. **Not fatal**: the money strip above it is the answer
@@ -228,6 +236,11 @@ export default function ProjectDetailScreen({ route }: Props) {
     for (const payment of payments) (map[payment.quoteId] ??= []).push(payment);
     return map;
   }, [payments]);
+  const linesByExpectedCost = useMemo(() => {
+    const map: Record<string, ProjectExpectedCostLine[]> = {};
+    for (const line of expectedCostLines) (map[line.expectedCostId] ??= []).push(line);
+    return map;
+  }, [expectedCostLines]);
   /**
    * What this renovation has not handed over yet.
    *
@@ -514,12 +527,15 @@ export default function ProjectDetailScreen({ route }: Props) {
             "$192,354.22". The label holds a fixed column so the figures line
             up on their right edge, which is how money is read. */}
         <View style={styles.strip}>
-          {budget ? (
-            <View style={styles.row}>
-              <Text style={styles.rowKey} numberOfLines={1}>Budget</Text>
-              <Text style={styles.rowValue} numberOfLines={1}>{budget}</Text>
-            </View>
-          ) : null}
+          <Pressable
+            onPress={() => setBudgetOpen(true)}
+            style={styles.row}
+            accessibilityRole="button"
+            accessibilityLabel={`Budget, ${budget ?? 'not set'}. Edit it.`}
+          >
+            <Text style={styles.rowKey} numberOfLines={1}>Budget</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>{budget ?? 'Not set'}</Text>
+          </Pressable>
           {/* Every one of the four is tappable, and an edited one renders in
               clay. That is the third thing in this app to earn red, after
               overdue and priority-high, and it earns it on the same terms: it
@@ -711,7 +727,10 @@ export default function ProjectDetailScreen({ route }: Props) {
           <Text style={styles.section}>Also expecting</Text>
           <View style={styles.rule} />
           <Pressable
-            onPress={() => setExpectedOpen(true)}
+            onPress={() => {
+              setEditingExpected(null);
+              setExpectedOpen(true);
+            }}
             style={styles.plusTap}
             accessibilityRole="button"
             accessibilityLabel="Add something you're expecting"
@@ -729,21 +748,34 @@ export default function ProjectDetailScreen({ route }: Props) {
             .filter((cost) => cost.settledBy === null)
             .map((cost) => (
               <View key={cost.id} style={styles.expected}>
-                <View style={styles.expectedTitles}>
-                  <Text style={styles.expectedName}>{cost.name}</Text>
-                  <Text style={styles.expectedSub} numberOfLines={1}>
-                    {[
-                      cost.likelySupplier,
-                      elements.find((e) => e.id === cost.elementId)?.name,
-                      'nobody has quoted this',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
+                {/* Opens it for editing. Sibling of the × below, never
+                    nested in it — the same rule every other row in this app
+                    follows for two controls that do different things. */}
+                <Pressable
+                  onPress={() => {
+                    setEditingExpected(cost);
+                    setExpectedOpen(true);
+                  }}
+                  style={styles.expectedTap}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${cost.name}, edit it`}
+                >
+                  <View style={styles.expectedTitles}>
+                    <Text style={styles.expectedName}>{cost.name}</Text>
+                    <Text style={styles.expectedSub} numberOfLines={1}>
+                      {[
+                        cost.likelySupplier,
+                        elements.find((e) => e.id === cost.elementId)?.name,
+                        'nobody has quoted this',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  </View>
+                  <Text style={styles.expectedAmount} numberOfLines={1}>
+                    {formatMoney(inclGst(cost.amount, cost.amountInclGst)) ?? 'no figure'}
                   </Text>
-                </View>
-                <Text style={styles.expectedAmount} numberOfLines={1}>
-                  {formatMoney(inclGst(cost.amount, cost.amountInclGst)) ?? 'no figure'}
-                </Text>
+                </Pressable>
                 <Pressable
                   onPress={async () => {
                     await deleteExpectedCost(cost.id);
@@ -832,56 +864,90 @@ export default function ProjectDetailScreen({ route }: Props) {
                     const price = itemPriceLabel(item);
                     const itemQuotes = quotesByItem[item.id] ?? [];
                     return (
-                      <Pressable
-                        key={item.id}
-                        onPress={() => setOpenItem(item.id)}
-                        style={styles.item}
-                        accessibilityRole="button"
-                        accessibilityLabel={item.name}
-                      >
-                        {/* The tick is *decided*, not *done* — the same
-                            distinction the shopping list draws between buying
-                            a part and doing the job. */}
-                        <View style={[styles.tick, item.committed !== null && styles.tickOn]}>
-                          {item.committed !== null ? (
-                            <Icon name="checkmark" size="sm" color={Colors.white} />
-                          ) : null}
-                        </View>
-                        <View style={styles.itemTitles}>
-                          <Text style={styles.itemName}>{item.name}</Text>
-                          <Text style={styles.itemSub} numberOfLines={1}>
-                            {itemQuotes.length === 0
-                              ? 'Nobody asked yet'
-                              : item.committed !== null
-                                ? [
-                                    itemQuotes.find(
-                                      (q) => q.kind === 'quote' && q.status === 'accepted'
-                                    )?.supplier ??
-                                      itemQuotes.find((q) => q.kind === 'invoice')?.supplier,
-                                    // Paid, billed, or merely agreed — three
-                                    // different answers to "where is this up to".
-                                    item.paid !== null
-                                      ? 'paid'
-                                      : item.invoiced !== null
-                                        ? 'invoiced'
-                                        : 'accepted',
-                                  ]
-                                    .filter(Boolean)
-                                    .join(' · ')
-                                : `${itemQuotes.length} ${itemQuotes.length === 1 ? 'price' : 'prices'} · nothing decided`}
-                          </Text>
-                        </View>
-                        <Text
-                          style={[
-                            styles.itemPrice,
-                            price.state === 'undecided' && styles.itemPriceRange,
-                            price.state === 'none' && styles.itemPriceNone,
-                          ]}
-                          numberOfLines={1}
+                      <View key={item.id} style={styles.itemRow}>
+                        <Pressable
+                          onPress={() => setOpenItem(item.id)}
+                          style={styles.item}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${item.name}${item.excluded ? ', excluded from the price build' : ''}`}
                         >
-                          {price.text}
-                        </Text>
-                      </Pressable>
+                          <View style={styles.itemTitles}>
+                            <Text
+                              style={[styles.itemName, item.excluded && styles.itemExcludedText]}
+                              numberOfLines={1}
+                            >
+                              {item.name}
+                            </Text>
+                            <Text
+                              style={[styles.itemSub, item.excluded && styles.itemExcludedText]}
+                              numberOfLines={1}
+                            >
+                              {item.excluded
+                                ? 'Excluded from the price build'
+                                : itemQuotes.length === 0
+                                  ? 'Nobody asked yet'
+                                  : item.committed !== null
+                                    ? [
+                                        itemQuotes.find(
+                                          (q) => q.kind === 'quote' && q.status === 'accepted'
+                                        )?.supplier ??
+                                          itemQuotes.find((q) => q.kind === 'invoice')?.supplier,
+                                        // Paid, billed, or merely agreed — three
+                                        // different answers to "where is this up to".
+                                        item.paid !== null
+                                          ? 'paid'
+                                          : item.invoiced !== null
+                                            ? 'invoiced'
+                                            : 'accepted',
+                                      ]
+                                        .filter(Boolean)
+                                        .join(' · ')
+                                    : `${itemQuotes.length} ${itemQuotes.length === 1 ? 'price' : 'prices'} · nothing decided`}
+                            </Text>
+                          </View>
+                          <Text
+                            style={[
+                              styles.itemPrice,
+                              price.state === 'undecided' && styles.itemPriceRange,
+                              price.state === 'none' && styles.itemPriceNone,
+                              item.excluded && styles.itemExcludedText,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {price.text}
+                          </Text>
+                        </Pressable>
+                        {/* Sibling of the row's own Pressable, never nested in
+                            it — the same rule that keeps opening and removing
+                            a photo apart, because one Pressable inside another
+                            is a coin toss about which one gets the tap. */}
+                        <Pressable
+                          onPress={async () => {
+                            try {
+                              await setItemExcluded(item.id, !item.excluded);
+                              await load();
+                            } catch (err: unknown) {
+                              showToast(err instanceof Error ? err.message : "That didn’t save");
+                            }
+                          }}
+                          style={[styles.includeToggle, item.excluded && styles.includeToggleOff]}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            item.excluded
+                              ? `Include ${item.name} in the price build`
+                              : `Exclude ${item.name} from the price build`
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.includeToggleLabel,
+                              item.excluded && styles.includeToggleLabelOff,
+                            ]}
+                          >
+                            {item.excluded ? 'Excluded' : 'Included'}
+                          </Text>
+                        </Pressable>
+                      </View>
                     );
                   })}
 
@@ -1164,6 +1230,11 @@ export default function ProjectDetailScreen({ route }: Props) {
         householdId={household.id}
         item={activeItem}
         quotes={activeItem ? quotesByItem[activeItem.id] ?? [] : []}
+        payments={
+          activeItem
+            ? (quotesByItem[activeItem.id] ?? []).flatMap((quote) => paymentsByQuote[quote.id] ?? [])
+            : []
+        }
         onClose={() => setOpenItem(null)}
         onUpdateItem={async (update, toast) => {
           if (!activeItem) return;
@@ -1210,6 +1281,16 @@ export default function ProjectDetailScreen({ route }: Props) {
           showToast(toast);
           await load();
         }}
+        onAddPayment={async (quoteId, amount) => {
+          await addPayment(quoteId, { amount, amountInclGst: true });
+          showToast('Paid');
+          await load();
+        }}
+        onDeletePayment={async (paymentId) => {
+          await deletePayment(paymentId);
+          showToast('Not paid');
+          await load();
+        }}
         onRecordAsThing={() => {
           setThingFor(activeItem);
           setOpenItem(null);
@@ -1237,10 +1318,45 @@ export default function ProjectDetailScreen({ route }: Props) {
         visible={expectedOpen}
         elements={elements}
         showElements={drawElements}
-        onClose={() => setExpectedOpen(false)}
+        existing={editingExpected}
+        lines={editingExpected ? linesByExpectedCost[editingExpected.id] ?? [] : []}
+        householdId={household.id}
+        onClose={() => {
+          setExpectedOpen(false);
+          setEditingExpected(null);
+        }}
         onSave={async (input) => {
-          await createExpectedCost(project.id, input);
-          showToast('Added to the forecast');
+          if (editingExpected) {
+            await updateExpectedCost(editingExpected.id, input);
+            showToast('Saved');
+          } else {
+            await createExpectedCost(project.id, input);
+            showToast('Added to the forecast');
+          }
+          await load();
+        }}
+        onDelete={async () => {
+          if (!editingExpected) return;
+          await deleteExpectedCost(editingExpected.id);
+          showToast('Removed');
+          setExpectedOpen(false);
+          setEditingExpected(null);
+          await load();
+        }}
+        onAddLine={async (input) => {
+          if (!editingExpected) return;
+          await addExpectedCostLine(editingExpected.id, input);
+          showToast('Added');
+          await load();
+        }}
+        onUpdateLine={async (lineId, input) => {
+          await updateExpectedCostLine(lineId, input);
+          showToast('Saved');
+          await load();
+        }}
+        onDeleteLine={async (lineId) => {
+          await deleteExpectedCostLine(lineId);
+          showToast('Removed');
           await load();
         }}
       />
@@ -1305,6 +1421,19 @@ export default function ProjectDetailScreen({ route }: Props) {
           await clearFigure(project.id, editingFigure);
           showToast('Back to the prices');
           await load();
+        }}
+      />
+
+      <EditBudgetSheet
+        visible={budgetOpen}
+        budget={project.budget}
+        budgetInclGst={project.budgetInclGst}
+        onClose={() => setBudgetOpen(false)}
+        onSave={async (amount, amountInclGst) => {
+          await patchProject(
+            { budget: amount, budgetInclGst: amountInclGst },
+            amount === null ? 'Budget cleared' : 'Saved'
+          );
         }}
       />
 
@@ -1603,25 +1732,22 @@ const styles = StyleSheet.create({
   elementName: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
   elementSub: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
   items: { marginTop: Spacing.xs },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
   item: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
     paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
     minHeight: MIN_TOUCH_TARGET,
   },
-  tick: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tickOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   itemTitles: { flex: 1, minWidth: 0 },
   itemName: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
   itemSub: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
@@ -1630,6 +1756,25 @@ const styles = StyleSheet.create({
   itemPrice: { flexShrink: 0, fontFamily: Fonts.mono, fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
   itemPriceRange: { color: Colors.status.doing, fontWeight: Typography.regular, fontSize: Typography.xs },
   itemPriceNone: { color: Colors.textMuted, fontWeight: Typography.regular, fontSize: Typography.xs },
+  // Decided against, without deleting it. Greyed rather than struck through —
+  // this is not done, it is simply not counted, and strike-through is the
+  // finished-job mark elsewhere in this app.
+  itemExcludedText: { color: Colors.textMuted, fontWeight: Typography.regular },
+  // The sunken-well-off / solid-fern-on shape every chip row in this app uses,
+  // reversed: excluded is the state that reads as "off" here, so it stays the
+  // sunken well and Included takes the fern.
+  includeToggle: {
+    flexShrink: 0,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+  },
+  includeToggleOff: { backgroundColor: Colors.sunken },
+  includeToggleLabel: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.white },
+  includeToggleLabelOff: { color: Colors.textMuted },
 
   addRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
   addInput: {
@@ -1704,8 +1849,12 @@ const styles = StyleSheet.create({
 
   expected: {
     flexDirection: 'row', alignItems: 'center',
-    paddingVertical: Spacing.sm,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  expectedTap: {
+    flex: 1, minWidth: 0,
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: Spacing.sm, minHeight: MIN_TOUCH_TARGET,
   },
   expectedTitles: { flex: 1, minWidth: 0 },
   expectedName: { fontSize: Typography.base, color: Colors.textPrimary },

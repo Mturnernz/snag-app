@@ -1403,6 +1403,21 @@ than deleted because "we thought the engineer would be $4,000 and it was $5,600"
 this app can make the next renovation's guesses better. **The amount is optional**: "there will be
 council costs" with no figure is still worth recording, as a named gap rather than as silence.
 
+**The row can be opened again, and it can be deleted.** A guess made in the first week of a job is
+rarely the final word — the architect's estimate gets revised, the likely supplier turns out to be
+somebody else — and until now the only way to fix one was to delete it and lose whatever had
+already been recorded against it. Tapping a row on *Also expecting* opens the same
+`ExpectedCostSheet` in edit mode; the `+` beside the heading still starts a new one.
+
+**A payment against it is its own thing, and it is deliberately thin.** An initial payment to the
+architect, a second instalment — `home.project_expected_cost_lines` holds them, each with a name,
+a reference number, a value, and somewhere to put a photo or a document, because that is what
+somebody standing at a bank statement actually has to record and nothing more. **It never reaches
+Committed, Invoiced or the forecast.** The parent expected cost still carries the one guessed
+figure that feeds Forecast — a payment on account is a record of what has moved, not a second
+opinion about what the job will cost, and letting it count twice is exactly the double-counting the
+rest of this feature is built to avoid. Read the way a bank statement is read, not priced.
+
 ### Two gaps, not one, and only one of them is about today
 
 `Outstanding` was committed less paid, and it answered neither of the two questions people
@@ -1438,8 +1453,8 @@ of **comparing three prices for a toilet**; nobody looks at a contract they sign
 thinks "I should mark that accepted" — and the control was six levels deep besides.
 
 So a commitment is signed under *Who we're paying*, **two taps from the top of the page**.
-Comparing prices for one item keeps *Accepted / Declined* on the item sheet: those are genuinely
-different moments and they should stop sharing a control. The enum underneath is unchanged.
+*Accepted / Declined* stays on the item sheet, on the one price an item now carries — see *One
+price, and a header that says where it's up to* below. The enum underneath is unchanged.
 
 ### A number you can type over, and the app saying so in red
 
@@ -1607,6 +1622,73 @@ record a quote is setup, and this app does not do setup. It groups on the trimme
 name and displays the spelling used most recently, and `home.rename_supplier` fixes a typo across
 a whole job — a rollup nobody can correct is a rollup nobody trusts.
 
+### One price, and a header that says where it's up to
+
+The item sheet used to hold a shortlist — several quotes on one item, each with its own
+*Accepted / TBC / Declined*, kept for comparing suppliers side by side. **An item now carries one
+active price**, and the sheet's header is that price's own lifecycle rather than a second decision
+sitting above the quotes list: **Quote** or **Invoiced** first, then whichever question follows
+from the answer — a quote is *Accepted* or *Declined*, an invoice is *Paid* or *Not paid*.
+**Accepted doesn't finish anything**: the next real event on a job is the bill, so an accepted
+quote reads **Pending invoice** underneath the toggle until somebody moves it to Invoiced. Tapping
+the state already chosen clears it, the same toggle-off every chip row in this app already gives —
+there is no third pill for "not decided" the way `tbc` used to render as a visible option.
+
+**Paid writes a payment, it doesn't just flip a flag.** Marking a price Paid records
+`home.add_payment` for exactly what `unpaid` still says is owed, so the figure behind the button
+and the figure in the rollup can never disagree; marking it Not paid removes the payments recorded
+against it. Nothing here reads a figure out of an attachment, same as everywhere else in this
+feature — the amount is whatever `unpaid` already computed from what was typed and what has
+actually been paid.
+
+**Editing a price is three fields: who from, what exactly, the amount.** Kind and paid-ness used to
+live in the same form as a chip row and a hint paragraph; both are decisions now made from the
+header, and a correction that could also silently move an invoice to a quote is exactly the
+kind of two-controls-for-one-fact this codebase keeps removing elsewhere. The date field is gone
+with them — nobody was asking "when was this quoted" often enough to earn a permanent box, and nothing
+downstream reads it. `updateQuote` still accepts `dated`; the sheet simply never sends it, so an
+edit leaves a date typed before this change exactly as it was.
+
+**A second price is no longer created through this sheet**, and an item that already had more than
+one before this change keeps every one of them — shown read-only, under *Also on record*, each
+still removable. Hiding them would be lying about what still counts in the rollup; the only thing
+that changed is that comparing them is no longer this sheet's job.
+
+**Installed moved out of the header and became its own control.** It used to be one of four chips
+sharing a row with Considering/Chosen/Ordered — the only one of those four anybody could tell apart
+from the others, since the rest collapsed into "the price is being sorted out" the moment Quote and
+Invoiced took over that meaning. It is the one state still changed by hand, because only a person
+knows the dishwasher is actually sitting in the kitchen, and it is what lets *Record it in the
+house record* offer itself once something is genuinely in.
+
+### Include or exclude, without deleting it
+
+Every item under *Parts of the job* used to carry a tick on its left — *decided*, in the words of
+the comment that explained it, not *done*. The item's price could still be wrong for the household,
+though: a vanity gets swapped for a cheaper one after the fact, or an item turns out to already be
+covered by the builder's contract and pricing it again would double it up. Until now the only way
+to stop an item counting was deleting it, which throws its quotes and its history away with the
+decision not to buy it.
+
+**`excluded` is the other option, and it is a toggle on the right, not the tick on the left.** The
+tick's job — telling committed items apart from undecided ones — is what the amount column already
+does; a second control saying the same thing a second way is exactly the duplicate-control failure
+this codebase keeps naming. Include/Exclude is a different fact, and it lives where a fact that
+isn't "open this row" belongs — the far side, as its own sibling `Pressable`, never nested inside
+the row's own tap target, for the reason opening and removing a photo are siblings everywhere else
+in this app: one `Pressable` inside another is a coin toss about which one gets the tap.
+
+**Excluded stays on the record and keeps its own price.** `project_items_with_totals` and
+`project_scope_money` at the item level are untouched by the flag, so opening an excluded item
+still shows what it would have cost — greyed in the list, never struck through, because this is
+not done, it is simply not counted. What changes is everything the item rolls *into*:
+`project_elements_with_totals` skips an excluded item's committed, invoiced and paid when summing
+its part, and its quotes drop out of *Who's owed what* and the bills due, so "the supplier rows
+sum to committed" — the invariant the whole money model is built to keep — stays true rather than
+counting money for work the household decided against. `home.set_item_excluded` is its own
+function for the same reason `set_part_bought` and `set_quote_status` are theirs: the only write
+here that changes what a total says, so it cannot have anything else riding along with it.
+
 ### A budget has parts, and the gap is named rather than resolved
 
 `project_elements.budget` carries each part's share. **`projects.budget` stays and stays typed.**
@@ -1615,6 +1697,13 @@ up (the contingency lives nowhere), and a derived figure that silently replaced 
 would be the app insisting somebody did not mean what they typed. So both exist and the page says
 *"parts budgeted $172,000 of $180,000 · $8,000 unallocated"* — the denominator rule, applied to
 budget.
+
+**The Budget row is tappable, and it is a plain edit rather than an override.** Every other figure
+in the strip carries the derived/override pattern — a build-up of prices sitting beside whatever a
+person typed over it — but budget has no build-up to sit beside: it is the one figure on the page
+nobody adds up from anything else. So `EditBudgetSheet` is a single `MoneyField` and a Save, not
+`EditFigureSheet`'s comparison against a derived number, and leaving the box empty clears the
+budget rather than asking for a second control to do it.
 
 **And they are stacked down the page, not laid across it.** They were cells in a row, which works
 until a renovation gets past five figures and one of them has to hold `$192,354.22` in a third of

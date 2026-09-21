@@ -6,89 +6,75 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from './Icon';
 import MoneyField from './MoneyField';
-import DateField from './DateField';
 import Attachments from './Attachments';
 import ConfirmDialog from './ConfirmDialog';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
+import { formatMoney, inclGst } from '@snag/supabase-queries';
 import {
-  formatDayFirst, formatLooseDate, formatMoney, inclGst, parseLooseDate,
-} from '@snag/supabase-queries';
-import {
-  ProjectItem, ProjectItemStatus, ProjectQuote, ProjectQuoteKind, ProjectQuoteStatus,
-  PROJECT_ITEM_STATUS_LABELS, PROJECT_ITEM_STATUS_ORDER,
-  PROJECT_QUOTE_KIND_LABELS, PROJECT_QUOTE_KINDS,
-  PROJECT_QUOTE_STATUS_LABELS, PROJECT_QUOTE_STATUSES,
+  ProjectItem, ProjectPayment, ProjectQuote, ProjectQuoteKind, ProjectQuoteStatus,
+  PROJECT_QUOTE_STATUS_LABELS,
 } from '../types';
+
+interface QuoteFields {
+  supplier: string | null;
+  detail: string | null;
+  amount: number | null;
+  amountInclGst: boolean;
+}
 
 interface Props {
   visible: boolean;
   householdId: string;
   item: ProjectItem | null;
+  /** This item's prices. The first one is the one the header operates on. */
   quotes: ProjectQuote[];
+  /** Payments against any invoice among `quotes`. */
+  payments: ProjectPayment[];
   onClose: () => void;
-  onUpdateItem: (update: { name?: string; status?: ProjectItemStatus; notes?: string | null; photoPaths?: string[]; documentPaths?: string[] }, toast: string) => Promise<void>;
+  onUpdateItem: (update: { name?: string; status?: ProjectItem['status']; notes?: string | null; photoPaths?: string[]; documentPaths?: string[] }, toast: string) => Promise<void>;
   onDeleteItem: () => Promise<void>;
-  onAddQuote: (input: {
-    supplier: string | null;
-    detail: string | null;
-    amount: number | null;
-    amountInclGst: boolean;
-    kind: ProjectQuoteKind;
-    dated: string | null;
-  }) => Promise<void>;
+  onAddQuote: (input: QuoteFields) => Promise<void>;
   onSetQuoteStatus: (quoteId: string, status: ProjectQuoteStatus) => Promise<void>;
   /**
-   * Corrects a price already saved.
+   * Corrects a price, or moves it between Quote and Invoiced.
    *
    * Deliberately does **not** carry `status`: accepting stays on
-   * `set_quote_status`, which is its own RPC precisely so the sibling-clearing
-   * can never be skipped by a caller passing it among eight other fields. A
+   * `onSetQuoteStatus`, which is its own call precisely so the sibling-clearing
+   * can never be skipped by a caller passing it among other fields. A
    * correction is not a decision.
    */
-  onUpdateQuote: (
-    quoteId: string,
-    update: {
-      supplier: string | null;
-      detail: string | null;
-      amount: number | null;
-      amountInclGst: boolean;
-      kind: ProjectQuoteKind;
-      dated: string | null;
-    }
-  ) => Promise<void>;
+  onUpdateQuote: (quoteId: string, update: Partial<QuoteFields> & { kind?: ProjectQuoteKind }) => Promise<void>;
   onDeleteQuote: (quoteId: string) => Promise<void>;
   onUpdateQuoteFiles: (quoteId: string, next: { photoPaths?: string[]; documentPaths?: string[] }, toast: string) => Promise<void>;
+  onAddPayment: (quoteId: string, amount: number) => Promise<void>;
+  onDeletePayment: (paymentId: string) => Promise<void>;
   /** Offered once something is in: an item that exists is a thing the house now has. */
   onRecordAsThing?: () => void;
 }
 
 /**
- * One item, and the quotes on it — the compare moment.
+ * One item, and the one price that answers "what does it cost".
  *
- * This is the bottom of the hierarchy and the place the middle-layer rule
- * applies for the second time: **an item with one quote shows that number and
- * never says the word "quote".** The list of quotes only becomes a list when
- * there are two, because until then it is just the price.
+ * **An item carries a single active price**, not a shortlist to compare.
+ * Recording it moves through two questions in order — is it a *Quote* or has
+ * it been *Invoiced*, and then the one that follows from that: a quote is
+ * *Accepted* or *Declined*, an invoice is *Paid* or *Not paid*. Accepting
+ * doesn't finish the job — the next real event is the bill, so an accepted
+ * quote reads **Pending invoice** until somebody flips it to Invoiced.
  *
- * **Choosing is the only write here that moves the project's total**, which is
- * why it goes through `set_quote_chosen` rather than riding in an update with
- * eight other fields — the same argument that keeps `setPartBought` out of
- * `updateSnag`. The server clears the sibling first, because the one-chosen
- * index is a plain unique index and not a deferred constraint.
+ * **Editing a price shows three fields and nothing else** — who from, what
+ * exactly, and the amount. What kind of paper it is and whether it has been
+ * paid are decisions, made from the header above the form, never something a
+ * half-finished edit can silently carry along.
  *
- * **Every quote carries its own paperwork**, rather than the item pooling it.
- * That is what makes "why did we pick Mico" answerable in March: the quote and
- * the PDF behind it are one row. Files roll up to the project's folder; they
- * never roll down, so the project's council consent is not shown here.
- *
- * The amount is typed with the GST pill beside it and stored exactly as typed —
- * nothing in this app reads a figure out of an attachment.
+ * The amount is typed with the GST pill beside it and stored exactly as typed
+ * — nothing in this app reads a figure out of an attachment.
  */
 export default function ItemSheet({
-  visible, householdId, item, quotes, onClose,
+  visible, householdId, item, quotes, payments, onClose,
   onUpdateItem, onDeleteItem, onAddQuote, onSetQuoteStatus, onUpdateQuote, onDeleteQuote,
-  onUpdateQuoteFiles, onRecordAsThing,
+  onUpdateQuoteFiles, onAddPayment, onDeletePayment, onRecordAsThing,
 }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
@@ -98,20 +84,22 @@ export default function ItemSheet({
   const [detail, setDetail] = useState('');
   const [amount, setAmount] = useState('');
   const [incl, setIncl] = useState(true);
-  const [kind, setKind] = useState<ProjectQuoteKind>('quote');
-  const [dated, setDated] = useState('');
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [expandedQuote, setExpandedQuote] = useState<string | null>(null);
-  /**
-   * The quote the form is correcting, or null when it is adding a new one.
-   *
-   * One form for both, rather than a second sheet: the fields are identical and
-   * a separate editor is a second place the GST pill and the kind chips would
-   * have to be got right.
-   */
+  const [filesOpen, setFilesOpen] = useState(false);
+  /** The quote the form is correcting, or null when it is adding the first one. */
   const [editingQuote, setEditingQuote] = useState<string | null>(null);
+
+  // The price the header and the edit pencil operate on. Kept to the first
+  // one recorded: an item carries a single active price now, so a second
+  // never gets created through this sheet, and any extra rows left over from
+  // before stay visible below, read-only, rather than disappearing.
+  const primaryQuote = quotes[0] ?? null;
+  const legacyQuotes = quotes.slice(1);
+  const primaryPayments = primaryQuote
+    ? payments.filter((payment) => payment.quoteId === primaryQuote.id)
+    : [];
 
   useEffect(() => {
     if (!visible) return;
@@ -120,10 +108,8 @@ export default function ItemSheet({
     setDetail('');
     setAmount('');
     setIncl(true);
-    setKind('quote');
-    setDated('');
     setNotes(item?.notes ?? '');
-    setExpandedQuote(null);
+    setFilesOpen(false);
     setEditingQuote(null);
   }, [visible, item?.id]);
 
@@ -131,7 +117,7 @@ export default function ItemSheet({
 
   const canSaveQuote = amount.trim().length > 0 || supplier.trim().length > 0;
 
-  /** Loads a saved price back into the one form, exactly as it was typed. */
+  /** Loads a saved price back into the form, exactly as it was typed. */
   function editQuote(quote: ProjectQuote) {
     setEditingQuote(quote.id);
     setAdding(false);
@@ -142,19 +128,15 @@ export default function ItemSheet({
     // box would change the number somebody is trying to correct.
     setAmount(quote.amount === null ? '' : String(quote.amount));
     setIncl(quote.amountInclGst);
-    setKind(quote.kind);
-    setDated(formatDayFirst(quote.dated));
   }
 
   function closeForm() {
     setEditingQuote(null);
-    setAdding(false);
+    setAdding(quotes.length === 0);
     setSupplier('');
     setDetail('');
     setAmount('');
     setIncl(true);
-    setKind('quote');
-    setDated('');
   }
 
   async function saveQuote() {
@@ -170,8 +152,6 @@ export default function ItemSheet({
         detail: detail.trim() || null,
         amount: Number.isFinite(parsed) ? parsed : null,
         amountInclGst: incl,
-        kind,
-        dated: parseLooseDate(dated) ?? null,
       });
       closeForm();
     } finally {
@@ -189,19 +169,48 @@ export default function ItemSheet({
         detail: detail.trim() || null,
         amount: Number.isFinite(parsed) ? parsed : null,
         amountInclGst: incl,
-        kind,
-        dated: parseLooseDate(dated) ?? null,
       });
       setSupplier('');
       setDetail('');
       setAmount('');
-      setDated('');
-      setKind('quote');
       setAdding(false);
     } finally {
       setBusy(false);
     }
   }
+
+  const grossAmount = primaryQuote ? inclGst(primaryQuote.amount, primaryQuote.amountInclGst) : null;
+  const isPaid = primaryQuote !== null
+    && primaryQuote.kind === 'invoice'
+    && primaryQuote.unpaid !== null
+    && primaryQuote.unpaid <= 0.005;
+
+  async function markPaid() {
+    if (!primaryQuote || busy || isPaid) return;
+    const outstanding = primaryQuote.unpaid ?? grossAmount;
+    if (outstanding === null || outstanding <= 0) return;
+    setBusy(true);
+    try {
+      await onAddPayment(primaryQuote.id, outstanding);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markNotPaid() {
+    if (!primaryQuote || busy || primaryPayments.length === 0) return;
+    setBusy(true);
+    try {
+      for (const payment of primaryPayments) {
+        // eslint-disable-next-line no-await-in-loop
+        await onDeletePayment(payment.id);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const showForm = adding || editingQuote !== null;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -221,175 +230,187 @@ export default function ItemSheet({
         </View>
 
         <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
-          {/* Where it has got to. Four states and never "done" — that word
-              belongs to snags, and an item can be in and still wrong. */}
-          <View style={styles.chips}>
-            {PROJECT_ITEM_STATUS_ORDER.map((option) => {
-              const on = item.status === option;
-              return (
+          {primaryQuote && !showForm ? (
+            <View style={styles.priceCard}>
+              <View style={styles.quoteTop}>
+                <View style={styles.quoteTitles}>
+                  <Text style={styles.quoteSupplier}>{primaryQuote.supplier ?? 'No supplier named'}</Text>
+                  {primaryQuote.detail ? (
+                    <Text style={styles.quoteDetail} numberOfLines={1}>{primaryQuote.detail}</Text>
+                  ) : null}
+                </View>
+                <View style={styles.quoteMoney}>
+                  <Text style={styles.quoteAmount}>{formatMoney(primaryQuote.amount) ?? '—'}</Text>
+                  <Text style={styles.quoteGst}>
+                    {primaryQuote.amount === null
+                      ? 'no amount'
+                      : primaryQuote.amountInclGst
+                        ? 'incl GST'
+                        : `excl · ${formatMoney(grossAmount)} incl`}
+                  </Text>
+                </View>
                 <Pressable
-                  key={option}
-                  onPress={() => onUpdateItem({ status: option }, PROJECT_ITEM_STATUS_LABELS[option])}
-                  style={styles.chipTap}
+                  onPress={() => editQuote(primaryQuote)}
+                  style={styles.quoteEdit}
                   accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                  accessibilityLabel={PROJECT_ITEM_STATUS_LABELS[option]}
+                  accessibilityLabel={`Correct the ${primaryQuote.supplier ?? 'unnamed'} price`}
                 >
-                  <View style={[styles.chip, on && styles.chipOn]}>
-                    <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                      {PROJECT_ITEM_STATUS_LABELS[option]}
-                    </Text>
-                  </View>
+                  <Icon name="pencil-outline" size="sm" color={Colors.textMuted} />
                 </Pressable>
-              );
-            })}
-          </View>
+              </View>
 
-          {/* ── quotes ─────────────────────────────────────────────────── */}
-          <View style={styles.sectionRow}>
-            <Text style={styles.section}>
-              {quotes.length > 1 ? 'Quotes' : 'What it costs'}
-            </Text>
-            <View style={styles.rule} />
-            {!adding && !editingQuote ? (
-              <Pressable
-                onPress={() => setAdding(true)}
-                style={styles.plusTap}
-                accessibilityRole="button"
-                accessibilityLabel="Add a quote"
-              >
-                <Icon name="add" size="md" color={Colors.textMuted} />
-              </Pressable>
-            ) : null}
-          </View>
+              {/* Quote, or Invoiced — the first question. */}
+              <View style={styles.chips}>
+                {(['quote', 'invoice'] as const).map((option) => {
+                  const on = primaryQuote.kind === option;
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => onUpdateQuote(primaryQuote.id, { kind: option })}
+                      style={styles.chipTap}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={option === 'quote' ? 'Quote' : 'Invoiced'}
+                    >
+                      <View style={[styles.chip, on && styles.chipOn]}>
+                        <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
+                          {option === 'quote' ? 'Quote' : 'Invoiced'}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-          {quotes.map((quote) => {
-            const shown = formatMoney(quote.amount);
-            const gross = formatMoney(inclGst(quote.amount, quote.amountInclGst));
-            const open = expandedQuote === quote.id;
-            return (
-              <View
-                key={quote.id}
-                style={[
-                  styles.quote,
-                  quote.status === 'accepted' && styles.quoteOn,
-                  // A declined price stays on the record and leaves every
-                  // total. Dimmed for the same reason a finished card is: there
-                  // is nothing to do about it.
-                  quote.status === 'declined' && styles.quoteOff,
-                ]}
-              >
-                <View style={styles.quoteTop}>
-                  <View style={styles.quoteTitles}>
-                    <Text style={styles.quoteSupplier}>{quote.supplier ?? 'No supplier named'}</Text>
-                    <Text style={styles.quoteDetail} numberOfLines={1}>
-                      {[
-                        quote.detail,
-                        PROJECT_QUOTE_KIND_LABELS[quote.kind].toLowerCase(),
-                        quote.dated ? formatLooseDate(quote.dated) : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </Text>
+              {/* Quoted: accepted or declined. Tapping the one already chosen
+                  clears it, the same toggle-off every chip row in this app
+                  gives — there is no third pill for "not decided". */}
+              {primaryQuote.kind === 'quote' ? (
+                <>
+                  <View style={styles.chips}>
+                    {(['accepted', 'declined'] as const).map((option) => {
+                      const on = primaryQuote.status === option;
+                      return (
+                        <Pressable
+                          key={option}
+                          onPress={() => onSetQuoteStatus(primaryQuote.id, on ? 'tbc' : option)}
+                          style={styles.chipTap}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: on }}
+                          accessibilityLabel={PROJECT_QUOTE_STATUS_LABELS[option]}
+                        >
+                          <View style={[styles.chip, on && styles.chipOn]}>
+                            <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
+                              {PROJECT_QUOTE_STATUS_LABELS[option]}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
                   </View>
-                  <View style={styles.quoteMoney}>
-                    <Text style={styles.quoteAmount}>{shown ?? '—'}</Text>
-                    {/* What was typed, and what it means. Never silently
-                        converted: the rollup normalises, the row does not. */}
-                    <Text style={styles.quoteGst}>
-                      {quote.amount === null
-                        ? 'no amount'
-                        : quote.amountInclGst
-                          ? 'incl GST'
-                          : `excl · ${gross} incl`}
-                    </Text>
-                  </View>
-                  {/* A pencil, the same affordance the snag headline carries
-                      for the same job — correcting what was written. A sibling
-                      of the amount rather than wrapping it: a Pressable inside a
-                      Pressable is a coin toss about which one gets the tap, and
-                      this row already holds three others.
-
-                      Muted and small, because a price that is right is the
-                      normal case and the pencil must not compete with the
-                      figure it sits beside. */}
+                  {primaryQuote.status === 'accepted' ? (
+                    <Text style={styles.pending}>Pending invoice</Text>
+                  ) : null}
+                </>
+              ) : (
+                <View style={styles.chips}>
                   <Pressable
-                    onPress={() => editQuote(quote)}
-                    style={styles.quoteEdit}
+                    onPress={markPaid}
+                    disabled={busy}
+                    style={styles.chipTap}
                     accessibilityRole="button"
-                    accessibilityLabel={`Correct the ${quote.supplier ?? 'unnamed'} price`}
+                    accessibilityState={{ selected: isPaid }}
+                    accessibilityLabel="Paid"
                   >
-                    <Icon name="pencil-outline" size="sm" color={Colors.textMuted} />
+                    <View style={[styles.chip, isPaid && styles.chipOn]}>
+                      <Text style={[styles.chipLabel, isPaid && styles.chipLabelOn]}>Paid</Text>
+                    </View>
+                  </Pressable>
+                  <Pressable
+                    onPress={markNotPaid}
+                    disabled={busy}
+                    style={styles.chipTap}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: !isPaid }}
+                    accessibilityLabel="Not paid"
+                  >
+                    <View style={[styles.chip, !isPaid && styles.chipOn]}>
+                      <Text style={[styles.chipLabel, !isPaid && styles.chipLabelOn]}>Not paid</Text>
+                    </View>
                   </Pressable>
                 </View>
+              )}
 
-                {/* Three named states where there was a tick.
-                    A tick could only ever say "not chosen", which read the same
-                    whether nobody had decided or somebody had said no — and the
-                    second is worth keeping, because what you were quoted and by
-                    whom is what makes the next renovation's numbers credible.
+              <View style={styles.priceFoot}>
+                <Pressable
+                  onPress={() => setFilesOpen((open) => !open)}
+                  style={styles.quoteFiles}
+                  accessibilityRole="button"
+                  accessibilityLabel="Paperwork for this price"
+                >
+                  <Icon name="document-attach-outline" size="sm" color={Colors.primary} />
+                  <Text style={styles.link}>
+                    {primaryQuote.photoPaths.length + primaryQuote.documentPaths.length > 0
+                      ? `${primaryQuote.photoPaths.length + primaryQuote.documentPaths.length} attached`
+                      : 'Attach'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => onDeleteQuote(primaryQuote.id)}
+                  style={styles.quoteRemove}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove this price"
+                >
+                  <Text style={styles.removeLabel}>Remove</Text>
+                </Pressable>
+              </View>
 
-                    The same argument that made capture's priority two named
-                    pills rather than one chip that toggles. */}
-                <View style={styles.quoteFoot}>
-                  {PROJECT_QUOTE_STATUSES.map((option) => {
-                    const on = quote.status === option;
-                    return (
-                      <Pressable
-                        key={option}
-                        onPress={() => onSetQuoteStatus(quote.id, option)}
-                        style={styles.chipTap}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: on }}
-                        accessibilityLabel={PROJECT_QUOTE_STATUS_LABELS[option]}
-                      >
-                        <View style={[styles.chip, on && styles.chipOn]}>
-                          <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                            {PROJECT_QUOTE_STATUS_LABELS[option]}
-                          </Text>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                  <Pressable
-                    onPress={() => setExpandedQuote(open ? null : quote.id)}
-                    style={styles.quoteFiles}
-                    accessibilityRole="button"
-                    accessibilityLabel="Paperwork for this quote"
-                  >
-                    <Icon name="document-attach-outline" size="sm" color={Colors.primary} />
-                    <Text style={styles.link}>
-                      {quote.photoPaths.length + quote.documentPaths.length > 0
-                        ? `${quote.photoPaths.length + quote.documentPaths.length} attached`
-                        : 'Attach'}
-                    </Text>
-                  </Pressable>
+              {filesOpen ? (
+                <View style={styles.quoteAttach}>
+                  <Attachments
+                    householdId={householdId}
+                    photoPaths={primaryQuote.photoPaths}
+                    documentPaths={primaryQuote.documentPaths}
+                    onChange={(next, toast) => onUpdateQuoteFiles(primaryQuote.id, next, toast)}
+                    emptyLabel="Nothing attached to this price yet."
+                  />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Whatever was on record before an item carried a single price.
+              Read-only here on purpose — comparing prices is no longer this
+              sheet's job — but never hidden, since each one still counts. */}
+          {legacyQuotes.length > 0 && !showForm ? (
+            <View style={styles.legacyBlock}>
+              <Text style={styles.section}>Also on record</Text>
+              {legacyQuotes.map((quote) => (
+                <View key={quote.id} style={styles.legacyRow}>
+                  <Text style={styles.legacyName} numberOfLines={1}>
+                    {quote.supplier ?? 'No supplier named'} · {PROJECT_QUOTE_STATUS_LABELS[quote.status]}
+                  </Text>
+                  <Text style={styles.legacyAmount} numberOfLines={1}>
+                    {formatMoney(quote.amount) ?? '—'}
+                  </Text>
                   <Pressable
                     onPress={() => onDeleteQuote(quote.id)}
-                    style={styles.quoteRemove}
+                    style={styles.legacyRemove}
                     accessibilityRole="button"
-                    accessibilityLabel={`Remove the ${quote.supplier ?? 'unnamed'} quote`}
+                    accessibilityLabel={`Remove the ${quote.supplier ?? 'unnamed'} price`}
                   >
                     <Icon name="close" size="sm" color={Colors.textMuted} />
                   </Pressable>
                 </View>
+              ))}
+            </View>
+          ) : null}
 
-                {open ? (
-                  <View style={styles.quoteAttach}>
-                    <Attachments
-                      householdId={householdId}
-                      photoPaths={quote.photoPaths}
-                      documentPaths={quote.documentPaths}
-                      onChange={(next, toast) => onUpdateQuoteFiles(quote.id, next, toast)}
-                      emptyLabel="Nothing attached to this quote yet."
-                    />
-                  </View>
-                ) : null}
-              </View>
-            );
-          })}
+          {!primaryQuote && !showForm ? (
+            <Text style={styles.hint}>Nobody has priced this yet.</Text>
+          ) : null}
 
-          {adding || editingQuote ? (
+          {showForm ? (
             <View style={styles.form}>
               <Text style={styles.fieldLabel}>Who from</Text>
               <TextInput
@@ -417,38 +438,6 @@ export default function ItemSheet({
                 inclusive={incl}
                 onChangeInclusive={setIncl}
               />
-              <Text style={styles.fieldLabel}>What is it</Text>
-              <View style={styles.chips}>
-                {PROJECT_QUOTE_KINDS.map((option) => {
-                  const on = kind === option;
-                  return (
-                    <Pressable
-                      key={option}
-                      onPress={() => setKind(option)}
-                      style={styles.chipTap}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: on }}
-                      accessibilityLabel={PROJECT_QUOTE_KIND_LABELS[option]}
-                    >
-                      <View style={[styles.chip, on && styles.chipOn]}>
-                        <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                          {PROJECT_QUOTE_KIND_LABELS[option]}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Text style={styles.hint}>
-                A quote is what it might cost. An invoice or a receipt is what it did — only those
-                two count towards what’s been spent.
-              </Text>
-              <DateField
-                label="Dated"
-                value={dated}
-                onChangeValue={setDated}
-                pickerTitle="When was it quoted?"
-              />
               <Pressable
                 onPress={editingQuote ? saveQuote : addQuote}
                 disabled={busy || !canSaveQuote}
@@ -467,18 +456,45 @@ export default function ItemSheet({
               {/* A way back out that does not save. Without it the only escape
                   from a form somebody opened by mistake is closing the whole
                   sheet, which loses the item they were looking at too. */}
-              <Pressable
-                onPress={closeForm}
-                style={styles.formCancel}
-                accessibilityRole="button"
-                accessibilityLabel="Leave it as it was"
-              >
-                <Text style={styles.formCancelLabel}>
-                  {editingQuote ? 'Leave it as it was' : 'Not now'}
-                </Text>
-              </Pressable>
+              {editingQuote || quotes.length > 0 ? (
+                <Pressable
+                  onPress={closeForm}
+                  style={styles.formCancel}
+                  accessibilityRole="button"
+                  accessibilityLabel="Leave it as it was"
+                >
+                  <Text style={styles.formCancelLabel}>
+                    {editingQuote ? 'Leave it as it was' : 'Not now'}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
+
+          {/* The one state still changed by hand — everything above moves
+              from the price. Installed is what lets the house record offer
+              carry this item's model number over once it is actually in. */}
+          <Pressable
+            onPress={() =>
+              onUpdateItem(
+                { status: item.status === 'installed' ? 'considering' : 'installed' },
+                item.status === 'installed' ? 'Not installed' : 'Installed'
+              )
+            }
+            style={styles.installedRow}
+            accessibilityRole="button"
+            accessibilityState={{ selected: item.status === 'installed' }}
+            accessibilityLabel={item.status === 'installed' ? 'Installed' : 'Mark as installed'}
+          >
+            <Icon
+              name={item.status === 'installed' ? 'checkmark-circle' : 'ellipse-outline'}
+              size="sm"
+              color={item.status === 'installed' ? Colors.primary : Colors.textMuted}
+            />
+            <Text style={[styles.installedLabel, item.status === 'installed' && styles.installedLabelOn]}>
+              {item.status === 'installed' ? 'Installed' : 'Mark as installed'}
+            </Text>
+          </Pressable>
 
           {/* ── the item's own paperwork ───────────────────────────────── */}
           <View style={styles.sectionRow}>
@@ -541,7 +557,7 @@ export default function ItemSheet({
         title={`Remove ${item.name}?`}
         message={
           quotes.length > 0
-            ? `Its ${quotes.length === 1 ? 'quote goes' : `${quotes.length} quotes go`} with it, and so does anything attached to them.`
+            ? `Its ${quotes.length === 1 ? 'price goes' : `${quotes.length} prices go`} with it, and so does anything attached to them.`
             : 'Nothing else goes with it.'
         }
         confirmLabel="Remove"
@@ -576,30 +592,25 @@ const styles = StyleSheet.create({
   headTap: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.md },
   scroll: { marginTop: Spacing.sm },
 
-  chips: { flexDirection: 'row', flexWrap: 'wrap' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: Spacing.sm },
   chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingRight: Spacing.sm },
   chip: { backgroundColor: Colors.sunken, borderRadius: Radius.chip, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
   chipOn: { backgroundColor: Colors.primary },
   chipLabel: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
+  pending: { fontSize: Typography.sm, color: Colors.status.doing, marginTop: Spacing.xs, fontWeight: Typography.medium },
 
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.md, marginBottom: Spacing.sm },
   section: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase' },
   rule: { flex: 1, height: 1, backgroundColor: Colors.border },
-  plusTap: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.md },
 
-  quote: {
+  priceCard: {
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: Radius.card,
     padding: Spacing.md,
-    marginBottom: Spacing.sm,
+    marginTop: Spacing.sm,
   },
-  quoteOn: { borderColor: Colors.successBorder, backgroundColor: Colors.primaryLight },
-  // The same 0.62 a finished card and a parked repeat take, and for the same
-  // reason: there is nothing to do about it. No strike-through — it is a price
-  // that was real, not a mistake.
-  quoteOff: { opacity: 0.62 },
   quoteTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   quoteTitles: { flex: 1, minWidth: 0 },
   quoteSupplier: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
@@ -615,14 +626,30 @@ const styles = StyleSheet.create({
     marginRight: -Spacing.sm,
     marginTop: -Spacing.xs,
   },
-  formCancel: { alignItems: 'center', minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
-  formCancelLabel: { fontSize: Typography.sm, color: Colors.textMuted },
-  quoteFoot: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs },
+  priceFoot: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
   quoteFiles: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, minHeight: MIN_TOUCH_TARGET, flex: 1 },
-  quoteRemove: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.sm },
+  quoteRemove: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.xs },
   quoteAttach: { marginTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: Spacing.sm },
 
-  form: { marginTop: Spacing.xs },
+  legacyBlock: { marginTop: Spacing.md },
+  legacyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  legacyName: { flex: 1, minWidth: 0, fontSize: Typography.sm, color: Colors.textSecondary },
+  legacyAmount: { flexShrink: 0, fontFamily: Fonts.mono, fontSize: Typography.sm, color: Colors.textMuted },
+  legacyRemove: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.sm },
+
+  installedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET, marginTop: Spacing.md,
+  },
+  installedLabel: { fontSize: Typography.sm, color: Colors.textMuted, fontWeight: Typography.medium },
+  installedLabelOn: { color: Colors.textPrimary, fontWeight: Typography.semibold },
+
+  form: { marginTop: Spacing.sm },
   fieldLabel: {
     fontSize: Typography.xs,
     fontWeight: Typography.semibold,
@@ -642,7 +669,7 @@ const styles = StyleSheet.create({
   },
   notes: { minHeight: 72, textAlignVertical: 'top' },
   spacer: { height: Spacing.xs },
-  hint: { fontSize: Typography.xs, color: Colors.textMuted, lineHeight: 17, marginBottom: Spacing.md },
+  hint: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: Spacing.sm },
   cta: {
     backgroundColor: Colors.primary,
     borderRadius: Radius.button,
@@ -655,6 +682,8 @@ const styles = StyleSheet.create({
   ctaOff: { backgroundColor: Colors.sunken },
   ctaLabel: { color: Colors.white, fontSize: Typography.base, fontWeight: Typography.semibold },
   ctaLabelOff: { color: Colors.textMuted },
+  formCancel: { alignItems: 'center', minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  formCancelLabel: { fontSize: Typography.sm, color: Colors.textMuted },
   link: { fontSize: Typography.sm, color: Colors.primary, fontWeight: Typography.semibold },
   record: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, minHeight: MIN_TOUCH_TARGET, marginTop: Spacing.sm },
   remove: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', marginTop: Spacing.sm },

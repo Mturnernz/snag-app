@@ -141,7 +141,8 @@ const element = (over: any = {}): any => ({
   createdAt: '2026-08-04T00:00:00Z', ...totals(), ...over,
 });
 const item = (over: any = {}): any => ({
-  id: 'i1', elementId: 'e1', name: 'Toilet suite', status: 'considering', sortOrder: 0,
+  id: 'i1', elementId: 'e1', name: 'Toilet suite', status: 'considering', excluded: false,
+  sortOrder: 0,
   notes: null, photoPaths: [], documentPaths: [], createdAt: '2026-08-04T00:00:00Z',
   quoteCount: 0, tbcCount: 0, committed: null, invoiced: null, paid: null,
   allowanceOpen: 0, additionalOpen: 0, ...over,
@@ -164,7 +165,7 @@ beforeEach(() => {
 async function arrange(opts: {
   project?: any; elements?: any[]; items?: any[]; quotes?: any[]; lines?: any[];
   payments?: any[]; files?: any[]; snags?: any[]; suppliers?: any[]; things?: any[];
-  milestones?: any[]; expected?: any[]; bills?: any[];
+  milestones?: any[]; expected?: any[]; expectedCostLines?: any[]; bills?: any[];
 } = {}) {
   mock_getProject.mockResolvedValue(opts.project ?? project());
   mock_getProjectContents.mockResolvedValue({
@@ -175,6 +176,7 @@ async function arrange(opts: {
     payments: opts.payments ?? [],
     milestones: opts.milestones ?? [],
     expected: opts.expected ?? [],
+    expectedCostLines: opts.expectedCostLines ?? [],
     bills: opts.bills ?? [],
   });
   mock_getProjectFiles.mockResolvedValue(opts.files ?? []);

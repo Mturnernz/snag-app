@@ -6,22 +6,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from './Icon';
 import MoneyField from './MoneyField';
-import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import Attachments from './Attachments';
+import ConfirmDialog from './ConfirmDialog';
+import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
-import type { ExpectedCostInput } from '@snag/supabase-queries';
-import { ProjectElement } from '../types';
+import { formatMoney, inclGst } from '@snag/supabase-queries';
+import type { ExpectedCostInput, ExpectedCostLineInput } from '@snag/supabase-queries';
+import { ProjectElement, ProjectExpectedCost, ProjectExpectedCostLine } from '../types';
 
 interface Props {
   visible: boolean;
   elements: ProjectElement[];
   /** Whether the part layer is drawn. An implicit part has no name anybody chose. */
   showElements: boolean;
+  /** Null to add a new one; a row to edit and to hold its payment lines. */
+  existing: ProjectExpectedCost | null;
+  /** The payment lines under `existing`. Ignored while adding. */
+  lines: ProjectExpectedCostLine[];
+  householdId: string;
   onSave: (input: ExpectedCostInput) => Promise<void>;
+  onDelete?: () => Promise<void>;
+  onAddLine: (input: ExpectedCostLineInput) => Promise<void>;
+  onUpdateLine: (lineId: string, input: Partial<ExpectedCostLineInput>) => Promise<void>;
+  onDeleteLine: (lineId: string) => Promise<void>;
   onClose: () => void;
 }
 
+const emptyLine = { name: '', reference: '', amount: '', incl: true, photoPaths: [] as string[], documentPaths: [] as string[] };
+
 /**
- * A cost somebody has told you to expect.
+ * A cost somebody has told you to expect — and, once it exists, the record of
+ * what has actually gone out against it.
  *
  * The architect says *"you'll need an engineer, and the council will want their
  * share"*. That is the beat the money model could not hold: no vendor, no quote,
@@ -38,13 +53,21 @@ interface Props {
  * somebody's estimate. **It is never committed and never invoiced** — it reaches
  * the forecast and nothing else, and every figure it touches names it as a guess.
  *
- * **The amount is optional on purpose.** "There will be council costs" with no
- * figure yet is still worth recording: it shows on the page as a named gap
- * rather than being silently absent, and the forecast says how many such gaps it
- * is carrying.
+ * **Once it exists, it can be opened again.** A guess made in the first week is
+ * rarely the final word, and the only way to fix it used to be deleting the row
+ * and losing the payments already recorded against it.
+ *
+ * **Payments against it are their own thing, deliberately thin.** An initial
+ * payment to the architect, a second instalment — each with a reference number
+ * and maybe a receipt. Kept simple on purpose: a name, a reference, a value, and
+ * somewhere to put a photo or a document. They never reach Committed, Invoiced
+ * or the forecast — the parent row still carries the one guessed figure that
+ * feeds it, and these lines are read the way a bank statement is read, not
+ * priced.
  */
 export default function ExpectedCostSheet({
-  visible, elements, showElements, onSave, onClose,
+  visible, elements, showElements, existing, lines, householdId,
+  onSave, onDelete, onAddLine, onUpdateLine, onDeleteLine, onClose,
 }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
@@ -55,15 +78,23 @@ export default function ExpectedCostSheet({
   const [likelySupplier, setLikelySupplier] = useState('');
   const [elementId, setElementId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const [lineEditing, setLineEditing] = useState<string | 'new' | null>(null);
+  const [lineForm, setLineForm] = useState(emptyLine);
+  const [lineBusy, setLineBusy] = useState(false);
+  const [removingLine, setRemovingLine] = useState<ProjectExpectedCostLine | null>(null);
 
   useEffect(() => {
     if (!visible) return;
-    setName('');
-    setAmount('');
-    setIncl(true);
-    setLikelySupplier('');
-    setElementId(null);
-  }, [visible]);
+    setName(existing?.name ?? '');
+    setAmount(existing?.amount !== null && existing?.amount !== undefined ? String(existing.amount) : '');
+    setIncl(existing?.amountInclGst ?? true);
+    setLikelySupplier(existing?.likelySupplier ?? '');
+    setElementId(existing?.elementId ?? null);
+    setLineEditing(null);
+    setLineForm(emptyLine);
+  }, [visible, existing?.id]);
 
   const canSave = name.trim().length > 0;
 
@@ -85,6 +116,50 @@ export default function ExpectedCostSheet({
     }
   }
 
+  function editLine(line: ProjectExpectedCostLine) {
+    setLineEditing(line.id);
+    setLineForm({
+      name: line.name,
+      reference: line.reference ?? '',
+      amount: line.amount !== null ? String(line.amount) : '',
+      incl: line.amountInclGst,
+      photoPaths: line.photoPaths,
+      documentPaths: line.documentPaths,
+    });
+  }
+
+  function startLine() {
+    setLineEditing('new');
+    setLineForm(emptyLine);
+  }
+
+  async function saveLine() {
+    if (lineBusy || lineForm.name.trim().length === 0) return;
+    setLineBusy(true);
+    try {
+      const parsed = lineForm.amount.trim() ? Number(lineForm.amount.replace(/[^0-9.]/g, '')) : NaN;
+      const input: ExpectedCostLineInput = {
+        name: lineForm.name.trim(),
+        reference: lineForm.reference.trim() || null,
+        amount: Number.isFinite(parsed) ? parsed : null,
+        amountInclGst: lineForm.incl,
+        photoPaths: lineForm.photoPaths,
+        documentPaths: lineForm.documentPaths,
+      };
+      if (lineEditing && lineEditing !== 'new') {
+        await onUpdateLine(lineEditing, input);
+      } else {
+        await onAddLine(input);
+      }
+      setLineEditing(null);
+      setLineForm(emptyLine);
+    } finally {
+      setLineBusy(false);
+    }
+  }
+
+  const title = existing ? 'Edit what you’re expecting' : 'Something else you’re expecting';
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
@@ -96,7 +171,7 @@ export default function ExpectedCostSheet({
       >
         <View style={styles.grab} />
         <View style={styles.head}>
-          <Text style={styles.title}>Something else you&rsquo;re expecting</Text>
+          <Text style={styles.title}>{title}</Text>
           <Pressable
             onPress={onClose}
             style={styles.headTap}
@@ -185,6 +260,134 @@ export default function ExpectedCostSheet({
               </View>
             </>
           ) : null}
+
+          {/* Payments against it — only once the row itself is real. A guess
+              cannot have a payment recorded against it before it exists. */}
+          {existing ? (
+            <>
+              <View style={styles.sectionRow}>
+                <Text style={styles.section}>Payments so far</Text>
+                <View style={styles.rule} />
+                {lineEditing === null ? (
+                  <Pressable
+                    onPress={startLine}
+                    style={styles.addLineBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add a payment"
+                  >
+                    <Icon name="add" size="sm" color={Colors.primary} />
+                  </Pressable>
+                ) : null}
+              </View>
+
+              {lines.length === 0 && lineEditing === null ? (
+                <Text style={styles.hint}>Nothing recorded yet.</Text>
+              ) : null}
+
+              {lines.map((line) =>
+                lineEditing === line.id ? null : (
+                  <Pressable
+                    key={line.id}
+                    onPress={() => editLine(line)}
+                    style={styles.line}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${line.name}, edit it`}
+                  >
+                    <View style={styles.lineTitles}>
+                      <Text style={styles.lineName} numberOfLines={1}>{line.name}</Text>
+                      {line.reference ? (
+                        <Text style={styles.lineRef} numberOfLines={1}>{line.reference}</Text>
+                      ) : null}
+                    </View>
+                    <Text style={styles.lineAmount} numberOfLines={1}>
+                      {formatMoney(inclGst(line.amount, line.amountInclGst)) ?? 'no figure'}
+                    </Text>
+                    <Pressable
+                      onPress={() => setRemovingLine(line)}
+                      style={styles.lineRemove}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${line.name}`}
+                    >
+                      <Icon name="close" size="sm" color={Colors.textMuted} />
+                    </Pressable>
+                  </Pressable>
+                )
+              )}
+
+              {lineEditing !== null ? (
+                <View style={styles.lineForm}>
+                  <Text style={styles.label}>NAME</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={lineForm.name}
+                    onChangeText={(text) => setLineForm((f) => ({ ...f, name: text }))}
+                    accessibilityLabel="Who it was paid to, or what for"
+                    autoFocus
+                  />
+
+                  <Text style={styles.label}>REFERENCE NUMBER</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={lineForm.reference}
+                    onChangeText={(text) => setLineForm((f) => ({ ...f, reference: text }))}
+                    accessibilityLabel="Reference number"
+                  />
+
+                  <MoneyField
+                    label="Amount"
+                    value={lineForm.amount}
+                    onChangeValue={(text) => setLineForm((f) => ({ ...f, amount: text }))}
+                    inclusive={lineForm.incl}
+                    onChangeInclusive={(next) => setLineForm((f) => ({ ...f, incl: next }))}
+                  />
+
+                  <Attachments
+                    householdId={householdId}
+                    photoPaths={lineForm.photoPaths}
+                    documentPaths={lineForm.documentPaths}
+                    onChange={async (next) => {
+                      setLineForm((f) => ({
+                        ...f,
+                        photoPaths: next.photoPaths ?? f.photoPaths,
+                        documentPaths: next.documentPaths ?? f.documentPaths,
+                      }));
+                    }}
+                  />
+
+                  <View style={styles.lineFormRow}>
+                    <Pressable
+                      onPress={() => { setLineEditing(null); setLineForm(emptyLine); }}
+                      disabled={lineBusy}
+                      style={styles.lineCancel}
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel"
+                    >
+                      <Text style={styles.lineCancelLabel}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={saveLine}
+                      disabled={lineBusy || lineForm.name.trim().length === 0}
+                      style={[
+                        styles.lineSave,
+                        (lineBusy || lineForm.name.trim().length === 0) && styles.ctaOff,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Save the payment"
+                    >
+                      <Text
+                        style={[
+                          styles.lineSaveLabel,
+                          (lineBusy || lineForm.name.trim().length === 0) && styles.ctaLabelOff,
+                        ]}
+                      >
+                        {lineBusy ? 'Saving…' : 'Save'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+            </>
+          ) : null}
         </ScrollView>
 
         <Pressable
@@ -192,13 +395,49 @@ export default function ExpectedCostSheet({
           disabled={!canSave || busy}
           style={[styles.cta, (!canSave || busy) && styles.ctaOff]}
           accessibilityRole="button"
-          accessibilityLabel="Add it"
+          accessibilityLabel={existing ? 'Save' : 'Add it'}
         >
           <Text style={[styles.ctaLabel, (!canSave || busy) && styles.ctaLabelOff]}>
-            {busy ? 'Saving…' : 'Add it'}
+            {busy ? 'Saving…' : existing ? 'Save' : 'Add it'}
           </Text>
         </Pressable>
+
+        {existing && onDelete ? (
+          <Pressable
+            onPress={() => setConfirmDelete(true)}
+            disabled={busy}
+            style={styles.remove}
+            accessibilityRole="button"
+            accessibilityLabel="Remove this expected cost"
+          >
+            <Text style={styles.removeLabel}>Remove</Text>
+          </Pressable>
+        ) : null}
       </View>
+
+      <ConfirmDialog
+        visible={confirmDelete}
+        title="Remove this?"
+        message={`"${existing?.name ?? ''}" and its payments will be removed.`}
+        confirmLabel="Remove"
+        onConfirm={async () => {
+          setConfirmDelete(false);
+          if (onDelete) await onDelete();
+        }}
+        onCancel={() => setConfirmDelete(false)}
+      />
+
+      <ConfirmDialog
+        visible={removingLine !== null}
+        title="Remove this payment?"
+        message={removingLine ? `"${removingLine.name}" will be removed.` : ''}
+        confirmLabel="Remove"
+        onConfirm={async () => {
+          if (removingLine) await onDeleteLine(removingLine.id);
+          setRemovingLine(null);
+        }}
+        onCancel={() => setRemovingLine(null)}
+      />
     </Modal>
   );
 }
@@ -254,6 +493,51 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium,
   },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
+  sectionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    marginTop: Spacing.lg,
+  },
+  section: {
+    fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textMuted,
+    letterSpacing: 0.8, textTransform: 'uppercase',
+  },
+  rule: { flex: 1, height: 1, backgroundColor: Colors.border },
+  addLineBtn: {
+    width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET,
+    alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.sm,
+  },
+  line: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    minHeight: MIN_TOUCH_TARGET,
+  },
+  lineTitles: { flex: 1, minWidth: 0 },
+  lineName: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  lineRef: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1, fontFamily: Fonts.mono },
+  lineAmount: {
+    flexShrink: 0, fontFamily: Fonts.mono, fontSize: Typography.sm,
+    fontWeight: Typography.semibold, color: Colors.textPrimary,
+  },
+  lineRemove: {
+    width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET,
+    alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.sm,
+  },
+  lineForm: {
+    backgroundColor: Colors.sunken, borderRadius: Radius.card,
+    padding: Spacing.md, marginTop: Spacing.sm,
+  },
+  lineFormRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg },
+  lineCancel: {
+    flex: 1, minHeight: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center',
+    borderRadius: Radius.button,
+  },
+  lineCancelLabel: { fontSize: Typography.base, color: Colors.textSecondary },
+  lineSave: {
+    flex: 1, minHeight: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center',
+    borderRadius: Radius.button, backgroundColor: Colors.primary,
+  },
+  lineSaveLabel: { fontSize: Typography.base, color: Colors.white, fontWeight: Typography.semibold },
   cta: {
     backgroundColor: Colors.primary, borderRadius: Radius.button,
     minHeight: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center',
@@ -262,4 +546,6 @@ const styles = StyleSheet.create({
   ctaOff: { backgroundColor: Colors.sunken },
   ctaLabel: { fontSize: Typography.base, color: Colors.white, fontWeight: Typography.semibold },
   ctaLabelOff: { color: Colors.textMuted },
+  remove: { minHeight: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },
+  removeLabel: { fontSize: Typography.sm, color: Colors.danger },
 });

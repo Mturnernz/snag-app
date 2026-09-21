@@ -351,11 +351,11 @@ export const getAllProjects = () => queries.getAllProjects(supabase);
 
 export const getProject = (projectId: string) => queries.getProject(supabase, projectId);
 
-export const getProjectContents = (projectId: string) =>
-  queries.getProjectContents(supabase, projectId);
 
-export const getProjectFiles = (projectId: string) =>
-  queries.getProjectFiles(supabase, projectId);
+/** The whole project page in one round trip. See `getProjectPage` for why. */
+export const getProjectPage = (projectId: string) =>
+  queries.getProjectPage(supabase, projectId);
+
 
 export const createProject = (input: queries.ProjectInput) =>
   queries.createProject(supabase, input);
@@ -410,13 +410,8 @@ export const updatePayment = (paymentId: string, input: Partial<queries.PaymentI
 
 export const deletePayment = (paymentId: string) => queries.deletePayment(supabase, paymentId);
 
-export const getProjectThings = (projectId: string) => queries.getProjectThings(supabase, projectId);
 
-export const getSupplierTotals = (projectId: string) =>
-  queries.getSupplierTotals(supabase, projectId);
 
-export const getExpectedCosts = (projectId: string) =>
-  queries.getExpectedCosts(supabase, projectId);
 
 export const createExpectedCost = (projectId: string, input: queries.ExpectedCostInput) =>
   queries.createExpectedCost(supabase, projectId, input);
@@ -427,8 +422,6 @@ export const updateExpectedCost = (expectedId: string, update: queries.ExpectedC
 export const deleteExpectedCost = (expectedId: string) =>
   queries.deleteExpectedCost(supabase, expectedId);
 
-export const getExpectedCostLines = (projectId: string) =>
-  queries.getExpectedCostLines(supabase, projectId);
 
 export const addExpectedCostLine = (expectedCostId: string, input: queries.ExpectedCostLineInput) =>
   queries.addExpectedCostLine(supabase, expectedCostId, input);
@@ -441,8 +434,6 @@ export const updateExpectedCostLine = (
 export const deleteExpectedCostLine = (lineId: string) =>
   queries.deleteExpectedCostLine(supabase, lineId);
 
-export const getProjectBills = (projectId: string) =>
-  queries.getProjectBills(supabase, projectId);
 
 export const setFigure = (
   projectId: string,

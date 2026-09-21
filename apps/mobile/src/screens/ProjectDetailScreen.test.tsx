@@ -69,13 +69,11 @@ jest.mock('../components/Attachments', () => {
   return { __esModule: true, default: () => React.createElement(Text, null, 'attachments') };
 });
 
-const mock_getProject = jest.fn();
-const mock_getProjectContents = jest.fn();
-const mock_getProjectFiles = jest.fn();
-const mock_getSnags = jest.fn();
+// One read, where there were fourteen. `home.project_page` returns the whole
+// page in a single round trip, so the screen has one mock to satisfy rather
+// than six — which is also what lets the burst test below simply count it.
+const mock_getProjectPage = jest.fn();
 const mock_setQuoteStatus = jest.fn();
-const mock_getSupplierTotals = jest.fn();
-const mock_getProjectThings = jest.fn();
 const mock_updateItem = jest.fn();
 const mock_createElement = jest.fn();
 const mock_deleteElement = jest.fn().mockResolvedValue([]);
@@ -88,10 +86,7 @@ const mock_createItem = jest.fn().mockResolvedValue({
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
-    getProject: (...a: unknown[]) => mock_getProject(...a),
-    getProjectContents: (...a: unknown[]) => mock_getProjectContents(...a),
-    getProjectFiles: (...a: unknown[]) => mock_getProjectFiles(...a),
-    getSnags: (...a: unknown[]) => mock_getSnags(...a),
+    getProjectPage: (...a: unknown[]) => mock_getProjectPage(...a),
     setQuoteStatus: (...a: unknown[]) => mock_setQuoteStatus(...a),
     updateItem: (...a: unknown[]) => mock_updateItem(...a),
     createElement: (...a: unknown[]) => mock_createElement(...a),
@@ -109,8 +104,6 @@ jest.mock('../lib/supabase', () => {
     addQuoteLine: jest.fn(), deleteQuoteLine: jest.fn(),
     addMilestone: jest.fn(), deleteMilestone: jest.fn(),
     createExpectedCost: jest.fn(), deleteExpectedCost: jest.fn(),
-    getSupplierTotals: (...a: unknown[]) => mock_getSupplierTotals(...a),
-    getProjectThings: (...a: unknown[]) => mock_getProjectThings(...a),
     // The pure ones are real: mocking `describeTotals` would mock away the rule.
     describeTotals: real.describeTotals,
     describeBudget: real.describeBudget,
@@ -199,8 +192,8 @@ async function arrange(opts: {
   payments?: any[]; files?: any[]; snags?: any[]; suppliers?: any[]; things?: any[];
   milestones?: any[]; expected?: any[]; expectedCostLines?: any[]; bills?: any[];
 } = {}) {
-  mock_getProject.mockResolvedValue(opts.project ?? project());
-  mock_getProjectContents.mockResolvedValue({
+  mock_getProjectPage.mockResolvedValue({
+    project: opts.project ?? project(),
     elements: opts.elements ?? [element()],
     items: opts.items ?? [],
     quotes: opts.quotes ?? [],
@@ -210,11 +203,11 @@ async function arrange(opts: {
     expected: opts.expected ?? [],
     expectedCostLines: opts.expectedCostLines ?? [],
     bills: opts.bills ?? [],
+    suppliers: opts.suppliers ?? [],
+    files: opts.files ?? [],
+    things: opts.things ?? [],
+    snags: opts.snags ?? [],
   });
-  mock_getProjectFiles.mockResolvedValue(opts.files ?? []);
-  mock_getSnags.mockResolvedValue(opts.snags ?? []);
-  mock_getSupplierTotals.mockResolvedValue(opts.suppliers ?? []);
-  mock_getProjectThings.mockResolvedValue(opts.things ?? []);
   const r = render(<ProjectDetailScreen route={{ params: { projectId: 'p1' } } as any} navigation={{} as any} />);
   await TestRenderer.act(async () => {});
   return r;
@@ -423,12 +416,18 @@ describe('who is owed what', () => {
     expect(r.queryByText('$0')).toBeNull();
   });
 
-  it('still renders the page when the rollup will not load', async () => {
-    // The money strip above it is the answer to this page's main question. A
-    // rollup that fails must not take the page down with it.
-    mock_getSupplierTotals.mockRejectedValueOnce(new Error('no'));
+  it('says it could not load rather than drawing half a page', async () => {
+    // This replaces a rule that no longer has anything to be true about.
+    // Three of the fourteen reads used to be `allSettled`, so the suppliers
+    // rollup, the handover offer and the punch list could each fail while the
+    // money strip still drew. That protected against *one endpoint* failing —
+    // and there is one endpoint now, which either answers or does not. The
+    // page it would have half-drawn is worse than the one that says so: a
+    // renovation showing Committed with the suppliers silently missing is a
+    // total without the rows that prove it.
+    mock_getProjectPage.mockRejectedValueOnce(new Error('offline'));
     const r = await arrange();
-    r.getByText('Downstairs laundry');
+    expect(r.queryByText('Downstairs laundry')).toBeNull();
   });
 });
 
@@ -518,17 +517,13 @@ describe('the punch list', () => {
     r.getByText('These are ordinary jobs on the list — filing one here doesn’t start it.');
   });
 
-  it('reads the list filtered by this project rather than keeping its own', async () => {
+  it('asks for one project and gets its punch list with it', async () => {
+    // The filter moved into `home.project_page`, which reads
+    // `snags_with_details` by `project_id` exactly as `getSnags({ projectId })`
+    // did — so what is assertable here is that the screen still keeps no list
+    // of its own and asks for this project by id.
     await arrange();
-    expect(mock_getSnags).toHaveBeenCalledWith({ projectId: 'p1' });
-  });
-
-  it('still renders the page when that read fails', async () => {
-    mock_getSnags.mockRejectedValue(new Error('offline'));
-    const r = await arrange();
-    // A punch list nobody can fetch must not take the page down — the same rule
-    // the thing-history card follows on the snag page.
-    r.getByText('Committed');
+    expect(mock_getProjectPage).toHaveBeenCalledWith('p1');
   });
 });
 
@@ -686,27 +681,76 @@ describe('a toggle answers before the network does', () => {
   });
 });
 
-describe('a price decision re-reads the money, and not the rest of the page', () => {
-  it('leaves the punch list, the handover offer and the files alone', async () => {
+/**
+ * What a press costs.
+ *
+ * This is the shape of the failure the whole read was rebuilt for, so it is
+ * pinned as behaviour rather than described in a comment. The page used to fire
+ * fourteen parallel reads on open and eleven on every write, into a PostgREST
+ * pool of ten. Past ten they queue; a queued page looks like a page that
+ * ignored the press; the press comes again with eleven more. The live logs for
+ * 21 September have exactly that — a toggle pressed three times inside one
+ * second, and `projects_with_totals` answering in 17.4 seconds — on views that
+ * each run in milliseconds by themselves.
+ */
+describe('a press costs one read, however many presses land', () => {
+  it('re-reads the page once after a write', async () => {
     mock_setItemExcluded.mockResolvedValueOnce(undefined);
     const r = await arrange({ elements: [element()], items: [item({ name: 'Toilet suite' })] });
-
-    const snags = mock_getSnags.mock.calls.length;
-    const things = mock_getProjectThings.mock.calls.length;
-    const files = mock_getProjectFiles.mock.calls.length;
-    const contents = mock_getProjectContents.mock.calls.length;
+    const before = mock_getProjectPage.mock.calls.length;
 
     await TestRenderer.act(async () => {
       await byLabel(r, 'Exclude Toilet suite from the price build').props.onPress();
     });
 
-    // None of these can move because somebody excluded an item, so none of
-    // them is asked for again.
-    expect(mock_getSnags.mock.calls.length).toBe(snags);
-    expect(mock_getProjectThings.mock.calls.length).toBe(things);
-    expect(mock_getProjectFiles.mock.calls.length).toBe(files);
-    // The money is derived in a view, so it genuinely has to be re-read.
-    expect(mock_getProjectContents.mock.calls.length).toBeGreaterThan(contents);
+    // One, not eleven — and the money, the punch list, the handover offer and
+    // the files all come back in it.
+    expect(mock_getProjectPage.mock.calls.length).toBe(before + 1);
+  });
+
+  it('never has two reads on the wire at once, and queues at most one more', async () => {
+    const r = await arrange({ elements: [element()], items: [item({ name: 'Toilet suite' })] });
+
+    // A read that does not settle until told to, so several refreshes are
+    // genuinely in flight at the same moment rather than merely sequential.
+    let inFlight = 0;
+    let peak = 0;
+    const release: (() => void)[] = [];
+    mock_getProjectPage.mockImplementation(() => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      return new Promise((resolve) => {
+        release.push(() => {
+          inFlight -= 1;
+          resolve({
+            project: project(), elements: [element()], items: [], quotes: [], lines: [],
+            payments: [], milestones: [], expected: [], expectedCostLines: [], bills: [],
+            suppliers: [], files: [], things: [], snags: [],
+          });
+        });
+      });
+    });
+
+    const toggle = byLabel(r, 'Exclude Toilet suite from the price build');
+    await TestRenderer.act(async () => {
+      toggle.props.onPress();
+      toggle.props.onPress();
+      toggle.props.onPress();
+      await Promise.resolve();
+    });
+
+    // Three presses. The guard on the toggle itself means one write, and the
+    // single-flight refresh means one read — never three racing to say
+    // different things about one row, which is also how the older of two
+    // reloads used to land last and quietly revert the newer.
+    expect(mock_setItemExcluded).toHaveBeenCalledTimes(1);
+    expect(peak).toBe(1);
+
+    await TestRenderer.act(async () => {
+      release.forEach((go) => go());
+      await Promise.resolve();
+    });
+    expect(peak).toBe(1);
   });
 });
 

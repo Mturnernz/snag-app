@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
@@ -35,9 +35,8 @@ import {
   deleteQuoteLine,
   clearFigure, setFigure, setItemExcluded,
   deleteStoredFiles, describeOverrides,
-  describeTotals, formatMoney, getProject,
-  getProjectContents, getProjectFiles, getProjectThings, getSupplierTotals,
-  getSnags, outstanding, setQuoteStatus, showsElements, updateElement, updateExpectedCost,
+  describeTotals, formatMoney, getProjectPage,
+  outstanding, setQuoteStatus, showsElements, updateElement, updateExpectedCost,
   updateExpectedCostLine, updateItem, updateProject, updateQuote,
 } from '../lib/supabase';
 import {
@@ -140,89 +139,86 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [exporting, setExporting] = useState(false);
 
   /**
-   * The money and the scope — everything a price can change.
+   * Everything on this page, in one request — and never two of them at once.
    *
-   * Deliberately not the whole page: the punch list, the handover offer and
-   * the file roll-up cannot move because somebody accepted a quote, and
-   * re-reading them on every chip press is work nobody asked for. `load` is
-   * still what a focus or a file change calls.
+   * **One read, where there were fourteen.** `getProjectPage` is
+   * `home.project_page`: the same views, the same filters and the same orders
+   * the fourteen separate reads used, asked in one journey. There is no longer
+   * a money-only variant and a whole-page variant, because there is nothing to
+   * save by fetching less — which also retires the question every write handler
+   * used to have to answer correctly, of which of the two it owed.
+   *
+   * **Single-flight, with the next one queued rather than started.** This is
+   * the part that actually stops the page hanging. Fourteen parallel reads into
+   * a ten-connection pool queue; a queued page looks like a page that ignored
+   * the press; the press comes again and adds another fourteen. In the logs for
+   * 21 September that ends with `projects_with_totals` taking 17.4 seconds and
+   * a chip pressed three times in one second, on views that each run in
+   * milliseconds. So a refresh arriving while one is in flight sets `pending`
+   * and returns; the one already running loops and goes again. However many
+   * presses land, at most one read is ever on the wire and exactly one more is
+   * ever owed.
+   *
+   * **And it is why nothing can arrive out of order.** Two reloads in flight
+   * meant the older could land last and overwrite the newer — silently
+   * reverting a change the server had accepted. Serialising them removes that
+   * by construction rather than by comparing timestamps.
    */
-  const reloadMoney = useCallback(async () => {
-    try {
-      const [loaded, contents, loadedSuppliers] = await Promise.all([
-        getProject(projectId),
-        getProjectContents(projectId),
-        // Not fatal, the same rule as below.
-        getSupplierTotals(projectId).catch(() => null),
-      ]);
-      setProject(loaded);
-      setElements(contents.elements);
-      setItems(contents.items);
-      setQuotes(contents.quotes);
-      setLines(contents.lines);
-      setPayments(contents.payments);
-      setMilestones(contents.milestones);
-      setExpected(contents.expected);
-      setExpectedCostLines(contents.expectedCostLines);
-      setBills(contents.bills);
-      if (loadedSuppliers) setSuppliers(loadedSuppliers);
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Couldn't load that project");
+  const refreshing = useRef(false);
+  const pending = useRef(false);
+  const alive = useRef(true);
+  /** Include/Exclude, the one write on this page with no sheet in front of it. */
+  const togglingItem = useRef(false);
+
+  useEffect(() => () => {
+    alive.current = false;
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (refreshing.current) {
+      pending.current = true;
+      return;
     }
-  }, [projectId]);
+    refreshing.current = true;
 
-  /**
-   * **One wave, not nine.** Every read here is independent of every other —
-   * `getProjectContents` needs nothing from the suppliers rollup, the punch
-   * list needs nothing from the files — so they are asked for together. They
-   * used to be awaited one at a time, which cost nine sequential round trips
-   * to Sydney before anything appeared.
-   *
-   * The three that are **not fatal** keep that property through
-   * `allSettled` rather than through three `try` blocks in a row: the money
-   * strip is the answer to this page's main question, and a rollup that will
-   * not load must not take the page down — the same rule the thing page's
-   * history card follows.
-   */
-  const load = useCallback(async () => {
     try {
-      const [loaded, contents, loadedFiles, extras] = await Promise.all([
-        getProject(projectId),
-        getProjectContents(projectId),
-        getProjectFiles(projectId),
-        Promise.allSettled([
-          getSupplierTotals(projectId),
-          getProjectThings(projectId),
-          getSnags({ projectId }),
-        ]),
-      ]);
-      setProject(loaded);
-      setElements(contents.elements);
-      setItems(contents.items);
-      setQuotes(contents.quotes);
-      setLines(contents.lines);
-      setPayments(contents.payments);
-      setMilestones(contents.milestones);
-      setExpected(contents.expected);
-      setExpectedCostLines(contents.expectedCostLines);
-      setBills(contents.bills);
-      setFiles(loadedFiles);
+      do {
+        pending.current = false;
+        const page = await getProjectPage(projectId);
+        // A page that came back after the screen went is a page nobody is
+        // looking at, and setting state on it is a warning in the console and
+        // nothing else useful.
+        if (!alive.current) return;
 
-      const [suppliersResult, thingsResult, snagsResult] = extras;
-      setSuppliers(suppliersResult.status === 'fulfilled' ? suppliersResult.value : []);
-      setRecorded(thingsResult.status === 'fulfilled' ? thingsResult.value : []);
-      setSnags(snagsResult.status === 'fulfilled' ? snagsResult.value : []);
+        setProject(page.project);
+        setElements(page.elements);
+        setItems(page.items);
+        setQuotes(page.quotes);
+        setLines(page.lines);
+        setPayments(page.payments);
+        setMilestones(page.milestones);
+        setExpected(page.expected);
+        setExpectedCostLines(page.expectedCostLines);
+        setBills(page.bills);
+        setSuppliers(page.suppliers);
+        setFiles(page.files);
+        setRecorded(page.things);
+        setSnags(page.snags);
+      } while (pending.current);
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Couldn't load that project");
+      if (alive.current) {
+        showToast(err instanceof Error ? err.message : "Couldn't load that project");
+      }
     } finally {
-      setLoading(false);
+      refreshing.current = false;
+      if (alive.current) setLoading(false);
     }
   }, [projectId]);
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load])
+      refresh();
+    }, [refresh])
   );
 
   const drawElements = useMemo(() => showsElements(elements), [elements]);
@@ -307,10 +303,11 @@ export default function ProjectDetailScreen({ route }: Props) {
   async function patchProject(update: Parameters<typeof updateProject>[1], toast: string) {
     if (!project) return;
     try {
+      // Shown from what came back, then reconciled: the file list is a
+      // roll-up, so a project-level attachment changes it too.
       setProject(await updateProject(project.id, update));
       showToast(toast);
-      // The file list is a roll-up, so a project-level attachment changes it.
-      setFiles(await getProjectFiles(projectId));
+      await refresh();
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "That didn’t save");
     }
@@ -330,7 +327,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       setOpenItem(created.id);
       setAddItemTo(null);
       showToast('Added');
-      await reloadMoney();
+      await refresh();
       return created;
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't add that");
@@ -343,7 +340,7 @@ export default function ProjectDetailScreen({ route }: Props) {
     setBusy(true);
     try {
       await createElement(projectId, name, room);
-      await load();
+      await refresh();
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't add that");
     } finally {
@@ -375,7 +372,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       const paths = await deleteElement(element.id);
       await deleteStoredFiles(paths);
       showToast('Removed');
-      await load();
+      await refresh();
     } catch (err: unknown) {
       // The server refuses the last one in words — a project with no parts is a
       // project nothing can be added to.
@@ -443,7 +440,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       });
       setThingFor(null);
       showToast('Added to the house record');
-      await load();
+      await refresh();
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't save that");
     }
@@ -644,7 +641,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                     showToast(PROJECT_QUOTE_STATUS_LABELS[status]);
                     // Signing moves Committed, Forecast and both gaps at three
                     // levels at once, and every one of them is derived.
-                    await load();
+                    await refresh();
                   }}
                   onOpenBuildUp={setBuildUpFor}
                   onOpenSchedule={setScheduleFor}
@@ -726,7 +723,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                   onPress={async () => {
                     await deleteExpectedCost(cost.id);
                     showToast('Removed');
-                    await load();
+                    await refresh();
                   }}
                   style={styles.expectedRemove}
                   accessibilityRole="button"
@@ -870,10 +867,23 @@ export default function ProjectDetailScreen({ route }: Props) {
                         <Pressable
                           onPress={async () => {
                             // Shown now, written after, put back if the write
-                            // fails. The round trip and the refresh that
-                            // follows it are around half a second; a toggle
-                            // that waits for them reads as a toggle that did
-                            // not register, and gets pressed again.
+                            // fails. A toggle that waits for the round trip
+                            // reads as a toggle that did not register, and gets
+                            // pressed again.
+                            //
+                            // Which it did: this is the control the logs for 21
+                            // September have going three times in one second,
+                            // during the worst of the pile-up. So it is also
+                            // the one place on this page that writes without a
+                            // sheet's own `busy` in front of it, and it takes
+                            // one here. The optimistic flip is what somebody is
+                            // pressing *against*, so the guard has to sit
+                            // outside it: without this, three presses are three
+                            // writes racing to say different things about one
+                            // row.
+                            if (togglingItem.current) return;
+                            togglingItem.current = true;
+
                             const next = !item.excluded;
                             const before = items;
                             setItems((rows) => rows.map(
@@ -881,10 +891,12 @@ export default function ProjectDetailScreen({ route }: Props) {
                             ));
                             try {
                               await setItemExcluded(item.id, next);
-                              await reloadMoney();
+                              await refresh();
                             } catch (err: unknown) {
                               setItems(before);
                               showToast(err instanceof Error ? err.message : "That didn’t save");
+                            } finally {
+                              togglingItem.current = false;
                             }
                           }}
                           style={[styles.includeToggle, item.excluded && styles.includeToggleOff]}
@@ -941,7 +953,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                         onChange={async (next, toast) => {
                           await updateElement(element.id, next);
                           showToast(toast);
-                          await load();
+                          await refresh();
                         }}
                         emptyLabel={`Nothing attached to the ${element.name.toLowerCase()} yet.`}
                       />
@@ -1186,7 +1198,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         onUpdateItem={async (itemId, update, toast) => {
           await updateItem(itemId, update);
           showToast(toast);
-          await load();
+          await refresh();
         }}
         onDeleteItem={async () => {
           if (!activeItem) return;
@@ -1194,12 +1206,12 @@ export default function ProjectDetailScreen({ route }: Props) {
           await deleteStoredFiles(paths);
           setOpenItem(null);
           showToast('Removed');
-          await load();
+          await refresh();
         }}
         onAddQuote={async (itemId, input) => {
           await createQuote({ itemId, ...input });
           showToast('Saved');
-          await load();
+          await refresh();
         }}
         onUpdateQuote={async (quoteId, update) => {
           // The header's Quote/Invoiced toggle comes through here, so the
@@ -1214,7 +1226,7 @@ export default function ProjectDetailScreen({ route }: Props) {
             showToast('Saved');
             // Re-read, because a corrected amount moves Committed, Invoiced
             // and Paid at three levels at once, all of them derived in a view.
-            await reloadMoney();
+            await refresh();
           } catch (err: unknown) {
             setQuotes(before);
             showToast(err instanceof Error ? err.message : "That didn’t save");
@@ -1230,7 +1242,7 @@ export default function ProjectDetailScreen({ route }: Props) {
             showToast(PROJECT_QUOTE_STATUS_LABELS[status]);
             // Re-read: accepting moves Committed and the two gaps at three
             // levels at once, and every one of them is derived in a view.
-            await reloadMoney();
+            await refresh();
           } catch (err: unknown) {
             setQuotes(before);
             showToast(err instanceof Error ? err.message : "That didn’t save");
@@ -1240,12 +1252,12 @@ export default function ProjectDetailScreen({ route }: Props) {
           const paths = await deleteQuote(quoteId);
           await deleteStoredFiles(paths);
           showToast('Removed');
-          await load();
+          await refresh();
         }}
         onUpdateQuoteFiles={async (quoteId, next, toast) => {
           await updateQuote(quoteId, next);
           showToast(toast);
-          await load();
+          await refresh();
         }}
         onAddPayment={async (quoteId, input) => {
           // `unpaid` is derived in the view, so it is patched here to what the
@@ -1265,7 +1277,7 @@ export default function ProjectDetailScreen({ route }: Props) {
           try {
             await addPayment(quoteId, input);
             showToast('Payment recorded');
-            await reloadMoney();
+            await refresh();
           } catch (err: unknown) {
             setQuotes(before);
             showToast(err instanceof Error ? err.message : "That didn’t save");
@@ -1278,7 +1290,7 @@ export default function ProjectDetailScreen({ route }: Props) {
           try {
             await updatePayment(paymentId, input);
             showToast('Saved');
-            await reloadMoney();
+            await refresh();
           } catch (err: unknown) {
             showToast(err instanceof Error ? err.message : "That didn’t save");
           }
@@ -1301,7 +1313,7 @@ export default function ProjectDetailScreen({ route }: Props) {
           try {
             await deletePayment(paymentId);
             showToast('Payment removed');
-            await reloadMoney();
+            await refresh();
           } catch (err: unknown) {
             setQuotes(before);
             setPayments(beforePayments);
@@ -1327,7 +1339,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         onSave={async (input) => {
           await createQuote(input);
           showToast('Saved');
-          await load();
+          await refresh();
         }}
       />
 
@@ -1350,7 +1362,7 @@ export default function ProjectDetailScreen({ route }: Props) {
             await createExpectedCost(project.id, input);
             showToast('Added to the forecast');
           }
-          await reloadMoney();
+          await refresh();
         }}
         onDelete={async () => {
           if (!editingExpected) return;
@@ -1358,23 +1370,23 @@ export default function ProjectDetailScreen({ route }: Props) {
           showToast('Removed');
           setExpectedOpen(false);
           setEditingExpected(null);
-          await reloadMoney();
+          await refresh();
         }}
         onAddLine={async (input) => {
           if (!editingExpected) return;
           await addExpectedCostLine(editingExpected.id, input);
           showToast('Added');
-          await reloadMoney();
+          await refresh();
         }}
         onUpdateLine={async (lineId, input) => {
           await updateExpectedCostLine(lineId, input);
           showToast('Saved');
-          await reloadMoney();
+          await refresh();
         }}
         onDeleteLine={async (lineId) => {
           await deleteExpectedCostLine(lineId);
           showToast('Removed');
-          await reloadMoney();
+          await refresh();
         }}
       />
 
@@ -1390,12 +1402,12 @@ export default function ProjectDetailScreen({ route }: Props) {
           if (!buildUpFor) return;
           await addQuoteLine(buildUpFor.id, input);
           showToast('Added');
-          await reloadMoney();
+          await refresh();
         }}
         onDeleteLine={async (lineId) => {
           await deleteQuoteLine(lineId);
           showToast('Removed');
-          await reloadMoney();
+          await refresh();
         }}
       />
 
@@ -1411,12 +1423,12 @@ export default function ProjectDetailScreen({ route }: Props) {
           if (!scheduleFor) return;
           await addMilestone(scheduleFor.id, input);
           showToast('Added');
-          await reloadMoney();
+          await refresh();
         }}
         onDelete={async (milestoneId) => {
           await deleteMilestone(milestoneId);
           showToast('Removed');
-          await reloadMoney();
+          await refresh();
         }}
       />
 
@@ -1431,13 +1443,13 @@ export default function ProjectDetailScreen({ route }: Props) {
           if (!editingFigure) return;
           await setFigure(project.id, editingFigure, { amount, amountInclGst, note });
           showToast('Edited');
-          await reloadMoney();
+          await refresh();
         }}
         onClear={async () => {
           if (!editingFigure) return;
           await clearFigure(project.id, editingFigure);
           showToast('Back to the prices');
-          await reloadMoney();
+          await refresh();
         }}
       />
 

@@ -21,10 +21,12 @@
 -- **This is the one that is easy to reintroduce.** `security_invoker` is off by
 -- default, it cannot be seen in `pg_get_viewdef`, and a view that leaks
 -- everything looks exactly like a view that works. Every other view in `home`
--- was already created with it; these two predate that habit — they are the
--- schema's two oldest views, written in `20260911*` before the projects work
--- established the pattern. So `20260921100100` adds a test that asserts the
--- property for every view in the schema rather than for these two by name.
+-- carries it. These two carried it too, in `20260911*` — and then lost it,
+-- because `create or replace view ... as` with no `with` clause **resets** the
+-- options rather than keeping them, which is what `20260917090000` and
+-- `20260920100000` did while adding a column. So `viewSecurity.test.ts` replays
+-- every migration in order and asserts where each view *ends up*, rather than
+-- checking these two by name: the next bare replace fails in CI.
 --
 -- Verified in a rolled-back transaction before being applied, in both
 -- directions, because the failure mode of getting this wrong is the opposite

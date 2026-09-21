@@ -3738,144 +3738,8 @@ export async function getProject(client: SupabaseClient, projectId: string): Pro
   return mapProject(unwrap<Row>(data, error, "Couldn't load that project"));
 }
 
-/**
- * Everything under a project, in three reads rather than one per element.
- *
- * A renovation with four elements and twenty items is one page, and fetching
- * its items element by element would be five round trips on a kitchen-bench
- * connection. The items and quotes are filtered by their parents' ids, which
- * RLS would enforce anyway — the `in` is about the size of the answer, not
- * about permission.
- */
-export async function getProjectContents(
-  client: SupabaseClient,
-  projectId: string
-): Promise<ProjectContents> {
-  // **Two waves, not six.** Every read below depends on the project id or on
-  // one of the two id lists the first wave produces, and nothing else — so
-  // what used to be a chain of six sequential round trips is two. On a phone
-  // in Auckland talking to Sydney that was the difference between a page that
-  // felt instant and one that visibly thought about it, because the cost was
-  // never the queries (all of them run in single-digit milliseconds) but the
-  // latency of asking six times in a row.
-  const [elementResult, expected, bills, expectedCostLines, quoteResult] = await Promise.all([
-    client
-      .from('project_elements_with_totals')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('sort_order', { ascending: true }),
-    // Expected costs and bills hang off the project rather than off its parts,
-    // so they are read whatever the shape of the job — a renovation whose only
-    // element is implicit still has council fees and still has bills due.
-    getExpectedCosts(client, projectId),
-    getProjectBills(client, projectId),
-    getExpectedCostLines(client, projectId),
-    // One read for every price on the job, at whichever level it hangs off.
-    // `reach_project_id` is a stored, indexed column, which is why this needs
-    // neither the elements nor three `in` lists to find them.
-    client
-      .from('project_quotes_with_totals')
-      .select('*')
-      .eq('reach_project_id', projectId)
-      .order('created_at', { ascending: true }),
-  ]);
 
-  if (elementResult.error) {
-    throw asError(elementResult.error, "Couldn't load the parts of this job");
-  }
-  if (quoteResult.error) throw asError(quoteResult.error, "Couldn't load the prices");
 
-  const elements = (elementResult.data ?? []).map(mapElement);
-  const quotes = (quoteResult.data ?? []).map(mapQuote);
-  const elementIds = elements.map((element) => element.id);
-  const quoteIds = quotes.map((quote) => quote.id);
-
-  const empty = { data: [] as Row[], error: null };
-
-  // The second wave hangs off the first and off nothing else, so the items
-  // read and the three quote reads all go together rather than in turn.
-  const [itemResult, lineResult, paymentResult, milestoneResult] = await Promise.all([
-    elementIds.length === 0 ? empty : client
-      .from('project_items_with_totals')
-      .select('*')
-      .in('element_id', elementIds)
-      .order('sort_order', { ascending: true }),
-    quoteIds.length === 0 ? empty : client
-      .from('project_quote_lines')
-      .select('*')
-      .in('quote_id', quoteIds)
-      .order('sort_order', { ascending: true }),
-    quoteIds.length === 0 ? empty : client
-      .from('project_payments')
-      .select('*')
-      .in('quote_id', quoteIds)
-      .order('paid_on', { ascending: true }),
-    quoteIds.length === 0 ? empty : client
-      .from('project_milestones')
-      .select('*')
-      .in('quote_id', quoteIds)
-      .order('sort_order', { ascending: true }),
-  ]);
-
-  if (itemResult.error) throw asError(itemResult.error, "Couldn't load what this job takes");
-  if (lineResult.error) throw asError(lineResult.error, "Couldn't load what the prices cover");
-  if (paymentResult.error) throw asError(paymentResult.error, "Couldn't load what has been paid");
-  if (milestoneResult.error) {
-    throw asError(milestoneResult.error, "Couldn't load the payment schedule");
-  }
-
-  return {
-    elements,
-    items: (itemResult.data ?? []).map(mapItem),
-    quotes,
-    lines: (lineResult.data ?? []).map(mapQuoteLine),
-    payments: (paymentResult.data ?? []).map(mapPayment),
-    milestones: (milestoneResult.data ?? []).map(mapMilestone),
-    expected,
-    expectedCostLines,
-    bills,
-  };
-}
-
-/**
- * The costs somebody has been told to expect on this job.
- *
- * Ordered by whether they are still open, because a settled one is history and
- * an open one is a number in the forecast.
- */
-export async function getExpectedCosts(
-  client: SupabaseClient,
-  projectId: string
-): Promise<ProjectExpectedCost[]> {
-  const { data, error } = await client
-    .from('project_expected_costs')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: true });
-
-  if (error) throw asError(error, "Couldn't load what else is expected");
-  return (data ?? []).map(mapExpectedCost);
-}
-
-/**
- * Live bills on this job, soonest due first.
- *
- * Nulls last, because a bill with no date on it is not more urgent than one
- * due on Friday — it is just a bill nobody has typed a date for.
- */
-export async function getProjectBills(
-  client: SupabaseClient,
-  projectId: string
-): Promise<ProjectBill[]> {
-  const { data, error } = await client
-    .from('project_bills')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('due_on', { ascending: true, nullsFirst: false });
-
-  if (error) throw asError(error, "Couldn't load what is due");
-  return (data ?? []).map(mapBill);
-}
 
 export interface ProjectContents {
   elements: ProjectElement[];
@@ -3892,66 +3756,71 @@ export interface ProjectContents {
   bills: ProjectBill[];
 }
 
-/**
- * What this renovation has already put in the house record.
- *
- * Read for the handover list, which needs to know *which* items are done rather
- * than how many — `project_item_id` is the column that makes that answerable,
- * and without it the list offers the dishwasher again every time.
- */
-export async function getProjectThings(
-  client: SupabaseClient,
-  projectId: string
-): Promise<Thing[]> {
-  const { data, error } = await client
-    .from('things_with_details')
-    .select('*')
-    .eq('project_id', projectId);
-
-  if (error) throw asError(error, "Couldn't load what this job left behind");
-  return (data ?? []).map(mapThing);
+/** Everything one project page draws, in one round trip. */
+export interface ProjectPage extends ProjectContents {
+  project: Project;
+  suppliers: ProjectSupplierTotals[];
+  files: ProjectFile[];
+  /** What the renovation has already put in the house record. */
+  things: Thing[];
+  /** The punch list — ordinary snags filed against this project. */
+  snags: Snag[];
 }
 
 /**
- * Who is owed what, on one job.
+ * The whole project page, in **one** request rather than fourteen.
  *
- * **Not fatal**, in the caller: the money strip above it is the answer to the
- * page's main question, and a rollup that will not load must not take the page
- * down with it — the same rule the thing page's history card follows.
+ * Every read this replaces is still the same view, the same filter and the same
+ * order — `home.project_page` moves the questions into one journey rather than
+ * answering them differently, so no figure can be arrived at a second way. It
+ * was checked that way too: every key's row count against the query it replaced,
+ * against the live database, before the screen was changed.
+ *
+ * The seven single-purpose reads it replaced are **deleted rather than left
+ * exported**. Each had exactly one caller and no longer has any, and a dead
+ * `getProjectContents` sitting beside this is an invitation to fetch the page
+ * the slow way again without noticing. `getProjects` and `getAllProjects` stay:
+ * the Projects tab, the Schedule tab and the You tab are still real callers.
+ *
+ * **Why one and not fourteen in parallel**, which is what this replaced:
+ * PostgREST's pool on this project is ten connections. Fourteen at once queue,
+ * a queued page looks like a page that ignored the press, and the press comes
+ * again carrying eleven more. The logs for 21 September have a single chip
+ * toggle pressed three times in one second and `projects_with_totals` taking
+ * 17.4 seconds — with every one of these views running in single-digit
+ * milliseconds on its own. The cost was never the queries.
+ *
+ * RLS is untouched and does the same filtering it always did: the function is
+ * SECURITY INVOKER over `security_invoker` views, so a non-member gets the
+ * refusal rather than a row.
  */
-export async function getSupplierTotals(
+export async function getProjectPage(
   client: SupabaseClient,
   projectId: string
-): Promise<ProjectSupplierTotals[]> {
-  const { data, error } = await client
-    .from('project_supplier_totals')
-    .select('*')
-    .eq('project_id', projectId);
+): Promise<ProjectPage> {
+  const { data, error } = await client.rpc('project_page', { p_project_id: projectId });
+  const page = unwrap<Row>(data, error, "Couldn't load that project");
 
-  if (error) throw asError(error, "Couldn't work out who is owed what");
-  return (data ?? []).map(mapSupplierTotals);
+  return {
+    project: mapProject(page.project),
+    elements: (page.elements ?? []).map(mapElement),
+    items: (page.items ?? []).map(mapItem),
+    quotes: (page.quotes ?? []).map(mapQuote),
+    lines: (page.lines ?? []).map(mapQuoteLine),
+    payments: (page.payments ?? []).map(mapPayment),
+    milestones: (page.milestones ?? []).map(mapMilestone),
+    expected: (page.expected ?? []).map(mapExpectedCost),
+    expectedCostLines: (page.expectedCostLines ?? []).map(mapExpectedCostLine),
+    bills: (page.bills ?? []).map(mapBill),
+    suppliers: (page.suppliers ?? []).map(mapSupplierTotals),
+    files: (page.files ?? []).map(mapProjectFile),
+    things: (page.things ?? []).map(mapThing),
+    snags: (page.snags ?? []).map(mapSnag),
+  };
 }
 
-/**
- * Every file under a project, whichever level owns it.
- *
- * Files roll up and never down, so this is the project's whole folder — and
- * each row says which level it came from, so the list can show where a file
- * lives rather than presenting a consent and a tile quote as the same kind of
- * thing.
- */
-export async function getProjectFiles(
-  client: SupabaseClient,
-  projectId: string
-): Promise<ProjectFile[]> {
-  const { data, error } = await client
-    .from('project_files')
-    .select('*')
-    .eq('project_id', projectId);
 
-  if (error) throw asError(error, "Couldn't load the paperwork");
-  return (data ?? []).map(mapProjectFile);
-}
+
 
 // ------------------------------------------------------------- writes
 
@@ -4551,29 +4420,6 @@ export async function deleteExpectedCost(
 
 // ------------------------------------------------ payments against a guess
 
-/**
- * The lines under an expected cost — a payment on account, with a reference
- * and, optionally, a receipt. Read for a whole project at once, the same
- * shape `getProjectContents` already reads quote lines in, rather than one
- * round trip per expected cost.
- */
-export async function getExpectedCostLines(
-  client: SupabaseClient,
-  projectId: string
-): Promise<ProjectExpectedCostLine[]> {
-  // Filtered through the parent rather than by a list of ids the caller has
-  // to fetch first. `!inner` makes the embed a join rather than a nullable
-  // attachment, so this is one round trip that depends on nothing but the
-  // project — which is what lets it start in the same wave as everything
-  // else `getProjectContents` reads.
-  const { data, error } = await client
-    .from('project_expected_cost_lines')
-    .select('*, project_expected_costs!inner(project_id)')
-    .eq('project_expected_costs.project_id', projectId)
-    .order('created_at', { ascending: true });
-  if (error) throw asError(error, "Couldn't load the payments against that");
-  return (data ?? []).map(mapExpectedCostLine);
-}
 
 export interface ExpectedCostLineInput {
   name: string;

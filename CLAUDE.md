@@ -1404,9 +1404,21 @@ Three rules inside that, and each answers a way the first pass was wrong:
   the door is how `committed - paid` comes out negative — it did, on the live project, against
   three suppliers at once. So `committed` is the accepted quote at a level, *or* its invoices
   when nothing was quoted there.
-- **Quoted is gone.** The low-to-high band across undecided quotes answered a question nobody
-  asks after the first fortnight, and per-line allowance variance (below) answers the same
-  thing far better and against real numbers. `rangeLabel` and `hasOpenRange` are deleted.
+- **The Quoted *band* is gone; a Quoted *figure* is back.** What went was the low-to-high
+  range across undecided quotes — it answered a question nobody asks after the first
+  fortnight, and per-line allowance variance (below) answers the same thing far better and
+  against real numbers. `rangeLabel` and `hasOpenRange` stay deleted. What came back is one
+  number sitting directly above Committed: **what the suppliers have actually said**, counting
+  every price of kind `quote` that has not been declined, accepted ones included. Committed on
+  its own cannot tell a job nobody has priced from a job where three contractors have quoted
+  and nobody has signed — both read as nothing agreed — and the gap between the two is what is
+  still to decide.
+
+  It is the **sum of the supplier rows** (`projectQuoted`), not a sixth expression in
+  `projects_with_totals`, and that is the whole of why it can be trusted: every money line now
+  opens to show what it is made of, and a line and its rows that are computed two ways are two
+  numbers waiting to disagree. There is no override for it, so its row does not open an editor
+  — this figure is the prices and nothing else.
 
 ### Committed is not the answer to "are we over"
 
@@ -1472,6 +1484,18 @@ Committed, Invoiced or the forecast.** The parent expected cost still carries th
 figure that feeds Forecast — a payment on account is a record of what has moved, not a second
 opinion about what the job will cost, and letting it count twice is exactly the double-counting the
 rest of this feature is built to avoid. Read the way a bank statement is read, not priced.
+
+**Leaving the sheet commits a payment still sitting in the box**, and this shipped broken. The
+only thing that wrote a line was the small *Save* beside it, so somebody who filled in a value
+and an invoice number and then pressed the sheet's own Save had it discarded — silently, with
+nothing anywhere saying so, because from the sheet's point of view nothing had happened. On the
+live job that was every payment ever typed here: `project_expected_cost_lines` had no rows at
+all. It is the project sheet's *typed-and-not-ticked* bug, one screen over, and it takes the same
+fix: the line is committed first, and a refusal **holds the sheet open with the words still
+there** rather than closing over something it did not take. The payment's own Save is live with
+an empty name rather than dead, and says what it wants — a disabled button is indistinguishable
+from a button that did nothing, and here that difference is a payment somebody typed and lost.
+`ExpectedCostSheet.test.tsx` pins all four cases, the untouched box included.
 
 ### Two gaps, not one, and only one of them is about today
 
@@ -1692,6 +1716,29 @@ what makes the next renovation's numbers credible. `set_quote_status` is its own
 reason `set_part_bought` is — it is the only write that changes what a total says, and alone it
 cannot have its sibling-clearing skipped by a caller passing a status among eight other fields.
 
+### Each figure opens onto who it is made of
+
+Every line in the strip that suppliers can be named for — Quoted, Committed, Invoiced, Paid —
+carries a chevron beside it, and opening one lists the suppliers behind it largest first. The
+chevron is a **sibling** of the row rather than inside it, because opening a figure and editing
+it are two different acts and a `Pressable` inside a `Pressable` is a coin toss about which one
+gets the tap.
+
+**Budget and Forecast deliberately have none.** A budget is what somebody typed and no supplier
+has said anything about it; a forecast is committed plus three kinds of guess, two of which are
+by definition money nobody has quoted. Attributing either to named suppliers would be the page
+inventing a debt, which is the one thing this feature must never do.
+
+**A supplier with nothing against that figure is left out, not drawn as a zero.** "Tile Space,
+nothing invoiced" is not part of what Invoiced is made of, and a column of noughts is how a
+breakdown stops being read.
+
+**And where the rows cannot add up to the line, the page says so.** An override is the only
+thing that can cause that, and it causes it by design: the rows are the prices and the line is
+what somebody typed instead. So the breakdown ends with what the prices actually come to — the
+same rule `describeOverride` follows, never merely that something was edited — because a reader
+who notices the gap unaided concludes the breakdown is broken.
+
 ### Who is owed what
 
 One row per supplier on the project page — committed, invoiced, paid, and what is still to go to
@@ -1699,10 +1746,21 @@ them — absent entirely when nobody is owed anything, the same rule as the shop
 **The check worth keeping: these rows sum to the project's committed total.** They are two views
 over one rule, and if they ever disagree one of them is lying about who is owed money.
 
+**The section is folded by default**, and the heading keeps the count and what is still to go
+out. Five supplier cards is most of a page, and what somebody arrives with is *a bill arrived,
+where does it go* — which is the button above the money, not this. A fold that took the count
+with it would be a filter rather than a fold, which is the list tab's own rule one screen over.
+The figures' own breakdowns (above) are the quick answer; these cards are the long one.
+
 The fallback belongs to the **scope**, not the supplier, and getting that wrong is subtle: group
 by supplier and then ask "accepted quotes, or failing that the invoices" and a consultant who has
 only ever invoiced comes out owed nothing, while a builder with a contract *and* a separate
-pre-start invoice has that invoice swallowed. `20260918090500` exists for exactly that.
+pre-start invoice has that invoice swallowed. `20260918090500` exists for exactly that — and
+**`20260921090400` lost it again**, restating the rule as a flat `filter (where kind = 'quote'
+and status = 'accepted')` while fixing the direct-buy case. The rows added to $7,773.47 under a
+Committed line reading $103,574.22 for three days, with nothing on screen able to show it;
+opening the figures is what found it. `20260921110000` restores the scope fallback on top of
+090400's direct-buy handling, measured against the live rows rather than asserted.
 
 Supplier stays **free text**, because a supplier list somebody has to fill in before they can
 record a quote is setup, and this app does not do setup. It groups on the trimmed, lower-cased
@@ -1804,6 +1862,28 @@ from the others, since the rest collapsed into "the price is being sorted out" t
 Invoiced took over that meaning. It is the one state still changed by hand, because only a person
 knows the dishwasher is actually sitting in the kitchen, and it is what lets *Record it in the
 house record* offer itself once something is genuinely in.
+
+**And it asks in two named halves, where it was one tick.** *Is it in?* · **Yes** · **Not yet**,
+in the app's one chip shape — a sunken well, solid fern on the half that is true, ~34px inside a
+48px target. A single tick has one lit state and one unlabelled one, so *not installed* was only
+ever the absence of a press, indistinguishable from nobody having got to it yet — on the one fact
+that decides whether the handover list offers this row at all. It is the argument the GST pill
+and the You tab's project switch both make. Pressing the half already lit writes nothing.
+
+**The sheet no longer asks what an item is twice.** It opened on a title box reading *"What is
+it?"* and then asked *What exactly* four rows down in the price form — two boxes for one fact,
+because on a line item they **are** one fact: a toilet is a toilet whether it is being named or
+being priced. So *What exactly* names the row, the heading shows what is being typed rather than
+asking for it again, and a sheet walked away from without saying what it is still writes nothing
+at all — the guarantee the old two-step gave, on the same terms. An item that already exists
+keeps its title box, because renaming is a real act.
+
+**Save is at the foot of the sheet and says only *Save*.** It read *Save this price* and sat
+directly under the amount, which put the one button that commits anything half way up a sheet
+that keeps scrolling past it. It is outside the ScrollView now, for the reason the snag page's
+bar is the last flex child: a button that scrolls away is a button people assume is not there.
+By the time a thumb is down there, the form above it is what is being saved, and naming it twice
+was the button repeating the field it belongs to.
 
 ### Adding an item is a pill and a modal, not a box and a +
 
@@ -1999,6 +2079,18 @@ from 414ms to 242ms.
 pending, the revert on a refusal, one read per press, and — with a read that
 does not settle until the test says so — that three presses in one gesture
 still put exactly one write and one read on the wire.
+
+### The parts of the job fold independently
+
+`openElements` is a Set, not a single id. It was one id, so opening the laundry
+shut the bathroom — the wrong model for a page somebody reads two parts of side
+by side, and it made the second tap feel like the first one had been undone.
+Each heading is now its own answer.
+
+The money strip above it is deliberately the other way: **one breakdown open at
+a time**. That is a five-row strip at the very top of the page and two open at
+once pushes the work itself off the screen, where two open parts are exactly
+what somebody is comparing.
 
 ### A budget has parts, and the gap is named rather than resolved
 
@@ -2339,7 +2431,17 @@ stopping once something is recorded, that files roll up without rolling down, th
 room picker rather than a naming box, the × naming what goes with a part, and no × while the layer
 is still implicit.
 `ItemSheet.test.tsx` also pins the three named states where a tick could only say "not chosen", a
-declined price staying on the record, and a correction never carrying one.
+declined price staying on the record, and a correction never carrying one. It pins the two named
+halves of *Is it in?* — the no-op press on the lit one and the way back off — that the sheet asks
+what an item is once rather than twice, that *What exactly* is what names the row, and that a
+sheet walked away from still writes nothing.
+`ProjectDetailScreen.test.tsx` pins the Quoted line and that it is the supplier rows' own sum,
+each figure opening onto who it is made of, a supplier with nothing against a figure being left
+out rather than drawn as a zero, the line that names the prices when an override means the rows
+cannot add up, Budget and Forecast having no breakdown at all, *Who we're paying* being folded
+with its count intact, and the parts of the job folding without shutting each other.
+`projects.test.ts` pins `projectQuoted` as the rows' sum, null rather than zero where nobody has
+quoted, and that a breakdown adds up to what it is a breakdown of.
 
 ## Why the app exists at all
 

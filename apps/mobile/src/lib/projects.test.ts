@@ -4,7 +4,8 @@ import {
   describeOverride, describeOverrides,
   describeToPay, describeTotals, forecastVariance, formatMoney, groupProjectsByStatus, inclGst,
   itemPriceLabel, milestoneAmount, outstanding,
-  projectDossierTable, projectExportPhotos, projectExportTable, showsElements,
+  projectDossierTable, projectExportPhotos, projectExportTable, projectQuoted,
+  showsElements, supplierBreakdown,
 } from '@snag/supabase-queries';
 import { GST_RATE } from '../types';
 import type {
@@ -724,5 +725,57 @@ describe('the discrepancy block', () => {
     expect(describeOverrides(project({ ...clean, partsEditedCount: 1 }))).toEqual([
       '1 part also has an edited figure.',
     ]);
+  });
+});
+
+describe('quoted, and who each figure is made of', () => {
+  const sup = (over: Partial<Record<string, unknown>> = {}) => ({
+    supplierKey: 'x', supplier: 'X',
+    quoted: null as number | null, committed: null as number | null,
+    invoiced: null as number | null, paid: null as number | null,
+    ...over,
+  });
+
+  it('is the sum of the supplier rows, so the line and the rows cannot disagree', () => {
+    // The whole reason it is computed here rather than in a second view
+    // expression: there is nothing to keep in step.
+    const rows = [sup({ quoted: 176755 }), sup({ quoted: 1952.47 }), sup({ quoted: null })];
+    expect(projectQuoted(rows)).toBe(178707.47);
+  });
+
+  it('is null where nobody has quoted anything, never zero', () => {
+    // A job where three prices are in and a job where nobody has been asked
+    // are different states, and telling them apart is the whole reason this
+    // line sits above Committed.
+    expect(projectQuoted([sup(), sup()])).toBeNull();
+    expect(projectQuoted([])).toBeNull();
+  });
+
+  it('orders a breakdown largest first', () => {
+    const rows = [
+      sup({ supplierKey: 'a', committed: 1952.47 }),
+      sup({ supplierKey: 'b', committed: 88814.5 }),
+      sup({ supplierKey: 'c', committed: 4335.5 }),
+    ];
+    expect(supplierBreakdown(rows, 'committed').map((r) => r.row.supplierKey))
+      .toEqual(['b', 'c', 'a']);
+  });
+
+  it('leaves out a supplier with nothing against that figure', () => {
+    // "Tile Space, nothing invoiced" is not part of what Invoiced is made of,
+    // and a list of noughts is how a breakdown stops being read.
+    const rows = [sup({ supplierKey: 'a', invoiced: 4335.5 }), sup({ supplierKey: 'b' })];
+    expect(supplierBreakdown(rows, 'invoiced')).toHaveLength(1);
+    expect(supplierBreakdown(rows, 'invoiced')[0].amount).toBe(4335.5);
+  });
+
+  it('adds up to what it is a breakdown of', () => {
+    const rows = [
+      sup({ supplierKey: 'a', quoted: 176755, committed: 88814.5 }),
+      sup({ supplierKey: 'b', quoted: null, committed: 4335.5 }),
+      sup({ supplierKey: 'c', quoted: 1952.47, committed: 1952.47 }),
+    ];
+    const summed = supplierBreakdown(rows, 'quoted').reduce((t, r) => t + r.amount, 0);
+    expect(summed).toBe(projectQuoted(rows));
   });
 });

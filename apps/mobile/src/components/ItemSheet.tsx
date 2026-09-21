@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
@@ -153,8 +153,34 @@ export default function ItemSheet({
     ? payments.filter((payment) => payment.quoteId === primaryQuote.id)
     : [];
 
+  /**
+   * Which item the form was last emptied for.
+   *
+   * **A row created from inside this sheet is the same sheet carrying on, not
+   * a different item being opened.** Naming an item is now the *What exactly*
+   * box in the price form, so the gesture that creates the row is the same
+   * gesture that is half way through typing a price — and emptying the form on
+   * the id arriving would wipe exactly what somebody is in the middle of
+   * writing. So the reset runs when the sheet opens and when it is pointed at
+   * a different existing item, and never on the create it performed itself.
+   */
+  const resetFor = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      resetFor.current = null;
+      return;
+    }
+    if (resetFor.current === 'new' && item) {
+      // The create this sheet just did. Take the id and the name, leave
+      // everything somebody has typed exactly where it is.
+      resetFor.current = item.id;
+      setTitle(item.name);
+      return;
+    }
+    const key = item?.id ?? 'new';
+    if (resetFor.current === key) return;
+    resetFor.current = key;
     setAdding(quotes.length === 0);
     setSupplier('');
     setDetail('');
@@ -187,7 +213,14 @@ export default function ItemSheet({
   async function ensureItem(): Promise<ProjectItem | null> {
     if (item) return item;
     if (!creatingIn) return null;
-    const named = title.trim();
+    // **The name is *What exactly*, and there is no second box asking for it.**
+    // The sheet used to open on a title box reading "What is it?" and then ask
+    // "What exactly" four rows down in the price form — two boxes for one
+    // fact, and on a line item they are the same fact: a toilet is a toilet
+    // whether it is being named or being priced. So the price form's own field
+    // names the row, and what somebody types about the thing they are buying
+    // is typed once.
+    const named = detail.trim();
     if (named.length === 0) {
       setTitleMissing(true);
       return null;
@@ -409,31 +442,39 @@ export default function ItemSheet({
         ]}
       >
         <View style={styles.grab} />
-        {/* The title is the box. It names a new item and renames an existing
-            one, which is the same act — and it is why adding no longer needs
-            a sheet of its own in front of this one. The placeholder asks the
-            question rather than showing an answer, which is the one case this
-            app's no-example-values rule allows. */}
+        {/* **A new item has no title box, and that is the change.** It opened
+            on one reading "What is it?" and then asked "What exactly" four
+            rows down in the price form — two boxes for one fact, because on a
+            line item they *are* one fact: a toilet is a toilet whether it is
+            being named or being priced. So *What exactly* names the row, and
+            the heading up here shows what is being typed rather than asking
+            for it again.
+
+            An item that already exists keeps the box, because renaming is a
+            real act and it is the same box it has always been. */}
         <View style={styles.head}>
-          <TextInput
-            style={styles.name}
-            value={title}
-            onChangeText={(text) => { setTitle(text); if (text.trim()) setTitleMissing(false); }}
-            onBlur={commitTitle}
-            onSubmitEditing={commitTitle}
-            placeholder="What is it?"
-            placeholderTextColor={Colors.textMuted}
-            accessibilityLabel="What the item is"
-            autoFocus={!item}
-            returnKeyType="done"
-          />
+          {item ? (
+            <TextInput
+              style={styles.name}
+              value={title}
+              onChangeText={(text) => { setTitle(text); if (text.trim()) setTitleMissing(false); }}
+              onBlur={commitTitle}
+              onSubmitEditing={commitTitle}
+              accessibilityLabel="What the item is"
+              returnKeyType="done"
+            />
+          ) : (
+            <Text
+              style={[styles.name, detail.trim().length === 0 && styles.nameWaiting]}
+              numberOfLines={1}
+            >
+              {detail.trim() || 'Something to buy'}
+            </Text>
+          )}
           <Pressable onPress={onClose} style={styles.headTap} accessibilityRole="button" accessibilityLabel="Close">
             <Icon name="close" size="md" color={Colors.textMuted} />
           </Pressable>
         </View>
-        {titleMissing ? (
-          <Text style={styles.titleMissing}>Give it a name — what is it you&rsquo;re getting?</Text>
-        ) : null}
         {/* Where it is going, stated rather than asked: the pill that opened
             this was inside the part, which has already answered it. */}
         {!item && creatingIn && showElement ? (
@@ -794,15 +835,25 @@ export default function ItemSheet({
                 placeholderTextColor={Colors.textMuted}
                 accessibilityLabel="Who from"
               />
+              {/* The one box that names the item as well as the price, on a
+                  new row. Said under the box rather than as a toast, because
+                  it is a fact about the box — the same place the title box
+                  said it when there was one. */}
               <Text style={styles.fieldLabel}>What exactly</Text>
               <TextInput
                 style={styles.input}
                 value={detail}
-                onChangeText={setDetail}
+                onChangeText={(text) => { setDetail(text); if (text.trim()) setTitleMissing(false); }}
                 placeholder="Methven Krome"
                 placeholderTextColor={Colors.textMuted}
                 accessibilityLabel="What exactly"
+                autoFocus={!item}
               />
+              {titleMissing ? (
+                <Text style={styles.titleMissing}>
+                  Say what it is — that names the item as well as the price.
+                </Text>
+              ) : null}
               <View style={styles.spacer} />
               <MoneyField
                 label="Amount"
@@ -811,21 +862,6 @@ export default function ItemSheet({
                 inclusive={incl}
                 onChangeInclusive={setIncl}
               />
-              <Pressable
-                onPress={editingQuote ? saveQuote : addQuote}
-                disabled={busy || !canSaveQuote}
-                style={[styles.cta, (busy || !canSaveQuote) && styles.ctaOff]}
-                accessibilityRole="button"
-                accessibilityLabel={editingQuote ? 'Save the correction' : 'Save this price'}
-              >
-                {busy ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={[styles.ctaLabel, !canSaveQuote && styles.ctaLabelOff]}>
-                    {editingQuote ? 'Save the correction' : 'Save this price'}
-                  </Text>
-                )}
-              </Pressable>
               {/* A way back out that does not save. Without it the only escape
                   from a form somebody opened by mistake is closing the whole
                   sheet, which loses the item they were looking at too. */}
@@ -846,31 +882,51 @@ export default function ItemSheet({
 
           {/* The one state still changed by hand — everything above moves
               from the price. Installed is what lets the house record offer
-              carry this item's model number over once it is actually in. */}
-          <Pressable
-            onPress={async () => {
-              const target = await ensureItem();
-              if (!target) return;
-              await onUpdateItem(
-                target.id,
-                { status: installed ? 'considering' : 'installed' },
-                installed ? 'Not installed' : 'Installed'
-              );
-            }}
-            style={styles.installedRow}
-            accessibilityRole="button"
-            accessibilityState={{ selected: installed }}
-            accessibilityLabel={installed ? 'Installed' : 'Mark as installed'}
-          >
-            <Icon
-              name={installed ? 'checkmark-circle' : 'ellipse-outline'}
-              size="sm"
-              color={installed ? Colors.primary : Colors.textMuted}
-            />
-            <Text style={[styles.installedLabel, installed && styles.installedLabelOn]}>
-              {installed ? 'Installed' : 'Mark as installed'}
-            </Text>
-          </Pressable>
+              carry this item's model number over once it is actually in.
+
+              **Two named halves, where it was one circle.** A single tick is a
+              control with one lit state and one unlabelled one, so *not*
+              installed was only ever the absence of a press — indistinguishable
+              from nobody having got to it yet, on the fact that decides whether
+              the handover list offers this row at all. It is the argument the
+              GST pill and the You tab's project switch both make, and it is the
+              app's one pill: a sunken well, solid fern on the half that is
+              true, ~34px inside a 48px target. */}
+          <View style={styles.installedRow}>
+            <Text style={styles.installedTitle}>Is it in?</Text>
+            <View style={styles.pill}>
+              <Pressable
+                onPress={async () => {
+                  // Pressing the half that is already lit writes nothing, the
+                  // same no-op the project switch takes.
+                  if (installed) return;
+                  const target = await ensureItem();
+                  if (!target) return;
+                  await onUpdateItem(target.id, { status: 'installed' }, 'Installed');
+                }}
+                style={[styles.half, installed && styles.halfOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: installed }}
+                accessibilityLabel="Installed"
+              >
+                <Text style={[styles.halfLabel, installed && styles.halfLabelOn]}>Yes</Text>
+              </Pressable>
+              <Pressable
+                onPress={async () => {
+                  if (!installed) return;
+                  const target = await ensureItem();
+                  if (!target) return;
+                  await onUpdateItem(target.id, { status: 'considering' }, 'Not installed');
+                }}
+                style={[styles.half, !installed && styles.halfOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !installed }}
+                accessibilityLabel="Not installed"
+              >
+                <Text style={[styles.halfLabel, !installed && styles.halfLabelOn]}>Not yet</Text>
+              </Pressable>
+            </View>
+          </View>
 
           {/* ── the item's own paperwork ───────────────────────────────── */}
           <View style={styles.sectionRow}>
@@ -933,6 +989,35 @@ export default function ItemSheet({
             <Text style={styles.removeLabel}>Remove this item</Text>
           </Pressable>
         </ScrollView>
+
+        {/* **Save is at the foot of the sheet, not buried in the form.** It
+            read *Save this price* and sat directly under the amount, which put
+            the one button that commits anything half way up a sheet that keeps
+            scrolling past it — so on a long item it was above the fold going
+            down and out of sight coming back. It is the last thing on the page
+            now, where every other page in this app puts the act that finishes
+            it, and it says **Save**: by the time somebody's thumb is down
+            there the form above it is what they are saving, and naming it
+            twice was the button repeating the field it belongs to.
+
+            It is outside the ScrollView for the same reason the snag page's
+            bar is the last flex child: a button that scrolls away is a button
+            people assume is not there. */}
+        {showForm ? (
+          <Pressable
+            onPress={editingQuote ? saveQuote : addQuote}
+            disabled={busy || !canSaveQuote}
+            style={[styles.cta, (busy || !canSaveQuote) && styles.ctaOff]}
+            accessibilityRole="button"
+            accessibilityLabel="Save"
+          >
+            {busy ? (
+              <ActivityIndicator color={Colors.white} />
+            ) : (
+              <Text style={[styles.ctaLabel, !canSaveQuote && styles.ctaLabelOff]}>Save</Text>
+            )}
+          </Pressable>
+        ) : null}
       </View>
 
       <ConfirmDialog
@@ -1001,6 +1086,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xs,
   },
   titleMissing: { fontSize: Typography.sm, color: Colors.danger, marginTop: Spacing.xs },
+  // The heading before *What exactly* has anything in it. Muted rather than a
+  // placeholder in a box, because there is no box here to fill in.
+  nameWaiting: { color: Colors.textMuted, fontWeight: Typography.semibold },
   goingOn: { fontSize: Typography.sm, color: Colors.textSecondary, marginTop: Spacing.xs },
   headTap: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.md },
   scroll: { marginTop: Spacing.sm },
@@ -1087,11 +1175,33 @@ const styles = StyleSheet.create({
   legacyRemove: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -Spacing.sm },
 
   installedRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     minHeight: MIN_TOUCH_TARGET, marginTop: Spacing.md,
   },
-  installedLabel: { fontSize: Typography.sm, color: Colors.textMuted, fontWeight: Typography.medium },
-  installedLabelOn: { color: Colors.textPrimary, fontWeight: Typography.semibold },
+  installedTitle: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    fontWeight: Typography.medium,
+  },
+  // The app's one chip shape, as `MoneyField` draws it: a sunken well when
+  // off, solid fern when on, no border either way.
+  pill: {
+    flexDirection: 'row',
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.chip,
+    overflow: 'hidden',
+  },
+  half: {
+    paddingHorizontal: Spacing.md,
+    // The visible pill is ~34px; the tap area is the full target.
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+  },
+  halfOn: { backgroundColor: Colors.primary },
+  halfLabel: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textSecondary },
+  halfLabelOn: { color: Colors.white },
 
   form: { marginTop: Spacing.sm },
   fieldLabel: {
@@ -1121,7 +1231,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
-    marginBottom: Spacing.sm,
+    // At the foot of the sheet now rather than inside the form. The sheet's
+    // own horizontal padding already holds it off the edges.
+    marginTop: Spacing.sm,
   },
   ctaOff: { backgroundColor: Colors.sunken },
   ctaLabel: { color: Colors.white, fontSize: Typography.base, fontWeight: Typography.semibold },

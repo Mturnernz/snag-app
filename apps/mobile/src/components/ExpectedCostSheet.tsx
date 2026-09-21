@@ -84,6 +84,8 @@ export default function ExpectedCostSheet({
   const [lineForm, setLineForm] = useState(emptyLine);
   const [lineBusy, setLineBusy] = useState(false);
   const [removingLine, setRemovingLine] = useState<ProjectExpectedCostLine | null>(null);
+  /** Said under the payment's name box when Save cannot take what is in it. */
+  const [lineMissing, setLineMissing] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -94,14 +96,34 @@ export default function ExpectedCostSheet({
     setElementId(existing?.elementId ?? null);
     setLineEditing(null);
     setLineForm(emptyLine);
+    setLineMissing(false);
   }, [visible, existing?.id]);
 
   const canSave = name.trim().length > 0;
 
+  /**
+   * Saves the row — **and the payment still sitting in the box**.
+   *
+   * This shipped broken, in exactly the shape the project sheet's second step
+   * already paid for once: the only thing that wrote a payment was the little
+   * *Save* beside it, so somebody who filled in the value and an invoice
+   * number and then pressed the sheet's own Save had it discarded, silently,
+   * with nothing anywhere saying so. On the live job that is every payment
+   * ever typed under *Also expecting* — the table has no rows at all.
+   *
+   * A half-typed answer in a box is still an answer, and the only honest
+   * readings of Save are "take it" or "say why you can't". So the line is
+   * committed first and a refusal **holds the sheet open** with the words
+   * still there, rather than closing over a payment it did not take.
+   */
   async function save() {
     if (busy || !canSave) return;
     setBusy(true);
     try {
+      if (lineEditing !== null) {
+        const committed = await commitLine();
+        if (!committed) return;
+      }
       const parsed = amount.trim() ? Number(amount.replace(/[^0-9.]/g, '')) : NaN;
       await onSave({
         name: name.trim(),
@@ -133,26 +155,57 @@ export default function ExpectedCostSheet({
     setLineForm(emptyLine);
   }
 
-  async function saveLine() {
-    if (lineBusy || lineForm.name.trim().length === 0) return;
-    setLineBusy(true);
-    try {
-      const parsed = lineForm.amount.trim() ? Number(lineForm.amount.replace(/[^0-9.]/g, '')) : NaN;
-      const input: ExpectedCostLineInput = {
-        name: lineForm.name.trim(),
-        reference: lineForm.reference.trim() || null,
-        amount: Number.isFinite(parsed) ? parsed : null,
-        amountInclGst: lineForm.incl,
-        photoPaths: lineForm.photoPaths,
-        documentPaths: lineForm.documentPaths,
-      };
-      if (lineEditing && lineEditing !== 'new') {
-        await onUpdateLine(lineEditing, input);
-      } else {
-        await onAddLine(input);
-      }
+  /**
+   * Writes whatever is in the payment box, and says so when it cannot.
+   *
+   * Returns whether the write landed, because the sheet's own Save has to
+   * decide from it whether to close. A box holding nothing at all is not a
+   * refusal — there is nothing to lose — so it passes.
+   */
+  async function commitLine(): Promise<boolean> {
+    const named = lineForm.name.trim();
+    const typed = lineForm.amount.trim();
+    if (named.length === 0 && typed.length === 0
+        && lineForm.reference.trim().length === 0
+        && lineForm.photoPaths.length === 0
+        && lineForm.documentPaths.length === 0) {
       setLineEditing(null);
       setLineForm(emptyLine);
+      setLineMissing(false);
+      return true;
+    }
+    // The name is what a bank statement's line is *called*, and the row is
+    // unreadable without it. Said under the box rather than as a toast,
+    // because it is a fact about the box.
+    if (named.length === 0) {
+      setLineMissing(true);
+      return false;
+    }
+    setLineMissing(false);
+    const parsed = typed ? Number(typed.replace(/[^0-9.]/g, '')) : NaN;
+    const input: ExpectedCostLineInput = {
+      name: named,
+      reference: lineForm.reference.trim() || null,
+      amount: Number.isFinite(parsed) ? parsed : null,
+      amountInclGst: lineForm.incl,
+      photoPaths: lineForm.photoPaths,
+      documentPaths: lineForm.documentPaths,
+    };
+    if (lineEditing && lineEditing !== 'new') {
+      await onUpdateLine(lineEditing, input);
+    } else {
+      await onAddLine(input);
+    }
+    setLineEditing(null);
+    setLineForm(emptyLine);
+    return true;
+  }
+
+  async function saveLine() {
+    if (lineBusy) return;
+    setLineBusy(true);
+    try {
+      await commitLine();
     } finally {
       setLineBusy(false);
     }
@@ -320,10 +373,18 @@ export default function ExpectedCostSheet({
                   <TextInput
                     style={styles.input}
                     value={lineForm.name}
-                    onChangeText={(text) => setLineForm((f) => ({ ...f, name: text }))}
+                    onChangeText={(text) => {
+                      setLineForm((f) => ({ ...f, name: text }));
+                      if (text.trim()) setLineMissing(false);
+                    }}
                     accessibilityLabel="Who it was paid to, or what for"
                     autoFocus
                   />
+                  {lineMissing ? (
+                    <Text style={styles.lineMissing}>
+                      Give it a name — &ldquo;Deposit&rdquo;, or who it went to.
+                    </Text>
+                  ) : null}
 
                   <Text style={styles.label}>REFERENCE NUMBER</Text>
                   <TextInput
@@ -356,7 +417,7 @@ export default function ExpectedCostSheet({
 
                   <View style={styles.lineFormRow}>
                     <Pressable
-                      onPress={() => { setLineEditing(null); setLineForm(emptyLine); }}
+                      onPress={() => { setLineEditing(null); setLineForm(emptyLine); setLineMissing(false); }}
                       disabled={lineBusy}
                       style={styles.lineCancel}
                       accessibilityRole="button"
@@ -364,22 +425,19 @@ export default function ExpectedCostSheet({
                     >
                       <Text style={styles.lineCancelLabel}>Cancel</Text>
                     </Pressable>
+                    {/* Live even with the name empty, deliberately. A dead
+                        button is indistinguishable from a button that did
+                        nothing, and on this sheet that difference is a payment
+                        somebody typed and lost — so it presses, and says what
+                        it wants. */}
                     <Pressable
                       onPress={saveLine}
-                      disabled={lineBusy || lineForm.name.trim().length === 0}
-                      style={[
-                        styles.lineSave,
-                        (lineBusy || lineForm.name.trim().length === 0) && styles.ctaOff,
-                      ]}
+                      disabled={lineBusy}
+                      style={[styles.lineSave, lineBusy && styles.ctaOff]}
                       accessibilityRole="button"
                       accessibilityLabel="Save the payment"
                     >
-                      <Text
-                        style={[
-                          styles.lineSaveLabel,
-                          (lineBusy || lineForm.name.trim().length === 0) && styles.ctaLabelOff,
-                        ]}
-                      >
+                      <Text style={[styles.lineSaveLabel, lineBusy && styles.ctaLabelOff]}>
                         {lineBusy ? 'Saving…' : 'Save'}
                       </Text>
                     </Pressable>
@@ -478,6 +536,7 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET, minWidth: 0,
   },
   hint: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: Spacing.xs },
+  lineMissing: { fontSize: Typography.sm, color: Colors.danger, marginTop: Spacing.xs },
   question: {
     fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary,
     marginTop: Spacing.lg, marginBottom: Spacing.sm,

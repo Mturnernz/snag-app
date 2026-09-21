@@ -3054,6 +3054,7 @@ function mapSupplierTotals(row: Row): ProjectSupplierTotals {
     projectId: row.project_id,
     supplierKey: row.supplier_key ?? '',
     supplier: row.supplier ?? null,
+    quoted: numberOrNull(row.quoted),
     committed: numberOrNull(row.committed),
     invoiced: numberOrNull(row.invoiced),
     paid: numberOrNull(row.paid),
@@ -3198,6 +3199,56 @@ export function outstanding(totals: {
 }): number | null {
   if (totals.committedTotal === null) return null;
   return Math.max(0, totals.committedTotal - (totals.paidTotal ?? 0));
+}
+
+/**
+ * What the suppliers have said, which is the line above Committed.
+ *
+ * **It is the sum of the supplier rows, deliberately, and it is the only thing
+ * that writes the figure.** Every money line on the project page opens to show
+ * the rows it is made of, and that is honest only while the rows add up to the
+ * line. A second expression in `projects_with_totals` would be a second path to
+ * one number, which is how a number starts disagreeing with itself — the
+ * failure this money model names about `needs_parts` and about the element
+ * layer, one figure further on.
+ *
+ * Null when nobody has quoted anything, never zero: a job where three prices
+ * are in and a job where nobody has been asked are different states, and the
+ * whole reason this line sits above Committed is to tell them apart.
+ */
+export function projectQuoted(
+  suppliers: readonly { quoted: number | null }[]
+): number | null {
+  const priced = suppliers.filter((s) => s.quoted !== null);
+  if (priced.length === 0) return null;
+  return priced.reduce((sum, s) => sum + (s.quoted ?? 0), 0);
+}
+
+/**
+ * Which supplier figure a money line opens onto.
+ *
+ * Budget and Forecast are absent on purpose. A budget is what somebody typed
+ * and no supplier has said anything about it; a forecast is committed plus
+ * three kinds of guess, two of which are by definition money nobody has quoted
+ * — attributing either to named suppliers would be the page inventing a debt.
+ */
+export type SupplierFigure = 'quoted' | 'committed' | 'invoiced' | 'paid';
+
+/**
+ * The rows under one money line: who it is made of, largest first.
+ *
+ * A supplier with nothing against that figure is left out rather than drawn as
+ * a zero — "Tile Space, nothing invoiced" is not part of what Invoiced is made
+ * of, and a list of noughts is how a breakdown stops being read.
+ */
+export function supplierBreakdown<T extends Record<SupplierFigure, number | null>>(
+  suppliers: readonly T[],
+  figure: SupplierFigure
+): { row: T; amount: number }[] {
+  return suppliers
+    .filter((s) => s[figure] !== null && Math.abs(s[figure] as number) > 0.005)
+    .map((row) => ({ row, amount: row[figure] as number }))
+    .sort((a, b) => b.amount - a.amount);
 }
 
 /**

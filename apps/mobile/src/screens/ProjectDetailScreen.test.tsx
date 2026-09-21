@@ -336,6 +336,80 @@ describe('the money', () => {
 
 });
 
+describe('a figure says who it is made of', () => {
+  const three = [
+    { projectId: 'p1', supplierKey: 'reliabuilder', supplier: 'ReliaBuilder',
+      quoted: 176755, committed: 88814.5, invoiced: 88814.5, paid: null,
+      unpaid: 88814.5, nextDueOn: null, tbcCount: 1 },
+    { projectId: 'p1', supplierKey: 'msc', supplier: 'MSC Consulting Group',
+      quoted: null, committed: 4335.5, invoiced: 4335.5, paid: null,
+      unpaid: 4335.5, nextDueOn: null, tbcCount: 0 },
+    { projectId: 'p1', supplierKey: 'tile space', supplier: 'Tile Space',
+      quoted: 1952.47, committed: 1952.47, invoiced: 1952.47, paid: 1952.47,
+      unpaid: 0, nextDueOn: null, tbcCount: 0 },
+  ];
+
+  it('puts Quoted above Committed, and reads it off the supplier rows', async () => {
+    // Committed on its own cannot tell a job nobody has priced from one where
+    // three contractors have quoted and nobody has signed. $176,755 + $1,952.47
+    // is what the suppliers have actually said.
+    const r = await arrange({
+      project: project({ committedTotal: 95102.47 }),
+      suppliers: three,
+    });
+    r.getByText('Quoted');
+    r.getByText('$178,707.47');
+  });
+
+  it('opens onto who the figure is made of, largest first', async () => {
+    const r = await arrange({
+      project: project({ committedTotal: 95102.47 }),
+      suppliers: three,
+    });
+    expect(r.queryByText('MSC Consulting Group')).toBeNull();
+    await TestRenderer.act(async () =>
+      byLabel(r, 'Show who committed is made of').props.onPress());
+    r.getByText('ReliaBuilder');
+    r.getByText('MSC Consulting Group');
+    r.getByText('$88,814.50');
+    r.getByText('$4,335.50');
+  });
+
+  it('leaves out a supplier with nothing against that figure, rather than drawing a zero', async () => {
+    const r = await arrange({
+      project: project({ paidTotal: 1952.47 }),
+      suppliers: three,
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Show who paid is made of').props.onPress());
+    r.getByText('Tile Space');
+    // "ReliaBuilder, nothing paid" is not part of what Paid is made of.
+    expect(r.queryByText('ReliaBuilder')).toBeNull();
+  });
+
+  it('says so when an override means the rows cannot add up to the line', async () => {
+    // The rows are the prices; the line is what somebody typed instead. A
+    // reader who notices the gap unaided concludes the breakdown is broken.
+    const r = await arrange({
+      project: project({
+        committedTotal: 200000, committedDerived: 95102.47, committedOverride: 200000,
+      }),
+      suppliers: three,
+    });
+    await TestRenderer.act(async () =>
+      byLabel(r, 'Show who committed is made of').props.onPress());
+    r.getByText('These are the prices, and they come to $95,102.47. Committed above was typed in.');
+  });
+
+  it('gives Budget and Forecast no breakdown, because no supplier said them', async () => {
+    const r = await arrange({
+      project: project({ budget: 180000, forecastTotal: 120000 }),
+      suppliers: three,
+    });
+    expect(byLabel(r, 'Show who forecast is made of')).toBeUndefined();
+    expect(byLabel(r, 'Show who budget is made of')).toBeUndefined();
+  });
+});
+
 describe('a figure you can type over', () => {
   it('shows the typed figure, and keeps the derived one one tap away', async () => {
     // The discrepancy paragraph is off the page, but the override is still
@@ -392,15 +466,21 @@ describe('who is owed what', () => {
     expect(r.queryByText('Who we’re paying')).toBeNull();
   });
 
+  const openSuppliers = async (r: ReturnType<typeof render>, count = 1) =>
+    TestRenderer.act(async () =>
+      byLabel(r, `Who we're paying, ${count === 1 ? '1 supplier' : `${count} suppliers`}`).props.onPress());
+
   it('names each supplier, and what is still to go to them', async () => {
     const r = await arrange({
       suppliers: [
         { projectId: 'p1', supplierKey: 'reliabuilder', supplier: 'ReliaBuilder',
+          quoted: 177594.5,
           committed: 177594.5, invoiced: 88814.5, paid: 84000, unpaid: 4814.5,
           nextDueOn: null, tbcCount: 0 },
       ],
     });
     r.getByText('Who we’re paying');
+    await openSuppliers(r);
     r.getByText('ReliaBuilder');
     r.getByText('$93,594.50');
   });
@@ -409,11 +489,35 @@ describe('who is owed what', () => {
     const r = await arrange({
       suppliers: [
         { projectId: 'p1', supplierKey: 'tile space', supplier: 'Tile Space',
+          quoted: 1952.47,
           committed: 1952.47, invoiced: 1952.47, paid: 1952.47, tbcCount: 0 },
       ],
     });
+    await openSuppliers(r);
     r.getByText('Settled');
     expect(r.queryByText('$0')).toBeNull();
+  });
+
+  it('is folded to start with, and the heading still says how many and how much', async () => {
+    // A fold keeps the heading and its count or it is a filter rather than a
+    // fold — the list tab's own rule, one screen over. Five supplier cards is
+    // most of a page, and what somebody arrives with is the button above.
+    const r = await arrange({
+      project: project({ dueToPay: 4814.5 }),
+      suppliers: [
+        { projectId: 'p1', supplierKey: 'reliabuilder', supplier: 'ReliaBuilder',
+          quoted: 177594.5, committed: 177594.5, invoiced: 88814.5, paid: 84000,
+          unpaid: 4814.5, nextDueOn: null, tbcCount: 0 },
+        { projectId: 'p1', supplierKey: 'tile space', supplier: 'Tile Space',
+          quoted: 1952.47, committed: 1952.47, invoiced: 1952.47, paid: 1952.47,
+          unpaid: 0, nextDueOn: null, tbcCount: 0 },
+      ],
+    });
+    r.getByText('Who we’re paying');
+    r.getByText('2 · $4,814.50 to pay');
+    expect(r.queryByText('ReliaBuilder')).toBeNull();
+    await openSuppliers(r, 2);
+    r.getByText('ReliaBuilder');
   });
 
   it('says it could not load rather than drawing half a page', async () => {
@@ -496,6 +600,45 @@ describe('files roll up, never down', () => {
     // "attachments") and must not appear in the roll-up list underneath, which
     // is for what is attached *below* it.
     expect(r.queryByText('Everything filed under this job')).toBeNull();
+  });
+});
+
+describe('the parts of the job fold independently', () => {
+  const two = [
+    element({ id: 'e1', name: 'Bathroom', implicit: false, sortOrder: 0, itemCount: 1 }),
+    element({ id: 'e2', name: 'Laundry', implicit: false, sortOrder: 1, itemCount: 1 }),
+  ];
+  const twoItems = [
+    item({ id: 'i1', elementId: 'e1', name: 'Toilet suite' }),
+    item({ id: 'i2', elementId: 'e2', name: 'Washing machine tap' }),
+  ];
+
+  it('does not shut one heading to open another', async () => {
+    // It was a single open id, so opening the laundry shut the bathroom — and
+    // the second tap read as the first one being undone, on a page somebody
+    // opens two parts of side by side to compare them.
+    const r = await arrange({
+      project: project({ shownElementCount: 2, elementCount: 2 }),
+      elements: two,
+      items: twoItems,
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Bathroom').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Laundry').props.onPress());
+    r.getByText('Toilet suite');
+    r.getByText('Washing machine tap');
+  });
+
+  it('still shuts the one that was pressed', async () => {
+    const r = await arrange({
+      project: project({ shownElementCount: 2, elementCount: 2 }),
+      elements: two,
+      items: twoItems,
+    });
+    await TestRenderer.act(async () => byLabel(r, 'Bathroom').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Laundry').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Bathroom').props.onPress());
+    expect(r.queryByText('Toilet suite')).toBeNull();
+    r.getByText('Washing machine tap');
   });
 });
 

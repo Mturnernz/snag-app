@@ -144,7 +144,7 @@ it('saves the correction through updateQuote, not as a new price, and never carr
   const { r, onUpdateQuote, onAddQuote } = arrange();
   await openEdit(r);
   await TestRenderer.act(async () => boxByLabel(r, 'Amount').props.onChangeText('1080'));
-  await TestRenderer.act(async () => byLabel(r, 'Save the correction').props.onPress());
+  await TestRenderer.act(async () => byLabel(r, 'Save').props.onPress());
 
   expect(onAddQuote).not.toHaveBeenCalled();
   expect(onUpdateQuote).toHaveBeenCalledWith('q1', {
@@ -159,7 +159,7 @@ it('never carries the status through a correction', async () => {
   const { r, onUpdateQuote, onSetQuoteStatus } = arrange([quote({ status: 'accepted' })]);
   await openEdit(r);
   await TestRenderer.act(async () => boxByLabel(r, 'Amount').props.onChangeText('1080'));
-  await TestRenderer.act(async () => byLabel(r, 'Save the correction').props.onPress());
+  await TestRenderer.act(async () => byLabel(r, 'Save').props.onPress());
 
   // Accepting stays on onSetQuoteStatus, which is its own call precisely so the
   // sibling-clearing can never be skipped by a caller passing a status among
@@ -172,7 +172,7 @@ it('clears a field that is emptied rather than leaving the old value', async () 
   const { r, onUpdateQuote } = arrange();
   await openEdit(r);
   await TestRenderer.act(async () => boxByLabel(r, 'Who from').props.onChangeText(''));
-  await TestRenderer.act(async () => byLabel(r, 'Save the correction').props.onPress());
+  await TestRenderer.act(async () => byLabel(r, 'Save').props.onPress());
   // An emptied supplier is somebody saying they no longer know. Leaving the old
   // one there would be the box lying about what it holds.
   expect(onUpdateQuote.mock.calls[0][1].supplier).toBeNull();
@@ -361,11 +361,28 @@ describe('an item still carrying more than one price from before', () => {
 });
 
 describe('installed, the one state still changed by hand', () => {
-  it('is offered as a single control, separate from the price header', async () => {
+  it('is two named halves, so "not installed" is an answer rather than an absence', async () => {
     const { r, onUpdateItem } = arrange();
-    expect(byLabel(r, 'Mark as installed')).toBeDefined();
-    await TestRenderer.act(async () => byLabel(r, 'Mark as installed').props.onPress());
+    expect(byLabel(r, 'Installed')).toBeDefined();
+    expect(byLabel(r, 'Not installed')).toBeDefined();
+    // A single tick left "no" as the unlabelled absence of a press, on the one
+    // fact that decides whether the handover list offers this row at all.
+    expect(byLabel(r, 'Not installed').props.accessibilityState.selected).toBe(true);
+    await TestRenderer.act(async () => byLabel(r, 'Installed').props.onPress());
     expect(onUpdateItem).toHaveBeenCalledWith('i1', { status: 'installed' }, 'Installed');
+  });
+
+  it('writes nothing when the half that is already lit is pressed', async () => {
+    const { r, onUpdateItem } = arrange();
+    await TestRenderer.act(async () => byLabel(r, 'Not installed').props.onPress());
+    expect(onUpdateItem).not.toHaveBeenCalled();
+  });
+
+  it('comes back off through the other half', async () => {
+    const { r, onUpdateItem } = arrange([], [], { item: item({ status: 'installed' }) });
+    expect(byLabel(r, 'Installed').props.accessibilityState.selected).toBe(true);
+    await TestRenderer.act(async () => byLabel(r, 'Not installed').props.onPress());
+    expect(onUpdateItem).toHaveBeenCalledWith('i1', { status: 'considering' }, 'Not installed');
   });
 });
 
@@ -405,43 +422,50 @@ describe('adding an item opens this sheet, not one in front of it', () => {
     // The thing the second modal could never do: put a price on it without
     // opening the item you have just made.
     const { r } = adding();
-    expect(boxByLabel(r, 'What the item is')).toBeDefined();
     expect(boxByLabel(r, 'Who from')).toBeDefined();
     expect(boxByLabel(r, 'Amount')).toBeDefined();
     expect(boxByLabel(r, 'Notes')).toBeDefined();
-    expect(byLabel(r, 'Mark as installed')).toBeDefined();
+    expect(byLabel(r, 'Installed')).toBeDefined();
   });
 
-  it('creates the row when the title is committed', async () => {
+  it('asks what it is once, in the price form, and never as a title box', async () => {
+    // Two boxes for one fact: a toilet is a toilet whether it is being named
+    // or being priced.
+    const { r } = adding();
+    expect(boxByLabel(r, 'What the item is')).toBeUndefined();
+    expect(boxByLabel(r, 'What exactly')).toBeDefined();
+  });
+
+  it('names the row from What exactly', async () => {
     const { r, onCreate } = adding();
     await TestRenderer.act(async () => {
-      boxByLabel(r, 'What the item is').props.onChangeText('Toilet');
+      boxByLabel(r, 'What exactly').props.onChangeText('Toilet');
+      boxByLabel(r, 'Amount').props.onChangeText('890');
     });
-    await TestRenderer.act(async () => boxByLabel(r, 'What the item is').props.onBlur());
+    await TestRenderer.act(async () => byLabel(r, 'Save').props.onPress());
     expect(onCreate).toHaveBeenCalledWith('e1', 'Toilet');
   });
 
   it('writes nothing at all from a sheet opened by mistake', async () => {
-    // The guarantee the old two-step gave, kept: walking away without typing
-    // a name leaves no row behind.
+    // The guarantee the old two-step gave, kept: walking away without saying
+    // what it is leaves no row behind.
     const { r, onCreate, onUpdateItem } = adding();
-    await TestRenderer.act(async () => boxByLabel(r, 'What the item is').props.onBlur());
-    await TestRenderer.act(async () => byLabel(r, 'Mark as installed').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Installed').props.onPress());
     expect(onCreate).not.toHaveBeenCalled();
     expect(onUpdateItem).not.toHaveBeenCalled();
-    r.getByText('Give it a name — what is it you’re getting?');
+    r.getByText('Say what it is — that names the item as well as the price.');
   });
 
   it('creates the row on the way past when a price is saved without blurring', async () => {
-    // On native a press does not reliably blur a TextInput, so typing a name
-    // and going straight for the amount is one gesture — and without this it
-    // would write nothing and say nothing.
+    // On native a press does not reliably blur a TextInput, so typing what it
+    // is and going straight for the amount is one gesture — and without this
+    // it would write nothing and say nothing.
     const { r, onCreate, onAddQuote } = adding();
     await TestRenderer.act(async () => {
-      boxByLabel(r, 'What the item is').props.onChangeText('Toilet');
+      boxByLabel(r, 'What exactly').props.onChangeText('Toilet');
       boxByLabel(r, 'Amount').props.onChangeText('890');
     });
-    await TestRenderer.act(async () => byLabel(r, 'Save this price').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Save').props.onPress());
 
     expect(onCreate).toHaveBeenCalledWith('e1', 'Toilet');
     expect(onAddQuote).toHaveBeenCalledWith('new1', expect.objectContaining({ amount: 890 }));

@@ -1615,6 +1615,15 @@ export interface ProjectSupplierTotals {
   supplierKey: string;
   /** Displayed with the spelling used most recently. Null when nobody was named. */
   supplier: string | null;
+  /**
+   * Everything they have quoted that has not been declined — accepted prices
+   * included, because an accepted quote was still quoted.
+   *
+   * The line above Committed on the project page, broken down by who said it.
+   * Null where this supplier has only ever invoiced, which is not zero: a
+   * consultant billing time by the month has no quote and never will.
+   */
+  quoted: number | null;
   committed: number | null;
   invoiced: number | null;
   paid: number | null;

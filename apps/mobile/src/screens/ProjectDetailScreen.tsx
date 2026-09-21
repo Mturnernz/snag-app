@@ -516,7 +516,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         <View style={styles.strip}>
           {budget ? (
             <View style={styles.row}>
-              <Text style={styles.rowKey}>Budget</Text>
+              <Text style={styles.rowKey} numberOfLines={1}>Budget</Text>
               <Text style={styles.rowValue} numberOfLines={1}>{budget}</Text>
             </View>
           ) : null}
@@ -1383,7 +1383,7 @@ function FigureRow({
       accessibilityRole="button"
       accessibilityLabel={`${label}, ${value ?? 'nothing yet'}${edited ? ', edited' : ''}. Edit it.`}
     >
-      <Text style={[styles.rowKey, lead && styles.rowKeyLead]}>{label}</Text>
+      <Text style={[styles.rowKey, lead && styles.rowKeyLead]} numberOfLines={1}>{label}</Text>
       <Text
         style={[
           styles.rowValue,
@@ -1452,8 +1452,11 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   rowLast: { borderBottomWidth: 0 },
+  // Wide enough for "COMMITTED" and "FORECAST" — the two longest labels here —
+  // to sit on one line at this size and letter-spacing. 58px wrapped both of
+  // them; measured rather than guessed, with a few px of headroom.
   rowKey: {
-    width: 58,
+    width: 84,
     flexShrink: 0,
     fontSize: Typography.xs,
     color: Colors.textMuted,
@@ -1462,9 +1465,16 @@ const styles = StyleSheet.create({
   },
   // Right-aligned so the three figures share an edge; `minWidth: 0` because a
   // flexed Text around a long unbroken string will otherwise refuse to shrink.
+  //
+  // `minWidth` on the figure itself is sized for the schema's own ceiling
+  // instead of guessed: `project_overrides.amount` is `numeric(12,2)` capped
+  // at 99,999,999, which is the most `formatMoney` can ever produce — 8 whole
+  // digits and 2 decimal digits, 10 in total. Reserving that width up front
+  // means the column never has to make room *after* somebody types a bigger
+  // figure, which is the one moment a jumping label would be most confusing.
   rowValue: {
     flex: 1,
-    minWidth: 0,
+    minWidth: 108,
     textAlign: 'right',
     fontFamily: Fonts.mono,
     fontSize: Typography.base,
@@ -1479,7 +1489,10 @@ const styles = StyleSheet.create({
   // Forecast leads: it is the figure the page is opened to read, and the one
   // that answers "are we over". Committed sits underneath as its evidence.
   rowKeyLead: { color: Colors.textSecondary, fontWeight: Typography.semibold },
-  rowValueLead: { fontSize: Typography.lg, color: Colors.textPrimary },
+  // Forecast's font is a size up from the other three, so the same 10-digit
+  // reservation needs a bit more room at this size or it would be the one row
+  // still tight enough to nudge the label.
+  rowValueLead: { fontSize: Typography.lg, color: Colors.textPrimary, minWidth: 128 },
   rowValueOver: { color: Colors.danger },
   stripRule: {
     height: 1,

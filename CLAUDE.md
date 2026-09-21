@@ -559,6 +559,14 @@ they last looked.
   is never a no-op. It is on that line rather than a row of its own because this screen has already
   evicted two filter rails for charging vertical rent on every visit.
 
+  **It reaches everything on screen, the trip sheet included**, and that is not a detail. It used
+  to reach only the list's own sections — so with the parts lens up, where the shopping card *is*
+  most of what is visible, pressing *Collapse all* folded the rooms behind the card and left the
+  rooms in front of you exactly as they were. A control that looks like it did nothing is the one
+  failure a control called "all" must not have. Expanding clears the trip sheet's folds outright
+  rather than only the rooms currently listed, because a room whose items have all been bought
+  drops out of the card and would otherwise come back shut the next time something was added to it.
+
   **It is `FoldAllPill`, and the House tab uses the same one.** Both tabs group the same house by
   the same rooms in the same seeded order — that rule already governs their headings, and it
   governs the control that closes them too, so there is one component rather than two that drift.
@@ -605,9 +613,16 @@ they last looked.
   does not say that pressing it swaps what the screen is showing, and a control whose whole job is
   to change the view has to name the view it changes to. So a caption sits under it reading **View
   shopping list**, and **View jobs list** once the trip sheet is up — by then the question has
-  turned round. It is the same size as the filter button beside it: the ~34px rule is about a
-  *rail* of chips outweighing the list it filters, and two header controls are not a rail, so a
-  48px square next to a 34px lozenge just reads as ragged.
+  turned round.
+
+  **Both header buttons come from one style, and the count rides the corner.** They were a 48px
+  square beside a lozenge half as wide again, offset vertically because the caption made the cart
+  column taller than the filter and the row centred them — two controls doing the same kind of job
+  reading as two different kinds of control. So `iconBtn` is the one shape, the two sit in a group
+  of their own with `alignItems: 'flex-start'` so they share a **top edge** while the cluster stays
+  centred against the title, and the count moved out of the cart into a badge, because it is a
+  number *about* the button rather than part of it. No new hue on the badge: fern while the button
+  is a sunken well, inverted to fern-on-white once the button itself has gone fern.
 
 `SnagListScreen.test.tsx` pins the New rule, the first-run case, the room ordering, the done
 window, and the whole of the fold — the heading and its count surviving, only the folded section
@@ -835,6 +850,13 @@ Three rules on screen:
   holds sorts after the seeded ones rather than jumping to the top, because `snags.room` is TEXT
   precisely so history survives a tag being removed. Each room folds, keeping its heading and a
   count of **what is left to get** rather than what was ever listed — the card's existing rule.
+
+  **The card claims nothing about the trip.** It carried a line reading *"One trip clears 5 jobs"*,
+  which is a promise about the world rather than a fact about the list: five jobs across a hardware
+  shop, a garden centre and a paint counter are three trips, and a card that tells somebody
+  otherwise is a card they stop believing — the same argument that keeps the pill from asking for
+  what was bought on Saturday. The heading and the counts say everything true that line was
+  reaching for.
 - **A ticked row stays on the trip sheet, struck through.** "Done leaves" would have it vanish, but a
   tap in an aisle lands on the wrong row often enough that a list which silently drops what you just
   touched is a dead end — you would have to remember which job the item belonged to to put it back.

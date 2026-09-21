@@ -342,6 +342,42 @@ describe('the shopping list', () => {
     expect(r.queryByText('View shopping list')).toBeNull();
   });
 
+  // The card names what is left to get and claims nothing about the trip. It
+  // said "One trip clears 5 jobs", which is a promise about the world rather
+  // than a fact about the list — five jobs can easily be three shops.
+  it('claims nothing about how many trips it takes', async () => {
+    withParts();
+    const r = render(<SnagListScreen />);
+    await settle();
+    await TestRenderer.act(async () => byLabel(r, 'View shopping list, 2 things to get').props.onPress());
+
+    expect(r.queryByText('Pick up on the way')).not.toBeNull();
+    expect(texts(r).some((t) => /One trip/i.test(t))).toBe(false);
+  });
+
+  // The failure that prompted this: with the parts lens up the card is most of
+  // what is on screen, so a Collapse all that reached only the sections behind
+  // it read as a button that did nothing.
+  it('collapses the trip sheet too, not just the list behind it', async () => {
+    withParts();
+    const r = render(<SnagListScreen />);
+    await settle();
+    await TestRenderer.act(async () => byLabel(r, 'View shopping list, 2 things to get').props.onPress());
+
+    expect(byLabel(r, 'Seal, tick off')).toBeDefined();
+
+    await TestRenderer.act(async () => byLabel(r, 'Collapse all').props.onPress());
+
+    // The rooms on the card fold with everything else, and the headings stay.
+    expect(byLabel(r, 'Seal, tick off')).toBeUndefined();
+    expect(byLabel(r, 'Brackets, tick off')).toBeUndefined();
+    expect(byLabel(r, 'Bathroom, 1 to get')).toBeDefined();
+
+    // And it now offers the way back, rather than still saying Collapse all.
+    await TestRenderer.act(async () => byLabel(r, 'Expand all').props.onPress());
+    expect(byLabel(r, 'Seal, tick off')).toBeDefined();
+  });
+
   // "Outside" nine times down the right-hand edge is a column of noise where
   // one heading would do, and a trip to the shop batches the way the list does.
   it('groups the trip sheet by room, and folds a room away', async () => {

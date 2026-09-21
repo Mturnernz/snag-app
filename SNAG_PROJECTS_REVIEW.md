@@ -536,28 +536,58 @@ What the scenario needs, and where each stands:
 
 | | Element | Status |
 |---|---|---|
-| 1 | **Budget**, project and per part | Built |
-| 2 | **Expected cost** — named, rough amount, no vendor, never committed | **Missing entirely** |
-| 3 | **Commitment** — a vendor and an amount you have agreed to | Exists as a quote; needs to become a noun, and to be **signed** rather than *accepted* |
-| 4 | **Allowance line** inside a commitment's build-up | Table and arithmetic built; **no editor, zero rows** |
-| 5 | Allowance **inside-the-total or on top of it** | **Missing** — must be asked |
-| 6 | Allowance **attendance / margin** | **Missing** — must be asked |
-| 7 | **Competing quote superseding an allowance**, over and under | Arithmetic built; no editor |
-| 8 | **Who pays whom** — direct, or through the head contractor | **Missing** |
-| 9 | **Claim / invoice** against a commitment | Built |
-| 10 | **Due date** on a bill | **Missing** — one column |
-| 11 | **Payment schedule** — the 25% × 4 | **Missing** |
-| 12 | **Payment** settling a bill | Built |
-| 13 | **Still to be billed** (committed − invoiced) | **Missing** |
-| 14 | **Due to pay**, with its date | **Missing** |
-| 15 | **Forecast** = committed + open allowances + expected costs + unpriced scope at budget | **Missing** |
-| 16 | **Variance**, per allowance line and forecast vs budget | Sentences written; nothing to run them on |
+| 1 | **Budget**, project and per part | Was built |
+| 2 | **Expected cost** — named, rough amount, no vendor, never committed | **Built** · `project_expected_costs`, `ExpectedCostSheet` |
+| 3 | **Commitment** — a vendor and an amount you have agreed to | **Built** · *Who we're paying*, **Signed** not *accepted*, two taps from the top |
+| 4 | **Allowance line** inside a commitment's build-up | **Built** · `BuildUpSheet` — the editor that makes the rule reachable |
+| 5 | Allowance **inside-the-total or on top of it** | **Built** · `additional`, asked once |
+| 6 | Allowance **attendance / margin** | **Built** · `attendance_pct`, a share of the actual |
+| 7 | **Competing quote superseding an allowance**, over and under | **Built** · `describeLineMovement`, both directions |
+| 8 | **Who pays whom** — direct, or through the head contractor | **Built** · `billed_through_id` |
+| 9 | **Claim / invoice** against a commitment | Was built |
+| 10 | **Due date** on a bill | **Built** · `due_on`, and `project_bills` |
+| 11 | **Payment schedule** — the 25% × 4 | **Built** · `project_milestones`, `ScheduleSheet` |
+| 12 | **Payment** settling a bill | Was built |
+| 13 | **Still to be billed** (committed − invoiced) | **Built** · signed, so an over-claim shows |
+| 14 | **Due to pay**, with its date | **Built** · `describeToPay`, the only figure about today |
+| 15 | **Forecast** = committed + open allowances + expected costs + unpriced scope at budget | **Built** · with `forecastGuess` beside it |
+| 16 | **Variance**, per allowance line and forecast vs budget | **Built** · names its cause, silent under |
 
-Six built, ten missing — but **the ten are mostly columns, rows and screens
-rather than new arithmetic.** The engine that turns a build-up into a total,
-normalises GST, keeps an allowance apart from an unpriced item and refuses to sum
-a superseded line twice is written, granted and tested. What it has never had is
-anybody able to put a line into it.
+All sixteen are built. As predicted, the ten missing ones were mostly columns,
+rows and screens rather than new arithmetic — the engine that turns a build-up
+into a total, normalises GST and keeps an allowance apart from an unpriced item
+needed no rebuilding. What it had never had was anybody able to put a line into
+it.
+
+### What the build found that the review did not
+
+Two of them, and both only surfaced when Mike and Alyssa's scenario was run
+through the views as **real rows** rather than through the TypeScript:
+
+- **A direct buy was counted nowhere at all.** §3.1's *"a superseding quote
+  contributes only through that line, never also on its own account"* is right
+  while the allowance stays inside the contract. It stops being right the moment
+  the sub bills the household direct: the allowance correctly leaves the contract
+  sum, and the filter then dropped the sub's own price too. The $12,000 genuinely
+  owed to the cabinetmaker vanished.
+- **A PC sum did not adjust a fixed price.** A fixed contract does not move on an
+  *unanswered* allowance — the builder carries that. But one that has been priced
+  and is being supplied by the builder is the contract sum adjusting to a real
+  number, which is what a PC sum is for. There was no term for it, so the
+  contract went on carrying the $14,000 it allowed while the $11,800 actually
+  charged landed nowhere and the household's $2,200 saving was invisible.
+
+Together they read the scenario as **$153,200 committed** where the truth is
+**$163,000**. `20260921090400` is the fix, and the check that now holds it is the
+one this file already named as worth keeping: the supplier rows sum to the
+committed total — ReliaBuilder $139,000, Gibson $12,000, Kitchen Mania $12,000,
+Elite Bathroomware absent because they bill the builder, and Committed $163,000.
+
+A third, smaller, in the client: the Projects card began rendering `$8,990
+committed` with **no denominator**, because `describeForecast` is silent where
+there is no forecast while the card still shows committed. That is the one rule
+this feature cannot bend, and the spec written for it caught the regression the
+same afternoon it arrived.
 
 ### The three questions the app must ask and must never infer
 

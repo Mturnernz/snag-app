@@ -1,6 +1,8 @@
 import {
-  describeAllowance, describeBudget, describeBuildUp, describeLineVariance, describePartsBudget,
-  describeTotals, formatMoney, groupProjectsByStatus, inclGst, itemPriceLabel, outstanding,
+  describeAllowance, describeBudget, describeBuildUp, describeForecast, describeForecastVariance,
+  describeLineMovement, describeLineVariance, describePartsBudget, describeStillToBill,
+  describeToPay, describeTotals, forecastVariance, formatMoney, groupProjectsByStatus, inclGst,
+  itemPriceLabel, milestoneAmount, outstanding,
   projectDossierTable, projectExportPhotos, projectExportTable, showsElements,
 } from '@snag/supabase-queries';
 import { GST_RATE } from '../types';
@@ -436,5 +438,178 @@ describe('the extract cannot say more than the record does', () => {
     // Round-robin: one from each source before any source's second, so a single
     // item photographed five times cannot spend the allowance.
     expect(photos.map((p) => p.path)).toEqual(['a.jpg', 'i1.jpg', 'b.jpg', 'i2.jpg']);
+  });
+});
+
+/**
+ * The forecast, and the discipline that keeps it from being a lie.
+ *
+ * Committed answers *what have we agreed to*. Three months into a job with five
+ * items unpriced it is not the answer to *are we over*, and it fails in the
+ * direction that costs money — everything nobody has priced counts as nought,
+ * so the budget looks comfortable until the week it does not.
+ *
+ * A forecast is by construction partly invented, which is why every one of these
+ * is about what it refuses to claim rather than what it adds up to.
+ */
+describe('the forecast says how much of itself is a guess', () => {
+  it('never describes a forecast without its denominator', () => {
+    const line = describeForecast(
+      project({ forecastTotal: 198400, forecastGuess: 11200, itemCount: 18, pricedCount: 13 })
+    );
+    expect(line).toBe('13 of 18 items priced · $11,200 of it still a guess');
+  });
+
+  it('is silent when there is no forecast, rather than describing nothing', () => {
+    expect(describeForecast(project({ forecastTotal: null }))).toBeNull();
+  });
+
+  it('keeps “still a guess” and “still an allowance” as different sentences', () => {
+    // An allowance is somebody's written number inside a contract they signed,
+    // so it counts as committed and is merely soft. A ballpark outside one and a
+    // cost nobody has quoted are not committed at all. Collapsing the wording
+    // would claim all three are somebody's written number, which two are not.
+    const forecastLine = describeForecast(
+      project({ forecastTotal: 198400, forecastGuess: 11200, itemCount: 9, pricedCount: 9 })
+    );
+    const allowanceLine = describeAllowance({ allowanceOpen: 11200 });
+    expect(forecastLine).toContain('still a guess');
+    expect(forecastLine).not.toContain('still an allowance');
+    expect(allowanceLine).toBe('$11,200 still an allowance');
+  });
+});
+
+describe('the variance warning', () => {
+  const over = {
+    budget: 187000, budgetInclGst: true, forecastTotal: 210000, forecastGuess: 17645.78,
+    itemCount: 18, pricedCount: 13,
+  };
+
+  it('names the cause rather than printing a percentage', () => {
+    expect(describeForecastVariance(over)).toBe(
+      '$23,000 over budget — 5 items aren’t priced and $17,645.78 is still a guess'
+    );
+  });
+
+  it('is silent under budget — it is a warning, not a running commentary', () => {
+    expect(
+      describeForecastVariance({ ...over, forecastTotal: 120000, forecastGuess: 0 })
+    ).toBeNull();
+  });
+
+  it('is silent inside the 5% threshold, and speaks past it', () => {
+    // 5% of $187,000 is $9,350 — about the smallest overrun worth interrupting
+    // somebody for, and well above the noise of a rounded quote.
+    expect(describeForecastVariance({ ...over, forecastTotal: 195000 })).toBeNull();
+    expect(describeForecastVariance({ ...over, forecastTotal: 197000 })).not.toBeNull();
+    expect(forecastVariance({ budget: 187000, budgetInclGst: true, forecastTotal: 196350 }))
+      .toBeCloseTo(0.05, 10);
+  });
+
+  it('has no variance against a budget nobody typed, rather than reassuring with 0%', () => {
+    expect(forecastVariance({ budget: null, budgetInclGst: true, forecastTotal: 210000 }))
+      .toBeNull();
+    expect(describeForecastVariance({ ...over, budget: null })).toBeNull();
+  });
+
+  it('grosses an ex-GST budget up before comparing, because the forecast is inclusive', () => {
+    // $180,000 ex-GST is $207,000 inclusive, so a $210,000 forecast is 1.4% over
+    // rather than 17% over. Comparing the two bases is a 15% error in the
+    // direction that tells somebody to stop spending.
+    expect(
+      describeForecastVariance({ ...over, budget: 180000, budgetInclGst: false })
+    ).toBeNull();
+  });
+});
+
+describe('the two gaps are not the same gap', () => {
+  it('reads committed less invoiced as what is still to come', () => {
+    expect(describeStillToBill({ stillToBill: 88780 })).toBe('$88,780 still to be billed');
+  });
+
+  it('reports an over-claim rather than flooring it into a tidy zero', () => {
+    // Negative means somebody has billed more than was ever committed, which is
+    // the single most useful thing this subtraction can say.
+    expect(describeStillToBill({ stillToBill: -1200 }))
+      .toBe('$1,200 billed beyond what was committed');
+  });
+
+  it('says so plainly when everything committed has been billed', () => {
+    expect(describeStillToBill({ stillToBill: 0 })).toBe('everything committed has been billed');
+  });
+
+  it('is silent when nothing has been committed at all', () => {
+    expect(describeStillToBill({ stillToBill: null })).toBeNull();
+  });
+
+  it('leads with the overdue share when there is one', () => {
+    expect(
+      describeToPay({ dueToPay: 43987.5, overdueTotal: 12000, nextDueOn: '2026-10-20', dueCount: 2 })
+    ).toBe('$12,000 overdue of $43,987.50');
+  });
+
+  it('names the date when nothing is late, because that is the actionable part', () => {
+    expect(
+      describeToPay({ dueToPay: 43987.5, overdueTotal: 0, nextDueOn: '2026-10-20', dueCount: 1 })
+    ).toBe('$43,987.50 to pay · next due 20 Oct 2026');
+  });
+
+  it('counts the bills when none of them carries a date', () => {
+    expect(describeToPay({ dueToPay: 4200, overdueTotal: 0, nextDueOn: null, dueCount: 3 }))
+      .toBe('$4,200 to pay · 3 bills');
+  });
+
+  it('is absent at zero — a line that can only say “nothing owed” is not a line', () => {
+    expect(describeToPay({ dueToPay: 0, overdueTotal: 0, nextDueOn: null, dueCount: 0 }))
+      .toBeNull();
+  });
+});
+
+describe('an allowance moves in both directions', () => {
+  const line = { name: 'Laundry cabinetry', amount: 10000, amountInclGst: true, additional: false };
+
+  it('says how far over a real quote has come, and that it is conditional', () => {
+    expect(describeLineMovement(line, 12000, false))
+      .toBe('allowed $10,000; quoted $12,000 — $2,000 over, if you accept it');
+  });
+
+  it('says how far under, because getting money back is as real an event', () => {
+    // A design that only warns on overruns never tells anybody the fittings
+    // supplier was worth ringing.
+    expect(describeLineMovement(line, 7800, true))
+      .toBe('allowed $10,000; quoted $7,800 — $2,200 under');
+  });
+
+  it('drops the conditional once the quote has been accepted', () => {
+    expect(describeLineMovement(line, 12000, true)).not.toContain('if you accept it');
+  });
+
+  it('says nothing at all while nobody has priced it', () => {
+    expect(describeLineMovement(line, null, false)).toBeNull();
+  });
+
+  it('says nothing when the allowance itself carries no figure', () => {
+    expect(describeLineMovement({ ...line, amount: null }, 12000, false)).toBeNull();
+  });
+});
+
+describe('a milestone resolves against the commitment it hangs off', () => {
+  it('takes a percentage of the contract', () => {
+    expect(milestoneAmount({ percent: 25, amount: null, amountInclGst: true }, 176755))
+      .toBe(44188.75);
+  });
+
+  it('prefers a flat amount where one was given', () => {
+    expect(milestoneAmount({ percent: null, amount: 5000, amountInclGst: true }, 176755))
+      .toBe(5000);
+  });
+
+  it('grosses an ex-GST flat amount, because the rollups are inclusive', () => {
+    expect(milestoneAmount({ percent: null, amount: 1000, amountInclGst: false }, null))
+      .toBe(1150);
+  });
+
+  it('cannot invent a figure from a percentage of nothing', () => {
+    expect(milestoneAmount({ percent: 25, amount: null, amountInclGst: true }, null)).toBeNull();
   });
 });

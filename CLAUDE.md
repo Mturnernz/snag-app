@@ -293,6 +293,34 @@ child rather than absolutely positioned, so it can never overlap what it belongs
 keyboard inset applied by the screen because the bar's own handling is `Keyboard`-based and
 iOS-only — and `Keyboard` is an empty stub in react-native-web.
 
+**Only one of the two buttons at the foot is solid fern, and it is *Mark done*.** They were both
+filled, both full width, stacked against each other with nothing but their words telling them
+apart — so a thumb reaching for one on muscle memory found the other, and the two are not remotely
+the same kind of act. **The asymmetry is total**: pressing Save is harmless, because the page has
+already saved everything and it merely closes; pressing *Mark done* changes the job's state,
+congratulates somebody, and takes the row off the list. Only one of them has a consequence, so
+only one of them gets the brand's colour — the bar's button is `secondary`, fern on its own tint.
+The split is not new: a finished job already renders *Reopen* as an outline in that same slot.
+
+The gap is the other half. `statusRow` carries a margin on both sides, because peripheral vision
+reads two adjacent full-width controls as one pair whatever they say, and because finishing is the
+last thing that happens rather than part of the repeat card above it.
+
+**And the button says what pressing it will do.** It read **Save** above a line reading *All
+changes saved*, which is the page contradicting itself — and a button that looks like an
+outstanding obligation is one people reach for on autopilot, which is what put a thumb beside
+*Mark done* in the first place. So it is **Save** only while a box is actually holding something
+and **Close** the rest of the time, decided off the same `unsaved` count the hint beside it already
+keeps: one fact, two ways of saying it, unable to disagree.
+
+**A slider was considered for *Mark done* and rejected.** Slide-to-confirm is the affordance for
+something irreversible, and finishing a household job is not: the same slot offers *Reopen*, and
+the list keeps done work for seven days. It would also tax the one rewarding moment in the
+product — the whole reward on offer is that finishing makes the list shorter — and ceremony spent
+where it is not needed is how it stops working where it is, which is the argument this file
+already makes about not demanding a typed word to remove an empty heading. The mis-tap is fixed by
+telling the two buttons apart, not by making the good one harder to press.
+
 **There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
 two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
 be a category. The order down the screen is now: photo strip, headline, the meta row,

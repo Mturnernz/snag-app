@@ -1091,13 +1091,39 @@ export default function SnagDetailScreen() {
           overlap the content it belongs to. The keyboard inset is applied here
           because StickyActionBar's own handling is `Keyboard`-based and
           iOS-only, and `Keyboard` is an empty stub in react-native-web — which
-          is the build people install. */}
+          is the build people install.
+
+          **It is tonal, and *Mark done* keeps the solid fern.** They were two
+          full-width solid fern buttons stacked against each other at the foot
+          of the screen, told apart by nothing but their words — so a thumb
+          reaching for one on muscle memory found the other, and the two are not
+          remotely the same kind of act. Pressing this one is harmless: the page
+          has already saved everything, so it closes. Pressing the other changes
+          the job's state, congratulates you, and takes the row off the list.
+          Only one of them has a consequence, and only one of them is the
+          brand's colour. (That split is already here on the other branch — a
+          finished job renders *Reopen* as an outline in the same slot.)
+
+          **And it says what pressing it will do.** It read **Save** above a
+          line reading *All changes saved*, which is the page contradicting
+          itself — and a button that looks like an outstanding obligation is one
+          people reach for on autopilot, which is what put a thumb next to *Mark
+          done* to begin with. So it is **Save** only while a box is actually
+          holding something, and **Close** the rest of the time, off the count
+          the hint beside it already keeps. One fact, two ways of saying it,
+          never disagreeing. */}
       <View style={{ marginBottom: keyboard }}>
         <StickyActionBar
           hint={unsaved > 0 ? unsavedHint(unsaved) : 'All changes saved'}
           hintTone={unsaved > 0 ? 'warn' : 'muted'}
         >
-          <Button label="Save" onPress={saveAndClose} loading={busy} fullWidth />
+          <Button
+            label={unsaved > 0 ? 'Save' : 'Close'}
+            variant="secondary"
+            onPress={saveAndClose}
+            loading={busy}
+            fullWidth
+          />
         </StickyActionBar>
       </View>
 
@@ -1480,7 +1506,17 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginTop: Spacing.xs,
   },
-  statusRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
+  // Mark done stands clear of both its neighbours. Above it, because finishing
+  // is the last thing that happens and is not part of the repeat card; below
+  // it, because the sticky bar's button sits directly under it and peripheral
+  // vision reads two adjacent full-width controls as one pair whatever they
+  // say. The bar's own top rule and shadow do the rest.
+  statusRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.xl,
+  },
   statusButton: { flex: 1 },
   section: { marginTop: Spacing.lg, gap: Spacing.sm },
   sectionTitle: {

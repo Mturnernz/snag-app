@@ -79,6 +79,10 @@ const mock_createElement = jest.fn();
 const mock_deleteElement = jest.fn().mockResolvedValue([]);
 const mock_setItemExcluded = jest.fn().mockResolvedValue(undefined);
 const mock_setExpectedCostConfirmed = jest.fn().mockResolvedValue(undefined);
+const mock_approveInvoiceReview = jest.fn().mockResolvedValue({});
+const mock_declineInvoiceReview = jest.fn().mockResolvedValue({});
+const mock_restoreInvoiceReview = jest.fn().mockResolvedValue({});
+const mock_deleteInvoiceReview = jest.fn().mockResolvedValue(undefined);
 const mock_createItem = jest.fn().mockResolvedValue({
   id: 'new1', elementId: 'e1', name: 'Shower mixer', status: 'considering', excluded: false,
   sortOrder: 0, notes: null, photoPaths: [], documentPaths: [], createdAt: '',
@@ -106,6 +110,10 @@ jest.mock('../lib/supabase', () => {
     addQuoteLine: jest.fn(), deleteQuoteLine: jest.fn(),
     addMilestone: jest.fn(), deleteMilestone: jest.fn(),
     createExpectedCost: jest.fn(), deleteExpectedCost: jest.fn(),
+    approveInvoiceReview: (...a: unknown[]) => mock_approveInvoiceReview(...a),
+    declineInvoiceReview: (...a: unknown[]) => mock_declineInvoiceReview(...a),
+    restoreInvoiceReview: (...a: unknown[]) => mock_restoreInvoiceReview(...a),
+    deleteInvoiceReview: (...a: unknown[]) => mock_deleteInvoiceReview(...a),
     // The pure ones are real: mocking `describeTotals` would mock away the rule.
     describeTotals: real.describeTotals,
     describeBudget: real.describeBudget,
@@ -193,6 +201,7 @@ async function arrange(opts: {
   project?: any; elements?: any[]; items?: any[]; quotes?: any[]; lines?: any[];
   payments?: any[]; files?: any[]; snags?: any[]; suppliers?: any[]; things?: any[];
   milestones?: any[]; expected?: any[]; expectedCostLines?: any[]; bills?: any[];
+  invoiceReviews?: any[];
 } = {}) {
   mock_getProjectPage.mockResolvedValue({
     project: opts.project ?? project(),
@@ -209,6 +218,7 @@ async function arrange(opts: {
     files: opts.files ?? [],
     things: opts.things ?? [],
     snags: opts.snags ?? [],
+    invoiceReviews: opts.invoiceReviews ?? [],
   });
   const r = render(<ProjectDetailScreen route={{ params: { projectId: 'p1' } } as any} navigation={{} as any} />);
   await TestRenderer.act(async () => {});
@@ -902,7 +912,7 @@ describe('a press costs one read, however many presses land', () => {
           resolve({
             project: project(), elements: [element()], items: [], quotes: [], lines: [],
             payments: [], milestones: [], expected: [], expectedCostLines: [], bills: [],
-            suppliers: [], files: [], things: [], snags: [],
+            suppliers: [], files: [], things: [], snags: [], invoiceReviews: [],
           });
         });
       });
@@ -993,5 +1003,144 @@ describe('adding an item to a part of the job', () => {
   it('is offered under Also expecting too, as the same pill', async () => {
     const r = await arrange();
     expect(byLabel(r, "Add something you're expecting")).toBeDefined();
+  });
+});
+
+describe('invoices that arrived by themselves', () => {
+  const review = (over: Partial<any> = {}): any => ({
+    id: 'r1', projectId: 'p1', elementId: null,
+    supplier: 'ReliaBuilder Limited', detail: null,
+    amount: 43987.5, amountInclGst: true,
+    invoiceNumber: 'INV-0208', dated: '2026-07-02', dueOn: '2026-07-02',
+    paid: false, paidOn: null, paidEvidence: null, category: null,
+    sourceRef: null, sourceSubject: null, sourceFrom: null, sourceAt: null,
+    inferred: [], state: 'pending', quoteId: null, decidedAt: null,
+    createdAt: '2026-07-02T00:00:00Z',
+    ...over,
+  });
+
+  /** The bell, by the sentence it reads out. */
+  const bell = (r: ReturnType<typeof render>, n: number) =>
+    byLabel(r, `You have ${n} object${n === 1 ? '' : 's'} to review`);
+
+  // The shopping pill's rule, and *Fit* in PhotoViewer: a bell with nothing
+  // behind it is a control dressed as a choice, and one that is always there
+  // teaches people it never means anything.
+  it('draws no bell when there is nothing waiting', async () => {
+    const r = await arrange({ invoiceReviews: [] });
+    expect(bell(r, 0)).toBeUndefined();
+    expect(r.queryByText('You have 0 objects to review')).toBeNull();
+  });
+
+  it('says how many are waiting, on the bell and above the deck', async () => {
+    const r = await arrange({ invoiceReviews: [review(), review({ id: 'r2' })] });
+    expect(bell(r, 2)).toBeDefined();
+    expect(r.queryByText('You have 2 objects to review')).not.toBeNull();
+  });
+
+  // A removed card is not something to review — it has been ruled on. Counting
+  // it would make the number climb as somebody cleared the deck.
+  it('counts what is waiting, not what is in the bin', async () => {
+    const r = await arrange({
+      invoiceReviews: [
+        review(),
+        review({ id: 'r2', state: 'declined', decidedAt: '2026-09-01T00:00:00Z' }),
+        review({ id: 'r3', state: 'approved' }),
+      ],
+    });
+    expect(bell(r, 1)).toBeDefined();
+    expect(r.queryByText('You have 1 object to review')).not.toBeNull();
+  });
+
+  it('draws a card per waiting invoice and none for the ruled-on ones', async () => {
+    const r = await arrange({
+      invoiceReviews: [
+        review({ supplier: 'ReliaBuilder Limited' }),
+        review({ id: 'r2', supplier: 'Aqua Fresh Limited', invoiceNumber: 'IV14657' }),
+        review({ id: 'r3', supplier: 'Gone', invoiceNumber: 'X1', state: 'declined' }),
+      ],
+    });
+    expect(r.queryByText('ReliaBuilder Limited · INV-0208')).not.toBeNull();
+    expect(r.queryByText('Aqua Fresh Limited · IV14657')).not.toBeNull();
+    expect(r.queryByText('Gone · X1')).toBeNull();
+  });
+
+  // The load-bearing guarantee. A pending row is in its own table, so no
+  // rollup can see it — the figures on this page are the same figures they
+  // would be if the deck were empty.
+  it('leaves every figure on the page alone until one is approved', async () => {
+    const withDeck = await arrange({ invoiceReviews: [review({ amount: 999_999 })] });
+    const committedWithDeck = withDeck.queryByText('$103,574.22');
+    withDeck.unmount();
+
+    const without = await arrange({ invoiceReviews: [] });
+    expect(!!committedWithDeck).toBe(!!without.queryByText('$103,574.22'));
+  });
+
+  it('allocates one through its own call, and says which of the two things happened', async () => {
+    const r = await arrange({ invoiceReviews: [review()] });
+
+    await TestRenderer.act(async () => {
+      r.root.findAll(
+        (n: any) => typeof n.type !== 'string' && n.props?.label === 'Allocate' && !!n.props?.onPress,
+        { deep: true }
+      )[0].props.onPress();
+    });
+
+    expect(mock_approveInvoiceReview).toHaveBeenCalledWith('r1');
+    // Never `createQuote` from here: the server goes through the one door, so
+    // the client cannot open a second one.
+    expect(mock_approveInvoiceReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes one without deleting it, so the bin has something to hold', async () => {
+    const r = await arrange({ invoiceReviews: [review()] });
+
+    await TestRenderer.act(async () => {
+      r.root.findAll(
+        (n: any) => typeof n.type !== 'string' && n.props?.label === 'Remove' && !!n.props?.onPress,
+        { deep: true }
+      )[0].props.onPress();
+    });
+
+    expect(mock_declineInvoiceReview).toHaveBeenCalledWith('r1');
+    expect(mock_deleteInvoiceReview).not.toHaveBeenCalled();
+  });
+
+  // Optimistic, the page's own rule for every toggle on it: the card leaves on
+  // the press so nobody swipes it twice, and a second approval is a second bill.
+  it('takes the card out of the deck before the write comes back', async () => {
+    let release: (() => void) | null = null;
+    mock_approveInvoiceReview.mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve({}); })
+    );
+
+    const r = await arrange({ invoiceReviews: [review()] });
+    expect(r.queryByText('ReliaBuilder Limited · INV-0208')).not.toBeNull();
+
+    await TestRenderer.act(async () => {
+      r.root.findAll(
+        (n: any) => typeof n.type !== 'string' && n.props?.label === 'Allocate' && !!n.props?.onPress,
+        { deep: true }
+      )[0].props.onPress();
+    });
+
+    expect(r.queryByText('ReliaBuilder Limited · INV-0208')).toBeNull();
+    await TestRenderer.act(async () => { release?.(); });
+  });
+
+  // Optimistic is not the same as dishonest.
+  it('puts the card back when the write is refused', async () => {
+    mock_approveInvoiceReview.mockRejectedValueOnce(new Error('That part belongs to another job'));
+
+    const r = await arrange({ invoiceReviews: [review()] });
+    await TestRenderer.act(async () => {
+      r.root.findAll(
+        (n: any) => typeof n.type !== 'string' && n.props?.label === 'Allocate' && !!n.props?.onPress,
+        { deep: true }
+      )[0].props.onPress();
+    });
+
+    expect(r.queryByText('ReliaBuilder Limited · INV-0208')).not.toBeNull();
   });
 });

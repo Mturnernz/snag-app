@@ -19,6 +19,9 @@ import ExpectedCostSheet from '../components/ExpectedCostSheet';
 import EditBudgetSheet from '../components/EditBudgetSheet';
 import ScheduleSheet from '../components/ScheduleSheet';
 import CommitmentCard from '../components/CommitmentCard';
+import InvoiceReviewCard from '../components/InvoiceReviewCard';
+import InvoiceReviewSheet from '../components/InvoiceReviewSheet';
+import ReviewBell from '../components/ReviewBell';
 import EditFigureSheet from '../components/EditFigureSheet';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import StatusBadge from '../components/StatusBadge';
@@ -27,10 +30,12 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
 import {
-  addExpectedCostLine, addMilestone, addPayment, addQuoteLine, createElement, createExpectedCost,
+  addExpectedCostLine, addMilestone, addPayment, addQuoteLine, approveInvoiceReview,
+  createElement, createExpectedCost,
   createItem,
   createLocation, createQuote, createThing, deleteElement,
-  deleteExpectedCost, deleteExpectedCostLine, deleteItem, deleteMilestone, deletePayment, updatePayment,
+  declineInvoiceReview, deleteExpectedCost, deleteExpectedCostLine, deleteInvoiceReview, deleteItem,
+  deleteMilestone, deletePayment, restoreInvoiceReview, updatePayment,
   deleteProject, deleteQuote, setExpectedCostConfirmed, getSupplierNames,
   deleteQuoteLine,
   clearFigure, setFigure, setItemExcluded,
@@ -40,13 +45,16 @@ import {
   updateExpectedCostLine, updateItem, updateProject, updateQuote,
 } from '../lib/supabase';
 import {
-  documentName, exportDateStamp, formatLooseDate, inclGst, itemPriceLabel, projectDossierTable,
+  documentName, exportDateStamp, formatLooseDate, inclGst, itemPriceLabel, pendingReviews,
+  reviewAlert,
+  projectDossierTable,
   projectExportPhotos, projectQuoted, supplierBreakdown,
   type SupplierFigure, type ThingInput,
 } from '@snag/supabase-queries';
 import { getFileUrls } from '../lib/supabase';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import {
+  InvoiceReview,
   Project, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectExpectedCostLine, ProjectFigure,
   ProjectFile, ProjectItem,
   ProjectMilestone, ProjectPayment, ProjectQuote,
@@ -151,6 +159,18 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [bills, setBills] = useState<ProjectBill[]>([]);
   const [recordOpen, setRecordOpen] = useState(false);
   /**
+   * Bills that arrived by themselves and have not been ruled on.
+   *
+   * They ride on the page read rather than a request of their own — the bell's
+   * count is not worth one of ten connections — and they reach no figure on
+   * this page until one is approved, because a pending row is in its own table
+   * and no rollup can see it.
+   */
+  const [invoiceReviews, setInvoiceReviews] = useState<InvoiceReview[]>([]);
+  const [reviewSheetOpen, setReviewSheetOpen] = useState(false);
+  /** Which card has a decision on the wire, so only that one shows it. */
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  /**
    * Every supplier name this household has used, for the walkthrough's first step.
    *
    * Read when the sheet is opened rather than with the page: the pool is ten
@@ -246,6 +266,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         setFiles(page.files);
         setRecorded(page.things);
         setSnags(page.snags);
+        setInvoiceReviews(page.invoiceReviews);
       } while (pending.current);
     } catch (err: unknown) {
       if (alive.current) {
@@ -509,6 +530,75 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
+  /**
+   * Yes, no, and the two ways back.
+   *
+   * All four answer **before the network does**, the page's existing rule for
+   * every toggle on it: the card leaves the deck on the press, the write goes,
+   * and a refusal puts it back and says why. Optimistic is not the same as
+   * dishonest — a card that stayed put while the server was thinking would have
+   * somebody swipe it twice, and a second approval is a second bill.
+   *
+   * Only the state is patched locally. Everything a decision changes downstream
+   * — Committed, Invoiced, Paid, who is owed what — is derived in views, so it
+   * waits for the re-read rather than being predicted here. That is the same
+   * line the include/exclude toggle draws, and for the same reason: a figure
+   * this client guessed at is a figure that can disagree with the one the
+   * database holds.
+   */
+  const rule = useCallback(
+    async (review: InvoiceReview, decide: () => Promise<unknown>, said: string) => {
+      const before = invoiceReviews;
+      setDecidingId(review.id);
+      setInvoiceReviews((rows) => rows.filter((r) => r.id !== review.id));
+      try {
+        await decide();
+        showToast(said);
+        await refresh();
+      } catch (err: unknown) {
+        setInvoiceReviews(before);
+        showToast(err instanceof Error ? err.message : "That didn’t save");
+      } finally {
+        setDecidingId(null);
+      }
+    },
+    [invoiceReviews, refresh, showToast]
+  );
+
+  const onApproveReview = useCallback(
+    (review: InvoiceReview) =>
+      rule(
+        review,
+        () => approveInvoiceReview(review.id),
+        // Says which of the two things happened. An approved bill that was also
+        // recorded as paid has moved two figures rather than one, and a toast
+        // reading only "Allocated" would leave the second one a surprise.
+        review.paid && review.amount !== null
+          ? 'Allocated, and recorded as paid'
+          : 'Allocated to the job'
+      ),
+    [rule]
+  );
+
+  const onDeclineReview = useCallback(
+    (review: InvoiceReview) =>
+      rule(review, () => declineInvoiceReview(review.id), 'Removed — it’s under the bell'),
+    [rule]
+  );
+
+  const onRestoreReview = useCallback(
+    (review: InvoiceReview) =>
+      rule(review, () => restoreInvoiceReview(review.id), 'Back in the deck'),
+    [rule]
+  );
+
+  const onDeleteReview = useCallback(
+    (review: InvoiceReview) =>
+      rule(review, () => deleteInvoiceReview(review.id), 'Deleted'),
+    [rule]
+  );
+
+
   if (loading || !project) {
     return (
       <View style={styles.loading}>
@@ -619,9 +709,45 @@ export default function ProjectDetailScreen({ route }: Props) {
         ]
           .filter(Boolean)
           .join(' · ')}
+        rightSlot={
+          <ReviewBell
+            count={pendingReviews(invoiceReviews).length}
+            onPress={() => setReviewSheetOpen(true)}
+          />
+        }
       />
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {/* ── invoices that arrived by themselves ────────────────────────
+            Above the record button, and that is the argument for it being
+            here at all: *a bill arrived, where does it go* is the most frequent
+            question on a live job, and these are bills that have already
+            arrived. Answering one is a swipe rather than a walkthrough.
+
+            None of it counts yet. A pending row is in its own table, so there
+            is no expression in any rollup that could see it — the figures below
+            are the same figures they would be if this section were empty. */}
+        {pendingReviews(invoiceReviews).length > 0 ? (
+          <View style={styles.deck}>
+            <Text style={styles.deckHeading}>
+              {reviewAlert(invoiceReviews)}
+            </Text>
+            <Text style={styles.deckHint}>
+              Read off your email and filled in as far as it allowed. Nothing here is on the job
+              until you say so.
+            </Text>
+            {pendingReviews(invoiceReviews).map((review) => (
+              <InvoiceReviewCard
+                key={review.id}
+                review={review}
+                busy={decidingId === review.id}
+                onApprove={() => onApproveReview(review)}
+                onDecline={() => onDeclineReview(review)}
+              />
+            ))}
+          </View>
+        ) : null}
+
         {/* ── the one thing people came to do ─────────────────────────
             A bill arrived; where does it go. The most frequent action on a
             live job, and until this rebuild the deepest buried — six levels
@@ -1703,6 +1829,16 @@ export default function ProjectDetailScreen({ route }: Props) {
         onCancel={() => setConfirmDelete(false)}
         onConfirm={removeProject}
       />
+
+      {/* What the bell opens: how much is waiting, and the bin behind it. */}
+      <InvoiceReviewSheet
+        visible={reviewSheetOpen}
+        reviews={invoiceReviews}
+        busyId={decidingId}
+        onClose={() => setReviewSheetOpen(false)}
+        onRestore={onRestoreReview}
+        onDelete={onDeleteReview}
+      />
     </View>
   );
 }
@@ -1877,6 +2013,16 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
   content: { padding: Spacing.lg, paddingBottom: Spacing.xxxl * 2 },
+
+  // The deck sits on the plaster ground with no card of its own: each invoice
+  // is already a card, and a card of cards is two elevations doing one job.
+  deck: { gap: Spacing.md, marginBottom: Spacing.xl },
+  deckHeading: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  deckHint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 19, marginTop: -Spacing.sm },
 
 
   strip: {

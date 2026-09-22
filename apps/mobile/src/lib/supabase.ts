@@ -432,6 +432,29 @@ export const deleteExpectedCost = (expectedId: string) =>
   queries.deleteExpectedCost(supabase, expectedId);
 
 
+// Invoices that arrived by themselves and have not been ruled on. Approving is
+// the only one of these that touches a figure, and it does it by going through
+// `create_quote` on the server rather than writing a bill of its own.
+
+export const createInvoiceReview = (input: queries.InvoiceReviewInput) =>
+  queries.createInvoiceReview(supabase, input);
+
+export const updateInvoiceReview = (reviewId: string, update: queries.InvoiceReviewUpdate) =>
+  queries.updateInvoiceReview(supabase, reviewId, update);
+
+export const approveInvoiceReview = (reviewId: string, elementId?: string | null) =>
+  queries.approveInvoiceReview(supabase, reviewId, elementId);
+
+export const declineInvoiceReview = (reviewId: string) =>
+  queries.declineInvoiceReview(supabase, reviewId);
+
+export const restoreInvoiceReview = (reviewId: string) =>
+  queries.restoreInvoiceReview(supabase, reviewId);
+
+export const deleteInvoiceReview = (reviewId: string) =>
+  queries.deleteInvoiceReview(supabase, reviewId);
+
+
 export const addExpectedCostLine = (expectedCostId: string, input: queries.ExpectedCostLineInput) =>
   queries.addExpectedCostLine(supabase, expectedCostId, input);
 

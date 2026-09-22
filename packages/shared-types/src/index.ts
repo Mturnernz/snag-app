@@ -1280,6 +1280,26 @@ export interface ProjectQuote {
   billedThroughId: string | null;
   /** The milestone this bill claims against, when the commitment has a schedule. */
   settlesMilestoneId: string | null;
+  /**
+   * The contract this bill is a claim against.
+   *
+   * *This bill is claim 2 of that contract.* The sentence the model could not
+   * say, which left two bad options and both were taken on the live job:
+   * record the contract as an invoice, and the page reports the whole thing as
+   * billed; or record each claim as a **payment** against it, and the money is
+   * right while the bill is fiction.
+   *
+   * **A claim sits exactly where its contract sits, and `create_quote` refuses
+   * anything else.** That is what keeps a contract and its claims out of
+   * Committed twice — the scope fallback already drops the invoices wherever an
+   * accepted quote is, so enforcing the scope at the write makes the
+   * double-count unrepresentable rather than something five rollup views have
+   * to subtract around.
+   *
+   * Set only at creation, like `supersedesLineId`: what a bill claims against
+   * is a fact about the bill, not something to be re-pointed later.
+   */
+  againstQuoteId: string | null;
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
@@ -1314,6 +1334,15 @@ export interface ProjectQuote {
   paidTotal: number | null;
   /** What is still to go out on this bill. Null unless it is a live invoice. */
   unpaid: number | null;
+  /**
+   * What has been claimed against this contract so far.
+   *
+   * Only ever set on a quote, and null until somebody claims against it — not
+   * zero, on the same terms as every other sum here. `effectiveAmount` less
+   * this is what the builder has left to claim, which is the one figure a
+   * householder on a progress-claim contract actually watches.
+   */
+  claimedTotal: number | null;
 }
 
 /**

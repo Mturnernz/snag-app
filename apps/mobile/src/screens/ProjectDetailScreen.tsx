@@ -13,7 +13,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import AddThingSheet from '../components/AddThingSheet';
 import ExportFooter from '../components/ExportFooter';
 import ProjectRoomsSheet from '../components/ProjectRoomsSheet';
-import RecordBillSheet from '../components/RecordBillSheet';
+import RecordMoneySheet from '../components/RecordMoneySheet';
 import BuildUpSheet from '../components/BuildUpSheet';
 import ExpectedCostSheet from '../components/ExpectedCostSheet';
 import EditBudgetSheet from '../components/EditBudgetSheet';
@@ -31,7 +31,7 @@ import {
   createItem,
   createLocation, createQuote, createThing, deleteElement,
   deleteExpectedCost, deleteExpectedCostLine, deleteItem, deleteMilestone, deletePayment, updatePayment,
-  deleteProject, deleteQuote, setExpectedCostConfirmed,
+  deleteProject, deleteQuote, setExpectedCostConfirmed, getSupplierNames,
   deleteQuoteLine,
   clearFigure, setFigure, setItemExcluded,
   deleteStoredFiles, describeOverrides,
@@ -150,6 +150,15 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [expectedCostLines, setExpectedCostLines] = useState<ProjectExpectedCostLine[]>([]);
   const [bills, setBills] = useState<ProjectBill[]>([]);
   const [recordOpen, setRecordOpen] = useState(false);
+  /**
+   * Every supplier name this household has used, for the walkthrough's first step.
+   *
+   * Read when the sheet is opened rather than with the page: the pool is ten
+   * connections and this is not worth one of them on every visit. Never fatal
+   * — a name list that will not load leaves you typing the name, which is what
+   * you would have done anyway.
+   */
+  const [knownSuppliers, setKnownSuppliers] = useState<string[]>([]);
   const [expectedOpen, setExpectedOpen] = useState(false);
   const [editingExpected, setEditingExpected] = useState<ProjectExpectedCost | null>(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
@@ -619,7 +628,14 @@ export default function ProjectDetailScreen({ route }: Props) {
             down, and only if a scope item already existed to hang it on. It is
             the only filled button on the page. */}
         <Pressable
-          onPress={() => setRecordOpen(true)}
+          onPress={async () => {
+            setRecordOpen(true);
+            try {
+              setKnownSuppliers(await getSupplierNames());
+            } catch {
+              // Leaves the list empty, which is the state it starts in.
+            }
+          }}
           style={styles.record}
           accessibilityRole="button"
           accessibilityLabel="Record a bill or a quote"
@@ -1489,17 +1505,48 @@ export default function ProjectDetailScreen({ route }: Props) {
 
       {/* The one primary action. It never creates scope: a bill maps to
           something that exists, or it is a cost against the job as a whole. */}
-      <RecordBillSheet
+      <RecordMoneySheet
         visible={recordOpen}
+        projectId={project.id}
+        householdId={household.id}
         elements={elements}
         items={items}
-        contracts={passThroughs}
-        projectId={project.id}
+        quotes={quotes}
+        expected={expected}
+        milestones={milestones}
+        knownSuppliers={knownSuppliers}
         showElements={drawElements}
         onClose={() => setRecordOpen(false)}
-        onSave={async (input) => {
-          await createQuote(input);
-          showToast('Saved');
+        onFinish={async (plan) => {
+          // One journey, performed in order: the new row first, then what it
+          // replaces. That way a refusal leaves the old record intact rather
+          // than declined with nothing standing in its place.
+          if (plan.expected) {
+            await createExpectedCost(project.id, plan.expected);
+          } else if (plan.quote) {
+            let scope = plan.quote;
+            // A quote may name a part the job did not have. It is created here
+            // rather than inside the sheet so that nothing is written until
+            // the last step, and `reloadLocations` keeps the vocabulary shared.
+            if (plan.newPart) {
+              const part = await createElement(project.id, plan.newPart, null);
+              scope = { ...scope, elementId: part.id, itemId: null, projectId: null };
+            }
+            const saved = await createQuote(scope);
+            for (const line of plan.lines) {
+              // eslint-disable-next-line no-await-in-loop
+              await addQuoteLine(saved.id, line);
+            }
+            if (plan.settleExpectedId) {
+              await updateExpectedCost(plan.settleExpectedId, { settledBy: saved.id });
+            }
+          }
+          if (plan.declineQuoteId) await setQuoteStatus(plan.declineQuoteId, 'declined');
+          showToast(
+            plan.kind === 'claim' ? 'Claim recorded'
+              : plan.kind === 'expected' ? 'Added to the forecast'
+                : 'Recorded'
+          );
           await refresh();
         }}
       />

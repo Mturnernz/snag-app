@@ -3005,6 +3005,7 @@ function mapQuote(row: Row): ProjectQuote {
     dueOn: row.due_on ?? null,
     billedThroughId: row.billed_through_id ?? null,
     settlesMilestoneId: row.settles_milestone_id ?? null,
+    againstQuoteId: row.against_quote_id ?? null,
     photoPaths: row.photo_paths ?? [],
     documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
@@ -3017,6 +3018,7 @@ function mapQuote(row: Row): ProjectQuote {
     effectiveAmount: numberOrNull(row.effective_amount),
     paidTotal: numberOrNull(row.paid_total),
     unpaid: numberOrNull(row.unpaid),
+    claimedTotal: numberOrNull(row.claimed_total),
   };
 }
 
@@ -3252,6 +3254,137 @@ export function supplierBreakdown<T extends Record<SupplierFigure, number | null
     .filter((s) => s[figure] !== null && Math.abs(s[figure] as number) > 0.005)
     .map((row) => ({ row, amount: row[figure] as number }))
     .sort((a, b) => b.amount - a.amount);
+}
+
+// ------------------------------------------- recording money, one step at a time
+
+/**
+ * A name to offer on the walkthrough's first step, and what you have from them.
+ *
+ * **Supplier stays free text and this is the whole of the "select or create".**
+ * A supplier list somebody has to fill in before they can record a quote is
+ * setup, and this app does not do setup — so the list *is* the names already
+ * used, and a name that is not on it is typed and added in the same control.
+ */
+export interface SupplierSuggestion {
+  name: string;
+  /** The one line under the name: what this job already has from them. */
+  note: string | null;
+  /**
+   * Their signed contract on this job, when there is exactly one.
+   *
+   * What makes step two able to offer *a claim against it* rather than asking
+   * a question the person has to translate. Null when they have none, or more
+   * than one — with two contracts the claim has to say which, so the shortcut
+   * would be guessing.
+   */
+  contract: ProjectQuote | null;
+  /** True when the name comes from another job rather than this one. */
+  elsewhere: boolean;
+}
+
+/**
+ * Who to offer, this job's suppliers first.
+ *
+ * Names from elsewhere in the household follow, because starting a second job
+ * and being offered nothing is how "ReliaBuilder" and "Reliabuilder" end up in
+ * one household — which is exactly what happened here. Deduplicated on the
+ * trimmed, lower-cased name, the same key the supplier rollup groups on.
+ */
+export function supplierSuggestions(
+  onThisJob: readonly ProjectQuote[],
+  elsewhereNames: readonly string[]
+): SupplierSuggestion[] {
+  const byKey = new Map<string, ProjectQuote[]>();
+  for (const quote of onThisJob) {
+    const name = quote.supplier?.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    byKey.set(key, [...(byKey.get(key) ?? []), quote]);
+  }
+
+  const here: SupplierSuggestion[] = [...byKey.entries()].map(([, quotes]) => {
+    const signed = quotes.filter((q) => q.kind === 'quote' && q.status === 'accepted');
+    const bills = quotes.filter((q) => q.kind === 'invoice' && q.status !== 'declined');
+    const note = signed.length > 0
+      ? `signed contract${bills.length > 0 ? ` · ${bills.length} claim${bills.length === 1 ? '' : 's'}` : ''}`
+      : bills.length > 0
+        ? `${bills.length} bill${bills.length === 1 ? '' : 's'}`
+        : 'a price, not decided';
+    return {
+      // The spelling used most recently, as the rollup displays it.
+      name: [...quotes].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0].supplier!.trim(),
+      note,
+      contract: signed.length === 1 ? signed[0] : null,
+      elsewhere: false,
+    };
+  });
+
+  const seen = new Set(here.map((s) => s.name.toLowerCase()));
+  const away: SupplierSuggestion[] = [];
+  for (const raw of elsewhereNames) {
+    const name = raw?.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    away.push({ name, note: 'used on another job', contract: null, elsewhere: true });
+  }
+
+  return [...here.sort((a, b) => a.name.localeCompare(b.name)), ...away.sort((a, b) => a.name.localeCompare(b.name))];
+}
+
+/**
+ * The names containing what somebody typed — `matchSuggestions`' rule again.
+ *
+ * Substring rather than prefix, because nobody hunting ReliaBuilder types
+ * "relia", gets nothing, and thinks to try "build".
+ */
+export function matchSuppliers(
+  suppliers: readonly SupplierSuggestion[],
+  query: string
+): SupplierSuggestion[] {
+  const wanted = query.trim().toLowerCase();
+  if (!wanted) return [...suppliers];
+  return suppliers.filter((one) => one.name.toLowerCase().includes(wanted));
+}
+
+/**
+ * What a contract has left to claim.
+ *
+ * Null unless it is a quote with a figure — nothing is not zero, and "still to
+ * claim" against a price nobody has stated is not a number. Never negative:
+ * a builder who has claimed more than the contract is an over-claim, which
+ * `stillToBill` reports at the project level with its sign intact; here the
+ * question is how much is left, and the answer is none.
+ */
+export function stillToClaim(contract: {
+  kind: ProjectQuoteKind;
+  effectiveAmount: number | null;
+  claimedTotal: number | null;
+}): number | null {
+  if (contract.kind !== 'quote') return null;
+  if (contract.effectiveAmount === null) return null;
+  return Math.max(0, contract.effectiveAmount - (contract.claimedTotal ?? 0));
+}
+
+/**
+ * *"$131,962.50 claimed of $176,755 — $44,792.50 still to claim."*
+ *
+ * The denominator rule, one figure further in: a claimed-so-far figure without
+ * the contract it is claimed against is the same misleading half-number as a
+ * total without its item count. Null where there is nothing to say.
+ */
+export function describeClaimed(contract: {
+  kind: ProjectQuoteKind;
+  effectiveAmount: number | null;
+  claimedTotal: number | null;
+}): string | null {
+  const left = stillToClaim(contract);
+  if (left === null) return null;
+  const claimed = contract.claimedTotal ?? 0;
+  if (claimed < 0.005) return `nothing claimed yet of ${formatMoney(contract.effectiveAmount)}`;
+  return `${formatMoney(claimed)} claimed of ${formatMoney(contract.effectiveAmount)} — ${formatMoney(left)} still to claim`;
 }
 
 /**
@@ -3782,6 +3915,41 @@ export async function getAllProjects(client: SupabaseClient): Promise<Project[]>
   return (data ?? []).map(mapProject);
 }
 
+/**
+ * Every supplier name this household has ever used, newest first.
+ *
+ * **Deliberately not filtered to one project.** Starting a second renovation
+ * and being offered nothing is how one household ends up holding both
+ * "ReliaBuilder" and "Reliabuilder" — which is what happened here, and what
+ * `rename_supplier` then had to fix. RLS does the scoping, as ever: this
+ * returns exactly the names on jobs this person can already see.
+ *
+ * One request, made when the walkthrough opens rather than on the project
+ * page's own path — the pool is ten connections and this is not worth one of
+ * them on every read of a project.
+ */
+export async function getSupplierNames(client: SupabaseClient): Promise<string[]> {
+  const { data, error } = await client
+    .from('project_quotes_with_totals')
+    .select('supplier, created_at')
+    .not('supplier', 'is', null)
+    .order('created_at', { ascending: false });
+
+  if (error) throw asError(error, "Couldn't load who you've used");
+
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const row of (data ?? []) as Row[]) {
+    const name = String(row.supplier ?? '').trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
 export async function getProject(client: SupabaseClient, projectId: string): Promise<Project> {
   const { data, error } = await client
     .from('projects_with_totals')
@@ -3991,18 +4159,34 @@ export async function deleteProject(
   return (data as string[] | null) ?? [];
 }
 
+/**
+ * Returns the part it made, because a caller sometimes needs to hang something
+ * off it in the same breath — the walkthrough naming *Consent and council* and
+ * then putting the quote on it. `create_element` has always returned the row;
+ * this was throwing it away, which made a create-then-find-by-name the only
+ * way to reach it.
+ *
+ * The derived columns of `project_elements_with_totals` are defaulted rather
+ * than re-read, the same as `createQuote`: a brand-new part has none of them,
+ * and the caller reloads the page.
+ */
 export async function createElement(
   client: SupabaseClient,
   projectId: string,
   name: string,
   room?: string | null
-): Promise<void> {
-  const { error } = await client.rpc('create_element', {
+): Promise<ProjectElement> {
+  const { data, error } = await client.rpc('create_element', {
     p_project_id: projectId,
     p_name: name,
     p_room: room ?? null,
   });
-  if (error) throw asError(error, "Couldn't add that");
+  return mapElement({
+    ...unwrap<Row>(data, error, "Couldn't add that"),
+    item_count: 0,
+    priced_count: 0,
+    quoted_count: 0,
+  });
 }
 
 export interface ElementUpdate {
@@ -4146,6 +4330,14 @@ export interface QuoteInput {
   billedThroughId?: string | null;
   /** The milestone this bill claims against. */
   settlesMilestoneId?: string | null;
+  /**
+   * The contract this bill is a claim against.
+   *
+   * `create_quote` refuses a claim that does not sit exactly where its contract
+   * sits, so a caller has to pass the contract's own scope alongside this. The
+   * walkthrough does that by construction — it never asks, it inherits.
+   */
+  againstQuoteId?: string | null;
   photoPaths?: string[];
   documentPaths?: string[];
 }
@@ -4173,6 +4365,7 @@ export async function createQuote(
     p_due_on: input.dueOn ?? null,
     p_billed_through_id: input.billedThroughId ?? null,
     p_settles_milestone_id: input.settlesMilestoneId ?? null,
+    p_against_quote_id: input.againstQuoteId ?? null,
   });
   // The RPC returns the table row, which carries none of the view's derived
   // columns. Defaulted here rather than re-read: the caller reloads the page.

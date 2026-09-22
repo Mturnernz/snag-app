@@ -4,8 +4,9 @@ import {
   describeOverride, describeOverrides,
   describeToPay, describeTotals, forecastVariance, formatMoney, groupProjectsByStatus, inclGst,
   itemPriceLabel, milestoneAmount, outstanding,
+  describeClaimed, matchSuppliers,
   projectDossierTable, projectExportPhotos, projectExportTable, projectQuoted,
-  showsElements, supplierBreakdown,
+  showsElements, stillToClaim, supplierBreakdown, supplierSuggestions,
 } from '@snag/supabase-queries';
 import { GST_RATE } from '../types';
 import type {
@@ -76,11 +77,11 @@ const quote = (over: Partial<ProjectQuote> = {}): ProjectQuote => ({
   id: 'q1', itemId: 'i1', elementId: null, projectId: null, supplier: 'Mico', detail: null,
   amount: 1000, amountInclGst: true, kind: 'quote', status: 'tbc', basis: 'fixed',
   dated: null, notes: null, supersedesLineId: null, photoPaths: [], documentPaths: [],
-  dueOn: null, billedThroughId: null, settlesMilestoneId: null,
+  dueOn: null, billedThroughId: null, settlesMilestoneId: null, againstQuoteId: null,
   createdAt: '2026-08-04T00:00:00Z',
   amountIncl: 1000, lineCount: 0, linesTotal: null, buildUp: null, allowanceOpen: 0,
   additionalOpen: 0,
-  effectiveAmount: 1000, paidTotal: null, unpaid: null,
+  effectiveAmount: 1000, paidTotal: null, unpaid: null, claimedTotal: null,
   ...over,
 });
 
@@ -778,5 +779,75 @@ describe('quoted, and who each figure is made of', () => {
     ];
     const summed = supplierBreakdown(rows, 'quoted').reduce((t, r) => t + r.amount, 0);
     expect(summed).toBe(projectQuoted(rows));
+  });
+});
+
+describe('a contract and the claims against it', () => {
+  const contract = (over: Partial<ProjectQuote> = {}) =>
+    quote({ id: 'c1', kind: 'quote', status: 'accepted', amount: 176755,
+      amountIncl: 176755, effectiveAmount: 176755, itemId: null, projectId: 'p1', ...over });
+
+  it('says what is left to claim, never below nothing', () => {
+    expect(stillToClaim(contract({ claimedTotal: 131962.5 }))).toBe(44792.5);
+    // An over-claim is reported with its sign by `stillToBill` at the project
+    // level. Here the question is how much is left, and the answer is none.
+    expect(stillToClaim(contract({ claimedTotal: 200000 }))).toBe(0);
+  });
+
+  it('is not a question you can ask of a bill, or of a price nobody stated', () => {
+    expect(stillToClaim(quote({ kind: 'invoice', claimedTotal: null }))).toBeNull();
+    expect(stillToClaim(contract({ effectiveAmount: null }))).toBeNull();
+  });
+
+  it('always ships the contract it is claimed against', () => {
+    // The denominator rule, one figure further in: a claimed-so-far number on
+    // its own is the same misleading half-answer as a total with no item count.
+    const line = describeClaimed(contract({ claimedTotal: 131962.5 }));
+    expect(line).toContain('$131,962.50');
+    expect(line).toContain('$176,755');
+    expect(line).toContain('$44,792.50 still to claim');
+  });
+
+  it('says so plainly when nothing has been claimed yet', () => {
+    expect(describeClaimed(contract({ claimedTotal: null })))
+      .toBe('nothing claimed yet of $176,755');
+  });
+});
+
+describe('who to offer when money is being recorded', () => {
+  const from = (over: Partial<ProjectQuote>) => quote({ itemId: null, projectId: 'p1', ...over });
+
+  it('names a signed contract, which is what lets the next step offer a claim', () => {
+    const [one] = supplierSuggestions(
+      [from({ id: 'c1', supplier: 'ReliaBuilder', kind: 'quote', status: 'accepted' })], []
+    );
+    expect(one.name).toBe('ReliaBuilder');
+    expect(one.note).toBe('signed contract');
+    expect(one.contract?.id).toBe('c1');
+  });
+
+  it('offers no shortcut when there are two contracts to choose between', () => {
+    // With two, a claim has to say which — so the shortcut would be guessing.
+    const [one] = supplierSuggestions([
+      from({ id: 'c1', supplier: 'ReliaBuilder', kind: 'quote', status: 'accepted' }),
+      from({ id: 'c2', supplier: 'ReliaBuilder', kind: 'quote', status: 'accepted' }),
+    ], []);
+    expect(one.contract).toBeNull();
+  });
+
+  it('carries names from other jobs, which is how one household stops holding two spellings', () => {
+    const rows = supplierSuggestions(
+      [from({ supplier: 'ReliaBuilder', kind: 'quote', status: 'accepted' })],
+      ['Tile Space', 'reliabuilder']
+    );
+    expect(rows.map((r) => r.name)).toEqual(['ReliaBuilder', 'Tile Space']);
+    expect(rows[1].elsewhere).toBe(true);
+  });
+
+  it('matches on a substring, so "relia" finds them', () => {
+    const rows = supplierSuggestions([from({ supplier: 'ReliaBuilder' })], []);
+    expect(matchSuppliers(rows, 'relia')).toHaveLength(1);
+    expect(matchSuppliers(rows, 'build')).toHaveLength(1);
+    expect(matchSuppliers(rows, 'mico')).toHaveLength(0);
   });
 });

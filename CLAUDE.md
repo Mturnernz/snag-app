@@ -1767,6 +1767,135 @@ what makes the next renovation's numbers credible. `set_quote_status` is its own
 reason `set_part_bought` is — it is the only write that changes what a total says, and alone it
 cannot have its sibling-clearing skipped by a caller passing a status among eight other fields.
 
+### A bill can claim against a contract
+
+`project_quotes.against_quote_id` (`20260922090000`). *This bill is claim 2 of that contract* —
+the sentence the model could not say, and whose absence made every ReliaBuilder number on the
+live job wrong in one of two ways. Record the $176,755 contract as an **invoice** and the page
+reports the whole thing as billed, with *still to be billed* at $0. Record each progress claim as
+a **payment** against that invoice and the money is right while the bill is fiction. Both
+happened: one project carried $87,975 of payments against a single $43,987.50 bill, the other a
+$176,755 "invoice" with two payments on it. The references typed into those payments were invoice
+numbers, which is the tell — **payments were standing in for claims because they were the only
+repeating control on the screen.**
+
+The arrangement it makes possible, and the one the money model always wanted:
+
+```
+One scope — the job, or a part
+  ├── quote, SIGNED  $176,755     → Committed, and it does not move
+  ├── invoice  claim 1            → Invoiced, + a payment
+  ├── invoice  claim 2            → Invoiced, + a payment
+  └── invoice  claim 3            → when it arrives
+```
+
+Committed stays the contract. Invoiced is the claims. *Still to be billed* is what the builder
+has left to claim, and *to pay* is what has been claimed and not settled. Both gaps already
+existed; nothing could feed them.
+
+**Summed from exactly one place, enforced at the write rather than patched in five views.** A
+contract and its claims must not both reach Committed. That is already true when they sit on the
+same scope — `coalesce(accepted_total, invoiced_total)` lets the accepted quote win and drops the
+invoices — and false the moment they do not. So `create_quote` **refuses a claim that does not sit
+exactly where its contract sits**, which makes the double-count unrepresentable rather than
+something every rollup has to subtract around. Not one view expression changed, and
+`20260922090000` proves it: every rollup came back byte-identical after the migration. Four more
+refusals, each a way a claim could lie: only a bill can claim, only against a quote, only in this
+job, and `on delete set null` so deleting a contract never takes the claims with it.
+
+`project_quotes_with_totals` gains `claimed_total`, and `describeClaimed` always names the
+contract beside it — *"$131,962.50 claimed of $176,755 — $44,792.50 still to claim"*. The
+denominator rule, one figure further in: a claimed-so-far number without what it is claimed
+against is the same misleading half-answer as a total without its item count. `stillToClaim` is
+never negative — an over-claim is `stillToBill`'s to report with its sign intact, and here the
+question is only how much is left.
+
+### Recording money is a walkthrough, not a form
+
+`RecordMoneySheet`, behind the one filled button on the project page. It replaces
+`RecordBillSheet` rather than sitting beside it — one door, or people find the one that teaches
+nothing.
+
+**The fields were never the problem.** The old sheet asked the right four things on one page —
+what kind of paper, who from, how much, what it's against — and the live job still came out wrong
+three ways at once: a contract recorded as an invoice, its claims recorded as payments, and both
+hung off items named after the paperwork inside a part called "Builders Quote". Four independent
+questions teach nothing, so somebody who does not already hold the model in their head answers
+them plausibly and wrongly. **Note that "Builders Quote" is the second time** — "Whole job" was
+the first. A shape somebody invents twice is a shape the UI is asking for.
+
+So the questions are asked in an order where **each answer narrows the next**, in the words
+somebody holding a piece of paper would use rather than the schema's.
+
+**Who first, which is what pays for the rest.** The supplier is the one thing you know without
+reading the document, and it is the most powerful key: once it is ReliaBuilder, the app knows
+there is a signed contract and can offer *a claim against it* with what is left to claim
+underneath. Rows with a search rather than a wall of chips — `RoomPicker`'s argument and its
+substring match, so "relia" finds them and "build" does too. A name that is not there is typed
+and added in the same control, because **supplier stays free text**: a list you must fill in
+before you can record a quote is setup, and this app does not do setup.
+
+`getSupplierNames` reads across the **whole household**, not this project. Starting a second job
+and being offered nothing is how one household ends up holding both "ReliaBuilder" and
+"Reliabuilder", which is exactly what happened and what `rename_supplier` then had to fix. One
+request, made when the sheet opens rather than on the project page's own path — the pool is ten
+connections — and never fatal, because a name list that will not load leaves you typing the name.
+
+**A step only appears when it has a real answer to offer**, and that is the whole of what keeps it
+simple:
+
+| | Step | When |
+|---|---|---|
+| 1 | Who's it from? | always |
+| 2 | What have they sent? | always |
+| 3 | Does this replace something? | only when there is something |
+| 4 | Amount, invoice number, dates | always |
+| 5 | What's it against? | never for a claim |
+| 6 | What's it made of? | quotes only, always skippable |
+| 7 | Attach the paperwork | not for an expected cost |
+
+A claim from a supplier already on the job is **three screens**; a first contract from a new
+supplier with a full build-up is all seven, and that is the once-per-job moment somebody is at a
+desk with the contract in front of them — the thing walkthrough's own argument. It is the answers
+that decide, never a mode switch, and the step counter says so honestly.
+
+Five things inside it are load-bearing:
+
+- **A claim never sees step 5.** It inherits its contract's scope, which is the double-count fix
+  made invisible rather than explained — and `create_quote` refuses anything else, so the rule
+  holds even if this screen is ever wrong about it.
+- **Nothing is written until the last step.** The sheet collects a `RecordPlan` and the screen
+  performs it. A half-created invoice is a wrong number in a total, not merely a thin record —
+  the thing walkthrough's rule with more force. It is also why the build-up lines ride along
+  rather than being written as they are typed: a contract with three of its five lines saved is a
+  build-up that does not add up.
+- **Step 6 is what finally makes the allowance machinery reachable.** Flagging a line as an
+  allowance is what turns a later price into *"tiles were allowed $12,400, Tile Depot has quoted
+  $15,900 — $3,500 over"*, months before the invoice and off real numbers. Every rule about
+  allowances was written, granted and tested five months before `BuildUpSheet` existed and has
+  **still never run on the live contract**, which is one opaque $176,755 figure to this day,
+  because breaking it up was a separate trip nobody makes.
+- **A quote may name a new category; a bill may not.** *Consent and council*, *Scaffolding*,
+  *Engineering* — a renovation has parts that are not rooms, and the picker alone insists
+  otherwise. The relaxation is deliberate and bounded: a quote is a planning moment where you are
+  describing what the job is, a bill is a recording moment where the job is already described,
+  and a bill that can invent a bucket is how the paperwork-shaped part came back twice.
+- **A cost to expect is the third option on step 2**, routing to `project_expected_costs` with its
+  confirmed/unconfirmed answer. So *Also expecting* keeps its card and loses its separate pill:
+  one front door for money. It is deliberately **not** called an estimate — `basis = estimate`
+  already means whether a quote's number can move, and collapsing those two is a 15%-shaped
+  mistake.
+
+`RecordMoneySheet.test.tsx` pins the supplier step naming what you already have, the claim option
+appearing with what is left to claim, a claim never being asked its scope and carrying
+`againstQuoteId` with the contract's own, the step counts, a quote being asked whether it is
+signed, the new-category box being a quote's alone, *replaces* staying away when there is nothing
+to replace, the expected-cost branch writing no price, and nothing being written before the last
+step. `projects.test.ts` pins `stillToClaim` never going below nothing and refusing the question
+of a bill, `describeClaimed` always shipping its contract, and `supplierSuggestions` — the signed
+contract it names, the two-contract case where it offers no shortcut, and names carried in from
+other jobs.
+
 ### Each figure opens onto who it is made of
 
 Every line in the strip that suppliers can be named for — Quoted, Committed, Invoiced, Paid —
@@ -2314,10 +2443,10 @@ holding five supplier accounts wearing items' clothes.
 
 So the page runs: **Record a bill or a quote** (the one filled button, and the first thing on it) ·
 the money · **Who we're paying** · **Also expecting** · what we're doing · to sort out · hand it
-over · paperwork. `RecordBillSheet` asks the four things somebody holding a piece of paper can
-answer — what kind, who from, how much, what it's against — and **it never creates scope**. An
-invoice maps to something that already exists or it is a cost against the whole job; it does not
-get to invent a part, which is the rule that stops another "Whole job" appearing.
+over · paperwork. `RecordMoneySheet` is behind that button — see *Recording money is a
+walkthrough* below. **It never creates scope for a bill.** An invoice maps to something that
+already exists or it is a cost against the whole job; it does not get to invent a part, which is
+the rule that stops another "Whole job" appearing.
 
 `BuildUpSheet` is the screen that finally makes the provisional-sum rule reachable. Every rule
 about allowances was written, granted and tested five months before it existed and had **never once

@@ -49,6 +49,7 @@ import type {
   AbsentThing,
   Project,
   ProjectAllowanceKind,
+  InvoiceReview,
   ProjectBill,
   ProjectElement,
   ProjectExpectedCost,
@@ -3128,6 +3129,37 @@ function mapBill(row: Row): ProjectBill {
   };
 }
 
+function mapInvoiceReview(row: Row): InvoiceReview {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    elementId: row.element_id ?? null,
+    supplier: row.supplier ?? null,
+    detail: row.detail ?? null,
+    // `numberOrNull`, not `Number`, for the reason it exists everywhere else
+    // in this file: `Number(null)` is 0, and an invoice nobody has priced is
+    // not an invoice for nothing.
+    amount: numberOrNull(row.amount),
+    amountInclGst: row.amount_incl_gst !== false,
+    invoiceNumber: row.invoice_number ?? null,
+    dated: row.dated ?? null,
+    dueOn: row.due_on ?? null,
+    paid: !!row.paid,
+    paidOn: row.paid_on ?? null,
+    paidEvidence: row.paid_evidence ?? null,
+    category: row.category ?? null,
+    sourceRef: row.source_ref ?? null,
+    sourceSubject: row.source_subject ?? null,
+    sourceFrom: row.source_from ?? null,
+    sourceAt: row.source_at ?? null,
+    inferred: row.inferred ?? [],
+    state: row.state ?? 'pending',
+    quoteId: row.quote_id ?? null,
+    decidedAt: row.decided_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+
 function mapOverride(row: Row): ProjectOverride {
   return {
     id: row.id,
@@ -3987,6 +4019,15 @@ export interface ProjectPage extends ProjectContents {
   things: Thing[];
   /** The punch list — ordinary snags filed against this project. */
   snags: Snag[];
+  /**
+   * Bills that have arrived and not been ruled on, plus the ones that were.
+   *
+   * It rides on the page read rather than arriving on its own request for the
+   * reason the other fourteen do: this pool is ten connections, and a bell
+   * whose count comes back separately is one more thing in flight while
+   * somebody is pressing something else.
+   */
+  invoiceReviews: InvoiceReview[];
 }
 
 /**
@@ -4038,6 +4079,7 @@ export async function getProjectPage(
     files: (page.files ?? []).map(mapProjectFile),
     things: (page.things ?? []).map(mapThing),
     snags: (page.snags ?? []).map(mapSnag),
+    invoiceReviews: (page.invoiceReviews ?? []).map(mapInvoiceReview),
   };
 }
 
@@ -5195,4 +5237,258 @@ export function looseEnds(input: {
   }
 
   return out;
+}
+
+// ------------------------------------------------- invoices waiting to be read
+
+/**
+ * Stage a bill that arrived, with whatever could be read off the email.
+ *
+ * Nothing here reaches a total. That is the whole point of the row existing:
+ * between an invoice landing and it being recorded there is a judgement nobody
+ * has made yet, and this is somewhere to put it while it waits.
+ *
+ * `inferred` names the fields that were **guessed** rather than read. The card
+ * marks them, so a reader can tell the app's answers from the invoice's — which
+ * is the same discipline `paidEvidence` applies to the paid flag, and the same
+ * one `describeOverride` applies to a typed-over figure.
+ */
+export interface InvoiceReviewInput {
+  projectId: string;
+  supplier?: string | null;
+  detail?: string | null;
+  amount?: number | null;
+  amountInclGst?: boolean;
+  invoiceNumber?: string | null;
+  dated?: string | null;
+  dueOn?: string | null;
+  paid?: boolean;
+  paidOn?: string | null;
+  /** The sentence `paid` was read from. Never send the flag without it. */
+  paidEvidence?: string | null;
+  category?: string | null;
+  elementId?: string | null;
+  sourceRef?: string | null;
+  sourceSubject?: string | null;
+  sourceFrom?: string | null;
+  sourceAt?: string | null;
+  inferred?: string[];
+}
+
+export async function createInvoiceReview(
+  client: SupabaseClient,
+  input: InvoiceReviewInput
+): Promise<InvoiceReview> {
+  const { data, error } = await client.rpc('create_invoice_review', {
+    p_project_id: input.projectId,
+    p_supplier: input.supplier ?? null,
+    p_detail: input.detail ?? null,
+    p_amount: input.amount ?? null,
+    p_amount_incl_gst: input.amountInclGst ?? true,
+    p_invoice_number: input.invoiceNumber ?? null,
+    p_dated: input.dated ?? null,
+    p_due_on: input.dueOn ?? null,
+    p_paid: input.paid ?? false,
+    p_paid_on: input.paidOn ?? null,
+    p_paid_evidence: input.paidEvidence ?? null,
+    p_category: input.category ?? null,
+    p_element_id: input.elementId ?? null,
+    p_source_ref: input.sourceRef ?? null,
+    p_source_subject: input.sourceSubject ?? null,
+    p_source_from: input.sourceFrom ?? null,
+    p_source_at: input.sourceAt ?? null,
+    p_inferred: input.inferred ?? [],
+  });
+  return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+const INVOICE_REVIEW_CLEARABLE: Record<string, string> = {
+  supplier: 'supplier',
+  detail: 'detail',
+  amount: 'amount',
+  invoiceNumber: 'invoice_number',
+  dated: 'dated',
+  dueOn: 'due_on',
+  paidOn: 'paid_on',
+  category: 'category',
+  elementId: 'element_id',
+};
+
+/**
+ * Correcting a card before ruling on it.
+ *
+ * `state` is deliberately absent, for the reason it is absent from
+ * `ExpectedCostUpdate`: approving and declining are what change what the page
+ * claims, so they are their own calls and cannot ride along beside a corrected
+ * supplier name. Trying is a type error rather than a write that does nothing.
+ *
+ * An emptied field clears the column rather than leaving the old value, the
+ * `p_clear` convention every update in this schema follows — somebody blanking
+ * an amount is saying they no longer know it.
+ */
+export interface InvoiceReviewUpdate {
+  supplier?: string | null;
+  detail?: string | null;
+  amount?: number | null;
+  amountInclGst?: boolean;
+  invoiceNumber?: string | null;
+  dated?: string | null;
+  dueOn?: string | null;
+  paid?: boolean;
+  paidOn?: string | null;
+  category?: string | null;
+  elementId?: string | null;
+}
+
+export async function updateInvoiceReview(
+  client: SupabaseClient,
+  reviewId: string,
+  update: InvoiceReviewUpdate
+): Promise<InvoiceReview> {
+  const clear = Object.entries(INVOICE_REVIEW_CLEARABLE)
+    .filter(([key]) => key in update && (update as Record<string, unknown>)[key] === null)
+    .map(([, column]) => column);
+
+  const { data, error } = await client.rpc('update_invoice_review', {
+    p_review_id: reviewId,
+    p_supplier: update.supplier ?? null,
+    p_detail: update.detail ?? null,
+    p_amount: update.amount ?? null,
+    p_amount_incl_gst: update.amountInclGst ?? null,
+    p_invoice_number: update.invoiceNumber ?? null,
+    p_dated: update.dated ?? null,
+    p_due_on: update.dueOn ?? null,
+    p_paid: update.paid ?? null,
+    p_paid_on: update.paidOn ?? null,
+    p_category: update.category ?? null,
+    p_element_id: update.elementId ?? null,
+    p_clear: clear,
+  });
+  return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/**
+ * Yes — it becomes a real bill on the job.
+ *
+ * The server calls `create_quote`, the one door every other price comes
+ * through, so an approved invoice is indistinguishable from one typed by hand.
+ * A paid one also records its payment, and only where there is an amount for
+ * the payment to be about.
+ */
+export async function approveInvoiceReview(
+  client: SupabaseClient,
+  reviewId: string,
+  elementId?: string | null
+): Promise<ProjectQuote> {
+  const { data, error } = await client.rpc('approve_invoice_review', {
+    p_review_id: reviewId,
+    p_element_id: elementId ?? null,
+  });
+  return mapQuote(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/** No — it leaves the deck, and it is still there to be put back. */
+export async function declineInvoiceReview(
+  client: SupabaseClient,
+  reviewId: string
+): Promise<InvoiceReview> {
+  const { data, error } = await client.rpc('decline_invoice_review', { p_review_id: reviewId });
+  return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/** The undo, and the reason declining is a state rather than a delete. */
+export async function restoreInvoiceReview(
+  client: SupabaseClient,
+  reviewId: string
+): Promise<InvoiceReview> {
+  const { data, error } = await client.rpc('restore_invoice_review', { p_review_id: reviewId });
+  return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/** For good. Its own call, so a swipe and a deletion are never one press. */
+export async function deleteInvoiceReview(
+  client: SupabaseClient,
+  reviewId: string
+): Promise<void> {
+  const { error } = await client.rpc('delete_invoice_review', { p_review_id: reviewId });
+  if (error) throw asError(error, "That didn’t delete");
+}
+
+// ------------------------------------------------------ reading the deck
+
+/** The cards still waiting on a judgement, oldest bill first. */
+export function pendingReviews(reviews: InvoiceReview[]): InvoiceReview[] {
+  return reviews.filter((r) => r.state === 'pending');
+}
+
+/** The bin. Newest decision first, because a mistake is looked for straight after. */
+export function declinedReviews(reviews: InvoiceReview[]): InvoiceReview[] {
+  return reviews
+    .filter((r) => r.state === 'declined')
+    .sort((a, b) => (b.decidedAt ?? '').localeCompare(a.decidedAt ?? ''));
+}
+
+/**
+ * What the bell says when it is pressed.
+ *
+ * **Absent at nought, in the caller.** Like the shopping pill and *Fit* in
+ * `PhotoViewer`, a bell with nothing behind it is a control dressed as a
+ * choice — so this returns null there rather than "you have 0 objects to
+ * review", and the header draws nothing.
+ *
+ * It counts **pending only**. The bin is reachable through the same bell, but
+ * a declined card is not something to review; it is something already ruled
+ * on, and counting it would make the number go up when somebody clears one.
+ */
+export function reviewAlert(reviews: InvoiceReview[]): string | null {
+  const n = pendingReviews(reviews).length;
+  if (n === 0) return null;
+  return `You have ${n} object${n === 1 ? '' : 's'} to review`;
+}
+
+/**
+ * What a card is called.
+ *
+ * The supplier is what somebody recognises — "ReliaBuilder" answers the
+ * question before the amount does — and the invoice number disambiguates the
+ * fourth one from them. With neither, the subject line the email arrived under
+ * is better than nothing, and *An invoice* is the last resort rather than a
+ * blank heading, on the same argument `snagHeadline` makes for a photo with no
+ * words.
+ */
+export function invoiceReviewHeadline(review: InvoiceReview): string {
+  const supplier = review.supplier?.trim();
+  const number = review.invoiceNumber?.trim();
+  if (supplier && number) return `${supplier} · ${number}`;
+  if (supplier) return supplier;
+  if (number) return number;
+  const subject = review.sourceSubject?.trim();
+  if (subject) return subject;
+  return 'An invoice';
+}
+
+/**
+ * Whether a field on this card is the app's guess rather than the invoice's
+ * answer. The card dims and marks these; nothing else reads `inferred`.
+ */
+export function wasInferred(review: InvoiceReview, field: string): boolean {
+  return review.inferred.includes(field);
+}
+
+/**
+ * How the card states the paid answer, with what it was read from.
+ *
+ * Never the flag alone. "Paid" on its own is the app asserting something it
+ * cannot see a bank statement for; "Paid — you replied *this is now paid* on
+ * 7 Jul" is a reader being shown the evidence and left to disagree. Where
+ * there is no evidence the wording says so rather than borrowing confidence it
+ * has not got.
+ */
+export function describePaidInference(review: InvoiceReview): string {
+  if (!review.paid) {
+    return review.paidEvidence
+      ? `Nothing in the thread says it was paid — ${review.paidEvidence}`
+      : 'Nothing in the thread says it was paid';
+  }
+  return review.paidEvidence ? `Paid — ${review.paidEvidence}` : 'Paid — no sentence to show for it';
 }

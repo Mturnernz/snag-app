@@ -1555,6 +1555,65 @@ export interface ProjectMilestone {
 }
 
 /**
+ * Where a card is up to. Pending is the deck, declined is the bin, approved is
+ * a bill on the job.
+ */
+export type InvoiceReviewState = 'pending' | 'approved' | 'declined';
+
+/**
+ * A bill that has arrived and has not yet been ruled on.
+ *
+ * Every other money row in this app is something a person typed while looking
+ * at a piece of paper. This is the one that arrived by itself — read off an
+ * email, pre-filled as far as the email allowed, and **worth nothing to any
+ * total until somebody says yes**.
+ *
+ * That is the whole design, and it is enforced by the row living in its own
+ * table rather than as a state on `ProjectQuote`: there is no expression
+ * anywhere that could accidentally count it. A pending invoice is a question.
+ *
+ * Two fields carry the honesty the rest of the feature rests on:
+ *
+ *   * **`inferred`** names the columns that were *guessed* rather than read, so
+ *     the card can mark them and the reader knows which answers are the app's
+ *     rather than the invoice's.
+ *   * **`paidEvidence`** is the sentence `paid` was drawn from. An inference
+ *     presented as a fact is how a record stops being believed, so the two
+ *     never travel apart.
+ */
+export interface InvoiceReview {
+  id: string;
+  projectId: string;
+  /** Which part it will land on. Null is the whole job — it never invents one. */
+  elementId: string | null;
+  supplier: string | null;
+  detail: string | null;
+  /** Nullable, and null is not zero — the rule every figure in this app follows. */
+  amount: number | null;
+  amountInclGst: boolean;
+  invoiceNumber: string | null;
+  dated: string | null;
+  dueOn: string | null;
+  paid: boolean;
+  paidOn: string | null;
+  /** The words `paid` was read from, shown under the answer. */
+  paidEvidence: string | null;
+  /** What the email suggests this is. Free text: a fixed list would need setup. */
+  category: string | null;
+  sourceRef: string | null;
+  sourceSubject: string | null;
+  sourceFrom: string | null;
+  sourceAt: string | null;
+  /** Column names whose values were guessed rather than read. */
+  inferred: string[];
+  state: InvoiceReviewState;
+  /** The bill it became, once approved. */
+  quoteId: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+}
+
+/**
  * One live bill on a job, with what is still to go out on it and when.
  *
  * A read and nothing else. There is no notification anywhere in this product

@@ -83,7 +83,7 @@ Somebody will read what you return back in a shop, character by character, so a 
 - make: the manufacturer or brand, written the way the brand writes its own name in ordinary text rather than in the label's capitals: "Mitsubishi Electric", "Fisher & Paykel", "Samsung", "LG", "De'Longhi" (for paint, the paint brand: "Resene", "Dulux").
 - model: the model number or part code. serial: the serial number. Keep the label's own capitals, spacing, slashes and dashes.
 - colourName, colourCode, product, sheen, tint: paint and tile only. tint is the tint formula exactly as printed.
-- hex: paint and tile only. Your estimate of the colour as a six-digit hex like #A1B2C3, from the colour visible in the photo or the named colour if you know it well. Null if you cannot judge it.
+- hex: paint only. The paint maker's own published hex for this exact colour, as six digits like #A1B2C3 — only when the brand and the colour name or code on the tin identify a colour on that maker's published colour chart and you know the value the maker publishes for it. Never estimate it from the colour in the photo, and never give the hex of a similar colour. Null when there is no colour name or code, when you are not certain of the published value, and for tiles.
 - consumables: only part numbers the label itself prints for something the item takes or is replaced with (a filter cartridge code, a bulb type printed on the fitting). Usually empty.
 - legible: false if the photo is not a label, or nothing on it can be read. Then return null for every field and empty lists.
 

@@ -190,6 +190,15 @@ describe('applyLabelReading', () => {
     expect(next.spec).toEqual({ sheen: 'Low sheen', tint: 'BS2 Y 12.5', hex: '#EAE8DF' });
   });
 
+  it('takes a swatch only as the published value of a colour the tin names', () => {
+    // A hex with no colour to be the value *of* can only be the photo judged by
+    // eye, and a white under a kitchen bulb photographs grey.
+    expect(applyLabelReading(blank, read({ make: 'Resene', hex: '#E4E2DC' }), 'finish').next.spec).toEqual({});
+    const named = applyLabelReading(blank, read({ colourName: 'Wan White', hex: '#E4E2DC' }), 'finish');
+    expect(named.next.spec).toEqual({ hex: '#E4E2DC' });
+    expect(named.filled).toContain('swatch');
+  });
+
   it('gives a paint no serial and an appliance no swatch', () => {
     expect(applyLabelReading(blank, read({ serial: '123' }), 'finish').next.serial).toBe('');
     expect(applyLabelReading(blank, read({ hex: '#FFFFFF' }), 'appliance').next.spec).toEqual({});

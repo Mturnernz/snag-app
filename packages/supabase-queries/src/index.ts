@@ -1381,8 +1381,9 @@ export function searchThings(things: Thing[], query: string): Thing[] {
 /**
  * A paint's swatch, as a colour a screen can draw — or null.
  *
- * `spec.hex` is typed, or read off the tin by `readLabel`, and either way it is
- * text somebody could have got wrong. So it is read back rather than trusted:
+ * `spec.hex` is typed, or comes from `readLabel` as the maker's published value
+ * for the colour named on the tin, and either way it is text somebody could
+ * have got wrong. So it is read back rather than trusted:
  * six hex digits or three, with or without the `#`, and anything else draws
  * **nothing** rather than a guess. A swatch in the wrong colour is worse than
  * none, because it is the one part of a paint record somebody believes at a
@@ -1431,7 +1432,8 @@ export function consumableOnList(snags: Snag[], thingId: string, item: string): 
  * What `read-label` says it could read off a photograph.
  *
  * Every field is what was **printed**, or null. The one exception is `hex`,
- * which is an estimate of a colour and is only ever drawn as a swatch beside
+ * which is the paint maker's **published** value for the colour the tin names
+ * — never judged from the photo — and is only ever drawn as a swatch beside
  * the code (see `swatchColour`). `consumables` is limited server-side to part
  * numbers on the label itself — a bulb spec guessed from general knowledge is
  * the same unverifiable claim an unsourced tradesman is, and a wrong one is a
@@ -1595,7 +1597,10 @@ export function applyLabelReading(
       putSpec('product', reading.product, 'product');
       putSpec('sheen', reading.sheen, 'sheen');
       putSpec('tint', reading.tint, 'tint formula');
-      putSpec('hex', reading.hex, 'swatch');
+      // A published hex belongs to a named colour. One arriving without a
+      // name or code to be the published value *of* is a judgement of the
+      // photo, which is exactly what a swatch must not be.
+      if (reading.colourName || reading.colourCode) putSpec('hex', reading.hex, 'swatch');
     }
   } else {
     put('make', reading.make, 'make');

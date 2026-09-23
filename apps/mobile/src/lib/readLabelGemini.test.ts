@@ -34,6 +34,9 @@ describe('the request', () => {
     expect(SYSTEM).toMatch(/Mitsubishi Electric/);
     expect(SYSTEM).toMatch(/not transcription/);
     expect(SCHEMA.properties.suggestedConsumables.items.required).toEqual(['item', 'code']);
+    // A swatch is the maker's published value or nothing — never read off the photo.
+    expect(SYSTEM).toMatch(/published hex/);
+    expect(SYSTEM).toMatch(/Never estimate it from the colour in the photo/);
   });
 
   it('treats an unknown kind as an appliance rather than sending nothing', () => {

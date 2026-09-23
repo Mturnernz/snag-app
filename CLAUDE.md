@@ -1111,7 +1111,12 @@ rules keep it that way, and they are the whole feature:
 - **It transcribes into boxes, and suggests only as offers.** An ambiguous character is null,
   never a best guess — a plausible wrong model number is worse than none in a shop. Every box it
   fills was printed on the thing in somebody's hand, where they can check it. `hex` is the one
-  estimate that reaches a box, and it is only ever drawn as a swatch. A serial, which the
+  box it fills that was not printed, and it is **the maker's published value or nothing**: the
+  model gives it only when the brand and the colour named on the tin identify a colour on that
+  maker's chart, never judges it from the photo (a white under a kitchen bulb photographs grey),
+  and `applyLabelReading` refuses one that arrives without a colour name or code to be the value
+  *of*. A paint with no swatch is honest; a swatch that is somebody's guess at a colour is the one
+  part of a paint record people believe at a glance. A serial, which the
   walkthrough never asks for, appears in a box of its own when read, so it is checked rather than
   saved unseen.
 
@@ -1276,7 +1281,8 @@ later, in an aisle, needing one exact string. So:
   **A paint swatch is not an exception to that**, and the distinction is worth holding: the palette
   is what the *app* spends colour on, and a swatch is the record's own data — the same as the
   photograph of the tin beside it. `spec.hex` holds it (jsonb, so no migration), typed on the thing
-  page or read off the tin (below). `swatchColour` draws it only when it parses as three or six hex
+  page or supplied with the label reading as the maker's **published** value for the colour the
+  tin names (below) — never a colour judged from a photograph. `swatchColour` draws it only when it parses as three or six hex
   digits, and draws **nothing** otherwise rather than a guess, because a swatch is the one part of a
   paint record somebody believes at a glance without reading the code beside it; a box holding
   something else says *Six hex digits draw a swatch*. It carries a hairline edge because most paint

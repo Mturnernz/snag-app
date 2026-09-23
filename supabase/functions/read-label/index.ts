@@ -18,7 +18,8 @@
 //   everywhere else. A path into somebody else's household is refused.
 // - **It transcribes; it does not know things — except where it says so.**
 //   Every field that lands in a box is what is printed on the label, or null.
-//   `hex` is an on-screen estimate of a colour, only ever drawn as a swatch.
+//   `hex` is the maker's published value for the named colour, or null —
+//   never judged from the photo, because lighting makes a white look grey.
 // - **What it takes is suggested, never entered.** A plate rarely prints its
 //   filter code, so `suggestedConsumables` and `suggestedServiceMonths` come
 //   from what the model knows about the make and model — and the walkthrough

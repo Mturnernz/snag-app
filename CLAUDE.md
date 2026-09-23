@@ -1108,12 +1108,36 @@ rules keep it that way, and they are the whole feature:
   the plate has already answered, and a reading that overwrote them would be the app deciding a
   photograph knows better than the person holding the appliance. It also makes a late answer safe:
   the read is never awaited, and whatever was typed while it was out is kept.
-- **It transcribes; it does not know things.** An ambiguous character is null, never a best guess —
-  a plausible wrong model number is worse than none in a shop. **What it takes comes off the label
-  or not at all**: a bulb spec "likely" for that oven is the unsourced-tradesman problem again. The
-  single exception is `hex`, an estimate by nature, which is only ever drawn as a swatch. A serial,
-  which the walkthrough never asks for, appears in a box of its own when read, so it is checked
-  rather than saved unseen.
+- **It transcribes into boxes, and suggests only as offers.** An ambiguous character is null,
+  never a best guess — a plausible wrong model number is worse than none in a shop. Every box it
+  fills was printed on the thing in somebody's hand, where they can check it. `hex` is the one
+  box it fills that was not printed, and it is **the maker's published value or nothing**: the
+  model gives it only when the brand and the colour named on the tin identify a colour on that
+  maker's chart, never judges it from the photo (a white under a kitchen bulb photographs grey),
+  and `applyLabelReading` refuses one that arrives without a colour name or code to be the value
+  *of*. A paint with no swatch is honest; a swatch that is somebody's guess at a colour is the one
+  part of a paint record people believe at a glance. A serial, which the
+  walkthrough never asks for, appears in a box of its own when read, so it is checked rather than
+  saved unseen.
+
+  **What it takes is the exception, and it is fenced rather than forbidden.** It used to come
+  "off the label or not at all", which in practice meant never: a heat pump's plate does not print
+  its filter code, so the step asking *Anything you re-buy for it?* came back empty on every real
+  appliance — and it was asked for. So the model also returns `suggestedConsumables` and
+  `suggestedServiceMonths`, **from what it knows about that make and model**, and they arrive as
+  offers on step four under *Suggested for this model · check before you buy*: a row with a + per
+  part, tapped to take, and a line saying the usual service cycle. **`applyLabelReading` never lays
+  one into a box, even an empty box**, and no cycle is chosen for anybody. That is the distinction
+  the unsourced-tradesman rule actually protects — a guess must not look like something read —
+  and a heading naming it a suggestion plus a tap to accept it keeps that true. The instruction
+  asks for a part code only when the model is confident of it, and the item in plain words
+  otherwise; "Air filter" with no code still tells somebody what to ask for.
+- **A brand is written the way the brand writes itself.** Rating plates shout, and "MITSUBISHI
+  ELECTRIC" in the record reads as a label rather than a name. The model is asked for the brand's
+  own casing; `brandCase` is the fallback when it copies the capitals anyway — it touches only a
+  make with no lower-case letter at all (so *iRobot* and *De'Longhi* are left as given) and keeps a
+  word of three characters or fewer in capitals (LG, AEG, 3M). The model and serial keep the
+  label's capitals, because those are read back character by character.
 - **It reads the photo as the caller.** The client sends a storage path, never bytes, and the
   function downloads with the caller's token — so the `home-photos` policies decide what can be
   read, exactly as everywhere else, and `docs/` paths are refused outright.
@@ -1161,11 +1185,13 @@ tier submitted content may be used to improve their products, and these are phot
 inside of people's houses. Until the key is set the feature says it is not set up and everything
 else works.
 
-`label.test.ts` pins `swatchColour`, `consumableOnList`, the defensive parse and the fill-only-
-empty rule; `readLabelGemini.test.ts` pins the request's shape and every refusal in
+`label.test.ts` pins `swatchColour`, `consumableOnList`, the defensive parse, `brandCase`, the
+suggestions kept apart from what was read, and the fill-only-empty rule — including that a
+suggestion never fills a box; `readLabelGemini.test.ts` pins the request's shape and every refusal in
 `readingFromGemini`; `AddThingSheet.test.tsx` pins the boxes filled and named, a typed box
-surviving a late reading, the failure sentence, and a paint's tin reaching `create_thing` as code,
-sheen and swatch.
+surviving a late reading, the failure sentence, a paint's tin reaching `create_thing` as code,
+sheen and swatch, and the suggestions — offered not entered, gone once tapped, carried into the
+write beside what was typed, and the suggested cycle never chosen.
 
 ### Writing is rare and accidental; reading is under pressure, somewhere else
 
@@ -1255,7 +1281,8 @@ later, in an aisle, needing one exact string. So:
   **A paint swatch is not an exception to that**, and the distinction is worth holding: the palette
   is what the *app* spends colour on, and a swatch is the record's own data — the same as the
   photograph of the tin beside it. `spec.hex` holds it (jsonb, so no migration), typed on the thing
-  page or read off the tin (below). `swatchColour` draws it only when it parses as three or six hex
+  page or supplied with the label reading as the maker's **published** value for the colour the
+  tin names (below) — never a colour judged from a photograph. `swatchColour` draws it only when it parses as three or six hex
   digits, and draws **nothing** otherwise rather than a guess, because a swatch is the one part of a
   paint record somebody believes at a glance without reading the code beside it; a box holding
   something else says *Six hex digits draw a swatch*. It carries a hairline edge because most paint

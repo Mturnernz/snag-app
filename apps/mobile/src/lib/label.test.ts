@@ -1,5 +1,5 @@
 import {
-  applyLabelReading, consumableOnList, parseLabelReading, swatchColour,
+  applyLabelReading, brandCase, consumableOnList, parseLabelReading, swatchColour,
   type LabelFields, type LabelReading,
 } from '@snag/supabase-queries';
 import type { Snag } from '../types';
@@ -75,7 +75,8 @@ describe('consumableOnList', () => {
 
 const read = (over: Partial<LabelReading>): LabelReading => ({
   legible: true, make: null, model: null, serial: null, colourName: null, colourCode: null,
-  product: null, sheen: null, tint: null, hex: null, consumables: [], ...over,
+  product: null, sheen: null, tint: null, hex: null, consumables: [],
+  suggestedConsumables: [], suggestedServiceDays: null, ...over,
 });
 const blank: LabelFields = { name: '', make: '', model: '', serial: '', takes: '', spec: {} };
 
@@ -93,6 +94,52 @@ describe('parseLabelReading', () => {
     });
     expect(got).toMatchObject({ make: 'Smeg', model: null, serial: null, hex: null, consumables: ['E14 25W'] });
   });
+
+  it('writes a shouted brand the way the brand writes itself', () => {
+    expect(parseLabelReading({ legible: true, make: 'MITSUBISHI ELECTRIC' })?.make).toBe('Mitsubishi Electric');
+  });
+
+  it('keeps suggestions apart from what was read, as words somebody can buy', () => {
+    const got = parseLabelReading({
+      legible: true, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', consumables: [],
+      suggestedConsumables: [
+        { item: 'Air filter', code: 'MAC-2360FT' },
+        { item: 'Remote batteries', code: null },
+        { item: 'air filter', code: 'mac-2360ft' },
+        { item: '', code: null },
+        'nonsense',
+      ],
+      suggestedServiceMonths: 12,
+    });
+    expect(got?.consumables).toEqual([]);
+    expect(got?.suggestedConsumables).toEqual(['Air filter MAC-2360FT', 'Remote batteries']);
+    expect(got?.suggestedServiceDays).toBe(365);
+  });
+
+  it('suggests only a cycle the walkthrough offers', () => {
+    expect(parseLabelReading({ legible: true, suggestedServiceMonths: 3 })?.suggestedServiceDays).toBeNull();
+    expect(parseLabelReading({ legible: true, suggestedServiceMonths: 6 })?.suggestedServiceDays).toBe(180);
+    expect(parseLabelReading({ legible: true })?.suggestedServiceDays).toBeNull();
+  });
+});
+
+describe('brandCase', () => {
+  it.each([
+    ['SAMSUNG', 'Samsung'],
+    ['FISHER & PAYKEL', 'Fisher & Paykel'],
+    ['DE\'LONGHI', 'De\'Longhi'],
+    ['LG', 'LG'],
+    ['AEG', 'AEG'],
+    ['3M', '3M'],
+    ['RESENE', 'Resene'],
+  ])('reads %p as %p', (shouted, want) => {
+    expect(brandCase(shouted)).toBe(want);
+  });
+
+  it('leaves a name that already has its own capitals alone', () => {
+    expect(brandCase('iRobot')).toBe('iRobot');
+    expect(brandCase('Smeg')).toBe('Smeg');
+  });
 });
 
 describe('applyLabelReading', () => {
@@ -104,6 +151,18 @@ describe('applyLabelReading', () => {
     );
     expect(next).toMatchObject({ make: 'Smeg', model: 'C6GMXA8', serial: '1690428', takes: 'E14 25W 300°C' });
     expect(filled).toEqual(['make', 'model', 'serial', 'what it takes']);
+  });
+
+  it('never lays a suggestion into a box, even an empty one', () => {
+    // Everything filled is on the label in somebody's hand; a suggestion is the
+    // model's memory of the model, and is offered rather than entered.
+    const { next, filled } = applyLabelReading(
+      blank,
+      read({ make: 'Smeg', suggestedConsumables: ['Oven bulb E14 25W'], suggestedServiceDays: 365 }),
+      'appliance'
+    );
+    expect(next.takes).toBe('');
+    expect(filled).toEqual(['make']);
   });
 
   it('never writes over a box somebody typed into', () => {
@@ -129,6 +188,15 @@ describe('applyLabelReading', () => {
     );
     expect(next).toMatchObject({ name: 'Wan White', make: 'Resene', model: 'N93-005-105', serial: '' });
     expect(next.spec).toEqual({ sheen: 'Low sheen', tint: 'BS2 Y 12.5', hex: '#EAE8DF' });
+  });
+
+  it('takes a swatch only as the published value of a colour the tin names', () => {
+    // A hex with no colour to be the value *of* can only be the photo judged by
+    // eye, and a white under a kitchen bulb photographs grey.
+    expect(applyLabelReading(blank, read({ make: 'Resene', hex: '#E4E2DC' }), 'finish').next.spec).toEqual({});
+    const named = applyLabelReading(blank, read({ colourName: 'Wan White', hex: '#E4E2DC' }), 'finish');
+    expect(named.next.spec).toEqual({ hex: '#E4E2DC' });
+    expect(named.filled).toContain('swatch');
   });
 
   it('gives a paint no serial and an appliance no swatch', () => {

@@ -1381,8 +1381,9 @@ export function searchThings(things: Thing[], query: string): Thing[] {
 /**
  * A paint's swatch, as a colour a screen can draw — or null.
  *
- * `spec.hex` is typed, or read off the tin by `readLabel`, and either way it is
- * text somebody could have got wrong. So it is read back rather than trusted:
+ * `spec.hex` is typed, or comes from `readLabel` as the maker's published value
+ * for the colour named on the tin, and either way it is text somebody could
+ * have got wrong. So it is read back rather than trusted:
  * six hex digits or three, with or without the `#`, and anything else draws
  * **nothing** rather than a guess. A swatch in the wrong colour is worse than
  * none, because it is the one part of a paint record somebody believes at a
@@ -1431,7 +1432,8 @@ export function consumableOnList(snags: Snag[], thingId: string, item: string): 
  * What `read-label` says it could read off a photograph.
  *
  * Every field is what was **printed**, or null. The one exception is `hex`,
- * which is an estimate of a colour and is only ever drawn as a swatch beside
+ * which is the paint maker's **published** value for the colour the tin names
+ * — never judged from the photo — and is only ever drawn as a swatch beside
  * the code (see `swatchColour`). `consumables` is limited server-side to part
  * numbers on the label itself — a bulb spec guessed from general knowledge is
  * the same unverifiable claim an unsourced tradesman is, and a wrong one is a
@@ -1449,7 +1451,40 @@ export interface LabelReading {
   tint: string | null;
   hex: string | null;
   consumables: string[];
+  /**
+   * **Not read off the label.** What the model knows goes with this make and
+   * model — "Air filter MAC-2360FT" — offered on the walkthrough's last step as
+   * rows somebody taps to add, and never laid into a box. See `applyLabelReading`.
+   */
+  suggestedConsumables: string[];
+  /** Likewise a suggestion: 180, 365 or 730, or null. Never chosen for them. */
+  suggestedServiceDays: number | null;
 }
+
+/**
+ * A brand in the case it writes itself in, when the label shouted it.
+ *
+ * Rating plates print the maker in capitals, and "MITSUBISHI ELECTRIC" in the
+ * house record reads as a label rather than a name. The model is asked for the
+ * brand's own casing; this is the fallback for when it copies the capitals
+ * anyway. Anything already holding a lower-case letter is left exactly as it
+ * came — "iRobot" and "De'Longhi" are somebody's decision — and a word of three
+ * letters or fewer stays capitals, because that is LG, AEG and GE.
+ */
+export function brandCase(value: string): string {
+  if (/[a-z]/.test(value) || !/[A-Z]/.test(value)) return value;
+  return value
+    .split(' ')
+    .map((word) =>
+      /^[A-Z0-9]{1,3}$/.test(word)
+        ? word
+        : word.toLowerCase().replace(/(^|[-'’.])([a-z])/g, (_, lead: string, c: string) => lead + c.toUpperCase())
+    )
+    .join(' ');
+}
+
+/** Service intervals the walkthrough offers, by the months a model says them in. */
+const SUGGESTED_CYCLE_DAYS: Record<number, number> = { 6: 180, 12: 365, 24: 730 };
 
 function labelText(value: unknown, max = 80): string | null {
   if (typeof value !== 'string') return null;
@@ -1472,9 +1507,22 @@ export function parseLabelReading(raw: unknown): LabelReading | null {
   const consumables = Array.isArray(r.consumables)
     ? r.consumables.map((one) => labelText(one, 60)).filter((one): one is string => !!one).slice(0, 5)
     : [];
+  const suggestedConsumables = Array.isArray(r.suggestedConsumables)
+    ? r.suggestedConsumables
+        .map((one) => {
+          if (!one || typeof one !== 'object') return null;
+          const { item, code } = one as Record<string, unknown>;
+          const words = [labelText(item, 40), labelText(code, 40)].filter(Boolean).join(' ');
+          return words ? words.slice(0, 60) : null;
+        })
+        .filter((one): one is string => !!one)
+        .filter((one, i, all) => all.findIndex((other) => other.toLowerCase() === one.toLowerCase()) === i)
+        .slice(0, 4)
+    : [];
+  const make = labelText(r.make);
   return {
     legible: true,
-    make: labelText(r.make),
+    make: make ? brandCase(make) : null,
     model: labelText(r.model),
     serial: labelText(r.serial),
     colourName: labelText(r.colourName),
@@ -1484,6 +1532,9 @@ export function parseLabelReading(raw: unknown): LabelReading | null {
     tint: labelText(r.tint, 120),
     hex: swatchColour({ hex: labelText(r.hex, 9) ?? '' }),
     consumables,
+    suggestedConsumables,
+    suggestedServiceDays:
+      typeof r.suggestedServiceMonths === 'number' ? SUGGESTED_CYCLE_DAYS[r.suggestedServiceMonths] ?? null : null,
   };
 }
 
@@ -1512,6 +1563,11 @@ export interface LabelFields {
  * answer somebody comes back for — its brand the make and its code the model.
  * Returns what it filled, in words, so the sheet can say which boxes to check
  * against the label rather than implying it read everything.
+ *
+ * The suggestions are deliberately **not** laid in here, even into an empty
+ * box. Everything this fills was printed on the thing in somebody's hand and
+ * they can check it against the label; a suggested filter code is the model's
+ * memory of the model, and the only honest place for it is an offer they tap.
  */
 export function applyLabelReading(
   current: LabelFields,
@@ -1541,7 +1597,10 @@ export function applyLabelReading(
       putSpec('product', reading.product, 'product');
       putSpec('sheen', reading.sheen, 'sheen');
       putSpec('tint', reading.tint, 'tint formula');
-      putSpec('hex', reading.hex, 'swatch');
+      // A published hex belongs to a named colour. One arriving without a
+      // name or code to be the published value *of* is a judgement of the
+      // photo, which is exactly what a swatch must not be.
+      if (reading.colourName || reading.colourCode) putSpec('hex', reading.hex, 'swatch');
     }
   } else {
     put('make', reading.make, 'make');

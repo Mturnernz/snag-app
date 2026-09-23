@@ -16,11 +16,15 @@
 //   bytes, and the download uses the caller's own token — so the four storage
 //   policies on `home-photos` decide what can be read, exactly as they do
 //   everywhere else. A path into somebody else's household is refused.
-// - **It transcribes; it does not know things.** Every field is what is printed
-//   on the label, or null. The single exception is `hex`, an on-screen
-//   estimate of a colour, only ever drawn as a swatch beside the real code.
-// - **What it takes comes off the label or not at all.** A bulb spec "likely"
-//   for this oven is the same unverifiable claim an unsourced tradesman is.
+// - **It transcribes; it does not know things — except where it says so.**
+//   Every field that lands in a box is what is printed on the label, or null.
+//   `hex` is the maker's published value for the named colour, or null —
+//   never judged from the photo, because lighting makes a white look grey.
+// - **What it takes is suggested, never entered.** A plate rarely prints its
+//   filter code, so `suggestedConsumables` and `suggestedServiceMonths` come
+//   from what the model knows about the make and model — and the walkthrough
+//   offers them under a heading calling them suggestions, one tap each, and
+//   never lays one into a box.
 //
 // The model is Gemini, called over REST (`gemini.ts` holds the request and the
 // reading of the reply, and is what the tests exercise). The app never knows

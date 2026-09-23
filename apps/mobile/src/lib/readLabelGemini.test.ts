@@ -1,0 +1,66 @@
+import {
+  geminiRequest, readingFromGemini, SCHEMA,
+} from '../../../../supabase/functions/read-label/gemini';
+import { parseLabelReading } from '@snag/supabase-queries';
+
+// `read-label` asks Gemini and the app never knows it did. What these pin is
+// the seam: the request carries the photo and the fixed shape, and every way
+// a reply can fail to be a reading is caught as one — so a blocked or cut-off
+// answer becomes the sentence under the boxes, never half a model number.
+
+const reply = (text: string, over: Record<string, unknown> = {}) => ({
+  candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP', ...over }],
+});
+
+const plate = {
+  legible: true, make: 'Smeg', model: 'C6GMXA8', serial: null, colourName: null,
+  colourCode: null, product: null, sheen: null, tint: null, hex: null, consumables: [],
+};
+
+describe('the request', () => {
+  it('sends the photo inline, asks for JSON in the fixed shape, and names the kind', () => {
+    const body = geminiRequest('finish', 'image/jpeg', 'AAAA');
+    expect(body.contents[0].parts[0]).toEqual({ inlineData: { mimeType: 'image/jpeg', data: 'AAAA' } });
+    expect(body.contents[0].parts[1].text).toMatch(/paint/);
+    expect(body.generationConfig).toEqual({ responseMimeType: 'application/json', responseJsonSchema: SCHEMA });
+    expect(body.systemInstruction.parts[0].text).toMatch(/Transcribe; do not infer/);
+  });
+
+  it('asks for every field, so a missing key never has to be told from a null', () => {
+    expect([...SCHEMA.required].sort()).toEqual(Object.keys(SCHEMA.properties).sort());
+  });
+
+  it('treats an unknown kind as an appliance rather than sending nothing', () => {
+    expect(geminiRequest('mystery', 'image/png', 'x').contents[0].parts[1].text).toMatch(/rating plate/);
+  });
+});
+
+describe('reading the reply', () => {
+  it('reads a clean answer, which the app then accepts', () => {
+    const outcome = readingFromGemini(reply(JSON.stringify(plate)));
+    expect(outcome).toEqual({ ok: true, reading: plate });
+    expect(parseLabelReading(outcome.ok ? outcome.reading : null)).toMatchObject({ make: 'Smeg' });
+  });
+
+  it('ignores thought parts and forgives a code fence', () => {
+    const raw = {
+      candidates: [{
+        finishReason: 'STOP',
+        content: { parts: [{ text: 'looking at the plate', thought: true }, { text: '```json\n{"legible":false}\n```' }] },
+      }],
+    };
+    expect(readingFromGemini(raw)).toEqual({ ok: true, reading: { legible: false } });
+  });
+
+  it.each([
+    ['a blocked prompt', { promptFeedback: { blockReason: 'SAFETY' } }, 'blocked'],
+    ['a filtered answer', reply('{}', { finishReason: 'SAFETY' }), 'blocked'],
+    ['an answer cut off', reply('{"legible":true,"make":"Sm', { finishReason: 'MAX_TOKENS' }), 'truncated'],
+    ['no candidates at all', { candidates: [] }, 'empty'],
+    ['an empty answer', reply('   '), 'empty'],
+    ['something that is not JSON', reply('The label says Smeg.'), 'unparseable'],
+    ['nothing at all', null, 'empty'],
+  ])('refuses %s', (_, raw, reason) => {
+    expect(readingFromGemini(raw)).toEqual({ ok: false, reason });
+  });
+});

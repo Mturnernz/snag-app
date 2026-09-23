@@ -28,7 +28,7 @@ create or replace function home.link_snag_thing_on_create()
 returns trigger
 language plpgsql
 security definer
-set search_path = home, pg_temp
+set search_path = ''
 as $$
 begin
   insert into home.snag_things (snag_id, thing_id, created_by)

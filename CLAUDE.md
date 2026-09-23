@@ -1100,7 +1100,7 @@ comes back by hand. A label is the opposite case: a transcription of something t
 holding, which they check against the object in front of them before anything is written. Four
 rules keep it that way, and they are the whole feature:
 
-- **It writes nothing.** The function returns text. The walkthrough still writes only on its last
+- **It writes nothing to the record.** The function returns text (it counts the read, below). The walkthrough still writes only on its last
   step through `create_thing`, so a reading nobody confirmed cannot reach the record — the same
   guarantee the ghost design and the handover's confirm step exist for.
 - **It fills only the boxes still empty** (`applyLabelReading`), and says which ones in words
@@ -1122,17 +1122,36 @@ A failure is **a sentence under the boxes, never an alert** — the step is stil
 typing is what they would have done anyway. A missing key says *Label reading isn't set up yet*
 rather than reading as an unreadable photo. It has its own deadline (`LABEL_TIMEOUT_MS`, 45s): a
 model looking at a photograph takes seconds even when it works, and 20s would word a slow answer as
-a dead connection. `connect-src` already covers `*.supabase.co`, so the CSP did not change.
+a dead connection. The function gives the model 40s, so it answers in words before the app gives
+up. `connect-src` already covers `*.supabase.co`, so the CSP did not change.
 
-**Setup lives outside git**: `ANTHROPIC_API_KEY` as a function secret, optional `LABEL_MODEL`, and
-`supabase functions deploy read-label` with JWT verification left on. Until then the feature says
-it is not set up and everything else works. The household operator pays per read; nothing rate-
-limits it beyond needing a session, which is the thing to revisit if the app ever has strangers in
-it.
+**The model is Gemini, over plain REST, and the app does not know that.** `gemini.ts` holds the
+request (the photo inline, the instructions, `responseJsonSchema` fixing the shape) and
+`readingFromGemini`, which tells apart the four ways a reply is not a reading — blocked, empty, cut
+off at `MAX_TOKENS`, not JSON — and never reads a thought part as the answer. It is pure, with no
+Deno and no imports, so jest tests it directly. No SDK: one POST is not worth a dependency to keep
+current inside an edge function. Swapping models means changing that file and nothing in the app.
+
+**A household gets fifty reads a day** (`home.claim_label_read`, `20260923110000`). The key is the
+operator's, and nothing but a session stood between it and a loop. Per household rather than per
+person, so a second account is not a way round it; claimed *before* the model is called and never
+refunded, because a read that failed at the model still cost a request and a refund is a second
+write that can itself fail. It returns false rather than raising, so *used up for today* and *not
+your household* stay two different sentences. `label_reads` has RLS on and no policies — nothing
+browses it.
+
+**Setup lives outside git**, and the order matters: apply the migrations, set `GEMINI_API_KEY`
+(and optionally `GEMINI_MODEL`) as function secrets, `supabase functions deploy read-label` with JWT
+verification left on, try one real plate, then merge. **Use a paid-tier key**: on Google's free
+tier submitted content may be used to improve their products, and these are photographs of the
+inside of people's houses. Until the key is set the feature says it is not set up and everything
+else works.
 
 `label.test.ts` pins `swatchColour`, `consumableOnList`, the defensive parse and the fill-only-
-empty rule; `AddThingSheet.test.tsx` pins the boxes filled and named, a typed box surviving a late
-reading, the failure sentence, and a paint's tin reaching `create_thing` as code, sheen and swatch.
+empty rule; `readLabelGemini.test.ts` pins the request's shape and every refusal in
+`readingFromGemini`; `AddThingSheet.test.tsx` pins the boxes filled and named, a typed box
+surviving a late reading, the failure sentence, and a paint's tin reaching `create_thing` as code,
+sheen and swatch.
 
 ### Writing is rare and accidental; reading is under pressure, somewhere else
 

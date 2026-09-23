@@ -11,15 +11,18 @@
 
 export const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 export const DEFAULT_MODEL = 'gemini-3.8-flash';
-// Asked when the first answers "busy". A different model rather than the same
-// one again: the first live reads both came back 503 "high demand" from the
-// newest Flash forty seconds apart, and demand is per model — an older stable
-// one is usually free when the newest is not.
+// Asked when the first answers "busy". Different models rather than the same
+// one again: demand is per model, and the first live reads came back 503 "high
+// demand" from both Flash models in turn, with the key, the photo and the count
+// all fine. Google's own advice for a 503 is a pause and a less contended model,
+// and the Flash-Lite line is the one it points new projects at — a transcription
+// needs less model than anything else this app could ask.
 export const FALLBACK_MODEL = 'gemini-3.6-flash';
+export const LAST_RESORT_MODEL = 'gemini-3.5-flash-lite';
 
 /** The models to ask, in order, without asking one twice. */
 export function modelsToTry(primary: string | undefined, fallback: string | undefined): string[] {
-  const order = [primary || DEFAULT_MODEL, fallback || FALLBACK_MODEL];
+  const order = [primary || DEFAULT_MODEL, fallback || FALLBACK_MODEL, LAST_RESORT_MODEL];
   return order.filter((model, i) => order.indexOf(model) === i);
 }
 

@@ -28,13 +28,14 @@
 //
 // Secrets: GEMINI_API_KEY (required — use a paid-tier key: on the free tier
 // Google may use submitted content, and these are photographs of the inside of
-// people's houses). GEMINI_MODEL (optional, defaults in gemini.ts).
+// people's houses). GEMINI_MODEL and GEMINI_FALLBACK_MODEL (optional, defaults
+// in gemini.ts).
 // Deploy: `supabase functions deploy read-label` — JWT verification stays on,
 // so a signed-out caller never reaches the model.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { encodeBase64 } from 'jsr:@std/encoding/base64';
-import { DEFAULT_MODEL, GEMINI_ENDPOINT, geminiRequest, readingFromGemini } from './gemini.ts';
+import { GEMINI_ENDPOINT, geminiRequest, isBusy, modelsToTry, readingFromGemini } from './gemini.ts';
 
 const BUCKET = 'home-photos';
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -50,6 +51,12 @@ const CORS = {
 };
 
 const NOT_SET_UP = "Label reading isn't set up yet — type what the label says.";
+const BUSY = 'The label reader is busy right now — try again in a minute, or type what it says.';
+// A second model is only worth asking with enough of the budget left to answer,
+// so the first is cut off early enough to leave it some: a model that hangs
+// must not spend the whole 40s on its own.
+const MIN_ATTEMPT_MS = 8_000;
+const FIRST_ATTEMPT_MS = 25_000;
 const COULD_NOT_READ = "Couldn't read that one — type what the label says.";
 
 function answer(status: number, body: unknown): Response {
@@ -123,29 +130,52 @@ Deno.serve(async (req) => {
     return answer(429, { error: "That's today's label reads used up — type what this one says." });
   }
 
-  const model = Deno.env.get('GEMINI_MODEL') || DEFAULT_MODEL;
-  let reply: Response;
-  try {
-    reply = await fetch(`${GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(geminiRequest(kind, mimeType, encodeBase64(bytes))),
-      signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
-    });
-  } catch (err) {
-    console.error('read-label: Gemini unreachable or too slow:', err);
-    return answer(504, { error: "Couldn't read the label just now — type what it says." });
-  }
+  // One read claimed above covers every model asked: falling back is our
+  // retry, not the household's second read.
+  const models = modelsToTry(Deno.env.get('GEMINI_MODEL'), Deno.env.get('GEMINI_FALLBACK_MODEL'));
+  const body = JSON.stringify(geminiRequest(kind, mimeType, encodeBase64(bytes)));
+  const deadline = Date.now() + MODEL_TIMEOUT_MS;
+  let reply: Response | null = null;
+  let busy = false;
 
-  if (!reply.ok) {
-    const detail = await reply.text().catch(() => '');
-    console.error(`read-label: Gemini ${reply.status}:`, detail.slice(0, 500));
-    if (reply.status === 429) return answer(429, { error: 'Too many labels at once — try again in a minute.' });
-    // A bad or revoked key comes back 400 ("API key not valid") or 401/403.
-    if (reply.status === 401 || reply.status === 403 || /API key/i.test(detail)) {
+  for (const [index, model] of models.entries()) {
+    const left = deadline - Date.now();
+    if (reply !== null || left < MIN_ATTEMPT_MS) break;
+    const last = index === models.length - 1;
+    let attempt: Response;
+    try {
+      attempt = await fetch(`${GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body,
+        signal: AbortSignal.timeout(last ? left : Math.min(left, FIRST_ATTEMPT_MS)),
+      });
+    } catch (err) {
+      // Too slow or unreachable is a kind of busy: the next model may answer.
+      console.error(`read-label: ${model} unreachable or too slow:`, err);
+      busy = true;
+      continue;
+    }
+    if (attempt.ok) {
+      reply = attempt;
+      break;
+    }
+    const detail = await attempt.text().catch(() => '');
+    console.error(`read-label: ${model} ${attempt.status}:`, detail.slice(0, 500));
+    if (isBusy(attempt.status)) {
+      busy = true;
+      continue;
+    }
+    // A bad or revoked key comes back 400 ("API key not valid") or 401/403,
+    // and would on every model.
+    if (attempt.status === 401 || attempt.status === 403 || /API key/i.test(detail)) {
       return answer(503, { error: NOT_SET_UP });
     }
     return answer(502, { error: "Couldn't read the label just now — type what it says." });
+  }
+
+  if (!reply) {
+    return answer(busy ? 503 : 504, { error: busy ? BUSY : "Couldn't read the label just now — type what it says." });
   }
 
   const outcome = readingFromGemini(await reply.json().catch(() => null));

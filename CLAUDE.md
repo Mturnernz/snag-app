@@ -1132,6 +1132,16 @@ off at `MAX_TOKENS`, not JSON — and never reads a thought part as the answer. 
 Deno and no imports, so jest tests it directly. No SDK: one POST is not worth a dependency to keep
 current inside an edge function. Swapping models means changing that file and nothing in the app.
 
+**A busy model is asked once more, on a different model.** The first two live reads both came back
+`503 "This model is currently experiencing high demand"` from `gemini-3.8-flash`, with the key, the
+photo and the count all fine — and the function gave up on the first refusal. Now a 503, 500 or
+429 (`isBusy`) moves on to `FALLBACK_MODEL` (`gemini-3.6-flash`; `GEMINI_FALLBACK_MODEL` overrides):
+demand is per model, and an older stable one is usually free when the newest is not. Anything else
+— a bad key, a malformed request — would fail the same way on every model and is not retried. The
+first attempt is capped at 25s so a hang cannot spend the whole 40s budget, one claimed read covers
+both attempts, and when both are busy the sentence says *busy, try again in a minute* rather than
+implying the photo was the problem.
+
 **A household gets fifty reads a day** (`home.claim_label_read`, `20260923110000`). The key is the
 operator's, and nothing but a session stood between it and a loop. Per household rather than per
 person, so a second account is not a way round it; claimed *before* the model is called and never

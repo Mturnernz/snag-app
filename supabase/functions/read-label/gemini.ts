@@ -11,6 +11,28 @@
 
 export const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 export const DEFAULT_MODEL = 'gemini-3.8-flash';
+// Asked when the first answers "busy". A different model rather than the same
+// one again: the first live reads both came back 503 "high demand" from the
+// newest Flash forty seconds apart, and demand is per model — an older stable
+// one is usually free when the newest is not.
+export const FALLBACK_MODEL = 'gemini-3.6-flash';
+
+/** The models to ask, in order, without asking one twice. */
+export function modelsToTry(primary: string | undefined, fallback: string | undefined): string[] {
+  const order = [primary || DEFAULT_MODEL, fallback || FALLBACK_MODEL];
+  return order.filter((model, i) => order.indexOf(model) === i);
+}
+
+/**
+ * Whether a refusal means "this model is busy", which the next model may not
+ * be. 503 is overload, 500 is Google's own failure, and 429 is a rate limit
+ * that Gemini keeps per model. Everything else — a bad key, a malformed
+ * request — would fail the same way on any model, so asking again only costs
+ * time the person is standing there for.
+ */
+export function isBusy(status: number): boolean {
+  return status === 503 || status === 500 || status === 429;
+}
 
 const nullableText = { type: ['string', 'null'] };
 

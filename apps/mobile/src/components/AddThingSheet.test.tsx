@@ -130,3 +130,33 @@ it('carries a paint’s tin into the record: code, sheen, tint and swatch', asyn
     spec: { sheen: 'Low sheen', hex: '#EAE8DF' },
   }));
 });
+
+it('offers what the model suggests on the last step, and records only what is tapped', async () => {
+  mock_readLabel.mockResolvedValue({
+    legible: true, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: null, colourName: null,
+    colourCode: null, product: null, sheen: null, tint: null, hex: null, consumables: [],
+    suggestedConsumables: ['Air filter MAC-2360FT', 'Remote batteries AAA'], suggestedServiceDays: 365,
+  });
+  const r = await openOnLabel('appliance', 'Heat pump');
+  await shoot(r);
+  await TestRenderer.act(async () => { press(r, 'Next').props.onPress(); });
+
+  // Offered, labelled as a suggestion, and not in the box.
+  expect(boxes(r)['What it takes'].props.value).toBe('');
+  expect(texts(r)).toContain('Suggested for this model · check before you buy');
+  expect(texts(r)).toContain('Suggested for this model: every year.');
+
+  await TestRenderer.act(async () => { press(r, 'Add Air filter MAC-2360FT').props.onPress(); });
+  // Taken, so no longer offered, and removable.
+  expect(press(r, 'Add Air filter MAC-2360FT')).toBeUndefined();
+  expect(press(r, 'Remove Air filter MAC-2360FT')).toBeDefined();
+
+  await TestRenderer.act(async () => { boxes(r)['What it takes'].props.onChangeText('Drain hose'); });
+  await TestRenderer.act(async () => { await press(r, 'Add it to the house').props.onPress(); });
+  expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({
+    make: 'Mitsubishi Electric',
+    consumables: ['Air filter MAC-2360FT', 'Drain hose'],
+    // A suggested cycle is said, never chosen for them.
+    serviceDays: null,
+  }));
+});

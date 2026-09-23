@@ -1,5 +1,5 @@
 import {
-  DEFAULT_MODEL, FALLBACK_MODEL, LAST_RESORT_MODEL, geminiRequest, isBusy, modelsToTry, readingFromGemini, SCHEMA,
+  DEFAULT_MODEL, FALLBACK_MODEL, LAST_RESORT_MODEL, geminiRequest, isBusy, modelsToTry, readingFromGemini, SCHEMA, SYSTEM,
 } from '../../../../supabase/functions/read-label/gemini';
 import { parseLabelReading } from '@snag/supabase-queries';
 
@@ -28,6 +28,12 @@ describe('the request', () => {
 
   it('asks for every field, so a missing key never has to be told from a null', () => {
     expect([...SCHEMA.required].sort()).toEqual(Object.keys(SCHEMA.properties).sort());
+  });
+
+  it('asks for the brand in its own capitals, and fences what is suggested from what is read', () => {
+    expect(SYSTEM).toMatch(/Mitsubishi Electric/);
+    expect(SYSTEM).toMatch(/not transcription/);
+    expect(SCHEMA.properties.suggestedConsumables.items.required).toEqual(['item', 'code']);
   });
 
   it('treats an unknown kind as an appliance rather than sending nothing', () => {

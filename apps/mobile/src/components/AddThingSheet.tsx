@@ -12,8 +12,8 @@ import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload'
 import { failureReason } from '../lib/deadline';
 import { readLabel, uploadFile } from '../lib/supabase';
 import {
-  applyLabelReading, catalogueSuggestions, documentFileName, documentName, matchSuggestions,
-  suggestionsForRoom, swatchColour, type ThingInput,
+  applyLabelReading, catalogueSuggestions, describeCycle, documentFileName, documentName,
+  matchSuggestions, suggestionsForRoom, swatchColour, type ThingInput,
 } from '@snag/supabase-queries';
 import { Location, ThingKind, ThingSpec, THING_KINDS, THING_KIND_LABELS } from '../types';
 
@@ -114,6 +114,14 @@ export default function AddThingSheet({
   const openCount = useRef(0);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [takes, setTakes] = useState('');
+  /**
+   * What the model knows goes with this make and model — never read off the
+   * label, so never laid into the box. Offered on step four as rows to tap.
+   */
+  const [suggested, setSuggested] = useState<string[]>([]);
+  const [suggestedService, setSuggestedService] = useState<number | null>(null);
+  /** Suggestions somebody tapped, kept beside whatever they type in the box. */
+  const [picked, setPicked] = useState<string[]>([]);
   const [serviceDays, setServiceDays] = useState<number | null>(null);
   /** For a paint: which surface in the room. "Main wall", "Windows". */
   const [where, setWhere] = useState('');
@@ -143,6 +151,9 @@ export default function AddThingSheet({
     openCount.current += 1;
     setPhotoPath(null);
     setTakes('');
+    setSuggested([]);
+    setSuggestedService(null);
+    setPicked([]);
     setServiceDays(null);
     setWhere('');
     setNote('');
@@ -300,6 +311,8 @@ export default function AddThingSheet({
       setSerial(next.serial);
       setTakes(next.takes);
       setSpec(next.spec);
+      setSuggested(found.suggestedConsumables ?? []);
+      setSuggestedService(found.suggestedServiceDays ?? null);
       setReading({ state: 'read', filled });
     } catch (err: unknown) {
       if (mine !== openCount.current) return;
@@ -366,7 +379,7 @@ export default function AddThingSheet({
         spec: painting ? cleanSpec(spec) : undefined,
         // A paint answers the last step with a surface; everything else answers
         // it with a part and a cycle. Neither carries the other's fields.
-        consumables: !painting && takes.trim() ? [takes.trim()] : [],
+        consumables: painting ? [] : takesList,
         serviceDays: painting ? null : serviceDays,
         // `notes` is one column doing two jobs, and the kind decides which. For
         // a paint it is the surface — the only thing telling two colours in one
@@ -391,6 +404,15 @@ export default function AddThingSheet({
     ? [spec.product, spec.sheen, spec.tint ? `tint ${spec.tint}` : null].filter(Boolean).join(' · ')
     : '';
   const nextLabel = step === 'label' && labelStepEmpty ? 'Skip for now' : 'Next';
+  // What the thing will be recorded as taking: the tapped suggestions, then the
+  // box, each once whatever its capitals.
+  const takesList = [...picked, takes.trim()]
+    .filter(Boolean)
+    .filter((one, i, all) => all.findIndex((other) => other.toLowerCase() === one.toLowerCase()) === i);
+  // A suggestion already taken, or already typed, is not offered again.
+  const offers = suggested.filter(
+    (one) => !takesList.some((taken) => taken.toLowerCase() === one.toLowerCase())
+  );
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
@@ -802,6 +824,19 @@ export default function AddThingSheet({
             <Text style={styles.question}>Anything you re-buy for it?</Text>
             <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
               <View style={styles.fields}>
+                {picked.map((item) => (
+                  <View key={item} style={styles.pickedRow}>
+                    <Text style={styles.pickedText} numberOfLines={1}>{item}</Text>
+                    <Pressable
+                      onPress={() => setPicked((all) => all.filter((one) => one !== item))}
+                      style={styles.pickedRemove}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${item}`}
+                    >
+                      <Icon name="close" size="sm" color={Colors.textMuted} />
+                    </Pressable>
+                  </View>
+                ))}
                 <TextInput
                   style={[styles.input, styles.inputMono]}
                   value={takes}
@@ -813,6 +848,25 @@ export default function AddThingSheet({
                   accessibilityLabel="What it takes"
                 />
               </View>
+              {offers.length ? (
+                <View style={styles.offers}>
+                  {/* Said on the heading, because these are the one thing in
+                      this walkthrough nobody can check against the photo. */}
+                  <Text style={styles.sectionLabel}>Suggested for this model · check before you buy</Text>
+                  {offers.map((item) => (
+                    <Pressable
+                      key={item}
+                      onPress={() => setPicked((all) => [...all, item])}
+                      style={styles.offer}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add ${item}`}
+                    >
+                      <Icon name="add-circle-outline" size="md" color={Colors.primary} />
+                      <Text style={styles.offerText} numberOfLines={1}>{item}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
               <Text style={styles.hint}>This is what a job about it offers you in the shop.</Text>
               <Text style={styles.question2}>Serviced how often?</Text>
               <View style={styles.chips}>
@@ -826,6 +880,11 @@ export default function AddThingSheet({
                   />
                 ))}
               </View>
+              {suggestedService && serviceDays !== suggestedService ? (
+                <Text style={styles.hint}>
+                  Suggested for this model: every {describeCycle(suggestedService)}.
+                </Text>
+              ) : null}
             </ScrollView>
           </>
         ) : null}
@@ -971,6 +1030,24 @@ const styles = StyleSheet.create({
   },
   scroll: { flexGrow: 0 },
   hint: { fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19, marginTop: Spacing.sm },
+  pickedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: MIN_TOUCH_TARGET,
+    paddingLeft: Spacing.md,
+    backgroundColor: Colors.sunken,
+    borderRadius: Radius.input,
+  },
+  pickedText: { flex: 1, minWidth: 0, fontFamily: Fonts.mono, fontSize: Typography.base, color: Colors.textPrimary },
+  pickedRemove: {
+    width: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  offers: { marginTop: Spacing.xs },
+  offer: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: MIN_TOUCH_TARGET },
+  offerText: { flex: 1, minWidth: 0, fontFamily: Fonts.mono, fontSize: Typography.base, color: Colors.textPrimary },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',

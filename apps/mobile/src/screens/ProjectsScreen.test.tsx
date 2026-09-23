@@ -38,13 +38,9 @@ jest.mock('../lib/supabase', () => {
     createProject: (...a: unknown[]) => mock_createProject(...a),
     // The pure helpers are the real ones: mocking `describeTotals` would mock
     // away the exact rule these specs exist to hold.
-    describeTotals: real.describeTotals,
-    describeForecast: real.describeForecast,
-    describeForecastVariance: real.describeForecastVariance,
-    describeToPay: real.describeToPay,
     createLocation: jest.fn(),
     formatMoney: real.formatMoney,
-    outstanding: real.outstanding,
+    inclGst: real.inclGst,
     projectSubtitle: real.projectSubtitle,
   };
 });
@@ -126,24 +122,34 @@ describe('the tab', () => {
     expect(seen).toEqual(['Underway', 'Planned', 'Done']);
   });
 
-  it('never shows a total without the line that says what it is of', async () => {
+  it('leads with what has been agreed, against the budget', async () => {
+    // Agreed is committed with the builder's open set-aside amounts taken out —
+    // the same figure the project page puts beside Undecided, so the list and
+    // the page cannot disagree.
     const r = await arrange([
-      project({ committedTotal: 8990, paidTotal: 3990, itemCount: 9, pricedCount: 5 }),
+      project({ committedTotal: 208320, allowanceOpen: 12000, budget: 230000 }),
     ]);
-    // Outstanding leads rather than paid: on a list of renovations the question
-    // is what is still to find, and "$3,990 paid" of an $8,990 job reads as
-    // nearly done.
-    r.getByText('$8,990 committed · $5,000 still to pay');
-    // The denominator is not decoration and not optional. Without it, $8,990
-    // reads as the cost of the renovation rather than as the cost of five
-    // ninths of it.
-    r.getByText('5 of 9 items priced · 4 not priced');
+    r.getByText('$196,320');
+    r.getByText('agreed of $230,000');
   });
 
-  it('says nothing about money when nobody has priced anything', async () => {
+  it('never shows a figure without saying what is still undecided', async () => {
+    // The denominator rule, in V2 words: $8,990 agreed on a job with four
+    // things nobody has chosen is not the cost of the job, and the card says so
+    // in the same breath.
+    const r = await arrange([
+      project({ committedTotal: 8990, itemCount: 9, pricedCount: 5, dueToPay: 5000 }),
+    ]);
+    r.getByText('$8,990');
+    r.getByText('4 to decide   ·   $5,000 to pay');
+  });
+
+  it('says nothing about money it has not got', async () => {
     const r = await arrange([project({ itemCount: 2 })]);
-    expect(r.queryByText('$0')).toBeNull();
-    r.getByText('0 of 2 items priced · 2 not priced');
+    r.getByText('2 to decide');
+    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+    expect(text).not.toContain('to pay');
+    expect(text).not.toContain('agreed of $');
   });
 
   it('dims a finished project rather than letting it leave', async () => {

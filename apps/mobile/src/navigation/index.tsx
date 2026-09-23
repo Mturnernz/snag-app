@@ -44,9 +44,10 @@ function MainTabs() {
         headerShown: false,
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
+        // V2: the bar sits on the same plaster as the screen, split by a hairline.
         tabBarStyle: {
-          backgroundColor: Colors.surface,
-          borderTopColor: Colors.border,
+          backgroundColor: Colors.background,
+          borderTopColor: Colors.separator,
         },
         tabBarLabelStyle: {
           fontSize: Typography.xs,

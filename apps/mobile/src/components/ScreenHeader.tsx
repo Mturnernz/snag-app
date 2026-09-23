@@ -29,8 +29,10 @@ export default function ScreenHeader({ title, subtitle, onBack, rightSlot }: Pro
         style={styles.backButton}
         onPress={onBack ?? (() => navigation.goBack())}
         hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
       >
-        <Icon name="arrow-back" size="lg" color={Colors.textPrimary} />
+        <Icon name="chevron-back" size={26} color={Colors.primary} />
       </TouchableOpacity>
       <View style={styles.titles}>
         <Text style={styles.title} numberOfLines={1}>
@@ -48,16 +50,18 @@ export default function ScreenHeader({ title, subtitle, onBack, rightSlot }: Pro
 }
 
 const styles = StyleSheet.create({
+  // V2: the navigation bar is the screen's own plaster, divided by a hairline
+  // rather than a white strip with a border.
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.sm,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
+    paddingHorizontal: Spacing.xs,
+    paddingBottom: Spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth * 2,
   },
   defaultContainer: {
-    backgroundColor: Colors.surface,
-    borderBottomColor: Colors.border,
+    backgroundColor: Colors.background,
+    borderBottomColor: Colors.separator,
   },
   backButton: {
     width: MIN_TOUCH_TARGET,
@@ -67,11 +71,11 @@ const styles = StyleSheet.create({
   },
   titles: { flex: 1 },
   title: {
-    fontSize: Typography.lg,
+    fontSize: Typography.body,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
   },
-  subtitle: { fontSize: Typography.sm, color: Colors.textMuted },
+  subtitle: { fontSize: Typography.footnote, color: Colors.textMuted },
   rightSlot: {
     minWidth: MIN_TOUCH_TARGET,
     alignItems: 'flex-end',

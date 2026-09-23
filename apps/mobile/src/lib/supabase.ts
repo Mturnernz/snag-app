@@ -390,6 +390,17 @@ export const deleteItem = (itemId: string) => queries.deleteItem(supabase, itemI
 export const setItemExcluded = (itemId: string, excluded: boolean) =>
   queries.setItemExcluded(supabase, itemId, excluded);
 
+export const setItemSetAside = (itemId: string, lineId: string | null) =>
+  queries.setItemSetAside(supabase, itemId, lineId);
+
+export const chooseOption = (
+  quoteId: string,
+  choice: { setAsideLineId: string | null; billedThroughId: string | null },
+) => queries.chooseOption(supabase, quoteId, choice);
+
+export const payBill = (quoteId: string, unpaid: number, paidOn: string) =>
+  queries.payBill(supabase, quoteId, unpaid, paidOn);
+
 export const createQuote = (input: queries.QuoteInput) => queries.createQuote(supabase, input);
 
 export const updateQuote = (quoteId: string, update: queries.QuoteUpdate) =>
@@ -518,7 +529,14 @@ export {
   showsElements,
   groupProjectsByStatus,
   projectSubtitle,
+  projectSummary,
+  describeRoom,
+  optionsFor,
+  chosenAgainst,
+  liveSetAsides,
+  isUndecided,
 } from '@snag/supabase-queries';
+export type { ProjectSummary, DecisionRow, RoomRow, ProjectPage } from '@snag/supabase-queries';
 export { GST_RATE } from '@snag/shared-types';
 
 export const markThingAbsent = (propertyId: string, room: string, name: string) =>

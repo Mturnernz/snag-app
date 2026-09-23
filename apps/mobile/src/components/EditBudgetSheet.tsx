@@ -18,10 +18,9 @@ interface Props {
 /**
  * What you said you'd spend, typed rather than derived.
  *
- * Unlike Forecast/Committed/Invoiced/Paid, the budget has no build-up to sit
- * beside — it is the one figure on the page nobody adds up from prices, so
- * this is a plain edit rather than the override pattern `EditFigureSheet`
- * carries: one box, the GST pill every money box carries, and a way to clear
+ * Unlike every other figure on the project page, the budget has no build-up to
+ * sit beside — it is the one figure nobody adds up from prices, so this is a
+ * plain edit: one box, the GST pill every money box carries, and a way to clear
  * it back to "no budget set" rather than a half-typed zero.
  */
 export default function EditBudgetSheet({ visible, budget, budgetInclGst, onSave, onClose }: Props) {

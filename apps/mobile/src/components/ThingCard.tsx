@@ -107,10 +107,10 @@ const styles = StyleSheet.create({
     // thumbnail leaves it floating above a gap.
     alignItems: 'center',
     gap: Spacing.md,
+    // V2: a recorded thing is white on plaster with no outline, which is also
+    // what keeps it apart from a ghost — the ghost is the only dashed edge.
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
     padding: Spacing.md,
     minHeight: MIN_TOUCH_TARGET,
     ...Shadow.sm,

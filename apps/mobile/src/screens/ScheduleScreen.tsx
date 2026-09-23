@@ -501,7 +501,11 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary },
+  // V2: the iOS large title, the same on every tab.
+  title: {
+    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    color: Colors.textPrimary, letterSpacing: -0.4,
+  },
   todayBtn: {
     minHeight: MIN_TOUCH_TARGET - Spacing.md,
     justifyContent: 'center',
@@ -560,10 +564,9 @@ const styles = StyleSheet.create({
   legendLabel: { fontSize: Typography.xs, color: Colors.textMuted },
   dayHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingTop: Spacing.sm },
   dayTitle: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    fontSize: Typography.body,
+    fontWeight: Typography.semibold,
+    letterSpacing: -0.2,
     color: Colors.textMuted,
   },
   dayRule: { flex: 1, height: 1, backgroundColor: Colors.border },
@@ -574,9 +577,8 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
     paddingVertical: Spacing.sm,
     paddingHorizontal: Spacing.md,
+    // V2: white on plaster is the card; no outline.
     backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: Radius.card,
   },
   rowDot: { width: 8, height: 8, borderRadius: 4 },

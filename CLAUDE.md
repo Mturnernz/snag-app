@@ -1281,6 +1281,91 @@ noun. The list holds what is wrong with the house; the House tab holds what is i
 hold a renovation — a body of work with a budget, a span of rooms, a folder of quotes, and an
 answer to "what did the bathroom actually cost".
 
+### V2: the page somebody who has never run a renovation can read
+
+The money model underneath this section is unchanged and still right. **The page on top of it was
+rebuilt in September 2026** after five renovations — a $6k ensuite up to a $420k whole-house job
+with an extension — were entered through the old screens by somebody holding the paperwork, and
+every one of them came out wrong. Several subsections below describe screens that no longer
+exist; where they conflict with this one, this one wins. `supabase/tests/project_scenarios.sql`
+replays the five and asserts the figures.
+
+**The reader is somebody who has never done this before.** They do not know *committed*, *PC sum*,
+*progress claim* or *basis*; they know the paper in their hand — a quote, a bill, a receipt — and
+they are doing two things in the same evening: **deciding** (three toilets, three kitchen designs)
+and **paying** (a builder's bill arrived). So the page answers four questions, in the order they
+are asked:
+
+1. **Are we on budget?** *Expected total* in large type, with **Agreed** and **Undecided** as the
+   rows under it — they add up to it, on screen — then *Left in budget* (or *Over budget*, in words
+   and clay), then *Budget*. Two tiles: **Paid** and **To pay**. Committed, Invoiced, Quoted and
+   Forecast are no longer words on the page; they are the accounting, and nobody asked it.
+2. **What's left to decide?** Every thing not yet chosen, with its option count and price range.
+3. **What do we have to pay?** Every bill still owing, with a **Paid** pill on the row.
+4. **Where is it going?** One row per room plus *Whole job*, the rows summing to the total.
+
+`projectSummary` (`packages/supabase-queries/src/summary.ts`) is that arithmetic, pure and pinned
+by `projectSummary.test.ts`:
+
+- **Agreed** = committed − the builder's *open* set-aside amounts. An allowance nobody has chosen
+  against is not something the household has agreed to spend.
+- **Undecided** = each open set-aside in full; what is left of one partly chosen against while
+  other things on it are still open; each undecided thing with no set-aside **at its dearest
+  option** (so the total never surprises upwards); unpriced expected costs; additional ballparks.
+  The user chose "dearest", not "cheapest", and chose to show it as its own row rather than hide it
+  inside the total.
+- The list card shows **Agreed**, not the expected total: the card has no per-item data and a
+  figure it had to approximate would disagree with the page.
+
+**Every line of small text is a fact the reader can add up** — a count, a date, a supplier, a
+figure compared with another figure on the screen ("$1,400 over the $8,000 set aside"). The
+paragraphs of explanation that sat under sections are gone, and the rule for new ones is that a
+sentence the app cannot check does not ship.
+
+**One way in for money** — the + in the header, `MoneySheet`, which asks *what have you got?*:
+
+- **A quote for a thing** is an **option** on it. It is never asked whether it was agreed;
+  comparing is the point. *Choose* on the thing's own sheet (`ThingSheet`) decides it.
+- **A quote for the job or a room** asks *Have you agreed to go ahead?* with **no answer chosen**.
+  The old walkthrough defaulted to *Signed*, and a quote somebody was only comparing went straight
+  into Committed.
+- **An agreed quote** then asks *Does it set money aside for things you'll choose?* Each answer is
+  an allowance line **and a thing in its room linked to that line** (`project_items.set_aside_line_id`).
+- **A bill from a supplier with an agreed price** asks *Is this part of an agreed price?* —
+  listing every one they have, with what is billed so far and what is left after this one. The old
+  walkthrough stopped offering the claim once a supplier had two signed prices, so the progress
+  bill after a variation went in as extra.
+- **A receipt** is a bill and its payment in one step. **A cost we're expecting** needs no supplier.
+
+**Choosing settles the set-aside, and that is the fix for the allowance rules never running.**
+Every rule in *A builder's number is not one number* was right and unreachable: nothing on any
+screen could set `supersedes_line_id` or `billed_through_id`, so an allowance and the thing that
+replaced it both counted ($12,000 over, on the scenario bathroom). Choosing an option for a thing
+that has a set-aside asks one question — **who will bill you for it?** — and `chooseOption` writes
+both links, then accepts. Several things may share one set-aside (a toilet, a vanity, a mixer are
+all "bathroom hardware"); what is left of it stays Undecided until the last is chosen, and then the
+room says the saving or the overrun in dollars.
+
+**Several options per thing, again.** *One price, and a header that says where it's up to* below
+moved an item to one active price. That was right for recording a bill and wrong for choosing a
+toilet; `ThingSheet` lists every option cheapest first, *Choose* on each, the unchosen ones faded
+and *Undo* on the chosen one.
+
+**Every bill opens** (`PriceSheet`): Mark as paid (a payment for exactly what is owing, dated
+today — never a flag), a part payment, Edit, Delete. Before V2 a bill on the whole job or a part
+could not be tapped, so it could never be paid, corrected or deleted and *To pay* only grew.
+
+**Nothing new can be typed over a figure.** `EditFigureSheet` is deleted. Overrides already in the
+database still count, so the page says *Some figures were typed in by hand*, names what the prices
+come to, and offers **Use the prices** (`clear_figure` on each). The view columns stay.
+
+Deleted with the old page: `ItemSheet`, `RecordMoneySheet`, `CommitmentCard`, `EditFigureSheet`
+and their specs. `BuildUpSheet`, `ScheduleSheet`, `ExpectedCostSheet`, the invoice-review deck,
+handover, punch list and documents are reused as they were.
+
+The vocabulary change is **Projects-tab only**, by the user's decision: the rest of the app keeps
+its words and takes only the V2 look (see *Design System*).
+
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;
 Schedule stays last because it is the tab you go to with a question rather than the one where work
@@ -1941,6 +2026,18 @@ and status = 'accepted')` while fixing the direct-buy case. The rows added to $7
 Committed line reading $103,574.22 for three days, with nothing on screen able to show it;
 opening the figures is what found it. `20260921110000` restores the scope fallback on top of
 090400's direct-buy handling, measured against the live rows rather than asserted.
+
+**`20260923090000` moves the fallback from the scope to the pair — this supplier, at this scope.**
+The scope rule was still wrong the other way: once *anybody* signed at a level, *every* invoice
+there stopped counting, so the builder's contract on the whole job hid the architect's, the
+engineer's and the council's bills, and one signed plumber's quote hid the vanity, the tiles and
+the paint on an ensuite ($1,450 committed against $3,929 invoiced). An invoice now counts unless the
+same supplier has a signed price at that scope, or it claims against a quote (`against_quote_id`).
+It is done by redefining `project_scope_money.accepted_total` so the eleven
+`coalesce(accepted_total, invoiced_total)` expressions above it give the right answer unchanged,
+and `project_supplier_totals` applies the same pair rule so the rows still sum to Committed. **One
+known limit:** a bill from the builder *before* the contract (a pre-start investigation) reads as a
+draw once the contract is signed — nothing on the row tells the two apart.
 
 Supplier stays **free text**, because a supplier list somebody has to fill in before they can
 record a quote is setup, and this app does not do setup. It groups on the trimmed, lower-cased
@@ -3238,6 +3335,17 @@ authorises clearing them, and that a new member goes to the places that were pic
 All tokens in `apps/mobile/src/constants/theme.ts`. Never hardcode colours, spacing or shadows.
 `apps/web/src/app/globals.css` mirrors the light values — change both.
 
+**V2 (September 2026) is an iOS grouped-list look over the same palette.** White rounded groups on
+the plaster ground with hairline separators (`Colors.separator`), no outlines on cards, 34pt large
+titles, 20pt sentence-case section titles, 17pt rows with 15pt facts under them, tabular figures,
+tinted pills for inline actions, one full-width filled button per screen. The primitives are
+`components/Grouped.tsx` (`Group`, `Row`, `SectionTitle`, `Pill`, `AddRow`, `PrimaryButton`,
+`TextButton`, `Segmented`, `RadioRow`) and `components/Sheet.tsx`; new screens use them rather than
+their own. `Radius.card` is 14 and `Radius.button` 12. The new colour tokens (`separator`,
+`chevron`, `track`, `undecided`, `scrim`, `segment`) are mobile-only — the web app's two recovery
+pages use none of them. Colour is still spent only on state and interaction: the palette did not
+grow a hue.
+
 Two rules govern the palette, and they are the whole system:
 
 1. **The ground is warm.** `#FAF7F2` is plaster, not near-white. This is a household list, not
@@ -3575,6 +3683,18 @@ somebody typed it".
 
 Note `create or replace view` can only *append* columns. Putting one back where it belongs means
 dropping and recreating the view, which takes the grant with it — re-issue it.
+
+### Check the money views
+`supabase/tests/project_scenarios.sql` replays five renovations through the app's own functions
+and asserts committed, and that the supplier rows sum to it, for each. Run it after any change to
+a rollup view, against a local stack, never the live project:
+
+```bash
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 \
+  -f supabase/tests/project_scenarios.sql
+```
+
+It runs in one transaction and rolls back.
 
 ### Add a query
 `packages/supabase-queries/src/index.ts`. Each function takes a `SupabaseClient` so both apps can

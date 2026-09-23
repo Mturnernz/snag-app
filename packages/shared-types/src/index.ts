@@ -1220,6 +1220,13 @@ export interface ProjectItem {
   allowanceOpen: number;
   /** See `ProjectTotals.additionalOpen`. */
   additionalOpen: number;
+  /**
+   * The set-aside amount in a builder's quote this item is being chosen
+   * against — "bathroom hardware, $12,000". Several items can share one line.
+   * Choosing an option writes `supersedes_line_id` on that quote, which is how
+   * the allowance gets settled.
+   */
+  setAsideLineId: string | null;
 }
 
 /**

@@ -929,7 +929,11 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary },
+  // V2: the iOS large title, the same on every tab.
+  title: {
+    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    color: Colors.textPrimary, letterSpacing: -0.4,
+  },
   // Both header buttons, from one style. They were a 48px square beside a
   // lozenge half as wide again, vertically offset by the caption under the
   // cart — two controls doing the same kind of job reading as two different
@@ -990,15 +994,16 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
     minHeight: MIN_TOUCH_TARGET,
   },
+  // V2: a room is a section title in sentence case, not a caption in capitals.
   group: {
-    fontSize: Typography.xs,
+    fontSize: Typography.title3,
     fontWeight: Typography.semibold,
-    color: Colors.textMuted,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
+    color: Colors.textPrimary,
+    letterSpacing: -0.3,
   },
   groupNew: { color: Colors.primary },
-  groupRule: { flex: 1, height: 1, backgroundColor: Colors.border },
+  // V2: a section title stands on its own; the rule after it went with the capitals.
+  groupRule: { flex: 1 },
   // The only elevated surface on the screen, and only under one lens. It should
   // feel like the thing you opened the app for on the way out the door.
   shopping: {

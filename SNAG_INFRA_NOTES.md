@@ -222,6 +222,26 @@ Because `auth.users` sits outside both schemas, none of this needed touching:
   `redirectTo`, so it falls back to the Site URL and can sign someone in without asking for a new
   password.
 
+### The CI test account needs a household, not just a login
+
+The authenticated mobile specs sign in as the `E2E_EMAIL` / `E2E_PASSWORD` repository secrets and
+then wait for the list. A login is not enough to reach it: `App.tsx` gates on a `home.profiles`
+row and a household, and without them the app stops on Setup. The account predates the pivot, so
+it had neither, and the three authenticated specs failed on every run from then until
+23 September 2026 while each one reported only "compose bar not found" — sign-in itself succeeded.
+
+It now has a profile (*E2E test*) and its own household (*E2E test house*, one property, the
+seeded rooms), made through `upsert_profile` and `create_household` exactly as signing up would.
+Don't add it to a real household, and don't delete that one: the specs need a list to land on. If
+they ever fail at sign-in again, check the account before the specs:
+
+```sql
+select p.display_name,
+  (select count(*) from home.household_members m where m.profile_id = u.id) as households
+from auth.users u left join home.profiles p on p.id = u.id
+where u.email = '<E2E_EMAIL>';
+```
+
 ## Hosts
 
 | Host | Serves |

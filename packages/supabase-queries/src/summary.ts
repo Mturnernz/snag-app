@@ -1,0 +1,277 @@
+/**
+ * What a project page says at the top, worked out from the one page read.
+ *
+ * The page answers four questions in this order — are we on budget, what is
+ * left to decide, what do we have to pay, and where is the money going — and
+ * every figure here is arithmetic over rows the reader can open. Nothing is
+ * estimated that is not labelled as undecided.
+ *
+ *     expected = agreed + undecided
+ *
+ * **Agreed** is Committed with the builder's open set-aside amounts taken out:
+ * an allowance nobody has chosen against is not something the household has
+ * agreed to spend, whatever the contract's total says.
+ *
+ * **Undecided** is everything still to be chosen, priced the one honest way
+ * each can be:
+ *
+ *   - a set-aside amount nobody has chosen against: the amount itself;
+ *   - one that has been partly chosen against while other things on it are
+ *     still open: what is left of it;
+ *   - a thing with options and no set-aside: its **dearest** option, so the
+ *     total never surprises anybody upwards;
+ *   - a cost somebody warned about that nobody has priced: its rough figure;
+ *   - an extra the builder said to budget on top: its figure.
+ *
+ * Pure, so `projectSummary.test.ts` can pin it without a network.
+ */
+import type {
+  ProjectBill,
+  ProjectItem,
+  ProjectQuote,
+  ProjectQuoteLine,
+} from '@snag/shared-types';
+import type { ProjectPage } from './index';
+
+export interface DecisionRow {
+  item: ProjectItem;
+  room: string | null;
+  /** Quotes and prices still in the running, cheapest first. */
+  options: ProjectQuote[];
+  low: number | null;
+  high: number | null;
+  setAside: ProjectQuoteLine | null;
+}
+
+export interface RoomRow {
+  /** The element id, or `'job'` for money that belongs to the whole job. */
+  key: string;
+  name: string;
+  elementId: string | null;
+  agreed: number;
+  undecided: number;
+  total: number;
+  toDecide: number;
+  supplierCount: number;
+  /** Set-aside amounts chosen against in this room, when every thing on them is decided. */
+  setAside: number | null;
+  chosen: number | null;
+  settled: boolean;
+}
+
+export interface ProjectSummary {
+  agreed: number;
+  undecided: number;
+  expected: number;
+  budget: number | null;
+  left: number | null;
+  paid: number;
+  toPay: number;
+  toDecide: DecisionRow[];
+  bills: ProjectBill[];
+  rooms: RoomRow[];
+}
+
+const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
+const round = (n: number): number => Math.round(n * 100) / 100;
+
+function gross(amount: number | null, incl: boolean): number {
+  if (amount === null) return 0;
+  return incl ? amount : round(amount * 1.15);
+}
+
+/** Whether a thing still needs choosing: not excluded, and nothing agreed or billed. */
+export function isUndecided(item: ProjectItem): boolean {
+  return !item.excluded && item.committed === null;
+}
+
+/** The options still in the running on one thing. */
+export function optionsFor(page: Pick<ProjectPage, 'quotes'>, itemId: string): ProjectQuote[] {
+  return page.quotes
+    .filter((q) => q.itemId === itemId && q.kind === 'quote' && q.status !== 'declined')
+    .sort((a, b) => (a.amountIncl ?? 0) - (b.amountIncl ?? 0));
+}
+
+/** What has been chosen against a set-aside amount so far. */
+export function chosenAgainst(page: Pick<ProjectPage, 'quotes'>, lineId: string): number {
+  return sum(
+    page.quotes
+      .filter((q) => q.supersedesLineId === lineId && q.kind === 'quote' && q.status === 'accepted')
+      .map((q) => q.amountIncl ?? 0),
+  );
+}
+
+/** Set-aside amounts on signed quotes — the only ones inside Agreed to begin with. */
+export function liveSetAsides(page: Pick<ProjectPage, 'quotes' | 'lines'>): ProjectQuoteLine[] {
+  const signed = new Set(
+    page.quotes.filter((q) => q.kind === 'quote' && q.status === 'accepted').map((q) => q.id),
+  );
+  return page.lines.filter((l) => l.isAllowance && !l.additional && signed.has(l.quoteId));
+}
+
+export function projectSummary(page: ProjectPage): ProjectSummary {
+  const { project, elements, items } = page;
+  const elementOf = new Map(elements.map((e) => [e.id, e]));
+  const roomName = (elementId: string): string | null => {
+    const e = elementOf.get(elementId);
+    return e ? e.room ?? e.name : null;
+  };
+  const setAsides = liveSetAsides(page);
+  const lineById = new Map(setAsides.map((l) => [l.id, l]));
+
+  // ---------------------------------------------------------------- decide
+  const toDecide: DecisionRow[] = items.filter(isUndecided).map((item) => {
+    const options = optionsFor(page, item.id);
+    const amounts = options.map((o) => o.amountIncl).filter((a): a is number => a !== null);
+    return {
+      item,
+      room: roomName(item.elementId),
+      options,
+      low: amounts.length ? Math.min(...amounts) : null,
+      high: amounts.length ? Math.max(...amounts) : null,
+      setAside: item.setAsideLineId ? lineById.get(item.setAsideLineId) ?? null : null,
+    };
+  });
+
+  // ------------------------------------------------------------- undecided
+  // Each set-aside amount, and which element its things live in. The first
+  // linked thing decides the room — a set-aside is about one place.
+  const lineElement = new Map<string, string>();
+  for (const item of items) {
+    if (item.setAsideLineId && !lineElement.has(item.setAsideLineId)) {
+      lineElement.set(item.setAsideLineId, item.elementId);
+    }
+  }
+
+  /** What each set-aside still contributes to Undecided. */
+  const lineUndecided = new Map<string, number>();
+  for (const line of setAsides) {
+    const amount = gross(line.amount, line.amountInclGst);
+    const chosen = chosenAgainst(page, line.id);
+    const linked = items.filter((i) => i.setAsideLineId === line.id && !i.excluded);
+    const open = linked.some(isUndecided);
+    if (chosen === 0) lineUndecided.set(line.id, amount); // still inside allowanceOpen
+    else if (open) lineUndecided.set(line.id, Math.max(amount - chosen, 0));
+    else lineUndecided.set(line.id, 0);
+  }
+
+  const itemUndecided = (d: DecisionRow): number =>
+    d.setAside ? 0 : d.high ?? 0;
+
+  const undecided = round(
+    sum([...lineUndecided.values()])
+      // An allowance on a signed quote but not marked as a set-aside line above
+      // (an additional one, or on a quote we could not see) still counts.
+      + Math.max(project.allowanceOpen - sum(setAsides
+          .filter((l) => chosenAgainst(page, l.id) === 0)
+          .map((l) => gross(l.amount, l.amountInclGst))), 0)
+      + project.additionalOpen
+      + project.expectedOpen
+      + sum(toDecide.map(itemUndecided)),
+  );
+
+  const agreed = round((project.committedTotal ?? 0) - project.allowanceOpen);
+  const expected = round(agreed + undecided);
+  const budget = project.budget === null ? null : gross(project.budget, project.budgetInclGst);
+
+  // ----------------------------------------------------------------- rooms
+  const quoteElement = (q: ProjectQuote): string | null => {
+    if (q.elementId) return q.elementId;
+    if (q.itemId) return items.find((i) => i.id === q.itemId)?.elementId ?? null;
+    return null;
+  };
+
+  const rooms: RoomRow[] = elements.map((e) => {
+    const inRoom = toDecide.filter((d) => d.item.elementId === e.id);
+    const lines = setAsides.filter((l) => lineElement.get(l.id) === e.id);
+    const lineAmount = sum(lines.map((l) => gross(l.amount, l.amountInclGst)));
+    const lineChosen = sum(lines.map((l) => chosenAgainst(page, l.id)));
+    const settled = lines.length > 0 && lines.every((l) => lineUndecided.get(l.id) === 0 && chosenAgainst(page, l.id) > 0);
+    const roomAgreed = round((e.committedTotal ?? 0) - e.allowanceOpen);
+    const roomUndecided = round(
+      sum(inRoom.map(itemUndecided))
+        + sum(lines.map((l) => lineUndecided.get(l.id) ?? 0))
+        + e.expectedOpen,
+    );
+    const suppliers = new Set(
+      page.quotes
+        .filter((q) => quoteElement(q) === e.id && q.status !== 'declined' && q.supplier)
+        .map((q) => q.supplier!.trim().toLowerCase()),
+    );
+    return {
+      key: e.id,
+      name: e.room ?? e.name,
+      elementId: e.id,
+      agreed: roomAgreed,
+      undecided: roomUndecided,
+      total: round(roomAgreed + roomUndecided),
+      toDecide: inRoom.length,
+      supplierCount: suppliers.size,
+      setAside: lines.length ? lineAmount : null,
+      chosen: lines.length ? lineChosen : null,
+      settled,
+    };
+  });
+
+  const jobAgreed = round(agreed - sum(rooms.map((r) => r.agreed)));
+  const jobUndecided = round(undecided - sum(rooms.map((r) => r.undecided)));
+  if (Math.abs(jobAgreed) >= 0.01 || Math.abs(jobUndecided) >= 0.01) {
+    const suppliers = new Set(
+      page.quotes
+        .filter((q) => quoteElement(q) === null && q.status !== 'declined' && q.supplier)
+        .map((q) => q.supplier!.trim().toLowerCase()),
+    );
+    rooms.unshift({
+      key: 'job',
+      name: 'Whole job',
+      elementId: null,
+      agreed: jobAgreed,
+      undecided: jobUndecided,
+      total: round(jobAgreed + jobUndecided),
+      toDecide: 0,
+      supplierCount: suppliers.size,
+      setAside: null,
+      chosen: null,
+      settled: false,
+    });
+  }
+
+  // ----------------------------------------------------------------- bills
+  const bills = page.bills
+    .filter((b) => (b.unpaid ?? 0) > 0)
+    .sort((a, b) => (a.dueOn ?? '9999').localeCompare(b.dueOn ?? '9999'));
+
+  return {
+    agreed,
+    undecided,
+    expected,
+    budget,
+    left: budget === null ? null : round(budget - expected),
+    paid: project.paidTotal ?? 0,
+    toPay: project.dueToPay,
+    toDecide,
+    bills,
+    rooms: rooms.filter((r) => r.total !== 0 || r.toDecide > 0 || r.key !== 'job'),
+  };
+}
+
+/**
+ * The line under a room's name. Only facts the reader can add up: a set-aside
+ * compared with what was chosen against it, what is left to decide, or who is
+ * involved.
+ */
+export function describeRoom(room: RoomRow, money: (n: number) => string): string {
+  if (room.setAside !== null && room.chosen !== null && room.settled) {
+    const diff = round(room.chosen - room.setAside);
+    if (diff > 0) return `${money(diff)} over the ${money(room.setAside)} set aside`;
+    if (diff < 0) return `${money(-diff)} under the ${money(room.setAside)} set aside`;
+    return `Matches the ${money(room.setAside)} set aside`;
+  }
+  const parts: string[] = [];
+  if (room.setAside !== null) parts.push(`${money(room.setAside)} set aside`);
+  if (room.toDecide > 0) parts.push(`${room.toDecide} to decide`);
+  if (parts.length === 0 && room.supplierCount > 0) {
+    parts.push(room.supplierCount === 1 ? '1 supplier' : `${room.supplierCount} suppliers`);
+  }
+  return parts.join(' · ');
+}

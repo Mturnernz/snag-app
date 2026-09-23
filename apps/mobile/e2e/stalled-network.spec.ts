@@ -30,10 +30,18 @@ async function signIn(page: Page) {
   await expect(page.getByText('Sign in', { exact: true })).toBeVisible({ timeout: 120_000 });
   await page.getByPlaceholder('Email').fill(EMAIL!);
   await page.getByPlaceholder('Password').fill(PASSWORD!);
+  // The bar renders before the place it files under has loaded, and a send in
+  // that gap is refused as "No place yet". The rooms are read only once a place
+  // is chosen, so their arrival is the signal that capture can file.
+  const placeChosen = page.waitForResponse(
+    (res) => res.url().includes('/rest/v1/locations') && res.ok(),
+    { timeout: 90_000 }
+  );
   await page.getByText('Sign in', { exact: true }).click();
   // The list is the initial route — there is no Add tab; capture is the bar at
   // the foot of this screen.
-  await expect(page.getByPlaceholder('Add something…')).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByPlaceholder('Capture new issue')).toBeVisible({ timeout: 90_000 });
+  await placeChosen;
 }
 
 test('a save that never comes back still stops spinning and says so', async ({ page }) => {
@@ -55,7 +63,7 @@ test('a save that never comes back still stops spinning and says so', async ({ p
     dialog.dismiss().catch(() => {});
   });
 
-  await page.getByPlaceholder('Add something…').fill('Stalled network probe');
+  await page.getByPlaceholder('Capture new issue').fill('Stalled network probe');
   await page.getByLabel('Add to the list').click();
 
   // The deadline is 20s for a data call; allow for it plus the dialog.
@@ -63,6 +71,6 @@ test('a save that never comes back still stops spinning and says so', async ({ p
 
   // And the bar is usable again rather than stuck mid-send, with the words put
   // back so nobody has to retype them.
-  await expect(page.getByPlaceholder('Add something…')).toBeEnabled();
-  await expect(page.getByPlaceholder('Add something…')).toHaveValue('Stalled network probe');
+  await expect(page.getByPlaceholder('Capture new issue')).toBeEnabled();
+  await expect(page.getByPlaceholder('Capture new issue')).toHaveValue('Stalled network probe');
 });

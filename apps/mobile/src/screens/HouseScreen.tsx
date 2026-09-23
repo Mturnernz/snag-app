@@ -685,7 +685,11 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.sm,
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary },
+  // V2: the iOS large title, the same on every tab.
+  title: {
+    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    color: Colors.textPrimary, letterSpacing: -0.4,
+  },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -693,9 +697,8 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.lg,
     paddingHorizontal: Spacing.md,
     minHeight: MIN_TOUCH_TARGET,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    // V2: the iOS search field — a sunken track, no outline.
+    backgroundColor: Colors.segment,
     borderRadius: Radius.input,
   },
   search: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary, paddingVertical: Spacing.sm },
@@ -723,14 +726,15 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
     minHeight: MIN_TOUCH_TARGET,
   },
+  // V2: a room is a section title in sentence case, not a caption in capitals.
   group: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    color: Colors.textMuted,
+    fontSize: Typography.title3,
+    fontWeight: Typography.semibold,
+    letterSpacing: -0.3,
+    color: Colors.textPrimary,
   },
-  groupRule: { flex: 1, height: 1, backgroundColor: Colors.border },
+  // V2: a section title stands on its own; the rule after it went with the capitals.
+  groupRule: { flex: 1 },
   groupAdd: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,

@@ -1778,6 +1778,21 @@ export function formatLooseDate(iso: string | null): string {
   return d && d !== 1 ? `${d} ${month} ${y}` : `${month} ${y}`;
 }
 
+/**
+ * A date that is always a real day — a bill's due date, the day a payment went.
+ *
+ * `formatLooseDate` drops the first of the month because that is how a
+ * month-only answer is stored; a bill due on the 1st is due on the 1st, and
+ * reading "Due Sep 2026" for it would hide the one precise fact on the row.
+ */
+export function formatExactDate(iso: string | null): string {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  const month = m ? MONTHS[m - 1] : null;
+  if (!y || !month || !d) return formatLooseDate(iso);
+  return `${d} ${month} ${y}`;
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -2984,6 +2999,7 @@ function mapItem(row: Row): ProjectItem {
     paid: numberOrNull(row.paid),
     allowanceOpen: numberOrNull(row.allowance_open) ?? 0,
     additionalOpen: numberOrNull(row.additional_open) ?? 0,
+    setAsideLineId: row.set_aside_line_id ?? null,
   };
 }
 
@@ -4349,6 +4365,55 @@ export async function setItemExcluded(
   if (error) throw asError(error, "That didn’t save");
 }
 
+/**
+ * Says which set-aside amount in a builder's quote a thing is being chosen
+ * against — or, with null, that it is not. Its own function for the reason
+ * `set_item_excluded` is: it changes what a later choice does to the totals.
+ */
+export async function setItemSetAside(
+  client: SupabaseClient,
+  itemId: string,
+  lineId: string | null
+): Promise<void> {
+  const { error } = await client.rpc('set_item_set_aside', {
+    p_item_id: itemId,
+    p_line_id: lineId,
+  });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+/**
+ * Chooses one option for a thing.
+ *
+ * Three writes, in the order that keeps every intermediate state honest:
+ * the link to the set-aside amount first (so the moment the quote is accepted
+ * it already settles the allowance rather than counting beside it), then who
+ * bills for it, then the acceptance itself — `set_quote_status` also puts any
+ * earlier choice on the same thing back to undecided.
+ */
+export async function chooseOption(
+  client: SupabaseClient,
+  quoteId: string,
+  choice: { setAsideLineId: string | null; billedThroughId: string | null }
+): Promise<void> {
+  await updateQuote(client, quoteId, {
+    supersedesLineId: choice.setAsideLineId,
+    billedThroughId: choice.billedThroughId,
+  });
+  await setQuoteStatus(client, quoteId, 'accepted');
+}
+
+/** Pays what is still owing on a bill, in one payment dated today. */
+export async function payBill(
+  client: SupabaseClient,
+  quoteId: string,
+  unpaid: number,
+  paidOn: string
+): Promise<void> {
+  if (!(unpaid > 0)) return;
+  await addPayment(client, quoteId, { amount: unpaid, amountInclGst: true, paidOn });
+}
+
 export interface QuoteInput {
   /** Exactly one of these three. The RPC refuses the other counts, in words. */
   itemId?: string | null;
@@ -5492,3 +5557,5 @@ export function describePaidInference(review: InvoiceReview): string {
   }
   return review.paidEvidence ? `Paid — ${review.paidEvidence}` : 'Paid — no sentence to show for it';
 }
+
+export * from './summary';

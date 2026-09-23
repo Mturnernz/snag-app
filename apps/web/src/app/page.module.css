@@ -4,8 +4,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-6) var(--space-4);
+  gap: var(--space-md);
+  padding: var(--space-2xl) var(--space-lg);
   text-align: center;
 }
 
@@ -17,23 +17,23 @@
 }
 
 .body {
-  color: var(--text-secondary);
+  color: var(--color-text-secondary);
   margin: 0;
   max-width: 32ch;
 }
 
 .action {
-  margin-top: var(--space-3);
-  padding: var(--space-3) var(--space-5);
+  margin-top: var(--space-md);
+  padding: var(--space-md) var(--space-xl);
   border-radius: var(--radius-button);
-  background: var(--primary);
-  color: var(--on-primary, #fff);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
   font-weight: 600;
   text-decoration: none;
 }
 
 .link {
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   font-size: var(--text-sm);
   text-decoration: none;
 }

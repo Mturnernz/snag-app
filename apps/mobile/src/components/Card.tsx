@@ -50,8 +50,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.card,
     padding: Spacing.lg,
   },
-  outlined: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
+  // V2: white on plaster already reads as a card, so the default card has no
+  // outline — the grouped-list look. `accentColor` still draws one on purpose.
+  outlined: {},
 });

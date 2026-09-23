@@ -127,13 +127,37 @@ export const Colors = {
    * reading as a different application.
    */
   photoViewerBackdrop: 'rgba(43, 39, 36, 0.97)',
+
+  // ── V2 grouped-list surfaces ─────────────────────────────────────────────
+  // The hairline between rows inside a white group. Lighter than `border`,
+  // which is for the edge of a thing rather than the gap between two rows of it.
+  separator: '#EFE9E0',
+  /** Disclosure chevrons. Decoration, never text, so it is exempt from 4.5:1. */
+  chevron: '#B9AFA3',
+  /** The empty part of a budget bar. */
+  track: '#EDE7DD',
+  /** The undecided part of a budget bar: fern, lightened, still reading as money. */
+  undecided: '#9BC0AB',
+  /** Behind a sheet. Warm ink rather than black, like every shadow here. */
+  scrim: 'rgba(43, 39, 36, 0.45)',
+  /** A segmented control's track. */
+  segment: '#EFE9E0',
 };
 
+/**
+ * Corners. V2 moved cards and full-width buttons to the rounder, continuous
+ * iOS feel — a grouped list is a 14pt rectangle — while chips keep their tight
+ * corner, because a chip is a label and not a surface.
+ */
 export const Radius = {
-  card: 12,
-  button: 8,
+  card: 14,
+  /** The top corners of a bottom sheet. */
+  sheet: 16,
+  button: 12,
+  /** A pill: tinted inline actions such as Choose or Paid. */
+  pill: 999,
   chip: 4,
-  input: 8,
+  input: 10,
   avatar: 9999,
 };
 
@@ -156,6 +180,17 @@ export const Typography = {
   xl: 22,
   xxl: 28,
   xxxl: 32,
+
+  // V2 named sizes, after the iOS text styles. Used by the grouped-list
+  // primitives in `components/Grouped.tsx`; the numeric keys above stay for
+  // screens that have not moved.
+  footnote: 13,
+  subhead: 15,
+  body: 17,
+  title3: 20,
+  title2: 22,
+  title1: 28,
+  largeTitle: 34,
 
   // Font weights — React Native uses string literals
   regular: '400' as const,

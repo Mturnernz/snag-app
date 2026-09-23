@@ -10,21 +10,18 @@ import Icon from '../components/Icon';
 import AddProjectSheet from '../components/AddProjectSheet';
 import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
-import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createLocation, createProject, describeForecast, describeForecastVariance, describeToPay,
-  describeTotals,
-  formatMoney, getProjects, outstanding,
-  projectSubtitle,
+  createLocation, createProject, formatMoney, getProjects, inclGst, projectSubtitle,
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
 import { exportDateStamp, groupProjectsByStatus, projectExportTable } from '@snag/supabase-queries';
 import { writeExport, type ExportFormat } from '../lib/exportFile';
 import { showAlert } from '../lib/alert';
 import {
-  Project, ProjectStatus, PROJECT_STATUS_LABELS, RootStackParamList,
+  Project, PROJECT_STATUS_LABELS, RootStackParamList,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -190,17 +187,29 @@ export default function ProjectsScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable
-          onPress={() => properties.length > 1 && setPlacesOpen(true)}
-          disabled={properties.length < 2}
-          style={styles.place}
-          accessibilityRole={properties.length > 1 ? 'button' : undefined}
-        >
-          <Text style={styles.title}>Projects</Text>
-          {properties.length > 1 ? (
-            <Icon name="chevron-down" size="sm" color={Colors.textMuted} />
-          ) : null}
-        </Pressable>
+        <View style={styles.headerRow}>
+          <Pressable
+            onPress={() => properties.length > 1 && setPlacesOpen(true)}
+            disabled={properties.length < 2}
+            style={styles.place}
+            accessibilityRole={properties.length > 1 ? 'button' : undefined}
+          >
+            <Text style={styles.title} accessibilityRole="header">Projects</Text>
+            {properties.length > 1 ? (
+              <Icon name="chevron-down" size="sm" color={Colors.textMuted} />
+            ) : null}
+          </Pressable>
+          <Pressable
+            onPress={() => setSheetOpen(true)}
+            style={styles.newTap}
+            accessibilityRole="button"
+            accessibilityLabel="Start a project"
+          >
+            <View style={styles.newDisc}>
+              <Icon name="add" size={20} color={Colors.primary} />
+            </View>
+          </Pressable>
+        </View>
         <Text style={styles.sub}>
           {properties.length > 1 ? `${placeName} · ${summary}` : summary}
         </Text>
@@ -231,10 +240,7 @@ export default function ProjectsScreen() {
             />
           }
           renderSectionHeader={({ section }) => (
-            <View style={styles.groupRow}>
-              <Text style={styles.group}>{section.title}</Text>
-              <View style={styles.groupRule} />
-            </View>
+            <Text style={styles.group} accessibilityRole="header">{section.title}</Text>
           )}
           renderItem={({ item, section }) => (
             <ProjectCard
@@ -274,16 +280,6 @@ export default function ProjectsScreen() {
         />
       )}
 
-      {sections.length > 0 ? (
-        <Pressable
-          onPress={() => setSheetOpen(true)}
-          style={[styles.fab, { bottom: insets.bottom + Spacing.lg }]}
-          accessibilityRole="button"
-          accessibilityLabel="Start a project"
-        >
-          <Icon name="add" size="lg" color={Colors.white} />
-        </Pressable>
-      ) : null}
 
       <ExportSheet
         visible={showExport}
@@ -339,12 +335,16 @@ export default function ProjectsScreen() {
 }
 
 /**
- * One project on the tab.
+ * One project on the tab, V2.
  *
- * The money line is the card's point, and it obeys the rule the whole feature
- * rests on: **a total never appears without its denominator.** `describeTotals`
- * writes the second line, and there is no code path here that renders the first
- * without it.
+ * **The figure is Agreed**, the same number the project page puts beside
+ * Undecided — committed with the builder's open set-aside amounts taken out —
+ * so the list and the page cannot disagree. The page's Expected total needs
+ * every option on every thing to work out, which is a read per project this
+ * list does not make; the card says the part it can say exactly.
+ *
+ * Under it: against the budget when there is one, then how many things are
+ * left to decide and what is owed. Counts and sums, nothing to believe.
  */
 function ProjectCard({
   project,
@@ -355,180 +355,115 @@ function ProjectCard({
   dim: boolean;
   onPress: () => void;
 }) {
-  const committed = formatMoney(project.committedTotal);
-  const paid = formatMoney(project.paidTotal);
-  const owing = formatMoney(outstanding(project));
-  const forecast = formatMoney(project.forecastTotal);
-  /**
-   * The denominator, and it must never be absent while a figure is present.
-   *
-   * `describeForecast` is silent when there is no forecast to describe — which
-   * is right for the forecast and wrong for the card, because the card still
-   * shows *committed* in that case. Falling through to `describeTotals` keeps
-   * the rule absolute: **no total renders here without the line that says what
-   * it is of.** Caught by the spec that exists for exactly this.
-   */
-  const denominator = describeForecast(project) ?? describeTotals(project);
-  // Over budget, in words and against **forecast** rather than committed —
-  // committed lags reality by everything nobody has priced, so a card that only
-  // reddened on committed would stay calm until the last quote landed.
-  const varianceLine = describeForecastVariance(project);
-  const toPayLine = describeToPay(project);
+  const agreed = (project.committedTotal ?? 0) - project.allowanceOpen;
+  const budget = inclGst(project.budget, project.budgetInclGst);
+  const toDecide = Math.max(project.itemCount - project.pricedCount, 0);
+  const facts = [
+    toDecide > 0 ? `${toDecide} to decide` : null,
+    project.dueToPay > 0.005 ? `${formatMoney(project.dueToPay)} to pay` : null,
+    project.openSnagCount > 0 ? `${project.openSnagCount} to sort out` : null,
+  ].filter(Boolean);
 
-  // Three sentences for three states, because "what has this cost" and "what
-  // is still to pay" are different questions and a project answers whichever it
-  // can. Nothing is invented when it can answer neither.
-  //
-  // Outstanding leads the card rather than Paid: on a list of renovations the
-  // question is what is still to find, and a card that said "$88,600 paid" of a
-  // $192,354 job would read as nearly done.
-  //
-  // Forecast leads where there is one, because *are we over* is the question a
-  // list of renovations is scanned with, and it is the one committed cannot
-  // answer while items are unpriced.
-  let money: string | null = null;
-  if (forecast && committed && forecast !== committed) {
-    money = `${forecast} forecast · ${committed} committed`;
-  } else if (committed && owing && owing !== committed) {
-    money = `${committed} committed · ${owing} still to pay`;
-  } else if (committed) {
-    money = `${committed} committed`;
-  } else if (paid) {
-    money = `${paid} paid`;
+  if (dim) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={[styles.card, styles.cardDone]}
+        accessibilityRole="button"
+        accessibilityLabel={project.name}
+      >
+        <View style={styles.cardTitles}>
+          <Text style={styles.doneName}>{project.name}</Text>
+          <Text style={styles.cardSub} numberOfLines={1}>{projectSubtitle(project)}</Text>
+        </View>
+        <Text style={styles.doneFigure}>{formatMoney(project.paidTotal ?? agreed) ?? ''}</Text>
+      </Pressable>
+    );
   }
 
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.card, dim && styles.cardDim]}
+      style={styles.card}
       accessibilityRole="button"
       accessibilityLabel={project.name}
     >
       <View style={styles.cardTop}>
-        <View style={styles.cardTitles}>
-          <Text style={styles.cardName}>{project.name}</Text>
-          <Text style={styles.cardSub} numberOfLines={1}>
-            {projectSubtitle(project)}
-          </Text>
-        </View>
-        <View style={[styles.badge, badgeStyle(project.status)]}>
-          <Text style={[styles.badgeLabel, badgeLabelStyle(project.status)]}>
-            {PROJECT_STATUS_LABELS[project.status]}
-          </Text>
-        </View>
+        <Text style={styles.cardName}>{project.name}</Text>
+        <Icon name="chevron-forward" size={16} color={Colors.chevron} />
       </View>
-
-      {money ? <Text style={styles.money}>{money}</Text> : null}
-      {denominator ? <Text style={styles.denominator}>{denominator}</Text> : null}
-      {varianceLine ? <Text style={styles.variance}>{varianceLine}</Text> : null}
-
-      {project.openSnagCount > 0 || project.fileCount > 0 || toPayLine ? (
-        <View style={styles.cardFoot}>
-          {/* Is there a bill due. The only thing on this card about today, and
-              worth answering without opening anything. */}
-          {toPayLine ? (
-            <View style={[styles.pill, project.overdueTotal > 0.005 && styles.pillOverdue]}>
-              <Text
-                style={[
-                  styles.pillLabel,
-                  project.overdueTotal > 0.005 && styles.pillLabelOverdue,
-                ]}
-              >
-                {toPayLine}
-              </Text>
-            </View>
-          ) : null}
-          {project.openSnagCount > 0 ? (
-            <View style={styles.pill}>
-              <Text style={styles.pillLabel}>
-                {project.openSnagCount === 1 ? '1 to sort out' : `${project.openSnagCount} to sort out`}
-              </Text>
-            </View>
-          ) : null}
-          {project.fileCount > 0 ? (
-            <View style={styles.pill}>
-              <Text style={styles.pillLabel}>
-                {project.fileCount === 1 ? '1 file' : `${project.fileCount} files`}
-              </Text>
-            </View>
-          ) : null}
+      <View style={styles.figureRow}>
+        <Text style={styles.figure}>{formatMoney(agreed) ?? '$0'}</Text>
+        <Text style={styles.figureOf}>
+          {budget !== null ? `agreed of ${formatMoney(budget)}` : 'agreed'}
+        </Text>
+      </View>
+      {budget !== null && budget > 0 ? (
+        <View style={styles.bar}>
+          <View style={[styles.barFill, { width: `${Math.min(agreed / budget, 1) * 100}%` }]} />
         </View>
+      ) : null}
+      {facts.length > 0 ? (
+        <Text style={[styles.facts, project.overdueTotal > 0.005 && styles.factsOverdue]}>
+          {facts.join('   ·   ')}
+        </Text>
       ) : null}
     </Pressable>
   );
 }
 
-// Status carries the same three hues the rest of the app spends on state:
-// slate is a state rather than a warning, brass is doing, done is neutral —
-// fern is the brand and fern is not "done".
-function badgeStyle(status: ProjectStatus) {
-  if (status === 'underway') return { backgroundColor: Colors.status.doingBg };
-  if (status === 'done') return { backgroundColor: Colors.status.doneBg };
-  return { backgroundColor: Colors.status.openBg };
-}
-function badgeLabelStyle(status: ProjectStatus) {
-  if (status === 'underway') return { color: Colors.status.doingFg };
-  if (status === 'done') return { color: Colors.status.doneFg };
-  return { color: Colors.status.openFg };
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, paddingBottom: Spacing.md },
+  header: { paddingHorizontal: Spacing.lg + 4, paddingTop: Spacing.md, paddingBottom: Spacing.sm },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
-  title: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary },
-  sub: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: 2 },
+  title: {
+    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    color: Colors.textPrimary, letterSpacing: -0.4,
+  },
+  sub: { fontSize: Typography.subhead, color: Colors.textMuted, marginTop: 2 },
+  newTap: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'flex-end', justifyContent: 'center' },
+  newDisc: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxxl * 2 },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
-  groupRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.lg, marginBottom: Spacing.sm },
   group: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.semibold,
-    color: Colors.textMuted,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    fontSize: Typography.title3, lineHeight: 25, fontWeight: Typography.semibold,
+    color: Colors.textPrimary, letterSpacing: -0.3,
+    marginTop: Spacing.xl, marginBottom: Spacing.sm + 2, paddingHorizontal: 4,
   },
-  groupRule: { flex: 1, height: 1, backgroundColor: Colors.border },
 
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
-    padding: Spacing.md,
-    marginBottom: Spacing.sm,
-    ...Shadow.sm,
+    paddingHorizontal: Spacing.lg + 2,
+    paddingTop: Spacing.lg + 2,
+    paddingBottom: Spacing.lg,
+    marginBottom: Spacing.sm + 2,
+    gap: Spacing.md,
   },
-  // The same translucency a parked repeat takes on the list, and the same fact
-  // behind it: there is nothing to do about this one.
-  cardDim: { opacity: 0.62 },
-  cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
-  cardTitles: { flex: 1, minWidth: 0 },
-  cardName: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
-  cardSub: { fontSize: Typography.sm, color: Colors.textMuted, marginTop: 1 },
-  badge: { borderRadius: Radius.chip, paddingHorizontal: Spacing.sm, paddingVertical: 3 },
-  badgeLabel: { fontSize: Typography.xs, fontWeight: Typography.semibold },
-  money: {
-    fontFamily: Fonts.mono,
-    fontSize: Typography.sm,
-    color: Colors.textSecondary,
-    marginTop: Spacing.sm,
+  // The same translucency a parked repeat takes on the list, for the same
+  // reason: there is nothing to do about this one, and it stays findable.
+  cardDone: { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.lg, gap: Spacing.md, opacity: 0.62 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  cardTitles: { flex: 1, minWidth: 0, gap: 2 },
+  cardName: { flex: 1, fontSize: Typography.body, lineHeight: 22, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  cardSub: { fontSize: Typography.subhead, color: Colors.textMuted },
+  doneName: { fontSize: Typography.body, color: Colors.textPrimary },
+  doneFigure: { fontSize: Typography.body, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
+  figureRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.sm },
+  figure: {
+    fontSize: Typography.title1, lineHeight: 34, fontWeight: Typography.bold,
+    color: Colors.textPrimary, letterSpacing: -0.4, fontVariant: ['tabular-nums'],
   },
-  // Never optional, and never in a lighter weight than it can be read at: this
-  // is the line that stops the figure above it being believed on its own.
-  denominator: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },
-  cardFoot: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginTop: Spacing.sm },
-  pill: {
-    backgroundColor: Colors.effort.bg,
-    borderRadius: Radius.chip,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-  },
-  pillLabel: { fontSize: Typography.xs, color: Colors.effort.fg, fontWeight: Typography.medium },
-  // Overdue is the one thing on a renovation card that has earned clay: it is a
-  // fact about a date somebody has gone past, not a judgement about the job.
-  pillOverdue: { backgroundColor: Colors.due.overdueBg },
-  pillLabelOverdue: { color: Colors.danger },
-  variance: { fontSize: Typography.xs, color: Colors.danger, marginTop: 2 },
+  figureOf: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
+  bar: { height: 6, borderRadius: 3, backgroundColor: Colors.track, overflow: 'hidden' },
+  barFill: { height: 6, backgroundColor: Colors.primary },
+  facts: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
+  factsOverdue: { color: Colors.danger },
 
   empty: { alignItems: 'center', paddingHorizontal: Spacing.xl },
   emptyTitle: {
@@ -563,17 +498,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
 
-  fab: {
-    position: 'absolute',
-    right: Spacing.lg,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Shadow.md,
-  },
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
   sheet: {

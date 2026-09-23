@@ -52,11 +52,14 @@ const CORS = {
 
 const NOT_SET_UP = "Label reading isn't set up yet — type what the label says.";
 const BUSY = 'The label reader is busy right now — try again in a minute, or type what it says.';
-// A second model is only worth asking with enough of the budget left to answer,
-// so the first is cut off early enough to leave it some: a model that hangs
-// must not spend the whole 40s on its own.
+// A next model is only worth asking with enough of the budget left to answer,
+// so every attempt but the last is cut off early enough to leave some: a model
+// that hangs must not spend the whole 40s on its own. A busy answer comes back
+// in a few seconds, so three attempts fit comfortably.
 const MIN_ATTEMPT_MS = 8_000;
-const FIRST_ATTEMPT_MS = 25_000;
+const EARLY_ATTEMPT_MS = 15_000;
+// A breath between a busy answer and the next ask — Google's own advice for 503.
+const BUSY_PAUSE_MS = 1_000;
 const COULD_NOT_READ = "Couldn't read that one — type what the label says.";
 
 function answer(status: number, body: unknown): Response {
@@ -148,7 +151,7 @@ Deno.serve(async (req) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body,
-        signal: AbortSignal.timeout(last ? left : Math.min(left, FIRST_ATTEMPT_MS)),
+        signal: AbortSignal.timeout(last ? left : Math.min(left, EARLY_ATTEMPT_MS)),
       });
     } catch (err) {
       // Too slow or unreachable is a kind of busy: the next model may answer.
@@ -164,6 +167,7 @@ Deno.serve(async (req) => {
     console.error(`read-label: ${model} ${attempt.status}:`, detail.slice(0, 500));
     if (isBusy(attempt.status)) {
       busy = true;
+      if (!last) await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSE_MS));
       continue;
     }
     // A bad or revoked key comes back 400 ("API key not valid") or 401/403,

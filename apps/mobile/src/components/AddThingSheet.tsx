@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
@@ -10,12 +10,12 @@ import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '..
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
-import { uploadFile } from '../lib/supabase';
+import { readLabel, uploadFile } from '../lib/supabase';
 import {
-  catalogueSuggestions, documentFileName, documentName, matchSuggestions,
-  suggestionsForRoom, type ThingInput,
+  applyLabelReading, catalogueSuggestions, documentFileName, documentName, matchSuggestions,
+  suggestionsForRoom, swatchColour, type ThingInput,
 } from '@snag/supabase-queries';
-import { Location, ThingKind, THING_KINDS, THING_KIND_LABELS } from '../types';
+import { Location, ThingKind, ThingSpec, THING_KINDS, THING_KIND_LABELS } from '../types';
 
 /**
  * Adding something to the house record, in four steps.
@@ -59,6 +59,13 @@ type Step = 'room' | 'what' | 'label' | 'takes';
 
 const STEPS: Step[] = ['room', 'what', 'label', 'takes'];
 
+/** Where reading the photographed label has got to. Never blocks a step. */
+type Reading =
+  | { state: 'idle' }
+  | { state: 'reading' }
+  | { state: 'read'; filled: string[] }
+  | { state: 'failed'; words: string };
+
 /** Service intervals a household actually uses. Nobody types "180 days". */
 const CYCLES: { days: number; label: string }[] = [
   { days: 180, label: '6 months' },
@@ -97,6 +104,14 @@ export default function AddThingSheet({
   const [naming, setNaming] = useState(false);
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
+  /** Only ever filled from the label: the walkthrough does not ask for it. */
+  const [serial, setSerial] = useState('');
+  /** A paint's sheen, tint, product and swatch, when the tin said them. */
+  const [spec, setSpec] = useState<ThingSpec>({});
+  const [reading, setReading] = useState<Reading>({ state: 'idle' });
+  // Bumped on every open, so a reading that lands after the sheet has been
+  // closed and reopened fills nothing in a walkthrough it was never for.
+  const openCount = useRef(0);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [takes, setTakes] = useState('');
   const [serviceDays, setServiceDays] = useState<number | null>(null);
@@ -122,6 +137,10 @@ export default function AddThingSheet({
     setNaming(false);
     setMake('');
     setModel('');
+    setSerial('');
+    setSpec({});
+    setReading({ state: 'idle' });
+    openCount.current += 1;
     setPhotoPath(null);
     setTakes('');
     setServiceDays(null);
@@ -139,6 +158,10 @@ export default function AddThingSheet({
     // pressed + on a heading back to a question they just answered.
     setStep(start?.name ? 'label' : start && start.room !== undefined ? 'what' : 'room');
   }, [visible, start]);
+
+  // What the boxes hold this render, for a reading that lands later.
+  const latest = useRef({ name, make, model, serial, takes, spec });
+  latest.current = { name, make, model, serial, takes, spec };
 
   const index = STEPS.indexOf(step);
   const painting = kind === 'finish';
@@ -233,6 +256,7 @@ export default function AddThingSheet({
       const { path, error } = await compressAndUpload(uri, photoFileName(pathPrefix));
       if (error || !path) throw error ?? new Error('The photo did not upload');
       setPhotoPath(path);
+      read(path);
     } catch (err: unknown) {
       // Shown in the sheet rather than an alert: the step is still on screen
       // and the retry is the same button they just pressed.
@@ -240,6 +264,49 @@ export default function AddThingSheet({
       console.error('Plate photo failed:', failureReason(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * What the photographed label says, laid into the boxes still empty.
+   *
+   * Not awaited by anything: the photo is on the record the moment it
+   * uploads, and the person can carry on typing, press Next, or leave while
+   * this runs. When it lands it fills **only what is still blank**
+   * (`applyLabelReading`) — whatever somebody reached first is theirs — and
+   * says which boxes it filled, so they know what to check against the label
+   * rather than assuming it read everything. Nothing is written by this; the
+   * last step is still the only write.
+   *
+   * A failure is a line under the boxes, never an alert: the step is still on
+   * screen and typing it is exactly what they would have done without this.
+   */
+  async function read(path: string) {
+    const mine = openCount.current;
+    setReading({ state: 'reading' });
+    try {
+      const found = await readLabel(path, kind);
+      if (mine !== openCount.current) return;
+      if (!found) {
+        setReading({ state: 'failed', words: "Couldn't make out a label in that photo — type what it says." });
+        return;
+      }
+      // Against the boxes as they are *now*, not as they were when the photo
+      // was taken: a box typed into while the read was out is filled.
+      const { next, filled } = applyLabelReading(latest.current, found, kind);
+      setName(next.name);
+      setMake(next.make);
+      setModel(next.model);
+      setSerial(next.serial);
+      setTakes(next.takes);
+      setSpec(next.spec);
+      setReading({ state: 'read', filled });
+    } catch (err: unknown) {
+      if (mine !== openCount.current) return;
+      setReading({
+        state: 'failed',
+        words: err instanceof Error && err.message ? err.message : "Couldn't read the label",
+      });
     }
   }
 
@@ -293,6 +360,10 @@ export default function AddThingSheet({
         documentPaths: docPath ? [docPath] : [],
         make: make.trim() || null,
         model: model.trim() || null,
+        // Both only ever arrive from the label. A paint has no serial, and
+        // offering the row would invent one — the thing page's own rule.
+        serial: !painting && serial.trim() ? serial.trim() : null,
+        spec: painting ? cleanSpec(spec) : undefined,
         // A paint answers the last step with a surface; everything else answers
         // it with a part and a cycle. Neither carries the other's fields.
         consumables: !painting && takes.trim() ? [takes.trim()] : [],
@@ -314,7 +385,11 @@ export default function AddThingSheet({
   // controls with one outcome sitting side by side. One control, and it says
   // which of the two things it is doing.
   const labelStepEmpty =
-    !photoPath && !docPath && !make.trim() && !model.trim() && !note.trim();
+    !photoPath && !docPath && !make.trim() && !model.trim() && !note.trim() && !serial.trim();
+  const swatch = painting ? swatchColour(spec) : null;
+  const specLine = painting
+    ? [spec.product, spec.sheen, spec.tint ? `tint ${spec.tint}` : null].filter(Boolean).join(' · ')
+    : '';
   const nextLabel = step === 'label' && labelStepEmpty ? 'Skip for now' : 'Next';
 
   return (
@@ -607,6 +682,36 @@ export default function AddThingSheet({
                   autoCapitalize="characters"
                   accessibilityLabel={kind === 'finish' ? 'Colour code' : 'Model'}
                 />
+                {/* Not asked for — the walkthrough never has — but when the
+                    plate carried one it is shown in a box, so it is checked
+                    and can be corrected rather than saved unseen. */}
+                {!painting && (serial || (reading.state === 'read' && reading.filled.includes('serial'))) ? (
+                  <TextInput
+                    style={[styles.input, styles.inputMono]}
+                    value={serial}
+                    onChangeText={setSerial}
+                    placeholder="Serial"
+                    placeholderTextColor={Colors.textMuted}
+                    maxLength={80}
+                    autoCorrect={false}
+                    autoCapitalize="characters"
+                    accessibilityLabel="Serial"
+                  />
+                ) : null}
+                {painting && (swatch || specLine) ? (
+                  <View style={styles.specRow}>
+                    {swatch ? (
+                      <View
+                        style={[styles.swatch, { backgroundColor: swatch }]}
+                        accessibilityLabel={`Swatch ${swatch}`}
+                      />
+                    ) : null}
+                    {specLine ? (
+                      <Text style={styles.specText} numberOfLines={2}>{specLine}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
+                <LabelStatus reading={reading} />
               </View>
 
               {/* The paperwork, at the moment somebody has it in their hand.
@@ -790,6 +895,42 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
   );
 }
 
+/** A paint's spec, with the keys nobody filled left out rather than stored empty. */
+function cleanSpec(spec: ThingSpec): ThingSpec | undefined {
+  const kept = Object.fromEntries(
+    Object.entries(spec).filter(([, value]) => value && value.trim())
+  );
+  return Object.keys(kept).length ? kept : undefined;
+}
+
+/**
+ * One line under the boxes saying where reading the label has got to.
+ *
+ * It names what it filled, because "read from the photo" over five boxes when
+ * it managed two would have somebody trust three it never touched.
+ */
+function LabelStatus({ reading }: { reading: Reading }) {
+  if (reading.state === 'idle') return null;
+  if (reading.state === 'reading') {
+    return (
+      <View style={styles.readingRow}>
+        <ActivityIndicator size="small" color={Colors.textMuted} />
+        <Text style={styles.readingText}>Reading the label…</Text>
+      </View>
+    );
+  }
+  if (reading.state === 'failed') {
+    return <Text style={styles.readingText}>{reading.words}</Text>;
+  }
+  return (
+    <Text style={styles.readingText}>
+      {reading.filled.length
+        ? `Read from the photo: ${reading.filled.join(', ')}. Check against the label before you save.`
+        : "Nothing read off that label that the boxes didn't already have."}
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
   sheet: {
@@ -870,6 +1011,19 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   inputMono: { fontFamily: Fonts.mono, fontSize: Typography.sm },
+  specRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  // The paint's own colour, not a hue the app spends; hairline because most
+  // paint is a white and a white circle on a white sheet is not there.
+  swatch: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  specText: { flex: 1, fontFamily: Fonts.mono, fontSize: Typography.sm, color: Colors.textSecondary },
+  readingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  readingText: { fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19 },
   inputMulti: { minHeight: 80, paddingTop: Spacing.sm, textAlignVertical: 'top' },
   attach: {
     flexDirection: 'row',

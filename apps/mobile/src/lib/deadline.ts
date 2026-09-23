@@ -98,13 +98,19 @@ export function failureReason(err: unknown): string {
  *   opposite of what that number exists for.
  * - **Bytes** are slow rather than broken on a bad connection, and cutting an
  *   upload off at 20s would invent a failure that was not there.
+ * - **Reading a label** is a model looking at a photograph, which takes
+ *   seconds rather than milliseconds even when nothing is wrong. It is never
+ *   waited on — the walkthrough carries on underneath it — so a longer leash
+ *   costs nobody a spinner, and a 20s one would call a slow answer a failure.
  */
 export const AUTH_TIMEOUT_MS = 15_000;
 export const REQUEST_TIMEOUT_MS = 20_000;
 export const UPLOAD_TIMEOUT_MS = 60_000;
+export const LABEL_TIMEOUT_MS = 45_000;
 
 export function deadlineFor(url: string): number {
   if (url.includes('/auth/v1/')) return AUTH_TIMEOUT_MS;
+  if (url.includes('/functions/v1/read-label')) return LABEL_TIMEOUT_MS;
   // Asking for a signed URL, not sending or fetching the bytes behind one.
   if (url.includes('/storage/v1/object/sign')) return REQUEST_TIMEOUT_MS;
   if (url.includes('/storage/v1/')) return UPLOAD_TIMEOUT_MS;

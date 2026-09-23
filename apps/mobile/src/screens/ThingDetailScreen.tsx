@@ -19,12 +19,12 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
-  describeCycle, documentFileName, documentName, formatLooseDate, parseLooseDate,
-  thingHeadline,
+  consumableOnList, describeCycle, documentFileName, documentName, formatLooseDate,
+  parseLooseDate, swatchColour, thingHeadline,
 } from '@snag/supabase-queries';
 import {
-  createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getThing, updateThing,
-  uploadFile,
+  createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getSnags, getThing,
+  updateSnag, updateThing, uploadFile,
 } from '../lib/supabase';
 import { PHOTO_PICK_LIMIT, compressAndUpload, photoFileName, pickPhotos } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
@@ -448,6 +448,70 @@ export default function ThingDetailScreen() {
   }
 
   /**
+   * The cart beside a consumable: this, on the shopping list, in one tap.
+   *
+   * The shopping list is not a list of its own — it is every open job's parts
+   * (`snags.parts`), and that is deliberate: a thing to buy without a job to
+   * use it on is how a list fills with cartridges nobody fits. So the tap files
+   * a small job about this thing — *Heat pump — RFC-24* — carrying the item,
+   * and the trip sheet picks it up like any other.
+   *
+   * **It starts that job, and that is right.** Filling a parts list is one of
+   * the four things that move a snag to *Doing*, and deciding to buy the filter
+   * is deciding to change it — the rule the triage page already states about
+   * its own `+`. What must *not* happen is the thing page quietly copying its
+   * consumables onto jobs nobody asked it to; this only ever acts on a press.
+   *
+   * **It asks before it files.** A second tap, or the other phone having done
+   * it an hour ago, answers "already on the list" rather than putting two rows
+   * on the trip sheet for one cartridge (`consumableOnList`). One read of the
+   * open jobs, never fatal: if it cannot be answered, filing is still the
+   * honest thing to do, since a duplicate costs a tap to remove and a missing
+   * filter costs a trip.
+   *
+   * Two writes, in this order: `create_snag` carries the link (and
+   * `20260923100000` puts it in `snag_things` on the way in, so the job reads as
+   * being about this thing everywhere), then `update_snag` gives it its part. A
+   * job that lands without the part is still a correct job, and says so.
+   */
+  async function addToShoppingList(item: string) {
+    if (!thing || busy) return;
+    setBusy(true);
+    try {
+      let waiting = null;
+      try {
+        const open = await getSnags({ propertyId: thing.propertyId, status: ['open', 'doing'] });
+        waiting = consumableOnList(open, thing.id, item);
+      } catch {
+        waiting = null;
+      }
+      if (waiting) {
+        showToast(`${item} is already on the shopping list`);
+        return;
+      }
+      const snag = await createSnag({
+        propertyId: thing.propertyId,
+        room: thing.room,
+        description: `${thingHeadline(thing)} — ${item}`,
+        thingId: thing.id,
+      });
+      try {
+        await updateSnag(snag.id, { parts: [item] });
+        showToast(`${item} is on the shopping list`);
+      } catch (err: any) {
+        showAlert(
+          'The job is on the list, the part is not',
+          `${err?.message ?? 'That didn’t save.'} Open the job and add ${item} to what it needs.`
+        );
+      }
+    } catch (err: any) {
+      showAlert("Couldn't add that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
    * A snag about this thing, from here.
    *
    * The parts list is deliberately *not* filled in from the consumables:
@@ -705,10 +769,18 @@ export default function ThingDetailScreen() {
               key={field.key}
               label={field.label}
               value={draft?.spec[field.key] ?? ''}
-              mono={field.key === 'tint'}
+              mono={field.key === 'tint' || field.key === 'hex'}
               onCopy={field.key === 'tint' ? copy : undefined}
               savedValue={thing.spec[field.key] ?? null}
               onChange={(v) => editSpec(field.key, v)}
+              // Read off the draft, so it answers while somebody types. A box
+              // holding something that is not a colour says so rather than
+              // drawing nothing and leaving them to wonder.
+              swatch={
+                field.key !== 'hex' || !(draft?.spec.hex ?? '').trim()
+                  ? undefined
+                  : swatchColour(draft!.spec) ?? false
+              }
             />
           ))}
 
@@ -869,6 +941,17 @@ export default function ThingDetailScreen() {
                   accessibilityLabel={`Copy ${item}`}
                 >
                   <Text style={styles.partText}>{item}</Text>
+                </Pressable>
+                {/* The cart and the × are siblings of the copy tap, never
+                    children of it — three intentions, three targets. */}
+                <Pressable
+                  onPress={() => addToShoppingList(item)}
+                  disabled={busy}
+                  style={styles.partRemove}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add ${item} to the shopping list`}
+                >
+                  <Icon name="cart-outline" size="sm" color={Colors.primary} />
                 </Pressable>
                 <Pressable
                   onPress={() =>
@@ -1112,7 +1195,7 @@ export default function ThingDetailScreen() {
  * what this page needed anyway once every field started showing.
  */
 function Field({
-  label, value, mono, multiline, onChange, onCopy, savedValue,
+  label, value, mono, multiline, onChange, onCopy, savedValue, swatch,
 }: {
   label: string;
   value: string;
@@ -1122,11 +1205,21 @@ function Field({
   /** The stored value, for the copy button — never the half-typed draft. */
   savedValue?: string | null;
   onCopy?: (label: string, value: string) => void;
+  /** A colour to draw beside the label; `false` when the box holds something that is not one. */
+  swatch?: string | false;
 }) {
   return (
     <View style={styles.field}>
       <View style={styles.fieldHead}>
         <Text style={styles.fieldLabel}>{label}</Text>
+        {swatch ? (
+          <View
+            style={[styles.swatch, { backgroundColor: swatch }]}
+            accessibilityLabel={`Swatch ${swatch}`}
+          />
+        ) : swatch === false ? (
+          <Text style={styles.swatchMiss}>Six hex digits draw a swatch</Text>
+        ) : null}
         {onCopy && savedValue ? (
           <Pressable
             onPress={() => onCopy(label, savedValue)}
@@ -1159,6 +1252,16 @@ function Field({
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
+  // A paint's own colour — data, like a photograph of the tin, not a hue the
+  // app is spending. The hairline is because most paint is a white.
+  swatch: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  swatchMiss: { fontSize: Typography.xs, color: Colors.textMuted },
   fromRow: {
     flexDirection: 'row',
     alignItems: 'center',

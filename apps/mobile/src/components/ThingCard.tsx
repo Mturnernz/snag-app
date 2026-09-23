@@ -4,7 +4,7 @@ import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 import Icon from './Icon';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Thing, ThingKind, ThingSuggestion } from '../types';
-import { describeCycle, thingDetailLine, thingHeadline } from '@snag/supabase-queries';
+import { describeCycle, swatchColour, thingDetailLine, thingHeadline } from '@snag/supabase-queries';
 
 /**
  * One thing in the house record.
@@ -41,6 +41,10 @@ interface Props {
 export default function ThingCard({ thing, photoUrl, onPress }: Props) {
   const detail = thingDetailLine(thing);
   const consumable = thing.consumables[0];
+  // A paint's own colour, when it has one this can draw. Not a breach of the
+  // palette rule: the palette is what the *app* spends colour on, and this is
+  // the record's data — the same as a photograph of the tin would be.
+  const swatch = thing.kind === 'finish' ? swatchColour(thing.spec) : null;
 
   return (
     <Pressable
@@ -58,9 +62,17 @@ export default function ThingCard({ thing, photoUrl, onPress }: Props) {
       )}
 
       <View style={styles.body}>
-        <Text style={styles.title} numberOfLines={1}>
-          {thingHeadline(thing)}
-        </Text>
+        <View style={styles.titleRow}>
+          {swatch ? (
+            <View
+              style={[styles.swatch, { backgroundColor: swatch }]}
+              accessibilityLabel={`Swatch ${swatch}`}
+            />
+          ) : null}
+          <Text style={styles.title} numberOfLines={1}>
+            {thingHeadline(thing)}
+          </Text>
+        </View>
         {detail ? (
           <Text style={styles.detail} numberOfLines={1}>
             {detail}
@@ -123,7 +135,18 @@ const styles = StyleSheet.create({
   },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
   body: { flex: 1, gap: 2 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  // A hairline edge on purpose: most paint is a white, and a white circle on a
+  // white card is not there at all.
+  swatch: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
   title: {
+    flexShrink: 1,
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,

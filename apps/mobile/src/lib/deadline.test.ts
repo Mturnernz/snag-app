@@ -1,6 +1,6 @@
 import {
   withDeadline, failureReason, DeadlineError,
-  deadlineFor, AUTH_TIMEOUT_MS, REQUEST_TIMEOUT_MS, UPLOAD_TIMEOUT_MS,
+  deadlineFor, AUTH_TIMEOUT_MS, REQUEST_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, LABEL_TIMEOUT_MS,
 } from './deadline';
 
 // The point of this helper is that no job can end in "still going" forever. The
@@ -109,6 +109,15 @@ describe('deadlineFor', () => {
     // request, so one that never settles means nothing is ever issued again.
     expect(deadlineFor(AUTH)).toBe(AUTH_TIMEOUT_MS);
     expect(deadlineFor(AUTH)).toBeLessThan(deadlineFor(REST));
+  });
+
+  it('gives a label read longer than a data call, and nothing else that leash', () => {
+    // A model looking at a photograph takes seconds even when it works; 20s
+    // would word a slow answer as a dead connection.
+    const LABEL = 'https://p.supabase.co/functions/v1/read-label';
+    expect(deadlineFor(LABEL)).toBe(LABEL_TIMEOUT_MS);
+    expect(deadlineFor(LABEL)).toBeGreaterThan(REQUEST_TIMEOUT_MS);
+    expect(deadlineFor('https://p.supabase.co/functions/v1/something-else')).toBe(REQUEST_TIMEOUT_MS);
   });
 
   it('treats asking for a signed URL as the data call it is', () => {

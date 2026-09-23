@@ -489,7 +489,7 @@ export const THING_KIND_FIELD_LABELS: Record<
 /**
  * The per-kind tail, kept out of the columns.
  *
- * Paint uses `sheen`, `product`, `tint` and `leftOver`; an appliance uses none
+ * Paint uses `sheen`, `product`, `tint`, `leftOver` and `hex`; an appliance uses none
  * of it. Values are strings because every one of them is read back rather than
  * computed on — a tint formula is not a number, it is a thing you hand to
  * someone behind a counter.
@@ -502,6 +502,10 @@ export const FINISH_SPEC_FIELDS: { key: string; label: string; placeholder: stri
   { key: 'product', label: 'Product', placeholder: 'Zylone Sheen' },
   { key: 'tint', label: 'Tint formula', placeholder: 'BS2 · Y 12.5 · R 3.0' },
   { key: 'leftOver', label: "What's left", placeholder: '~4L, garage top shelf' },
+  // Last, because it is the least exact thing here: an on-screen guess at a
+  // colour no screen shows true. It draws the swatch (`swatchColour`) and is
+  // never what anybody takes to the counter — the code and the tint are.
+  { key: 'hex', label: 'Swatch (hex)', placeholder: '' },
 ];
 
 /**

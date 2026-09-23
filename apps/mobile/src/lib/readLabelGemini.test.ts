@@ -1,5 +1,5 @@
 import {
-  geminiRequest, readingFromGemini, SCHEMA,
+  DEFAULT_MODEL, FALLBACK_MODEL, geminiRequest, isBusy, modelsToTry, readingFromGemini, SCHEMA,
 } from '../../../../supabase/functions/read-label/gemini';
 import { parseLabelReading } from '@snag/supabase-queries';
 
@@ -62,5 +62,25 @@ describe('reading the reply', () => {
     ['nothing at all', null, 'empty'],
   ])('refuses %s', (_, raw, reason) => {
     expect(readingFromGemini(raw)).toEqual({ ok: false, reason });
+  });
+});
+
+describe('asking a second model when the first is busy', () => {
+  // The first live reads came back 503 "high demand" from the newest Flash
+  // twice in a row, with the key, the photo and the count all fine.
+
+  it('asks the default, then the fallback, and never one model twice', () => {
+    expect(modelsToTry(undefined, undefined)).toEqual([DEFAULT_MODEL, FALLBACK_MODEL]);
+    expect(modelsToTry('gemini-x', undefined)).toEqual(['gemini-x', FALLBACK_MODEL]);
+    expect(modelsToTry(FALLBACK_MODEL, FALLBACK_MODEL)).toEqual([FALLBACK_MODEL]);
+    expect(modelsToTry('', '')).toEqual([DEFAULT_MODEL, FALLBACK_MODEL]);
+  });
+
+  it.each([503, 500, 429])('treats %i as busy, which another model may not be', (status) => {
+    expect(isBusy(status)).toBe(true);
+  });
+
+  it.each([400, 401, 403, 404])('does not retry %i, which every model would refuse alike', (status) => {
+    expect(isBusy(status)).toBe(false);
   });
 });

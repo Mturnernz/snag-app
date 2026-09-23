@@ -33,10 +33,14 @@ jest.mock('../components/StickyActionBar', () => {
 const mock_getThing = jest.fn();
 const mock_updateThing = jest.fn();
 const mock_createSnag = jest.fn();
+const mock_getSnags = jest.fn();
+const mock_updateSnag = jest.fn();
 jest.mock('../lib/supabase', () => ({
   getThing: (...a: unknown[]) => mock_getThing(...a),
   updateThing: (...a: unknown[]) => mock_updateThing(...a),
   createSnag: (...a: unknown[]) => mock_createSnag(...a),
+  getSnags: (...a: unknown[]) => mock_getSnags(...a),
+  updateSnag: (...a: unknown[]) => mock_updateSnag(...a),
   getFileUrls: jest.fn().mockResolvedValue({}),
   getFileUrl: jest.fn().mockResolvedValue(null),
   deleteThing: jest.fn(),
@@ -52,7 +56,8 @@ jest.mock('../lib/photoUpload', () => ({
   compressAndUpload: (...a: unknown[]) => mock_compressAndUpload(...a),
   photoFileName: () => 'h1/whatever.jpg',
 }));
-jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
+const mock_showToast = jest.fn();
+jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: (...a: unknown[]) => mock_showToast(...a) }) }));
 const mock_showAlert = jest.fn();
 jest.mock('../lib/alert', () => ({ showAlert: (...a: unknown[]) => mock_showAlert(...a) }));
 jest.mock('../hooks/useHousehold', () => ({
@@ -361,5 +366,113 @@ describe('ThingDetailScreen', () => {
       { deep: true }
     )[0];
     expect(six.props.accessibilityState.selected).toBe(true);
+  });
+});
+
+describe('the cart beside what it takes', () => {
+  // The shopping list is every open job's parts, so the cart files a small job
+  // about this thing carrying the item — and asks first, so a second press or
+  // the other phone never puts one cartridge on the trip sheet twice.
+  const onList = (over: Partial<any> = {}): any => ({
+    id: 's9', status: 'doing', thingId: null, linkedThings: [{ id: 't1' }],
+    parts: ['RFC-24'], bought: [], ...over,
+  });
+
+  it('files a job about this thing, then gives it the part', async () => {
+    mock_getSnags.mockResolvedValue([]);
+    mock_createSnag.mockResolvedValue({ id: 's1' });
+    mock_updateSnag.mockResolvedValue({ id: 's1' });
+    const r = await open({ name: 'Water filter', consumables: ['RFC-24'] });
+
+    await TestRenderer.act(async () => {
+      pressable(r, 'Add RFC-24 to the shopping list').props.onPress();
+    });
+
+    expect(mock_createSnag).toHaveBeenCalledWith(
+      expect.objectContaining({ propertyId: 'p', room: 'Kitchen', thingId: 't1', description: 'Water filter — RFC-24' })
+    );
+    // The part goes on through update_snag, which is what starts the job:
+    // deciding to buy the cartridge is deciding to change it.
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { parts: ['RFC-24'] });
+    expect(mock_showToast).toHaveBeenCalledWith('RFC-24 is on the shopping list');
+  });
+
+  it('says it is already there rather than filing it twice', async () => {
+    mock_getSnags.mockResolvedValue([onList()]);
+    const r = await open({ consumables: ['RFC-24'] });
+
+    await TestRenderer.act(async () => {
+      pressable(r, 'Add RFC-24 to the shopping list').props.onPress();
+    });
+
+    expect(mock_createSnag).not.toHaveBeenCalled();
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(mock_showToast).toHaveBeenCalledWith('RFC-24 is already on the shopping list');
+  });
+
+  it('files again once the last one has been bought', async () => {
+    mock_getSnags.mockResolvedValue([onList({ bought: ['RFC-24'] })]);
+    mock_createSnag.mockResolvedValue({ id: 's2' });
+    mock_updateSnag.mockResolvedValue({ id: 's2' });
+    const r = await open({ consumables: ['RFC-24'] });
+
+    await TestRenderer.act(async () => {
+      pressable(r, 'Add RFC-24 to the shopping list').props.onPress();
+    });
+
+    expect(mock_createSnag).toHaveBeenCalled();
+  });
+
+  it('still files when the open jobs cannot be read', async () => {
+    // A duplicate costs a tap to remove; a missing filter costs a trip.
+    mock_getSnags.mockRejectedValue(new Error('offline'));
+    mock_createSnag.mockResolvedValue({ id: 's3' });
+    mock_updateSnag.mockResolvedValue({ id: 's3' });
+    const r = await open({ consumables: ['RFC-24'] });
+
+    await TestRenderer.act(async () => {
+      pressable(r, 'Add RFC-24 to the shopping list').props.onPress();
+    });
+
+    expect(mock_updateSnag).toHaveBeenCalledWith('s3', { parts: ['RFC-24'] });
+  });
+
+  it('says the job landed without its part when only the second write fails', async () => {
+    mock_getSnags.mockResolvedValue([]);
+    mock_createSnag.mockResolvedValue({ id: 's4' });
+    mock_updateSnag.mockRejectedValue(new Error('That didn’t save'));
+    const r = await open({ consumables: ['RFC-24'] });
+
+    await TestRenderer.act(async () => {
+      pressable(r, 'Add RFC-24 to the shopping list').props.onPress();
+    });
+
+    expect(mock_showAlert).toHaveBeenCalledWith(
+      'The job is on the list, the part is not',
+      expect.stringContaining('add RFC-24')
+    );
+    expect(mock_showToast).not.toHaveBeenCalledWith('RFC-24 is on the shopping list');
+  });
+});
+
+describe('a paint swatch', () => {
+  const swatches = (r: RenderResult) =>
+    r.root.findAll((n) => typeof n.props.accessibilityLabel === 'string'
+      && n.props.accessibilityLabel.startsWith('Swatch #'), { deep: true });
+
+  it('draws the colour a saved hex describes', async () => {
+    const r = await open({ kind: 'finish', name: 'Wan White', spec: { hex: '#eae8df' } });
+    expect(swatches(r).map((n) => n.props.accessibilityLabel)).toContain('Swatch #EAE8DF');
+  });
+
+  it('draws nothing, and says why, for something that is not a colour', async () => {
+    const r = await open({ kind: 'finish', name: 'Wan White', spec: { hex: 'white-ish' } });
+    expect(swatches(r)).toHaveLength(0);
+    expect(texts(r)).toContain('Six hex digits draw a swatch');
+  });
+
+  it('has no swatch box at all on an appliance', async () => {
+    const r = await open({ kind: 'appliance' });
+    expect(boxes(r)['Swatch (hex)']).toBeUndefined();
   });
 });

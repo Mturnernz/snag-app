@@ -1087,6 +1087,53 @@ required fields past the room: every house-inventory product ever shipped opens 
 thirty-field form, a house has four hundred things in it, and the record ends up 8% complete. An
 8% record is worse than none — you check it once, find nothing, and never check again.
 
+### The photographed label is read, and nothing it says is saved unseen
+
+Step three has always photographed the rating plate "because it carries the make, model and serial
+at once" — and then asked somebody to type all three off the photo they had just taken.
+`supabase/functions/read-label` reads it, and the walkthrough lays the answer into the boxes.
+
+**This is the one place the app calls a model, and it is a deliberate exception** to the rule the
+assessment loop states (*no key, no queue, no edge function*). That rule is about *judgement* — an
+assessment is advice nobody can check at the moment it arrives, so it stays outside the app and
+comes back by hand. A label is the opposite case: a transcription of something the person is
+holding, which they check against the object in front of them before anything is written. Four
+rules keep it that way, and they are the whole feature:
+
+- **It writes nothing.** The function returns text. The walkthrough still writes only on its last
+  step through `create_thing`, so a reading nobody confirmed cannot reach the record — the same
+  guarantee the ghost design and the handover's confirm step exist for.
+- **It fills only the boxes still empty** (`applyLabelReading`), and says which ones in words
+  (*Read from the photo: make, model, serial*). Somebody who typed the model before photographing
+  the plate has already answered, and a reading that overwrote them would be the app deciding a
+  photograph knows better than the person holding the appliance. It also makes a late answer safe:
+  the read is never awaited, and whatever was typed while it was out is kept.
+- **It transcribes; it does not know things.** An ambiguous character is null, never a best guess —
+  a plausible wrong model number is worse than none in a shop. **What it takes comes off the label
+  or not at all**: a bulb spec "likely" for that oven is the unsourced-tradesman problem again. The
+  single exception is `hex`, an estimate by nature, which is only ever drawn as a swatch. A serial,
+  which the walkthrough never asks for, appears in a box of its own when read, so it is checked
+  rather than saved unseen.
+- **It reads the photo as the caller.** The client sends a storage path, never bytes, and the
+  function downloads with the caller's token — so the `home-photos` policies decide what can be
+  read, exactly as everywhere else, and `docs/` paths are refused outright.
+
+A failure is **a sentence under the boxes, never an alert** — the step is still on screen and
+typing is what they would have done anyway. A missing key says *Label reading isn't set up yet*
+rather than reading as an unreadable photo. It has its own deadline (`LABEL_TIMEOUT_MS`, 45s): a
+model looking at a photograph takes seconds even when it works, and 20s would word a slow answer as
+a dead connection. `connect-src` already covers `*.supabase.co`, so the CSP did not change.
+
+**Setup lives outside git**: `ANTHROPIC_API_KEY` as a function secret, optional `LABEL_MODEL`, and
+`supabase functions deploy read-label` with JWT verification left on. Until then the feature says
+it is not set up and everything else works. The household operator pays per read; nothing rate-
+limits it beyond needing a session, which is the thing to revisit if the app ever has strangers in
+it.
+
+`label.test.ts` pins `swatchColour`, `consumableOnList`, the defensive parse and the fill-only-
+empty rule; `AddThingSheet.test.tsx` pins the boxes filled and named, a typed box surviving a late
+reading, the failure sentence, and a paint's tin reaching `create_thing` as code, sheen and swatch.
+
 ### Writing is rare and accidental; reading is under pressure, somewhere else
 
 This asymmetry decides the layout, and it is the thing to hold on to. You record the heat pump
@@ -1172,6 +1219,16 @@ later, in an aisle, needing one exact string. So:
 - **No new colour.** Kind is an outline icon. The palette's four hues stay spent on state, and a
   thing has no state.
 
+  **A paint swatch is not an exception to that**, and the distinction is worth holding: the palette
+  is what the *app* spends colour on, and a swatch is the record's own data — the same as the
+  photograph of the tin beside it. `spec.hex` holds it (jsonb, so no migration), typed on the thing
+  page or read off the tin (below). `swatchColour` draws it only when it parses as three or six hex
+  digits, and draws **nothing** otherwise rather than a guess, because a swatch is the one part of a
+  paint record somebody believes at a glance without reading the code beside it; a box holding
+  something else says *Six hex digits draw a swatch*. It carries a hairline edge because most paint
+  is a white. It is always approximate — no screen shows paint true — so it sits **beside** the
+  colour code and never replaces it: the code and the tint formula are what the counter matches.
+
 ### Five kinds, two built
 
 `home.thing_kind` is `appliance | finish | tile | fitting | fabric | contact`. `THING_KINDS` is
@@ -1211,20 +1268,46 @@ three unbuilt ones will want it.
 ### Four joins, all using mechanisms that already exist
 
 - **`snags.thing_id`** — what a snag is about. `on delete set null`, never cascade: what was wrong
-  with the old dishwasher is still what was wrong. **Nothing in the app sets it any more**: the
+  with the old dishwasher is still what was wrong. **Capture and triage no longer set it**: the
   capture step that wrote it and the picker on the job's page have both gone, and *Linked assets*
   answers the question they existed for without asking anything (see above). Rows linked before
   that keep their link, and everything that *reads* it still works — the *Also said about…*
   history card, the extract's *About* column, `thing_name`/`thing_make`/`thing_model` on
   `snags_with_details`. The column and the join stay because the data is real and because the
   cheap place to ask is capture, with the room already chosen, if it is ever wanted back.
+
+  **The thing page does still set it**, through three doors — *Report a problem*, *Schedule
+  service* and the cart beside a consumable — and since `20260920100000` that meant a job filed from the
+  heat pump's own page arrived with *Linked assets* empty and did not count towards "on the list",
+  because both read `home.snag_things`. `20260923100000` is an **insert-only** trigger that puts
+  the link in the join table as the job is created. It keeps nothing in step afterwards, which is
+  what keeps it from being the second writer `20260920100000` warns about: from then on
+  `set_snag_things` is the only way the set changes. It deliberately does **not** backfill — a job
+  whose link somebody removed in the picker looks identical to one that never got it, and
+  re-adding it would contradict them.
 - **Pointing a snag at a thing would NOT start the job.** Saying what something is about is the
   tail of capture, the same gesture as tagging the room. Assignee, due date, repeat and parts
   start it; `thing_id` doesn't, and the `v_started` expression in `update_snag` still says so.
-- **Nothing copies a thing's consumables onto a snag's parts list.** The client offers them as
-  taps. Filling the parts list is what moves a snag to 'doing', so a job that started itself
-  because somebody named the appliance would empty the status from the same end the *Start it*
-  button did.
+- **Nothing copies a thing's consumables onto a snag's parts list on its own.** Filling the parts
+  list is what moves a snag to 'doing', so a job that started itself because somebody named the
+  appliance would empty the status from the same end the *Start it* button did.
+
+  **A person can, in one tap: the cart beside each consumable.** The shopping list is not a list
+  of its own — it is every open job's `parts` — and that is kept: a thing to buy with no job to use
+  it on is how a list fills with cartridges nobody fits. So the cart files a small job about the
+  thing (*Water filter — RFC-24*), linked to it, and gives it the part through `update_snag`. **That
+  starts the job, and that is right**: deciding to buy the filter is deciding to change it, which
+  is the rule the triage page's own `+` already follows. What would be wrong is the page doing it
+  unasked.
+
+  **It asks before it files.** `consumableOnList` looks for an open job about this thing still
+  waiting on that item — a second tap, or the other phone an hour ago — and answers *already on
+  the shopping list* instead of a second row on the trip sheet. A **bought** one does not count,
+  because pressing the cart again after the trip means another. The read is one request and never
+  fatal: if it fails the cart files anyway, since a duplicate costs a tap and a missing filter a
+  trip. Two writes (create, then parts), and if only the second fails the alert says the job
+  landed without its part rather than claiming either outcome. `ThingDetailScreen.test.tsx` pins
+  all four.
 - **`service_days` is not a scheduler, and now it does something.** It used to be a rail of
   intervals on the spec sheet that answered a question and then sat there: the column was written
   and no job ever appeared. It is a **Schedule service** button and a modal now — how often, who

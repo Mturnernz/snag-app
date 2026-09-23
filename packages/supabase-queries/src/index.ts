@@ -1379,6 +1379,215 @@ export function searchThings(things: Thing[], query: string): Thing[] {
 }
 
 /**
+ * A paint's swatch, as a colour a screen can draw — or null.
+ *
+ * `spec.hex` is typed, or read off the tin by `readLabel`, and either way it is
+ * text somebody could have got wrong. So it is read back rather than trusted:
+ * six hex digits or three, with or without the `#`, and anything else draws
+ * **nothing** rather than a guess. A swatch in the wrong colour is worse than
+ * none, because it is the one part of a paint record somebody believes at a
+ * glance without reading the code beside it.
+ *
+ * Only ever approximate — no screen shows paint true — which is why it sits
+ * beside the colour code and never replaces it. The code is what the shop
+ * matches.
+ */
+export function swatchColour(spec: ThingSpec): string | null {
+  const raw = (spec.hex ?? '').trim().replace(/^#/, '');
+  if (/^[0-9a-f]{6}$/i.test(raw)) return `#${raw.toUpperCase()}`;
+  if (/^[0-9a-f]{3}$/i.test(raw)) {
+    return `#${raw.split('').map((c) => c + c).join('').toUpperCase()}`;
+  }
+  return null;
+}
+
+/**
+ * The open job already waiting on this item for this thing, if there is one.
+ *
+ * What stops the cart beside a consumable filing the same filter twice: a
+ * second tap, or the other phone having done it an hour ago, answers "it's
+ * already on the list" rather than putting two rows on the trip sheet for one
+ * cartridge. Matched on the words, trimmed and in any case, because the item
+ * text is the key the shopping list already uses (`set_part_bought`).
+ *
+ * An item that has been **bought** does not count: it is off the trip sheet,
+ * and somebody pressing the cart again is saying they need another one.
+ * Done jobs never count either — the list does not show them.
+ */
+export function consumableOnList(snags: Snag[], thingId: string, item: string): Snag | null {
+  const want = item.trim().toLowerCase();
+  if (!want) return null;
+  return (
+    snags.find(
+      (snag) =>
+        snag.status !== 'done' &&
+        (snag.thingId === thingId || snag.linkedThings.some((one) => one.id === thingId)) &&
+        unboughtParts(snag).some((part) => part.trim().toLowerCase() === want)
+    ) ?? null
+  );
+}
+
+/**
+ * What `read-label` says it could read off a photograph.
+ *
+ * Every field is what was **printed**, or null. The one exception is `hex`,
+ * which is an estimate of a colour and is only ever drawn as a swatch beside
+ * the code (see `swatchColour`). `consumables` is limited server-side to part
+ * numbers on the label itself — a bulb spec guessed from general knowledge is
+ * the same unverifiable claim an unsourced tradesman is, and a wrong one is a
+ * wasted trip.
+ */
+export interface LabelReading {
+  legible: boolean;
+  make: string | null;
+  model: string | null;
+  serial: string | null;
+  colourName: string | null;
+  colourCode: string | null;
+  product: string | null;
+  sheen: string | null;
+  tint: string | null;
+  hex: string | null;
+  consumables: string[];
+}
+
+function labelText(value: unknown, max = 80): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+/**
+ * The function's answer, read defensively.
+ *
+ * It crossed a network from a model, so nothing about its shape is assumed:
+ * anything not a string becomes null, strings are trimmed and capped at what
+ * the boxes they land in accept, and a reading with no `legible: true` is not
+ * a reading.
+ */
+export function parseLabelReading(raw: unknown): LabelReading | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (r.legible !== true) return null;
+  const consumables = Array.isArray(r.consumables)
+    ? r.consumables.map((one) => labelText(one, 60)).filter((one): one is string => !!one).slice(0, 5)
+    : [];
+  return {
+    legible: true,
+    make: labelText(r.make),
+    model: labelText(r.model),
+    serial: labelText(r.serial),
+    colourName: labelText(r.colourName),
+    colourCode: labelText(r.colourCode),
+    product: labelText(r.product),
+    sheen: labelText(r.sheen),
+    tint: labelText(r.tint, 120),
+    hex: swatchColour({ hex: labelText(r.hex, 9) ?? '' }),
+    consumables,
+  };
+}
+
+/** The walkthrough's boxes, as far as a label can answer them. */
+export interface LabelFields {
+  name: string;
+  make: string;
+  model: string;
+  serial: string;
+  takes: string;
+  spec: ThingSpec;
+}
+
+/**
+ * A reading, laid into the boxes — **only the empty ones.**
+ *
+ * The rule the whole feature rests on. Somebody who typed a model number and
+ * then photographed the plate has already answered, and a reading that wrote
+ * over them would be the app deciding a photograph knows better than the
+ * person holding the appliance. Filling blanks and nothing else also makes it
+ * safe to arrive late: the read runs while they carry on typing, and whatever
+ * they reached first is kept.
+ *
+ * The kind decides where things go, exactly as `THING_KIND_FIELD_LABELS`
+ * decides what the boxes are called. A paint's colour is its **name** — the
+ * answer somebody comes back for — its brand the make and its code the model.
+ * Returns what it filled, in words, so the sheet can say which boxes to check
+ * against the label rather than implying it read everything.
+ */
+export function applyLabelReading(
+  current: LabelFields,
+  reading: LabelReading,
+  kind: ThingKind
+): { next: LabelFields; filled: string[] } {
+  const next: LabelFields = { ...current, spec: { ...current.spec } };
+  const filled: string[] = [];
+  const colourKind = kind === 'finish' || kind === 'tile';
+
+  const put = (key: 'name' | 'make' | 'model' | 'serial' | 'takes', value: string | null, word: string) => {
+    if (!value || next[key].trim()) return;
+    next[key] = value;
+    filled.push(word);
+  };
+  const putSpec = (key: string, value: string | null, word: string) => {
+    if (!value || (next.spec[key] ?? '').trim()) return;
+    next.spec[key] = value;
+    filled.push(word);
+  };
+
+  if (colourKind) {
+    put('name', reading.colourName, 'colour');
+    put('make', reading.make, kind === 'finish' ? 'brand' : 'range');
+    put('model', reading.colourCode ?? reading.model, 'code');
+    if (kind === 'finish') {
+      putSpec('product', reading.product, 'product');
+      putSpec('sheen', reading.sheen, 'sheen');
+      putSpec('tint', reading.tint, 'tint formula');
+      putSpec('hex', reading.hex, 'swatch');
+    }
+  } else {
+    put('make', reading.make, 'make');
+    put('model', reading.model, 'model');
+    put('serial', reading.serial, 'serial');
+    put('takes', reading.consumables[0] ?? null, 'what it takes');
+  }
+  return { next, filled };
+}
+
+/**
+ * Asks `read-label` what a photograph of a label says.
+ *
+ * The photo is already in `home-photos` by the time this is called, and the
+ * function downloads it **as the caller**, so the storage policies decide
+ * whether it can be read — a path to somebody else's household is refused the
+ * same way it would be refused anywhere else. Nothing is written: the answer
+ * goes into boxes a person then confirms.
+ *
+ * Throws with the function's own words when it gave some ("Label reading
+ * isn't set up on this project"), so a missing key and an unreadable photo are
+ * not one message.
+ */
+export async function readLabel(
+  client: SupabaseClient,
+  path: string,
+  kind: ThingKind
+): Promise<LabelReading | null> {
+  const { data, error } = await client.functions.invoke('read-label', { body: { path, kind } });
+  if (error) {
+    let words: string | null = null;
+    const context = (error as { context?: unknown }).context;
+    if (context && typeof (context as Response).json === 'function') {
+      try {
+        const body = await (context as Response).json();
+        words = typeof body?.error === 'string' ? body.error : null;
+      } catch {
+        words = null;
+      }
+    }
+    throw new Error(words ?? "Couldn't read the label");
+  }
+  return parseLabelReading(data);
+}
+
+/**
  * The order the asset picker offers a house in.
  *
  * Three bands, and each earns its place by how likely the next tap is:

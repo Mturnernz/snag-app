@@ -341,6 +341,9 @@ export const updateThing = (thingId: string, update: queries.ThingUpdate) =>
 
 export const deleteThing = (thingId: string) => queries.deleteThing(supabase, thingId);
 
+export const readLabel = (path: string, kind: Parameters<typeof queries.readLabel>[2]) =>
+  queries.readLabel(supabase, path, kind);
+
 export const getAbsentThings = (propertyId: string) => queries.getAbsentThings(supabase, propertyId);
 
 // ------------------------------------------------------------------ projects

@@ -38,8 +38,10 @@ begin
 end;
 $$;
 
--- Called by the trigger, never by a person. Nothing is granted.
-revoke all on function home.link_snag_thing_on_create() from public;
+-- Called by the trigger, never by a person. Named rather than swept: the
+-- platform's default privileges hand new functions to anon and authenticated,
+-- so revoking from public alone would leave both.
+revoke all on function home.link_snag_thing_on_create() from public, anon, authenticated;
 
 drop trigger if exists snags_link_thing_on_create on home.snags;
 create trigger snags_link_thing_on_create

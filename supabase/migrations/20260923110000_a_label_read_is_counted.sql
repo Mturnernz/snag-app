@@ -27,6 +27,8 @@ create table if not exists home.label_reads (
 );
 
 alter table home.label_reads enable row level security;
+-- Named, because the platform's default privileges grant new tables to both.
+revoke all on table home.label_reads from anon, authenticated;
 
 /*
  * Claims one read for this household today. True if it was within the day's
@@ -62,5 +64,5 @@ begin
 end;
 $$;
 
-revoke all on function home.claim_label_read(uuid) from public;
+revoke all on function home.claim_label_read(uuid) from public, anon;
 grant execute on function home.claim_label_read(uuid) to authenticated;

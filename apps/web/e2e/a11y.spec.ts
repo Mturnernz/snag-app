@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-// Accessibility. axe-core against the three routes this host still serves.
+// Accessibility. axe-core against the public routes this host serves.
 //
 // Small surface, but it's the account-recovery path: someone reaches it locked
 // out, usually on a phone, usually from an email client's in-app browser. If
@@ -23,7 +23,7 @@ function describe(violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violat
     .join('\n');
 }
 
-const ROUTES = ['/', '/forgot-password', '/reset-password'] as const;
+const ROUTES = ['/', '/forgot-password', '/reset-password', '/staff/sign-in'] as const;
 
 test.describe('accessibility', () => {
   for (const path of ROUTES) {
@@ -42,4 +42,17 @@ test('reset-password reads its tokens from the fragment, not the query', async (
   // implicit rather than PKCE. See src/app/forgot-password/actions.ts.
   await page.goto('/reset-password', { waitUntil: 'networkidle' });
   await expect(page.getByText(/link/i).first()).toBeVisible();
+});
+
+test('the staff portal sends a signed-out visitor to sign in', async ({ page }) => {
+  // The proxy is not the security boundary — every portal read goes through a
+  // staff_* function that refuses anybody not on the staff list — but a
+  // signed-out visitor should meet the front door, not a page that can only
+  // say no.
+  await page.goto('/staff', { waitUntil: 'networkidle' });
+  await expect(page).toHaveURL(/\/staff\/sign-in$/);
+  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
+
+  await page.goto('/staff/requests/00000000-0000-0000-0000-000000000000', { waitUntil: 'networkidle' });
+  await expect(page).toHaveURL(/\/staff\/sign-in$/);
 });

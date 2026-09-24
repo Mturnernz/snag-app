@@ -78,15 +78,23 @@ def xyz_to_lab(x, y, z, white):
     return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
 
 
-def lab_from_rgb(rgb, tone=1.0):
+def lab_from_rgb(rgb, tone=1.0, lrv=None):
     """Lab (D50, D65) from a maker's 8-bit RGB.
 
     `tone` undoes a display curve the maker applied before publishing: the
     published linear value is raised to it. 1.0 means the RGB is taken as it
     stands. See TONE below for where each value comes from.
+
+    `lrv`, when given, anchors the luminance to it: the colour keeps the RGB's
+    chromaticity and takes its lightness from the LRV, which is a measurement
+    rather than a rendering. For a maker whose RGB and LRV disagree without any
+    one curve explaining it.
     """
     lin = [srgb_to_linear(c) ** tone for c in rgb]
     xyz65 = linear_to_xyz(*lin)
+    if lrv and xyz65[1] > 0:
+        scale = (lrv / 100) / xyz65[1]
+        xyz65 = tuple(v * scale for v in xyz65)
     return xyz_to_lab(*bradford_d65_to_d50(*xyz65), D50), xyz_to_lab(*xyz65, D65)
 
 
@@ -139,7 +147,11 @@ def delta_e_2000(lab1, lab2):
 #   Resene "visual" RGB   0.77   −7.10 ± 4.19 raw → −0.01 ± 2.08 corrected
 #   Dulux atlas           0.87   −3.31 ± 1.87 raw → +0.09 ± 0.67 corrected
 #   Porter's (DuluxGroup) 0.87   −3.65 ± 2.49 raw → −0.03 ± 1.79 corrected
-#   Wattyl / Aalto        fitted at build time, see fit_tone()
+#
+# Wattyl and Aalto are not in the table because no one curve fits either: part
+# of each range is published on its LRV and part is published lighter by a
+# varying amount. Those take their lightness from the LRV (`anchor_to_lrv`).
+# fit_tone() is how the exponents above were found, kept for re-fitting.
 TONE = {'resene_cad': 1.0, 'resene_visual': 0.77, 'dulux': 0.87, 'porters': 0.87}
 
 
@@ -404,35 +416,34 @@ def build_wattyl():
                 'lrv': float(m.group(6)), 'ok': True} if m else {'ok': False}
 
     pages = fetch_many([s for _, s, _ in swatches], one, 'wattyl_pages.json', lambda p: p.get('ok'))
-    tone = wattyl_tone(pages)
+    report_wattyl(pages)
     rows = []
     for name, slug, hexv in swatches:
         p = pages.get(slug, {})
         rgb = tuple(p['rgb']) if p.get('ok') else tuple(int(hexv[i:i + 2], 16) for i in (1, 3, 5))
         lrv = p.get('lrv')
         roofing = name.upper().startswith(('COLORBOND', 'COLORSTEEL'))
-        # Whole-number LRVs sit on the RGB exactly; the newer colours carrying
-        # two-decimal LRVs are published lighter than they measure.
+        # Colours with a whole-number LRV are published exactly on it. The newer
+        # ones, carrying a two-decimal LRV, are published 0-5 L* lighter with
+        # no one curve explaining it — so those take their lightness from the LRV.
         newer = lrv is not None and lrv != int(lrv)
-        k = tone['newer'][0] if newer else tone['older'][0]
         rows.append(row(
             brand='Wattyl / Taubmans', name=html.unescape(name), code=p.get('code', ''), maker_id=slug,
             collection='Roofing steel' if roofing else 'Colour Designer', status='current', aliases='',
-            rgb=rgb, lrv=lrv, tone=k,
-            basis=(f'Wattyl RGB, display curve undone (^{k:.2f})' if abs(k - 1) > 0.005 else 'Wattyl RGB as published'),
-            not_flat=False, source=f'https://www.wattyl.co.nz/paint-colour/{slug}/'))
+            rgb=rgb, lrv=lrv, tone=1.0, basis='Wattyl RGB hue' if newer else 'Wattyl RGB as published',
+            anchor_to_lrv=newer, not_flat=False, source=f'https://www.wattyl.co.nz/paint-colour/{slug}/'))
     return rows
 
 
-def wattyl_tone(pages):
-    groups = {'older': [], 'newer': []}
-    for p in pages.values():
-        if p.get('ok') and 0 not in p['rgb'] and 255 not in p['rgb'] and p['lrv'] > 0:
-            groups['newer' if p['lrv'] != int(p['lrv']) else 'older'].append((p['rgb'], p['lrv']))
-    fitted = {g: fit_tone(s) if len(s) > 20 else (1.0, 0, 0) for g, s in groups.items()}
-    for g, (k, mean, sd) in fitted.items():
-        print(f'  Wattyl {g}: n={len(groups[g])} tone ^{k:.2f}, L* vs LRV {mean:+.2f} ± {sd:.2f}')
-    return fitted
+def report_wattyl(pages):
+    for group, is_newer in (('whole-number LRV', False), ('two-decimal LRV', True)):
+        d = [lab_from_rgb(p['rgb'])[1][0] - l_star_from_lrv(p['lrv']) for p in pages.values()
+             if p.get('ok') and p['lrv'] > 0 and (p['lrv'] != int(p['lrv'])) == is_newer]
+        if d:
+            mean = sum(d) / len(d)
+            sd = math.sqrt(sum((x - mean) ** 2 for x in d) / len(d))
+            print(f'  Wattyl, {group}: n={len(d)}, RGB L* vs LRV {mean:+.2f} ± {sd:.2f}, '
+                  f'{sum(abs(x) <= 1 for x in d)} within 1 L*')
 
 
 # ---------------------------------------------------------------------------
@@ -507,8 +518,13 @@ def build_aalto():
     pages = fetch_many(slugs, one, 'aalto_pages.json', lambda p: p.get('rgb'))
     samples = [(p['rgb'], p['lrv']) for p in pages.values()
                if p.get('rgb') and p.get('lrv') and 0 not in p['rgb'] and 255 not in p['rgb']]
-    k, mean, sd = fit_tone(samples)
-    print(f'  Aalto: n={len(samples)} tone ^{k:.2f}, L* vs LRV {mean:+.2f} ± {sd:.2f}')
+    # No single curve reconciles Aalto's RGB with its LRV: about 40% agree to
+    # ±1 L*, about 30% are published 3-5 L* lighter (whites at RGB 249-252,
+    # brighter than any white paint), and a few LRVs are typos (Tinto 105).
+    # So the RGB gives the hue and the LRV gives the lightness.
+    k = 1.0
+    within = sum(1 for rgb, lrv in samples if abs(lab_from_rgb(rgb)[1][0] - l_star_from_lrv(lrv)) <= 1)
+    print(f'  Aalto: n={len(samples)}, {within} with RGB and LRV within 1 L*; lightness taken from LRV')
     rows = []
     for slug in slugs:
         p = pages.get(slug, {})
@@ -517,7 +533,7 @@ def build_aalto():
             brand='Aalto', name=re.sub(r'\s*[-–•|]\s*Aalto.*$', '', p.get('name', slug)), code='', maker_id=slug,
             collection='; '.join(cols), status='archived' if 'the archive' in cols else 'current', aliases='',
             rgb=tuple(p['rgb']) if p.get('rgb') else None, lrv=p.get('lrv'), tone=k,
-            basis=(f'Aalto RGB, display curve undone (^{k:.2f})' if abs(k - 1) > 0.005 else 'Aalto RGB as published'),
+            basis='Aalto RGB hue', anchor_to_lrv=True,
             not_flat=False, source=f'https://www.aaltopaint.co.nz/shop/colour/{slug}'))
     return rows
 
@@ -549,7 +565,8 @@ NIX_HAS = {
 }
 
 
-def row(brand, name, code, maker_id, collection, status, aliases, rgb, lrv, tone, basis, not_flat, source):
+def row(brand, name, code, maker_id, collection, status, aliases, rgb, lrv, tone, basis, not_flat, source,
+        anchor_to_lrv=False):
     r = {c: '' for c in COLUMNS}
     r.update(id=f'{slugify(brand)}/{slugify(str(maker_id) or name)}', brand=brand, name=name, code=code,
              collection=collection, status=status, aliases=aliases, source_url=source, retrieved=TODAY,
@@ -559,15 +576,25 @@ def row(brand, name, code, maker_id, collection, status, aliases, rgb, lrv, tone
     if not rgb or not_flat:
         r['lab_quality'] = 'none — a stain, metallic or texture' if not_flat else 'none — no colour data published'
         return r
-    lab50, lab65 = lab_from_rgb(rgb, tone)
+    as_published = lab_from_rgb(rgb, tone)[1]
+    # An LRV over 100 is not a measurement, and one that puts a colour more
+    # than 15 L* from its own RGB is a typo on one side or the other.
+    anchored = bool(anchor_to_lrv and lrv and 0 < lrv <= 100
+                    and abs(as_published[0] - l_star_from_lrv(lrv)) <= 15)
+    lab50, lab65 = lab_from_rgb(rgb, tone, lrv if anchored else None)
+    if anchored:
+        basis += ', lightness from LRV'
     r.update(lab_d50_L=round(lab50[0], 2), lab_d50_a=round(lab50[1], 2), lab_d50_b=round(lab50[2], 2),
              lab_d65_L=round(lab65[0], 2), lab_d65_a=round(lab65[1], 2), lab_d65_b=round(lab65[2], 2),
              lab_basis=basis)
     clipped = 0 in rgb or 255 in rgb
     if lrv:
-        check = lab65[0] - l_star_from_lrv(lrv)
+        # Measured before any anchoring: how far the maker's own two figures
+        # agree is the evidence, and anchoring would make it read 0 always.
+        check = as_published[0] - l_star_from_lrv(lrv)
         r['lrv_check'] = round(check, 2)
-        quality = 'good' if abs(check) <= 1 else 'approx' if abs(check) <= 3 else 'poor'
+        limit = 6 if anchored else 3
+        quality = 'good' if abs(check) <= 1 else 'approx' if abs(check) <= limit else 'poor'
     else:
         quality = 'approx'
     if clipped and quality == 'good':

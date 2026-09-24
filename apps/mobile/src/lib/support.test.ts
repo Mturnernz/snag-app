@@ -1,13 +1,18 @@
 import {
+  describeSupportStatus,
+  supportAccessEndsAt,
+  supportIsOpen,
+} from '@snag/supabase-queries';
+// The portal's half, from its own entry point. Importing it is fine in a test,
+// which never reaches the bundle; `staffSeparation.test.ts` keeps it out of
+// everything that does.
+import {
   adviceDraftFrom,
   adviceDraftProblems,
   cleanAdviceDraft,
-  describeSupportStatus,
   describeWait,
-  supportAccessEndsAt,
-  supportIsOpen,
   supportReplyEmail,
-} from '@snag/supabase-queries';
+} from '@snag/supabase-queries/staff';
 import { SUPPORT_ACCESS_DAYS, type AdviceDraft, type SupportRequest } from '@snag/shared-types';
 
 // Asking SnagHQ about a job. These pin the rules the app and the staff portal

@@ -113,6 +113,19 @@ describe('a bill', () => {
     expect(mock_updateQuote).toHaveBeenCalledWith('b1', expect.objectContaining({ amount: 4400, dueOn: '2026-10-01' }));
   });
 
+  it('shows its invoice number, and a correction can change or empty it', async () => {
+    const { r } = open({ ...bill, invoiceNumber: 'INV87022' });
+    r.getByText('INV87022');
+    await press(r, 'Edit');
+    await TestRenderer.act(async () => { node(r, 'Invoice number', 'onChangeText').props.onChangeText('INV87023'); });
+    await press(r, 'Save');
+    expect(mock_updateQuote).toHaveBeenCalledWith('b1', expect.objectContaining({ invoiceNumber: 'INV87023' }));
+    await press(r, 'Edit');
+    await TestRenderer.act(async () => { node(r, 'Invoice number', 'onChangeText').props.onChangeText(' '); });
+    await press(r, 'Save');
+    expect(mock_updateQuote).toHaveBeenLastCalledWith('b1', expect.objectContaining({ invoiceNumber: null }));
+  });
+
   it('can be deleted, and its files go with it', async () => {
     const { r, onClose } = open();
     await press(r, 'Delete bill');

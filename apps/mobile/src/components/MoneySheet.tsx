@@ -14,7 +14,9 @@ import {
   addPayment, addQuoteLine, createElement, createExpectedCost, createItem, createQuote,
   formatMoney, setItemSetAside,
 } from '../lib/supabase';
-import { dayKey, parseLooseDate } from '@snag/supabase-queries';
+import {
+  billsOnJob, dayKey, describeDuplicate, findDuplicateBill, inclGst, parseLooseDate,
+} from '@snag/supabase-queries';
 import type { Location, ProjectElement, ProjectItem, ProjectQuote } from '../types';
 
 export type MoneyKind = 'quote' | 'bill' | 'receipt' | 'expected';
@@ -34,6 +36,8 @@ interface Props {
   onSaved: (message: string) => Promise<void>;
   /** The paper is in an inbox rather than a hand: this job's address for forwarding it. */
   onEmailIn?: () => void;
+  /** Opens a bill already on the job — the one this bill looks like a copy of. */
+  onOpenBill?: (quote: ProjectQuote) => void;
 }
 
 type Step = 'kind' | 'supplier' | 'form' | 'setAside';
@@ -80,10 +84,17 @@ const sameName = (a: string | null, b: string | null) =>
  *
  * Nothing is written until Save, and a refusal holds the sheet open with the
  * words still in it.
+ *
+ * **A bill that looks like one already on the job says so, and still saves.**
+ * The same invoice number from the same supplier — or, where a number is
+ * missing, the same supplier and amount — puts a line under the invoice number
+ * naming the bill it matches, and Save reads *Save anyway*. Never a refusal:
+ * two progress claims for the same figure are two bills, and the person holding
+ * the paper is the one who can tell. See `findDuplicateBill`.
  */
 export default function MoneySheet({
   visible, projectId, householdId, elements, items, quotes, locations, knownSuppliers,
-  start, onClose, onSaved, onEmailIn,
+  start, onClose, onSaved, onEmailIn, onOpenBill,
 }: Props) {
   const [step, setStep] = useState<Step>('kind');
   const [kind, setKind] = useState<MoneyKind>('bill');
@@ -174,6 +185,16 @@ export default function MoneySheet({
     ? (contract.amountIncl ?? 0) - (contract.claimedTotal ?? 0) - (incl ? money : money * 1.15)
     : null;
 
+  const duplicate = useMemo(() => {
+    if (!isBill || step !== 'form') return null;
+    return findDuplicateBill(billsOnJob(quotes), {
+      supplier,
+      invoiceNumber: invoiceNo,
+      amountIncl: money === null ? null : inclGst(money, incl),
+      dated: null,
+    });
+  }, [isBill, step, quotes, supplier, invoiceNo, money, incl]);
+
   const missing: string | null = (() => {
     if (kind === 'expected') return detail.trim() ? null : 'Say what the cost is for';
     if (!supplier) return 'Say who it’s from';
@@ -228,14 +249,11 @@ export default function MoneySheet({
             : { itemId: null, elementId: null, projectId };
       }
 
-      const described = isBill
-        ? [invoiceNo.trim(), detail.trim()].filter(Boolean).join(' — ') || null
-        : detail.trim() || null;
-
       const created = await createQuote({
         ...scope,
         supplier,
-        detail: described,
+        detail: detail.trim() || null,
+        invoiceNumber: isBill ? invoiceNo.trim() || null : null,
         amount: money,
         amountInclGst: incl,
         kind: isBill ? 'invoice' : 'quote',
@@ -321,7 +339,7 @@ export default function MoneySheet({
     : null;
 
   const footer = step === 'form'
-    ? <PrimaryButton label="Save" onPress={save} busy={busy} />
+    ? <PrimaryButton label={duplicate ? 'Save anyway' : 'Save'} onPress={save} busy={busy} />
     : step === 'setAside'
       ? (
         <>
@@ -554,6 +572,27 @@ export default function MoneySheet({
             </Group>
           ) : null}
 
+          {duplicate ? (
+            <View style={styles.duplicate} accessibilityLiveRegion="polite">
+              <Icon name="copy-outline" size={18} color={Colors.status.doingFg} />
+              <View style={styles.duplicateBody}>
+                <Text style={styles.duplicateText}>
+                  {describeDuplicate(duplicate.match, 'on the job')}
+                </Text>
+                {onOpenBill ? (
+                  <Pressable
+                    onPress={() => onOpenBill(duplicate.match.quote)}
+                    style={styles.duplicateOpen}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open the bill already on the job"
+                  >
+                    <Text style={styles.duplicateOpenLabel}>Open that one</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
           {kind !== 'expected' ? (
             <Group>
               <View style={styles.field}>
@@ -742,4 +781,12 @@ const styles = StyleSheet.create({
   thingBlock: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, gap: Spacing.sm },
   thingLabel: { fontSize: Typography.subhead, color: Colors.textMuted },
   error: { fontSize: Typography.subhead, color: Colors.danger, paddingHorizontal: 4 },
+  duplicate: {
+    flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start',
+    padding: Spacing.md, borderRadius: Radius.card, backgroundColor: Colors.status.doingBg,
+  },
+  duplicateBody: { flex: 1, minWidth: 0 },
+  duplicateText: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textPrimary },
+  duplicateOpen: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start' },
+  duplicateOpenLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.primary },
 });

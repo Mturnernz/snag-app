@@ -315,6 +315,44 @@ describe('the rest of the page', () => {
   });
 });
 
+describe('a bill that looks like one already on the job', () => {
+  const waiting = (over: any = {}) => ({
+    id: 'rv1', projectId: 'p1', state: 'pending', supplier: 'MSC Consulting', amount: 437,
+    amountInclGst: true, invoiceNumber: 'INV87022', dated: '2026-08-31', paid: false,
+    createdAt: '2026-09-20T00:00:00Z', inferred: [], photoPaths: [], documentPaths: [],
+    roomIds: [], roomAmounts: null, ...over,
+  });
+  const onJob = quote({
+    id: 'm1', projectId: 'p1', kind: 'invoice', status: 'accepted', supplier: 'MSC Consulting',
+    invoiceNumber: 'INV87022', amount: 437, dated: '2026-08-31',
+  });
+
+  it('warns on the card, opens the bill it matches, and still allocates', async () => {
+    const r = await arrange(downstairs({ quotes: [...downstairs().quotes, onJob], invoiceReviews: [waiting()] }));
+    r.getByText('Looks like INV87022 from MSC Consulting ($437, 31 Aug 2026), already on the job');
+    await press(r, 'Open the bill it looks like');
+    r.getByText('price sheet open: MSC Consulting');
+    const approve = r.root.findAll((n: any) => n.props?.onApprove, { deep: true })[0];
+    await TestRenderer.act(async () => { approve.props.onApprove(); });
+    expect(mock_approveInvoiceReview).toHaveBeenCalledWith('rv1');
+  });
+
+  it('warns on the second of two cards for the same bill', async () => {
+    const r = await arrange(downstairs({
+      invoiceReviews: [waiting(), waiting({ id: 'rv2', createdAt: '2026-09-21T00:00:00Z' })],
+    }));
+    expect(r.getAllByText('Looks like INV87022 from MSC Consulting ($437, 31 Aug 2026), also waiting')).toHaveLength(1);
+  });
+
+  it('says nothing about a different invoice from the same supplier', async () => {
+    const r = await arrange(downstairs({
+      quotes: [...downstairs().quotes, onJob], invoiceReviews: [waiting({ invoiceNumber: 'INV87100' })],
+    }));
+    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+    expect(text).not.toContain('Looks like');
+  });
+});
+
 describe('a figure somebody typed over', () => {
   it('is named, with what the prices say, and can be undone', async () => {
     const base = downstairs();

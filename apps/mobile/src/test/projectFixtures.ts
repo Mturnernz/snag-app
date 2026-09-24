@@ -52,7 +52,7 @@ export const quote = (over: any = {}): any => ({
   id: 'q1', itemId: null, elementId: null, projectId: null, supplier: 'Reece', detail: null,
   amount: null, amountInclGst: true, kind: 'quote', status: 'tbc', basis: 'fixed',
   dated: null, notes: null, supersedesLineId: null, dueOn: null, billedThroughId: null,
-  settlesMilestoneId: null, againstQuoteId: null, photoPaths: [], documentPaths: [],
+  settlesMilestoneId: null, againstQuoteId: null, invoiceNumber: null, photoPaths: [], documentPaths: [],
   createdAt: '2026-04-06T00:00:00Z',
   amountIncl: over.amount ?? null, lineCount: 0, linesTotal: null, buildUp: null,
   allowanceOpen: 0, additionalOpen: 0, effectiveAmount: over.amount ?? null,

@@ -29,6 +29,13 @@ interface Props {
   onOpenFile?: (path: string) => void;
   /** Where allocating puts it — "Whole job", a room, or rooms and how they split. */
   landsOn?: string | null;
+  /**
+   * The sentence naming a bill this one looks like — already on the job, or a
+   * card still waiting. The card still allocates: it is a warning, not a lock.
+   */
+  duplicate?: string | null;
+  /** Opens the bill it looks like, when that bill is on the job. */
+  onOpenDuplicate?: () => void;
 }
 
 /**
@@ -65,9 +72,17 @@ interface Props {
  * that has already paid 490 KB for the PDF renderer. `PanResponder` is core
  * React Native, is implemented on react-native-web, and reports everything a
  * horizontal drag needs. **No new dependency; the bundle does not move.**
+ *
+ * **A card that looks like a bill already on the job says so above its
+ * buttons** — the number, who from, the figure and the date of the one it
+ * matches, and a way to open it. The same email forwarded twice, or a bill typed
+ * in and then emailed in as well, is how one invoice got onto the live job three
+ * times. Allocating still works: two progress claims for one figure are two
+ * bills, and `findDuplicateBill` cannot tell that from the paper; the person
+ * reading the card can.
  */
 export default function InvoiceReviewCard({
-  review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn,
+  review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate,
 }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
@@ -251,6 +266,25 @@ export default function InvoiceReviewCard({
           </Text>
         ) : null}
 
+        {duplicate ? (
+          <View style={styles.duplicate} accessibilityLiveRegion="polite">
+            <Icon name="copy-outline" size="sm" color={Colors.status.doingFg} />
+            <View style={styles.duplicateBody}>
+              <Text style={styles.duplicateText}>{duplicate}</Text>
+              {onOpenDuplicate ? (
+                <Pressable
+                  onPress={onOpenDuplicate}
+                  style={styles.duplicateOpen}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open the bill it looks like"
+                >
+                  <Text style={styles.duplicateOpenLabel}>Open that one</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.actions}>
           {onEdit ? (
             <Pressable style={styles.edit} onPress={onEdit} accessibilityLabel="Correct this invoice">
@@ -292,6 +326,15 @@ function Fact({
 }
 
 const styles = StyleSheet.create({
+  duplicate: {
+    flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start',
+    marginTop: Spacing.sm, padding: Spacing.md, borderRadius: Radius.input,
+    backgroundColor: Colors.status.doingBg,
+  },
+  duplicateBody: { flex: 1, minWidth: 0 },
+  duplicateText: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textPrimary },
+  duplicateOpen: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start' },
+  duplicateOpenLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.primary },
   wrap: { position: 'relative' },
   rails: {
     ...StyleSheet.absoluteFillObject,

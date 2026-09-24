@@ -233,6 +233,60 @@ describe('a bill', () => {
   });
 });
 
+describe('a bill that is already on the job', () => {
+  const onJob = quote({
+    id: 'b1', projectId: 'p1', kind: 'invoice', status: 'accepted', supplier: 'MSC Consulting',
+    detail: 'Structural Engineering', invoiceNumber: 'INV87022', amount: 437, dated: '2026-08-31',
+  });
+
+  it('keeps the invoice number as a number, not folded into what it is for', async () => {
+    const { r } = open();
+    await press(r, 'A bill');
+    await pickSupplier(r, 'Tile Space');
+    await type(r, 'Amount', '120');
+    await type(r, 'What it’s for', 'Grout');
+    await type(r, 'Invoice number', 'V962155');
+    await press(r, 'Save');
+    expect(mock_createQuote).toHaveBeenCalledWith(expect.objectContaining({
+      detail: 'Grout', invoiceNumber: 'V962155',
+    }));
+  });
+
+  it('says which bill it looks like as soon as the number matches, and still saves', async () => {
+    const onOpenBill = jest.fn();
+    const { r } = open({ quotes: [onJob], onOpenBill });
+    await press(r, 'A bill');
+    await pickSupplier(r, 'MSC Consulting');
+    await type(r, 'Amount', '500');
+    expect(r.queryByText('Save anyway')).toBeNull();
+    await type(r, 'Invoice number', 'inv-87022');
+    r.getByText('Looks like INV87022 from MSC Consulting ($437, 31 Aug 2026), already on the job');
+    r.getByText('Save anyway');
+    await press(r, 'Open the bill already on the job');
+    expect(onOpenBill).toHaveBeenCalledWith(onJob);
+    await press(r, 'Save anyway');
+    expect(mock_createQuote).toHaveBeenCalledWith(expect.objectContaining({ invoiceNumber: 'inv-87022' }));
+  });
+
+  it('with no number, warns on the same supplier and figure', async () => {
+    const { r } = open({ quotes: [onJob] });
+    await press(r, 'A bill');
+    await pickSupplier(r, 'MSC Consulting');
+    await type(r, 'Amount', '437');
+    r.getByText('Save anyway');
+  });
+
+  it('says nothing when the number is different, even for the same figure', async () => {
+    const { r } = open({ quotes: [onJob] });
+    await press(r, 'A bill');
+    await pickSupplier(r, 'MSC Consulting');
+    await type(r, 'Amount', '437');
+    await type(r, 'Invoice number', 'INV87100');
+    expect(r.queryByText('Save anyway')).toBeNull();
+    r.getByText('Save');
+  });
+});
+
 describe('a receipt', () => {
   it('is a bill and its payment, in one go', async () => {
     const { r, onSaved } = open();

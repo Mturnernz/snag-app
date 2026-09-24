@@ -3767,10 +3767,13 @@ grey mid-press reads as the action having failed.
   unsent state — a half-typed note, an open sheet, a scroll position somebody spent a minute
   reaching — and navigating away drops all of it to show a supplier's website, while stripping the
   app from the back stack in exactly the way that makes people think they have lost their work. So
-  web gets `window.open(url, '_blank', 'noopener,noreferrer')`, guarded because a blocked popup
-  returns null rather than throwing; native keeps `Linking.openURL`, which is the OS handler and
-  therefore the default browser. `noopener` is not optional — without it the opened page gets a
-  live `window.opener` handle back into a signed-in session.
+  web gets `window.open('', '_blank')`, guarded because a blocked popup returns null rather than
+  throwing, then `opener = null` and only then the address; native keeps `Linking.openURL`, which
+  is the OS handler and therefore the default browser. Cutting the opener is not optional — without
+  it the opened page gets a live `window.opener` handle back into a signed-in session — **but it
+  must not be done with `noopener` in the features string**, which by spec makes `window.open`
+  return null on success too. That shipped: every PDF opened fine and then *Your browser blocked the
+  new tab* came up the moment somebody closed it and came back.
 
   **An address typed into prose is tappable** (`LinkedText`, over `linkify`). With no
   notifications anywhere in this product a note is the only way one person tells the other

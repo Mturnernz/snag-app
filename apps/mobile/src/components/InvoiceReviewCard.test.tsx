@@ -21,6 +21,7 @@ const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
   paid: false, paidOn: null, paidEvidence: null, category: null,
   sourceRef: null, sourceSubject: null, sourceFrom: null, sourceAt: null,
   inferred: [], state: 'pending', quoteId: null, decidedAt: null,
+  photoPaths: [], documentPaths: [],
   createdAt: '2026-09-16T00:00:00Z',
   ...over,
 });
@@ -114,4 +115,38 @@ it('states the unpaid answer rather than leaving it as the absence of a tick', (
 it('says where it came from, so a card can be checked against the email', () => {
   const { r } = arrange({ sourceFrom: 'marcusn@tiles.co.nz' });
   expect(r.queryByText('from marcusn@tiles.co.nz')).not.toBeNull();
+});
+
+// An emailed bill brings the invoice with it, and the invoice is what every
+// field on the card has to be checked against — so it is one tap away, named as
+// the file was named rather than as a storage key.
+it('lists what came with the email and opens it', () => {
+  const onOpenFile = jest.fn();
+  const { r } = arrange(
+    { documentPaths: ['h1/docs/1790000000000-012345-INV-0208.pdf'], photoPaths: ['h1/1790000000000-1.jpg'] },
+    { onOpenFile },
+  );
+  expect(r.queryByText('INV-0208.pdf')).not.toBeNull();
+  expect(r.queryByText('Photo')).not.toBeNull();
+
+  const open = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Open INV-0208.pdf' && n.props?.onPress)[0];
+  TestRenderer.act(() => open.props.onPress());
+  expect(onOpenFile).toHaveBeenCalledWith('h1/docs/1790000000000-012345-INV-0208.pdf');
+});
+
+it('lists nothing when nothing came with it', () => {
+  const { r } = arrange({}, { onOpenFile: jest.fn() });
+  expect(r.root.findAll((n: any) => /^Open /.test(n.props?.accessibilityLabel ?? '')).length).toBe(0);
+});
+
+// The figure is the field a guess costs most on. A GST basis the bill did not
+// state is the reader's assumption, and the card says so beside the amount.
+it('marks the figure as guessed when its GST basis was', () => {
+  const { r } = arrange({ inferred: ['amount_incl_gst'] });
+  expect(r.queryByText('guessed')).not.toBeNull();
+});
+
+it('marks a supplier taken from the sender rather than the bill', () => {
+  const { r } = arrange({ inferred: ['supplier'] });
+  expect(r.queryByText('supplier guessed')).not.toBeNull();
 });

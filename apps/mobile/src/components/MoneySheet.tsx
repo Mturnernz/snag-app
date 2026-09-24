@@ -32,6 +32,8 @@ interface Props {
   start?: { kind?: MoneyKind; elementId?: string | null; itemId?: string | null } | null;
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
+  /** The paper is in an inbox rather than a hand: this job's address for forwarding it. */
+  onEmailIn?: () => void;
 }
 
 type Step = 'kind' | 'supplier' | 'form' | 'setAside';
@@ -81,7 +83,7 @@ const sameName = (a: string | null, b: string | null) =>
  */
 export default function MoneySheet({
   visible, projectId, householdId, elements, items, quotes, locations, knownSuppliers,
-  start, onClose, onSaved,
+  start, onClose, onSaved, onEmailIn,
 }: Props) {
   const [step, setStep] = useState<Step>('kind');
   const [kind, setKind] = useState<MoneyKind>('bill');
@@ -358,6 +360,7 @@ export default function MoneySheet({
           ))}
         </Group>
       ) : null}
+      {step === 'kind' && onEmailIn ? <TextButton label="Email it in instead" onPress={onEmailIn} /> : null}
 
       {step === 'supplier' ? (
         <>

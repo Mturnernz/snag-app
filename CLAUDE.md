@@ -1584,10 +1584,14 @@ they buy that back with three rules:
   gap is named in words — "3 not priced". `sum` over nothing is null here, never 0, and
   `numberOrNull` in the query package exists because `Number(null)` is `0`, which is exactly the
   lie this feature cannot tell.
-- **Nothing reads a figure out of an attachment.** Every amount is typed by somebody who looked at
-  the quote. There is deliberately no function anywhere that takes a document and returns a number:
-  a scraped total has a source nobody can check, and it will be wrong about GST, about provisional
-  sums, and about which of three revisions it read.
+- **Nothing read out of an attachment reaches a figure unconfirmed.** It used to be that nothing
+  read one at all, and every amount was typed by somebody looking at the quote: a scraped total has
+  a source nobody can check, and it will be wrong about GST, about provisional sums, and about which
+  of three revisions it read. That is still true of what a scrape *is*, which is why the one place
+  it now happens — an emailed bill, see *A bill can be emailed in* — lands on a pending
+  `invoice_reviews` card that reaches no total, marks every guessed field, and counts only when a
+  person allocates it through `create_quote`. The rule moved from "never read" to "never believed
+  unseen"; a reading that went straight into `project_quotes` would break it.
 
 **Five figures, and nothing under them.** *Budget* is what you said you'd spend;
 **Forecast** is what it is going to cost; *Committed* is what has been agreed; *Invoiced* is what
@@ -2651,6 +2655,71 @@ whether a *tab* exists and the navigator reads it off the profile in context.
 hint naming what else goes, and both reads being skipped once it is off.
 `ScheduleScreen.test.tsx` pins the filter reaching `getSnags` and `getAllProjects` not being
 called.
+
+### A bill can be emailed in
+
+Every project has an address, `<token>@bills.snaghq.co.nz`, and a bill **forwarded** there lands on
+that project as a card in the *Bills waiting* deck — the `invoice_reviews` waiting room that
+`20260922100000` built and nothing had ever put a card in. `20260924090000` is the door. The deck
+is the prompt: opening the project shows what arrived, and nothing counts until somebody allocates
+it.
+
+**One address per project, not one per household.** The link between a bill and its job is then a
+fact the address carries rather than a guess somebody has to check — and a guessed job is the
+field on a card most likely to be approved without being read. `projects.inbox_token` is minted by
+`home.project_inbox_token` the first time anybody opens *Email bills to this job* (in the money
+sheet, under *What have you got?*), so a project nobody emails has no address to leak.
+`rotate_project_inbox` replaces it, quietly and without asking, because an address that got out is
+exactly when somebody presses that.
+
+**Only the addresses people sign in with are accepted.** `home.inbox_for` returns a sender only when
+their `auth.users` email is on that project's place. Forwarding is the gesture; accepting mail from
+anyone holding the address would make a leaked address a way to put cards in front of somebody that
+look exactly like their builder's, and the only defence would be reading every one. The token is
+sixteen hex digits and is **not** the security model on its own — the sender check is.
+
+**`supabase/functions/inbound-bill` does the work, and it is the second place the app calls a
+model.** Resend receives the mail and posts `email.received`; the function checks the Svix
+signature (JWT verification is off — Resend has no Supabase token — so the signature is the lock),
+finds the project, fetches the attachments, stores PDFs under `<household>/docs/` and photos beside
+the others (the app's own layouts, so no screen needed changing to open them), asks Gemini what the
+bill says, and files the card through `home.file_emailed_bill`. Four rules:
+
+- **It answers Resend at once and works afterwards** (`EdgeRuntime.waitUntil`). Reading a PDF takes
+  longer than a webhook waits, and a retried webhook is a second card — which `file_emailed_bill`
+  refuses anyway, one card per email id (`invoice_reviews_one_per_email`; the older index includes
+  `invoice_number`, and a null there made two rows distinct).
+- **Every field is checked before it reaches a card** (`reviewFromReading` in `bill.ts`, pure and
+  pinned by `inboundBill.test.ts`). An amount must be a positive number; a date must be one the
+  calendar has; a GST basis the bill did not state defaults to *incl* **and is marked guessed**, so
+  the card says it beside the figure; and a paid flag with no sentence behind it is dropped, the
+  rule the review table was built on.
+- **A reading that fails still files the card.** The bill arrived; the card carries the PDF and the
+  subject and the person types the rest. A card that silently never appeared would be the worst
+  outcome, and it is also why a missing Gemini key degrades to unread cards rather than to nothing.
+- **Fifty a household a day**, counted in `file_emailed_bill`. A renovation does not produce that
+  many bills; a mail loop does, and the key reading them is the operator's.
+
+**The card now opens what came with it and can be corrected.** It lists the attachments (the
+invoice is what every field has to be checked against), marks a guessed supplier or figure, and
+its pencil opens `ReviewEditSheet` — who from, what for, the amount with its GST pill, the numbers
+and dates, and **which part of the job**, which nothing reading an email can know. That writes only
+to the card; allocating is still the card's own button, and it now carries the attachments into
+`create_quote` so they become the bill's paperwork and roll up into the project's files.
+`20260924090100` makes answering the GST pill or the description clear their *guessed* mark, which
+it did not. Deleting a card from the bin clears its files too, since nothing else points at them.
+
+`inboundBill.test.ts` pins the address parsing, the signature (a changed body, a wrong secret, a
+stale timestamp, a rotation's two signatures), the attachment filter (the signature logo dropped,
+PDFs first, the caps), the stored paths, and every refusal in `reviewFromReading`.
+`InvoiceReviewCard.test.tsx` pins the attachments and the guessed marks; `ReviewEditSheet.test.tsx`
+the load, the one write with an emptied box as a clear, the part chosen, no part offered while the
+layer is implicit, and a date the calendar has not got holding the sheet open.
+
+**Setup is outside git** and is in `SNAG_INFRA_NOTES.md` under *Resend*: the `bills` MX record,
+`RESEND_INBOUND_API_KEY` and `RESEND_WEBHOOK_SECRET` as function secrets, and the function deployed
+with `--no-verify-jwt`. **Nothing sends anything**: no reply to the forwarder, no notification. If
+a forward does not appear, the function's logs say which of the four reasons it was.
 
 ### Four things that stay exactly as they are
 

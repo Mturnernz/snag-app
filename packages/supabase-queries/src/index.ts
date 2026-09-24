@@ -3441,6 +3441,8 @@ function mapInvoiceReview(row: Row): InvoiceReview {
     quoteId: row.quote_id ?? null,
     decidedAt: row.decided_at ?? null,
     createdAt: row.created_at,
+    photoPaths: row.photo_paths ?? [],
+    documentPaths: row.document_paths ?? [],
   };
 }
 
@@ -5798,6 +5800,27 @@ export function invoiceReviewHeadline(review: InvoiceReview): string {
   const subject = review.sourceSubject?.trim();
   if (subject) return subject;
   return 'An invoice';
+}
+
+/** Where a project's bills are emailed: `<token>@` this. See `supabase/functions/inbound-bill`. */
+export const BILLS_EMAIL_DOMAIN = 'bills.snaghq.co.nz';
+
+/**
+ * This project's address for emailed bills, minted the first time anybody asks.
+ *
+ * A bill forwarded here from the address somebody signs in with lands as a card
+ * on this project and waits to be checked — nothing reaches a figure until it
+ * is allocated.
+ */
+export async function getProjectInboxAddress(client: SupabaseClient, projectId: string): Promise<string> {
+  const { data, error } = await client.rpc('project_inbox_token', { p_project_id: projectId });
+  return `${unwrap<string>(data, error, "Couldn't get the address")}@${BILLS_EMAIL_DOMAIN}`;
+}
+
+/** A new address; the old one stops working. For an address that has got out. */
+export async function rotateProjectInbox(client: SupabaseClient, projectId: string): Promise<string> {
+  const { data, error } = await client.rpc('rotate_project_inbox', { p_project_id: projectId });
+  return `${unwrap<string>(data, error, "Couldn't change the address")}@${BILLS_EMAIL_DOMAIN}`;
 }
 
 /**

@@ -468,6 +468,12 @@ export const restoreInvoiceReview = (reviewId: string) =>
 export const deleteInvoiceReview = (reviewId: string) =>
   queries.deleteInvoiceReview(supabase, reviewId);
 
+export const getProjectInboxAddress = (projectId: string) =>
+  queries.getProjectInboxAddress(supabase, projectId);
+
+export const rotateProjectInbox = (projectId: string) =>
+  queries.rotateProjectInbox(supabase, projectId);
+
 
 export const addExpectedCostLine = (expectedCostId: string, input: queries.ExpectedCostLineInput) =>
   queries.addExpectedCostLine(supabase, expectedCostId, input);

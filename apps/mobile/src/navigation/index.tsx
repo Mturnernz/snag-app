@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, IconSize, Typography } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { MainTabParamList, RootStackParamList } from '../types';
 import SnagListScreen from '../screens/SnagListScreen';
 import ScheduleScreen from '../screens/ScheduleScreen';
@@ -32,9 +33,15 @@ const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap,
 
 function MainTabs() {
   const { profile } = useHousehold();
+  // The tab bar measures the safe area itself, and on an installed Android
+  // phone that answer is zero — the manifest hides the system bars — so the
+  // corner tabs sat in the rounded bottom corners, where the swipe that brings
+  // the navigation bar back starts. Hand it the floored insets instead.
+  const edge = useEdgeInsets();
 
   return (
     <Tab.Navigator
+      safeAreaInsets={{ bottom: edge.bottom, left: edge.left, right: edge.right }}
       // The list. Adding something is a bar at the foot of it rather than a
       // tab of its own, so there is nowhere else to open — and opening here is
       // how one person finds out what the other added, which with no

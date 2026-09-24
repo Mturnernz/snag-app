@@ -9,7 +9,7 @@ import Attachments from './Attachments';
 import {
   AddRow, Group, PrimaryButton, RadioRow, Row, Segmented, TextButton, groupedStyles,
 } from './Grouped';
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   addPayment, addQuoteLine, createElement, createExpectedCost, createItem, createQuote,
   formatMoney, setItemSetAside,
@@ -645,7 +645,7 @@ function PlaceList({
           <Pressable
             key={o.label}
             onPress={() => onChange(o.place)}
-            hitSlop={6}
+            style={styles.chipTap}
             accessibilityRole="radio"
             accessibilityState={{ selected, checked: selected }}
             accessibilityLabel={o.label}
@@ -681,7 +681,7 @@ function ThingPicker({
             <Pressable
               key={t.id}
               onPress={() => onChange(selected ? null : t.id)}
-              hitSlop={6}
+              style={styles.chipTap}
               accessibilityRole="radio"
               accessibilityState={{ selected, checked: selected }}
               accessibilityLabel={t.name}
@@ -729,6 +729,9 @@ const styles = StyleSheet.create({
   switchLabel: { fontSize: Typography.body, color: Colors.textPrimary },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, padding: Spacing.lg, paddingTop: Spacing.sm },
   chipsInline: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  // The pill is 34pt and the tap area 48, the split every chip row here makes.
+  // It was hitSlop, which react-native-web ignores.
+  chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   chip: {
     height: 34, paddingHorizontal: Spacing.md, borderRadius: 17, justifyContent: 'center',
     backgroundColor: Colors.sunken,

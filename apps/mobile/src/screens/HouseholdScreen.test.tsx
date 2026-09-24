@@ -62,6 +62,8 @@ jest.mock('../lib/supabase', () => ({
   setPropertyMember: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
+const mock_shareLink = jest.fn();
+jest.mock('../lib/share', () => ({ shareLink: (...a: unknown[]) => mock_shareLink(...a) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
 
@@ -188,7 +190,7 @@ describe('deleting a place', () => {
     // Singular and plural both, because "1 snags" is the kind of thing nobody
     // notices until it is in front of somebody about to delete their house.
     expect(r.queryByText(
-      '2 snags and 1 thing go with it, along with its rooms and every photo. It cannot be undone.'
+      '2 jobs and 1 item go with it, along with its rooms and every photo. It cannot be undone.'
     )).not.toBeNull();
 
     expect(input(r, (props) => props.accessibilityLabel === 'Type The bach to confirm')).toBeDefined();
@@ -307,7 +309,41 @@ describe('inviting somebody who has not signed up', () => {
       .map((n: any) => JSON.stringify(n.children))
       .join(' ');
     expect(said).not.toMatch(/\bsent\b/i);
-    expect(said).toMatch(/doesn't email them, so tell them yourself/i);
+    expect(said).toMatch(/doesn't email them/i);
+    expect(said).toMatch(/tell them yourself/i);
+  });
+
+  // The address invitation sends nothing, so the other person had to be told
+  // anyway — and sign up with exactly that address. A link carries the
+  // invitation itself, so it is the first thing offered.
+  it('offers a link to share first, through the phone\'s own sheet', async () => {
+    arrange();
+    mock_shareLink.mockResolvedValue('shared');
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    const all = r.root.findAll((n: any) => typeof n.type !== 'string' && typeof n.props?.label === 'string')
+      .map((n: any) => n.props.label);
+    expect(all.indexOf('Share an invite link')).toBeLessThan(all.indexOf('Invite them'));
+
+    await press(pressableAround(r, 'Share an invite link'));
+    expect(mock_createInviteLink).toHaveBeenCalledWith('h', undefined);
+    expect(mock_shareLink).toHaveBeenCalledWith(
+      expect.stringContaining(`/join/${LINK.token}`), expect.any(String));
+  });
+
+  // Minting a code kills the old one, so a second share must not break the
+  // link the first person has not opened yet.
+  it('shares the live link again rather than minting a new one', async () => {
+    arrange();
+    mock_shareLink.mockResolvedValue('shared');
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    await press(pressableAround(r, 'Share an invite link'));
+    await press(pressableAround(r, 'Share an invite link'));
+    expect(mock_createInviteLink).toHaveBeenCalledTimes(1);
+    expect(mock_shareLink).toHaveBeenCalledTimes(2);
   });
 
   it('shows who is waiting, without their reading as somebody who is here', async () => {

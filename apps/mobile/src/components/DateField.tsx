@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, Modal, Pressable, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -52,7 +52,7 @@ interface CalendarProps {
 export function CalendarSheet({
   visible, selected, onPick, onClear, onClose, title = 'Pick a date',
 }: CalendarProps) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const [cursor, setCursor] = useState(() => new Date());
 
   // Opens on the month of what is already set, so somebody correcting a date

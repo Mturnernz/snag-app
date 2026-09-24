@@ -194,6 +194,40 @@ The three helpers only ever called from *inside* SECURITY DEFINER functions (`re
 `snag_household`, `is_member_profile`) stay revoked, because those calls run as the function
 owner and the caller's EXECUTE is never consulted.
 
+## The usability pass (September 2026)
+
+A customer-journey review counted taps and duplicate routes outside the Projects tab, and nineteen
+changes came out of it. Several reverse a decision written up further down; those sections have
+been edited in place, and where anything below still disagrees, **this section wins**.
+
+- **Words.** A list entry is a **job** and a house-record entry is an **item** — in the compose bar
+  (*Capture a new job*), the job page (*Linked items*), the picker, the thing page (*Remove this
+  item*) and every confirmation. The code still says `snag` and `thing`; only what people read
+  changed. The Projects tab kept its own vocabulary.
+- **Capture.** A library button beside the field (item 3). On the amend sheet, **choosing a room
+  finishes it** (it wrote the room and then waited for Submit), the room the last capture used is
+  **offered** for ten minutes — lit, written only when accepted — and the sheet no longer toasts
+  each answer back.
+- **Every place that adds photos offers the camera and the library** — the reversal is written up
+  under *Paperwork lives beside the photos*.
+- **The list**: *Due soon*, the tick on each card with *Undo*, and no *Show me* button — under *The
+  list is the app's home*.
+- **The job page**: *Mark done* in the footer, leaving saves, one *When* card, and one-tap
+  **suggested items** from the job's room on the *Linked items* card (one `getThings` read, only
+  when the job has a room, never fatal; tapping writes through `set_snag_things` like the picker).
+  The edit sheet's button is **Done** and never dead.
+- **Things**: the thing page saves each box as it is left; one service job per thing; the
+  walkthrough's cycle files it; *Report a problem* through the capture bar — under *The house
+  record*.
+- **Invites**: the link first, and a pasted link on the waiting screen — under *A code you can hold
+  up*.
+
+**One rule for saving, everywhere outside Projects: a tap writes when it is pressed, a box writes
+when it is left, and leaving the page writes whatever is still in a box.** Buttons that commit are
+kept only where something is being *created* (the add-a-thing walkthrough, the capture bar) or in
+a sheet editing two fields together (the edit sheet, whose button is *Done*). A screen that asks
+*Leave without saving?* has broken this.
+
 ## Capture and triage are different moments
 
 This is the load-bearing product decision and the easiest one to erode.
@@ -209,10 +243,12 @@ reach one-handed; the old Add screen had it at the top, which is the hardest.
 
 **The camera is the default, and the *field* says so.** A photograph is the snag, so the shutter
 is what the bar is for and typing is the alternative — but the words for that belong in the
-field, which reads **"Capture new issue"**, not on the button. The button carried the word
+field, which reads **"Capture a new job"**, not on the button. The button carried the word
 "Photo" for one commit, which put a label on the control whose meaning is least in doubt: a
 camera glyph on a fern circle at the foot of a list is not something anybody has to read. Still
-one tap to the camera rather than to a chooser, and still bottom-left.
+one tap to the camera rather than to a chooser, and still bottom-left. A photo somebody already
+has goes in through the **library button at the far end of the field**, which gives way to the
+send arrow once there are words — see *The usability pass*.
 
 Five things about capture are load-bearing, and two of them are things it stopped asking:
 
@@ -296,71 +332,28 @@ small independent decisions and a Save button turns sorting twelve items into fo
 **sheet rather than a push** for the same reason — though note react-native-web renders a modal
 presentation as a full screen, so that particular benefit is native-only.
 
-**There is a Save button, and it closes rather than collects.** Every control here still writes
-when it is pressed: a Save that held them would turn sorting twelve jobs into forty taps, and would
-put the tick somebody makes standing in a shop aisle behind a second press. So it buys two things
-this page could not do. It is a **way out that reads as finished** — a back chevron in the header
-is navigation, and somebody who has just set a date and added two parts wants somewhere to press
-meaning "done here". And its hint is the page **saying the taps landed**, which nothing ever did:
-the same silence the thing page's spec sheet was reversed to fix, where "the rows called `patch`
-without the toast it takes, so edits saved in silence".
+**Leaving saves, and the footer is *Mark done*.** There was a Save button here that closed rather
+than collected, and it mostly read *Close* beside a back arrow that already did the same. What it
+really did was commit the two boxes that can hold typed text — the date, whose `onBlur` is not
+guaranteed on native, and the item typed into the shopping box, which waits on its own `+`. The
+page now does that itself: `commitPending` runs on `beforeRemove` (every way off the page — the
+header's back, Android's, a swipe) and before *Mark done*, as **one** `update_snag`, and a date no
+calendar has holds the page open with the words still in the box. The hint in the bar still counts
+the boxes, honestly — *"1 unsaved change — kept when you leave"*.
 
-**It commits what is sitting in a box, and that is the whole reason it is not merely a Close.**
-Two boxes can be holding something: the date, whose `onBlur` is not guaranteed to have fired — on
-native, pressing a Pressable does not reliably blur a `TextInput` — and the item typed into the
-shopping list, which has no blur commit at all because it waits on the `+` beside it. Without
-this, **Save is the one button on the page that silently discards what somebody typed**, which is
-precisely the failure a button called Save exists to prevent. Adding that item starts the job, and
-that is right: deciding what to buy is deciding to do the work.
-
-**One write, not two.** A date and an item both pending are one `update_snag` rather than two round
-trips and two re-reads. And Save does not navigate away from a write that failed, or from a date no
-calendar has: the words stay in the box so they can be fixed, unlike the blur path, which has
-somewhere to put them back to. `patch` returns whether the write landed for that one caller —
-every control that fires and forgets ignores it, because the alert is the report.
-
-The hint counts those two boxes and is honest in both branches rather than always reassuring,
-in the thing page's own words (*"1 unsaved change"*) so two screens do not invent two for one
-fact.
-
-It is a `StickyActionBar`, the same component and the same rules the thing page uses: the last flex
-child rather than absolutely positioned, so it can never overlap what it belongs to, and the
-keyboard inset applied by the screen because the bar's own handling is `Keyboard`-based and
-iOS-only — and `Keyboard` is an empty stub in react-native-web.
-
-**Only one of the two buttons at the foot is solid fern, and it is *Mark done*.** They were both
-filled, both full width, stacked against each other with nothing but their words telling them
-apart — so a thumb reaching for one on muscle memory found the other, and the two are not remotely
-the same kind of act. **The asymmetry is total**: pressing Save is harmless, because the page has
-already saved everything and it merely closes; pressing *Mark done* changes the job's state,
-congratulates somebody, and takes the row off the list. Only one of them has a consequence, so
-only one of them gets the brand's colour — the bar's button is `secondary`, fern on its own tint.
-The split is not new: a finished job already renders *Reopen* as an outline in that same slot.
-
-The gap is the other half. `statusRow` carries a margin on both sides, because peripheral vision
-reads two adjacent full-width controls as one pair whatever they say, and because finishing is the
-last thing that happens rather than part of the repeat card above it.
-
-**And the button says what pressing it will do.** It read **Save** above a line reading *All
-changes saved*, which is the page contradicting itself — and a button that looks like an
-outstanding obligation is one people reach for on autopilot, which is what put a thumb beside
-*Mark done* in the first place. So it is **Save** only while a box is actually holding something
-and **Close** the rest of the time, decided off the same `unsaved` count the hint beside it already
-keeps: one fact, two ways of saying it, unable to disagree.
-
-**A slider was considered for *Mark done* and rejected.** Slide-to-confirm is the affordance for
-something irreversible, and finishing a household job is not: the same slot offers *Reopen*, and
-the list keeps done work for seven days. It would also tax the one rewarding moment in the
-product — the whole reward on offer is that finishing makes the list shorter — and ceremony spent
-where it is not needed is how it stops working where it is, which is the argument this file
-already makes about not demanding a typed word to remove an empty heading. The mis-tap is fixed by
-telling the two buttons apart, not by making the good one harder to press.
+So the `StickyActionBar` holds **Mark done** (solid fern) or **Reopen** (outline). Finishing is the
+most common thing done to a job that already exists, and at the foot of the scroll it was past
+every card. The earlier worry — two primary buttons stacked, a thumb finding the wrong one — is
+answered by there now being only one. **A slider was considered and rejected**, as before: finishing
+is not irreversible (*Reopen*, the seven-day done list, and *Undo* on the list's own tick), and
+ceremony spent where it is not needed is how it stops working where it is.
 
 **There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
 two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
 be a category. The order down the screen is now: photo strip, headline, the meta row,
-**Linked assets**, **Anything to pick up?**, what came back from an assessment, **Notes**, the
-asset's own history, **When's it due?**, **Schedule a recurring job**, and *Mark done* last.
+**Linked items**, **Anything to pick up?**, what came back from an assessment, **Notes**, the
+item's own history, and the **When** card (the date, then *Repeats*) — with *Mark done* in the
+footer.
 
 **The order is the order of inspecting and fixing something**: what the job is about, then what to
 do about it, then when, then the one state change a person still makes by hand. The asset card
@@ -368,11 +361,6 @@ earned the top slot by shrinking — as a nine-row inventory it belonged below t
 two-line summary of what this job concerns it is the first thing worth knowing. The assessment
 card stays directly above the shopping list, because the parts it offers with a `+` land in that
 list and a card whose suggestions are two cards away is one nobody connects to anything.
-
-**Mark done sits at the foot, not near the top.** Pinned high it competed with Save in the sticky
-footer — two primary actions, one of which is a state change and the other a way out. Finishing is
-the one state change only a person can make, and it is the *last* thing that happens, so it reads
-last.
 
 **Notes sit near the top, above every control.** This product has no notifications and never
 will, so a note is the only way one person tells the other anything — "ordered the part, arriving
@@ -634,11 +622,19 @@ they last looked.
 - **Done leaves.** One line at the foot, not a lens. Finishing something should make the list
   shorter; that is the whole reward on offer. Only the last seven days are rendered. A repeating
   job cannot leave — see *Finishing says so* below.
-- **Both filter rails became one button.** Filtering is occasional and was charging 96px of
-  vertical rent on every visit to a screen people now open constantly. **Two lenses, where there
-  were four**: *Mine* read `assignee_id` and *Urgent* read `priority`, and nothing writes either
-  any more — a lens over a column nothing can set comes back empty for ever and tells nobody why.
-  What is left is *Everything* and *Needs parts*, which is the one somebody actually arrives with.
+- **Both filter rails became one button, and then the button went.** The *Show me* sheet was down
+  to two lenses and three sorts: *Needs parts* was the cart again by another door, *Due* is
+  answered by **Due soon** without asking, and *Newest* by **New** and **Just added**. The cart is
+  the only lens control; it stays on screen while its lens is up even at nought, because it is the
+  only way back to the jobs.
+- **Due soon sits under New and above every room** — overdue, or due in the next seven days,
+  soonest first. There are no notifications, so this screen is the only reminder; grouped by room,
+  the gutters due on Saturday sat in Outside with everything else. A parked repeat is left out and
+  comes back up on its own the day it falls due.
+- **A job can be finished from its card.** A tick beside each open card calls `set_snag_status`
+  — a sibling of the card's own `Pressable`, never inside it — and the toast offers **Undo**. It
+  was open, scroll past every card, *Mark done*, *Return to list*. A repeat that rolls forward gets
+  the honest toast and no Undo.
 - **The shopping list rides the "Needs parts" lens**, and a pill in the header says how much of it
   there is. One card above the cards, listing every item the visible jobs are waiting on — the only
   elevated surface on the screen, and the only thing the retired Weekend tab left behind. See
@@ -767,34 +763,30 @@ RLS does the filtering rather than the query pretending to: the comments policy 
 property, so this returns exactly what this person could have read by opening those jobs one at a
 time.
 
-**And the repeat card no longer repeats the date.** The due-date field sits directly above it, so
-*"Due 8/10/2026, then every 6 months"* put the same day on screen twice a card apart — which read
-as two stacked date controls and had somebody asking which was real. The date is stated once,
-where it can be changed; the card says only what that field cannot: what happens next.
+**The date and the repeat are one *When* card, and setting up a repeat is one tap.** It was a
+due-date card, then a *Schedule a recurring job* card holding only Yes and No, then a modal behind
+the Yes asking how often and — again — *"When's the next one due?"* with its own date presets. Two
+sets of controls writing one `due_at` had people asking which date was real, and *Yes* opened the
+modal without writing anything, so dismissing it left *No* lit. Now: the `DateField` with **This
+weekend** and **Next week** a tap away, then a **Repeats** row — *Never* and the `REPEAT_PRESETS`
+as chips that write when pressed, plus the job's own cycle when it is not a preset (a heat pump's
+730 days from the thing page must not read as *Never*). Choosing a cycle dates an undated job a
+cycle out; a date already set is left alone. One sentence under it says what marking it done does
+and that it comes up under **Due soon** on the list — *Snag doesn't send reminders* is still said,
+because a repeat is exactly what somebody expects to be reminded about.
 
-**And the repeat card asks one word.** The heading is **Schedule a recurring job** — it says what
-the card *does*, because *Does it come round again?* made somebody hunting for a way to schedule
-the filter read straight past the one card that does it. The list's *Comes round again* section
-keeps its name deliberately: that one describes a state, this one names an action.
-
-Under the heading there is a **Yes and a No and nothing else**. It used to carry a paragraph about
-filters and gutters, then the question, then two rails of presets — permanently, on a page people
-open constantly, to serve the minority of jobs that come round. The common answer is no. So the
-arrangement moved into a modal that only somebody who said Yes ever sees: how often, when the next
-one lands, the sentence stating what will happen, and the line saying **Snag reminds nobody**,
-which belongs there because a card called *Schedule a recurring job* is exactly what somebody
-would expect to remind them.
-
-**It asks for the *next* one, not the first.** "When's the first one due?" on a filter changed
-twice already is the app asking a question that was answered a year ago.
+**The box shows the day it is due.** It was `formatLooseDate`, which is built for date columns and
+reads a timestamp's day as nothing, so a job due on the 8th showed back as *Nov 2026*. `dueText`
+is `formatDayFirst(dayKey(due_at))` — the local day, round-tripping with what was typed.
 
 `SnagDetailScreen.test.tsx` pins the edit sheet writing both fields in one call, the refusal on a
 photo-less job with no words, the linked-assets list offering this room only and writing nothing,
 its absence when the room is empty, the page surviving a failed record read, the history card and
-its exclusion, the due date's day-first parse and its refusal of `31/02/2026`, the repeat card
-explaining nothing until the answer is yes, and the Save button — returning to the list, writing
-nothing of its own, saying which of the two things is true about the date, and committing a typed
-one that was never blurred.
+its exclusion, the due date's day-first parse and its refusal of `31/02/2026`, the When card —
+one-tap repeat, a date left alone, a cycle the presets lack, the quick dates, the day shown back —
+and leaving: no Save or Close, nothing written when nothing is typed, one write for both boxes on
+`beforeRemove`, staying put on a failure or a date no calendar has, the boxes committed before
+*Mark done*, and a calendar pick committing at once.
 
 ### Finishing says so, and a repeat cannot finish
 
@@ -1214,9 +1206,17 @@ later, in an aisle, needing one exact string. So:
   argument being that a page of blanks is homework. Lived with, it failed at both ends: nothing
   ever said a change had been kept (the rows called `patch` without the toast it takes, so edits
   saved in silence), and a page showing only what it has cannot tell you what it could hold. So
-  **every field the kind can answer is on screen, empty or not**, and **one Save button** commits
-  the typed ones together and says so. A paint still gets no Serial box: "every field" means every
-  field the kind can answer.
+  **every field the kind can answer is on screen, empty or not.** A paint still gets no Serial
+  box: "every field" means every field the kind can answer.
+
+  **It writes each box when the box is left, and says *Saved*.** It had one Save button for a
+  while, and a back gesture over typed words asked *Leave without saving?* — a question with a
+  wrong answer that loses the words, on the one page in the app where every other kind of edit
+  (a tap, a photo, the room) already wrote on its own. What the reversal was really fixing was the
+  silence, and the toast fixes that. So a box commits on blur, **only what changed** is sent, an
+  emptied box clears its column, anything still being typed is written on `beforeRemove`, and a
+  date no calendar has holds the page. `draftRef` beside the state, because the calendar fills a
+  box and blurs it in one gesture before React has re-rendered.
 - **A saved record is thin on purpose.** Three things were taken off it, and all three were
   information rather than answers. The Appliance/Paint rail (see below). The twelve room chips,
   now **one pill and a *Change*** — a paragraph of controls standing in for one word, eleven of
@@ -1236,13 +1236,14 @@ later, in an aisle, needing one exact string. So:
   width that `min-width: auto` will not shrink below, so a flexed right-aligned value grew past the
   card and off the screen edge. Anything flexed around a `TextInput` needs `minWidth: 0`.
 - **Paperwork lives beside the photos, and so does the way to add either.** The section is
-  **Photos and paperwork**, and one row carries both offers: **Add photos** and *Attach a PDF*.
-  There is deliberately **one** photo control rather than a camera and a *Choose one* beside it —
-  two controls with one outcome, and on the build people install the distinction was never the
-  app's to make: `<input type="file" accept="image/*">` is answered by the phone's own sheet, which
-  offers *Take Photo* above the library, so asking first only added a tap. (On native it is the
-  library; `takePhoto` stays for the two screens whose whole gesture is the shutter — the compose
-  bar, and the walkthrough's rating plate.) **It takes several at once**, capped at
+  **Photos and paperwork**, and one row carries all three offers: **Take photo**, **Choose
+  photos** and *Attach a PDF*. **Two photo controls, and that is a reversal.** It was one, on the
+  belief that `<input type="file" accept="image/*">` is answered by the phone's own sheet with
+  *Take Photo* above the library. iOS Safari does; **Android Chrome drops the camera from that
+  sheet whenever `multiple` is set**, and the native build was the library only — so photographing
+  the thing in front of you meant leaving the app. `addPhotos(prefix, save, 'camera' | 'library')`
+  is the one path for both, and the job page's strip, `Attachments` and this page all offer both.
+  **The library takes several at once**, capped at
   `PHOTO_PICK_LIMIT` — five is a plausible number of angles on one appliance, and the cap exists
   because each photograph is decoded, resized and re-encoded before it is sent, so *select all* on
   a camera roll would otherwise be minutes of spinner with no way back. Three rules in the upload:
@@ -1385,6 +1386,30 @@ three unbuilt ones will want it.
   `create_snag` `p_due_at` and `p_repeat_days` so `v_started` never runs. This is not a second way
   to schedule anything: same two columns, same table, same `set_snag_status` rolling it forward.
   **The compose bar passes neither and never will** — capture asks nothing before it files.
+
+  **One service job per thing, and the page edits it rather than filing another.** Every press of
+  *Schedule service* used to `createSnag`, so changing a heat pump from six months to a year left
+  the six-monthly job running beside the new one, and *Stop servicing it* cleared only the thing's
+  column while the job went on coming round. `serviceJobFor` finds the open repeating job about the
+  thing (by `thing_id` or `snag_things`), read once when the page opens and never fatally. When it
+  exists the modal says *Next one due* and *Update the service job*, writes through `update_snag`,
+  and — because a date or a repeat is one of the things that start a job — puts an `open` job back
+  to `open` with `set_snag_status` if the update moved it to `doing`. *Stop servicing it* clears the
+  repeat and **finishes** the job rather than deleting it: its notes are the appliance's history.
+  The *Servicing* line reads the cycle and next date off that job, so the page and the list cannot
+  disagree.
+
+  **The walkthrough's cycle files the same job.** Step four asked *Serviced how often?*, stored it,
+  and put nothing on the list — the failure this bullet opens with, one screen over. `fileServiceJob`
+  (`lib/serviceJob.ts`) creates it, dated a cycle out, after `create_thing` on the House tab and in
+  the project handover; a job that cannot be filed is said, never thrown. The chips are
+  `SERVICE_CYCLES` — the walkthrough had a third, local list of three.
+
+- **Report a problem goes through the capture bar.** The thing page's *Add something about this*
+  created a job the moment it was pressed, described as *"Heat pump — "*, and opened it — so a press
+  walked away from left a half-written job on everybody's list. It opens `ComposeBar` in a sheet
+  now (`embedded`), and nothing exists until it is sent; the job arrives about the thing and in its
+  room.
 
 `things.room` is TEXT for exactly the reason `snags.room` is, and the House tab groups by
 `home.locations` in seeded order — the two tabs have to describe the house in the same words and
@@ -3038,11 +3063,10 @@ day counts, and that each preset's label matches what `describeCycle` says about
 The weeks and days branches stay, because `create_snag` accepts any interval from 1 to 3650 and an
 extract should say what the row actually holds rather than round it into a lie.
 
-Setting one up is a **yes/no first, then the cycle**: how often, then when the first one lands,
-then a plain sentence stating the arrangement. It used to be a row of presets with "One-off" among
-them, which made the common answer — no, it doesn't come round — look like a setting rather than
-the default it is. A repeat with no date on it would never surface, so choosing an interval sets
-one; an existing date is never clobbered.
+Setting one up is **one tap on the *Repeats* row**, under the due date on the same card: *Never*
+first and lit by default, then the presets. It was a yes/no card with the cycle and a second set of
+date controls in a modal behind the Yes — see *the When card* under triage. A repeat with no date
+on it would never surface, so choosing an interval sets one; an existing date is never clobbered.
 
 ## A date is typed or tapped, and never only tapped
 
@@ -3312,7 +3336,17 @@ the personal thing, and the name is what goes. `snags_with_details.reporter_name
 and therefore a new profile, so that can't actually be reached — it is there so a row that ever does
 come back doesn't read as gone everywhere it is named.
 
-### A code you can hold up
+### A code you can hold up — and a link you can send
+
+**The link is the first thing *Add someone* offers**, as **Share an invite link** through the
+phone's own share sheet (`lib/share.ts`: `navigator.share` on web, `Share` on native, the clipboard
+where there is neither). The address invitation sends nothing, so the other person had to be told
+anyway and had to sign up with exactly that address; a link carries the invitation itself. It
+**reuses the live code** rather than minting one, because minting kills the old one and a second
+share must not break a link the first person has not opened. The QR code and the address
+invitation stay, beneath it. And the waiting screen (*Someone else set ours up*) takes a **pasted
+link** — `parseJoinToken` reads the code out of whatever a messaging app wrapped it in — and hands
+it to the same `JoinScreen` gate a tapped link reaches, through `SetupScreen`'s `onJoinToken`.
 
 Typing an address assumes you know it and are willing to type it. Standing in the same kitchen both
 are friction, so an invitation can also be addressed to **whoever holds the link**:
@@ -3873,11 +3907,11 @@ Four things about the change:
   preference and `display: standalone` stays the answer for anything that does not read one —
   iOS, which has no fullscreen display mode at all, and older Chrome. Nothing regresses on the
   way past.
-- **Every inset goes to zero with the bars, and that is correct.** `env(safe-area-inset-top)` and
-  `-bottom` describe bars that are no longer there, so the eleven screens padding by `insets.top`
-  stop padding and the compose bar moves down to sit against the screen edge — where the camera
-  button is *meant* to be, since it is bottom-left for one-handed reach. Android reserves the
-  bottom strip for the home **swipe**; a tap on a 48px target passes straight through.
+- **Every inset goes to zero with the bars — and that turned out not to be fine.** The reported
+  insets describe bars that are no longer there, but the glass is still rounded and the camera is
+  still punched through it, so a zero top put the header's back arrow in the corner curve and a
+  zero bottom put the corner tabs where the swipe that brings the bars back begins. See *Corners
+  and edges* below: `useEdgeInsets` floors both in `fullscreen`.
 - **iOS is deliberately left alone.** `apple-mobile-web-app-status-bar-style` stays `default`
   rather than becoming `black-translucent`: translucent is how a web app gets under the iOS
   status bar, and it also forces light status-bar content, which on a `#FAF7F2` ground is a clock
@@ -3891,6 +3925,37 @@ Four things about the change:
 navigation-bar plugin — two builds of one app disagreeing about whether Android's controls are on
 screen is drift nothing else would catch, since each is configured in a different file, in a
 different vocabulary, and neither build renders the other.
+
+## Corners and edges, on an iPhone and on Android
+
+*"The buttons on the corners are difficult to push"*, on an iPhone 17. Three causes, none of which
+shows up anywhere but a phone, and `lib/edgeInsets.test.ts` pins all three.
+
+- **`hitSlop` does nothing on the build people install.** react-native-web 0.21's `Pressable` and
+  `TouchableOpacity` ignore it, so every icon "enlarged" with it had its glyph's own tap area — the
+  job page's delete was a 24pt icon in the top-right corner. **Never use `hitSlop`.** Size the box
+  (`MIN_TOUCH_TARGET` square), or put the pill inside a 48pt `Pressable` the way every chip row here
+  does, or — where the layout cannot grow — pad the `Pressable` and pull the padding back with a
+  negative margin (`segmentTap` in `Grouped.tsx`). The test fails the build on any `hitSlop=`.
+- **The safe area is not where a thumb can press.** On an installed Android phone the manifest
+  hides both system bars, so every inset is zero while the corners are still rounded; on anything
+  without a home indicator the bottom is zero too. **`useEdgeInsets`** (`hooks/`) is the safe area
+  floored: 28 at the top in `fullscreen` only (anywhere else a status bar is already above the
+  page, and a band under it would push every header down for nothing), 16 at the bottom always.
+  **Use it, never `useSafeAreaInsets`**, for anything against an edge — the test fails the build on
+  the raw hook. The tab bar is handed the same floors through `safeAreaInsets`, because it
+  measures the safe area itself. It reads the context rather than calling `useSafeAreaInsets`,
+  which throws outside a provider.
+- **Every bottom sheet pads the bottom edge** — `(keyboard > 0 ? 0 : edge.bottom) + Spacing.lg`.
+  The capture sheet's *Submit*, the item picker's *Done* and the thing page's two sheets had
+  none, so on an iPhone their one button sat on the home indicator.
+
+Two smaller ones. `ScreenHeader` stands **8 in from the glass**, not 4 — both corners of that row
+hold a control, and four pixels in is under the curve of an iPhone's edge; the job and household
+pages also padded the top inset twice around it. And `html { touch-action: manipulation }` in
+`public/index.html`, because iOS reads two quick taps on one control as a double-tap-to-zoom and
+enlarges the page instead; pinch zoom is untouched, and `PhotoViewer`'s own `touchAction: 'none'`
+still wins on its surface.
 
 ## Environment Setup
 

@@ -39,3 +39,17 @@ export function clearJoinToken(): void {
   if (!JOIN_PATH.test(window.location.pathname)) return;
   window.history.replaceState(null, '', '/');
 }
+
+/**
+ * The code in something pasted — the whole link, or just the code.
+ *
+ * Somebody who signed up before they were sent anything is left on a screen
+ * whose only action was *Check again*; if the other person has since sent a
+ * link, pasting it is the way in. Anything with a 36-character code in it is
+ * read, because a link arrives from a messaging app wrapped in whatever that
+ * app thought it should add.
+ */
+export function parseJoinToken(text: string): string | null {
+  const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/.exec(text);
+  return match ? match[1].toLowerCase() : null;
+}

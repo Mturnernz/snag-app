@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, Image, TextInput, Pressable, Modal, ActivityIndicator, StyleSheet,
 } from 'react-native';
@@ -12,26 +12,27 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import DateField from '../components/DateField';
 import PhotoViewer from '../components/PhotoViewer';
 import Button from '../components/Button';
-import StickyActionBar from '../components/StickyActionBar';
 import { openUrl } from '../lib/openUrl';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import {
   consumableOnList, describeCycle, documentFileName, documentName, formatLooseDate,
-  parseLooseDate, swatchColour, thingHeadline,
+  parseLooseDate, serviceJobFor, swatchColour, thingHeadline, dayKey, formatDayFirst,
 } from '@snag/supabase-queries';
 import {
   createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getSnags, getThing,
-  updateSnag, updateThing, uploadFile,
+  setSnagStatus, updateSnag, updateThing, uploadFile,
 } from '../lib/supabase';
-import { PHOTO_PICK_LIMIT, compressAndUpload, photoFileName, pickPhotos } from '../lib/photoUpload';
+import { addPhotos, PhotoSource } from '../lib/addPhotos';
+import ComposeBar from '../components/ComposeBar';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
 import {
-  FINISH_SPEC_FIELDS, RootStackParamList, SERVICE_CYCLES, Thing, ThingKind,
+  FINISH_SPEC_FIELDS, RootStackParamList, SERVICE_CYCLES, Snag, Thing, ThingKind,
   THING_KIND_FIELD_LABELS,
 } from '../types';
 
@@ -118,11 +119,6 @@ type Draft = {
   spec: Record<string, string>;
 };
 
-/** "3 unsaved changes" — a count, because which ones is on screen already. */
-function unsavedHint(count: number): string {
-  return count === 1 ? '1 unsaved change' : `${count} unsaved changes`;
-}
-
 function draftFrom(thing: Thing): Draft {
   return {
     name: thing.name ?? '',
@@ -163,8 +159,14 @@ export default function ThingDetailScreen() {
   const { household, locations } = useHousehold();
   const { showToast } = useToast();
   const keyboard = useKeyboardInset();
+  const edge = useEdgeInsets();
 
-  const [thing, setThing] = useState<Thing | null>(null);
+  const [thing, setThingState] = useState<Thing | null>(null);
+  const thingRef = useRef<Thing | null>(null);
+  const setThing = useCallback((next: Thing | null) => {
+    thingRef.current = next;
+    setThingState(next);
+  }, []);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   // Which photo is open full screen, or null. A rating plate is the whole
   // reason this tab exists and is unreadable in a 220px tile.
@@ -172,14 +174,28 @@ export default function ThingDetailScreen() {
   /** Twelve chips stand down to one pill until somebody says otherwise. */
   const [roomOpen, setRoomOpen] = useState(false);
   const [service, setService] = useState<ServiceDraft | null>(null);
+  /**
+   * The repeating job on the list that services this thing, if any. The one
+   * source for the cycle this page shows — see `serviceJobFor`.
+   */
+  const [serviceJob, setServiceJob] = useState<Snag | null>(null);
   const [consumableDraft, setConsumableDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
-  // The typed fields, held locally until Save. Taps are not in here — the kind
-  // chips, the room, the parts list, photos and documents each write on press,
-  // because a single decision is its own confirmation and putting twelve of
-  // them behind one button is how sorting a room becomes forty taps.
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const savingRef = useRef(false);
+  // The typed fields, as typed. Each is written when its box is left — and
+  // anything still in a box when the page is left is written then — so there
+  // is no Save to find and nothing to discard. Taps write on press, as ever.
+  //
+  // A ref beside the state, because the calendar fills a box and commits in
+  // one gesture, before React has re-rendered with the new value.
+  const [draft, setDraftState] = useState<Draft | null>(null);
+  const draftRef = useRef<Draft | null>(null);
+  const setDraft = useCallback((next: Draft | null | ((d: Draft | null) => Draft | null)) => {
+    const value = typeof next === 'function' ? next(draftRef.current) : next;
+    draftRef.current = value;
+    setDraftState(value);
+  }, []);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async () => {
@@ -188,6 +204,16 @@ export default function ThingDetailScreen() {
       setThing(found);
       setDraft(draftFrom(found));
       setPhotoUrls(await getFileUrls(found.photoPaths));
+      // Never fatal: a page that cannot see the list still shows the record.
+      if (KINDS_WITH_SERVICING.includes(found.kind)) {
+        let open: Snag[] = [];
+        try {
+          open = (await getSnags({ propertyId: found.propertyId, status: ['open', 'doing'] })) ?? [];
+        } catch {
+          open = [];
+        }
+        setServiceJob(serviceJobFor(open, found.id));
+      }
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'Please try again.');
     }
@@ -198,25 +224,24 @@ export default function ThingDetailScreen() {
   }, [load]);
 
   /**
-   * A Save button can lose work in a way writing on blur never could, so the
-   * back gesture has to ask. `showAlert` takes two buttons at most — on the web
-   * build it is a `window.confirm`, which has exactly two.
+   * **Leaving saves.** The page used to be a form with one Save button, and a
+   * back gesture over typed words asked *Leave without saving?* — a question
+   * with a wrong answer that loses work. Every box now writes when it is left,
+   * and one still being typed in when the page goes is written on the way out.
+   * A date no calendar has holds the page, with the words still in the box.
    */
+  const saveRef = useRef<() => Promise<boolean>>(async () => true);
   useEffect(() => {
     const stop = navigation.addListener('beforeRemove', (e) => {
-      if (!thing || !draft || changedFields(thing, draft).length === 0) return;
+      const current = thingRef.current;
+      if (!current || !draftRef.current || changedFields(current, draftRef.current).length === 0) return;
       e.preventDefault();
-      showAlert(
-        'Leave without saving?',
-        'The changes you typed here have not been saved.',
-        [
-          { text: 'Keep editing', style: 'cancel' },
-          { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
-        ]
-      );
+      saveRef.current().then((ok) => {
+        if (ok) navigation.dispatch(e.data.action);
+      });
     });
     return stop;
-  }, [navigation, thing, draft]);
+  }, [navigation]);
 
   async function patch(update: Parameters<typeof updateThing>[1], toast?: string) {
     if (!thing || busy) return;
@@ -254,10 +279,13 @@ export default function ThingDetailScreen() {
    * untouched field as an empty string would be the difference between not
    * saying anything and saying nothing is there.
    */
-  async function save() {
-    if (!thing || !draft || saving) return;
+  async function save(): Promise<boolean> {
+    const thing = thingRef.current;
+    const draft = draftRef.current;
+    if (!thing || !draft) return true;
+    if (savingRef.current) return false;
     const changed = changedFields(thing, draft);
-    if (changed.length === 0) return;
+    if (changed.length === 0) return true;
 
     const update: Parameters<typeof updateThing>[1] = {};
     const text = (v: string) => (v.trim() === '' ? null : v.trim());
@@ -283,7 +311,7 @@ export default function ThingDetailScreen() {
           `Couldn't read the ${field.label.toLowerCase()} date`,
           'Try a year, a month and a year, or a full date — "2019", "Nov 2019", "8 Nov 2019".'
         );
-        return;
+        return false;
       }
       update[field.key] = parsed;
     }
@@ -299,19 +327,36 @@ export default function ThingDetailScreen() {
     if (Object.keys(spec).length > 0) update.spec = spec;
     if (clearSpec.length > 0) update.clearSpec = clearSpec;
 
+    savingRef.current = true;
     setSaving(true);
     try {
       const next = await updateThing(thing.id, update);
       setThing(next);
-      setDraft(draftFrom(next));
+      // Only the boxes that were written come back from the row: another box
+      // may have been typed into while this one was on its way.
+      setDraft((d) => {
+        if (!d) return draftFrom(next);
+        const fresh = draftFrom(next);
+        const merged: Draft = { ...d, spec: { ...d.spec } };
+        for (const key of changed) {
+          if (key.startsWith('spec.')) merged.spec[key.slice(5)] = fresh.spec[key.slice(5)] ?? '';
+          else (merged as any)[key] = (fresh as any)[key];
+        }
+        return merged;
+      });
       showToast('Saved');
+      return true;
     } catch (err: any) {
       // The draft is left exactly as typed — the words are the only copy.
       showAlert("That didn't save", err?.message ?? 'Please try again.');
+      return false;
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
+  saveRef.current = save;
+  const commit = () => { void save(); };
 
   /**
    * Photos and documents write the moment they land, never via Save.
@@ -338,50 +383,16 @@ export default function ThingDetailScreen() {
    * the PDF export follows for a photograph that will not come, and the paste
    * screen follows for a write that fails part way.
    */
-  async function attachPhotos() {
+  async function attachPhotos(source: PhotoSource) {
     if (!thing || !household || busy) return;
-    const { uris, dropped } = await pickPhotos();
-    if (uris.length === 0) return;
-
     setBusy(true);
-    const added: string[] = [];
-    let lastError: unknown = null;
     try {
-      for (const uri of uris) {
-        try {
-          const { path, error } = await compressAndUpload(uri, photoFileName(household.id));
-          if (error || !path) throw error ?? new Error('The photo did not upload');
-          added.push(path);
-        } catch (err: unknown) {
-          lastError = err;
-        }
-      }
-
-      if (added.length > 0) {
-        await patch(
-          { photoPaths: [...thing.photoPaths, ...added] },
-          added.length === 1 ? 'Photo added' : `${added.length} photos added`,
-        );
-      }
-    } catch (err: unknown) {
-      lastError = err;
+      await addPhotos(household.id, (added) => patch(
+        { photoPaths: [...thing.photoPaths, ...added] },
+        added.length === 1 ? 'Photo added' : `${added.length} photos added`,
+      ), source);
     } finally {
       setBusy(false);
-    }
-
-    const missed = uris.length - added.length;
-    if (missed > 0) {
-      showAlert(
-        added.length > 0 ? `${missed} of ${uris.length} didn't save` : "That photo didn't save",
-        failureReason(lastError),
-      );
-    } else if (dropped > 0) {
-      // Said out loud rather than dropped in silence — a cap nobody is told
-      // about is indistinguishable from photographs that failed.
-      showAlert(
-        `${PHOTO_PICK_LIMIT} at a time`,
-        `${added.length} added. Choose the other ${dropped} in another go.`,
-      );
     }
   }
 
@@ -520,22 +531,27 @@ export default function ThingDetailScreen() {
    * of meaning from the same end the Start button did. The detail sheet offers
    * them as taps instead.
    */
-  async function addSnag() {
-    if (!thing || busy) return;
-    setBusy(true);
-    try {
-      const snag = await createSnag({
-        propertyId: thing.propertyId,
-        room: thing.room,
-        description: `${thingHeadline(thing)} — `,
-        thingId: thing.id,
-      });
-      navigation.navigate('SnagDetail', { snagId: snag.id });
-    } catch (err: any) {
-      showAlert("Couldn't add that", err?.message ?? 'Please try again.');
-    } finally {
-      setBusy(false);
-    }
+  /**
+   * Something wrong with this thing, filed through the capture bar.
+   *
+   * It used to create the job the moment it was pressed, described as
+   * *"Heat pump — "*, and open it — so somebody who pressed it and backed out
+   * left a half-written job on everybody's list. Now it opens the same bar the
+   * List tab files with (a photo, a line, or both) and nothing exists until it
+   * is sent. The job arrives already about this thing and in its room.
+   */
+  const [reporting, setReporting] = useState(false);
+  async function fileReport(input: { photoPaths: string[]; description: string | null }) {
+    if (!thing) return;
+    const snag = await createSnag({
+      propertyId: thing.propertyId,
+      room: thing.room,
+      description: input.description,
+      photoPaths: input.photoPaths,
+      thingId: thing.id,
+    });
+    setReporting(false);
+    navigation.navigate('SnagDetail', { snagId: snag.id });
   }
 
   /**
@@ -547,11 +563,13 @@ export default function ThingDetailScreen() {
    */
   function openService() {
     if (!thing) return;
-    const days = thing.serviceDays ?? 180;
+    const days = serviceJob?.repeatDays ?? thing.serviceDays ?? 180;
     setService({
       days,
       by: thing.spec.servicedBy ?? '',
-      first: formatLooseDate(isoDate(addDays(new Date(), days))),
+      first: serviceJob?.dueAt
+        ? formatDayFirst(dayKey(serviceJob.dueAt))
+        : formatLooseDate(isoDate(addDays(new Date(), days))),
     });
   }
 
@@ -590,7 +608,29 @@ export default function ThingDetailScreen() {
         ...(by ? { spec: { servicedBy: by } } : { clearSpec: ['servicedBy'] }),
       });
       setThing(next);
-      await createSnag({
+      if (serviceJob) {
+        // **Edit the job that exists, never file a second.** Pressing this
+        // used to create a new repeating job every time, so changing the cycle
+        // left the old one running beside the new.
+        const dueAt = new Date(`${due}T00:00:00`).toISOString();
+        const change: Parameters<typeof updateSnag>[1] = {};
+        if (serviceJob.repeatDays !== service.days) change.repeatDays = service.days;
+        if (!serviceJob.dueAt || dayKey(serviceJob.dueAt) !== due) change.dueAt = dueAt;
+        let updated = serviceJob;
+        if (Object.keys(change).length > 0) {
+          updated = await updateSnag(serviceJob.id, change);
+          // A date or a repeat is one of the things that start a job, and
+          // rearranging a service is not starting it: put it back as it was.
+          if (serviceJob.status === 'open' && updated.status === 'doing') {
+            updated = await setSnagStatus(serviceJob.id, 'open');
+          }
+        }
+        setServiceJob(updated);
+        setService(null);
+        showToast(`Service job updated · every ${describeCycle(service.days)}`);
+        return;
+      }
+      const created = await createSnag({
         propertyId: next.propertyId,
         room: next.room,
         description: `Service the ${thingHeadline(next).toLowerCase()}${by ? ` · ${by}` : ''}`,
@@ -598,6 +638,7 @@ export default function ThingDetailScreen() {
         dueAt: due,
         repeatDays: service.days,
       });
+      setServiceJob(created);
       setService(null);
       showToast(`On the list · every ${describeCycle(service.days)}`);
     } catch (err: any) {
@@ -607,11 +648,32 @@ export default function ThingDetailScreen() {
     }
   }
 
-  /** Stops the regime on the thing. Anything already on the list stays there. */
+  /**
+   * Stops the regime — on the thing **and on the list**.
+   *
+   * It used to stop only the thing's own column, so the repeating job went on
+   * coming round for ever after somebody had said it was no longer serviced.
+   * The job is finished rather than deleted: its notes are the appliance's
+   * history, and a finished job keeps them where *Also said about…* can find
+   * them. The repeat is cleared first, or finishing would roll it forward.
+   */
   async function stopService() {
     if (!thing) return;
     setService(null);
-    await patch({ serviceDays: null, clearSpec: ['servicedBy'] }, 'No longer serviced');
+    if (serviceJob) {
+      try {
+        await updateSnag(serviceJob.id, { repeatDays: null });
+        await setSnagStatus(serviceJob.id, 'done');
+        setServiceJob(null);
+      } catch (err: any) {
+        showAlert("Couldn't take it off the list", err?.message ?? 'Please try again.');
+        return;
+      }
+    }
+    await patch(
+      { serviceDays: null, clearSpec: ['servicedBy'] },
+      serviceJob ? 'No longer serviced — taken off the list' : 'No longer serviced',
+    );
   }
 
   async function handleDelete() {
@@ -643,8 +705,6 @@ export default function ThingDetailScreen() {
   // Every field the kind can answer is on screen, empty or not. It used to show
   // only what was filled in, with the rest behind an "Add a detail" row — which
   // reads as tidy and is why nobody could tell what the record could hold.
-  const changed = draft ? changedFields(thing, draft) : [];
-  const dirty = changed.length > 0;
 
   return (
     <View style={styles.flex}>
@@ -655,7 +715,7 @@ export default function ThingDetailScreen() {
       />
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, keyboard > 0 && { paddingBottom: keyboard + Spacing.lg }]}
         keyboardShouldPersistTaps="handled"
       >
         {/* ── Where it came from ──
@@ -743,8 +803,8 @@ export default function ThingDetailScreen() {
               each box already says what it wants, and an empty box that looks
               empty is the whole point of the reversal that put them all on
               screen. */}
-          <Field label="Name" value={draft?.name ?? ''} onChange={(v) => edit('name', v)} />
-          <Field label={words.make} value={draft?.make ?? ''} onChange={(v) => edit('make', v)} />
+          <Field label="Name" value={draft?.name ?? ''} onChange={(v) => edit('name', v)} onBlur={commit} />
+          <Field label={words.make} value={draft?.make ?? ''} onChange={(v) => edit('make', v)} onBlur={commit} />
           <Field
             label={words.model}
             value={draft?.model ?? ''}
@@ -752,6 +812,7 @@ export default function ThingDetailScreen() {
             onCopy={copy}
             savedValue={thing.model}
             onChange={(v) => edit('model', v)}
+            onBlur={commit}
           />
           {KINDS_WITH_SERIAL.includes(thing.kind) ? (
             <Field
@@ -761,6 +822,7 @@ export default function ThingDetailScreen() {
               onCopy={copy}
               savedValue={thing.serial}
               onChange={(v) => edit('serial', v)}
+              onBlur={commit}
             />
           ) : null}
 
@@ -773,6 +835,7 @@ export default function ThingDetailScreen() {
               onCopy={field.key === 'tint' ? copy : undefined}
               savedValue={thing.spec[field.key] ?? null}
               onChange={(v) => editSpec(field.key, v)}
+              onBlur={commit}
               // Read off the draft, so it answers while somebody types. A box
               // holding something that is not a colour says so rather than
               // drawing nothing and leaving them to wonder.
@@ -796,6 +859,7 @@ export default function ThingDetailScreen() {
               label={field.label}
               value={draft?.[field.key] ?? ''}
               onChangeValue={(v) => edit(field.key, v)}
+              onBlur={commit}
               pickerTitle={field.label}
             />
           ))}
@@ -805,6 +869,7 @@ export default function ThingDetailScreen() {
             value={draft?.notes ?? ''}
             multiline={thing.kind !== 'finish'}
             onChange={(v) => edit('notes', v)}
+            onBlur={commit}
           />
         </View>
         {/* ── photos and paperwork ───────────────────────────────────────
@@ -854,20 +919,29 @@ export default function ThingDetailScreen() {
             wraps rather than squeezing three labels onto one phone-width
             line. */}
         <View style={styles.attachRow}>
-          {/* One control, not a camera and a *Choose one* beside it. Those were
-              two controls with one outcome — and on the build people install
-              the distinction was never the app's to make: the file input's own
-              sheet offers *Take Photo* above the library, so asking first only
-              added a tap. It takes several at once. */}
+          {/* A camera and the library, side by side. It was one *Add photos*
+              on the belief that the phone's own file sheet offers *Take Photo*
+              — Android Chrome does not once several files are allowed, so the
+              camera meant leaving the app. See lib/addPhotos.ts. */}
           <Pressable
-            onPress={attachPhotos}
+            onPress={() => attachPhotos('camera')}
             disabled={busy}
             style={styles.addDetail}
             accessibilityRole="button"
-            accessibilityLabel="Add photos"
+            accessibilityLabel="Take a photo"
           >
             <Icon name="camera-outline" size="sm" color={Colors.primary} />
-            <Text style={styles.addDetailLabel}>Add photos</Text>
+            <Text style={styles.addDetailLabel}>Take photo</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => attachPhotos('library')}
+            disabled={busy}
+            style={styles.addDetail}
+            accessibilityRole="button"
+            accessibilityLabel="Choose photos"
+          >
+            <Icon name="images-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.addDetailLabel}>Choose photos</Text>
           </Pressable>
           <Pressable
             onPress={attachDocument}
@@ -1007,10 +1081,17 @@ export default function ThingDetailScreen() {
         {KINDS_WITH_SERVICING.includes(thing.kind) ? (
           <>
             <Text style={styles.sectionLabel}>Servicing</Text>
-            {thing.serviceDays ? (
+            {/* Read off the job on the list when there is one, so this line
+                and the list cannot say two different things. */}
+            {serviceJob?.repeatDays || thing.serviceDays ? (
               <Text style={styles.serviceNow}>
-                Every {describeCycle(thing.serviceDays)}
+                Every {describeCycle((serviceJob?.repeatDays ?? thing.serviceDays)!)}
                 {thing.spec.servicedBy ? ` · ${thing.spec.servicedBy}` : ''}
+                {serviceJob
+                  ? serviceJob.dueAt
+                    ? ` · next due ${formatDayFirst(dayKey(serviceJob.dueAt))}`
+                    : ' · on the list'
+                  : ' · not on the list'}
               </Text>
             ) : null}
             <Pressable
@@ -1021,15 +1102,20 @@ export default function ThingDetailScreen() {
             >
               <Icon name="calendar-outline" size="sm" color={Colors.primary} />
               <Text style={styles.addDetailLabel}>
-                {thing.serviceDays ? 'Change the service regime' : 'Schedule service'}
+                {serviceJob || thing.serviceDays ? 'Change the service regime' : 'Schedule service'}
               </Text>
             </Pressable>
           </>
         ) : null}
 
-        <Pressable onPress={addSnag} style={styles.addDetail} accessibilityRole="button">
+        <Pressable
+          onPress={() => setReporting(true)}
+          style={styles.addDetail}
+          accessibilityRole="button"
+          accessibilityLabel="Report a problem"
+        >
           <Icon name="add" size="sm" color={Colors.primary} />
-          <Text style={styles.addDetailLabel}>Add something about this</Text>
+          <Text style={styles.addDetailLabel}>Report a problem</Text>
         </Pressable>
 
         <Pressable
@@ -1037,27 +1123,10 @@ export default function ThingDetailScreen() {
           style={styles.remove}
           accessibilityRole="button"
         >
-          <Text style={styles.removeLabel}>Remove from the record</Text>
+          <Text style={styles.removeLabel}>Remove this item</Text>
         </Pressable>
       </ScrollView>
 
-      {/* The bar is the last flex child rather than absolutely positioned, so
-          it can never overlap the content it belongs to. `stacked` is false:
-          nothing sits below it here, so it owns the home indicator. The
-          keyboard inset is applied by the screen because StickyActionBar's own
-          handling is `Keyboard`-based and iOS-only, and `Keyboard` is an empty
-          stub in react-native-web — which is the build people install. */}
-      <View style={{ marginBottom: keyboard }}>
-        <StickyActionBar hint={dirty ? unsavedHint(changed.length) : 'All changes saved'}>
-          <Button
-            label={dirty ? 'Save' : 'Saved'}
-            onPress={save}
-            loading={saving}
-            disabled={!dirty}
-            fullWidth
-          />
-        </StickyActionBar>
-      </View>
 
       <PhotoViewer
         visible={viewing !== null}
@@ -1081,7 +1150,7 @@ export default function ThingDetailScreen() {
           onPress={() => setService(null)}
           accessibilityLabel="Close"
         />
-        <View style={[styles.sheet, { marginBottom: keyboard }]}>
+        <View style={[styles.sheet, { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg }]}>
           <View style={styles.grab} />
           <Text style={styles.sheetTitle}>How often is it serviced?</Text>
           <View style={styles.chips}>
@@ -1112,10 +1181,10 @@ export default function ThingDetailScreen() {
 
           <View style={styles.sheetField}>
             <DateField
-              label="First one due"
+              label={serviceJob ? 'Next one due' : 'First one due'}
               value={service?.first ?? ''}
               onChangeValue={(v) => setService((d) => (d ? { ...d, first: v } : d))}
-              pickerTitle="When's the first one due?"
+              pickerTitle={serviceJob ? "When's the next one due?" : "When's the first one due?"}
             />
           </View>
 
@@ -1134,8 +1203,9 @@ export default function ThingDetailScreen() {
           {/* Said once, here, where somebody is setting up something that
               sounds like it might remind them. It will not. */}
           <Text style={styles.sectionHint}>
-            It goes on the list as a job that comes round, and the list rolls it forward each time
-            it is done. Nothing is sent to anybody — this app has no notifications.
+            {serviceJob
+              ? 'This changes the service job already on the list. It comes up under Due soon — nothing is sent to anybody.'
+              : 'It goes on the list as a job that comes round, and comes up under Due soon when it is near. Nothing is sent to anybody.'}
           </Text>
 
           <Pressable
@@ -1143,16 +1213,18 @@ export default function ThingDetailScreen() {
             disabled={busy}
             style={[styles.cta, busy && styles.ctaOff]}
             accessibilityRole="button"
-            accessibilityLabel="Put it on the list"
+            accessibilityLabel={serviceJob ? 'Update the service job' : 'Put it on the list'}
           >
             {busy ? (
               <ActivityIndicator color={Colors.white} />
             ) : (
-              <Text style={styles.ctaLabel}>Put it on the list</Text>
+              <Text style={styles.ctaLabel}>
+                {serviceJob ? 'Update the service job' : 'Put it on the list'}
+              </Text>
             )}
           </Pressable>
 
-          {thing.serviceDays ? (
+          {thing.serviceDays || serviceJob ? (
             <Pressable
               onPress={stopService}
               style={styles.stop}
@@ -1162,6 +1234,34 @@ export default function ThingDetailScreen() {
               <Text style={styles.stopLabel}>Stop servicing it</Text>
             </Pressable>
           ) : null}
+        </View>
+      </Modal>
+
+      {/* ── report a problem ──
+          The List tab's own capture bar, in a sheet: one gesture for filing a
+          job wherever it is filed from. */}
+      <Modal
+        visible={reporting}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReporting(false)}
+      >
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setReporting(false)}
+          accessibilityLabel="Close"
+        />
+        <View style={[styles.sheet, { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg }]}>
+          <View style={styles.grab} />
+          <Text style={styles.sheetTitle}>
+            {`What's wrong with the ${thingHeadline(thing).toLowerCase()}?`}
+          </Text>
+          <ComposeBar
+            pathPrefix={household?.id ?? null}
+            onAdd={fileReport}
+            words={{ placeholder: 'Describe it, or take a photo', sendLabel: 'Add to the list' }}
+            embedded
+          />
         </View>
       </Modal>
 
@@ -1195,13 +1295,15 @@ export default function ThingDetailScreen() {
  * what this page needed anyway once every field started showing.
  */
 function Field({
-  label, value, mono, multiline, onChange, onCopy, savedValue, swatch,
+  label, value, mono, multiline, onChange, onBlur, onCopy, savedValue, swatch,
 }: {
   label: string;
   value: string;
   mono?: boolean;
   multiline?: boolean;
   onChange: (value: string) => void;
+  /** Leaving the box is what writes it. */
+  onBlur?: () => void;
   /** The stored value, for the copy button — never the half-typed draft. */
   savedValue?: string | null;
   onCopy?: (label: string, value: string) => void;
@@ -1239,6 +1341,7 @@ function Field({
         style={[styles.input, mono && styles.inputMono, multiline && styles.inputMulti]}
         value={value}
         onChangeText={onChange}
+        onBlur={onBlur}
         autoCorrect={!mono}
         autoCapitalize={mono ? 'characters' : 'sentences'}
         multiline={multiline}

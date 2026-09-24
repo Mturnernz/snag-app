@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import MoneyField from './MoneyField';
@@ -82,7 +82,7 @@ interface Props {
 export default function AddProjectSheet({
   visible, propertyId, locations, onAddRoom, onCancel, onCreate,
 }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   const [step, setStep] = useState<Step>('name');

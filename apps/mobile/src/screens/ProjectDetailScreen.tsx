@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import Icon from '../components/Icon';
@@ -30,6 +30,7 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../consta
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
+import { fileServiceJob } from '../lib/serviceJob';
 import {
   addExpectedCostLine, addMilestone, addQuoteLine, approveInvoiceReview, clearFigure,
   createElement, createExpectedCost, createLocation, createThing, deleteElement,
@@ -88,7 +89,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export default function ProjectDetailScreen({ route }: Props) {
   const { projectId } = route.params;
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const { household, locations, reloadLocations } = useHousehold();
   const { showToast } = useToast();
 
@@ -343,14 +344,15 @@ export default function ProjectDetailScreen({ route }: Props) {
 
   async function recordAsThing(input: Omit<ThingInput, 'propertyId'>) {
     try {
-      await createThing({
+      const created = await createThing({
         ...input,
         propertyId: project.propertyId,
         projectId: project.id,
         projectItemId: thingFor?.id ?? null,
       });
       setThingFor(null);
-      await changed('Added to the house record');
+      // The walkthrough's service cycle goes on the list, wherever it is asked.
+      await changed((await fileServiceJob(created)) ?? 'Added to the house record');
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't save that");
     }
@@ -937,7 +939,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.sm, backgroundColor: Colors.background,
   },
-  back: { flexDirection: 'row', alignItems: 'center', minHeight: 44, paddingRight: Spacing.md },
+  back: { flexDirection: 'row', alignItems: 'center', minHeight: MIN_TOUCH_TARGET, paddingRight: Spacing.md, paddingLeft: Spacing.xs },
   backLabel: { fontSize: Typography.body, color: Colors.primary },
   navRight: { flexDirection: 'row', alignItems: 'center' },
   addTap: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },

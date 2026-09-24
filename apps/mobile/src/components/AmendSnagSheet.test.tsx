@@ -149,7 +149,7 @@ describe('what it asks', () => {
 // moment a household adds rooms to the seeded twelve.
 
 describe('choosing the room', () => {
-  async function openOnRoom(over: Partial<Snag> = {}) {
+  async function openOnRoom(over: Partial<Snag> = {}, suggestedRoom: string | null = null) {
     const onSetRoom = jest.fn().mockResolvedValue(undefined);
     const onOpenDetail = jest.fn();
     const result = render(
@@ -158,6 +158,7 @@ describe('choosing the room', () => {
         locations={rooms}
         onSaveNote={jest.fn()}
         onSetRoom={onSetRoom}
+        suggestedRoom={suggestedRoom}
         onOpenDetail={onOpenDetail}
         onClose={jest.fn()}
       />
@@ -210,5 +211,44 @@ describe('choosing the room', () => {
     const { result, onOpenDetail } = await openOnRoom();
     await TestRenderer.act(async () => { byLabel(result, 'Submit').props.onPress(); });
     expect(onOpenDetail).toHaveBeenCalled();
+  });
+
+  // Choosing a room is the answer. It used to write the room and then wait
+  // for Submit, which was a second tap confirming a choice that confirmed
+  // itself.
+  it('finishes the sheet the moment a room is chosen', async () => {
+    const { result, onSetRoom, onOpenDetail } = await openOnRoom();
+    await TestRenderer.act(async () => { await row(result, 'Bathroom').props.onPress(); });
+    expect(onSetRoom).toHaveBeenCalledWith('Bathroom');
+    expect(onOpenDetail).toHaveBeenCalled();
+  });
+
+  it('does not finish when a room is taken away', async () => {
+    const { result, onOpenDetail } = await openOnRoom({ room: 'Kitchen' });
+    await TestRenderer.act(async () => { await row(result, 'Kitchen').props.onPress(); });
+    expect(onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  // A walk round files things in batches. The last room is offered, never
+  // written until somebody accepts it.
+  it('offers the last room, and writes it only when accepted', async () => {
+    const { result, onSetRoom, onOpenDetail } = await openOnRoom({}, 'Bathroom');
+    expect(onSetRoom).not.toHaveBeenCalled();
+
+    await TestRenderer.act(async () => { await row(result, 'Bathroom').props.onPress(); });
+    expect(onSetRoom).toHaveBeenCalledWith('Bathroom');
+    expect(onOpenDetail).toHaveBeenCalled();
+  });
+
+  it('takes the offered room on Submit too', async () => {
+    const { result, onSetRoom } = await openOnRoom({}, 'Bathroom');
+    await TestRenderer.act(async () => { await byLabel(result, 'Submit').props.onPress(); });
+    expect(onSetRoom).toHaveBeenCalledWith('Bathroom');
+  });
+
+  it('never offers a room over one the snag already has', async () => {
+    const { result, onSetRoom } = await openOnRoom({ room: 'Kitchen' }, 'Bathroom');
+    await TestRenderer.act(async () => { await byLabel(result, 'Submit').props.onPress(); });
+    expect(onSetRoom).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import Icon from './Icon';
 import RoomPicker from './RoomPicker';
 import { Colors, Radius, Spacing, Typography, Shadow, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { Location, Snag } from '../types';
 
 /**
@@ -77,6 +78,15 @@ interface Props {
   onSaveNote: (text: string) => Promise<void>;
   onSetRoom: (room: string | null) => Promise<void>;
   /**
+   * The room the last snag was filed in, when that was a few minutes ago.
+   *
+   * A walk round the house files things in batches — three in the bathroom,
+   * then two in the laundry — and asking the same question five times over is
+   * the one tap the batch does not need. It is offered, never written: the
+   * snag gets it only when **Submit** is pressed with nothing else chosen.
+   */
+  suggestedRoom?: string | null;
+  /**
    * Where the sheet goes when it is finished with.
    *
    * Finishing capture opens the job. Everything the sheet used to ask on steps
@@ -89,11 +99,19 @@ interface Props {
 }
 
 export default function AmendSnagSheet({
-  snag, locations, busy, onSaveNote, onSetRoom, onOpenDetail, onClose,
+  snag, locations, busy, onSaveNote, onSetRoom, suggestedRoom, onOpenDetail, onClose,
 }: Props) {
   const [step, setStep] = useState<AmendStep>(() => firstStep(snag));
+  /**
+   * The suggestion still standing. Cleared the moment somebody touches the
+   * picker, so a room they deliberately un-chose is not quietly put back.
+   */
+  const [suggestion, setSuggestion] = useState<string | null>(
+    () => (snag.room ? null : suggestedRoom ?? null)
+  );
   const [note, setNote] = useState(snag.description ?? '');
   const keyboard = useKeyboardInset();
+  const edge = useEdgeInsets();
 
   const order = amendSteps();
   const index = Math.max(0, order.indexOf(step));
@@ -110,13 +128,37 @@ export default function AmendSnagSheet({
       return;
     }
     // The last step. Dismissing is finishing, and finishing opens the job.
+    if (suggestion && !snag.room) await onSetRoom(suggestion);
     onOpenDetail();
+  }
+
+  /**
+   * **Choosing a room is the answer, so it finishes the sheet.** It used to
+   * write the room and then wait for Submit — a second tap confirming a choice
+   * that was its own confirmation. Pressing the chosen room again still clears
+   * it, and that does not finish anything: somebody taking a room away is
+   * about to pick another, or to Submit with none.
+   */
+  async function chooseRoom(picked: string | null) {
+    // The picker reports a press on the lit row as "clear it". A suggested row
+    // is lit without being chosen, so pressing it is taking the suggestion.
+    const room = picked === null && suggestion && !snag.room ? suggestion : picked;
+    setSuggestion(null);
+    await onSetRoom(room);
+    if (room) onOpenDetail();
   }
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
-      <View style={[styles.sheet, { marginBottom: keyboard }]}>
+      {/* The home indicator's height under the Submit button. Without it the
+          one button this sheet exists for sat on the iPhone's bottom edge. */}
+      <View
+        style={[
+          styles.sheet,
+          { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg },
+        ]}
+      >
         <View style={styles.grab} />
 
         <View style={styles.head}>
@@ -174,8 +216,8 @@ export default function AmendSnagSheet({
             <Text style={styles.question}>Where is it?</Text>
             <RoomPicker
               locations={locations}
-              value={snag.room}
-              onChange={(room) => { void onSetRoom(room); }}
+              value={snag.room ?? suggestion}
+              onChange={(room) => { void chooseRoom(room); }}
               disabled={busy}
               startOpen
             />

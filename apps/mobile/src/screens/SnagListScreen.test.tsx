@@ -37,7 +37,9 @@ const mock_getSnags = jest.fn();
 const mock_markListSeen = jest.fn();
 const mock_setPartBought = jest.fn().mockResolvedValue(undefined);
 const mock_updateSnag = jest.fn();
+const mock_setSnagStatus = jest.fn();
 jest.mock('../lib/supabase', () => ({
+  setSnagStatus: (...a: unknown[]) => mock_setSnagStatus(...a),
   getSnags: (...a: unknown[]) => mock_getSnags(...a),
   markListSeen: () => mock_markListSeen(),
   getFileUrls: jest.fn().mockResolvedValue({}),
@@ -46,7 +48,8 @@ jest.mock('../lib/supabase', () => ({
   updateSnag: (...a: unknown[]) => mock_updateSnag(...a),
   setPartBought: (...a: unknown[]) => mock_setPartBought(...a),
 }));
-jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
+const mock_showToast = jest.fn();
+jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: mock_showToast }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
 
@@ -504,11 +507,11 @@ describe('a job that comes round again', () => {
   });
 
   it('leaves an ordinary repeat exactly where it was', async () => {
-    // Due on Saturday and never done: there is work to do, so it stays in its
+    // Due next month and never done: there is work to do, so it stays in its
     // room with everything else.
     arrange();
     const all = [snag({
-      id: 'b', room: 'Outside', description: 'Gutters', repeatDays: 180, dueAt: at(3),
+      id: 'b', room: 'Outside', description: 'Gutters', repeatDays: 180, dueAt: at(30),
     })];
     mock_getSnags.mockImplementation(async (filter: any) =>
       all.filter((s) => filter.status.includes(s.status)));
@@ -527,6 +530,106 @@ describe('a job that comes round again', () => {
 // long way to reach the one it came for. Folding keeps the answer the grouping
 // gives ("there are three things in the Garage") while costing none of the
 // height.
+
+// ---------------------------------------------------------------- due soon
+//
+// Nothing in this product reminds anybody, so the list is the reminder. A job
+// due on Saturday used to sit in its room with everything else.
+
+describe('what is due soon', () => {
+  const at = (days: number) => new Date(Date.now() + days * DAY).toISOString();
+  const sectionTitles = (r: ReturnType<typeof render>) =>
+    texts(r).filter((t) => / · \d+$/.test(t));
+
+  it('lifts what is overdue or due this week above every room, soonest first', async () => {
+    const all = [
+      snag({ id: 'a', room: 'Kitchen', description: 'Tap', dueAt: at(5) }),
+      snag({ id: 'b', room: 'Garage', description: 'Filter', dueAt: at(-2) }),
+      snag({ id: 'c', room: 'Kitchen', description: 'Shelf', dueAt: at(40) }),
+      snag({ id: 'd', room: 'Kitchen', description: 'Hinge' }),
+    ];
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      all.filter((s) => filter.status.includes(s.status)));
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    const titles = sectionTitles(r);
+    expect(titles[0]).toBe('Due soon · 2');
+    expect(titles).toContain('Kitchen · 2');
+    expect(titles).not.toContain('Garage · 1');
+    const words = texts(r);
+    expect(words.indexOf('Filter')).toBeLessThan(words.indexOf('Tap'));
+  });
+
+  it('leaves a repeat that is parked until next time out of it', async () => {
+    const all = [snag({
+      id: 'a', room: 'Kitchen', description: 'Filter', repeatDays: 7, dueAt: at(5), lastDoneAt: ago(2),
+    })];
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      all.filter((s) => filter.status.includes(s.status)));
+    const r = render(<SnagListScreen />);
+    await settle();
+    expect(sectionTitles(r).some((t) => t.startsWith('Due soon'))).toBe(false);
+  });
+
+  it('has no Show me button any more — the cart is the only lens', async () => {
+    const r = render(<SnagListScreen />);
+    await settle();
+    const found = r.root.findAll((n) => n.props?.accessibilityLabel === 'Show me', { deep: true });
+    expect(found).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------- finishing
+//
+// Marking something done is the most common thing done to a job that already
+// exists, and it was four actions and a scroll away.
+
+describe('finishing from the list', () => {
+  const tick = (r: ReturnType<typeof render>, headline: string) =>
+    r.root.findAll((n) => typeof n.type !== 'string' && !!n.props?.onPress
+      && n.props?.accessibilityLabel === `Mark done: ${headline}`, { deep: true });
+
+  it('finishes a job from its card and offers to take it back', async () => {
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      filter.status.includes('done') ? [] : [snag({ id: 'a', description: 'Hinge' })]);
+    mock_setSnagStatus.mockResolvedValue(snag({ id: 'a', status: 'done' }));
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    await TestRenderer.act(async () => { await tick(r, 'Hinge')[0].props.onPress(); });
+    expect(mock_setSnagStatus).toHaveBeenCalledWith('a', 'done');
+    const [message, action] = mock_showToast.mock.calls.at(-1)!;
+    expect(message).toBe('Done: Hinge');
+    expect(action.label).toBe('Undo');
+
+    mock_setSnagStatus.mockResolvedValue(snag({ id: 'a' }));
+    await TestRenderer.act(async () => { action.onPress(); });
+    expect(mock_setSnagStatus).toHaveBeenLastCalledWith('a', 'open');
+  });
+
+  it('says a repeat is back on the list, and offers no undo', async () => {
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      filter.status.includes('done') ? [] : [snag({ id: 'a', description: 'Filter', repeatDays: 90 })]);
+    mock_setSnagStatus.mockResolvedValue(
+      snag({ id: 'a', status: 'open', repeatDays: 90, dueAt: new Date(Date.now() + 90 * DAY).toISOString() }));
+    const r = render(<SnagListScreen />);
+    await settle();
+
+    await TestRenderer.act(async () => { await tick(r, 'Filter')[0].props.onPress(); });
+    const [message, action] = mock_showToast.mock.calls.at(-1)!;
+    expect(message).toMatch(/back on the list/);
+    expect(action).toBeUndefined();
+  });
+
+  it('offers no tick on a job that is already done', async () => {
+    mock_getSnags.mockImplementation(async (filter: any) =>
+      filter.status.includes('done') ? [snag({ id: 'z', description: 'Fence', status: 'done', doneAt: ago(1) })] : []);
+    const r = render(<SnagListScreen />);
+    await settle();
+    expect(tick(r, 'Fence')).toHaveLength(0);
+  });
+});
 
 describe('folding a room away', () => {
   // The fold is remembered on the device, which means it survives a remount —

@@ -213,7 +213,7 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="dark" />
         <ToastProvider>
-          <SetupScreen profile={profile} onReady={loadAccount} />
+          <SetupScreen profile={profile} onReady={loadAccount} onJoinToken={setJoinToken} />
         </ToastProvider>
       </SafeAreaProvider>
     );

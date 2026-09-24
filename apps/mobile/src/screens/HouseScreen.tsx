@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import {
   exportDateStamp, ghostsForRoom, searchThings, thingExportPhotos, thingExportTable,
@@ -25,6 +25,7 @@ import {
   createLocation, createThing, getAbsentThings, getFileUrls, getThings, markThingAbsent,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { fileServiceJob } from '../lib/serviceJob';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import {
   AbsentThing, RootStackParamList, Thing, ThingKind, ThingSuggestion,
@@ -89,7 +90,7 @@ interface Section {
 
 export default function HouseScreen() {
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const {
     household, properties, activeProperty, setActiveProperty, locations, reloadLocations,
   } = useHousehold();
@@ -292,9 +293,9 @@ export default function HouseScreen() {
       return;
     }
     try {
-      await createThing({ ...input, propertyId: activeProperty.id });
+      const created = await createThing({ ...input, propertyId: activeProperty.id });
       setSheetOpen(false);
-      showToast('In the record');
+      showToast((await fileServiceJob(created)) ?? 'Added to the house');
       await load();
     } catch (err: any) {
       // The sheet stays open on a failure: everything typed is still in it, and

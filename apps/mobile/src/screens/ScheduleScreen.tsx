@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import {
   dayKey, describeCycle, marksOn, monthGrid, scheduleMarks, snagHeadline,
@@ -153,7 +153,7 @@ const MONTHS = [
 
 export default function ScheduleScreen() {
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const { household, properties, profile } = useHousehold();
 
   const today = useMemo(() => new Date(), []);
@@ -410,7 +410,7 @@ export default function ScheduleScreen() {
             <EmptyState
               icon="calendar-outline"
               title={selected ? 'Nothing on this day' : `Nothing in ${MONTHS[monthOf]}`}
-              message="Dates come from a snag's due date and from when it was added or finished."
+              message="Dates come from a job's due date and from when it was added or finished."
             />
           )
         ) : (

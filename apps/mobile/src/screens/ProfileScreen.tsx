@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -33,7 +33,7 @@ const LOOSE_END_LIMIT = 5;
 
 export default function ProfileScreen() {
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const { profile, household, members, locations, properties, reloadAccount } = useHousehold();
   const { showToast } = useToast();
 
@@ -340,7 +340,7 @@ export default function ProfileScreen() {
         title="Delete your account?"
         message={
           "You'll be signed out for good. Any household you're the only one in is deleted with " +
-          'every snag, thing and photo in it. This cannot be undone.'
+          'every job, item and photo in it. This cannot be undone.'
         }
         confirmLabel="Delete"
         confirmText={profile.displayName}

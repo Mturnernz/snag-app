@@ -4,7 +4,7 @@ import {
   useWindowDimensions, Platform,
   type ViewStyle, type NativeTouchEvent,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -72,7 +72,7 @@ const isZoomed = (t: Transform) => t.scale > MIN_SCALE + 0.01;
  */
 export default function PhotoViewer({ visible, photos, startIndex = 0, onClose }: Props) {
   const { width, height } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
 
   const [index, setIndex] = useState(startIndex);
   // Two booleans rather than the live scale, deliberately: they only flip at

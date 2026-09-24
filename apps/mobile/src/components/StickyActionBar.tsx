@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Keyboard, Platform, KeyboardEvent } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { Colors, Spacing, Typography, Shadow } from '../constants/theme';
 import Icon from './Icon';
 
@@ -28,7 +28,7 @@ interface Props {
 // on an old Android, so the bar carries its own near-opaque ground and stays
 // legible with the blur removed entirely.
 export default function StickyActionBar({ children, hint, hintTone = 'muted', stacked }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Android resizes the window for the keyboard (Expo's default layout mode),

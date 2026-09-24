@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -47,7 +47,7 @@ interface Props {
 export default function ProjectRoomsSheet({
   visible, locations, elements, onAddRoom, onAdd, onClose,
 }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   const [busy, setBusy] = useState(false);

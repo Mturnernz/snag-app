@@ -11,6 +11,18 @@ interface Props {
   snag: Snag;
   photoUrl?: string | null;
   onPress: () => void;
+  /**
+   * Finishing from the list, without opening the job.
+   *
+   * Marking something done is the most common thing anybody does to a job
+   * that already exists, and it was four actions and a scroll away: open it,
+   * scroll past every card, *Mark done*, *Return to list*. Absent on anything
+   * that is done, or parked until it comes round again — there is nothing to
+   * finish there.
+   */
+  onDone?: () => void;
+  /** While the finish is on its way, so a second tap cannot send a second. */
+  finishing?: boolean;
 }
 
 /**
@@ -21,7 +33,7 @@ interface Props {
  * space and the metadata is a single wrapping row underneath rather than a
  * stack of labelled fields.
  */
-export default function SnagCard({ snag, photoUrl, onPress }: Props) {
+export default function SnagCard({ snag, photoUrl, onPress, onDone, finishing }: Props) {
   const done = snag.status === 'done';
   // A repeating job that has been done and is waiting for its next turn gets
   // the same translucency, because it is the same fact: there is nothing to do
@@ -33,9 +45,12 @@ export default function SnagCard({ snag, photoUrl, onPress }: Props) {
   const toGet = unboughtParts(snag);
 
   return (
+    <View style={[styles.card, settled && styles.doneCard]}>
+    {/* The tick is a sibling of the door, never inside it: a Pressable inside
+        a Pressable is a coin toss about which one gets the tap. */}
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed, settled && styles.doneCard]}
+      style={({ pressed }) => [styles.open, pressed && styles.pressed]}
       accessibilityRole="button"
       accessibilityLabel={`${headline}${snag.room ? `, ${snag.room}` : ''}`}
     >
@@ -102,20 +117,61 @@ export default function SnagCard({ snag, photoUrl, onPress }: Props) {
         ) : null}
       </View>
     </Pressable>
+
+    {onDone && !settled ? (
+      <Pressable
+        onPress={onDone}
+        disabled={finishing}
+        style={({ pressed }) => [styles.tick, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={`Mark done: ${headline}`}
+      >
+        <View style={[styles.tickRing, finishing && styles.tickRingBusy]}>
+          <Icon
+            name="checkmark"
+            size="sm"
+            color={finishing ? Colors.textMuted : Colors.primary}
+          />
+        </View>
+      </Pressable>
+    ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
-    gap: Spacing.md,
+    alignItems: 'stretch',
+    gap: Spacing.xs,
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
     padding: Spacing.md,
     minHeight: MIN_TOUCH_TARGET,
     ...Shadow.sm,
   },
+  open: { flex: 1, flexDirection: 'row', gap: Spacing.md },
   pressed: { opacity: 0.7 },
+  // An outline circle, fern on white: an interaction, which is what fern is
+  // for — and hollow, because nothing is done until it is pressed.
+  tick: {
+    width: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginRight: -Spacing.xs,
+  },
+  tickRing: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tickRingBusy: { borderColor: Colors.border },
   doneCard: { opacity: 0.62 },
   thumb: {
     width: 84,

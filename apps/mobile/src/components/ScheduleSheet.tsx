@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, Modal, ScrollView, Pressable, StyleSheet,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import DateField from './DateField';
@@ -48,7 +48,7 @@ interface Props {
 export default function ScheduleSheet({
   visible, quote, milestones, claimedIds, onAdd, onDelete, onClose,
 }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   const [name, setName] = useState('');

@@ -1,4 +1,6 @@
-import { PHOTO_PICK_LIMIT, compressAndUpload, photoFileName, pickPhotos } from './photoUpload';
+import {
+  PHOTO_PICK_LIMIT, compressAndUpload, photoFileName, pickPhotos, takePhoto,
+} from './photoUpload';
 import { showAlert } from './alert';
 
 function failureReason(err: unknown): string {
@@ -26,12 +28,30 @@ function failureReason(err: unknown): string {
  *
  * The caller owns the write: each level has its own RPC, and a helper that
  * could write would be a second place a snag's or a thing's photos are set.
+ *
+ * **Two sources, and the caller offers both.** This used to be the library
+ * only, on the assumption that a phone browser's own file sheet always offers
+ * *Take Photo* above the library. iOS Safari does; Android Chrome drops the
+ * camera the moment the input allows more than one file, and the native build
+ * never offered it — so somebody standing in front of the problem had to leave
+ * the app to photograph it. `camera` is one shot through `takePhoto`, which
+ * sets `capture` and opens the rear camera directly.
  */
+export type PhotoSource = 'camera' | 'library';
+
 export async function addPhotos(
   pathPrefix: string,
-  save: (paths: string[]) => Promise<void>
+  save: (paths: string[]) => Promise<void>,
+  source: PhotoSource = 'library'
 ): Promise<void> {
-  const { uris, dropped } = await pickPhotos();
+  let uris: string[];
+  let dropped = 0;
+  if (source === 'camera') {
+    const uri = await takePhoto();
+    uris = uri ? [uri] : [];
+  } else {
+    ({ uris, dropped } = await pickPhotos());
+  }
   if (uris.length === 0) return;
 
   const added: string[] = [];

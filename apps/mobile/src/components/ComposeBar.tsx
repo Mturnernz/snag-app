@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -8,14 +8,20 @@ import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
+import { addPhotos } from '../lib/addPhotos';
 
 interface Props {
   /** `<household_id>` — the storage folder the RLS policies read. */
   pathPrefix: string | null;
-  /** Files a snag with a photo, a line of text, or both. */
-  onAdd: (input: { photoPath: string | null; description: string | null }) => Promise<void>;
+  /** Files a snag with photos, a line of text, or both. */
+  onAdd: (input: { photoPaths: string[]; description: string | null }) => Promise<void>;
   /** Stacked above a tab bar, which already clears the home indicator. */
   stacked?: boolean;
+  /**
+   * Inside a sheet rather than pinned to the foot of a screen — a thing's
+   * *Report a problem*. The sheet owns the keyboard lift and the edges.
+   */
+  embedded?: boolean;
   /**
    * What the bar is for, in the words of the tab it is on.
    *
@@ -60,8 +66,8 @@ interface Props {
  *   bar is the exact case that breaks. This is the one component in the app
  *   that could not exist without that fix.
  */
-export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props) {
-  const insets = useSafeAreaInsets();
+export default function ComposeBar({ pathPrefix, onAdd, stacked, words, embedded }: Props) {
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   const [draft, setDraft] = useState('');
@@ -71,7 +77,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
   const off = busy || !pathPrefix;
 
   const cameraLabel = words?.cameraLabel ?? 'Take a photo';
-  const prompt = words?.placeholder ?? 'Capture new issue';
+  const prompt = words?.placeholder ?? 'Capture a new job';
   // The accessible name is the prompt without its trailing ellipsis: a screen
   // reader saying "Say what it is dot dot dot" is reading punctuation aloud.
   const promptLabel = prompt.replace(/[….]+$/, '');
@@ -86,7 +92,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
       // tick, and a bar still holding the words that are now on screen reads
       // as "that didn't send".
       setDraft('');
-      await onAdd({ photoPath: null, description: text });
+      await onAdd({ photoPaths: [], description: text });
     } catch (err: any) {
       setDraft(text);
       showAlert("Couldn't add that", err?.message ?? 'Please try again.');
@@ -108,9 +114,30 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
       // someone typing and then reaching for the camera meant one snag.
       const description = draft.trim() || null;
       setDraft('');
-      await onAdd({ photoPath: path, description });
+      await onAdd({ photoPaths: [path], description });
     } catch (err: unknown) {
       showAlert("Couldn't add that photo", failureReason(err) ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * A photograph somebody already has — taken earlier with the phone's own
+   * camera, or sent over by the other person. The bar only ever opened the
+   * camera, so filing one meant typing a snag and then adding the photo on its
+   * page. The shutter stays the one-tap default; this sits at the far end of
+   * the field, where the send arrow goes once there are words to send.
+   */
+  async function handleLibrary() {
+    if (busy || !pathPrefix) return;
+    setBusy(true);
+    try {
+      const description = draft.trim() || null;
+      await addPhotos(pathPrefix, async (paths) => {
+        setDraft('');
+        await onAdd({ photoPaths: paths, description });
+      }, 'library');
     } finally {
       setBusy(false);
     }
@@ -120,12 +147,14 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
     <View
       style={[
         styles.bar,
-        {
-          marginBottom: keyboard,
-          // The keyboard covers the inset it would otherwise clear, and a tab
-          // bar below already owns it. Never both.
-          paddingBottom: (keyboard > 0 || stacked ? 0 : insets.bottom) + Spacing.sm,
-        },
+        embedded
+          ? styles.barEmbedded
+          : {
+            marginBottom: keyboard,
+            // The keyboard covers the inset it would otherwise clear, and a tab
+            // bar below already owns it. Never both.
+            paddingBottom: (keyboard > 0 || stacked ? 0 : insets.bottom) + Spacing.sm,
+          },
       ]}
     >
       {/* **The camera is the default way to log something, and the field says
@@ -170,7 +199,17 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
         accessibilityLabel={promptLabel}
       />
 
-      {draft.trim().length > 0 ? (
+      {draft.trim().length === 0 ? (
+        <Pressable
+          onPress={handleLibrary}
+          disabled={off}
+          style={styles.library}
+          accessibilityRole="button"
+          accessibilityLabel="Choose a photo you already have"
+        >
+          <Icon name="images-outline" size="md" color={off ? Colors.textMuted : Colors.textSecondary} />
+        </Pressable>
+      ) : (
         <Pressable
           onPress={handleText}
           disabled={!canSend}
@@ -180,7 +219,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
         >
           <Icon name="arrow-up" size="md" color={canSend ? Colors.white : Colors.textMuted} />
         </Pressable>
-      ) : null}
+      )}
     </View>
   );
 }
@@ -196,6 +235,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
+  barEmbedded: { borderTopWidth: 0, paddingHorizontal: 0, paddingBottom: Spacing.sm },
   camera: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
@@ -226,4 +266,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendOff: { backgroundColor: Colors.sunken },
+  library: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

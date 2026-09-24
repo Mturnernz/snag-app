@@ -96,7 +96,7 @@ export default function LocationTagsScreen() {
   function confirmRemove(tag: Location) {
     showAlert(
       `Remove ${tag.name}?`,
-      'Snags already filed there keep the tag — it just stops being offered when you add something new.',
+      'Jobs already filed there keep the tag — it just stops being offered when you add something new.',
       [
         { text: 'Keep it', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: () => remove(tag) },

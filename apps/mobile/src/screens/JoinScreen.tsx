@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -51,7 +51,7 @@ interface Props {
  *   people scan twice and the second scan must not read as a fresh invitation.
  */
 export default function JoinScreen({ token, profile, onJoined, onDismiss }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const [invitation, setInvitation] = useState<InvitationByToken | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -9,12 +9,18 @@ import {
   acceptInvitation, createHousehold, declineInvitation, getMyInvitations, signOut, upsertProfile,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { parseJoinToken } from '../lib/joinLink';
 import { InvitationToMe, Profile } from '../types';
 
 interface Props {
   /** Null for an account that hasn't given a name yet. */
   profile: Profile | null;
   onReady: () => Promise<void>;
+  /**
+   * A link pasted on the waiting screen. It hands the code to the same join
+   * question a scanned or tapped link reaches — one way in, not two.
+   */
+  onJoinToken?: (token: string) => void;
 }
 
 /**
@@ -36,8 +42,8 @@ interface Props {
  * waits at the address, this screen finds it, and the person it names decides —
  * Join, or No thanks. An invitation you can't refuse is an instruction.
  */
-export default function SetupScreen({ profile, onReady }: Props) {
-  const insets = useSafeAreaInsets();
+export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
+  const insets = useEdgeInsets();
   const [name, setName] = useState(profile?.displayName ?? '');
   const [householdName, setHouseholdName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -45,6 +51,8 @@ export default function SetupScreen({ profile, onReady }: Props) {
   const [invitations, setInvitations] = useState<InvitationToMe[]>([]);
   const [checking, setChecking] = useState(false);
   const [answering, setAnswering] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const pastedToken = parseJoinToken(pasted);
 
   // Only ever looked for once there is a profile to accept with — accept_invitation
   // needs one, and asking before the name is saved would find nothing and say so
@@ -162,6 +170,36 @@ export default function SetupScreen({ profile, onReady }: Props) {
           disabled={checking}
           fullWidth
         />
+
+        {/* The other way in. Somebody who signed up before they were sent
+            anything had *Check again* and nothing else; if a link has since
+            arrived in a message, pasting it here is quicker than finding and
+            tapping it. */}
+        {onJoinToken ? (
+          <View style={styles.paste}>
+            <Text style={styles.label}>Been sent a link?</Text>
+            <TextInput
+              style={styles.input}
+              value={pasted}
+              onChangeText={setPasted}
+              placeholder="Paste it here"
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Paste an invite link"
+            />
+            {pasted.trim() && !pastedToken ? (
+              <Text style={styles.pasteMiss}>That doesn't look like a Snag invite link.</Text>
+            ) : null}
+            <Button
+              label="Use this link"
+              variant="outline"
+              onPress={() => pastedToken && onJoinToken(pastedToken)}
+              disabled={!pastedToken}
+              fullWidth
+            />
+          </View>
+        ) : null}
         <Button label="Sign out" variant="ghost" onPress={() => signOut()} fullWidth />
       </View>
     );
@@ -258,6 +296,8 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: Spacing.md,
   },
+  paste: { alignSelf: 'stretch', gap: Spacing.sm, marginTop: Spacing.lg },
+  pasteMiss: { fontSize: Typography.sm, color: Colors.textMuted },
   input: {
     backgroundColor: Colors.surface,
     borderWidth: 1,

@@ -75,6 +75,7 @@ export default function PriceSheet({
   const [partAmount, setPartAmount] = useState('');
   const [supplier, setSupplier] = useState('');
   const [detail, setDetail] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
   const [amount, setAmount] = useState('');
   const [incl, setIncl] = useState(true);
   const [due, setDue] = useState('');
@@ -90,6 +91,7 @@ export default function PriceSheet({
     setPartAmount('');
     setSupplier(quote.supplier ?? '');
     setDetail(quote.detail ?? '');
+    setInvoiceNo(quote.invoiceNumber ?? '');
     setAmount(quote.amount === null ? '' : String(quote.amount));
     setIncl(quote.amountInclGst);
     setDue(quote.dueOn ? formatDayFirst(quote.dueOn) : '');
@@ -149,7 +151,7 @@ export default function PriceSheet({
       detail: detail.trim() || null,
       // An emptied amount box is refused rather than clearing a price.
       ...(money !== null ? { amount: money, amountInclGst: incl } : {}),
-      ...(isBill ? { dueOn: dueOn ?? null } : {}),
+      ...(isBill ? { dueOn: dueOn ?? null, invoiceNumber: invoiceNo.trim() || null } : {}),
     }), 'Saved').then(() => setEditing(false));
   }
 
@@ -230,6 +232,11 @@ export default function PriceSheet({
             </View>
             {isBill ? (
               <View style={styles.field}>
+                <TextInput style={styles.input} value={invoiceNo} onChangeText={setInvoiceNo} placeholder="Invoice number" placeholderTextColor={Colors.textMuted} accessibilityLabel="Invoice number" autoCapitalize="characters" />
+              </View>
+            ) : null}
+            {isBill ? (
+              <View style={styles.field}>
                 <DateField label="Due" value={due} onChangeValue={setDue} pickerTitle="When it’s due" />
               </View>
             ) : null}
@@ -266,6 +273,7 @@ export default function PriceSheet({
 
             <Group>
               {isBill && unpaid > 0 && mine.length > 0 ? <Row title="Still to pay" value={formatMoney(unpaid)} bold /> : null}
+              {isBill && quote.invoiceNumber ? <Row title="Invoice" value={quote.invoiceNumber} tone="muted" /> : null}
               {isBill && quote.dueOn ? <Row title="Due" value={formatExactDate(quote.dueOn)} tone="muted" /> : null}
               {contract ? (
                 <Row title="Part of" value={contract.detail ?? 'Agreed price'} tone="muted" onPress={() => onOpen(contract)} />

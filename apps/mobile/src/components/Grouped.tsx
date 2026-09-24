@@ -63,12 +63,20 @@ interface RowProps {
   accessibilityLabel?: string;
   dim?: boolean;
   bold?: boolean;
+  /** Sits under a heading row: the bills beneath a supplier's name. */
+  indent?: boolean;
+  /**
+   * The row folds what is under it rather than opening something: a chevron
+   * pointing down or up instead of the forward one, which promises navigation.
+   */
+  expanded?: boolean;
 }
 
 export function Row({
   title, subtitle, value, tone = 'default', onPress, accessory, leading,
-  accessibilityLabel, dim, bold,
+  accessibilityLabel, dim, bold, indent, expanded,
 }: RowProps) {
+  const folds = expanded !== undefined;
   const body = (
     <>
       {leading}
@@ -90,7 +98,13 @@ export function Row({
           {value}
         </Text>
       ) : null}
-      {onPress && !accessory ? <Icon name="chevron-forward" size={16} color={Colors.chevron} /> : null}
+      {onPress && !accessory ? (
+        <Icon
+          name={folds ? (expanded ? 'chevron-up' : 'chevron-down') : 'chevron-forward'}
+          size={16}
+          color={Colors.chevron}
+        />
+      ) : null}
     </>
   );
   return (
@@ -98,14 +112,15 @@ export function Row({
       {onPress ? (
         <Pressable
           onPress={onPress}
-          style={styles.rowTap}
+          style={[styles.rowTap, indent && styles.indent]}
           accessibilityRole="button"
           accessibilityLabel={accessibilityLabel ?? title}
+          accessibilityState={folds ? { expanded } : undefined}
         >
           {body}
         </Pressable>
       ) : (
-        <View style={styles.rowTap}>{body}</View>
+        <View style={[styles.rowTap, indent && styles.indent]}>{body}</View>
       )}
       {accessory}
     </View>
@@ -294,6 +309,7 @@ const styles = StyleSheet.create({
     flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     minHeight: 52, paddingVertical: Spacing.sm + 2, paddingLeft: Spacing.lg,
   },
+  indent: { paddingLeft: Spacing.lg + Spacing.xl },
   titles: { flex: 1, minWidth: 0, gap: 2 },
   title: { fontSize: Typography.body, lineHeight: 22, color: Colors.textPrimary },
   subtitle: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textMuted },

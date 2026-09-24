@@ -156,3 +156,25 @@ it('says where allocating puts it, before anybody presses Allocate', () => {
   expect(r.queryByText('For')).not.toBeNull();
   expect(r.queryByText('Bathroom, Laundry · split evenly')).not.toBeNull();
 });
+
+describe('a card that looks like a bill already on the job', () => {
+  it('says which, offers to open it, and still allocates', () => {
+    const onOpenDuplicate = jest.fn();
+    const { r, onApprove } = arrange({}, {
+      duplicate: 'Looks like TS-4471 from Tile Space ($2,480, 16 Sep 2026), already on the job',
+      onOpenDuplicate,
+    });
+    r.getByText('Looks like TS-4471 from Tile Space ($2,480, 16 Sep 2026), already on the job');
+    const open = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Open the bill it looks like' && n.props?.onPress)[0];
+    TestRenderer.act(() => open.props.onPress());
+    expect(onOpenDuplicate).toHaveBeenCalled();
+    press(r, 'Allocate');
+    expect(onApprove).toHaveBeenCalled();
+  });
+
+  it('says nothing when there is no likely twin', () => {
+    const { r } = arrange();
+    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+    expect(text).not.toContain('Looks like');
+  });
+});

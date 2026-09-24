@@ -41,7 +41,8 @@ import {
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  dayKey, exportDateStamp, formatExactDate, formatLooseDate, pendingReviews, projectDossierTable,
+  billFactsOfReview, dayKey, describeDuplicate, duplicateReviews, exportDateStamp, formatExactDate,
+  formatLooseDate, groupBySupplier, pendingReviews, projectDossierTable,
   projectExportPhotos, reviewAlert, type ThingInput,
 } from '@snag/supabase-queries';
 import { getFileUrl, getFileUrls, setInvoiceReviewRooms, updateInvoiceReview } from '../lib/supabase';
@@ -49,7 +50,7 @@ import { describeRooms } from '../components/RoomSplit';
 import { openUrl } from '../lib/openUrl';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import type {
-  InvoiceReview, ProjectElement, ProjectExpectedCost, ProjectItem, ProjectQuote, RootStackParamList,
+  InvoiceReview, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectItem, ProjectQuote, RootStackParamList,
 } from '../types';
 
 /** How much of the handover list is shown before it asks — a sitting's worth. */
@@ -118,6 +119,7 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [checking, setChecking] = useState<InvoiceReview | null>(null);
   const [emailOpen, setEmailOpen] = useState(false);
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [foldedPayees, setFoldedPayees] = useState<Set<string>>(() => new Set());
 
   const refreshing = useRef(false);
   const pending = useRef(false);
@@ -155,6 +157,12 @@ export default function ProjectDetailScreen({ route }: Props) {
 
   const summary = useMemo(() => (page ? projectSummary(page) : null), [page]);
   const setAsides = useMemo(() => (page ? liveSetAsides(page) : []), [page]);
+  // Waiting cards that look like a bill already on the job, or like an earlier
+  // card — the same email forwarded twice. A warning on the card, never a lock.
+  const duplicates = useMemo(
+    () => (page ? duplicateReviews(page.quotes, pendingReviews(page.invoiceReviews)) : new Map()),
+    [page],
+  );
   const thingStart = useMemo(() => {
     if (!thingFor || !page) return null;
     const element = page.elements.find((e) => e.id === thingFor.elementId);
@@ -361,6 +369,10 @@ export default function ProjectDetailScreen({ route }: Props) {
   }
 
   const money$ = (n: number) => formatMoney(n) ?? '—';
+  const dueText = (bill: ProjectBill): string | null => (
+    bill.overdue && bill.dueOn ? `Overdue since ${formatExactDate(bill.dueOn)}`
+      : bill.dueOn ? `Due ${formatExactDate(bill.dueOn)}` : null
+  );
   const started = project.startedOn ? `Started ${formatLooseDate(project.startedOn)}` : null;
   const finished = project.status === 'done' && project.finishedOn ? `Finished ${formatLooseDate(project.finishedOn)}` : null;
 
@@ -400,11 +412,19 @@ export default function ProjectDetailScreen({ route }: Props) {
         {reviews.length > 0 ? (
           <View style={groupedStyles.block}>
             <SectionTitle title={reviewAlert(page.invoiceReviews) ?? 'Bills waiting'} />
-            {reviews.map((review) => (
+            {reviews.map((review) => {
+              const twin = duplicates.get(review.id);
+              return (
               <InvoiceReviewCard
                 key={review.id}
                 review={review}
                 busy={decidingId === review.id}
+                duplicate={
+                  twin?.quote ? describeDuplicate(twin.quote, 'on the job')
+                    : twin?.review ? describeDuplicate(billFactsOfReview(twin.review), 'waiting')
+                      : null
+                }
+                onOpenDuplicate={twin?.quote ? () => setOpenPrice(twin.quote!.id) : undefined}
                 onEdit={() => setChecking(review)}
                 onOpenFile={openFile}
                 landsOn={
@@ -419,7 +439,8 @@ export default function ProjectDetailScreen({ route }: Props) {
                 )}
                 onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — it’s under the bell')}
               />
-            ))}
+              );
+            })}
           </View>
         ) : null}
 
@@ -519,29 +540,57 @@ export default function ProjectDetailScreen({ route }: Props) {
           <View style={groupedStyles.block}>
             <SectionTitle title="To pay" count={summary.bills.length} />
             <Group>
-              {summary.bills.map((bill) => (
-                <Row
-                  key={bill.id}
-                  title={bill.supplier ?? 'A bill'}
-                  subtitle={[
-                    bill.detail,
-                    bill.overdue && bill.dueOn ? `Overdue since ${formatExactDate(bill.dueOn)}`
-                      : bill.dueOn ? `Due ${formatExactDate(bill.dueOn)}` : null,
-                  ].filter(Boolean).join(' · ') || null}
-                  value={money$(bill.unpaid ?? 0)}
-                  tone={bill.overdue ? 'danger' : 'default'}
-                  bold
-                  onPress={() => setOpenPrice(bill.id)}
-                  accessory={(
-                    <Pill
-                      label="Paid"
-                      disabled={payingId !== null}
-                      accessibilityLabel={`Mark ${bill.supplier ?? 'this bill'} ${money$(bill.unpaid ?? 0)} as paid`}
-                      onPress={() => pay(bill)}
-                    />
-                  )}
-                />
-              ))}
+              {groupBySupplier(summary.bills).flatMap((group) => {
+                const billRow = (bill: ProjectBill, sub: boolean) => (
+                  <Row
+                    key={bill.id}
+                    indent={sub}
+                    title={sub ? bill.detail ?? (bill.dated ? formatExactDate(bill.dated) : 'A bill') : bill.supplier ?? 'A bill'}
+                    subtitle={[
+                      sub ? null : bill.detail,
+                      dueText(bill),
+                    ].filter(Boolean).join(' · ') || null}
+                    value={money$(bill.unpaid ?? 0)}
+                    tone={bill.overdue ? 'danger' : 'default'}
+                    bold={!sub}
+                    onPress={() => setOpenPrice(bill.id)}
+                    accessibilityLabel={sub ? `${bill.supplier}, ${bill.detail ?? 'bill'}` : undefined}
+                    accessory={(
+                      <Pill
+                        label="Paid"
+                        disabled={payingId !== null}
+                        accessibilityLabel={`Mark ${bill.supplier ?? 'this bill'}${sub && bill.detail ? ` ${bill.detail}` : ''} ${money$(bill.unpaid ?? 0)} as paid`}
+                        onPress={() => pay(bill)}
+                      />
+                    )}
+                  />
+                );
+                if (group.rows.length === 1) return [billRow(group.rows[0], false)];
+                const open = !foldedPayees.has(group.key);
+                const owed = group.rows.reduce((total, b) => total + (b.unpaid ?? 0), 0);
+                const overdue = group.rows.filter((b) => b.overdue).length;
+                const subtitle = [`${group.rows.length} bills`, overdue > 0 ? `${overdue} overdue` : null]
+                  .filter(Boolean).join(' · ');
+                return [
+                  <Row
+                    key={group.key}
+                    title={group.supplier ?? 'A bill'}
+                    subtitle={subtitle}
+                    value={money$(owed)}
+                    tone={overdue > 0 ? 'danger' : 'default'}
+                    bold
+                    expanded={open}
+                    onPress={() => setFoldedPayees((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(group.key)) next.delete(group.key);
+                      else next.add(group.key);
+                      return next;
+                    })}
+                    accessibilityLabel={`${group.supplier}, ${subtitle}, ${money$(owed)} to pay`}
+                  />,
+                  ...(open ? group.rows.map((bill) => billRow(bill, true)) : []),
+                ];
+              })}
             </Group>
           </View>
         ) : null}
@@ -651,6 +700,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         onClose={() => setMoney(null)}
         onSaved={changed}
         onEmailIn={() => { setMoney(null); setEmailOpen(true); }}
+        onOpenBill={(q) => { setMoney(null); setOpenPrice(q.id); }}
       />
 
       <EmailBillsSheet visible={emailOpen} projectId={project.id} onClose={() => setEmailOpen(false)} />

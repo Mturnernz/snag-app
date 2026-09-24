@@ -21,7 +21,7 @@ const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
   paid: false, paidOn: null, paidEvidence: null, category: null,
   sourceRef: null, sourceSubject: null, sourceFrom: null, sourceAt: null,
   inferred: [], state: 'pending', quoteId: null, decidedAt: null,
-  photoPaths: [], documentPaths: [],
+  photoPaths: [], documentPaths: [], roomIds: [], roomAmounts: null,
   createdAt: '2026-09-16T00:00:00Z',
   ...over,
 });
@@ -149,4 +149,10 @@ it('marks the figure as guessed when its GST basis was', () => {
 it('marks a supplier taken from the sender rather than the bill', () => {
   const { r } = arrange({ inferred: ['supplier'] });
   expect(r.queryByText('supplier guessed')).not.toBeNull();
+});
+
+it('says where allocating puts it, before anybody presses Allocate', () => {
+  const { r } = arrange({}, { landsOn: 'Bathroom, Laundry · split evenly' });
+  expect(r.queryByText('For')).not.toBeNull();
+  expect(r.queryByText('Bathroom, Laundry · split evenly')).not.toBeNull();
 });

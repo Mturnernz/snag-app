@@ -24,6 +24,7 @@ const mock_deleteQuote = jest.fn().mockResolvedValue(['h/docs/inv.pdf']);
 const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
 const mock_updateQuote = jest.fn().mockResolvedValue(undefined);
 const mock_setQuoteStatus = jest.fn().mockResolvedValue(undefined);
+const mock_setQuoteRooms = jest.fn().mockResolvedValue([]);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -34,6 +35,7 @@ jest.mock('../lib/supabase', () => {
     deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
     updateQuote: (...a: unknown[]) => mock_updateQuote(...a),
     setQuoteStatus: (...a: unknown[]) => mock_setQuoteStatus(...a),
+    setQuoteRooms: (...a: unknown[]) => mock_setQuoteRooms(...a),
     formatMoney: real.formatMoney,
   };
 });
@@ -61,6 +63,10 @@ function open(q: any = bill, extra: Partial<React.ComponentProps<typeof PriceShe
       onOpenBuildUp={jest.fn()}
       onOpenSchedule={jest.fn()}
       onOpen={jest.fn()}
+      elements={[]}
+      locations={[]}
+      quoteRooms={[]}
+      onAddRoom={jest.fn().mockResolvedValue(null)}
       {...extra}
     />
   );
@@ -148,5 +154,50 @@ describe('an agreed price', () => {
     const { r } = open(contract);
     await press(r, 'Turned down');
     expect(mock_setQuoteStatus).toHaveBeenCalledWith('c1', 'declined');
+  });
+});
+
+describe('which rooms it is for', () => {
+  const rooms = [
+    { id: 'eB', projectId: 'p1', name: 'Bathroom', room: 'Bathroom', implicit: false },
+    { id: 'eL', projectId: 'p1', name: 'Laundry', room: 'Laundry', implicit: false },
+  ] as any[];
+
+  it('shares a bill on the whole job evenly between the rooms ticked, in one write', async () => {
+    const { r } = open(bill, { elements: rooms });
+    r.getByText('Whole job');
+    await press(r, 'Rooms');
+    await press(r, 'Bathroom');
+    await press(r, 'Laundry');
+    await press(r, 'Save');
+    expect(mock_setQuoteRooms).toHaveBeenCalledWith('b1', ['eB', 'eL'], [2100, 2100]);
+    expect(mock_updateQuote).not.toHaveBeenCalled();
+  });
+
+  it('says how it is shared, and can be put back on the whole job', async () => {
+    const { r } = open(bill, {
+      elements: rooms,
+      quoteRooms: [
+        { quoteId: 'b1', elementId: 'eB', amount: 3000, sortOrder: 0 },
+        { quoteId: 'b1', elementId: 'eL', amount: 1200, sortOrder: 1 },
+      ],
+    });
+    r.getByText('Bathroom, Laundry · split by amount');
+    await press(r, 'Rooms');
+    await press(r, 'Bathroom');
+    await press(r, 'Laundry');
+    await press(r, 'Save');
+    expect(mock_setQuoteRooms).toHaveBeenCalledWith('b1', [], null);
+  });
+
+  it('names the one room a price on a room is in, and offers no sharing', () => {
+    const { r } = open(quote({ ...bill, id: 'b2', projectId: null, elementId: 'eB' }), { elements: rooms });
+    r.getByText('Bathroom');
+    expect(r.queryByText('Rooms')).toBeNull();
+  });
+
+  it('offers no sharing on a claim — its contract is what gets shared', () => {
+    const { r } = open(quote({ ...bill, id: 'b3', againstQuoteId: 'c1' }), { elements: rooms });
+    expect(r.queryByText('Rooms')).toBeNull();
   });
 });

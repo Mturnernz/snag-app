@@ -5,7 +5,7 @@ import Sheet from './Sheet';
 import { AddRow, Group, Row, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { formatMoney, inclGst, isUndecided } from '../lib/supabase';
-import type { ProjectExpectedCost, ProjectItem, ProjectQuote } from '../types';
+import type { ProjectExpectedCost, ProjectItem, ProjectQuote, ProjectQuoteRoom } from '../types';
 import type { RoomRow } from '../lib/supabase';
 
 interface Props {
@@ -13,6 +13,8 @@ interface Props {
   room: RoomRow | null;
   items: ProjectItem[];
   quotes: ProjectQuote[];
+  /** Which rooms prices on the whole job are shared with. */
+  quoteRooms: ProjectQuoteRoom[];
   expected: ProjectExpectedCost[];
   onClose: () => void;
   onOpenThing: (item: ProjectItem) => void;
@@ -27,15 +29,23 @@ interface Props {
  * that belong to the room as a whole, and anything expected there that nobody
  * has priced. "Whole job" is the same sheet for money that belongs to no room —
  * the builder's contract, the architect, the council.
+ *
+ * A bill on the whole job that is **shared** with this room is listed here too,
+ * saying what share of it is this room's — and it stays listed under *Whole
+ * job* as well, because that is where the bill itself lives and where the rest
+ * of it is counted.
  */
 export default function RoomSheet({
-  visible, room, items, quotes, expected, onClose, onOpenThing, onOpenPrice, onOpenExpected, onAdd, onRemove,
+  visible, room, items, quotes, quoteRooms, expected, onClose, onOpenThing, onOpenPrice, onOpenExpected, onAdd, onRemove,
 }: Props) {
   if (!room) return null;
 
   const things = room.elementId ? items.filter((i) => i.elementId === room.elementId) : [];
+  const shares = new Map(
+    quoteRooms.filter((r) => r.elementId === room.elementId).map((r) => [r.quoteId, r.amount]),
+  );
   const prices = quotes.filter((q) =>
-    room.elementId ? q.elementId === room.elementId : q.projectId !== null)
+    room.elementId ? q.elementId === room.elementId || shares.has(q.id) : q.projectId !== null)
     // A progress bill is shown under the price it is part of, not beside it.
     .filter((q) => q.againstQuoteId === null);
   const expecting = expected.filter((x) =>
@@ -86,6 +96,11 @@ export default function RoomSheet({
                 title={q.supplier ?? 'No supplier named'}
                 subtitle={[
                   q.detail,
+                  shares.has(q.id)
+                    ? shares.get(q.id) === null
+                      ? 'Shared, not split'
+                      : `Shared · ${formatMoney(inclGst(shares.get(q.id) ?? 0, q.amountInclGst))} of it`
+                    : null,
                   q.kind === 'invoice'
                     ? (q.unpaid ?? 0) > 0 ? 'To pay' : 'Paid'
                     : q.status === 'accepted' ? 'Agreed' : q.status === 'declined' ? 'Turned down' : 'Not agreed yet',

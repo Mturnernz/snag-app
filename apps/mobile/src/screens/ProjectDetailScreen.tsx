@@ -43,7 +43,8 @@ import {
   dayKey, exportDateStamp, formatExactDate, formatLooseDate, pendingReviews, projectDossierTable,
   projectExportPhotos, reviewAlert, type ThingInput,
 } from '@snag/supabase-queries';
-import { getFileUrl, getFileUrls, updateInvoiceReview } from '../lib/supabase';
+import { getFileUrl, getFileUrls, setInvoiceReviewRooms, updateInvoiceReview } from '../lib/supabase';
+import { describeRooms } from '../components/RoomSplit';
 import { openUrl } from '../lib/openUrl';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import type {
@@ -273,6 +274,29 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
+  /**
+   * A room added from a bill: a room of the house if it is not one yet, then a
+   * part of this job, through the writers the rooms sheet uses — so it is on
+   * the List and House tabs too. Answers with the part's id so it can be ticked.
+   */
+  async function addRoomToJob(name: string): Promise<string | null> {
+    const wanted = name.trim();
+    try {
+      const known = locations.find((l) => l.name.trim().toLowerCase() === wanted.toLowerCase());
+      if (!known) {
+        await createLocation(project.propertyId, wanted);
+        await reloadLocations();
+      }
+      const roomName = known?.name ?? wanted;
+      const element = await createElement(project.id, roomName, roomName);
+      await refresh();
+      return element.id;
+    } catch (err: unknown) {
+      showAlert("Couldn't add that room", err instanceof Error ? err.message : 'Please try again.');
+      return null;
+    }
+  }
+
   async function removeElement(element: ProjectElement) {
     setRemovingElement(null);
     setOpenRoom(null);
@@ -379,6 +403,11 @@ export default function ProjectDetailScreen({ route }: Props) {
                 busy={decidingId === review.id}
                 onEdit={() => setChecking(review)}
                 onOpenFile={openFile}
+                landsOn={
+                  review.roomIds.length > 0
+                    ? describeRooms(review.roomIds, review.roomAmounts, review.amount, elements)
+                    : elements.find((e) => e.id === review.elementId && !e.implicit)?.name ?? 'Whole job'
+                }
                 onApprove={() => rule(
                   review,
                   () => approveInvoiceReview(review.id),
@@ -625,10 +654,14 @@ export default function ProjectDetailScreen({ route }: Props) {
       <ReviewEditSheet
         review={checking}
         elements={elements}
+        locations={locations}
+        onAddRoom={addRoomToJob}
         onClose={() => setChecking(null)}
-        onSave={async (update) => {
+        onSave={async (update, rooms) => {
           if (!checking) return;
+          // The figure first: the split is checked against the bill as it now reads.
           await updateInvoiceReview(checking.id, update);
+          await setInvoiceReviewRooms(checking.id, rooms.ids, rooms.amounts);
           await changed('Saved — it still needs allocating');
         }}
       />
@@ -658,6 +691,10 @@ export default function ProjectDetailScreen({ route }: Props) {
         onOpenBuildUp={setBuildUpFor}
         onOpenSchedule={setScheduleFor}
         onOpen={(q) => setOpenPrice(q.id)}
+        elements={elements}
+        locations={locations}
+        quoteRooms={page.quoteRooms}
+        onAddRoom={addRoomToJob}
       />
 
       <RoomSheet
@@ -665,6 +702,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         room={room}
         items={items}
         quotes={quotes}
+        quoteRooms={page.quoteRooms}
         expected={page.expected}
         onClose={() => setOpenRoom(null)}
         onOpenThing={(item) => setOpenThing(item.id)}

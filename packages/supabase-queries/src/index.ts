@@ -65,6 +65,7 @@ import type {
   ProjectQuoteBasis,
   ProjectQuoteKind,
   ProjectQuoteLine,
+  ProjectQuoteRoom,
   ProjectQuoteStatus,
   ProjectStatus,
   ProjectSupplierTotals,
@@ -3307,6 +3308,15 @@ function mapQuote(row: Row): ProjectQuote {
   };
 }
 
+function mapQuoteRoom(row: Row): ProjectQuoteRoom {
+  return {
+    quoteId: row.quote_id,
+    elementId: row.element_id,
+    amount: numberOrNull(row.amount),
+    sortOrder: row.sort_order ?? 0,
+  };
+}
+
 function mapQuoteLine(row: Row): ProjectQuoteLine {
   return {
     id: row.id,
@@ -3443,6 +3453,10 @@ function mapInvoiceReview(row: Row): InvoiceReview {
     createdAt: row.created_at,
     photoPaths: row.photo_paths ?? [],
     documentPaths: row.document_paths ?? [],
+    roomIds: row.room_ids ?? [],
+    roomAmounts: Array.isArray(row.room_amounts)
+      ? row.room_amounts.map((a: unknown) => numberOrNull(a) ?? 0)
+      : null,
   };
 }
 
@@ -4286,6 +4300,8 @@ export interface ProjectContents {
   items: ProjectItem[];
   quotes: ProjectQuote[];
   lines: ProjectQuoteLine[];
+  /** Which rooms a price on the whole job is for, and each one's share. */
+  quoteRooms: ProjectQuoteRoom[];
   payments: ProjectPayment[];
   milestones: ProjectMilestone[];
   /** Costs nobody has quoted. Forecast's, never committed's. */
@@ -4356,6 +4372,7 @@ export async function getProjectPage(
     items: (page.items ?? []).map(mapItem),
     quotes: (page.quotes ?? []).map(mapQuote),
     lines: (page.lines ?? []).map(mapQuoteLine),
+    quoteRooms: (page.quoteRooms ?? []).map(mapQuoteRoom),
     payments: (page.payments ?? []).map(mapPayment),
     milestones: (page.milestones ?? []).map(mapMilestone),
     expected: (page.expected ?? []).map(mapExpectedCost),
@@ -5646,7 +5663,6 @@ const INVOICE_REVIEW_CLEARABLE: Record<string, string> = {
   dueOn: 'due_on',
   paidOn: 'paid_on',
   category: 'category',
-  elementId: 'element_id',
 };
 
 /**
@@ -5672,7 +5688,6 @@ export interface InvoiceReviewUpdate {
   paid?: boolean;
   paidOn?: string | null;
   category?: string | null;
-  elementId?: string | null;
 }
 
 export async function updateInvoiceReview(
@@ -5696,7 +5711,6 @@ export async function updateInvoiceReview(
     p_paid: update.paid ?? null,
     p_paid_on: update.paidOn ?? null,
     p_category: update.category ?? null,
-    p_element_id: update.elementId ?? null,
     p_clear: clear,
   });
   return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
@@ -5720,6 +5734,52 @@ export async function approveInvoiceReview(
     p_element_id: elementId ?? null,
   });
   return mapQuote(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/**
+ * Where a waiting bill will land: none of the rooms is the whole job, one is
+ * that room, and two or more keep it on the whole job shared between them.
+ *
+ * `amounts` is each room's share in the bill's own GST basis, or null for
+ * "these rooms, not split". It is ignored for fewer than two rooms, because
+ * one room takes the whole bill. The server is the one writer of where a card
+ * lands, so the room and the split cannot disagree.
+ */
+export async function setInvoiceReviewRooms(
+  client: SupabaseClient,
+  reviewId: string,
+  elementIds: string[],
+  amounts: number[] | null
+): Promise<InvoiceReview> {
+  const { data, error } = await client.rpc('set_invoice_review_rooms', {
+    p_review_id: reviewId,
+    p_element_ids: elementIds,
+    p_amounts: elementIds.length > 1 ? amounts : null,
+  });
+  return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/**
+ * Which rooms a price on the whole job is for, replacing whatever it said.
+ *
+ * One call for the whole answer, for the reason `setSnagThings` is one call:
+ * a picker with a Done button is answering one question. It changes nothing
+ * about the price itself — the room breakdown reads it, and no total does.
+ * An empty list clears it back to the whole job.
+ */
+export async function setQuoteRooms(
+  client: SupabaseClient,
+  quoteId: string,
+  elementIds: string[],
+  amounts: number[] | null
+): Promise<ProjectQuoteRoom[]> {
+  const { data, error } = await client.rpc('set_quote_rooms', {
+    p_quote_id: quoteId,
+    p_element_ids: elementIds,
+    p_amounts: elementIds.length > 0 ? amounts : null,
+  });
+  if (error) throw asError(error, "That didn’t save");
+  return ((data ?? []) as Row[]).map(mapQuoteRoom);
 }
 
 /** No — it leaves the deck, and it is still there to be put back. */
@@ -5850,3 +5910,4 @@ export function describePaidInference(review: InvoiceReview): string {
 }
 
 export * from './summary';
+export * from './split';

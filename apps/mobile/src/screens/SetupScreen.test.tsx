@@ -118,6 +118,40 @@ describe('an invitation waiting at sign-up', () => {
 });
 
 describe('waiting to be invited', () => {
+  async function waiting(onJoinToken = jest.fn()) {
+    const r = render(<SetupScreen profile={null} onReady={onReady} onJoinToken={onJoinToken} />);
+    await settle();
+    const nameField = r.root.findAll(
+      (n: any) => typeof n.type === 'string' && n.type === 'TextInput'
+    )[0];
+    await TestRenderer.act(async () => nameField.props.onChangeText('Alyssa'));
+    await press(pressableAround(r, 'Someone else set ours up'));
+    await settle();
+    return { r, onJoinToken };
+  }
+
+  const pasteBox = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type === 'string' && n.props?.accessibilityLabel === 'Paste an invite link'
+  )[0];
+
+  // Somebody who signed up before they were sent anything had *Check again*
+  // and nothing else. A link that has since arrived can be pasted.
+  it('takes a pasted link to the same join question a tapped one reaches', async () => {
+    const { r, onJoinToken } = await waiting();
+    await TestRenderer.act(async () => pasteBox(r).props.onChangeText(
+      'Join us! https://app.snaghq.co.nz/join/8F1D3C2E-0000-4000-8000-000000000000'));
+    await press(pressableAround(r, 'Use this link'));
+    expect(onJoinToken).toHaveBeenCalledWith('8f1d3c2e-0000-4000-8000-000000000000');
+  });
+
+  it('says so when what was pasted is not a link, and does nothing', async () => {
+    const { r, onJoinToken } = await waiting();
+    await TestRenderer.act(async () => pasteBox(r).props.onChangeText('hello'));
+    expect(r.queryByText("That doesn't look like a Snag invite link.")).not.toBeNull();
+    await press(pressableAround(r, 'Use this link'));
+    expect(onJoinToken).not.toHaveBeenCalled();
+  });
+
   it('says nothing will arrive by email, because nothing will', async () => {
     const r = render(<SetupScreen profile={null} onReady={onReady} />);
     await settle();

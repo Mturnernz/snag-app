@@ -25,6 +25,7 @@ import {
 import { joinUrl } from '@snag/supabase-queries';
 import { APP_URL } from '../lib/appUrl';
 import { copyToClipboard } from '../lib/clipboard';
+import { shareLink } from '../lib/share';
 import QrCode, { QrCaption } from '../components/QrCode';
 import { showAlert } from '../lib/alert';
 
@@ -253,6 +254,40 @@ export default function HouseholdScreen() {
       showAlert("Couldn't invite them", err?.message ?? 'Please try again.');
     } finally {
       setAdding(false);
+    }
+  }
+
+  /**
+   * The main way to add somebody: a link, into whatever they message on.
+   *
+   * The address invitation sends nothing, so the other person has to be told
+   * anyway — and has to sign up with exactly that address. A link carries the
+   * invitation itself, works whatever address they use, and goes through the
+   * phone's own share sheet in one tap. It reuses the live code rather than
+   * minting one, because minting kills the old one — and somebody sharing to a
+   * second person must not break the link the first has not opened yet.
+   */
+  async function handleShareLink() {
+    setBusyLink2(true);
+    try {
+      let live = link;
+      if (!live?.token) {
+        live = await createInviteLink(
+          household.id,
+          properties.length > 1 ? startOn : undefined
+        );
+        setLink(live);
+      }
+      const outcome = await shareLink(
+        joinUrl(APP_URL, live.token!),
+        `Join ${household.name} on Snag — the link is good for a day.`,
+      );
+      if (outcome === 'copied') showToast('Link copied — paste it into a message');
+      if (outcome === 'failed') showToast('Copy the link from under the code');
+    } catch (err: any) {
+      showAlert("Couldn't make a link", err?.message ?? 'Please try again.');
+    } finally {
+      setBusyLink2(false);
     }
   }
 
@@ -617,22 +652,9 @@ export default function HouseholdScreen() {
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Add someone</Text>
           <Text style={styles.sectionHint}>
-            Invite the address they'll sign up with. They don't need an account yet — the
-            invitation waits until they do. Snag doesn't email them, so tell them yourself.
+            Send them a link. It opens Snag and asks them to join, whatever address they sign up
+            with — good for a day.
           </Text>
-          <View style={styles.addRow}>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="alyssa@example.com"
-              placeholderTextColor={Colors.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              inputMode="email"
-            />
-          </View>
           {/* Asked only once there's a choice to make. It used to send them to
               whichever place happened to be first in the adder's list, and the
               hint underneath asserted that as though somebody had decided it. */}
@@ -667,29 +689,27 @@ export default function HouseholdScreen() {
               </View>
             </>
           ) : null}
+
+          {/* The link first, into the phone's own share sheet. It was framed
+              as the thing for somebody "standing right here", behind the
+              address form — but the address invitation sends nothing, so the
+              other person had to be told anyway, and had to sign up with
+              exactly that address. */}
           <Button
-            label="Invite them"
-            onPress={handleInvite}
-            loading={adding}
-            disabled={!email.trim() || adding || (properties.length > 1 && startOn.length === 0)}
+            label="Share an invite link"
+            onPress={handleShareLink}
+            loading={busyLink2}
+            disabled={busyLink2 || (properties.length > 1 && startOn.length === 0)}
             fullWidth
-            icon="person-add-outline"
+            icon="share-outline"
           />
 
-          {/* The same invitation, addressed to whoever holds the code instead of
-              to an address — one table, one accept path, not a second way in.
-              Nothing here scans: their own camera opens the link, which is the
-              point, because they haven't installed Snag yet. */}
           <View style={styles.codeBlock}>
-            <Text style={styles.orLine}>or, if they're standing right here</Text>
             {link?.token ? (
               <>
+                <Text style={styles.orLine}>or let them scan it</Text>
                 <QrCode value={joinUrl(APP_URL, link.token)} />
                 <QrCaption text={joinUrl(APP_URL, link.token)} />
-                <Text style={styles.codeHint}>
-                  Point their camera at this. It opens Snag and asks them to join — good for a
-                  day, and only for whoever you show it to.
-                </Text>
                 <View style={styles.codeActions}>
                   <Button
                     label="Copy link"
@@ -720,6 +740,40 @@ export default function HouseholdScreen() {
                 icon="qr-code-outline"
               />
             )}
+          </View>
+
+          {/* The address invitation stays, second: somebody who has not got
+              the other person's phone number can still name an address. It
+              sends nothing and says so. */}
+          <View style={styles.codeBlock}>
+            <Text style={styles.orLine}>or invite the address they'll sign up with</Text>
+            <View style={styles.addRow}>
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Their email address"
+                placeholderTextColor={Colors.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                inputMode="email"
+                accessibilityLabel="Their email address"
+              />
+            </View>
+            <Text style={styles.sectionHint}>
+              Snag doesn't email them — the invitation waits until they sign up with it, so tell
+              them yourself.
+            </Text>
+            <Button
+              label="Invite them"
+              variant="outline"
+              onPress={handleInvite}
+              loading={adding}
+              disabled={!email.trim() || adding || (properties.length > 1 && startOn.length === 0)}
+              fullWidth
+              icon="person-add-outline"
+            />
           </View>
         </Card>
 

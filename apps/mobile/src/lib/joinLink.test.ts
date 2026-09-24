@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { clearJoinToken, readJoinToken } from './joinLink';
+import { clearJoinToken, parseJoinToken, readJoinToken } from './joinLink';
 
 // A join code arrives in the address bar and nowhere else: the QR is scanned by
 // the scanner's own camera, which opens a URL in their browser. So this is the
@@ -84,5 +84,20 @@ describe('clearJoinToken', () => {
     atPath(`/join/${TOKEN}`);
     clearJoinToken();
     expect(replaceState).not.toHaveBeenCalled();
+  });
+});
+
+describe('parseJoinToken', () => {
+  it('reads the code out of a whole link, whatever came with it', () => {
+    expect(parseJoinToken(`Join us https://app.snaghq.co.nz/join/${TOKEN.toUpperCase()} x`)).toBe(TOKEN);
+  });
+
+  it('reads a bare code', () => {
+    expect(parseJoinToken(` ${TOKEN} `)).toBe(TOKEN);
+  });
+
+  it('reads nothing out of something that holds no code', () => {
+    expect(parseJoinToken('https://app.snaghq.co.nz/snags/123')).toBeNull();
+    expect(parseJoinToken('')).toBeNull();
   });
 });

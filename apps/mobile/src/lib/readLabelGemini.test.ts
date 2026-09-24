@@ -42,7 +42,9 @@ describe('the request', () => {
   it('asks what the thing is when nobody has said, and says what it is when somebody has', () => {
     expect(geminiRequest('', 'image/jpeg', 'x').contents[0].parts[1].text).toMatch(/Say what this is/);
     expect(geminiRequest('finish', 'image/jpeg', 'x').contents[0].parts[1].text).not.toMatch(/Say what this is/);
-    expect(SCHEMA.properties.kindGuess.enum).toEqual(['appliance', 'finish', 'tile', null]);
+    // No enum: every field uses the one nullable-string shape the live reads
+    // already prove Gemini accepts. The app keeps only the three kinds.
+    expect(SCHEMA.properties.kindGuess).toEqual({ type: ['string', 'null'] });
     expect(SYSTEM).toMatch(/whatItIs: what the item is/);
   });
 

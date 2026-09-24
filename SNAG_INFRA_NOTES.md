@@ -190,7 +190,7 @@ Svix-signed) files bills emailed to a project. Their source is in `supabase/func
 share `read-label/gemini.ts` for the model plumbing.
 
 `read-label` finishes its work under `EdgeRuntime.waitUntil` and keeps what it read in
-`home.label_readings` (`20260924110000`), so the walkthrough never waits on it. **Order matters:**
+`home.label_readings` (`20260924120000`), so the walkthrough never waits on it. **Order matters:**
 apply that migration *before* deploying the function (without it the function logs *could not
 open a reading* and the reading cannot outlive the sheet), deploy the function before merging the
 client, and check one real read with the sheet closed before it lands — the row should appear

@@ -55,7 +55,11 @@ export const SCHEMA = {
     // two. The walkthrough offers it pre-filled on "What is it?", where the
     // person sees it and can change it before anything is written.
     whatItIs: nullableText,
-    kindGuess: { type: ['string', 'null'], enum: ['appliance', 'finish', 'tile', null] },
+    // A plain nullable string like every other field here, not an enum: the
+    // schema subset Gemini accepts is narrower than JSON Schema, and a
+    // refused schema fails every read. `parseLabelGuess` keeps only the three
+    // kinds the walkthrough offers.
+    kindGuess: nullableText,
     make: nullableText,
     model: nullableText,
     serial: nullableText,

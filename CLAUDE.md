@@ -1201,7 +1201,7 @@ write beside what was typed, and the suggested cycle never chosen.
 ### A reading waits to be checked, rather than making somebody wait for it
 
 The function now **finishes the read whatever the phone does** (`EdgeRuntime.waitUntil`, the
-`inbound-bill` pattern) and keeps what it found in **`home.label_readings`** (`20260924110000`).
+`inbound-bill` pattern) and keeps what it found in **`home.label_readings`** (`20260924120000`).
 That table is a waiting room, the `invoice_reviews` shape: a reading is a suggestion *about* a
 record, never the record. An open sheet still gets the answer in the reply and lays it into the
 boxes as before; a reading that lands after *Add it* turns up as a **Read from the label** card on
@@ -1235,7 +1235,7 @@ longer needs somebody standing there while the model looks.
   tap, never a paint (whose name is a colour). It is asked because the photo now comes before the
   kind is known; an empty `kind` asks the reader to say, and fill plate or paint fields to fit.
 
-**Deploy order**, because the client and the function move together: apply `20260924110000`,
+**Deploy order**, because the client and the function move together: apply `20260924120000`,
 deploy `read-label` (its reply only gains `readingId`, so the live client keeps working), read one
 real plate and close the sheet before it lands to check the row appears, then merge.
 `AddThingSheet.test.tsx` pins the photo-first order, moving on before the read is back, *Add it*

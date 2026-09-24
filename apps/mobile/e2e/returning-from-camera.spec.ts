@@ -72,15 +72,15 @@ test('the walkthrough survives the tab going away and coming back', async ({ pag
 
   await page.getByText('House', { exact: true }).first().click();
   await page.getByLabel('Add something to Kitchen').click();
-  await expect(page.getByText('What is it?')).toBeVisible({ timeout: 30_000 });
+  // The walkthrough opens on the photo now, which is the step the original
+  // report came from: the camera is what sends the tab away.
+  await expect(page.getByText('Photograph the label')).toBeVisible({ timeout: 30_000 });
 
   await leaveAndComeBack(page);
 
-  // Both halves of the bug. It was reported from step three, the one with the
-  // camera on it, but the unmount takes the whole sheet whichever step is
-  // showing — and step two needs no selection to reach, so it is the steadier
-  // thing to assert on.
-  await expect(page.getByText('What is it?')).toBeVisible();
+  // Both halves of the bug: the sheet is still on the photo step, and the
+  // unmount that took the whole sheet did not happen.
+  await expect(page.getByText('Photograph the label')).toBeVisible();
   // The navigator must not have fallen back to its initial route.
   await expect(page.getByPlaceholder('Capture new issue')).toBeHidden();
 });

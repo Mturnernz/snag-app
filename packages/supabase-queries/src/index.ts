@@ -71,8 +71,11 @@ import type {
   ProjectStatus,
   ProjectSupplierTotals,
   ProjectTotals,
+  FileTag,
+  FileTags,
 } from '@snag/shared-types';
 import {
+  FILE_TAGS,
   ROOM_SUGGESTIONS,
   STATUS_LABELS,
   THING_KIND_LABELS,
@@ -4361,6 +4364,8 @@ export interface ProjectPage extends ProjectContents {
    * somebody is pressing something else.
    */
   invoiceReviews: InvoiceReview[];
+  /** What each of the project's files has been tagged as, by storage path. */
+  fileTags: FileTags;
 }
 
 /**
@@ -4414,7 +4419,34 @@ export async function getProjectPage(
     things: (page.things ?? []).map(mapThing),
     snags: (page.snags ?? []).map(mapSnag),
     invoiceReviews: (page.invoiceReviews ?? []).map(mapInvoiceReview),
+    fileTags: mapFileTags(page.fileTags),
   };
+}
+
+/** Keeps only tags this app knows, so a value added later is untagged rather than mislabelled. */
+function mapFileTags(raw: unknown): FileTags {
+  const tags: FileTags = {};
+  if (!raw || typeof raw !== 'object') return tags;
+  for (const [path, tag] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof tag === 'string' && (FILE_TAGS as string[]).includes(tag)) tags[path] = tag as FileTag;
+  }
+  return tags;
+}
+
+/**
+ * Tags several files at once, or untags them with `null`.
+ *
+ * Several because filing an emailed paper tags every PDF it carried in one
+ * gesture. The server checks each file's household folder against the caller.
+ */
+export async function setFileTags(
+  client: SupabaseClient,
+  paths: string[],
+  tag: FileTag | null
+): Promise<void> {
+  if (paths.length === 0) return;
+  const { error } = await client.rpc('set_file_tags', { p_paths: paths, p_tag: tag });
+  if (error) throw new Error(error.message || "That tag didn't save");
 }
 
 

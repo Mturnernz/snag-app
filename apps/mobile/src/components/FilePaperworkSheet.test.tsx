@@ -34,9 +34,16 @@ const parts = [element({ id: 'eRoof', name: 'Roof' }), element({ id: 'eDeck', na
 
 const radio = (r: RenderResult, title: string) =>
   r.root.findAll((n) => n.props.accessibilityRole === 'radio' && n.props.accessibilityLabel === title && n.props.onPress, { deep: true })[0];
+const TAGS = ['Compliance certificate', 'Product sheet', 'Warranty', 'Other'];
+/** Where it is going — the tag chips are radios too, and are asked about on their own. */
 const selected = (r: RenderResult) =>
   r.root.findAll((n) => n.props.accessibilityRole === 'radio' && n.props.accessibilityState?.selected && n.props.onPress, { deep: true })
-    .map((n) => n.props.accessibilityLabel);
+    .map((n) => n.props.accessibilityLabel)
+    .filter((label: string) => !TAGS.includes(label));
+const litTag = (r: RenderResult) =>
+  r.root.findAll((n) => n.props.accessibilityRole === 'radio' && n.props.accessibilityState?.selected && n.props.onPress, { deep: true })
+    .map((n) => n.props.accessibilityLabel)
+    .filter((label: string) => TAGS.includes(label));
 const tap = (r: RenderResult, label: string) =>
   r.root.findAll((n) => n.props.accessibilityLabel === label && n.props.onPress, { deep: true })[0];
 
@@ -79,7 +86,7 @@ it('files where it was told, and closes', async () => {
   const { r, onFile, onClose } = await open(paper());
   await TestRenderer.act(async () => { radio(r, 'Deck').props.onPress(); });
   await TestRenderer.act(async () => { await tap(r, 'File it').props.onPress(); });
-  expect(onFile).toHaveBeenCalledWith({ quoteId: null, elementId: 'eDeck' });
+  expect(onFile).toHaveBeenCalledWith({ quoteId: null, elementId: 'eDeck' }, 'compliance');
   expect(onClose).toHaveBeenCalled();
 });
 
@@ -88,4 +95,40 @@ it('stays open and says why when the filing is refused', async () => {
   await TestRenderer.act(async () => { await tap(r, 'File it').props.onPress(); });
   expect(r.queryByText('That bill belongs to another job')).not.toBeNull();
   expect(onClose).not.toHaveBeenCalled();
+});
+
+// What the paper is, asked at the one moment it is in somebody's hand.
+it('suggests what the paper is from its title, and files it with that tag', async () => {
+  const { r } = await open(paper());
+  expect(litTag(r)).toEqual(['Compliance certificate']);
+  expect(r.queryByText('Suggested from its title: Compliance certificate')).not.toBeNull();
+});
+
+it('takes a different answer, and says nothing about a suggestion once somebody has answered', async () => {
+  const { r, onFile } = await open(paper());
+  await TestRenderer.act(async () => { radio(r, 'Warranty').props.onPress(); });
+  expect(r.queryByText('Suggested from its title: Compliance certificate')).toBeNull();
+  await TestRenderer.act(async () => { await tap(r, 'File it').props.onPress(); });
+  expect(onFile).toHaveBeenCalledWith(expect.anything(), 'warranty');
+});
+
+it('leaves it untagged when the lit chip is pressed again', async () => {
+  const { r, onFile } = await open(paper());
+  await TestRenderer.act(async () => { radio(r, 'Compliance certificate').props.onPress(); });
+  expect(litTag(r)).toEqual([]);
+  await TestRenderer.act(async () => { await tap(r, 'File it').props.onPress(); });
+  expect(onFile).toHaveBeenCalledWith(expect.anything(), null);
+});
+
+it('guesses nothing when the words say nothing', async () => {
+  const { r } = await open(paper({ detail: 'Variation', documentPaths: ['h/docs/1-1-Variation.pdf'] }));
+  expect(litTag(r)).toEqual([]);
+});
+
+// A photo of the deck is not a certificate, whatever the paper beside it was.
+it('does not ask what photos are', async () => {
+  const { r, onFile } = await open(paper({ detail: 'Photos', documentPaths: [], photoPaths: ['h/1.jpg'] }));
+  expect(r.queryByText('What is it?')).toBeNull();
+  await TestRenderer.act(async () => { await tap(r, 'File it').props.onPress(); });
+  expect(onFile).toHaveBeenCalledWith(expect.anything(), null);
 });

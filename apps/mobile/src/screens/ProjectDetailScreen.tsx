@@ -18,6 +18,7 @@ import InvoiceReviewCard from '../components/InvoiceReviewCard';
 import InvoiceReviewSheet from '../components/InvoiceReviewSheet';
 import ReviewEditSheet from '../components/ReviewEditSheet';
 import FilePaperworkSheet from '../components/FilePaperworkSheet';
+import TaggedFiles from '../components/TaggedFiles';
 import EmailBillsSheet from '../components/EmailBillsSheet';
 import ReviewBell from '../components/ReviewBell';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
@@ -47,7 +48,7 @@ import {
   projectExportPhotos, reviewAlert, reviewGroups, type ThingInput,
 } from '@snag/supabase-queries';
 import {
-  filePaperwork, getFileUrl, getFileUrls, rereadInvoiceReview, setInvoiceReviewRooms, updateInvoiceReview,
+  filePaperwork, setFileTags, getFileUrl, getFileUrls, rereadInvoiceReview, setInvoiceReviewRooms, updateInvoiceReview,
 } from '../lib/supabase';
 import { describeRooms } from '../components/RoomSplit';
 import { openUrl } from '../lib/openUrl';
@@ -705,9 +706,19 @@ export default function ProjectDetailScreen({ route }: Props) {
 
         {/* ── documents ────────────────────────────────────────────────── */}
         <View style={groupedStyles.block}>
+          <TaggedFiles files={page.files} tags={page.fileTags} />
           <SectionTitle title="Documents" count={page.files.length || undefined} />
           <View style={styles.docs}>
             <Attachments
+              tags={page.fileTags}
+              onTag={async (path, tag) => {
+                try {
+                  await setFileTags([path], tag);
+                  await changed(tag ? 'Tagged' : 'Tag removed');
+                } catch (err: unknown) {
+                  showToast(err instanceof Error ? err.message : 'That tag didn’t save');
+                }
+              }}
               householdId={household.id}
               photoPaths={project.photoPaths}
               documentPaths={project.documentPaths}
@@ -765,9 +776,13 @@ export default function ProjectDetailScreen({ route }: Props) {
         quotes={quotes}
         elements={elements}
         onClose={() => setFiling(null)}
-        onFile={async (where) => {
+        onFile={async (where, tag) => {
           if (!filing) return;
           await filePaperwork(filing.id, where);
+          // Filed first: a tag on a file nothing yet holds would name a file
+          // nobody can see. Its PDFs only — a photo of the deck is not a
+          // certificate, whatever the paper beside it was.
+          if (tag) await setFileTags(filing.documentPaths, tag);
           await changed('Filed with the job’s paperwork');
         }}
       />
@@ -801,6 +816,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         locations={locations}
         quoteRooms={page.quoteRooms}
         onAddRoom={addRoomToJob}
+        fileTags={page.fileTags}
       />
 
       <RoomSheet

@@ -3,8 +3,10 @@ import { StyleSheet, Text } from 'react-native';
 
 import Sheet from './Sheet';
 import { Group, PrimaryButton, RadioRow, SectionTitle, groupedStyles } from './Grouped';
+import FileTagChips from './FileTagChips';
 import { Colors, Spacing, Typography } from '../constants/theme';
-import { formatLooseDate, formatMoney, invoiceReviewHeadline, paperworkHomes } from '@snag/supabase-queries';
+import { documentName, formatLooseDate, formatMoney, guessFileTag, invoiceReviewHeadline, paperworkHomes } from '@snag/supabase-queries';
+import { FILE_TAG_LABELS, type FileTag } from '@snag/shared-types';
 import type { InvoiceReview, ProjectElement, ProjectQuote } from '../types';
 
 /** Where it goes: a bill, a part, or — with neither — the job itself. */
@@ -18,7 +20,8 @@ interface Props {
   quotes: ProjectQuote[];
   elements: ProjectElement[];
   onClose: () => void;
-  onFile: (where: PaperworkHome) => Promise<void>;
+  /** Where it goes, and what its PDFs are — `null` leaves them untagged. */
+  onFile: (where: PaperworkHome, tag: FileTag | null) => Promise<void>;
 }
 
 const key = (home: PaperworkHome) => home.quoteId ?? home.elementId ?? 'job';
@@ -40,11 +43,21 @@ const key = (home: PaperworkHome) => home.quoteId ?? home.elementId ?? 'job';
  * answer; the job itself is chosen otherwise, because it is never wrong, only
  * less specific. Every other bill is below, so the suggestion is an offer and
  * never a fence.
+ *
+ * **It also asks what the paper is**, because this is the one moment the
+ * answer is in front of somebody. The card's own words and filenames suggest
+ * it (`guessFileTag` — "Certificate of Compliance" is a compliance
+ * certificate), lit already and marked as a suggestion; pressing it again
+ * leaves the paper untagged, and nothing is tagged on a sheet walked away from. A card with no
+ * PDF is not asked: a photo of the deck is not a certificate.
  */
 export default function FilePaperworkSheet({ review, quotes, elements, onClose, onFile }: Props) {
   const homes = useMemo(() => (review ? paperworkHomes(review, quotes) : { suggested: [], others: [] }), [review, quotes]);
   const parts = elements.filter((e) => !e.implicit);
   const [chosen, setChosen] = useState<PaperworkHome>({ quoteId: null, elementId: null });
+  const [tag, setTag] = useState<FileTag | 'none'>('none');
+  const [guessed, setGuessed] = useState(false);
+  const hasDocuments = (review?.documentPaths.length ?? 0) > 0;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +65,9 @@ export default function FilePaperworkSheet({ review, quotes, elements, onClose, 
     if (!review) return;
     const first = homes.suggested[0];
     setChosen({ quoteId: first?.id ?? null, elementId: null });
+    const guess = guessFileTag(review.detail, review.category, ...review.documentPaths.map(documentName));
+    setTag(guess ?? 'none');
+    setGuessed(guess !== null);
     setBusy(false);
     setError(null);
   }, [review?.id]);
@@ -61,7 +77,7 @@ export default function FilePaperworkSheet({ review, quotes, elements, onClose, 
     setBusy(true);
     setError(null);
     try {
-      await onFile(chosen);
+      await onFile(chosen, hasDocuments && tag !== 'none' ? tag : null);
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'That didn’t file');
@@ -92,6 +108,20 @@ export default function FilePaperworkSheet({ review, quotes, elements, onClose, 
       onClose={onClose}
       footer={<PrimaryButton label="File it" onPress={file} busy={busy} />}
     >
+      {hasDocuments ? (
+        <>
+          <SectionTitle title="What is it?" />
+          <FileTagChips
+            accessibilityLabel="What this paper is"
+            value={tag === 'none' ? null : tag}
+            onChange={(next) => { setTag(next ?? 'none'); setGuessed(false); }}
+          />
+          {guessed && tag !== 'none' ? (
+            <Text style={groupedStyles.hint}>Suggested from its title: {FILE_TAG_LABELS[tag]}</Text>
+          ) : null}
+        </>
+      ) : null}
+
       {homes.suggested.length > 0 ? (
         <>
           <SectionTitle title="With the bill it’s about" />

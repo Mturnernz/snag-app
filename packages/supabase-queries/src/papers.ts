@@ -12,7 +12,7 @@
  *
  * Pure, and importing nothing from `index` (which re-exports this file).
  */
-import type { InvoiceReview, InvoiceReviewKind, ProjectQuote } from '@snag/shared-types';
+import type { FileTag, InvoiceReview, InvoiceReviewKind, ProjectQuote } from '@snag/shared-types';
 
 /**
  * Whether nothing has been read off a card or typed onto it. Only such a card
@@ -134,4 +134,63 @@ export function paperworkHomes(review: InvoiceReview, quotes: ProjectQuote[]): P
     return key !== null && keys.has(key);
   });
   return { suggested, others: live.filter((q) => !suggested.includes(q)) };
+}
+
+/**
+ * What a piece of paperwork most likely is, from the words on its card or its
+ * filename — offered already chosen when it is filed, never written unasked.
+ *
+ * Only the three tags a word can honestly suggest. *Other* is never guessed:
+ * it is somebody's answer, and a guess that says nothing is worse than none.
+ * Compliance is checked first because a certificate's own title often names
+ * the product it certifies ("Certificate of Compliance — heat pump
+ * installation"), and the certificate is what somebody will be asked for.
+ */
+export function guessFileTag(...texts: (string | null | undefined)[]): FileTag | null {
+  const text = texts.filter(Boolean).join(' ').toLowerCase();
+  if (!text) return null;
+  if (/\b(certificate|compliance|coc|esc|ps[1-4]|producer statement|code of compliance|gas safety|electrical safety|record of work)\b/.test(text)) {
+    return 'compliance';
+  }
+  if (/\b(warrant(y|ies)|guarantee)\b/.test(text)) return 'warranty';
+  if (/\b(product|data ?sheet|spec(ification)?s?|brochure|manual|installation (guide|instructions)|technical)\b/.test(text)) {
+    return 'product_sheet';
+  }
+  return null;
+}
+
+/**
+ * The bills and signed prices another bill could sit inside.
+ *
+ * A subcontractor's invoice made out to the builder is already inside the
+ * builder's invoice, and recorded as its own bill the same money counts twice.
+ * Pointing it at the bill it is inside (`billed_through_id`) is what the views
+ * already read as *passed through*: it leaves Agreed, To pay and the supplier
+ * rows, and the bill it points at is the one that counts.
+ *
+ * Offered: live bills and signed prices on the job other than this one, and
+ * never one that is itself inside another (a chain would leave the reader
+ * following links to find what counts). Largest first, because the bill that
+ * holds others is nearly always the biggest from a different business.
+ */
+export function billHosts(quote: ProjectQuote, quotes: ProjectQuote[]): ProjectQuote[] {
+  return quotes
+    .filter((q) => q.id !== quote.id
+      && q.billedThroughId === null
+      && q.againstQuoteId === null
+      && q.status !== 'declined'
+      && (q.kind === 'invoice' || q.status === 'accepted'))
+    .sort((a, b) => (b.amountIncl ?? 0) - (a.amountIncl ?? 0));
+}
+
+/** The bills recorded as sitting inside this one, largest first. */
+export function billsInside(quote: ProjectQuote, quotes: ProjectQuote[]): ProjectQuote[] {
+  return quotes
+    .filter((q) => q.kind === 'invoice' && q.billedThroughId === quote.id && q.supersedesLineId === null)
+    .sort((a, b) => (b.amountIncl ?? 0) - (a.amountIncl ?? 0));
+}
+
+/** Whether a bill is inside another one, and so counts nowhere on its own account. */
+export function isInsideAnotherBill(quote: ProjectQuote): boolean {
+  return quote.kind === 'invoice' && quote.billedThroughId !== null && quote.supersedesLineId === null;
 }

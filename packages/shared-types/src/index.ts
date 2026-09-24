@@ -1857,6 +1857,28 @@ export interface ProjectFile {
   path: string;
 }
 
+/**
+ * What a file on the record is, when somebody has said.
+ *
+ * Kept on the file rather than on whatever it hangs off (`home.file_tags`,
+ * keyed by storage path), so one answer holds wherever the file is attached.
+ * Absent means untagged, the resting state. Invoices and quotes are never
+ * tagged: the price they sit on already says what they are.
+ */
+export type FileTag = 'product_sheet' | 'compliance' | 'warranty' | 'other';
+
+export const FILE_TAGS: FileTag[] = ['compliance', 'product_sheet', 'warranty', 'other'];
+
+export const FILE_TAG_LABELS: Record<FileTag, string> = {
+  compliance: 'Compliance certificate',
+  product_sheet: 'Product sheet',
+  warranty: 'Warranty',
+  other: 'Other',
+};
+
+/** Storage path to tag, for the files one screen can see. */
+export type FileTags = Record<string, FileTag>;
+
 // ---------------------------------------------------------------- navigation
 
 export type RootStackParamList = {

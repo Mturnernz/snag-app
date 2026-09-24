@@ -36,6 +36,7 @@ jest.mock('../lib/supabase', () => {
     updateQuote: (...a: unknown[]) => mock_updateQuote(...a),
     setQuoteStatus: (...a: unknown[]) => mock_setQuoteStatus(...a),
     setQuoteRooms: (...a: unknown[]) => mock_setQuoteRooms(...a),
+    setFileTags: jest.fn().mockResolvedValue(undefined),
     formatMoney: real.formatMoney,
   };
 });
@@ -212,5 +213,68 @@ describe('which rooms it is for', () => {
   it('offers no sharing on a claim — its contract is what gets shared', () => {
     const { r } = open(quote({ ...bill, id: 'b3', againstQuoteId: 'c1' }), { elements: rooms });
     expect(r.queryByText('Rooms')).toBeNull();
+  });
+});
+
+// A subcontractor's invoice made out to the builder is already inside the
+// builder's invoice. Recorded as its own bill, the same money counts twice.
+describe('a bill inside another bill', () => {
+  const builder = quote({
+    id: 'rb', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', detail: 'Variations', invoiceNumber: 'INV-0184',
+    amount: 5587.85, kind: 'invoice', status: 'tbc', unpaid: 5587.85,
+  });
+  const plumber = quote({
+    id: 'fp', projectId: 'p1', supplier: 'Force Plumbing', detail: 'Pipes relocation', invoiceNumber: 'INV-04621',
+    amount: 1138.71, kind: 'invoice', status: 'tbc', unpaid: 1138.71,
+  });
+  const inside = { ...plumber, billedThroughId: 'rb' };
+
+  it('asks, and says a bill of its own is one you pay', () => {
+    const { r } = open(plumber, { quotes: [builder, plumber] });
+    expect(r.queryByText('Part of another bill?')).not.toBeNull();
+    expect(r.queryByText('No — we pay this one')).not.toBeNull();
+  });
+
+  it('is put inside the bill chosen, through the one link the totals already read', async () => {
+    const { r, onChanged } = open(plumber, { quotes: [builder, plumber] });
+    await TestRenderer.act(async () => { node(r, 'Part of another bill?').props.onPress(); });
+    await TestRenderer.act(async () => { node(r, 'RELIABUILDER LIMITED · INV-0184').props.onPress(); });
+    expect(mock_updateQuote).toHaveBeenCalledWith('fp', { billedThroughId: 'rb' });
+    expect(onChanged).toHaveBeenCalledWith('Counted inside that bill');
+  });
+
+  it('says which bill it is inside, and offers nothing to pay', () => {
+    const { r } = open(inside, { quotes: [builder, inside] });
+    expect(r.queryByText('Inside another bill')).not.toBeNull();
+    expect(r.queryByText('Inside RELIABUILDER LIMITED · INV-0184 — not counted on its own')).not.toBeNull();
+    expect(r.queryByText('Mark as paid')).toBeNull();
+  });
+
+  it('can be counted on its own again', async () => {
+    const { r } = open(inside, { quotes: [builder, inside] });
+    await TestRenderer.act(async () => { node(r, 'Part of another bill?').props.onPress(); });
+    await TestRenderer.act(async () => { node(r, 'No — we pay this one').props.onPress(); });
+    expect(mock_updateQuote).toHaveBeenCalledWith('fp', { billedThroughId: null });
+  });
+
+  it('lets the bill it is inside say what it includes, and what is the builder\'s own', () => {
+    const { r } = open(builder, { quotes: [builder, inside] });
+    expect(r.queryByText('Includes')).not.toBeNull();
+    expect(r.queryByText('Force Plumbing')).not.toBeNull();
+    expect(r.queryByText('The rest of this bill')).not.toBeNull();
+    expect(r.queryByText('$4,449.14')).not.toBeNull();
+    // A bill holding others is not itself put inside something.
+    expect(r.queryByText('Part of another bill?')).toBeNull();
+  });
+
+  it('is not offered on a progress claim, which counts through its contract already', () => {
+    const claim = { ...plumber, againstQuoteId: 'rb' };
+    const { r } = open(claim, { quotes: [builder, claim] });
+    expect(r.queryByText('Part of another bill?')).toBeNull();
+  });
+
+  it('is not offered when there is no other bill to be inside', () => {
+    const { r } = open(plumber, { quotes: [plumber] });
+    expect(r.queryByText('Part of another bill?')).toBeNull();
   });
 });

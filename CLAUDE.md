@@ -2850,6 +2850,59 @@ allocate and filed onto the builder's bill and the job without moving Committed,
 `InvoiceReviewCard.test.tsx`, `ReviewEditSheet.test.tsx`, `invoiceReviews.test.ts` and
 `ProjectDetailScreen.test.tsx` pin the rest of the page.
 
+### A bill can be inside another bill
+
+The Variations email showed the gap the reader cannot always close. Good Connections' invoice said
+it was made out to "Relia Builder LTD", so it became paperwork; Force Plumbing's did not say, so it
+came in as the household's own bill and the $1,138.71 inside ReliaBuilder's INV-0184 counted twice.
+A reading can only see what the paper says, so **a person has to be able to say it too**.
+
+*Part of another bill?* on `PriceSheet` points a bill at the one it is inside. **It is not a new
+column and not an "ignore" flag**: it writes `billed_through_id`, which every rollup already reads as
+*passed through* — the invoice leaves Invoiced, Paid and the scope's fallback in
+`project_scope_money`, the supplier rows and `project_bills` — so not one view changed and the
+supplier rows still sum to Committed. `agreedContribution` drops it the same way, so the room
+breakdown agrees. Two rules:
+
+- **It names the bill, never merely "ignored".** A figure that stops counting says why, in words the
+  paper can be checked against: *Inside RELIABUILDER LIMITED · INV-0184 — not counted on its own*. A
+  generic ignore switch is a way to make any figure vanish with no reason on record, which is the
+  shape the override rules exist to refuse.
+- **The bill it is inside says what it includes**, with *the rest of this bill* as the figure the
+  builder charged for their own work. That is the reconciliation somebody would otherwise do by hand.
+
+Offered only on a bill of its own (`billHosts`, `papers.ts`): not on a progress claim, which counts
+through its contract already; not on a price answering a set-aside, where the same link means
+billed through the builder's contract and `ThingSheet` decides it; never pointing at a bill that is
+itself inside another, because a chain leaves the reader following links to find what counts; and
+not on a bill that already holds others. The room sheet lists an inner bill under its host, as it
+lists a claim under its contract. `billsInside.test.ts` and `PriceSheet.test.tsx` pin it.
+
+### A file says what it is
+
+A job's paperwork was a pile of PDFs by filename, and the one somebody gets asked for — the
+certificate of compliance, at code compliance or by an insurer — could only be found by opening
+every file. `home.file_tags` (`20260925090000`) tags a file **Compliance certificate**, **Product
+sheet**, **Warranty** or **Other**.
+
+- **The tag belongs to the file**, keyed by storage path like `label_readings`, not a column on each
+  of the six arrays a file can live in. A file removed from its record stops being shown; a stale
+  row names nothing anybody can see. Absence is untagged. Invoices and quotes are never tagged —
+  the price they sit on already says what they are. `set_file_tags` takes several paths and checks
+  each one's household folder against the caller.
+- **The tags ride in `project_page`** (`fileTags`), limited to the files `project_files` shows, rather
+  than a read per sheet — the pool is ten connections and every sheet shows files.
+- **Set on the file**, as a pill beside each document in `Attachments` (on the job, a part and a
+  price) opening `FileTagChips` — the app's one chip, wrapping because four long labels do not fit
+  across a phone, and pressing the lit one clears it.
+- **Asked when paperwork is filed**, because that is the one moment it is in somebody's hand.
+  `guessFileTag` reads the card's words and filenames and lights a suggestion, said as one;
+  compliance first, because a certificate's title often names the product it certifies; *Other* is
+  never guessed. A card with no PDF is not asked — a photo of the deck is not a certificate.
+- **Gathered on the project page** by `TaggedFiles` — *Compliance certificates*, *Product sheets*,
+  *Warranties* — each row saying where the file is attached. A read over `project_files`, never a
+  second place a file lives, and absent until something is tagged.
+
 ### A bill can be shared between rooms
 
 A tile order goes on the bathroom floor and the laundry splashback. A bill could sit on **one**

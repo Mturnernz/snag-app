@@ -467,6 +467,8 @@ export const setQuoteRooms = (quoteId: string, elementIds: string[], amounts: nu
 
 export const filePaperwork = (reviewId: string, where: { quoteId?: string | null; elementId?: string | null }) =>
   queries.filePaperwork(supabase, reviewId, where);
+export const setFileTags = (paths: string[], tag: import('@snag/shared-types').FileTag | null) =>
+  queries.setFileTags(supabase, paths, tag);
 
 export const rereadInvoiceReview = (reviewId: string) =>
   queries.rereadInvoiceReview(supabase, reviewId);

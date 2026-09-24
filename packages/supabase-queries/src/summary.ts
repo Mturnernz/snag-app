@@ -138,6 +138,8 @@ const supplierKey = (name: string | null): string | null => {
  */
 export function agreedContribution(page: Pick<ProjectPage, 'quotes'>, q: ProjectQuote): number {
   if (q.status === 'declined' || q.supersedesLineId || q.againstQuoteId) return 0;
+  // A bill inside another bill counts through that one — the views drop it too.
+  if (q.kind === 'invoice' && q.billedThroughId) return 0;
   if (q.kind === 'quote') {
     return q.status === 'accepted'
       ? round((q.effectiveAmount ?? q.amountIncl ?? 0) - q.allowanceOpen)

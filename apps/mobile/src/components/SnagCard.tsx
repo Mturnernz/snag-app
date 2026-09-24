@@ -125,7 +125,6 @@ export default function SnagCard({ snag, photoUrl, onPress, onDone, finishing }:
         style={({ pressed }) => [styles.tick, pressed && styles.pressed]}
         accessibilityRole="button"
         accessibilityLabel={`Mark done: ${headline}`}
-        hitSlop={4}
       >
         <View style={[styles.tickRing, finishing && styles.tickRingBusy]}>
           <Icon

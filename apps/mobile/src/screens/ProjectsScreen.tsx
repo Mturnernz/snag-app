@@ -3,7 +3,7 @@ import {
   View, Text, SectionList, Pressable, Modal, RefreshControl, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import Icon from '../components/Icon';
@@ -62,7 +62,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  */
 export default function ProjectsScreen() {
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const {
     household, properties, activeProperty, setActiveProperty, locations, reloadLocations,
   } = useHousehold();

@@ -5,7 +5,6 @@ import {
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -142,7 +141,6 @@ function describeRepeat(snag: Snag): string {
 export default function SnagDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
-  const insets = useSafeAreaInsets();
   // The comment box is the last thing in a long scroll, so on web the keyboard
   // opens over the thing being typed into. The KeyboardAvoidingView wrapped
   // around this screen does nothing in a browser — see lib/keyboardInset.ts.
@@ -578,14 +576,18 @@ export default function SnagDetailScreen() {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={{ paddingTop: insets.top }}>
+      {/* ScreenHeader pads the top inset itself; padding here too doubled it. */}
+      <View>
         <ScreenHeader
           title={snag.reference}
           onBack={() => navigation.goBack()}
           rightSlot={
+            // A 48pt box, not a glyph with `hitSlop`: react-native-web ignores
+            // hitSlop, so on the build people install the tap area was the
+            // 24pt icon itself, in the screen's top-right corner.
             <Pressable
               onPress={() => setConfirmDelete(true)}
-              hitSlop={12}
+              style={styles.headerAction}
               accessibilityRole="button"
               accessibilityLabel="Delete"
             >
@@ -1378,6 +1380,12 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontSize: Typography.sm,
     color: Colors.textMuted,
+  },
+  headerAction: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   suggestRow: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -43,7 +43,7 @@ interface Props {
  * Join, or No thanks. An invitation you can't refuse is an instruction.
  */
 export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const [name, setName] = useState(profile?.displayName ?? '');
   const [householdName, setHouseholdName] = useState('');
   const [saving, setSaving] = useState(false);

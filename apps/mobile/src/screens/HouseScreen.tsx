@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import {
   exportDateStamp, ghostsForRoom, searchThings, thingExportPhotos, thingExportTable,
@@ -90,7 +90,7 @@ interface Section {
 
 export default function HouseScreen() {
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const {
     household, properties, activeProperty, setActiveProperty, locations, reloadLocations,
   } = useHousehold();

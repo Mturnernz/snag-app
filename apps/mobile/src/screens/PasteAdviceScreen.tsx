@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, ScrollView, Pressable, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -46,7 +46,7 @@ import { ADVICE_VERDICT_LABELS, Snag } from '../types';
  */
 export default function PasteAdviceScreen() {
   const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
   const { activeProperty } = useHousehold();
   const { showToast } = useToast();

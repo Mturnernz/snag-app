@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import Icon from '../components/Icon';
@@ -88,7 +88,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export default function ProjectDetailScreen({ route }: Props) {
   const { projectId } = route.params;
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const { household, locations, reloadLocations } = useHousehold();
   const { showToast } = useToast();
 
@@ -901,7 +901,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.sm, backgroundColor: Colors.background,
   },
-  back: { flexDirection: 'row', alignItems: 'center', minHeight: 44, paddingRight: Spacing.md },
+  back: { flexDirection: 'row', alignItems: 'center', minHeight: MIN_TOUCH_TARGET, paddingRight: Spacing.md, paddingLeft: Spacing.xs },
   backLabel: { fontSize: Typography.body, color: Colors.primary },
   navRight: { flexDirection: 'row', alignItems: 'center' },
   addTap: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },

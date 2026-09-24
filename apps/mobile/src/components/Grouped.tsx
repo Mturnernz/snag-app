@@ -217,8 +217,11 @@ export function Segmented<T extends string>({
             key={option.value}
             onPress={() => onChange(option.value)}
             // The visible segment is 32pt, like every chip here; the tap area
-            // reaches the 48pt minimum without making the track that tall.
-            hitSlop={8}
+            // reaches the 48pt minimum without making the track that tall. It
+            // is padding pulled back by a negative margin rather than hitSlop,
+            // because react-native-web ignores hitSlop: on the build people
+            // install the target was the 32pt segment.
+            style={styles.segmentTap}
             accessibilityRole="radio"
             accessibilityState={{ selected: on, checked: on }}
             accessibilityLabel={option.label}
@@ -333,6 +336,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', backgroundColor: Colors.segment, borderRadius: 9, padding: 2,
     alignSelf: 'flex-start',
   },
+  segmentTap: { paddingVertical: 8, marginVertical: -8 },
   segmentOption: { height: 32, paddingHorizontal: Spacing.md + 2, borderRadius: 7, justifyContent: 'center' },
   segmentOn: {
     backgroundColor: Colors.surface,

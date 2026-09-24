@@ -3,7 +3,6 @@ import {
   View, Text, TextInput, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -53,7 +52,6 @@ import { showAlert } from '../lib/alert';
  */
 export default function HouseholdScreen() {
   const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
   const {
     household, members, profile, properties, activeProperty, refresh, reloadAccount,
   } = useHousehold();
@@ -418,7 +416,8 @@ export default function HouseholdScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={{ paddingTop: insets.top }}>
+      {/* ScreenHeader pads the top inset itself; padding here too doubled it. */}
+      <View>
         <ScreenHeader title={household.name} onBack={() => navigation.goBack()} />
       </View>
 
@@ -440,7 +439,6 @@ export default function HouseholdScreen() {
                   <Pressable
                     onPress={() => setConfirmRemove({ id: member.profileId, name: member.displayName })}
                     style={styles.rowAction}
-                    hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Remove ${member.displayName}`}
                   >
@@ -465,7 +463,6 @@ export default function HouseholdScreen() {
               <Pressable
                 onPress={() => handleCancelInvite(invitation.id)}
                 style={styles.rowAction}
-                hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel={`Cancel the invitation to ${invitation.email}`}
               >
@@ -542,7 +539,6 @@ export default function HouseholdScreen() {
                   <Pressable
                     onPress={() => askDeletePlace(place.id, place.name)}
                     style={styles.rowAction}
-                    hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Delete ${place.name}`}
                   >

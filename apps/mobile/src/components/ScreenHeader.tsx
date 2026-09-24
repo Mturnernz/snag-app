@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import Icon from './Icon';
 
@@ -15,7 +15,7 @@ interface Props {
 
 export default function ScreenHeader({ title, subtitle, onBack, rightSlot }: Props) {
   const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
 
   return (
     <View
@@ -28,7 +28,6 @@ export default function ScreenHeader({ title, subtitle, onBack, rightSlot }: Pro
       <TouchableOpacity
         style={styles.backButton}
         onPress={onBack ?? (() => navigation.goBack())}
-        hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel="Back"
       >
@@ -52,10 +51,14 @@ export default function ScreenHeader({ title, subtitle, onBack, rightSlot }: Pro
 const styles = StyleSheet.create({
   // V2: the navigation bar is the screen's own plaster, divided by a hairline
   // rather than a white strip with a border.
+  // Eight in from the glass, not four. Both corners of this row hold a control
+  // — the back arrow and whatever the screen puts on the right — and on a
+  // phone whose glass curves at the edge, four pixels in is under the curve.
+  // A 48pt box starting at eight puts the glyph where a thumb lands.
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
     paddingBottom: Spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth * 2,
   },
@@ -78,6 +81,7 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: Typography.footnote, color: Colors.textMuted },
   rightSlot: {
     minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
     alignItems: 'flex-end',
     justifyContent: 'center',
   },

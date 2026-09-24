@@ -17,6 +17,7 @@ import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '..
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import {
   consumableOnList, describeCycle, documentFileName, documentName, formatLooseDate,
   parseLooseDate, serviceJobFor, swatchColour, thingHeadline, dayKey, formatDayFirst,
@@ -158,6 +159,7 @@ export default function ThingDetailScreen() {
   const { household, locations } = useHousehold();
   const { showToast } = useToast();
   const keyboard = useKeyboardInset();
+  const edge = useEdgeInsets();
 
   const [thing, setThingState] = useState<Thing | null>(null);
   const thingRef = useRef<Thing | null>(null);
@@ -1148,7 +1150,7 @@ export default function ThingDetailScreen() {
           onPress={() => setService(null)}
           accessibilityLabel="Close"
         />
-        <View style={[styles.sheet, { marginBottom: keyboard }]}>
+        <View style={[styles.sheet, { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg }]}>
           <View style={styles.grab} />
           <Text style={styles.sheetTitle}>How often is it serviced?</Text>
           <View style={styles.chips}>
@@ -1249,7 +1251,7 @@ export default function ThingDetailScreen() {
           onPress={() => setReporting(false)}
           accessibilityLabel="Close"
         />
-        <View style={[styles.sheet, styles.reportSheet, { marginBottom: keyboard }]}>
+        <View style={[styles.sheet, { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg }]}>
           <View style={styles.grab} />
           <Text style={styles.sheetTitle}>
             {`What's wrong with the ${thingHeadline(thing).toLowerCase()}?`}
@@ -1582,7 +1584,6 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
-  reportSheet: { paddingBottom: Spacing.xl },
   sheetTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
   sheetField: { gap: Spacing.xs, minWidth: 0 },
   cta: {

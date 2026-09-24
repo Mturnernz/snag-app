@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -67,7 +67,7 @@ interface Props {
  *   that could not exist without that fix.
  */
 export default function ComposeBar({ pathPrefix, onAdd, stacked, words, embedded }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   const [draft, setDraft] = useState('');

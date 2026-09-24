@@ -3858,11 +3858,11 @@ Four things about the change:
   preference and `display: standalone` stays the answer for anything that does not read one —
   iOS, which has no fullscreen display mode at all, and older Chrome. Nothing regresses on the
   way past.
-- **Every inset goes to zero with the bars, and that is correct.** `env(safe-area-inset-top)` and
-  `-bottom` describe bars that are no longer there, so the eleven screens padding by `insets.top`
-  stop padding and the compose bar moves down to sit against the screen edge — where the camera
-  button is *meant* to be, since it is bottom-left for one-handed reach. Android reserves the
-  bottom strip for the home **swipe**; a tap on a 48px target passes straight through.
+- **Every inset goes to zero with the bars — and that turned out not to be fine.** The reported
+  insets describe bars that are no longer there, but the glass is still rounded and the camera is
+  still punched through it, so a zero top put the header's back arrow in the corner curve and a
+  zero bottom put the corner tabs where the swipe that brings the bars back begins. See *Corners
+  and edges* below: `useEdgeInsets` floors both in `fullscreen`.
 - **iOS is deliberately left alone.** `apple-mobile-web-app-status-bar-style` stays `default`
   rather than becoming `black-translucent`: translucent is how a web app gets under the iOS
   status bar, and it also forces light status-bar content, which on a `#FAF7F2` ground is a clock
@@ -3876,6 +3876,37 @@ Four things about the change:
 navigation-bar plugin — two builds of one app disagreeing about whether Android's controls are on
 screen is drift nothing else would catch, since each is configured in a different file, in a
 different vocabulary, and neither build renders the other.
+
+## Corners and edges, on an iPhone and on Android
+
+*"The buttons on the corners are difficult to push"*, on an iPhone 17. Three causes, none of which
+shows up anywhere but a phone, and `lib/edgeInsets.test.ts` pins all three.
+
+- **`hitSlop` does nothing on the build people install.** react-native-web 0.21's `Pressable` and
+  `TouchableOpacity` ignore it, so every icon "enlarged" with it had its glyph's own tap area — the
+  job page's delete was a 24pt icon in the top-right corner. **Never use `hitSlop`.** Size the box
+  (`MIN_TOUCH_TARGET` square), or put the pill inside a 48pt `Pressable` the way every chip row here
+  does, or — where the layout cannot grow — pad the `Pressable` and pull the padding back with a
+  negative margin (`segmentTap` in `Grouped.tsx`). The test fails the build on any `hitSlop=`.
+- **The safe area is not where a thumb can press.** On an installed Android phone the manifest
+  hides both system bars, so every inset is zero while the corners are still rounded; on anything
+  without a home indicator the bottom is zero too. **`useEdgeInsets`** (`hooks/`) is the safe area
+  floored: 28 at the top in `fullscreen` only (anywhere else a status bar is already above the
+  page, and a band under it would push every header down for nothing), 16 at the bottom always.
+  **Use it, never `useSafeAreaInsets`**, for anything against an edge — the test fails the build on
+  the raw hook. The tab bar is handed the same floors through `safeAreaInsets`, because it
+  measures the safe area itself. It reads the context rather than calling `useSafeAreaInsets`,
+  which throws outside a provider.
+- **Every bottom sheet pads the bottom edge** — `(keyboard > 0 ? 0 : edge.bottom) + Spacing.lg`.
+  The capture sheet's *Submit*, the item picker's *Done* and the thing page's two sheets had
+  none, so on an iPhone their one button sat on the home indicator.
+
+Two smaller ones. `ScreenHeader` stands **8 in from the glass**, not 4 — both corners of that row
+hold a control, and four pixels in is under the curve of an iPhone's edge; the job and household
+pages also padded the top inset twice around it. And `html { touch-action: manipulation }` in
+`public/index.html`, because iOS reads two quick taps on one control as a double-tap-to-zoom and
+enlarges the page instead; pinch zoom is untouched, and `PhotoViewer`'s own `touchAction: 'none'`
+still wins on its surface.
 
 ## Environment Setup
 

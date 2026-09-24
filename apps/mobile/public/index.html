@@ -70,6 +70,12 @@
            on a plaster-coloured app. Matches Colors.background. */
         background-color: #FAF7F2;
       }
+      /* A quick second tap on a button is a second tap, not a zoom. Without
+         this iOS reads two taps on the same control as a double-tap-to-zoom
+         and enlarges the page instead. Pinch zoom is untouched. */
+      html {
+        touch-action: manipulation;
+      }
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {
         overflow: hidden;

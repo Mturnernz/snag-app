@@ -1,8 +1,8 @@
 import React from 'react';
 import { View, Text, Modal, ScrollView, Pressable, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
-import { Colors, Radius, Spacing, Typography } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 
 interface Props {
@@ -31,7 +31,7 @@ interface Props {
 export default function Sheet({
   visible, title, subtitle, onClose, closeLabel = 'Cancel', children, footer,
 }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   return (
@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary, letterSpacing: -0.3,
   },
   subtitle: { fontSize: Typography.body, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
-  close: { minHeight: 44, justifyContent: 'center', paddingLeft: Spacing.sm },
+  close: { minHeight: MIN_TOUCH_TARGET, minWidth: MIN_TOUCH_TARGET, alignItems: 'flex-end', justifyContent: 'center', paddingLeft: Spacing.sm },
   closeLabel: { fontSize: Typography.body, color: Colors.primary },
   scroll: { marginTop: Spacing.lg },
   content: { gap: Spacing.xl, paddingBottom: Spacing.lg },

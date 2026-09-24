@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import SnagCard from '../components/SnagCard';
 import EmptyState from '../components/EmptyState';
@@ -89,7 +89,7 @@ function describeSince(iso: string | null): string | null {
 
 export default function SnagListScreen() {
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const {
     household, profile, properties, activeProperty, setActiveProperty, locations,
   } = useHousehold();

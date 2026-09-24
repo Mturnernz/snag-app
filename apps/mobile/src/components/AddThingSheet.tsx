@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -90,7 +90,7 @@ interface Props {
 export default function AddThingSheet({
   visible, locations, pathPrefix, start, onAddRoom, onCancel, onAdd,
 }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   const [step, setStep] = useState<Step>('room');

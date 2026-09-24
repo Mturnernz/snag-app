@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -36,7 +36,7 @@ interface Props {
  * workmanship guarantee findable.
  */
 export default function LinkProjectSheet({ visible, propertyId, linkedId, onClose, onPick }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const [projects, setProjects] = useState<Project[] | null>(null);
 
   useEffect(() => {

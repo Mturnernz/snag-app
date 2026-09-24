@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -33,7 +33,7 @@ const LOOSE_END_LIMIT = 5;
 
 export default function ProfileScreen() {
   const navigation = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const { profile, household, members, locations, properties, reloadAccount } = useHousehold();
   const { showToast } = useToast();
 

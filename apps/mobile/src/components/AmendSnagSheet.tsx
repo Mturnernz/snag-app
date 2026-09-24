@@ -7,6 +7,7 @@ import Icon from './Icon';
 import RoomPicker from './RoomPicker';
 import { Colors, Radius, Spacing, Typography, Shadow, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { Location, Snag } from '../types';
 
 /**
@@ -110,6 +111,7 @@ export default function AmendSnagSheet({
   );
   const [note, setNote] = useState(snag.description ?? '');
   const keyboard = useKeyboardInset();
+  const edge = useEdgeInsets();
 
   const order = amendSteps();
   const index = Math.max(0, order.indexOf(step));
@@ -149,7 +151,14 @@ export default function AmendSnagSheet({
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
-      <View style={[styles.sheet, { marginBottom: keyboard }]}>
+      {/* The home indicator's height under the Submit button. Without it the
+          one button this sheet exists for sat on the iPhone's bottom edge. */}
+      <View
+        style={[
+          styles.sheet,
+          { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg },
+        ]}
+      >
         <View style={styles.grab} />
 
         <View style={styles.head}>

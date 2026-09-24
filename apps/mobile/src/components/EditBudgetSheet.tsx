@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Modal, ScrollView, Pressable, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
 import MoneyField from './MoneyField';
@@ -24,7 +24,7 @@ interface Props {
  * it back to "no budget set" rather than a half-typed zero.
  */
 export default function EditBudgetSheet({ visible, budget, budgetInclGst, onSave, onClose }: Props) {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   const [amount, setAmount] = useState('');

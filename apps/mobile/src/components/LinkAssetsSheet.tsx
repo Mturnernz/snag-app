@@ -7,6 +7,7 @@ import Icon from './Icon';
 import Button from './Button';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { assetPickerOrder, searchThings, thingDetailLine, thingHeadline } from '@snag/supabase-queries';
 import { Location, Thing } from '../types';
 
@@ -59,6 +60,7 @@ export default function LinkAssetsSheet({
   /** `null` is "everywhere"; a string is one room. Opens on the job's room. */
   const [only, setOnly] = useState<string | null>(room);
   const keyboard = useKeyboardInset();
+  const edge = useEdgeInsets();
 
   // Re-seeded every time it opens, so a sheet dismissed without saving does not
   // hand its abandoned answer to the next opening.
@@ -94,7 +96,12 @@ export default function LinkAssetsSheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
       <Pressable style={styles.backdrop} onPress={onCancel} accessibilityLabel="Close" />
-      <View style={[styles.sheet, { marginBottom: keyboard }]}>
+      <View
+        style={[
+          styles.sheet,
+          { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg },
+        ]}
+      >
         <View style={styles.grab} />
 
         <View style={styles.head}>

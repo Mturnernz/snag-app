@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Pressable,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Button from '../components/Button';
 import Icon from '../components/Icon';
@@ -13,7 +13,7 @@ import { showAlert } from '../lib/alert';
 type Mode = 'signIn' | 'signUp';
 
 export default function AuthScreen() {
-  const insets = useSafeAreaInsets();
+  const insets = useEdgeInsets();
   const [mode, setMode] = useState<Mode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

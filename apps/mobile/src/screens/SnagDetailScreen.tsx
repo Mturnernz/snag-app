@@ -16,6 +16,8 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import StickyActionBar from '../components/StickyActionBar';
 import PhotoViewer from '../components/PhotoViewer';
 import AdviceCard from '../components/AdviceCard';
+import SupportCard from '../components/SupportCard';
+import AskSnagHQSheet from '../components/AskSnagHQSheet';
 import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
 import DateField from '../components/DateField';
@@ -28,6 +30,7 @@ import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
   deleteStoredFiles, getSnagAdvice, deleteSnagAdvice, setPartBought,
   getThingNotes, getThings, setSnagThings,
+  getSupportRequestForSnag, createSupportRequest, addSupportMessage, closeSupportRequest,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
@@ -37,7 +40,8 @@ import {
   thingHeadline, thingsInArea,
 } from '@snag/supabase-queries';
 import {
-  Comment, LinkedThing, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote, REPEAT_PRESETS,
+  Comment, LinkedThing, RootStackParamList, Snag, SnagAdvice, SupportRequest, Thing, ThingNote,
+  REPEAT_PRESETS,
 } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -153,6 +157,9 @@ export default function SnagDetailScreen() {
   const [snag, setSnag] = useState<Snag | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [advice, setAdvice] = useState<SnagAdvice | null>(null);
+  /** The latest question asked of SnagHQ about this job, open or not. */
+  const [support, setSupport] = useState<SupportRequest | null>(null);
+  const [asking, setAsking] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   // Which photo is open full screen, or null. An index rather than a URL, so
   // the viewer's own next/previous walk the same strip.
@@ -211,17 +218,21 @@ export default function SnagDetailScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [next, nextComments, nextAdvice] = await Promise.all([
+      const [next, nextComments, nextAdvice, nextSupport] = await Promise.all([
         getSnag(params.snagId),
         getComments(params.snagId),
         // Never fatal: a job with no assessment is the resting state, and a
         // read that fails must not take the page down with it.
         getSnagAdvice(params.snagId).catch(() => null),
+        // Never fatal either, for the same reason: most jobs were never asked
+        // about, and a question nobody can fetch must not hide the job.
+        getSupportRequestForSnag(params.snagId).catch(() => null),
       ]);
       setSnag(next);
       setDueDraft(dueText(next.dueAt));
       setComments(nextComments);
       setAdvice(nextAdvice);
+      setSupport(nextSupport);
 
       // What has been said on the asset's *other* jobs. Read after the snag
       // rather than beside it, because it needs the snag's `thingId` — and
@@ -538,6 +549,59 @@ export default function SnagDetailScreen() {
       setComments(await getComments(snag.id));
     } catch (err: any) {
       showAlert("Couldn't add that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Asking SnagHQ, replying and closing. Each re-reads the question rather
+   * than patching it: the status and "seen" line are the server's to decide,
+   * and none of the three touches the job itself.
+   */
+  async function refreshSupport(snagId: string) {
+    setSupport(await getSupportRequestForSnag(snagId).catch(() => support));
+  }
+
+  async function handleAsk(question: string) {
+    if (!snag) return;
+    setBusy(true);
+    try {
+      await createSupportRequest(snag.id, question);
+      setAsking(false);
+      await refreshSupport(snag.id);
+      showToast('Sent to SnagHQ');
+    } catch (err: any) {
+      showAlert("Couldn't send that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSupportReply(body: string): Promise<boolean> {
+    if (!snag || !support) return false;
+    setBusy(true);
+    try {
+      await addSupportMessage(support.id, body);
+      await refreshSupport(snag.id);
+      return true;
+    } catch (err: any) {
+      showAlert("Couldn't send that", err?.message ?? 'Please try again.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSupportClose() {
+    if (!snag || !support) return;
+    setBusy(true);
+    try {
+      await closeSupportRequest(support.id);
+      await refreshSupport(snag.id);
+      showToast('Closed — SnagHQ can no longer see this job');
+    } catch (err: any) {
+      showAlert("Couldn't close that", err?.message ?? 'Please try again.');
     } finally {
       setBusy(false);
     }
@@ -965,6 +1029,31 @@ export default function SnagDetailScreen() {
             thing that answers the controls underneath it. A suggested part is
             an offer with a + beside it — accepting one is what puts it on the
             shopping list, and that tap is what starts the job. */}
+        {/* ── Asked SnagHQ ──
+            Directly above the assessment, because that is where SnagHQ's
+            answer lands. With no question yet it is one quiet row: most jobs
+            never need it, and a card saying so on every job would be the page
+            advertising a service rather than showing the job. */}
+        {support ? (
+          <SupportCard
+            request={support}
+            busy={busy}
+            onReply={handleSupportReply}
+            onClose={handleSupportClose}
+            onAskAgain={() => setAsking(true)}
+          />
+        ) : (
+          <Pressable
+            onPress={() => setAsking(true)}
+            style={styles.askRow}
+            accessibilityRole="button"
+            accessibilityLabel="Ask SnagHQ about this"
+          >
+            <Icon name="chatbubbles-outline" size="sm" color={Colors.textSecondary} />
+            <Text style={styles.askLabel}>Ask SnagHQ about this</Text>
+          </Pressable>
+        )}
+
         {advice ? (
           <AdviceCard
             advice={advice}
@@ -1216,6 +1305,13 @@ export default function SnagDetailScreen() {
         onClose={() => setViewing(null)}
       />
 
+      <AskSnagHQSheet
+        visible={asking}
+        busy={busy}
+        onSend={handleAsk}
+        onCancel={() => setAsking(false)}
+      />
+
       <EditSnagSheet
         visible={editing}
         snag={snag}
@@ -1281,6 +1377,14 @@ function Option({
 }
 
 const styles = StyleSheet.create({
+  askRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.xs,
+  },
+  askLabel: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.semibold },
   flex: { flex: 1, backgroundColor: Colors.background },
   loading: {
     flex: 1,

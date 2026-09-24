@@ -4887,6 +4887,12 @@ export async function updateQuote(
     p_photo_paths: update.photoPaths ?? null,
     p_document_paths: update.documentPaths ?? null,
     p_clear: clear,
+    // These three were missing, so setting them wrote nothing and said nothing —
+    // only clearing (through p_clear) ever reached the row. Every field
+    // `QuoteUpdate` carries has to be named here; `updateQuote.test.ts` pins it.
+    p_due_on: update.dueOn ?? null,
+    p_billed_through_id: update.billedThroughId ?? null,
+    p_settles_milestone_id: update.settlesMilestoneId ?? null,
     p_invoice_number: update.invoiceNumber ?? null,
   });
   if (error) throw asError(error, "That didn’t save");

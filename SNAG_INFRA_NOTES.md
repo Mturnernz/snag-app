@@ -230,20 +230,27 @@ Because `auth.users` sits outside both schemas, none of this needed touching:
 
 ### The staff portal — Google sign-in, a staff list, and one email
 
-`www.snaghq.co.nz/staff` is where SnagHQ employees answer questions households ask about a job
-(`20260925090000`; *The staff portal* in `CLAUDE.md`). None of what makes it work is in git, and
-the order matters — **apply the migration first**, then:
+`staff.snaghq.co.nz` (`apps/staff`) is where SnagHQ employees answer questions households ask about
+a job (`20260925090000`; *The staff portal* in `CLAUDE.md`). It is its own Netlify site, separate
+from the app's and from `www`'s. None of what makes it work is in git, and the order matters —
+**apply the migration first**, then:
 
-1. **Google as an Auth provider.** A Google Cloud OAuth client (Web application) in the
+1. **The Netlify site.** A third site on this repository with **Base directory `apps/staff`**
+   (Netlify's Next.js runtime is detected; `apps/staff/netlify.toml` only pins Node). Environment
+   variables: `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the same project as
+   the app), and optionally `NEXT_PUBLIC_SNAG_APP_URL`. Then the custom domain
+   `staff.snaghq.co.nz` — a `staff` record in the Netlify-managed DNS — and HTTPS.
+2. **Google as an Auth provider.** A Google Cloud OAuth client (Web application) in the
    snaghq.co.nz Workspace, with the authorised redirect URI
    `https://wpkdpukpllxuyqqlxkxf.supabase.co/auth/v1/callback`. Its client id and secret go in
    Supabase → Auth → Providers → Google. Setting the OAuth consent screen to **Internal** keeps
    anybody outside the Workspace from getting past Google at all; the staff list is the check
    either way.
-2. **Redirect allow-list** — add `https://www.snaghq.co.nz/staff/auth/callback` (and
-   `http://localhost:3000/staff/auth/callback` for local work). Missing, the sign-in lands on the
+3. **Redirect allow-list** — add `https://staff.snaghq.co.nz/auth/callback` (and
+   `http://localhost:3001/auth/callback` for local work). The Google OAuth client does not change:
+   its redirect URI is Supabase's own callback, never ours. Missing, the sign-in lands on the
    Site URL and never reaches the portal, with nothing said.
-3. **Who is staff** — by hand, one row per employee, after they have signed in once so their
+4. **Who is staff** — by hand, one row per employee, after they have signed in once so their
    `auth.users` row exists:
 
    ```sql
@@ -255,13 +262,14 @@ the order matters — **apply the migration first**, then:
    provider, so an email-and-password account with a snaghq.co.nz address is not staff. Somebody
    leaving is `update home.staff set active = false` — never a delete: their name is on every
    reply and log entry they wrote.
-4. **The reply email** — `RESEND_API_KEY` (a **sending-only** key) and optionally
-   `SUPPORT_EMAIL_FROM` as environment variables on the **web** Netlify site, not as function
+5. **The reply email** — `RESEND_API_KEY` (a **sending-only** key) and optionally
+   `SUPPORT_EMAIL_FROM` as environment variables on the **staff** Netlify site, not as function
    secrets: the portal sends from a Next server action. The from address (default
    `help@snaghq.co.nz`) has to be on a domain verified for sending in Resend. Without the key,
    replies still save and the portal says they were not emailed.
 
-Checking it: a signed-in non-staff account on `/staff` sees *This account isn't on the SnagHQ
+Checking it: `curl -sI https://staff.snaghq.co.nz/` answers a redirect to `/sign-in` with
+`X-Robots-Tag: noindex, nofollow`; a signed-in non-staff account sees *This account isn't on the SnagHQ
 staff list*; and `select home.is_staff()` run as a staff token is `true`.
 
 ### The CI test account needs a household, not just a login
@@ -288,7 +296,8 @@ where u.email = '<E2E_EMAIL>';
 
 | Host | Serves |
 |---|---|
-| `www.snaghq.co.nz` | `apps/web` — the password-reset landing page, and the staff portal at `/staff` |
+| `www.snaghq.co.nz` | `apps/web` — the password-reset landing page (`/staff/*` redirects to the portal) |
+| `staff.snaghq.co.nz` | `apps/staff` — the SnagHQ staff portal |
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the actual app |
 | `snagv1.netlify.app` | redirect to `app.snaghq.co.nz`; must keep resolving (printed QR codes, old notification links) |
 
@@ -299,7 +308,7 @@ Apex redirects to `www`. DNS is Netlify-managed.
 One account, four entirely separate paths into it, which fail independently:
 
 - **HTTP API** — used by `notify-snag` (retired product only), and by the staff portal's reply
-  email (a Next server action on the web site; see *The staff portal* above).
+  email (a Next server action on the staff site; see *The staff portal* above).
 - **SMTP** — used by Supabase Auth for password recovery. This is the one the home app depends on.
 - **Receiving** — `bills.snaghq.co.nz`, a receive-only domain (sending disabled), for bills
   forwarded to a project. Resend posts `email.received` to the `inbound-bill` edge function.

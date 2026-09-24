@@ -275,7 +275,7 @@ describe('the rest of the page', () => {
       invoiceReviews: [{
         id: 'rv1', projectId: 'p1', state: 'pending', supplier: 'Tile Space', amount: 1240,
         amountInclGst: true, paid: false, read: {}, createdAt: '2026-09-20T00:00:00Z',
-        inferred: [], photoPaths: [], documentPaths: [],
+        inferred: [], photoPaths: [], documentPaths: [], roomIds: [], roomAmounts: null,
       }],
     }));
     const approve = r.root.findAll((n: any) => n.props?.onApprove, { deep: true })[0];

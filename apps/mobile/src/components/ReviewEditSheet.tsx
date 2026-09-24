@@ -4,17 +4,29 @@ import { View, Text, TextInput, StyleSheet } from 'react-native';
 import Sheet from './Sheet';
 import MoneyField from './MoneyField';
 import DateField from './DateField';
-import { Group, PrimaryButton, RadioRow, groupedStyles } from './Grouped';
+import RoomSplit, { resolveSplit, splitValueFrom, type RoomSplitValue } from './RoomSplit';
+import { Group, PrimaryButton } from './Grouped';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { formatDayFirst, parseLooseDate, type InvoiceReviewUpdate } from '@snag/supabase-queries';
-import type { InvoiceReview, ProjectElement } from '../types';
+import type { InvoiceReview, Location, ProjectElement } from '../types';
+
+/** Where the bill will land: no rooms is the whole job, one is that room, more is shared. */
+export interface ReviewRooms {
+  ids: string[];
+  /** Each room's share in the bill's own GST basis, or null for not split. */
+  amounts: number[] | null;
+}
 
 interface Props {
   review: InvoiceReview | null;
   /** The parts of the job. Only ones somebody has seen are offered — an implicit one is the job. */
   elements: ProjectElement[];
+  /** The house's rooms, offered when adding one to the job from here. */
+  locations: Location[];
+  /** Adds a room to the job, answering with its element id or null. */
+  onAddRoom: (name: string) => Promise<string | null>;
   onClose: () => void;
-  onSave: (update: InvoiceReviewUpdate) => Promise<void>;
+  onSave: (update: InvoiceReviewUpdate, rooms: ReviewRooms) => Promise<void>;
 }
 
 const parseAmount = (text: string): number | null | undefined => {
@@ -32,14 +44,23 @@ const parseAmount = (text: string): number | null | undefined => {
  * takes a yes or a no; this is where a wrong answer is put right first — who it
  * is from, the figure and whether it includes GST, the numbers and dates, and
  * **which part of the job it lands on**, which nothing reading an email can
- * know. It writes only to the card (`update_invoice_review`): nothing here
- * reaches a total, and allocating is still the card's own button.
+ * know. It writes only to the card (`update_invoice_review` and
+ * `set_invoice_review_rooms`): nothing here reaches a total, and allocating is
+ * still the card's own button.
+ *
+ * **Rooms are ticked, not chosen.** Tiles for the bathroom floor and the
+ * laundry splashback are one bill for two rooms, and a single choice made that
+ * either a lie about one of them or a bill on the whole job saying nothing.
+ * One room puts the bill on that room, as it always did; two or more keep it on
+ * the whole job and say how it splits — see `RoomSplit`. The split is worked
+ * out against the figure in the box as it is saved, so correcting the amount
+ * and the rooms together cannot leave them disagreeing.
  *
  * Every box loads what the card holds and an emptied one clears it, the
  * convention every update in this schema follows. A date or a figure it cannot
  * read holds the sheet open and says which, rather than saving something else.
  */
-export default function ReviewEditSheet({ review, elements, onClose, onSave }: Props) {
+export default function ReviewEditSheet({ review, elements, locations, onAddRoom, onClose, onSave }: Props) {
   const [supplier, setSupplier] = useState('');
   const [detail, setDetail] = useState('');
   const [amount, setAmount] = useState('');
@@ -47,7 +68,7 @@ export default function ReviewEditSheet({ review, elements, onClose, onSave }: P
   const [invoiceNo, setInvoiceNo] = useState('');
   const [dated, setDated] = useState('');
   const [due, setDue] = useState('');
-  const [elementId, setElementId] = useState<string | null>(null);
+  const [rooms, setRooms] = useState<RoomSplitValue>({ ids: [], kind: 'even', typed: {} });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -60,12 +81,11 @@ export default function ReviewEditSheet({ review, elements, onClose, onSave }: P
     setInvoiceNo(review.invoiceNumber ?? '');
     setDated(formatDayFirst(review.dated));
     setDue(formatDayFirst(review.dueOn));
-    setElementId(review.elementId);
+    const ids = review.roomIds.length > 0 ? review.roomIds : review.elementId ? [review.elementId] : [];
+    setRooms(splitValueFrom(ids, review.roomIds.length > 0 ? review.roomAmounts : null, review.amount, 2));
     setError(null);
     setBusy(false);
   }, [review]);
-
-  const parts = elements.filter((e) => !e.implicit);
 
   async function save() {
     if (!review || busy) return;
@@ -75,6 +95,8 @@ export default function ReviewEditSheet({ review, elements, onClose, onSave }: P
     if (figure === undefined) { setError('That amount isn’t a figure.'); return; }
     if (datedIso === undefined) { setError('The date on the bill isn’t a day the calendar has.'); return; }
     if (dueIso === undefined) { setError('The due date isn’t a day the calendar has.'); return; }
+    const split = resolveSplit(rooms, figure, 2);
+    if ('error' in split) { setError(split.error); return; }
 
     setBusy(true);
     setError(null);
@@ -87,8 +109,7 @@ export default function ReviewEditSheet({ review, elements, onClose, onSave }: P
         invoiceNumber: invoiceNo.trim() || null,
         dated: datedIso,
         dueOn: dueIso,
-        elementId,
-      });
+      }, split);
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'That didn’t save');
@@ -150,22 +171,16 @@ export default function ReviewEditSheet({ review, elements, onClose, onSave }: P
         </View>
       </Group>
 
-      {parts.length > 0 ? (
-        <View style={groupedStyles.block}>
-          <Text style={groupedStyles.question}>Which part of the job?</Text>
-          <Group>
-            <RadioRow title="The whole job" selected={elementId === null} onPress={() => setElementId(null)} />
-            {parts.map((part) => (
-              <RadioRow
-                key={part.id}
-                title={part.name}
-                selected={elementId === part.id}
-                onPress={() => setElementId(part.id)}
-              />
-            ))}
-          </Group>
-        </View>
-      ) : null}
+      <RoomSplit
+        elements={elements}
+        locations={locations}
+        value={rooms}
+        onChange={setRooms}
+        total={parseAmount(amount) ?? null}
+        inclusive={incl}
+        splitFrom={2}
+        onAddRoom={onAddRoom}
+      />
 
       {error ? <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text> : null}
     </Sheet>

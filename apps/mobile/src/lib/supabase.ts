@@ -459,6 +459,12 @@ export const updateInvoiceReview = (reviewId: string, update: queries.InvoiceRev
 export const approveInvoiceReview = (reviewId: string, elementId?: string | null) =>
   queries.approveInvoiceReview(supabase, reviewId, elementId);
 
+export const setInvoiceReviewRooms = (reviewId: string, elementIds: string[], amounts: number[] | null) =>
+  queries.setInvoiceReviewRooms(supabase, reviewId, elementIds, amounts);
+
+export const setQuoteRooms = (quoteId: string, elementIds: string[], amounts: number[] | null) =>
+  queries.setQuoteRooms(supabase, quoteId, elementIds, amounts);
+
 export const declineInvoiceReview = (reviewId: string) =>
   queries.declineInvoiceReview(supabase, reviewId);
 

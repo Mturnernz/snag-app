@@ -20,7 +20,7 @@ const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
   paid: false, paidOn: null, paidEvidence: null, category: null,
   sourceRef: null, sourceSubject: null, sourceFrom: null, sourceAt: null,
   inferred: [], state: 'pending', quoteId: null, decidedAt: null,
-  photoPaths: [], documentPaths: [],
+  photoPaths: [], documentPaths: [], roomIds: [], roomAmounts: null,
   createdAt: '2026-07-02T00:00:00Z',
   ...over,
 });

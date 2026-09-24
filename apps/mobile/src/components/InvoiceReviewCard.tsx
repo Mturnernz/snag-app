@@ -27,6 +27,8 @@ interface Props {
    * the invoice itself is what every field on it has to be checked against.
    */
   onOpenFile?: (path: string) => void;
+  /** Where allocating puts it — "Whole job", a room, or rooms and how they split. */
+  landsOn?: string | null;
 }
 
 /**
@@ -64,7 +66,9 @@ interface Props {
  * React Native, is implemented on react-native-web, and reports everything a
  * horizontal drag needs. **No new dependency; the bundle does not move.**
  */
-export default function InvoiceReviewCard({ review, onApprove, onDecline, onEdit, busy, onOpenFile }: Props) {
+export default function InvoiceReviewCard({
+  review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn,
+}: Props) {
   const pan = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
   const [lean, setLean] = useState<SwipeDecision | null>(null);
@@ -204,6 +208,7 @@ export default function InvoiceReviewCard({ review, onApprove, onDecline, onEdit
           {review.dueOn ? (
             <Fact label="Due" value={formatLooseDate(review.dueOn) ?? review.dueOn} guessed={wasInferred(review, 'due_on')} />
           ) : null}
+          {landsOn ? <Fact label="For" value={landsOn} /> : null}
         </View>
 
         {/*

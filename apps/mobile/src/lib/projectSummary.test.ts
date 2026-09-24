@@ -1,6 +1,7 @@
 import {
   describeRoom,
   formatMoney,
+  groupBySupplier,
   projectSummary,
 } from '@snag/supabase-queries';
 import { bill, downstairs, element, item, page, project, quote } from '../test/projectFixtures';
@@ -222,5 +223,29 @@ describe('projectSummary — a bill shared between rooms', () => {
       { quoteId: 'tl', elementId: 'eL', amount: 3000, sortOrder: 1 },
     ]));
     expect(rooms.Bathroom.shared + rooms.Laundry.shared).toBe(3000);
+  });
+});
+
+describe('groupBySupplier', () => {
+  const row = (id: string, supplier: string | null, dated: string | null = null) => ({ id, supplier, dated });
+
+  it('gathers one supplier however it was typed, in the order first seen', () => {
+    const groups = groupBySupplier([
+      row('a', 'MSC Consulting'), row('b', 'Gibson'), row('c', ' msc consulting '),
+    ]);
+    expect(groups.map((g) => g.rows.map((r) => r.id))).toEqual([['a', 'c'], ['b']]);
+  });
+
+  it('shows the spelling on the most recently dated row', () => {
+    const [g] = groupBySupplier([
+      row('a', 'MSC CONSULTING', '2026-08-31'), row('b', 'MSC Consulting', '2026-06-30'),
+    ]);
+    expect(g.supplier).toBe('MSC CONSULTING');
+  });
+
+  it('never puts rows naming nobody under one heading', () => {
+    const groups = groupBySupplier([row('a', null), row('b', '  '), row('c', null)]);
+    expect(groups).toHaveLength(3);
+    expect(groups.every((g) => g.supplier === null)).toBe(true);
   });
 });

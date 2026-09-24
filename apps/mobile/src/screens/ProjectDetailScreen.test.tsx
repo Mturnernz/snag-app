@@ -196,6 +196,36 @@ describe('what do we have to pay', () => {
     r.getByText('price sheet open: ReliaBuilder');
   });
 
+  it('puts several bills from one supplier under one heading, owed adding up', async () => {
+    const r = await arrange(downstairs({
+      bills: [
+        bill({ id: 'm1', supplier: 'MSC Consulting', detail: 'June', dated: '2026-08-31', unpaid: 3565, dueOn: '2026-07-20', overdue: true }),
+        bill(),
+        bill({ id: 'm2', supplier: 'msc consulting ', detail: 'August', dated: '2026-06-30', unpaid: 437, dueOn: '2026-09-30' }),
+      ],
+    }));
+    r.getByText('MSC Consulting');
+    r.getByText('2 bills · 1 overdue');
+    r.getByText('$4,002');
+    r.getByText('Overdue since 20 Jul 2026');
+    r.getByText('Due 30 Sep 2026');
+    // Each bill under it is still paid on its own.
+    await press(r, 'Mark MSC Consulting June $3,565 as paid');
+    expect(mock_payBill).toHaveBeenCalledWith('m1', 3565, expect.any(String));
+  });
+
+  it('folds a supplier’s bills under the heading', async () => {
+    const r = await arrange(downstairs({
+      bills: [
+        bill({ id: 'm1', supplier: 'MSC', detail: 'June', unpaid: 100 }),
+        bill({ id: 'm2', supplier: 'MSC', detail: 'August', unpaid: 50 }),
+      ],
+    }));
+    await press(r, 'MSC, 2 bills, $150 to pay');
+    r.getByText('$150');
+    expect(r.queryByText('June')).toBeNull();
+  });
+
   it('names an overdue bill as overdue', async () => {
     const r = await arrange(downstairs({ bills: [bill({ overdue: true, dueOn: '2026-09-01' })] }));
     r.getByText('Progress bill 1 · Overdue since 1 Sep 2026');

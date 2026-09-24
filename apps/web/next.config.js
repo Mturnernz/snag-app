@@ -65,6 +65,15 @@ const nextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: SECURITY_HEADERS }];
   },
+
+  // The staff portal is its own site. It sat at /staff here for one unmerged
+  // branch; anything still pointing at that path lands on the right origin.
+  async redirects() {
+    return [
+      { source: '/staff', destination: 'https://staff.snaghq.co.nz/', permanent: true },
+      { source: '/staff/:path*', destination: 'https://staff.snaghq.co.nz/:path*', permanent: true },
+    ];
+  },
 };
 
 module.exports = nextConfig;

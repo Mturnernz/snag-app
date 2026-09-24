@@ -796,6 +796,179 @@ export interface SnagAdvice {
 
 
 
+// ---------------------------------------------------------------- asking SnagHQ
+//
+// A household asks a question about one job, and somebody at SnagHQ answers
+// it from the staff portal on www.snaghq.co.nz. The answer is an ordinary
+// `SnagAdvice` row — the same card a pasted assessment fills — plus the
+// thread below.
+//
+// **Staff see the job that was asked about, and only while the question is
+// open.** Open means waiting on SnagHQ, or within `SUPPORT_ACCESS_DAYS` of
+// SnagHQ's last reply. After that the portal cannot read the job at all; see
+// `20260925100000_a_job_can_be_asked_about.sql`.
+
+/** Whose court the ball is in: SnagHQ's, the household's, or nobody's. */
+export type SupportStatus = 'waiting' | 'replied' | 'closed';
+
+/** How long after SnagHQ's last reply the job stays shared. */
+export const SUPPORT_ACCESS_DAYS = 14;
+
+/** `expired` is a question that lapsed after SnagHQ's reply went unanswered. */
+export type SupportClosedBy = 'customer' | 'staff' | 'expired';
+
+export type SupportCloseReason = 'resolved' | 'no_reply' | 'not_for_us' | 'duplicate';
+
+export const SUPPORT_CLOSE_REASONS: SupportCloseReason[] = [
+  'resolved', 'no_reply', 'not_for_us', 'duplicate',
+];
+
+export const SUPPORT_CLOSE_REASON_LABELS: Record<SupportCloseReason, string> = {
+  resolved: 'Sorted',
+  no_reply: 'No reply from them',
+  not_for_us: 'Not something we help with',
+  duplicate: 'Asked twice',
+};
+
+export interface SupportMessage {
+  id: string;
+  fromStaff: boolean;
+  /** A snapshot taken when it was written: "Sam", or the household member. */
+  authorName: string;
+  /** Null only on a reply that was nothing but an assessment. */
+  body: string | null;
+  /** Staff-only. A household never receives one — RLS, not a filter. */
+  internal: boolean;
+  /** This reply carried an assessment, which is now on the job's advice card. */
+  withAdvice: boolean;
+  /** Set only once the email was accepted for delivery. */
+  emailedAt: string | null;
+  createdAt: string;
+}
+
+/** What the household sees on the job page. */
+export interface SupportRequest {
+  id: string;
+  snagId: string;
+  status: SupportStatus;
+  question: string;
+  createdAt: string;
+  waitingSince: string;
+  firstSeenAt: string | null;
+  lastStaffReplyAt: string | null;
+  closedAt: string | null;
+  closedBy: SupportClosedBy | null;
+  messages: SupportMessage[];
+}
+
+export type StaffQueueTab = 'unclaimed' | 'mine' | 'open' | 'closed';
+
+/** One row of the portal's queue. `job` is null once access has ended. */
+export interface StaffQueueRow {
+  id: string;
+  status: SupportStatus;
+  open: boolean;
+  question: string;
+  reference: string;
+  createdAt: string;
+  waitingSince: string;
+  firstSeenAt: string | null;
+  lastStaffReplyAt: string | null;
+  closedAt: string | null;
+  closedBy: SupportClosedBy | null;
+  closeReason: SupportCloseReason | null;
+  assignedTo: string | null;
+  assignedName: string | null;
+  job: {
+    description: string | null;
+    room: string | null;
+    photoPath: string | null;
+    photoCount: number;
+    suburb: string | null;
+    town: string | null;
+  } | null;
+}
+
+export interface StaffMember {
+  userId: string;
+  displayName: string;
+}
+
+export interface StaffQueue {
+  rows: StaffQueueRow[];
+  counts: {
+    unclaimed: number;
+    mine: number;
+    open: number;
+    waiting: number;
+    oldestWaitingSince: string | null;
+  };
+  me: StaffMember | null;
+}
+
+export interface StaffLogEntry {
+  action: 'opened' | 'claimed' | 'assigned' | 'released' | 'noted' | 'replied' | 'emailed' | 'closed';
+  at: string;
+  staffName: string;
+}
+
+/** Everything the portal's request page draws, from one request. */
+export interface StaffRequestPage {
+  request: {
+    id: string;
+    snagId: string;
+    status: SupportStatus;
+    question: string;
+    createdAt: string;
+    waitingSince: string;
+    firstSeenAt: string | null;
+    lastStaffReplyAt: string | null;
+    assignedTo: string | null;
+    askedByName: string | null;
+  };
+  job: {
+    id: string;
+    reference: string;
+    description: string | null;
+    room: string | null;
+    photoPaths: string[];
+    status: SnagStatus;
+    parts: string[];
+    bought: string[];
+    dueAt: string | null;
+    repeatDays: number | null;
+    createdAt: string;
+    doneAt: string | null;
+    lastDoneAt: string | null;
+    reporterName: string | null;
+    propertyName: string | null;
+    linkedThings: { id: string; name: string; room: string | null; make: string | null; model: string | null }[];
+  };
+  place: { name: string; suburb: string | null; town: string | null };
+  notes: { id: string; body: string; createdAt: string; authorName: string | null }[];
+  advice: SnagAdvice | null;
+  messages: SupportMessage[];
+  log: StaffLogEntry[];
+  staff: StaffMember[];
+  me: string;
+}
+
+/**
+ * An assessment as the portal's form holds it, before it is checked. The same
+ * fields as `SnagAdvice`, written the way `snag_advice` stores them.
+ */
+export interface AdviceDraft {
+  diagnosis: string;
+  verdict: AdviceVerdict | null;
+  reason: string;
+  steps: string[];
+  needToSee: string;
+  parts: AdvicePart[];
+  trade: string;
+  tradies: AdviceTradie[];
+}
+
+
 // ---------------------------------------------------------------- projects
 
 /**

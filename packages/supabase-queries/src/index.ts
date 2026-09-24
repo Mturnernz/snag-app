@@ -71,6 +71,8 @@ import type {
   ProjectStatus,
   ProjectSupplierTotals,
   ProjectTotals,
+  SupportMessage,
+  SupportRequest,
   FileTag,
   FileTags,
 } from '@snag/shared-types';
@@ -215,7 +217,8 @@ export function asError(error: NonNullable<QueryError>, what: string): Error {
   return new Error(`${what}: ${error.message}`);
 }
 
-function unwrap<T>(data: T | null, error: QueryError, what: string): T {
+/** Package-internal: exported for `staff.ts`, not for callers. */
+export function unwrap<T>(data: T | null, error: QueryError, what: string): T {
   if (error) throw asError(error, what);
   if (data === null) throw new Error(`${what}: no data returned`);
   return data;
@@ -832,7 +835,7 @@ export async function getSnag(client: SupabaseClient, snagId: string): Promise<S
  * it by where it is beats "Untitled": on a list that is mostly photographs, the
  * picture carries the what and this only has to carry the where.
  */
-export function snagHeadline(snag: Snag): string {
+export function snagHeadline(snag: Pick<Snag, 'description' | 'room'>): string {
   if (snag.description) return snag.description;
   return snag.room ? `Something in the ${snag.room.toLowerCase()}` : 'Something to sort out';
 }
@@ -3075,7 +3078,8 @@ export async function getSnagAdvice(
   return data ? mapAdvice(data as Row) : null;
 }
 
-function mapAdvice(row: Row): SnagAdvice {
+/** Package-internal: exported for `staff.ts`, not for callers. */
+export function mapAdvice(row: Row): SnagAdvice {
   return {
     snagId: row.snag_id,
     diagnosis: row.diagnosis,
@@ -3147,6 +3151,105 @@ export function formatDayFirst(iso: string | null): string {
 /** "Pasted 15 Sep" — the source line under the advice. */
 export function adviceSource(now = new Date()): string {
   return `Pasted ${now.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}`;
+}
+
+// ---------------------------------------------------------------- asking SnagHQ
+//
+// The household's half. It reads the table (RLS: members of the place).
+//
+// **The staff half is not in this file, and must never be.** It lives in
+// `staff.ts`, imported as `@snag/supabase-queries/staff` by `apps/staff` and by
+// nothing else, so none of the portal's code ships in the app households
+// install. `apps/mobile/src/lib/staffSeparation.test.ts` fails the build if the
+// app ever imports it, or if a staff function reappears here. See
+// `20260925100000_a_job_can_be_asked_about.sql`.
+
+/** Package-internal: exported for `staff.ts`, not for callers. */
+export function mapSupportMessage(row: Row): SupportMessage {
+  return {
+    id: row.id,
+    fromStaff: row.from_staff ?? row.staff_id != null,
+    authorName: row.author_name,
+    body: row.body ?? null,
+    internal: row.internal ?? false,
+    withAdvice: row.with_advice ?? false,
+    emailedAt: row.emailed_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+function mapSupportRequest(row: Row): SupportRequest {
+  const messages = ((row.support_messages ?? []) as Row[])
+    .map(mapSupportMessage)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return {
+    id: row.id,
+    snagId: row.snag_id,
+    status: row.status,
+    question: row.question,
+    createdAt: row.created_at,
+    waitingSince: row.waiting_since,
+    firstSeenAt: row.first_seen_at ?? null,
+    lastStaffReplyAt: row.last_staff_reply_at ?? null,
+    closedAt: row.closed_at ?? null,
+    closedBy: row.closed_by ?? null,
+    messages,
+  };
+}
+
+/**
+ * The latest question about this job, open or not — a closed one still shows
+ * what SnagHQ said. One request: the thread is embedded.
+ */
+export async function getSupportRequestForSnag(
+  client: SupabaseClient,
+  snagId: string
+): Promise<SupportRequest | null> {
+  const { data, error } = await client
+    .from('support_requests')
+    .select(
+      'id, snag_id, status, question, created_at, waiting_since, first_seen_at, ' +
+        'last_staff_reply_at, closed_at, closed_by, ' +
+        'support_messages (id, staff_id, author_name, body, with_advice, emailed_at, created_at)'
+    )
+    .eq('snag_id', snagId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw asError(error, "Couldn't load your question to SnagHQ");
+  return data ? mapSupportRequest(data as Row) : null;
+}
+
+/** Asking does not touch the job — it is not a note, and it does not start it. */
+export async function createSupportRequest(
+  client: SupabaseClient,
+  snagId: string,
+  question: string
+): Promise<void> {
+  const { error } = await client.rpc('create_support_request', {
+    p_snag_id: snagId,
+    p_question: question,
+  });
+  if (error) throw asError(error, "Couldn't send that to SnagHQ");
+}
+
+export async function addSupportMessage(
+  client: SupabaseClient,
+  requestId: string,
+  body: string
+): Promise<void> {
+  const { error } = await client.rpc('add_support_message', {
+    p_request_id: requestId,
+    p_body: body,
+  });
+  if (error) throw asError(error, "Couldn't send that to SnagHQ");
+}
+
+/** Ends SnagHQ's access to the job at once. */
+export async function closeSupportRequest(client: SupabaseClient, requestId: string): Promise<void> {
+  const { error } = await client.rpc('close_support_request', { p_request_id: requestId });
+  if (error) throw asError(error, "Couldn't close that question");
 }
 
 // ---------------------------------------------------------------- projects
@@ -6071,4 +6174,5 @@ export function describeDuplicate(
 export * from './summary';
 export * from './duplicates';
 export * from './split';
+export * from './support';
 export * from './papers';

@@ -45,6 +45,8 @@ const mock_setPartBought = jest.fn().mockResolvedValue(undefined);
 const mock_getThings = jest.fn().mockResolvedValue([]);
 const mock_setSnagThings = jest.fn().mockResolvedValue(undefined);
 const mock_getThingNotes = jest.fn().mockResolvedValue([]);
+const mock_getSupport = jest.fn().mockResolvedValue(null);
+const mock_createSupport = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => ({
   getSnag: (...a: unknown[]) => mock_getSnag(...a),
   getComments: jest.fn().mockResolvedValue([]),
@@ -62,6 +64,10 @@ jest.mock('../lib/supabase', () => ({
   setSnagThings: (...a: unknown[]) => mock_setSnagThings(...a),
   createThing: jest.fn(),
   createLocation: jest.fn(),
+  getSupportRequestForSnag: (...a: unknown[]) => mock_getSupport(...a),
+  createSupportRequest: (...a: unknown[]) => mock_createSupport(...a),
+  addSupportMessage: jest.fn().mockResolvedValue(undefined),
+  closeSupportRequest: jest.fn().mockResolvedValue(undefined),
 }));
 const mock_showToast = jest.fn();
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: mock_showToast }) }));
@@ -126,7 +132,10 @@ const press = async (node: any) => {
   await TestRenderer.act(async () => { await node.props.onPress(); });
 };
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mock_getSupport.mockResolvedValue(null);
+});
 
 describe('finishing a snag', () => {
   it('says congratulations, and offers the list back', async () => {
@@ -818,5 +827,54 @@ describe('the notes box', () => {
       { deep: true },
     );
     expect(arrows).toEqual([]);
+  });
+});
+
+describe('asking SnagHQ', () => {
+  const asked = (over: Partial<any> = {}): any => ({
+    id: 'r1', snagId: 's1', status: 'waiting', question: 'Why does it run?',
+    createdAt: new Date().toISOString(), waitingSince: new Date().toISOString(),
+    firstSeenAt: null, lastStaffReplyAt: null, closedAt: null, closedBy: null,
+    messages: [],
+    ...over,
+  });
+
+  it('offers one quiet row when nobody has asked', async () => {
+    const r = await arrange();
+    expect(r.queryByText('Ask SnagHQ about this')).not.toBeNull();
+    expect(r.queryByText('Asked SnagHQ')).toBeNull();
+  });
+
+  it('shows the question and its state once asked, instead of the row', async () => {
+    mock_getSupport.mockResolvedValue(asked());
+    const r = await arrange();
+    expect(r.queryByText('Asked SnagHQ')).not.toBeNull();
+    expect(r.queryByText('Why does it run?')).not.toBeNull();
+    expect(r.queryByText('Ask SnagHQ about this')).toBeNull();
+  });
+
+  it('survives a question it cannot read', async () => {
+    mock_getSupport.mockRejectedValue(new Error('offline'));
+    const r = await arrange();
+    expect(r.queryByText('Toilet cistern keeps running')).not.toBeNull();
+    expect(r.queryByText('Ask SnagHQ about this')).not.toBeNull();
+  });
+
+  it('sends the question without touching the job', async () => {
+    const r = await arrange();
+    const row = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Ask SnagHQ about this'
+      && typeof n.props?.onPress === 'function')[0];
+    await press(row);
+    const box = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'What do you want to know?'
+      && typeof n.props?.onChangeText === 'function')[0];
+    await TestRenderer.act(async () => { box.props.onChangeText('  Can I fix it?  '); });
+    mock_getSupport.mockResolvedValue(asked({ question: 'Can I fix it?' }));
+    await press(topButton(r, 'Send to SnagHQ'));
+
+    expect(mock_createSupport).toHaveBeenCalledWith('s1', 'Can I fix it?');
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(mock_setSnagStatus).not.toHaveBeenCalled();
+    expect(mock_showToast).toHaveBeenCalledWith('Sent to SnagHQ');
+    expect(r.queryByText('Can I fix it?')).not.toBeNull();
   });
 });

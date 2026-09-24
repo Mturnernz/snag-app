@@ -20,7 +20,7 @@ there before "simplifying" it — several things are deliberate.
 | Layer | Choice |
 |---|---|
 | Mobile framework | Expo SDK 54 (React Native 0.81, React 19), `apps/mobile` |
-| Web | Next.js, `apps/web` — reduced to password recovery, see below |
+| Web | Next.js: `apps/web` (password recovery) and `apps/staff` (the SnagHQ staff portal), see below |
 | Language | TypeScript (strict mode) |
 | Navigation | React Navigation v6 — bottom tabs + native stack |
 | Backend | Supabase — the `home` schema of the Snagv1 project |
@@ -45,10 +45,12 @@ snag/
 │   │       ├── screens/           # SnagList (home), SnagDetail, House, ThingDetail,
 │   │       │                       #   Household, LocationTags, Profile, Auth, Setup
 │   │       └── components/
-│   └── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
+│   ├── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
+│   └── staff/                     # Next.js — the SnagHQ staff portal, staff.snaghq.co.nz
 ├── packages/
 │   ├── shared-types/              # @snag/shared-types — enums, row types, labels, nav params
 │   └── supabase-queries/          # @snag/supabase-queries — every read and write, each taking a client
+│                                   #   (…/staff is the portal's own entry point; the app never imports it)
 ├── supabase/migrations/           # 20260911* is the home schema; everything before it is the archive
 ├── SNAG_HOME_PIVOT_REVIEW.md      # why the pivot was done this way
 └── SNAG_INFRA_NOTES.md            # the config that isn't in git
@@ -127,7 +129,9 @@ The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
   `properties`, `property_members`, `locations`, `snags`, `comments`, `things` (the house record),
   `absent_things` (what a place hasn't got) and `invitations` (who has been asked and hasn't
   answered). Plus `snags_with_details` and `things_with_details`, the views every list, record and
-  detail screen reads.
+  detail screen reads. (Projects, bills and the rest have grown it since; the staff portal adds
+  `staff`, `support_requests`, `support_messages` and `support_access_log` — see *The staff
+  portal*.)
 - **`public`** — the retired B2B product, **frozen**. 35 tables, 112 migrations, 6 pilot orgs and
   57 snags. Not migrated, not dropped, not read from. Leaving it intact *is* the archive, which
   is why the pivot needed no destructive migration and why there's no schema dump anywhere.
@@ -3793,7 +3797,7 @@ authorises clearing them, and that a new member goes to the places that were pic
 ## Design System (DO NOT deviate)
 
 All tokens in `apps/mobile/src/constants/theme.ts`. Never hardcode colours, spacing or shadows.
-`apps/web/src/app/globals.css` mirrors the light values — change both.
+`apps/web/src/app/globals.css` and `apps/staff/src/app/globals.css` mirror the light values — change all three.
 
 **V2 (September 2026) is an iOS grouped-list look over the same palette.** White rounded groups on
 the plaster ground with hairline separators (`Colors.separator`), no outlines on cards, 34pt large
@@ -3949,12 +3953,146 @@ grey mid-press reads as the action having failed.
   session, so `signOut` is bounded and falls back to dropping the stored session directly. Local
   scope, not global: signing out of a device means that device.
 
+## The staff portal: SnagHQ answers a job it was asked about
+
+A household taps **Ask SnagHQ about this** on a job and types a question. A SnagHQ employee picks it
+up at `staff.snaghq.co.nz` (`apps/staff`), reads that job, and replies — with words, and optionally with an
+assessment. The assessment is an ordinary `snag_advice` row, so it lands on the job as the same
+card a pasted assessment fills; the household gets **one email** saying there is an answer.
+
+It is the assessment loop (*The PDF can carry the question*) with a person on the other end, and
+it keeps that loop's rules: an answer is a suggestion, a tradesman needs the page he was found on,
+money stays text, and recording it does not touch the snag.
+
+### What an employee can see, and for how long
+
+**The job that was asked about, and nothing else in the house.** There is no RLS policy anywhere
+that lets a staff member read `home.snags`, `home.comments` or any other household table. The
+portal reads through SECURITY DEFINER functions — `staff_queue` and `staff_request_page` — which
+return that one snag, its notes, its linked items and shopping list, the advice already on it, and
+the place's name, suburb and town. Never a street, never another job, never the house record or a
+project. The sheet the household asks from says exactly that list before anything is shared.
+
+**While the question is open, and not after.** Open is `waiting` (SnagHQ's turn), or `replied`
+within **14 days** of SnagHQ's last reply (`SUPPORT_ACCESS_DAYS`). It is a date comparison —
+`home.support_is_open`, twinned in the client by `supportIsOpen` the way `inclGst` twins
+`home.incl_gst` — so nothing has to run for access to lapse. A lapsed question is closed as
+`expired` the next time the household asks about that job. Closing (either side) ends it at once.
+
+**The photographs are the one read that cannot go through a function**, because Storage signs
+them. So there is one extra, select-only policy on `storage.objects`:
+`home.staff_can_read_file(name)` answers yes only for a file in the `photo_paths` of a job with an
+open question. It is plpgsql so `is_staff()` is checked first and a customer's read of their own
+bucket pays one primary-key lookup. The four member policies are untouched.
+
+**A closed question in the queue carries nothing about the job** — its reference, the question and
+dates only. A queue that went on showing the photograph after access ended would be access that
+had not.
+
+**Every open is logged** (`support_access_log`: opened, claimed, assigned, released, noted,
+replied, emailed, closed), shown on the request as *Who has looked*. The household sees the first
+open as *Seen by SnagHQ*. "Opened" is written at most once per half hour per person, because the
+page re-reads after every action and forty "opened"s bury the entries that mean something.
+
+### Its own site, and its own entry point
+
+**The portal is a separate origin**, `staff.snaghq.co.nz`, and a separate Netlify site from both
+the app and `www`. For one unmerged branch it was `www.snaghq.co.nz/staff`, beside password
+recovery, with its cookie scoped to `/staff` — and **a cookie path is not a browser security
+boundary**: any page on the same origin can open a window at the portal and read what it holds. A
+separate host is a boundary, so a staff session is reachable from nothing but the portal's own
+pages, and `apps/web` went back to holding no session at all. `www/staff/*` redirects to the new
+host.
+
+**Its code is not in the app.** The staff reads and writes, and the rules only the portal needs
+(`adviceDraftProblems`, `supportReplyEmail`, `describeWait` …), are `@snag/supabase-queries/staff`
+(`src/staff.ts`, re-exported by a one-line `staff.ts` at the package root — no `exports` field, so
+Metro's resolution of the main entry is untouched). The app imports the package whole, so while they
+sat in `index.ts` every phone downloaded the portal's API. Nothing there was a secret — every
+`staff_*` function refuses a caller not on the staff list — but the household's app has no
+business carrying it. `staffSeparation.test.ts` fails the build if a staff function reappears in the
+main export or anything that ships imports the staff entry point; tests may, since they never reach
+the bundle. The household's half — asking, replying, closing, `supportIsOpen`,
+`describeSupportStatus` — stays in the main export, because the app is where a household asks.
+
+Same repository and same Supabase project, deliberately: the portal reads the same `home` schema,
+and a second repo would be two copies of the types to keep in step.
+
+### Who is staff
+
+`home.staff`, filled **by hand in SQL** (see `SNAG_INFRA_NOTES.md`); there is deliberately no
+screen that writes it. `home.is_staff()` wants three things: an active row for `auth.uid()`, the
+token's email equal to the row's, and Google among the account's providers. The last is the
+difference between "somebody at snaghq.co.nz" and "somebody who once made an email-and-password
+account with a snaghq.co.nz address". A row has no foreign key to `auth.users`, for the reason
+`profiles` lost its own: an employee's name is on every reply they wrote. Leaving is
+`active = false`.
+
+Sign-in is Google Workspace SSO through Supabase Auth, PKCE, with `hd=snaghq.co.nz` as a hint to
+Google — a hint, not the check. A signed-in account that is not staff sees *This account isn't on
+the SnagHQ staff list*, never an empty queue, which would read as "nobody has asked anything".
+
+### Staff never write to the job
+
+Not its status, words, notes, parts or dates. They write their own messages (`support_messages`,
+where `internal` notes are staff-only by RLS, not by a filter) and the `snag_advice` row, whose
+new `staff_id` says SnagHQ wrote it — exactly one of `created_by` and `staff_id` is set, and the
+paste path clears `staff_id` so a household pasting their own assessment over SnagHQ's takes
+authorship with it. An answer that marked a job 'doing' would be SnagHQ deciding the household had
+started work; the SQL test asserts `status`, `updated_at` and `parts` do not move.
+
+`staff_reply` **refuses** a tradesman with no source, where `parseTradies` drops one. A pasted
+answer is a stranger's and dropping is the only option; an employee typing can fix it, and the
+rule — a name nobody can follow back must never reach a household — is the same either way.
+
+### The one email, and why it is not a notification
+
+This product sends nothing unasked, and that has not changed. The reply email is the answer to a
+question the household asked, it says so, and the ask sheet warns of it before the question is
+sent. It says there is a reply and links to `/snags/<id>`; **it carries nothing of the answer** —
+no diagnosis, no photo, no price — because an email is a copy that gets forwarded, and the answer
+belongs on the job where the other person in the house will also see it. `supportReplyEmail` is
+pure and pinned.
+
+**It is recorded only once Resend has accepted it.** The reply is saved first, whatever happens;
+the Next server action then posts to Resend (`apps/staff/src/lib/replyEmail.ts`) and calls `staff_mark_emailed`
+only on a 2xx. Anything else comes back as a sentence beside the reply — *Sent — it's on the job,
+but the email didn't go*, with Resend's own reason — and a *Send email again*. The message id is
+the idempotency key, so a retry after a timeout that did deliver cannot send a second copy. This is
+the invitation screen's lesson (*The failure was the claim, not the row*) applied to the one place
+this product now sends mail. **Don't make the portal say "emailed" from anything but
+`emailed_at`.**
+
+### On the job page
+
+One quiet row, *Ask SnagHQ about this*, until somebody asks — most jobs never need it, and a card
+on every job would be the page advertising a service. Then `SupportCard`, directly above the
+advice card because that is where the answer lands. It states every state in words (waiting,
+seen, replied and *shared until*, closed), takes follow-ups (which put it back in SnagHQ's court
+and move `waiting_since`, the queue's sort key), and **Close it** ends access after a
+`ConfirmDialog` saying that is what it does. Asking, replying and closing never touch the job, and
+a question the page cannot read never takes the page down.
+
+`supabase/tests/support_access.sql` replays every access rule from both sides — shared while open,
+not shared before, after closing, or fourteen days after the last reply; a non-Google staff row
+refused; another household seeing nothing; internal notes invisible; the unsourced tradesman
+refused; the job untouched. Run it like `project_scenarios.sql`. `support.test.ts` pins the client
+twin of the open rule, the status line, the assessment's refusals and the email;
+`SupportCard.test.tsx`, `AskSnagHQSheet.test.tsx` and `SnagDetailScreen.test.tsx` pin the job page;
+`staffSeparation.test.ts` pins the split; `apps/staff/e2e/a11y.spec.ts` puts `/sign-in` through
+axe and pins the signed-out redirect and the `X-Robots-Tag` on every response.
+
+**Setup is outside git and in order** — migration, Google provider, the callback on the redirect
+allow-list, staff rows, the staff Netlify site with its env and DNS — then merge. `SNAG_INFRA_NOTES.md` has it
+under *The staff portal*.
+
 ## Hosts
 
 | Host | What it serves |
 |---|---|
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the app people install |
 | `www.snaghq.co.nz` | `apps/web` — the root page and password recovery, nothing else |
+| `staff.snaghq.co.nz` | `apps/staff` — the SnagHQ staff portal |
 | `snagv1.netlify.app` | redirect to `app.snaghq.co.nz` |
 
 `snagv1.netlify.app` has to keep resolving, and not only for tidiness: **QR codes encoding it were
@@ -3984,6 +4122,10 @@ that isn't on it doesn't error: Auth quietly substitutes the Site URL and the li
 homepage instead of a password form. And don't test recovery with the dashboard's **Send password
 recovery** button — it sends no `redirectTo`, so it can produce a link that signs someone in
 without ever asking for a new password.
+
+**Keep it sessionless.** The staff portal is `@supabase/ssr` on PKCE, which is right there because a
+Google sign-in starts and finishes in one browser, and it is on its own origin (`apps/staff`) partly
+so that nothing on this host ever holds a session. Don't add one here.
 
 ## Deep links
 
@@ -4130,13 +4272,16 @@ still wins on its surface.
 1. Copy `apps/mobile/.env.example` → `apps/mobile/.env`, fill in `EXPO_PUBLIC_SUPABASE_URL` and
    `EXPO_PUBLIC_SUPABASE_ANON_KEY`.
 2. Copy `apps/web/.env.example` → `apps/web/.env.local` (`NEXT_PUBLIC_SUPABASE_*`) — same project.
+3. Copy `apps/staff/.env.example` → `apps/staff/.env.local` — the same two, plus `RESEND_API_KEY` if
+   the reply email should actually send.
 
 ## Running
 
 ```bash
 npm install          # repo root — installs every workspace
 npm run mobile       # Expo
-npm run web          # Next.js
+npm run web          # Next.js — recovery, on :3000
+npm run staff        # Next.js — the staff portal, on :3001
 npm run typecheck
 npm run test:mobile  # jest
 ```

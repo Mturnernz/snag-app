@@ -43,3 +43,12 @@ test('reset-password reads its tokens from the fragment, not the query', async (
   await page.goto('/reset-password', { waitUntil: 'networkidle' });
   await expect(page.getByText(/link/i).first()).toBeVisible();
 });
+
+test('the old portal path points at the staff site', async ({ request }) => {
+  // The portal lived at /staff on this host for one unmerged branch, and moved
+  // to its own origin before shipping (see CLAUDE.md, *The staff portal*).
+  // Anything still pointing here lands on the right site rather than a 404.
+  const res = await request.get('/staff/requests/abc', { maxRedirects: 0 });
+  expect(res.status()).toBe(308);
+  expect(res.headers()['location']).toBe('https://staff.snaghq.co.nz/requests/abc');
+});

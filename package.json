@@ -8,10 +8,11 @@
   "scripts": {
     "mobile": "npm run start --workspace=apps/mobile",
     "web": "npm run dev --workspace=apps/web",
-    "typecheck": "npm run typecheck --workspace=apps/web && tsc --noEmit -p apps/mobile",
+    "staff": "npm run dev --workspace=apps/staff -- --port 3001",
+    "typecheck": "npm run typecheck --workspace=apps/web && npm run typecheck --workspace=apps/staff && tsc --noEmit -p apps/mobile",
     "test": "npm run test:mobile && npm run test:e2e && npm run test:e2e:mobile",
     "test:mobile": "npm run test --workspace=apps/mobile",
-    "test:e2e": "npm run test:e2e --workspace=apps/web",
+    "test:e2e": "npm run test:e2e --workspace=apps/web && npm run test:e2e --workspace=apps/staff",
     "test:e2e:mobile": "npm run test:e2e --workspace=apps/mobile"
   },
   "overrides": {

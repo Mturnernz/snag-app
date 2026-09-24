@@ -1,0 +1,12 @@
+# The staff portal, staff.snaghq.co.nz. A SEPARATE Netlify site from both
+# apps/mobile's and apps/web's — its "Base directory" must be set to apps/staff
+# in the Netlify dashboard. Netlify's built-in Next.js runtime is auto-detected.
+#
+# Required env vars (Site settings → Environment variables):
+#   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY — same project as the app
+#   NEXT_PUBLIC_SNAG_APP_URL                               — optional, the app's origin
+#   RESEND_API_KEY, SUPPORT_EMAIL_FROM                     — the reply email
+# See SNAG_INFRA_NOTES.md, *The staff portal*.
+
+[build.environment]
+  NODE_VERSION = "22"

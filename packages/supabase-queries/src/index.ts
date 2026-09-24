@@ -3318,6 +3318,7 @@ function mapQuote(row: Row): ProjectQuote {
     billedThroughId: row.billed_through_id ?? null,
     settlesMilestoneId: row.settles_milestone_id ?? null,
     againstQuoteId: row.against_quote_id ?? null,
+    invoiceNumber: row.invoice_number ?? null,
     photoPaths: row.photo_paths ?? [],
     documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
@@ -4760,6 +4761,8 @@ export interface QuoteInput {
   againstQuoteId?: string | null;
   photoPaths?: string[];
   documentPaths?: string[];
+  /** The supplier's number for a bill. Compared by `findDuplicateBill`, never refused on. */
+  invoiceNumber?: string | null;
 }
 
 export async function createQuote(
@@ -4786,6 +4789,7 @@ export async function createQuote(
     p_billed_through_id: input.billedThroughId ?? null,
     p_settles_milestone_id: input.settlesMilestoneId ?? null,
     p_against_quote_id: input.againstQuoteId ?? null,
+    p_invoice_number: input.invoiceNumber ?? null,
   });
   // The RPC returns the table row, which carries none of the view's derived
   // columns. Defaulted here rather than re-read: the caller reloads the page.
@@ -4807,6 +4811,7 @@ export interface QuoteUpdate {
   dueOn?: string | null;
   billedThroughId?: string | null;
   settlesMilestoneId?: string | null;
+  invoiceNumber?: string | null;
 }
 
 const QUOTE_CLEARABLE: Record<string, string> = {
@@ -4819,6 +4824,7 @@ const QUOTE_CLEARABLE: Record<string, string> = {
   dueOn: 'due_on',
   billedThroughId: 'billed_through_id',
   settlesMilestoneId: 'settles_milestone_id',
+  invoiceNumber: 'invoice_number',
 };
 
 export async function updateQuote(
@@ -4845,6 +4851,7 @@ export async function updateQuote(
     p_photo_paths: update.photoPaths ?? null,
     p_document_paths: update.documentPaths ?? null,
     p_clear: clear,
+    p_invoice_number: update.invoiceNumber ?? null,
   });
   if (error) throw asError(error, "That didn’t save");
 }
@@ -5935,5 +5942,28 @@ export function describePaidInference(review: InvoiceReview): string {
   return review.paidEvidence ? `Paid — ${review.paidEvidence}` : 'Paid — no sentence to show for it';
 }
 
+/**
+ * What a likely duplicate is called on screen: the number if it has one, who it
+ * is from, the figure and the date — the four things somebody checks the paper
+ * against. Lives here rather than in `duplicates.ts`, which cannot import the
+ * formatters from the module that re-exports it.
+ */
+export function describeDuplicate(
+  bill: { supplier: string | null; invoiceNumber: string | null; amountIncl: number | null; dated: string | null },
+  where: 'on the job' | 'waiting',
+): string {
+  const what = [
+    bill.invoiceNumber ?? 'a bill',
+    bill.supplier ? `from ${bill.supplier}` : null,
+  ].filter(Boolean).join(' ');
+  const facts = [
+    bill.amountIncl !== null ? formatMoney(bill.amountIncl) : null,
+    bill.dated ? formatExactDate(bill.dated) : null,
+  ].filter(Boolean).join(', ');
+  const place = where === 'on the job' ? 'already on the job' : 'also waiting';
+  return `Looks like ${what}${facts ? ` (${facts})` : ''}, ${place}`;
+}
+
 export * from './summary';
+export * from './duplicates';
 export * from './split';

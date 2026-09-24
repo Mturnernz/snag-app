@@ -41,7 +41,8 @@ import {
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  dayKey, exportDateStamp, formatExactDate, formatLooseDate, groupBySupplier, pendingReviews, projectDossierTable,
+  billFactsOfReview, dayKey, describeDuplicate, duplicateReviews, exportDateStamp, formatExactDate,
+  formatLooseDate, groupBySupplier, pendingReviews, projectDossierTable,
   projectExportPhotos, reviewAlert, type ThingInput,
 } from '@snag/supabase-queries';
 import { getFileUrl, getFileUrls, setInvoiceReviewRooms, updateInvoiceReview } from '../lib/supabase';
@@ -156,6 +157,12 @@ export default function ProjectDetailScreen({ route }: Props) {
 
   const summary = useMemo(() => (page ? projectSummary(page) : null), [page]);
   const setAsides = useMemo(() => (page ? liveSetAsides(page) : []), [page]);
+  // Waiting cards that look like a bill already on the job, or like an earlier
+  // card — the same email forwarded twice. A warning on the card, never a lock.
+  const duplicates = useMemo(
+    () => (page ? duplicateReviews(page.quotes, pendingReviews(page.invoiceReviews)) : new Map()),
+    [page],
+  );
   const thingStart = useMemo(() => {
     if (!thingFor || !page) return null;
     const element = page.elements.find((e) => e.id === thingFor.elementId);
@@ -403,11 +410,19 @@ export default function ProjectDetailScreen({ route }: Props) {
         {reviews.length > 0 ? (
           <View style={groupedStyles.block}>
             <SectionTitle title={reviewAlert(page.invoiceReviews) ?? 'Bills waiting'} />
-            {reviews.map((review) => (
+            {reviews.map((review) => {
+              const twin = duplicates.get(review.id);
+              return (
               <InvoiceReviewCard
                 key={review.id}
                 review={review}
                 busy={decidingId === review.id}
+                duplicate={
+                  twin?.quote ? describeDuplicate(twin.quote, 'on the job')
+                    : twin?.review ? describeDuplicate(billFactsOfReview(twin.review), 'waiting')
+                      : null
+                }
+                onOpenDuplicate={twin?.quote ? () => setOpenPrice(twin.quote!.id) : undefined}
                 onEdit={() => setChecking(review)}
                 onOpenFile={openFile}
                 landsOn={
@@ -422,7 +437,8 @@ export default function ProjectDetailScreen({ route }: Props) {
                 )}
                 onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — it’s under the bell')}
               />
-            ))}
+              );
+            })}
           </View>
         ) : null}
 
@@ -682,6 +698,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         onClose={() => setMoney(null)}
         onSaved={changed}
         onEmailIn={() => { setMoney(null); setEmailOpen(true); }}
+        onOpenBill={(q) => { setMoney(null); setOpenPrice(q.id); }}
       />
 
       <EmailBillsSheet visible={emailOpen} projectId={project.id} onClose={() => setEmailOpen(false)} />

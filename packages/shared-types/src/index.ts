@@ -1311,6 +1311,14 @@ export interface ProjectQuote {
    * is a fact about the bill, not something to be re-pointed later.
    */
   againstQuoteId: string | null;
+  /**
+   * The supplier's own number for this bill — `INV-0208`, `25.010`.
+   *
+   * Its own column so two bills from one supplier can be told apart, or told
+   * to be the same one (`findDuplicateBill`). It used to ride in `notes` or be
+   * folded into `detail`, where nothing could compare it.
+   */
+  invoiceNumber: string | null;
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;

@@ -1536,6 +1536,25 @@ naming nobody is never grouped — two bills with no supplier are not known to b
 A supplier with one price is the one row it always was. Pinned by `RoomSheet.test.tsx`,
 `projectSummary.test.ts` and `ProjectDetailScreen.test.tsx`.
 
+**A bill that looks like one already on the job says so, and never refuses.** The same bill got
+in twice on the live job — INV-15879 and 25.010 twice each, 81914 three times — by being forwarded
+again, or typed in and then emailed in too, and was found by eye and deleted. `project_quotes`
+had no place for the invoice number (allocating copied it into `notes`, the money sheet folded it
+into `detail`), so nothing could compare it. `20260924110000` gives it a column, backfilled from
+the allocated cards, and `create_quote`, `update_quote` and `approve_invoice_review` carry it.
+`findDuplicateBill` (`duplicates.ts`) is the check, pure and run over the page already in hand:
+**the same number from the same supplier** is the same bill (compared ignoring case and
+punctuation, and backed by the figure when one side names no supplier); **two different numbers
+are two bills** whatever else matches, which is what keeps ReliaBuilder's two $43,987.50 claims
+apart; and with a number missing, the same supplier and figure on dates that do not disagree. An
+older bill with its number folded into `detail` is searched for it as a whole word. A waiting card
+that matches says so above its buttons (*Looks like INV87022 from MSC … already on the job*) with
+*Open that one*, and so does the later of two cards for one bill; the money sheet says it under the
+invoice number and its button reads *Save anyway*. **A warning, never a lock, and no unique
+index**: two claims for one figure are two bills, and only the person holding the paper can tell.
+Pinned by `duplicates.test.ts`, `MoneySheet.test.tsx`, `InvoiceReviewCard.test.tsx`,
+`PriceSheet.test.tsx` and `ProjectDetailScreen.test.tsx`.
+
 **Nothing new can be typed over a figure.** `EditFigureSheet` is deleted. Overrides already in the
 database still count, so the page says *Some figures were typed in by hand*, names what the prices
 come to, and offers **Use the prices** (`clear_figure` on each). The view columns stay.

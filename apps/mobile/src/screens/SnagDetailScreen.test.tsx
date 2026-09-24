@@ -17,7 +17,20 @@ const mock_goBack = jest.fn();
 // depends on it: a fresh literal per render changes the callback's identity,
 // re-fires the effect, and spins the screen forever. It looks like a hang
 // rather than a failure, which is why this is spelled out.
-const mock_navigation = { goBack: mock_goBack, navigate: jest.fn(), push: jest.fn() };
+// `beforeRemove` is where leaving the page saves what is still in a box, so the
+// listener is kept where a test can fire it the way React Navigation would.
+const mock_listeners: Record<string, (e: any) => void> = {};
+const mock_dispatch = jest.fn();
+const mock_navigation = {
+  goBack: mock_goBack,
+  navigate: jest.fn(),
+  push: jest.fn(),
+  dispatch: mock_dispatch,
+  addListener: (event: string, fn: (e: any) => void) => {
+    mock_listeners[event] = fn;
+    return () => { delete mock_listeners[event]; };
+  },
+};
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mock_navigation,
   useRoute: () => ({ params: { snagId: 's1' } }),
@@ -186,7 +199,7 @@ describe('editing a job after it was filed', () => {
     // question. The snag is in the Bathroom, so that is what the field reads.
     await press(byLabel(r, 'Room: Bathroom. Change it'));
     await press(byLabel(r, 'Kitchen'));
-    await press(topButton(r, 'Save'));
+    await press(topButton(r, 'Done'));
 
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', {
       description: 'The cistern drips',
@@ -204,7 +217,7 @@ describe('editing a job after it was filed', () => {
       && n.props?.accessibilityLabel === "What's wrong?")[0];
     await TestRenderer.act(async () => { input.props.onChangeText('   '); });
 
-    expect(topButton(r, 'Save').props.disabled).toBe(true);
+    expect(topButton(r, 'Done').props.disabled).toBe(true);
     expect(r.queryByText(
       'This one has no photo, so it needs a few words — otherwise there is nothing to go on.',
     )).not.toBeNull();
@@ -246,14 +259,42 @@ describe('linked assets', () => {
     make: 'Mitsubishi', model: 'MSZ-AP50VGK', kind: 'appliance', ...over,
   });
 
-  it('offers to link, and reads nothing, when the job is about nothing', async () => {
+  it('offers to link, and reads nothing, when the job has no room', async () => {
     mock_getThings.mockClear();
-    const r = await arrange(snag({ linkedThings: [] }));
+    const r = await arrange(snag({ linkedThings: [], room: null }));
 
     expect(byLabel(r, 'Link an appliance or fixture')).toBeDefined();
-    // A once-in-a-job's-life decision must not cost a request on every visit to
-    // a page people open constantly.
+    // With no room there is no shortlist to offer, so nothing to read.
     expect(mock_getThings).not.toHaveBeenCalled();
+  });
+
+  // The room is already on the job, so the things recorded in it are the
+  // shortlist a person would pick from — one tap each rather than a sheet.
+  it('suggests what is in the room, and one tap links it', async () => {
+    mock_getThings.mockClear();
+    mock_getThings.mockResolvedValue([
+      thing({ id: 't1', name: 'Heat pump', room: 'Bathroom' }),
+      thing({ id: 't2', name: 'Extractor fan', room: 'Bathroom' }),
+      thing({ id: 't3', name: 'Dishwasher', room: 'Kitchen' }),
+    ]);
+    mock_setSnagThings.mockClear();
+    const r = await arrange(snag({ linkedThings: [linked({ id: 't1' })], room: 'Bathroom' }));
+
+    expect(mock_getThings).toHaveBeenCalledTimes(1);
+    // Already linked, and in another room: neither is offered.
+    expect(byLabel(r, 'Link Heat pump')).toBeUndefined();
+    expect(byLabel(r, 'Link Dishwasher')).toBeUndefined();
+
+    await press(byLabel(r, 'Link Extractor fan'));
+    expect(mock_setSnagThings).toHaveBeenCalledWith('s1', ['t1', 't2']);
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    mock_getThings.mockResolvedValue([]);
+  });
+
+  it('keeps the page when the room cannot be read', async () => {
+    mock_getThings.mockRejectedValueOnce(new Error('Network'));
+    const r = await arrange(snag({ room: 'Bathroom' }));
+    expect(r.queryByText('Toilet cistern keeps running')).not.toBeNull();
   });
 
   it('shows what is linked, counted, with the number somebody came for', async () => {
@@ -420,75 +461,102 @@ describe("when it's due", () => {
   });
 });
 
-// ------------------------------------------------------------------ repeating
+// ------------------------------------------------------------------ when
 //
-// The card carried a paragraph, a question and two rails of presets, permanently,
-// on a page people open constantly — to serve the minority of jobs that come
-// round. The common answer is no, so the card asks and the arrangement moves
-// behind the Yes.
+// One card for one fact. The date and the repeat were two cards and a modal,
+// and the modal carried a second set of date controls writing the same
+// `due_at` — which one was real was a fair question. Setting up a repeat is
+// one tap now.
 
-describe('scheduling a recurring job', () => {
-  it('asks yes or no, and explains nothing until the answer is yes', async () => {
+describe('the When card', () => {
+  const texts = (r: ReturnType<typeof render>) =>
+    r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
+
+  it('offers how often it repeats beside the date, with nothing behind a Yes', async () => {
     const r = await arrange(snag({ repeatDays: null }));
 
-    expect(r.queryByText('Schedule a recurring job')).not.toBeNull();
+    expect(r.queryByText('Repeats')).not.toBeNull();
+    expect(button(r, 'Never')).toBeDefined();
+    expect(button(r, 'Every 6 months')).toBeDefined();
+    expect(button(r, 'Yes')).toBeUndefined();
     expect(r.queryByText('How often does it come round?')).toBeNull();
-    expect(r.queryByText('Does it come round again?')).toBeNull();
-    expect(
-      r.getAllByType('Text').some((n: any) => String(n.props.children ?? '')
-        .includes('Filters, gutters, smoke alarms'))
-    ).toBe(false);
-  });
-
-  it('opens the arrangement on Yes', async () => {
-    const r = await arrange(snag({ repeatDays: null }));
-    await press(button(r, 'Yes'));
-    expect(r.queryByText('How often does it come round?')).not.toBeNull();
     expect(r.queryByText("When's the next one due?")).toBeNull();
   });
 
-  it('asks when the next one lands once a cycle is set, never "the first"', async () => {
-    const r = await arrange(snag({ repeatDays: 180, dueAt: null }));
-    await press(button(r, 'Yes'));
+  it('sets a repeat in one tap, dating it a cycle out when it had no date', async () => {
+    mock_updateSnag.mockResolvedValue(snag({ repeatDays: 180, dueAt: ahead(180) }));
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
 
-    expect(r.queryByText("When's the next one due?")).not.toBeNull();
-    expect(r.queryByText("When's the first one due?")).toBeNull();
-    // One vocabulary for how often: six months is 180 days everywhere, and
-    // `describeCycle` says it in months rather than coming back "26 weeks".
-    expect(r.queryByText('A full 6 months away')).not.toBeNull();
+    await press(button(r, 'Every 6 months'));
+    const [, update] = mock_updateSnag.mock.calls[0];
+    expect(update.repeatDays).toBe(180);
+    const days = (new Date(update.dueAt).getTime() - Date.now()) / DAY;
+    expect(Math.round(days)).toBe(180);
   });
 
-  // The due-date field sits directly above this card, so stating the day here
-  // too put it on screen twice a card apart — which read as two date controls
-  // stacked. This says only the part that field cannot: what happens next.
-  it('says what happens next without repeating the date', async () => {
-    const r = await arrange(snag({ repeatDays: 180, dueAt: '2026-11-08T00:00:00.000Z' }));
-    const said = r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
+  it('leaves a date already set alone when a repeat is chosen', async () => {
+    const due = ahead(10);
+    mock_updateSnag.mockResolvedValue(snag({ repeatDays: 30, dueAt: due }));
+    const r = await arrange(snag({ repeatDays: null, dueAt: due }));
 
-    expect(said.some((t: string) => t.includes('every 6 months'))).toBe(true);
-    expect(said.some((t: string) => t.includes('8/11/2026') || t.includes('11/8/2026'))).toBe(false);
+    await press(button(r, 'Monthly'));
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: 30, dueAt: due });
   });
 
-  it('clears the repeat on No rather than opening anything', async () => {
+  it('clears the repeat on Never', async () => {
     mock_updateSnag.mockResolvedValue(snag({ repeatDays: null }));
     const r = await arrange(snag({ repeatDays: 180 }));
 
-    await press(button(r, 'No'));
+    await press(button(r, 'Never'));
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: null });
+  });
+
+  // A heat pump serviced every two years arrives from the thing page with 730
+  // days; a row that could not show it would read as Never.
+  it('shows a cycle the presets do not carry', async () => {
+    const r = await arrange(snag({ repeatDays: 730, dueAt: ahead(30) }));
+    expect(button(r, 'Every 2 years').props.active).toBe(true);
+    expect(button(r, 'Never').props.active).toBe(false);
+  });
+
+  it('dates the job in one tap', async () => {
+    mock_updateSnag.mockResolvedValue(snag({ dueAt: ahead(7) }));
+    const r = await arrange(snag({ dueAt: null }));
+
+    await press(button(r, 'Next week'));
+    const [, update] = mock_updateSnag.mock.calls[0];
+    const due = new Date(update.dueAt);
+    expect(due.getHours()).toBe(0);
+    expect(Math.round((due.getTime() - Date.now()) / DAY)).toBeGreaterThanOrEqual(6);
+  });
+
+  // The date is stated once, in the box, where it can be changed; the sentence
+  // says only what happens next, and where it will turn up.
+  it('says what happens next without repeating the date', async () => {
+    const r = await arrange(snag({ repeatDays: 180, dueAt: '2026-11-08T00:00:00.000Z' }));
+    const said = texts(r).join(' ');
+
+    expect(said).toContain('every 6 months');
+    expect(said).toContain('Due soon');
+    expect(said).not.toContain('8/11/2026 ');
+  });
+
+  it('shows the day it is due, never just the month', async () => {
+    const r = await arrange(snag({ dueAt: '2026-11-08T00:00:00.000' }));
+    const box = r.root.findAll((n: any) => typeof n.type !== 'string' && !!n.props?.onChangeText
+      && n.props?.accessibilityLabel === "When's it due?", { deep: true })[0];
+    expect(box.props.value).toBe('08/11/2026');
   });
 });
 
-// ------------------------------------------------------------------ saving
+// ------------------------------------------------------------------ leaving
 //
-// It closes; it does not collect. Every control on this page still writes when
-// it is pressed — triage is a series of small independent decisions, and a
-// Save that held them would turn sorting twelve jobs into forty taps and put
-// the tick you make in a shop aisle behind a second press.
-//
-// What it adds is a way out that reads as finished, and the page finally
-// saying that the taps landed.
+// Leaving saves. The page had a Save that mostly read Close, beside a back
+// arrow that already did the same; every control here writes when pressed, so
+// the only things it could be waiting on were two boxes — and the page now
+// commits those itself on the way out, and before Mark done.
 
-describe('the Save button', () => {
+describe('leaving the page', () => {
   const texts = (r: ReturnType<typeof render>) =>
     r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
 
@@ -499,67 +567,37 @@ describe('the Save button', () => {
       { deep: true },
     )[0];
 
-  it('sits on the page and returns to the list', async () => {
+  /** What React Navigation does on a back press: ask first, then go. */
+  async function leave() {
+    const action = { type: 'GO_BACK' };
+    const e = { preventDefault: jest.fn(), data: { action } };
+    await TestRenderer.act(async () => { mock_listeners.beforeRemove?.(e); });
+    await settle();
+    return { prevented: e.preventDefault.mock.calls.length > 0, action };
+  }
+
+  it('has no Save or Close — the footer holds Mark done', async () => {
     const r = await arrange();
-    await press(button(r, 'Close'));
-    expect(mock_goBack).toHaveBeenCalled();
+    expect(button(r, 'Save')).toBeUndefined();
+    expect(button(r, 'Close')).toBeUndefined();
+    expect(button(r, 'Mark done')).toBeDefined();
+    expect(texts(r)).toContain('All changes saved');
   });
 
-  it('writes nothing of its own when nothing was typed', async () => {
+  it('lets the page go without a write when nothing is in a box', async () => {
     mock_updateSnag.mockClear();
-    const r = await arrange();
-    await press(button(r, 'Close'));
+    await arrange();
+    const { prevented } = await leave();
+    expect(prevented).toBe(false);
     expect(mock_updateSnag).not.toHaveBeenCalled();
   });
 
-  // A button reading Save over a line reading "All changes saved" is the page
-  // contradicting itself — and one that looks like an outstanding obligation
-  // gets reached for on autopilot, which is what puts a thumb next to Mark
-  // done. The word comes off the same count the hint does, so the two cannot
-  // say different things about one fact.
-  it('says Close while nothing is pending, and Save once something is', async () => {
-    const r = await arrange(snag({ dueAt: null }));
-    expect(button(r, 'Close')).toBeDefined();
-    expect(texts(r)).toContain('All changes saved');
-
-    await TestRenderer.act(async () => {
-      field(r, "When's it due?").props.onChangeText('8/11/2026');
-    });
-
-    expect(button(r, 'Save')).toBeDefined();
-    expect(r.root.findAll(
-      (n: any) => typeof n.type !== 'string' && n.props?.label === 'Close',
-    )).toEqual([]);
-  });
-
-  // The whole point of the pair. Two full-width solid fern buttons stacked at
-  // the foot were told apart by nothing but their words; only one of them has
-  // a consequence, and only that one keeps the brand's colour.
-  it('leaves the solid fern to Mark done and goes tonal itself', async () => {
-    const r = await arrange();
-
-    expect(button(r, 'Close').props.variant).toBe('secondary');
-    // Mark done takes the default, which is the filled primary.
-    expect(button(r, 'Mark done').props.variant).toBeUndefined();
-  });
-
-  it('says the taps already landed', async () => {
-    const r = await arrange();
-    expect(texts(r)).toContain('All changes saved');
-  });
-
-  // Two boxes hold typed text — the date, and the item being added to the
-  // shopping list — so those are the only branches in which "All changes
-  // saved" would be a lie. The wording is the thing page's, so two screens do
-  // not invent two for the same fact.
-  it('admits when a typed date is still behind the row', async () => {
+  it('says a typed date will be kept on the way out', async () => {
     const r = await arrange(snag({ dueAt: null }));
     await TestRenderer.act(async () => {
       field(r, "When's it due?").props.onChangeText('8/11/2026');
     });
-
-    expect(texts(r)).toContain('1 unsaved change');
-    expect(texts(r)).not.toContain('All changes saved');
+    expect(texts(r)).toContain('1 unsaved change — kept when you leave');
   });
 
   it('counts both boxes', async () => {
@@ -570,31 +608,10 @@ describe('the Save button', () => {
     await TestRenderer.act(async () => {
       field(r, 'Something to pick up').props.onChangeText('Hinge');
     });
-
-    expect(texts(r)).toContain('2 unsaved changes');
+    expect(texts(r)).toContain('2 unsaved changes — kept when you leave');
   });
 
-  // The item half-typed into the shopping box has no blur commit at all — it
-  // waits on the + beside it — so without this, Save is the one button on the
-  // page that silently discards what somebody typed.
-  it('adds an item left sitting in the shopping box', async () => {
-    mock_updateSnag.mockClear();
-    mock_updateSnag.mockResolvedValue(snag({ parts: ['Hinge'] }));
-    const r = await arrange(snag({ parts: [] }));
-
-    await TestRenderer.act(async () => {
-      field(r, 'Something to pick up').props.onChangeText('Hinge');
-    });
-    await press(button(r, 'Save'));
-
-    const [, update] = mock_updateSnag.mock.calls[0];
-    expect(update.parts).toEqual(['Hinge']);
-    expect(mock_goBack).toHaveBeenCalled();
-  });
-
-  // Two round trips and two re-reads for one press is the thing `addPhotos`
-  // and `create_snag`'s own date already refuse.
-  it('writes a pending date and a pending item in one call', async () => {
+  it('writes a pending date and a pending item in one call, then goes', async () => {
     mock_updateSnag.mockClear();
     mock_updateSnag.mockResolvedValue(snag());
     const r = await arrange(snag({ dueAt: null, parts: [] }));
@@ -605,15 +622,16 @@ describe('the Save button', () => {
     await TestRenderer.act(async () => {
       field(r, 'Something to pick up').props.onChangeText('Hinge');
     });
-    await press(button(r, 'Save'));
+    const { prevented, action } = await leave();
 
+    expect(prevented).toBe(true);
     expect(mock_updateSnag).toHaveBeenCalledTimes(1);
     const [, update] = mock_updateSnag.mock.calls[0];
     expect(update.parts).toEqual(['Hinge']);
     expect(new Date(update.dueAt).getDate()).toBe(8);
+    expect(mock_dispatch).toHaveBeenCalledWith(action);
   });
 
-  // Closing over a failed write would read as having saved.
   it('stays put when the write fails', async () => {
     mock_updateSnag.mockClear();
     mock_updateSnag.mockRejectedValue(new Error('Network'));
@@ -622,9 +640,8 @@ describe('the Save button', () => {
     await TestRenderer.act(async () => {
       field(r, 'Something to pick up').props.onChangeText('Hinge');
     });
-    await press(button(r, 'Save'));
-
-    expect(mock_goBack).not.toHaveBeenCalled();
+    await leave();
+    expect(mock_dispatch).not.toHaveBeenCalled();
   });
 
   it('stays put on a date no calendar has, keeping the words in the box', async () => {
@@ -634,29 +651,42 @@ describe('the Save button', () => {
     await TestRenderer.act(async () => {
       field(r, "When's it due?").props.onChangeText('31/02/2026');
     });
-    await press(button(r, 'Save'));
+    await leave();
 
     expect(mock_updateSnag).not.toHaveBeenCalled();
-    expect(mock_goBack).not.toHaveBeenCalled();
+    expect(mock_dispatch).not.toHaveBeenCalled();
     expect(field(r, "When's it due?").props.value).toBe('31/02/2026');
   });
 
-  // `onBlur` is not guaranteed to have fired — on native, pressing a Pressable
-  // does not reliably blur a TextInput — so Save must not be the one button
-  // here that discards what somebody typed.
-  it('commits a typed date that was never blurred', async () => {
+  // Finishing a job with a part still typed in the box is finishing the job
+  // that includes it.
+  it('commits what is in a box before Mark done', async () => {
     mock_updateSnag.mockClear();
-    mock_updateSnag.mockResolvedValue(snag({ dueAt: '2026-11-08T00:00:00.000Z' }));
-    const r = await arrange(snag({ dueAt: null }));
+    mock_updateSnag.mockResolvedValue(snag({ parts: ['Hinge'] }));
+    mock_setSnagStatus.mockResolvedValue(snag({ status: 'done', doneAt: new Date().toISOString() }));
+    const r = await arrange(snag({ parts: [] }));
 
     await TestRenderer.act(async () => {
-      field(r, "When's it due?").props.onChangeText('8/11/2026');
+      field(r, 'Something to pick up').props.onChangeText('Hinge');
     });
-    await press(button(r, 'Save'));
+    await press(button(r, 'Mark done'));
 
-    const [, update] = mock_updateSnag.mock.calls[0];
-    expect(new Date(update.dueAt).getDate()).toBe(8);
-    expect(mock_goBack).toHaveBeenCalled();
+    expect(mock_updateSnag.mock.calls[0][1].parts).toEqual(['Hinge']);
+    expect(mock_setSnagStatus).toHaveBeenCalledWith('s1', 'done');
+  });
+
+  // A calendar tap writes the box and commits in one gesture, before React has
+  // re-rendered — the commit has to see the new value, not the old one.
+  it('commits a day picked from the calendar straight away', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ dueAt: '2026-11-08T00:00:00.000' }));
+    const r = await arrange(snag({ dueAt: null }));
+    const box = field(r, "When's it due?");
+    await TestRenderer.act(async () => {
+      box.props.onChangeText('8/11/2026');
+      await box.props.onBlur();
+    });
+    expect(new Date(mock_updateSnag.mock.calls[0][1].dueAt).getDate()).toBe(8);
   });
 });
 
@@ -679,7 +709,7 @@ describe('the order down the page', () => {
       (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : flat(c))).join('');
 
     const wanted = ['Linked assets', 'Anything to pick up?', 'Notes', "When's it due?",
-      'Schedule a recurring job'];
+      'Repeats'];
     const seen = r.getAllByType('Text')
       .map((n: any) => flat(n).trim())
       .filter((t: string) => wanted.includes(t));
@@ -687,14 +717,15 @@ describe('the order down the page', () => {
     expect(seen).toEqual(wanted);
   });
 
-  // Finishing is the one state change a person still makes by hand, so it sits
-  // at the foot of the content rather than competing with Save in the footer.
-  it('puts Mark done below everything it depends on', async () => {
+  // Finishing is the most common thing done to a job that exists, so it is in
+  // the footer where a thumb finds it without scrolling past every card.
+  it('puts Mark done in the footer, after all the content', async () => {
     const r = await arrange(snag({ repeatDays: null }));
     const order = r.getAllByType('Text')
       .map((n: any) => String(n.props.children ?? ''));
 
-    expect(order.indexOf('Mark done')).toBeGreaterThan(order.indexOf('Schedule a recurring job'));
+    expect(order.indexOf('Mark done')).toBeGreaterThan(order.indexOf('Repeats'));
+    expect(button(r, 'Mark done').props.variant).toBeUndefined();
   });
 });
 

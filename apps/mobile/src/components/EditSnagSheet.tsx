@@ -101,11 +101,17 @@ export default function EditSnagSheet({
           />
 
           <View style={styles.actions}>
+            {/* **Done**, and never dead. It was *Save*, disabled until
+                something changed — a button that looks like an obligation and
+                then refuses the press. Every other surface on this page writes
+                as it goes or on the way out; this one writes when it is closed
+                with something changed, and simply closes otherwise. *Cancel*
+                is still the way to walk away from an edit. */}
             <Button
-              label="Save"
-              onPress={() => onSave({ description: trimmed || null, room })}
+              label="Done"
+              onPress={() => (unchanged ? onCancel() : onSave({ description: trimmed || null, room }))}
               loading={busy}
-              disabled={busy || needsWords || unchanged}
+              disabled={busy || needsWords}
               fullWidth
             />
             <Button label="Cancel" variant="ghost" onPress={onCancel} disabled={busy} fullWidth />

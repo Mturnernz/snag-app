@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, Image, TextInput, Pressable, Modal, StyleSheet,
+  View, Text, ScrollView, Image, TextInput, Pressable, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
@@ -19,7 +19,7 @@ import PhotoViewer from '../components/PhotoViewer';
 import AdviceCard from '../components/AdviceCard';
 import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
-import DateField, { CalendarSheet } from '../components/DateField';
+import DateField from '../components/DateField';
 import LinkAssetsSheet from '../components/LinkAssetsSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
@@ -34,7 +34,8 @@ import { showAlert } from '../lib/alert';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import LinkedText from '../components/LinkedText';
 import {
-  dayKey, describeCycle, dueState, formatLooseDate, parseLooseDate, snagHeadline,
+  dayKey, describeCycle, dueState, formatDayFirst, parseLooseDate, snagHeadline,
+  thingHeadline, thingsInArea,
 } from '@snag/supabase-queries';
 import {
   Comment, LinkedThing, RootStackParamList, Snag, SnagAdvice, Thing, ThingNote, REPEAT_PRESETS,
@@ -54,12 +55,53 @@ type Route = RouteProp<RootStackParamList, 'SnagDetail'>;
  */
 const DAY_MS = 86_400_000;
 
-/** "month", "3 months" — for the sentence about when the first one lands. */
-/** Within a day either side — these are buttons, not a calendar. */
-function isDueIn(dueAt: string | null, days: number): boolean {
-  if (!dueAt) return false;
-  const wanted = Date.now() + days * DAY_MS;
-  return Math.abs(new Date(dueAt).getTime() - wanted) < DAY_MS / 2;
+/**
+ * The due date as the box shows it: the local day, day first.
+ *
+ * It was `formatLooseDate`, which is built for date columns and reads a
+ * timestamp's day as nothing — so a job due on the 8th showed back as
+ * "Nov 2026", a precision the person who picked the 8th never asked to lose.
+ * `dayKey` is the one place an instant becomes a local calendar day.
+ */
+function dueText(dueAt: string | null): string {
+  return dueAt ? formatDayFirst(dayKey(dueAt)) : '';
+}
+
+/** Local midnight, `days` from today. */
+function daysFromNow(days: number): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+/** The coming Saturday — today, if today is one. */
+function thisWeekend(): Date {
+  const today = new Date().getDay();
+  return daysFromNow((6 - today + 7) % 7);
+}
+
+/**
+ * The two dates people give a household job most often, a tap away. Anything
+ * else is typed, or picked from the calendar in the box.
+ */
+const QUICK_DATES: { label: string; at: () => Date }[] = [
+  { label: 'This weekend', at: thisWeekend },
+  { label: 'Next week', at: () => daysFromNow(7) },
+];
+
+/**
+ * The repeat chips: the presets, plus whatever the job already carries when it
+ * is not one of them — a heat pump serviced every two years arrives from the
+ * thing page with 730 days, and a row that could not show it would read as
+ * *Never*.
+ */
+function repeatChoices(current: number | null): { days: number; label: string }[] {
+  const presets = REPEAT_PRESETS.map(({ days, label }) => ({ days, label }));
+  if (current && !presets.some((p) => p.days === current)) {
+    presets.push({ days: current, label: `Every ${describeCycle(current)}` });
+  }
+  return presets;
 }
 
 /**
@@ -93,8 +135,8 @@ function unsavedHint(count: number): string {
 function describeRepeat(snag: Snag): string {
   if (!snag.repeatDays) return '';
   const every = describeCycle(snag.repeatDays);
-  if (!snag.dueAt) return `Set a date above, then every ${every} after it's marked done.`;
-  return `Then every ${every} after it's marked done.`;
+  if (!snag.dueAt) return `Set a date, then marking it done brings it back every ${every}.`;
+  return `Marking it done brings it back every ${every}.`;
 }
 
 export default function SnagDetailScreen() {
@@ -118,7 +160,12 @@ export default function SnagDetailScreen() {
   // the viewer's own next/previous walk the same strip.
   const [viewing, setViewing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
-  const [partDraft, setPartDraft] = useState('');
+  const [partDraft, setPartDraftState] = useState('');
+  const partRef = useRef('');
+  const setPartDraft = useCallback((next: string) => {
+    partRef.current = next;
+    setPartDraftState(next);
+  }, []);
   /**
    * What is in the due-date box, as typed.
    *
@@ -127,17 +174,24 @@ export default function SnagDetailScreen() {
    * January, and a field that wrote on every keystroke would file the job under
    * it. It is committed on blur and re-seeded whenever the row changes.
    */
-  const [dueDraft, setDueDraft] = useState('');
-  /** Whether the recurring arrangement is open. */
-  const [repeatOpen, setRepeatOpen] = useState(false);
+  const [dueDraft, setDueDraftState] = useState('');
+  /**
+   * The same string, readable synchronously. The calendar writes the box and
+   * commits in one gesture, before React has re-rendered with the new value —
+   * so a commit reading the state it closed over saw the old date and wrote
+   * nothing.
+   */
+  const dueRef = useRef('');
+  const setDueDraft = useCallback((next: string) => {
+    dueRef.current = next;
+    setDueDraftState(next);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   /** Whether the congratulations dialog is up. Only a real finish sets it. */
   const [celebrating, setCelebrating] = useState(false);
   /** Editing what the job says — its words and its room, together. */
   const [editing, setEditing] = useState(false);
-  /** The day the first one lands, when none of the three presets is the answer. */
-  const [dueOpen, setDueOpen] = useState(false);
   /** The place's record, read when the picker opens rather than on page load. */
   const [things, setThings] = useState<Thing[]>([]);
   const [thingsLoading, setThingsLoading] = useState(false);
@@ -167,7 +221,7 @@ export default function SnagDetailScreen() {
         getSnagAdvice(params.snagId).catch(() => null),
       ]);
       setSnag(next);
-      setDueDraft(formatLooseDate(next.dueAt));
+      setDueDraft(dueText(next.dueAt));
       setComments(nextComments);
       setAdvice(nextAdvice);
 
@@ -223,6 +277,38 @@ export default function SnagDetailScreen() {
     }
   }
 
+  /**
+   * The room's record, read once the job is known to have a room — for the
+   * suggestions on the card. One request, never fatal: a card that cannot
+   * suggest anything is still a card, and the picker still opens.
+   */
+  const roomOf = snag?.room ?? null;
+  const placeOf = snag?.propertyId ?? null;
+  useEffect(() => {
+    if (!roomOf || !placeOf || thingsFor.current === placeOf) return;
+    let cancelled = false;
+    getThings(placeOf)
+      .then((found) => {
+        if (cancelled) return;
+        thingsFor.current = placeOf;
+        setThings(found);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [roomOf, placeOf]);
+
+  /**
+   * Up to three things recorded in the job's room and not already linked —
+   * offered as one tap each rather than behind the picker. Saying what a job is
+   * about was four taps and a sheet; the room is already on the job, so the
+   * shortlist a person would pick from is already known.
+   */
+  const suggested = useMemo(() => {
+    if (!roomOf) return [];
+    const linkedIds = new Set(linked.map((one) => one.id));
+    return thingsInArea(things, roomOf).filter((t) => !linkedIds.has(t.id)).slice(0, 3);
+  }, [things, roomOf, linked]);
+
   /** Replacing the whole set, which is the one call the server offers. */
   async function saveAssets(ids: string[]) {
     if (!snag) return;
@@ -258,7 +344,7 @@ export default function SnagDetailScreen() {
     if (!pending) return;
     if (pending.unreadable) {
       showAlert("Couldn't read that date", 'Try 8/11/2019, Nov 2019, or tap the calendar.');
-      setDueDraft(formatLooseDate(snag.dueAt));
+      setDueDraft(dueText(snag.dueAt));
       return;
     }
     await patch({ dueAt: pending.dueAt });
@@ -275,8 +361,8 @@ export default function SnagDetailScreen() {
    */
   function pendingDue(): { dueAt: string | null; unreadable?: true } | undefined {
     if (!snag) return undefined;
-    const typed = dueDraft.trim();
-    if (typed === formatLooseDate(snag.dueAt)) return undefined;
+    const typed = dueRef.current.trim();
+    if (typed === dueText(snag.dueAt)) return undefined;
     if (!typed) return { dueAt: null };
     const parsed = parseLooseDate(typed);
     if (!parsed) return { dueAt: null, unreadable: true };
@@ -292,49 +378,66 @@ export default function SnagDetailScreen() {
    * "All changes saved" would be a lie.
    */
   const unsaved = (pendingDue() ? 1 : 0) + (partDraft.trim() ? 1 : 0);
+  void dueDraft; // read through dueRef; the state is what re-renders the count
 
   /**
-   * Finishing with the page.
+   * Whatever is sitting in a box, onto the row. **Leaving saves.**
    *
-   * **It commits what is sitting in a box, and that is the whole reason it is
-   * not merely a Close.** `onBlur` is not guaranteed to have fired — on native,
-   * pressing a Pressable does not reliably blur a `TextInput` — and the item
-   * half-typed into the shopping box has no blur commit at all: it waits on the
-   * `+` beside it. Without this, Save would be the one button on the page that
-   * silently discards what somebody typed, which is precisely the failure a
-   * button called Save exists to prevent.
+   * There was a Save button for this, and it mostly read *Close*: every
+   * control here writes when it is pressed, so the only things a Save could be
+   * waiting on were the two boxes — the date, whose `onBlur` is not guaranteed
+   * to fire (on native, pressing a Pressable does not reliably blur a
+   * `TextInput`), and the item half-typed into the shopping box, which waits on
+   * its own `+`. So the page commits them itself, on the way out and before
+   * *Mark done*, and the footer is free for the one action with a consequence.
    *
    * **One write, not two.** A date and an item both pending are one
-   * `update_snag` rather than two round trips and two re-reads.
-   *
-   * A date it cannot read holds the page open rather than closing over it: the
-   * words stay in the box so they can be fixed, unlike the blur path, which has
-   * somewhere to put them back to.
+   * `update_snag`. A date no calendar has holds the page open with the words
+   * still in the box, rather than leaving over something it did not take.
    */
-  async function saveAndClose() {
-    if (busy || !snag) return;
-
+  async function commitPending(): Promise<boolean> {
+    if (!snag) return true;
     const update: Parameters<typeof updateSnag>[1] = {};
     const due = pendingDue();
     if (due?.unreadable) {
       showAlert("Couldn't read that date", 'Try 8/11/2019, Nov 2019, or tap the calendar.');
-      return;
+      return false;
     }
     if (due) update.dueAt = due.dueAt;
 
     // Adding an item is one of the four things that start a job, which is
-    // right: deciding what to buy is deciding to do the work. Pressing Save
-    // with a word in the box is adding it.
-    const item = partDraft.trim();
+    // right: deciding what to buy is deciding to do the work. Leaving with a
+    // word in the box is adding it.
+    const item = partRef.current.trim();
     if (item) update.parts = [...snag.parts, item];
 
-    if (Object.keys(update).length > 0) {
-      const ok = await patch(update);
-      if (!ok) return;
-      setPartDraft('');
-    }
-    navigation.goBack();
+    if (Object.keys(update).length === 0) return true;
+    const ok = await patch(update);
+    if (ok) setPartDraft('');
+    return ok;
   }
+
+  /*
+   * Every way off the page goes through `beforeRemove` — the header's back,
+   * Android's, a swipe — so none of them can be the one that drops a typed
+   * date. Refs rather than state, because the listener is registered once.
+   */
+  const commitRef = useRef(commitPending);
+  commitRef.current = commitPending;
+  const unsavedRef = useRef(0);
+  unsavedRef.current = unsaved;
+  useEffect(() => {
+    if (!navigation.addListener) return undefined;
+    return navigation.addListener('beforeRemove', (e: any) => {
+      if (unsavedRef.current === 0) return;
+      e.preventDefault();
+      commitRef.current().then((ok) => {
+        if (!ok) return;
+        unsavedRef.current = 0;
+        navigation.dispatch(e.data.action);
+      });
+    });
+  }, [navigation]);
 
   /** Another angle, or the plate you went back for. */
   async function handleAddPhotos(source: PhotoSource) {
@@ -401,6 +504,8 @@ export default function SnagDetailScreen() {
 
   async function handleStatus(next: Snag['status']) {
     if (!snag) return;
+    // A date or an item still in a box is part of the job being finished.
+    if (!(await commitPending())) return;
     setBusy(true);
     try {
       const updated = await setSnagStatus(snag.id, next);
@@ -452,6 +557,8 @@ export default function SnagDetailScreen() {
       // see deleteStoredFiles.
       await deleteStoredFiles(photos);
       showToast('Deleted');
+      // Nothing to save on a job that no longer exists.
+      unsavedRef.current = 0;
       navigation.goBack();
     } catch (err: any) {
       showAlert("Couldn't delete that", err?.message ?? 'Please try again.');
@@ -721,6 +828,30 @@ export default function SnagDetailScreen() {
               </View>
             ))
           )}
+
+          {/* Offers, so they look like offers: the sunken chip, a +, and a
+              label saying where they came from. Tapping one links it — the
+              same `set_snag_things` the picker writes through. */}
+          {suggested.length > 0 ? (
+            <View style={styles.suggestRow}>
+              <Text style={styles.suggestLabel}>{`In the ${roomOf!.toLowerCase()}:`}</Text>
+              {suggested.map((thing) => (
+                <Pressable
+                  key={thing.id}
+                  onPress={() => saveAssets([...linked.map((one) => one.id), thing.id])}
+                  disabled={busy}
+                  style={styles.suggestTap}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Link ${thingHeadline(thing)}`}
+                >
+                  <View style={styles.suggestChip}>
+                    <Icon name="add" size="sm" color={Colors.primary} />
+                    <Text style={styles.suggestText} numberOfLines={1}>{thingHeadline(thing)}</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </Card>
 
         {/* ── Anything to pick up ──
@@ -963,30 +1094,28 @@ export default function SnagDetailScreen() {
           </Card>
         ) : null}
 
-        {/* ── When it's due ──
-            Its own field, and it was not reachable at all except through the
-            repeat card — so a one-off job could never be given a date. That
-            made the Schedule tab's *Due* marks and the overdue badge features
-            only repeating jobs had, which is precisely backwards: a filter that
-            comes round every six months looks after itself, and the gutters
-            before the weekend away are the ones somebody needs reminding of.
+        {/* ── When ──
+            One card for one fact. The date and the repeat used to be two cards
+            and a modal, and the modal asked "When's the next one due?" with a
+            second set of date controls writing the same `due_at` as the box
+            above it — so which date was real was a fair question to ask. And
+            *Yes* opened the modal without saying anything, so dismissing it
+            left *No* lit.
 
-            Typed or tapped, through the one `DateField` every date in this app
-            uses — `8/11/2019` is the eighth of November, and a calendar sits in
-            the box because it says what it wants better than grey example text
-            does. Setting a date starts the job, which is right: putting a day
-            on something is deciding to do it. */}
+            Now: the date, typed or tapped, with the two answers people give
+            most often a tap away; then how often it comes round, as one row of
+            chips that writes when pressed. Setting up a repeat is one tap —
+            and a repeat with no date would never surface, so choosing one
+            dates it a cycle out unless a date is already set.
+
+            Committed on blur, because `8/1` on the way to `8/11/2019` parses
+            to the eighth of January. Setting a date starts the job, which is
+            right: putting a day on something is deciding to do it. */}
         <Card
           elevation="md"
           style={styles.section}
           onLayout={(e) => { dueY.current = e.nativeEvent.layout.y; }}
         >
-          {/* The label belongs to `DateField` rather than being a card title
-              above it, so the box has an accessible name of its own — a screen
-              reader on a card whose only content is one input should not have
-              to infer what the input is for from a heading it has already
-              passed. Same stacked shape the thing page's spec sheet uses:
-              name above, box below, full width. */}
           <DateField
             label="When's it due?"
             value={dueDraft}
@@ -995,145 +1124,86 @@ export default function SnagDetailScreen() {
             placeholder="No date — that's fine"
             pickerTitle="When's it due?"
           />
-        </Card>
+          <View style={styles.optionRow}>
+            {QUICK_DATES.map(({ label, at }) => {
+              const day = at();
+              return (
+                <Option
+                  key={label}
+                  label={label}
+                  active={!!snag.dueAt && dayKey(snag.dueAt) === dayKey(day)}
+                  onPress={() => patch({ dueAt: day.toISOString() })}
+                  disabled={busy}
+                />
+              );
+            })}
+          </View>
 
-        {/* ── Repeat ──
-            A yes/no, and nothing else on the card until the answer is yes.
-
-            It used to carry a paragraph under the heading explaining filters
-            and gutters and what marking a repeating job done does, then a
-            question, then two rails of presets — a card that had to be read
-            before the one-word answer it actually wanted could be given. The
-            common answer is no. So the card asks, and the arrangement moves
-            into a modal that only somebody who said yes ever sees.
-
-            The heading still says what the section *does* rather than asking
-            whether it applies: "Does it come round again?" made somebody
-            hunting for a way to schedule the filter read straight past the one
-            card that does it. */}
-        <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Schedule a recurring job</Text>
+          <Text style={styles.fieldLabel}>Repeats</Text>
           <View style={styles.optionRow}>
             <Option
-              label="No"
+              label="Never"
               active={!snag.repeatDays}
               onPress={() => {
                 if (snag.repeatDays) patch({ repeatDays: null });
               }}
               disabled={busy}
             />
-            <Option
-              label="Yes"
-              active={!!snag.repeatDays}
-              onPress={() => setRepeatOpen(true)}
-              disabled={busy}
-            />
+            {repeatChoices(snag.repeatDays).map(({ days, label }) => (
+              <Option
+                key={days}
+                label={label}
+                active={snag.repeatDays === days}
+                onPress={() => {
+                  if (snag.repeatDays === days) return;
+                  patch({
+                    repeatDays: days,
+                    dueAt: snag.dueAt ?? new Date(Date.now() + days * DAY_MS).toISOString(),
+                  });
+                }}
+                disabled={busy}
+              />
+            ))}
           </View>
-
-          {/* The arrangement, in a sentence, on the card rather than behind the
-              modal — somebody arriving at this page wants to know what it
-              already does, not to re-open the thing that set it. */}
           {snag.repeatDays ? (
-            <Pressable
-              onPress={() => setRepeatOpen(true)}
-              disabled={busy}
-              style={styles.repeatSummary}
-              accessibilityRole="button"
-              accessibilityLabel="Change how often it comes round"
-            >
-              <Text style={styles.sectionHint}>{describeRepeat(snag)}</Text>
-              <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
-            </Pressable>
+            <Text style={styles.sectionHint}>
+              {describeRepeat(snag)} It comes up under Due soon on the list — Snag doesn't
+              send reminders.
+            </Text>
           ) : null}
         </Card>
-        {/* ── Status ──
-            No "Start it". Nobody pressed it: people commented on things and
-            assigned them to each other while the list went on claiming nothing
-            had been touched. Doing something about a snag is the evidence that
-            it has been started, so the server moves it — see
-            20260912140000_work_starts_itself.sql. Finishing is the one state
-            change that still needs saying out loud. */}
-        <View style={styles.statusRow}>
+      </ScrollView>
+
+      {/* ── Mark done ──
+          The one state change a person still makes by hand, in the footer where
+          a thumb finds it without scrolling past every card. It used to sit at
+          the foot of the scroll with a Save/Close in this bar — and that Save
+          mostly read *Close*, beside a back arrow that already did the same.
+          Leaving saves now (see `commitPending`), so the bar holds the action
+          with a consequence, and the hint says whether a box is still holding
+          something that will be kept on the way out. */}
+      <View style={{ marginBottom: keyboard }}>
+        <StickyActionBar
+          hint={unsaved > 0 ? `${unsavedHint(unsaved)} — kept when you leave` : 'All changes saved'}
+          hintTone={unsaved > 0 ? 'warn' : 'muted'}
+        >
           {snag.status !== 'done' ? (
             <Button
               label="Mark done"
               onPress={() => handleStatus('done')}
-              disabled={busy}
+              loading={busy}
               icon="checkmark-circle-outline"
-              style={styles.statusButton}
+              fullWidth
             />
           ) : (
             <Button
               label="Reopen"
               variant="outline"
               onPress={() => handleStatus('open')}
-              disabled={busy}
-              style={styles.statusButton}
+              loading={busy}
+              fullWidth
             />
           )}
-        </View>
-
-      </ScrollView>
-
-      {/* ── Save ──
-          **It closes; it does not collect.** Every control on this page still
-          writes when it is pressed, because triage is a series of small
-          independent decisions and a Save button that held them would turn
-          sorting twelve jobs into forty taps — and would put the tick you make
-          standing in a shop aisle behind a second press.
-
-          So what is it for? Two things this page could not do before. It is a
-          **way out that reads as finished**: a back chevron in the header is
-          navigation, and somebody who has just set a date and added two parts
-          wants somewhere to press that means "done here". And the hint above it
-          is the page finally **saying that the taps landed** — nothing ever
-          confirmed a write, which is the exact failure the thing page's spec
-          sheet was reversed to fix ("the rows called `patch` without the toast
-          it takes, so edits saved in silence").
-
-          The hint is honest in both branches rather than always reassuring: the
-          due-date box is the one control that holds typed text, and until it is
-          committed there *is* something unsaved. Pressing Save commits it
-          first — `commitDue` is a no-op when the box matches the row — because
-          Save must not be the one button on this page that loses a typed value.
-
-          Last flex child rather than absolutely positioned, so it can never
-          overlap the content it belongs to. The keyboard inset is applied here
-          because StickyActionBar's own handling is `Keyboard`-based and
-          iOS-only, and `Keyboard` is an empty stub in react-native-web — which
-          is the build people install.
-
-          **It is tonal, and *Mark done* keeps the solid fern.** They were two
-          full-width solid fern buttons stacked against each other at the foot
-          of the screen, told apart by nothing but their words — so a thumb
-          reaching for one on muscle memory found the other, and the two are not
-          remotely the same kind of act. Pressing this one is harmless: the page
-          has already saved everything, so it closes. Pressing the other changes
-          the job's state, congratulates you, and takes the row off the list.
-          Only one of them has a consequence, and only one of them is the
-          brand's colour. (That split is already here on the other branch — a
-          finished job renders *Reopen* as an outline in the same slot.)
-
-          **And it says what pressing it will do.** It read **Save** above a
-          line reading *All changes saved*, which is the page contradicting
-          itself — and a button that looks like an outstanding obligation is one
-          people reach for on autopilot, which is what put a thumb next to *Mark
-          done* to begin with. So it is **Save** only while a box is actually
-          holding something, and **Close** the rest of the time, off the count
-          the hint beside it already keeps. One fact, two ways of saying it,
-          never disagreeing. */}
-      <View style={{ marginBottom: keyboard }}>
-        <StickyActionBar
-          hint={unsaved > 0 ? unsavedHint(unsaved) : 'All changes saved'}
-          hintTone={unsaved > 0 ? 'warn' : 'muted'}
-        >
-          <Button
-            label={unsaved > 0 ? 'Save' : 'Close'}
-            variant="secondary"
-            onPress={saveAndClose}
-            loading={busy}
-            fullWidth
-          />
         </StickyActionBar>
       </View>
 
@@ -1155,123 +1225,6 @@ export default function SnagDetailScreen() {
         }}
         onCancel={() => setEditing(false)}
       />
-
-      {/* A day tapped on a calendar is a *local* day: built at local midnight
-          and stored as the instant that is, so `dayKey` reads it back as the
-          same square somebody pressed. `toISOString().slice(0, 10)` would file
-          a September evening in Auckland under the next day for half the year,
-          which is the bug `dayKey` exists for. */}
-      <CalendarSheet
-        visible={dueOpen}
-        selected={snag.dueAt ? dayKey(snag.dueAt) : null}
-        title="When's the next one due?"
-        onPick={(iso) => {
-          setDueOpen(false);
-          patch({ dueAt: new Date(`${iso}T00:00:00`).toISOString() });
-        }}
-        onClose={() => setDueOpen(false)}
-      />
-
-      {/* ── How often, and when the next one lands ──
-          Behind the Yes rather than on the card, because the card's job is to
-          collect a one-word answer and the common answer is no. Two rails and
-          a paragraph of explanation used to stand permanently under a heading
-          on a page people open constantly, to serve the minority of jobs that
-          come round.
-
-          **The date it asks for is the *next* one, not the first.** The rail
-          said "When's the first one due?" whatever the job's history, which on
-          a filter changed twice already is the app asking a question that was
-          answered a year ago. `describeCycle` supplies the words on the third
-          preset so the modal and every other screen say "every 6 months" the
-          same way — `cycles.test.ts` pins that every interval either list
-          offers is a whole number of months or years, precisely so this never
-          reads back "every 26 weeks" at somebody who pressed a chip saying
-          six months. */}
-      <Modal
-        visible={repeatOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setRepeatOpen(false)}
-      >
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => setRepeatOpen(false)}
-          accessibilityLabel="Close"
-        />
-        <View style={styles.sheet}>
-          <View style={styles.grab} />
-          <Text style={styles.sectionTitle}>How often does it come round?</Text>
-
-          <View style={styles.optionRow}>
-            {REPEAT_PRESETS.map(({ days, label }) => (
-              <Option
-                key={days}
-                label={label}
-                active={snag.repeatDays === days}
-                onPress={() =>
-                  patch({
-                    repeatDays: days,
-                    // A repeat with no date on it would never surface. Set one
-                    // on the first choice, and leave an existing one alone.
-                    dueAt: snag.dueAt ?? new Date(Date.now() + days * DAY_MS).toISOString(),
-                  })
-                }
-                disabled={busy}
-              />
-            ))}
-          </View>
-
-          {snag.repeatDays ? (
-            <>
-              <Text style={styles.fieldLabel}>When's the next one due?</Text>
-              <View style={styles.optionRow}>
-                {[
-                  { label: 'Today', at: 0 },
-                  { label: 'In a week', at: 7 },
-                  { label: `A full ${describeCycle(snag.repeatDays)} away`, at: snag.repeatDays },
-                ].map(({ label, at }) => (
-                  <Option
-                    key={label}
-                    label={label}
-                    active={isDueIn(snag.dueAt, at)}
-                    onPress={() => patch({ dueAt: new Date(Date.now() + at * DAY_MS).toISOString() })}
-                    disabled={busy}
-                  />
-                ))}
-                {/* The three presets cover the common answers and cannot say
-                    "the Saturday we're back", which is the answer often enough
-                    that having no way to give it made this rail read as the
-                    only dates on offer. Lit whenever the date set is not one
-                    the presets would have produced. */}
-                <Option
-                  label="Pick a date…"
-                  active={
-                    !!snag.dueAt &&
-                    ![0, 7, snag.repeatDays].some((at) => isDueIn(snag.dueAt, at ?? -1))
-                  }
-                  onPress={() => setDueOpen(true)}
-                  disabled={busy}
-                />
-              </View>
-
-              <Text style={styles.sectionHint}>{describeRepeat(snag)}</Text>
-
-              {/* No cron, no second table, no notifications — and the modal
-                  says so, because a thing called "Schedule a recurring job" is
-                  exactly what somebody would expect to remind them. */}
-              <Text style={styles.sectionHint}>
-                Snag doesn't remind anybody. Marking it done schedules the next one instead of
-                closing it.
-              </Text>
-            </>
-          ) : null}
-
-          <View style={styles.repeatDone}>
-            <Button label="Done" onPress={() => setRepeatOpen(false)} disabled={busy} />
-          </View>
-        </View>
-      </Modal>
 
       <LinkAssetsSheet
         visible={picking}
@@ -1426,30 +1379,25 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textMuted,
   },
-  repeatSummary: {
+  suggestRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: Spacing.xs,
+    marginTop: Spacing.xs,
+  },
+  suggestLabel: { fontSize: Typography.sm, color: Colors.textMuted, marginRight: Spacing.xs },
+  suggestTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', maxWidth: '100%' },
+  suggestChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-    minHeight: MIN_TOUCH_TARGET,
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    minHeight: 34,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.sunken,
   },
-  repeatDone: { marginTop: Spacing.sm },
-  backdrop: { flex: 1, backgroundColor: 'rgba(43, 39, 36, 0.4)' },
-  sheet: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.card,
-    borderTopRightRadius: Radius.card,
-    padding: Spacing.lg,
-    paddingTop: Spacing.sm,
-    gap: Spacing.sm,
-  },
-  grab: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.border,
-    alignSelf: 'center',
-    marginBottom: Spacing.xs,
-  },
+  suggestText: { fontSize: Typography.sm, color: Colors.textSecondary, flexShrink: 1 },
   photo: {
     width: 220,
     height: 165,
@@ -1522,13 +1470,6 @@ const styles = StyleSheet.create({
   // it, because the sticky bar's button sits directly under it and peripheral
   // vision reads two adjacent full-width controls as one pair whatever they
   // say. The bar's own top rule and shadow do the rest.
-  statusRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginTop: Spacing.xl,
-    marginBottom: Spacing.xl,
-  },
-  statusButton: { flex: 1 },
   section: { marginTop: Spacing.lg, gap: Spacing.sm },
   sectionTitle: {
     fontSize: Typography.lg,

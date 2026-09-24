@@ -1622,6 +1622,13 @@ export interface InvoiceReview {
   quoteId: string | null;
   decidedAt: string | null;
   createdAt: string;
+  /**
+   * What came attached to the email — the invoice itself, nearly always. It
+   * travels with the card so it can be checked against, and becomes the bill's
+   * own paperwork when the card is allocated.
+   */
+  photoPaths: string[];
+  documentPaths: string[];
 }
 
 /**

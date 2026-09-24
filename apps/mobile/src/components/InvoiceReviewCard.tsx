@@ -7,7 +7,7 @@ import Icon from './Icon';
 import Button from './Button';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
-  describePaidInference, formatLooseDate, formatMoney, invoiceReviewHeadline, wasInferred,
+  describePaidInference, documentName, formatLooseDate, formatMoney, invoiceReviewHeadline, wasInferred,
 } from '@snag/supabase-queries';
 import {
   isHorizontalDrag, swipeDecision, swipeLean, swipeProgress, type SwipeDecision,
@@ -22,6 +22,11 @@ interface Props {
   onEdit?: () => void;
   /** While a decision is on the wire. The card stops taking gestures. */
   busy?: boolean;
+  /**
+   * Opens an attachment that came with the email. The card lists them because
+   * the invoice itself is what every field on it has to be checked against.
+   */
+  onOpenFile?: (path: string) => void;
 }
 
 /**
@@ -59,7 +64,7 @@ interface Props {
  * React Native, is implemented on react-native-web, and reports everything a
  * horizontal drag needs. **No new dependency; the bundle does not move.**
  */
-export default function InvoiceReviewCard({ review, onApprove, onDecline, onEdit, busy }: Props) {
+export default function InvoiceReviewCard({ review, onApprove, onDecline, onEdit, busy, onOpenFile }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
   const [lean, setLean] = useState<SwipeDecision | null>(null);
@@ -125,6 +130,16 @@ export default function InvoiceReviewCard({ review, onApprove, onDecline, onEdit
   const amount = review.amount === null
     ? 'Not priced'
     : `${formatMoney(review.amount)}${review.amountInclGst ? '' : ' + GST'}`;
+  // The figure is the field a guess costs most on, and GST is a guess the
+  // reader makes whenever a bill does not say — so either marks it.
+  const amountGuessed = review.amount !== null
+    && (wasInferred(review, 'amount') || wasInferred(review, 'amount_incl_gst'));
+  const files = [
+    ...review.documentPaths.map((path) => ({ path, label: documentName(path), icon: 'document-text-outline' as const })),
+    ...review.photoPaths.map((path, i) => ({
+      path, label: review.photoPaths.length > 1 ? `Photo ${i + 1}` : 'Photo', icon: 'image-outline' as const,
+    })),
+  ];
 
   return (
     <View style={styles.wrap} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -167,8 +182,15 @@ export default function InvoiceReviewCard({ review, onApprove, onDecline, onEdit
             card is read for, and half a number is worse than a clipped noun —
             the rule a project's own item rows already follow.
           */}
-          <Text style={styles.amount} numberOfLines={1}>{amount}</Text>
+          <View style={styles.amountCol}>
+            <Text style={styles.amount} numberOfLines={1}>{amount}</Text>
+            {amountGuessed ? <Guessed /> : null}
+          </View>
         </View>
+
+        {review.supplier && wasInferred(review, 'supplier') ? (
+          <Text style={styles.guessed}>supplier guessed</Text>
+        ) : null}
 
         {review.detail ? <Text style={styles.detail}>{review.detail}</Text> : null}
 
@@ -197,6 +219,23 @@ export default function InvoiceReviewCard({ review, onApprove, onDecline, onEdit
           />
           <Text style={styles.paidText}>{describePaidInference(review)}</Text>
         </View>
+
+        {onOpenFile && files.length > 0 ? (
+          <View style={styles.files}>
+            {files.map((file) => (
+              <Pressable
+                key={file.path}
+                onPress={() => onOpenFile(file.path)}
+                style={styles.file}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${file.label}`}
+              >
+                <Icon name={file.icon} size="sm" color={Colors.primary} />
+                <Text style={styles.fileLabel} numberOfLines={1}>{file.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
 
         {review.sourceFrom || review.sourceAt ? (
           <Text style={styles.source} numberOfLines={1}>
@@ -323,6 +362,13 @@ const styles = StyleSheet.create({
   paidText: { flex: 1, minWidth: 0, fontSize: Typography.xs, color: Colors.textSecondary },
 
   source: { fontSize: Typography.xs, color: Colors.textMuted },
+  amountCol: { alignItems: 'flex-end' },
+  files: { gap: 2 },
+  file: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    minHeight: MIN_TOUCH_TARGET, alignSelf: 'flex-start',
+  },
+  fileLabel: { fontSize: Typography.sm, color: Colors.primary, flexShrink: 1 },
 
   actions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs },
   action: { flex: 1 },

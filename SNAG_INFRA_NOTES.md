@@ -183,7 +183,13 @@ call rather than a tidy-up. Not done.
 | `home-photos` | `home` | Private. 15 MB limit. **Holds manuals as well as photos** — `allowed_mime_types` gained `application/pdf` on 14 Sep 2026, and Storage enforces that list *before* RLS, so a type that isn't on it is refused with nothing said about permissions. Layout `<household_id>/<file>`, documents one deeper at `<household_id>/docs/<file>`; the RLS policies read only the first segment. The id can't be renamed, so the name stays wrong and the code is named honestly instead (`HOUSEHOLD_FILES_BUCKET`, `getFileUrl`). |
 | `snag-photos`, `snag-evidence`, `org-documents`, `investigation-files`, `governance-reports`, `work-group-images` | retired `public` product | Left in place with the rest of the archive. |
 
-### Edge functions — all belong to the retired product, and all five are to be deleted
+### Edge functions the home app uses
+
+`read-label` (JWT on) reads a photographed rating plate or paint tin; `inbound-bill` (JWT **off**,
+Svix-signed) files bills emailed to a project. Their source is in `supabase/functions/`, and both
+share `read-label/gemini.ts` for the model plumbing.
+
+### Edge functions — the five below belong to the retired product, and are to be deleted
 
 `notify-snag` (v20), `export-investigation`, `export-governance-report`, `worksheet`,
 `worksheet-import`. None is called by the home app; `notify-snag` is deliberately not adapted
@@ -254,10 +260,37 @@ Apex redirects to `www`. DNS is Netlify-managed.
 
 ## Resend
 
-One account, two entirely separate paths into it, which fail independently:
+One account, three entirely separate paths into it, which fail independently:
 
 - **HTTP API** — used by `notify-snag` (retired product only).
 - **SMTP** — used by Supabase Auth for password recovery. This is the one the home app depends on.
+- **Receiving** — `bills.snaghq.co.nz`, a receive-only domain (sending disabled), for bills
+  forwarded to a project. Resend posts `email.received` to the `inbound-bill` edge function.
+
+### Emailed bills (`bills.snaghq.co.nz`)
+
+Created 24 Sep 2026 in region `ap-northeast-1`, with the webhook
+`https://wpkdpukpllxuyqqlxkxf.supabase.co/functions/v1/inbound-bill` subscribed to
+`email.received`. Four things make it work, and each fails silently:
+
+1. **DNS at the snaghq.co.nz host** — an `MX` record, name `bills`, value
+   `inbound-smtp.ap-northeast-1.amazonaws.com`, priority 10; and the `TXT` DKIM record Resend
+   lists for `resend._domainkey.bills`. A subdomain, deliberately: an MX on the root would compete
+   with whatever receives `@snaghq.co.nz` mail and one of the two would stop getting it.
+2. **`RESEND_INBOUND_API_KEY`** as an edge-function secret — a **full-access** Resend key, because
+   reading received mail and its attachments needs one. Its own name so it cannot be confused with
+   `notify-snag`'s `RESEND_API_KEY`, which is sending-only and is going with that function.
+3. **`RESEND_WEBHOOK_SECRET`** — the `whsec_…` signing secret on the webhook (Resend → Webhooks).
+   Without it every delivery is refused with a 401, which is the right answer to an unsigned
+   request and indistinguishable, from the inbox, from nothing happening.
+4. **`GEMINI_API_KEY`** — already set for `read-label`. Without it cards still arrive, unread.
+
+The function runs with `verify_jwt: false` and must stay that way (Resend has no Supabase token);
+the signature is the lock. A signed-out `curl -X POST` answers `401 Bad signature`, which is the
+one-command check that it is deployed and refusing strangers.
+
+To test end to end: open a project, *+* → *Email it in instead*, copy the address, and forward a
+bill to it **from the address you sign in with**. Anything else is logged and dropped.
 
 The sender must be on a verified domain. `onboarding@resend.dev` delivers only to the Resend
 account's own address and rejects everything else with a 403 that nothing surfaces.

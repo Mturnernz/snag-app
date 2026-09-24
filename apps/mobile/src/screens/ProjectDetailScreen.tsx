@@ -16,6 +16,8 @@ import EditBudgetSheet from '../components/EditBudgetSheet';
 import ScheduleSheet from '../components/ScheduleSheet';
 import InvoiceReviewCard from '../components/InvoiceReviewCard';
 import InvoiceReviewSheet from '../components/InvoiceReviewSheet';
+import ReviewEditSheet from '../components/ReviewEditSheet';
+import EmailBillsSheet from '../components/EmailBillsSheet';
 import ReviewBell from '../components/ReviewBell';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import StatusBadge from '../components/StatusBadge';
@@ -41,7 +43,8 @@ import {
   dayKey, exportDateStamp, formatExactDate, formatLooseDate, pendingReviews, projectDossierTable,
   projectExportPhotos, reviewAlert, type ThingInput,
 } from '@snag/supabase-queries';
-import { getFileUrls } from '../lib/supabase';
+import { getFileUrl, getFileUrls, updateInvoiceReview } from '../lib/supabase';
+import { openUrl } from '../lib/openUrl';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import type {
   InvoiceReview, ProjectElement, ProjectExpectedCost, ProjectItem, ProjectQuote, RootStackParamList,
@@ -110,6 +113,8 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [exporting, setExporting] = useState(false);
   const [reviewSheetOpen, setReviewSheetOpen] = useState(false);
   const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [checking, setChecking] = useState<InvoiceReview | null>(null);
+  const [emailOpen, setEmailOpen] = useState(false);
   const [payingId, setPayingId] = useState<string | null>(null);
 
   const refreshing = useRef(false);
@@ -184,6 +189,12 @@ export default function ProjectDetailScreen({ route }: Props) {
     },
     [page, changed, showToast]
   );
+
+  const openFile = useCallback(async (path: string) => {
+    const url = await getFileUrl(path);
+    if (url) openUrl(url);
+    else showToast('That file won’t open just now');
+  }, [showToast]);
 
   if (loading || !page || !summary) {
     return (
@@ -366,6 +377,8 @@ export default function ProjectDetailScreen({ route }: Props) {
                 key={review.id}
                 review={review}
                 busy={decidingId === review.id}
+                onEdit={() => setChecking(review)}
+                onOpenFile={openFile}
                 onApprove={() => rule(
                   review,
                   () => approveInvoiceReview(review.id),
@@ -604,6 +617,20 @@ export default function ProjectDetailScreen({ route }: Props) {
         start={money}
         onClose={() => setMoney(null)}
         onSaved={changed}
+        onEmailIn={() => { setMoney(null); setEmailOpen(true); }}
+      />
+
+      <EmailBillsSheet visible={emailOpen} projectId={project.id} onClose={() => setEmailOpen(false)} />
+
+      <ReviewEditSheet
+        review={checking}
+        elements={elements}
+        onClose={() => setChecking(null)}
+        onSave={async (update) => {
+          if (!checking) return;
+          await updateInvoiceReview(checking.id, update);
+          await changed('Saved — it still needs allocating');
+        }}
       />
 
       <ThingSheet
@@ -807,7 +834,16 @@ export default function ProjectDetailScreen({ route }: Props) {
         busyId={decidingId}
         onClose={() => setReviewSheetOpen(false)}
         onRestore={(review) => rule(review, () => restoreInvoiceReview(review.id), 'Back in the deck')}
-        onDelete={(review) => rule(review, () => deleteInvoiceReview(review.id), 'Deleted')}
+        onDelete={(review) => rule(
+          review,
+          async () => {
+            await deleteInvoiceReview(review.id);
+            // An emailed bill brought its files with it, and nothing else points
+            // at them until it is allocated — which a deleted card never will be.
+            await deleteStoredFiles([...review.photoPaths, ...review.documentPaths]);
+          },
+          'Deleted',
+        )}
       />
     </View>
   );

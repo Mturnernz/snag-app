@@ -19,7 +19,15 @@ import { showAlert } from './alert';
  * think they have lost their work.
  *
  * `noopener` is not optional: without it the opened page gets a live
- * `window.opener` handle back into a signed-in session.
+ * `window.opener` handle back into a signed-in session. **But it cannot go in
+ * `window.open`'s features string.** The spec says a `noopener` open returns
+ * `null` — the same value a blocked popup returns — so the guard below read
+ * every successful open as blocked, and the alert surfaced the moment
+ * somebody closed the PDF and came back to the app. So the tab is opened
+ * blank, its opener cut by hand, and only then pointed at the address: the
+ * page never loads with a handle to cut. The referrer that `noreferrer` also
+ * suppressed is left to the site's `Referrer-Policy`, which already gives
+ * another site our origin and nothing more.
  *
  * **Native keeps `Linking.openURL`**, which is the OS handler and therefore the
  * default browser — or better, the app that owns the scheme.
@@ -29,12 +37,13 @@ export function openUrl(url: string): void {
     // Guarded: a browser that refuses the popup returns null rather than
     // throwing, and a link that silently does nothing is the failure this
     // whole helper exists to make impossible.
-    const opened = typeof window !== 'undefined'
-      ? window.open(url, '_blank', 'noopener,noreferrer')
-      : null;
+    const opened = typeof window !== 'undefined' ? window.open('', '_blank') : null;
     if (!opened) {
       showAlert("Couldn't open that", 'Your browser blocked the new tab. Allow pop-ups and try again.');
+      return;
     }
+    opened.opener = null;
+    opened.location.href = url;
     return;
   }
 

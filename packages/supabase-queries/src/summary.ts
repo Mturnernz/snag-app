@@ -138,6 +138,8 @@ const supplierKey = (name: string | null): string | null => {
  */
 export function agreedContribution(page: Pick<ProjectPage, 'quotes'>, q: ProjectQuote): number {
   if (q.status === 'declined' || q.supersedesLineId || q.againstQuoteId) return 0;
+  // A bill inside another bill counts through that one — the views drop it too.
+  if (q.kind === 'invoice' && q.billedThroughId) return 0;
   if (q.kind === 'quote') {
     return q.status === 'accepted'
       ? round((q.effectiveAmount ?? q.amountIncl ?? 0) - q.allowanceOpen)
@@ -362,4 +364,57 @@ export function describeRoom(room: RoomRow, money: (n: number) => string): strin
     parts.push(room.supplierCount === 1 ? '1 supplier' : `${room.supplierCount} suppliers`);
   }
   return parts.join(' · ');
+}
+
+/** One supplier's rows, under the one name the list shows for them. */
+export interface SupplierGroup<T> {
+  /** The trimmed, lower-cased name — or `row:<id>` for a row naming nobody. */
+  key: string;
+  /** The spelling on the most recently dated row. Null when nobody was named. */
+  supplier: string | null;
+  rows: T[];
+}
+
+/**
+ * Rows from one supplier gathered under one heading.
+ *
+ * An engineer billing monthly is four rows reading *MSC Consulting Group Ltd*
+ * one after another, and what somebody wants off that is the supplier once and
+ * their bills underneath. Grouped on the trimmed, lower-cased name — the same
+ * rule `project_supplier_totals` groups on, so "MSC" and "msc " are one
+ * supplier here exactly as they are one in the rollup — and shown in the
+ * spelling used most recently.
+ *
+ * **A row naming nobody is never grouped.** Two bills with no supplier are not
+ * known to be from the same place, and putting them under one heading would say
+ * they were.
+ *
+ * Groups keep the order of their first row, so a list already sorted by due
+ * date stays sorted by the soonest thing each supplier is owed; rows inside a
+ * group keep the order they came in.
+ */
+export function groupBySupplier<T extends { id: string; supplier: string | null; dated: string | null }>(
+  rows: T[],
+): SupplierGroup<T>[] {
+  const groups = new Map<string, SupplierGroup<T>>();
+  const latest = new Map<string, string>();
+  for (const row of rows) {
+    const name = row.supplier?.trim() ?? '';
+    const key = name ? name.toLowerCase() : `row:${row.id}`;
+    const group = groups.get(key);
+    if (!group) {
+      groups.set(key, { key, supplier: name || null, rows: [row] });
+      if (row.dated) latest.set(key, row.dated);
+      continue;
+    }
+    group.rows.push(row);
+    const seen = latest.get(key);
+    if (row.dated && (!seen || row.dated >= seen)) {
+      latest.set(key, row.dated);
+      group.supplier = name;
+    } else if (!row.dated && !seen) {
+      group.supplier = name;
+    }
+  }
+  return [...groups.values()];
 }

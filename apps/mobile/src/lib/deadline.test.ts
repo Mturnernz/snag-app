@@ -1,6 +1,6 @@
 import {
   withDeadline, failureReason, DeadlineError,
-  deadlineFor, AUTH_TIMEOUT_MS, REQUEST_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, LABEL_TIMEOUT_MS,
+  deadlineFor, AUTH_TIMEOUT_MS, REQUEST_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, LABEL_TIMEOUT_MS, READ_AGAIN_TIMEOUT_MS,
 } from './deadline';
 
 // The point of this helper is that no job can end in "still going" forever. The
@@ -118,6 +118,14 @@ describe('deadlineFor', () => {
     expect(deadlineFor(LABEL)).toBe(LABEL_TIMEOUT_MS);
     expect(deadlineFor(LABEL)).toBeGreaterThan(REQUEST_TIMEOUT_MS);
     expect(deadlineFor('https://p.supabase.co/functions/v1/something-else')).toBe(REQUEST_TIMEOUT_MS);
+  });
+
+  it('gives reading an emailed card again longer still, and more than the function gives the model', () => {
+    // Every paper on the card is read, with the busy-model fallback; the
+    // function stops the model at 45s so it can still answer in words.
+    const AGAIN = 'https://p.supabase.co/functions/v1/reread-bill';
+    expect(deadlineFor(AGAIN)).toBe(READ_AGAIN_TIMEOUT_MS);
+    expect(READ_AGAIN_TIMEOUT_MS).toBeGreaterThan(45_000);
   });
 
   it('treats asking for a signed URL as the data call it is', () => {

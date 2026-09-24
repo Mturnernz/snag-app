@@ -474,6 +474,14 @@ export const setInvoiceReviewRooms = (reviewId: string, elementIds: string[], am
 export const setQuoteRooms = (quoteId: string, elementIds: string[], amounts: number[] | null) =>
   queries.setQuoteRooms(supabase, quoteId, elementIds, amounts);
 
+export const filePaperwork = (reviewId: string, where: { quoteId?: string | null; elementId?: string | null }) =>
+  queries.filePaperwork(supabase, reviewId, where);
+export const setFileTags = (paths: string[], tag: import('@snag/shared-types').FileTag | null) =>
+  queries.setFileTags(supabase, paths, tag);
+
+export const rereadInvoiceReview = (reviewId: string) =>
+  queries.rereadInvoiceReview(supabase, reviewId);
+
 export const declineInvoiceReview = (reviewId: string) =>
   queries.declineInvoiceReview(supabase, reviewId);
 

@@ -14,7 +14,7 @@ import type { InvoiceReview } from '../types';
  */
 
 const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
-  id: 'r1', projectId: 'p1', elementId: null,
+  id: 'r1', projectId: 'p1', elementId: null, kind: 'invoice', addressedTo: null, sourcePart: 0,
   supplier: 'Tile Space', detail: null,
   amount: 2480, amountInclGst: true,
   invoiceNumber: 'TS-4471', dated: '2026-09-16', dueOn: null,
@@ -155,4 +155,101 @@ it('says where allocating puts it, before anybody presses Allocate', () => {
   const { r } = arrange({}, { landsOn: 'Bathroom, Laundry · split evenly' });
   expect(r.queryByText('For')).not.toBeNull();
   expect(r.queryByText('Bathroom, Laundry · split evenly')).not.toBeNull();
+});
+
+describe('a card that looks like a bill already on the job', () => {
+  it('says which, offers to open it, and still allocates', () => {
+    const onOpenDuplicate = jest.fn();
+    const { r, onApprove } = arrange({}, {
+      duplicate: 'Looks like TS-4471 from Tile Space ($2,480, 16 Sep 2026), already on the job',
+      onOpenDuplicate,
+    });
+    r.getByText('Looks like TS-4471 from Tile Space ($2,480, 16 Sep 2026), already on the job');
+    const open = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Open the bill it looks like' && n.props?.onPress)[0];
+    TestRenderer.act(() => open.props.onPress());
+    expect(onOpenDuplicate).toHaveBeenCalled();
+    press(r, 'Allocate');
+    expect(onApprove).toHaveBeenCalled();
+  });
+
+  it('says nothing when there is no likely twin', () => {
+    const { r } = arrange();
+    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+    expect(text).not.toContain('Looks like');
+  });
+});
+
+describe('one email, several kinds of paper', () => {
+  const words = (r: ReturnType<typeof render>) =>
+    r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+
+  it('says what kind of paper every card is, and marks a guess', () => {
+    expect(arrange().r.queryByText('Invoice')).not.toBeNull();
+    const { r } = arrange({ kind: 'quote', inferred: ['kind'] });
+    expect(r.queryByText('Quote')).not.toBeNull();
+    expect(r.queryByText('guessed')).not.toBeNull();
+  });
+
+  // A quote allocated as a bill is how an unsigned $49,482.20 deck quote would
+  // have landed in *To pay*.
+  it('adds a quote as a quote, and never asks whether it was paid', () => {
+    const { r, onApprove } = arrange({ kind: 'quote', invoiceNumber: 'QU-0111' });
+    expect(r.queryByText('Allocate')).toBeNull();
+    press(r, 'Add quote');
+    expect(onApprove).toHaveBeenCalled();
+    expect(words(r)).not.toContain('paid');
+  });
+
+  it('files paperwork — never allocates it — and calls it by what it is', () => {
+    const { r, onApprove } = arrange({
+      kind: 'paperwork', supplier: 'Good Connection', detail: 'Certificate of compliance',
+      amount: null, invoiceNumber: null,
+    });
+    expect(r.queryByText('Good Connection · Certificate of compliance')).not.toBeNull();
+    expect(r.queryByText('Allocate')).toBeNull();
+    // A certificate is not an unpriced bill.
+    expect(r.queryByText('Not priced')).toBeNull();
+    expect(words(r)).not.toContain('paid');
+    press(r, 'File it');
+    expect(onApprove).toHaveBeenCalled();
+  });
+
+  it('says why somebody else’s bill is paperwork, and keeps its figure for reference', () => {
+    const { r } = arrange({
+      kind: 'paperwork', supplier: 'Force Plumbing', addressedTo: 'ReliaBuilder', amount: 1200,
+    });
+    expect(r.queryByText('Made out to ReliaBuilder, not you — kept as paperwork so it isn’t counted twice')).not.toBeNull();
+    expect(r.queryByText('$1,200')).not.toBeNull();
+  });
+});
+
+describe('reading again', () => {
+  const blank = {
+    supplier: null, detail: null, amount: null, invoiceNumber: null, dated: null, dueOn: null,
+    sourceSubject: 'Fwd: Variations', documentPaths: ['h/docs/1790265108843-292946-Variations - INV 0184.pdf'],
+    inferred: ['kind'],
+  };
+
+  it('is offered on a card nothing was read off, and calls back', () => {
+    const onReread = jest.fn();
+    const { r } = arrange(blank, { onReread });
+    expect(r.queryByText('Nothing was read off this yet.')).not.toBeNull();
+    // Its own file's name, not the subject every card from that email shares.
+    expect(r.queryByText('Variations - INV 0184.pdf')).not.toBeNull();
+    press(r, 'Read again');
+    expect(onReread).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not offered once anything is on the card', () => {
+    const { r } = arrange({ ...blank, supplier: 'ReliaBuilder' }, { onReread: jest.fn() });
+    expect(r.queryByText('Read again')).toBeNull();
+  });
+
+  it('holds the card while the reading is out', () => {
+    const { r } = arrange(blank, { onReread: jest.fn(), rereading: true });
+    const allocate = r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.label === 'Allocate', { deep: true },
+    )[0];
+    expect(allocate.props.disabled).toBe(true);
+  });
 });

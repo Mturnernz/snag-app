@@ -13,7 +13,7 @@ import {
 // the thresholds that keep a thumb resting on a card from spending money.
 
 const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
-  id: 'r1', projectId: 'p1', elementId: null,
+  id: 'r1', projectId: 'p1', elementId: null, kind: 'invoice', addressedTo: null, sourcePart: 0,
   supplier: 'ReliaBuilder Limited', detail: null,
   amount: 43987.5, amountInclGst: true,
   invoiceNumber: 'INV-0208', dated: '2026-07-02', dueOn: '2026-07-02',
@@ -198,5 +198,78 @@ describe('what a drag decides', () => {
   it('ignores a tap that wandered a few pixels', () => {
     expect(isHorizontalDrag(5, 0)).toBe(false);
     expect(isHorizontalDrag(20, 0)).toBe(true);
+  });
+});
+
+describe('one email, several papers', () => {
+  const {
+    businessKey, describeAddressedTo, describeEmailGroup, duplicateReviews, isUnreadReview, paperworkHomes, reviewGroups,
+  } = require('@snag/supabase-queries');
+
+  it('knows a card nothing was read off, and one somebody has touched', () => {
+    const blank = review({ supplier: null, invoiceNumber: null, amount: null, dated: null, dueOn: null });
+    expect(isUnreadReview(blank)).toBe(true);
+    expect(isUnreadReview({ ...blank, detail: 'Deposit' })).toBe(false);
+    expect(isUnreadReview(review())).toBe(false);
+  });
+
+  it('keeps an email’s cards together, in the order of its papers, and a lone card alone', () => {
+    const groups = reviewGroups([
+      review({ id: 'b', sourceRef: 'em1', sourcePart: 2, sourceSubject: 'Fwd: Variations' }),
+      review({ id: 'alone', sourceRef: null }),
+      review({ id: 'a', sourceRef: 'em1', sourcePart: 0, sourceSubject: 'Fwd: Variations' }),
+    ]);
+    expect(groups.map((g: any) => g.reviews.map((r: InvoiceReview) => r.id))).toEqual([['a', 'b'], ['alone']]);
+    expect(groups[0].subject).toBe('Fwd: Variations');
+  });
+
+  it('counts what an email held, so it can be checked against what was sent', () => {
+    expect(describeEmailGroup([
+      review({ kind: 'invoice' }), review({ kind: 'paperwork' }), review({ kind: 'paperwork' }), review({ kind: 'quote' }),
+    ])).toBe('1 bill · 1 quote · 2 to file');
+    expect(describeEmailGroup([review(), review()])).toBe('2 bills');
+  });
+
+  it('says why somebody else’s bill is paperwork, and says nothing otherwise', () => {
+    expect(describeAddressedTo(review({ kind: 'paperwork', addressedTo: 'ReliaBuilder' })))
+      .toBe('Made out to ReliaBuilder, not you — kept as paperwork so it isn’t counted twice');
+    expect(describeAddressedTo(review({ kind: 'paperwork' }))).toBeNull();
+    expect(describeAddressedTo(review({ kind: 'invoice', addressedTo: 'ReliaBuilder' }))).toBeNull();
+  });
+
+  it('takes a business name as one business however it is printed', () => {
+    expect(businessKey('RELIABUILDER LIMITED')).toBe(businessKey('ReliaBuilder'));
+    expect(businessKey('Good Connection Ltd.')).toBe(businessKey('good connection'));
+    expect(businessKey('   ')).toBeNull();
+  });
+
+  it('suggests bills from who issued it or who it was made out to, and never a declined one', () => {
+    const quotes: any[] = [
+      { id: 'rb', supplier: 'ReliaBuilder Ltd', status: 'accepted', dated: '2026-09-10' },
+      { id: 'fp', supplier: 'Force Plumbing', status: 'declined', dated: '2026-09-11' },
+      { id: 'x', supplier: 'Tile Space', status: 'tbc', dated: '2026-09-12' },
+    ];
+    const homes = paperworkHomes(review({ kind: 'paperwork', supplier: 'Force Plumbing', addressedTo: 'RELIABUILDER' }), quotes);
+    expect(homes.suggested.map((q: any) => q.id)).toEqual(['rb']);
+    expect(homes.others.map((q: any) => q.id)).toEqual(['x']);
+  });
+
+  // A subcontractor's variation made out to the builder can carry the figure of
+  // a line on the builder's bill, and a warning about that is a false alarm.
+  it('never checks paperwork for a duplicate, or matches a bill against it', () => {
+    const variation = review({ id: 'p', kind: 'paperwork', supplier: 'ReliaBuilder Limited', invoiceNumber: 'INV-0184' });
+    const bill = review({ id: 'b', supplier: 'ReliaBuilder Limited', invoiceNumber: 'INV-0184' });
+    expect(duplicateReviews([], [variation, bill]).size).toBe(0);
+  });
+
+  it('names paperwork by what it is, and a blank card by its own file', () => {
+    expect(invoiceReviewHeadline(review({ kind: 'paperwork', supplier: 'Good Connection', detail: 'Certificate of compliance' })))
+      .toBe('Good Connection · Certificate of compliance');
+    expect(invoiceReviewHeadline(review({
+      supplier: null, invoiceNumber: null, sourceSubject: 'Fwd: Variations',
+      documentPaths: ['h/docs/1790265106347-088743-Variation - Force Plumbing.pdf'],
+    }))).toBe('Variation - Force Plumbing.pdf');
+    expect(invoiceReviewHeadline(review({ kind: 'paperwork', supplier: null, invoiceNumber: null, sourceSubject: null })))
+      .toBe('Paperwork');
   });
 });

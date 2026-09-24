@@ -1,4 +1,63 @@
-import { linkify } from './openUrl';
+import { Platform } from 'react-native';
+
+import { showAlert } from './alert';
+import { linkify, openUrl } from './openUrl';
+
+jest.mock('./alert', () => ({ showAlert: jest.fn() }));
+
+/**
+ * Opening a link on the web build.
+ *
+ * `window.open` with `noopener` in its features returns null by spec — the
+ * value a blocked popup returns — so the guard read every successful open as
+ * blocked, and "Your browser blocked the new tab" came up each time somebody
+ * closed a PDF and came back. These pin the tab opening, its opener being cut
+ * before it is pointed anywhere, and the alert kept for a real block.
+ */
+describe('openUrl on the web', () => {
+  const realWindow = (global as any).window;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    Object.defineProperty(Platform, 'OS', { value: 'web', configurable: true });
+  });
+
+  afterAll(() => {
+    (global as any).window = realWindow;
+  });
+
+  it('opens the tab and says nothing when the browser allows it', () => {
+    const steps: string[] = [];
+    const tab = {
+      location: {} as { href?: string },
+      set opener(value: unknown) { steps.push(`opener=${String(value)}`); },
+    };
+    Object.defineProperty(tab.location, 'href', {
+      set(value: string) { steps.push(`href=${value}`); },
+    });
+    const open = jest.fn(() => tab);
+    (global as any).window = { open };
+
+    openUrl('https://example.co/invoice.pdf');
+
+    // No `noopener` in the features: that is what made the return value null.
+    expect(open).toHaveBeenCalledWith('', '_blank');
+    // The handle back into the session is cut before the page is asked for.
+    expect(steps).toEqual(['opener=null', 'href=https://example.co/invoice.pdf']);
+    expect(showAlert).not.toHaveBeenCalled();
+  });
+
+  it('still says so when the popup really is blocked', () => {
+    (global as any).window = { open: jest.fn(() => null) };
+
+    openUrl('https://example.co/invoice.pdf');
+
+    expect(showAlert).toHaveBeenCalledWith(
+      "Couldn't open that",
+      'Your browser blocked the new tab. Allow pop-ups and try again.',
+    );
+  });
+});
 
 /**
  * Where a link stops.

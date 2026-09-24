@@ -1484,6 +1484,14 @@ export interface ProjectQuote {
    * is a fact about the bill, not something to be re-pointed later.
    */
   againstQuoteId: string | null;
+  /**
+   * The supplier's own number for this bill — `INV-0208`, `25.010`.
+   *
+   * Its own column so two bills from one supplier can be told apart, or told
+   * to be the same one (`findDuplicateBill`). It used to ride in `notes` or be
+   * folded into `detail`, where nothing could compare it.
+   */
+  invoiceNumber: string | null;
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
@@ -1745,6 +1753,20 @@ export interface ProjectMilestone {
 export type InvoiceReviewState = 'pending' | 'approved' | 'declined';
 
 /**
+ * What kind of paper a card is. One email can carry all three: the builder's
+ * invoice, a quote for the next stage, and the electrician's certificate of
+ * compliance — and each is its own card.
+ *
+ *   * **invoice** — a bill to pay. Allocating it is a bill on the job.
+ *   * **quote** — a price offered. Allocating it is a quote nobody has agreed
+ *     yet, never a bill.
+ *   * **paperwork** — a certificate, a warranty, photos of the work, or a bill
+ *     made out to somebody else (a subcontractor billing the builder). It is
+ *     **filed** onto the job, a part of it or a bill on it, and moves no figure.
+ */
+export type InvoiceReviewKind = 'invoice' | 'quote' | 'paperwork';
+
+/**
  * A bill that has arrived and has not yet been ruled on.
  *
  * Every other money row in this app is something a person typed while looking
@@ -1768,6 +1790,16 @@ export type InvoiceReviewState = 'pending' | 'approved' | 'declined';
 export interface InvoiceReview {
   id: string;
   projectId: string;
+  /** What kind of paper this is — see `InvoiceReviewKind`. `'kind'` in `inferred` when it was a guess. */
+  kind: InvoiceReviewKind;
+  /**
+   * Who a bill is made out to, when that is not the household. Set on
+   * paperwork that was read as somebody else's bill, so the card can say why it
+   * is not a bill to pay.
+   */
+  addressedTo: string | null;
+  /** Which paper of its email this card is. Cards from one email share `sourceRef`. */
+  sourcePart: number;
   /** Which part it will land on. Null is the whole job — it never invents one. */
   elementId: string | null;
   supplier: string | null;
@@ -1997,6 +2029,28 @@ export interface ProjectFile {
   kind: 'photo' | 'document';
   path: string;
 }
+
+/**
+ * What a file on the record is, when somebody has said.
+ *
+ * Kept on the file rather than on whatever it hangs off (`home.file_tags`,
+ * keyed by storage path), so one answer holds wherever the file is attached.
+ * Absent means untagged, the resting state. Invoices and quotes are never
+ * tagged: the price they sit on already says what they are.
+ */
+export type FileTag = 'product_sheet' | 'compliance' | 'warranty' | 'other';
+
+export const FILE_TAGS: FileTag[] = ['compliance', 'product_sheet', 'warranty', 'other'];
+
+export const FILE_TAG_LABELS: Record<FileTag, string> = {
+  compliance: 'Compliance certificate',
+  product_sheet: 'Product sheet',
+  warranty: 'Warranty',
+  other: 'Other',
+};
+
+/** Storage path to tag, for the files one screen can see. */
+export type FileTags = Record<string, FileTag>;
 
 // ---------------------------------------------------------------- navigation
 

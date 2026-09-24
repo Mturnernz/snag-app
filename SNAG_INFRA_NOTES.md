@@ -235,11 +235,17 @@ a job (`20260925090000`; *The staff portal* in `CLAUDE.md`). It is its own Netli
 from the app's and from `www`'s. None of what makes it work is in git, and the order matters —
 **apply the migration first**, then:
 
-1. **The Netlify site.** A third site on this repository with **Base directory `apps/staff`**
-   (Netlify's Next.js runtime is detected; `apps/staff/netlify.toml` only pins Node). Environment
-   variables: `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the same project as
-   the app), and optionally `NEXT_PUBLIC_SNAG_APP_URL`. Then the custom domain
-   `staff.snaghq.co.nz` — a `staff` record in the Netlify-managed DNS — and HTTPS.
+1. **The Netlify site** is **`snag-staff`** (id `c27cfb6a-6975-4cda-9dbf-1ba03784cd5c`, team
+   `mturnernz`), created 24 Sep 2026 with its environment variables already set:
+   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the legacy anon key, as the app and
+   web use), `NEXT_PUBLIC_SNAG_APP_URL`, `SUPPORT_EMAIL_FROM`, and `RESEND_API_KEY` (step 5).
+   **Still to do by hand**, because none of it is reachable from an API token here:
+   - *Link repository* → `mturnernz/snag-app`, production branch `main`, **Base directory
+     `apps/staff`**, build command and publish directory left empty (Netlify's Next.js runtime is
+     detected; `apps/staff/netlify.toml` only pins Node). Do it **after** the branch carrying
+     `apps/staff` is merged, or the first build from `main` has nothing to build.
+   - *Domain management* → `staff.snaghq.co.nz`. DNS is Netlify-managed, so the record and HTTPS
+     come with it.
 2. **Google as an Auth provider.** A Google Cloud OAuth client (Web application) in the
    snaghq.co.nz Workspace, with the authorised redirect URI
    `https://wpkdpukpllxuyqqlxkxf.supabase.co/auth/v1/callback`. Its client id and secret go in
@@ -262,11 +268,19 @@ from the app's and from `www`'s. None of what makes it work is in git, and the o
    provider, so an email-and-password account with a snaghq.co.nz address is not staff. Somebody
    leaving is `update home.staff set active = false` — never a delete: their name is on every
    reply and log entry they wrote.
-5. **The reply email** — `RESEND_API_KEY` (a **sending-only** key) and optionally
-   `SUPPORT_EMAIL_FROM` as environment variables on the **staff** Netlify site, not as function
-   secrets: the portal sends from a Next server action. The from address (default
-   `help@snaghq.co.nz`) has to be on a domain verified for sending in Resend. Without the key,
-   replies still save and the portal says they were not emailed.
+5. **The reply email** — done. `RESEND_API_KEY` is the Resend key **`snag-staff-portal`**:
+   sending-only, restricted to `snaghq.co.nz` (verified for sending), stored on `snag-staff` as a
+   **secret, production context only**. Two things about that, both found by setting it:
+   - **A Netlify secret cannot be set for the `dev` context**, and the context "all" includes
+     `dev` — so a secret upserted with context "all" is refused *silently* (the API answers
+     "upserted" and nothing is stored). Production-only is also the right answer on its own terms:
+     a deploy preview of the portal should never email a household.
+   - **Narrowed scopes are refused the same silent way** on this team's plan for plain values —
+     `SUPPORT_EMAIL_FROM` only stuck with the default scopes. Read the variables back after
+     setting any; "upserted" is not evidence.
+   It is a Next server action that sends, so these are **site** variables, not function secrets.
+   Without the key, replies still save and the portal says they were not emailed. To rotate:
+   create a new sending-only key restricted to the domain, replace the value, delete the old key.
 
 Checking it: `curl -sI https://staff.snaghq.co.nz/` answers a redirect to `/sign-in` with
 `X-Robots-Tag: noindex, nofollow`; a signed-in non-staff account sees *This account isn't on the SnagHQ

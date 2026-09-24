@@ -1429,6 +1429,32 @@ export function consumableOnList(snags: Snag[], thingId: string, item: string): 
 }
 
 /**
+ * The repeating job that services this thing, if there is one.
+ *
+ * **One per thing, and this is how it is found.** *Schedule service* used to
+ * file a new repeating job every time it was pressed — so changing a heat pump
+ * from six months to a year left the six-monthly job running beside the new
+ * one, and *Stop servicing it* stopped nothing on the list. The thing page now
+ * edits the job this returns and files one only when it returns null; and it
+ * reads the cycle off that job, so the two cannot drift. Soonest due first,
+ * should an older duplicate still exist.
+ */
+export function serviceJobFor(snags: Snag[], thingId: string): Snag | null {
+  const candidates = snags.filter(
+    (snag) =>
+      snag.status !== 'done' &&
+      !!snag.repeatDays &&
+      (snag.thingId === thingId || snag.linkedThings.some((one) => one.id === thingId))
+  );
+  candidates.sort((a, b) => {
+    const at = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
+    const bt = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
+    return at - bt;
+  });
+  return candidates[0] ?? null;
+}
+
+/**
  * What `read-label` says it could read off a photograph.
  *
  * Every field is what was **printed**, or null. The one exception is `hex`,

@@ -25,6 +25,7 @@ import {
   createLocation, createThing, getAbsentThings, getFileUrls, getThings, markThingAbsent,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { fileServiceJob } from '../lib/serviceJob';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import {
   AbsentThing, RootStackParamList, Thing, ThingKind, ThingSuggestion,
@@ -292,9 +293,9 @@ export default function HouseScreen() {
       return;
     }
     try {
-      await createThing({ ...input, propertyId: activeProperty.id });
+      const created = await createThing({ ...input, propertyId: activeProperty.id });
       setSheetOpen(false);
-      showToast('In the record');
+      showToast((await fileServiceJob(created)) ?? 'In the record');
       await load();
     } catch (err: any) {
       // The sheet stays open on a failure: everything typed is still in it, and

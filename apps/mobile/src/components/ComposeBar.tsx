@@ -18,6 +18,11 @@ interface Props {
   /** Stacked above a tab bar, which already clears the home indicator. */
   stacked?: boolean;
   /**
+   * Inside a sheet rather than pinned to the foot of a screen — a thing's
+   * *Report a problem*. The sheet owns the keyboard lift and the edges.
+   */
+  embedded?: boolean;
+  /**
    * What the bar is for, in the words of the tab it is on.
    *
    * The same three controls file a snag on the list and a thing in the house
@@ -61,7 +66,7 @@ interface Props {
  *   bar is the exact case that breaks. This is the one component in the app
  *   that could not exist without that fix.
  */
-export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props) {
+export default function ComposeBar({ pathPrefix, onAdd, stacked, words, embedded }: Props) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardInset();
 
@@ -142,12 +147,14 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
     <View
       style={[
         styles.bar,
-        {
-          marginBottom: keyboard,
-          // The keyboard covers the inset it would otherwise clear, and a tab
-          // bar below already owns it. Never both.
-          paddingBottom: (keyboard > 0 || stacked ? 0 : insets.bottom) + Spacing.sm,
-        },
+        embedded
+          ? styles.barEmbedded
+          : {
+            marginBottom: keyboard,
+            // The keyboard covers the inset it would otherwise clear, and a tab
+            // bar below already owns it. Never both.
+            paddingBottom: (keyboard > 0 || stacked ? 0 : insets.bottom) + Spacing.sm,
+          },
       ]}
     >
       {/* **The camera is the default way to log something, and the field says
@@ -228,6 +235,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
+  barEmbedded: { borderTopWidth: 0, paddingHorizontal: 0, paddingBottom: Spacing.sm },
   camera: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,

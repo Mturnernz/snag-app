@@ -30,6 +30,7 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../consta
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
+import { fileServiceJob } from '../lib/serviceJob';
 import {
   addExpectedCostLine, addMilestone, addQuoteLine, approveInvoiceReview, clearFigure,
   createElement, createExpectedCost, createLocation, createThing, deleteElement,
@@ -319,14 +320,15 @@ export default function ProjectDetailScreen({ route }: Props) {
 
   async function recordAsThing(input: Omit<ThingInput, 'propertyId'>) {
     try {
-      await createThing({
+      const created = await createThing({
         ...input,
         propertyId: project.propertyId,
         projectId: project.id,
         projectItemId: thingFor?.id ?? null,
       });
       setThingFor(null);
-      await changed('Added to the house record');
+      // The walkthrough's service cycle goes on the list, wherever it is asked.
+      await changed((await fileServiceJob(created)) ?? 'Added to the house record');
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't save that");
     }

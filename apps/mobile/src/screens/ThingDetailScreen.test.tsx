@@ -15,10 +15,38 @@ import ThingDetailScreen from './ThingDetailScreen';
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+// `beforeRemove` is where leaving the page writes a box still being typed in,
+// so the listener is kept where a test can fire it.
+const mock_listeners: Record<string, (e: any) => void> = {};
+const mock_dispatch = jest.fn();
+const mock_navigate = jest.fn();
+const mock_nav = {
+  navigate: mock_navigate,
+  goBack: jest.fn(),
+  dispatch: mock_dispatch,
+  addListener: (event: string, fn: (e: any) => void) => {
+    mock_listeners[event] = fn;
+    return () => {};
+  },
+};
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn(), addListener: () => () => {} }),
+  useNavigation: () => mock_nav,
   useRoute: () => ({ params: { thingId: 't1' } }),
 }));
+jest.mock('../components/ComposeBar', () => {
+  const React = require('react');
+  const { Pressable, Text } = require('react-native');
+  return {
+    __esModule: true,
+    // The bar itself is pinned in ComposeBar.test.tsx; here it only has to
+    // hand over what was captured.
+    default: ({ onAdd }: any) => React.createElement(
+      Pressable,
+      { accessibilityLabel: 'Send report', onPress: () => onAdd({ photoPaths: ['h1/p.jpg'], description: 'Leaking' }) },
+      React.createElement(Text, null, 'compose bar'),
+    ),
+  };
+});
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock('../components/StickyActionBar', () => {
@@ -35,7 +63,9 @@ const mock_updateThing = jest.fn();
 const mock_createSnag = jest.fn();
 const mock_getSnags = jest.fn();
 const mock_updateSnag = jest.fn();
+const mock_setSnagStatus = jest.fn();
 jest.mock('../lib/supabase', () => ({
+  setSnagStatus: (...a: unknown[]) => mock_setSnagStatus(...a),
   getThing: (...a: unknown[]) => mock_getThing(...a),
   updateThing: (...a: unknown[]) => mock_updateThing(...a),
   createSnag: (...a: unknown[]) => mock_createSnag(...a),
@@ -47,10 +77,12 @@ jest.mock('../lib/supabase', () => ({
   uploadFile: jest.fn(),
 }));
 const mock_pickPhotos = jest.fn();
+const mock_takePhoto = jest.fn();
 const mock_compressAndUpload = jest.fn();
 jest.mock('../lib/photoUpload', () => ({
   PHOTO_PICK_LIMIT: 5,
   pickPhotos: (...a: unknown[]) => mock_pickPhotos(...a),
+  takePhoto: (...a: unknown[]) => mock_takePhoto(...a),
   // The storage key is whatever the upload says it wrote, so the name only has
   // to be a string here.
   compressAndUpload: (...a: unknown[]) => mock_compressAndUpload(...a),
@@ -95,12 +127,6 @@ const pressable = (result: RenderResult, label: string) => {
   return found[0];
 };
 
-/** The Save button, found by the label it carries in each state. */
-const saveButton = (result: RenderResult, label: 'Save' | 'Saved') =>
-  result.root.findAll(
-    (n) => n.props.accessibilityLabel === label || n.props.label === label,
-    { deep: true }
-  )[0];
 
 async function open(over: Partial<any> = {}) {
   mock_getThing.mockResolvedValue(thing(over));
@@ -112,6 +138,7 @@ async function open(over: Partial<any> = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mock_getSnags.mockResolvedValue([]);
 });
 
 /** Every text rendered on the page, flattened. */
@@ -144,19 +171,18 @@ describe('ThingDetailScreen', () => {
     expect(found['Colour code']).toBeTruthy();
   });
 
-  it('starts with Save off, because nothing has been typed', async () => {
+  it('has no Save button — leaving a box writes it', async () => {
     const result = await open({ name: 'Rangehood' });
-    expect(saveButton(result, 'Saved')).toBeTruthy();
-    expect(saveButton(result, 'Saved').props.disabled).toBe(true);
+    const saves = result.root.findAll((n) => n.props?.label === 'Save' || n.props?.label === 'Saved', { deep: true });
+    expect(saves).toHaveLength(0);
     expect(mock_updateThing).not.toHaveBeenCalled();
   });
 
-  it('writes nothing until Save, then writes only what changed', async () => {
-    // Both halves matter. Typing must not write — that is the point of the
-    // button — and Save must not send fields nobody touched: `update_thing`
-    // reads a null argument as "leave it alone", so an untouched field sent as
-    // an empty string is the difference between saying nothing and saying
-    // there is nothing there.
+  it('writes nothing while typing, then only what changed when the box is left', async () => {
+    // Both halves matter. Typing must not write, and leaving must not send
+    // fields nobody touched: `update_thing` reads a null argument as "leave it
+    // alone", so an untouched field sent as an empty string is the difference
+    // between saying nothing and saying there is nothing there.
     const result = await open({ name: 'Rangehood', make: 'Award Appliances' });
 
     await TestRenderer.act(async () => {
@@ -165,10 +191,11 @@ describe('ThingDetailScreen', () => {
     expect(mock_updateThing).not.toHaveBeenCalled();
 
     mock_updateThing.mockResolvedValue(thing({ name: 'Rangehood', make: 'Award Appliances', model: 'CS2 600/1' }));
-    await TestRenderer.act(async () => { saveButton(result, 'Save').props.onPress(); });
+    await TestRenderer.act(async () => { await boxes(result)['Model'].props.onBlur(); });
 
     expect(mock_updateThing).toHaveBeenCalledTimes(1);
     expect(mock_updateThing).toHaveBeenCalledWith('t1', { model: 'CS2 600/1' });
+    expect(mock_showToast).toHaveBeenCalledWith('Saved');
   });
 
   it('clears a field that is emptied, rather than leaving it alone', async () => {
@@ -178,32 +205,56 @@ describe('ThingDetailScreen', () => {
 
     await TestRenderer.act(async () => { boxes(result)['Serial'].props.onChangeText(''); });
     mock_updateThing.mockResolvedValue(thing());
-    await TestRenderer.act(async () => { saveButton(result, 'Save').props.onPress(); });
+    await TestRenderer.act(async () => { await boxes(result)['Serial'].props.onBlur(); });
 
     expect(mock_updateThing).toHaveBeenCalledWith('t1', { serial: null });
   });
 
-  it('takes photographs from here, not only from the walkthrough', async () => {
-    // The rating-plate prompt lives in the walkthrough's step three; this page
-    // is where the angles that come later get added, so it says what it does
-    // rather than naming the one photograph it was originally for.
-    const result = await open();
-    expect(pressable(result, 'Add photos')).toBeTruthy();
+  // It used to ask *Leave without saving?* — a question with a wrong answer
+  // that loses the words. Now the page writes them on the way out.
+  it('writes a box still being typed in when the page is left', async () => {
+    const result = await open({ name: 'Rangehood' });
+    await TestRenderer.act(async () => { boxes(result)['Make'].props.onChangeText('Award'); });
+
+    mock_updateThing.mockResolvedValue(thing({ name: 'Rangehood', make: 'Award' }));
+    const e = { preventDefault: jest.fn(), data: { action: { type: 'GO_BACK' } } };
+    await TestRenderer.act(async () => { mock_listeners.beforeRemove(e); });
+    await TestRenderer.act(async () => {});
+
+    expect(e.preventDefault).toHaveBeenCalled();
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { make: 'Award' });
+    expect(mock_dispatch).toHaveBeenCalledWith(e.data.action);
+    expect(mock_showAlert).not.toHaveBeenCalled();
   });
 
-  // Somebody wanting a second photograph of the dishwasher goes looking in the
-  // section that attaches things. Finding only *Attach a PDF* there reads as a
-  // record that does not take photographs at all — so both offers sit in one
-  // row, and there is exactly one way to add a photograph.
-  it('offers photos beside the PDF button, as one control', async () => {
+  it('takes photographs from here, with the camera and from the library', async () => {
+    const result = await open();
+    expect(pressable(result, 'Take a photo')).toBeTruthy();
+    expect(pressable(result, 'Choose photos')).toBeTruthy();
+  });
+
+  // Android Chrome drops the camera from a picker that takes several files, so
+  // one *Add photos* meant leaving the app to photograph the thing in front of
+  // you. Both sit beside the PDF button, in the section that attaches things.
+  it('offers the camera and the library beside the PDF button', async () => {
     const result = await open({ photoPaths: ['h1/plate.jpg'] });
 
-    expect(pressable(result, 'Add photos')).toBeTruthy();
+    expect(pressable(result, 'Take a photo')).toBeTruthy();
+    expect(pressable(result, 'Choose photos')).toBeTruthy();
     expect(pressable(result, 'Attach a PDF')).toBeTruthy();
-    // One offer, not a camera and a *Choose one* beside it: two controls with
-    // one outcome, and on the web build the sheet already asks which.
-    expect(result.getAllByText('Add photos')).toHaveLength(1);
-    expect(result.queryByText('Choose one')).toBeNull();
+  });
+
+  it('adds one taken with the camera, after the ones already there', async () => {
+    mock_takePhoto.mockResolvedValue('file:///shot.jpg');
+    mock_compressAndUpload.mockResolvedValueOnce({ path: 'h1/shot.jpg' });
+    const result = await open({ photoPaths: ['h1/plate.jpg'] });
+
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Take a photo').props.onPress();
+    });
+
+    expect(mock_pickPhotos).not.toHaveBeenCalled();
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/plate.jpg', 'h1/shot.jpg'] });
   });
 
   it('adds several in one write, after the ones already there', async () => {
@@ -216,7 +267,7 @@ describe('ThingDetailScreen', () => {
     const result = await open({ photoPaths: ['h1/plate.jpg'] });
 
     await TestRenderer.act(async () => {
-      await pressable(result, 'Add photos').props.onPress();
+      await pressable(result, 'Choose photos').props.onPress();
     });
 
     expect(mock_updateThing).toHaveBeenCalledTimes(1);
@@ -235,7 +286,7 @@ describe('ThingDetailScreen', () => {
     const result = await open({ photoPaths: [] });
 
     await TestRenderer.act(async () => {
-      await pressable(result, 'Add photos').props.onPress();
+      await pressable(result, 'Choose photos').props.onPress();
     });
 
     expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/a.jpg'] });
@@ -247,7 +298,7 @@ describe('ThingDetailScreen', () => {
     const result = await open({ photoPaths: ['h1/plate.jpg'] });
 
     await TestRenderer.act(async () => {
-      await pressable(result, 'Add photos').props.onPress();
+      await pressable(result, 'Choose photos').props.onPress();
     });
 
     expect(mock_updateThing).not.toHaveBeenCalled();
@@ -261,7 +312,7 @@ describe('ThingDetailScreen', () => {
     const result = await open({ photoPaths: [] });
 
     await TestRenderer.act(async () => {
-      await pressable(result, 'Add photos').props.onPress();
+      await pressable(result, 'Choose photos').props.onPress();
     });
 
     expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/a.jpg'] });
@@ -366,6 +417,77 @@ describe('ThingDetailScreen', () => {
       { deep: true }
     )[0];
     expect(six.props.accessibilityState.selected).toBe(true);
+  });
+
+  const serviceJob = (over: Partial<any> = {}): any => ({
+    id: 'svc', status: 'open', thingId: 't1', linkedThings: [{ id: 't1' }],
+    repeatDays: 180, dueAt: '2027-03-01T00:00:00.000', parts: [], bought: [], ...over,
+  });
+
+  // Pressing it again used to file a second repeating job, so changing the
+  // cycle left the old one running beside the new.
+  it('edits the service job already on the list rather than filing another', async () => {
+    mock_getSnags.mockResolvedValue([serviceJob()]);
+    mock_updateThing.mockResolvedValue(thing({ name: 'Heat pump', serviceDays: 365 }));
+    mock_updateSnag.mockResolvedValue(serviceJob({ repeatDays: 365, status: 'doing' }));
+    mock_setSnagStatus.mockResolvedValue(serviceJob({ repeatDays: 365 }));
+
+    const result = await open({ name: 'Heat pump', serviceDays: 180 });
+    expect(texts(result).some((t) => t.includes('next due'))).toBe(true);
+
+    await TestRenderer.act(async () => { pressable(result, 'Schedule service').props.onPress(); });
+    await TestRenderer.act(async () => { pressable(result, 'Every year').props.onPress(); });
+    await TestRenderer.act(async () => { pressable(result, 'Update the service job').props.onPress(); });
+
+    expect(mock_createSnag).not.toHaveBeenCalled();
+    expect(mock_updateSnag).toHaveBeenCalledWith('svc', expect.objectContaining({ repeatDays: 365 }));
+    // Rearranging a service is not starting it.
+    expect(mock_setSnagStatus).toHaveBeenCalledWith('svc', 'open');
+  });
+
+  it('opens on the cycle the job carries, and asks for the next one, not the first', async () => {
+    mock_getSnags.mockResolvedValue([serviceJob({ repeatDays: 730 })]);
+    const result = await open({ name: 'Heat pump', serviceDays: 180 });
+    await TestRenderer.act(async () => { pressable(result, 'Schedule service').props.onPress(); });
+
+    const two = result.root.findAll(
+      (n) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Every 2 years',
+      { deep: true }
+    )[0];
+    expect(two.props.accessibilityState.selected).toBe(true);
+    expect(texts(result)).toContain('Next one due');
+  });
+
+  // It used to stop only the thing's column, and the job went on coming round.
+  it('takes the job off the list when servicing stops, keeping its notes', async () => {
+    mock_getSnags.mockResolvedValue([serviceJob()]);
+    mock_updateSnag.mockResolvedValue(serviceJob({ repeatDays: null }));
+    mock_setSnagStatus.mockResolvedValue(serviceJob({ repeatDays: null, status: 'done' }));
+    mock_updateThing.mockResolvedValue(thing({ name: 'Heat pump' }));
+
+    const result = await open({ name: 'Heat pump', serviceDays: 180 });
+    await TestRenderer.act(async () => { pressable(result, 'Schedule service').props.onPress(); });
+    await TestRenderer.act(async () => { await pressable(result, 'Stop servicing it').props.onPress(); });
+
+    expect(mock_updateSnag).toHaveBeenCalledWith('svc', { repeatDays: null });
+    expect(mock_setSnagStatus).toHaveBeenCalledWith('svc', 'done');
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { serviceDays: null, clearSpec: ['servicedBy'] });
+  });
+
+  // It used to create "Heat pump — " the moment it was pressed, and a press
+  // walked away from left that on everybody's list.
+  it('files a problem through the capture bar, and nothing before it is sent', async () => {
+    mock_createSnag.mockResolvedValue({ id: 'new' });
+    const result = await open({ name: 'Heat pump', room: 'Kitchen' });
+
+    await TestRenderer.act(async () => { pressable(result, 'Report a problem').props.onPress(); });
+    expect(mock_createSnag).not.toHaveBeenCalled();
+
+    await TestRenderer.act(async () => { await pressable(result, 'Send report').props.onPress(); });
+    expect(mock_createSnag).toHaveBeenCalledWith({
+      propertyId: 'p', room: 'Kitchen', description: 'Leaking', photoPaths: ['h1/p.jpg'], thingId: 't1',
+    });
+    expect(mock_navigate).toHaveBeenCalledWith('SnagDetail', { snagId: 'new' });
   });
 });
 

@@ -15,7 +15,9 @@ import {
   applyLabelReading, catalogueSuggestions, describeCycle, documentFileName, documentName,
   matchSuggestions, suggestionsForRoom, swatchColour, type ThingInput,
 } from '@snag/supabase-queries';
-import { Location, ThingKind, ThingSpec, THING_KINDS, THING_KIND_LABELS } from '../types';
+import {
+  Location, SERVICE_CYCLES, ThingKind, ThingSpec, THING_KINDS, THING_KIND_LABELS,
+} from '../types';
 
 /**
  * Adding something to the house record, in four steps.
@@ -66,12 +68,6 @@ type Reading =
   | { state: 'read'; filled: string[] }
   | { state: 'failed'; words: string };
 
-/** Service intervals a household actually uses. Nobody types "180 days". */
-const CYCLES: { days: number; label: string }[] = [
-  { days: 180, label: '6 months' },
-  { days: 365, label: 'A year' },
-  { days: 730, label: '2 years' },
-];
 
 interface Props {
   visible: boolean;
@@ -871,15 +867,25 @@ export default function AddThingSheet({
               <Text style={styles.question2}>Serviced how often?</Text>
               <View style={styles.chips}>
                 <Chip label="Never" on={serviceDays === null} onPress={() => setServiceDays(null)} />
-                {CYCLES.map((cycle) => (
+                {/* The thing page's own list, so the two places a service
+                    cycle is chosen offer the same answers in the same words.
+                    It was a third, local list of three. */}
+                {SERVICE_CYCLES.map((days) => (
                   <Chip
-                    key={cycle.days}
-                    label={cycle.label}
-                    on={serviceDays === cycle.days}
-                    onPress={() => setServiceDays(cycle.days)}
+                    key={days}
+                    label={`Every ${describeCycle(days)}`}
+                    on={serviceDays === days}
+                    onPress={() => setServiceDays(days)}
                   />
                 ))}
               </View>
+              {/* Said here because it is now true: the answer is a job on the
+                  list, not a note on the record. */}
+              {serviceDays ? (
+                <Text style={styles.hint}>
+                  {`It goes on the list as a job every ${describeCycle(serviceDays)}.`}
+                </Text>
+              ) : null}
               {suggestedService && serviceDays !== suggestedService ? (
                 <Text style={styles.hint}>
                   Suggested for this model: every {describeCycle(suggestedService)}.

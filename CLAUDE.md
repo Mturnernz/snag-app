@@ -50,6 +50,8 @@ snag/
 │   ├── shared-types/              # @snag/shared-types — enums, row types, labels, nav params
 │   └── supabase-queries/          # @snag/supabase-queries — every read and write, each taking a client
 ├── supabase/migrations/           # 20260911* is the home schema; everything before it is the archive
+├── tools/paint-library/           # builds a NZ paint-colour CSV to match Nix readings against.
+│                                   #   Its output is never committed: the makers' terms forbid redistribution.
 ├── SNAG_HOME_PIVOT_REVIEW.md      # why the pivot was done this way
 └── SNAG_INFRA_NOTES.md            # the config that isn't in git
 ```

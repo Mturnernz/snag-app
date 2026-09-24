@@ -342,7 +342,7 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
-  async function recordAsThing(input: Omit<ThingInput, 'propertyId'>) {
+  async function recordAsThing(input: Omit<ThingInput, 'propertyId'>): Promise<boolean> {
     try {
       const created = await createThing({
         ...input,
@@ -353,8 +353,10 @@ export default function ProjectDetailScreen({ route }: Props) {
       setThingFor(null);
       // The walkthrough's service cycle goes on the list, wherever it is asked.
       await changed((await fileServiceJob(created)) ?? 'Added to the house record');
+      return true;
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't save that");
+      return false;
     }
   }
 

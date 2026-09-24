@@ -22,7 +22,8 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createLocation, createThing, getAbsentThings, getFileUrls, getThings, markThingAbsent,
+  createLocation, createThing, getAbsentThings, getFileUrls, getLabelReadingsToCheck, getThings,
+  markThingAbsent,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { fileServiceJob } from '../lib/serviceJob';
@@ -112,6 +113,12 @@ export default function HouseScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetStart, setSheetStart] =
     useState<{ room?: string | null; name?: string | null; kind?: ThingKind } | null>(null);
+  /**
+   * Things with a label reading waiting on their page — one that landed after
+   * *Add it*, or never landed. Read beside the record and never fatal: a count
+   * nobody can fetch is a count of nought, which is also what it usually is.
+   */
+  const [labelChecks, setLabelChecks] = useState<string[]>([]);
 
   const propertyId = activeProperty?.id ?? null;
 
@@ -130,6 +137,13 @@ export default function HouseScreen() {
       ]);
       setThings(rows);
       setAbsent(hidden);
+      try {
+        const waiting = await getLabelReadingsToCheck(propertyId);
+        // A reading still being read is not something to check yet.
+        setLabelChecks(waiting.filter((one) => one.status !== 'pending').map((one) => one.thingId));
+      } catch {
+        setLabelChecks([]);
+      }
       const covers = rows.map((t) => t.photoPaths[0]).filter(Boolean) as string[];
       setPhotoUrls(await getFileUrls(covers));
     } catch (err) {
@@ -287,20 +301,22 @@ export default function HouseScreen() {
 
   const recorded = things.length;
 
-  async function handleAdd(input: Omit<ThingInput, 'propertyId'>) {
+  async function handleAdd(input: Omit<ThingInput, 'propertyId'>): Promise<boolean> {
     if (!activeProperty) {
       showAlert('No place yet', 'Add a place before adding to the house record.');
-      return;
+      return false;
     }
     try {
       const created = await createThing({ ...input, propertyId: activeProperty.id });
       setSheetOpen(false);
       showToast((await fileServiceJob(created)) ?? 'Added to the house');
       await load();
+      return true;
     } catch (err: any) {
       // The sheet stays open on a failure: everything typed is still in it, and
       // the retry is the same button.
       showAlert("Couldn't add that", err?.message ?? 'Please try again.');
+      return false;
     }
   }
 
@@ -428,6 +444,24 @@ export default function HouseScreen() {
       {!searching ? (
         <View style={styles.countRow}>
           <Text style={styles.count}>{recorded} recorded</Text>
+          {/* Absent at nought, like the shopping pill: a control with nothing
+              behind it is a choice that isn't one. It opens the first thing
+              with a reading waiting; each card says so too. */}
+          {labelChecks.length > 0 ? (
+            <Pressable
+              onPress={() => navigation.navigate('ThingDetail', { thingId: labelChecks[0] })}
+              style={styles.checkTap}
+              accessibilityRole="button"
+              accessibilityLabel={`${labelChecks.length === 1 ? '1 label' : `${labelChecks.length} labels`} to check`}
+            >
+              <View style={styles.checkPill}>
+                <Icon name="scan-outline" size="sm" color={Colors.textSecondary} />
+                <Text style={styles.checkLabel}>
+                  {labelChecks.length === 1 ? '1 label to check' : `${labelChecks.length} labels to check`}
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
           {sections.length > 1 ? (
             <FoldAllPill
               anyOpen={anyOpen}
@@ -506,6 +540,7 @@ export default function HouseScreen() {
             <ThingCard
               thing={item.thing}
               photoUrl={item.thing.photoPaths[0] ? photoUrls[item.thing.photoPaths[0]] : null}
+              labelToCheck={labelChecks.includes(item.thing.id)}
               onPress={() => navigation.navigate('ThingDetail', { thingId: item.thing.id })}
             />
           ) : (
@@ -513,7 +548,7 @@ export default function HouseScreen() {
               suggestion={item.suggestion}
               onPress={() => {
                 // Tapping a ghost has already answered "which room" and "what
-                // is it", so the walkthrough opens on the label.
+                // is it", so the walkthrough goes from the photo to the rest.
                 setSheetStart({
                   room: item.room === NO_ROOM ? null : item.room,
                   name: item.suggestion.name,
@@ -593,6 +628,10 @@ export default function HouseScreen() {
         onAddRoom={addRoom}
         onCancel={() => setSheetOpen(false)}
         onAdd={handleAdd}
+        onLateReading={(name, readable) => {
+          showToast(readable ? `Read the label for ${name} — check it` : `Couldn't read the label for ${name}`);
+          load();
+        }}
       />
 
       <ExportSheet
@@ -713,6 +752,18 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
   },
   count: { fontSize: Typography.sm, color: Colors.textMuted },
+  // The app's one pill: a sunken well, ~34px inside a 48px target.
+  checkTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  checkPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    height: 34,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.sunken,
+  },
+  checkLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   // Room for the + to float over without covering the last card.
   listContent: { padding: Spacing.lg, paddingBottom: Spacing.xxxl * 2, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },

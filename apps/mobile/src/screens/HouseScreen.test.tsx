@@ -35,7 +35,9 @@ const mock_createLocation = jest.fn();
 const mock_getThings = jest.fn();
 const mock_getAbsentThings = jest.fn();
 const mock_markThingAbsent = jest.fn();
+const mock_getLabelReadingsToCheck = jest.fn();
 jest.mock('../lib/supabase', () => ({
+  getLabelReadingsToCheck: (...a: unknown[]) => mock_getLabelReadingsToCheck(...a),
   getThings: (...a: unknown[]) => mock_getThings(...a),
   getAbsentThings: (...a: unknown[]) => mock_getAbsentThings(...a),
   markThingAbsent: (...a: unknown[]) => mock_markThingAbsent(...a),
@@ -102,6 +104,7 @@ beforeEach(() => {
   mock_getThings.mockResolvedValue([]);
   mock_getAbsentThings.mockResolvedValue([]);
   mock_markThingAbsent.mockResolvedValue(undefined);
+  mock_getLabelReadingsToCheck.mockResolvedValue([]);
   mock_createLocation.mockResolvedValue(undefined);
   mock_reloadLocations.mockResolvedValue(undefined);
 });
@@ -344,5 +347,36 @@ describe('folding rooms on the House tab', () => {
 
     expect(byLabel(r, 'Collapse all')).toBeUndefined();
     expect(byLabel(r, 'Expand all')).toBeUndefined();
+  });
+
+  // A label read after *Add it* waits on the thing's page. The pill is how
+  // somebody finds out, so it is absent at nought and counts only what is
+  // ready to check — never one still being read.
+  it('says how many labels are waiting to be checked, and nothing at nought', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
+      thing({ id: '2', name: 'Dryer', room: 'Laundry' }),
+    ]);
+    const none = render(<HouseScreen />);
+    await settle();
+    expect(texts(none).some((t) => /label/.test(t))).toBe(false);
+
+    mock_getLabelReadingsToCheck.mockResolvedValue([
+      { id: 'r1', thingId: '1', status: 'read' },
+      { id: 'r2', thingId: '2', status: 'pending' },
+    ]);
+    const some = render(<HouseScreen />);
+    await settle();
+    expect(texts(some)).toContain('1 label to check');
+    expect(texts(some)).toContain('Label to check');
+    expect(mock_getLabelReadingsToCheck).toHaveBeenCalledWith('p');
+  });
+
+  it('draws the record when the readings cannot be fetched', async () => {
+    mock_getThings.mockResolvedValue([thing({ id: '1', name: 'Washing machine', room: 'Laundry' })]);
+    mock_getLabelReadingsToCheck.mockRejectedValue(new Error('offline'));
+    const result = render(<HouseScreen />);
+    await settle();
+    expect(texts(result)).toContain('1 recorded');
   });
 });

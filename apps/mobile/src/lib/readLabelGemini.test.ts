@@ -39,6 +39,13 @@ describe('the request', () => {
     expect(SYSTEM).toMatch(/Never estimate it from the colour in the photo/);
   });
 
+  it('asks what the thing is when nobody has said, and says what it is when somebody has', () => {
+    expect(geminiRequest('', 'image/jpeg', 'x').contents[0].parts[1].text).toMatch(/Say what this is/);
+    expect(geminiRequest('finish', 'image/jpeg', 'x').contents[0].parts[1].text).not.toMatch(/Say what this is/);
+    expect(SCHEMA.properties.kindGuess.enum).toEqual(['appliance', 'finish', 'tile', null]);
+    expect(SYSTEM).toMatch(/whatItIs: what the item is/);
+  });
+
   it('treats an unknown kind as an appliance rather than sending nothing', () => {
     expect(geminiRequest('mystery', 'image/png', 'x').contents[0].parts[1].text).toMatch(/rating plate/);
   });

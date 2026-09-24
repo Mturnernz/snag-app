@@ -2,8 +2,8 @@ import {
   staffMarkEmailed,
   staffReplyEmailTarget,
   supportReplyEmail,
-} from '@snag/supabase-queries';
-import type { StaffClient } from '@/lib/supabase/staff';
+} from '@snag/supabase-queries/staff';
+import type { StaffClient } from '@/lib/supabase';
 
 export type EmailOutcome = { emailed: true } | { emailed: false; reason: string };
 

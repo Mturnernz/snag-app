@@ -24,6 +24,7 @@ jobs:
       - name: Typecheck every workspace
         run: |
           npm run typecheck --workspace=apps/web
+          npm run typecheck --workspace=apps/staff
           npx tsc --noEmit -p apps/mobile
 
   unit:
@@ -108,6 +109,24 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
+      # The staff portal (staff.snaghq.co.nz) is its own site. Its specs cover
+      # the sign-in page and the signed-out redirect; nothing signs in, because
+      # a staff session needs a Google Workspace account.
+      - name: Run Playwright (staff portal)
+        if: ${{ !cancelled() }}
+        working-directory: apps/staff
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-staff
+          path: apps/staff/playwright-report/
+          retention-days: 7
+
   build:
     name: Web build
     runs-on: ubuntu-latest
@@ -120,6 +139,12 @@ jobs:
       - run: npm ci
       - name: next build
         working-directory: apps/web
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: npm run build
+      - name: next build (staff portal)
+        working-directory: apps/staff
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}

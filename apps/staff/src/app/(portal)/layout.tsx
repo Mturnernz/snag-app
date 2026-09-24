@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { isStaff } from '@snag/supabase-queries';
-import { createStaffClient } from '@/lib/supabase/staff';
+import { isStaff } from '@snag/supabase-queries/staff';
+import { createStaffClient } from '@/lib/supabase';
 import { Button } from '@/components/Button';
 import { signOut } from './actions';
 import styles from '../staff.module.css';
@@ -20,14 +20,14 @@ export default async function PortalLayout({ children }: { children: React.React
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect('/staff/sign-in');
+  if (!user) redirect('/sign-in');
 
   const staff = await isStaff(supabase).catch(() => false);
 
   return (
     <div className={styles.shell}>
       <header className={styles.bar}>
-        <Link href="/staff" className={styles.brand}>
+        <Link href="/" className={styles.brand}>
           SnagHQ staff
         </Link>
         <span className={styles.spacer} />

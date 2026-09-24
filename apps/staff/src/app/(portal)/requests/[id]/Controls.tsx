@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { adviceDraftProblems } from '@snag/supabase-queries';
+import { adviceDraftProblems } from '@snag/supabase-queries/staff';
 import {
   ADVICE_VERDICT_LABELS,
   SUPPORT_CLOSE_REASONS,
@@ -386,7 +386,7 @@ export function CloseControl({ requestId }: { requestId: string }) {
           start(async () => {
             setError(null);
             const result = await close(requestId, reason);
-            if (result.ok) router.push('/staff');
+            if (result.ok) router.push('/');
             else setError(result.error);
           });
         }}

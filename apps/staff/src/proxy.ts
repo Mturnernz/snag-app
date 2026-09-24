@@ -4,13 +4,12 @@ import { createServerClient } from '@supabase/ssr';
 /**
  * Keeps a staff session fresh, and sends anybody without one to sign in.
  *
- * Only `/staff` runs through here: the root page and password recovery have no
- * session and must not grow one. This is not the security boundary — every
- * portal read and write goes through a `staff_*` function that refuses a caller
- * not on the staff list — it is what refreshes the cookie and saves a signed-out
- * visitor a page that can only say no.
+ * This is not the security boundary — every portal read and write goes through
+ * a `staff_*` function that refuses a caller not on the staff list — it is what
+ * refreshes the cookie and saves a signed-out visitor a page that can only say
+ * no.
  */
-const OPEN = ['/staff/sign-in', '/staff/auth/'];
+const OPEN = ['/sign-in', '/auth/'];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -20,7 +19,7 @@ export async function proxy(request: NextRequest) {
   if (!url || !key) return response;
 
   const supabase = createServerClient(url, key, {
-    cookieOptions: { path: '/staff', sameSite: 'lax' },
+    cookieOptions: { sameSite: 'lax' },
     cookies: {
       getAll: () => request.cookies.getAll(),
       setAll: (list, headers) => {
@@ -39,7 +38,7 @@ export async function proxy(request: NextRequest) {
 
   if (!data?.claims && !open) {
     const to = request.nextUrl.clone();
-    to.pathname = '/staff/sign-in';
+    to.pathname = '/sign-in';
     to.search = '';
     return NextResponse.redirect(to);
   }
@@ -47,6 +46,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // `:path*` matches zero segments too, so this covers /staff itself.
-  matcher: ['/staff/:path*'],
+  // Everything but Next's own assets and the icon, which a signed-out browser
+  // still has to be able to fetch to draw the sign-in page.
+  matcher: ['/((?!_next/static|_next/image|icon.svg|favicon.ico).*)'],
 };

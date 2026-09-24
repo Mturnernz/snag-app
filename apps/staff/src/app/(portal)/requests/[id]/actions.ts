@@ -6,9 +6,9 @@ import {
   staffAssign,
   staffCloseRequest,
   staffReply,
-} from '@snag/supabase-queries';
+} from '@snag/supabase-queries/staff';
 import type { AdviceDraft, SupportCloseReason } from '@snag/shared-types';
-import { createStaffClient } from '@/lib/supabase/staff';
+import { createStaffClient } from '@/lib/supabase';
 import { sendReplyEmail, type EmailOutcome } from '@/lib/replyEmail';
 
 /**
@@ -19,7 +19,7 @@ import { sendReplyEmail, type EmailOutcome } from '@/lib/replyEmail';
 export type ActionResult = { ok: true } | { ok: false; error: string };
 export type ReplyResult = { ok: true; email: EmailOutcome } | { ok: false; error: string };
 
-const pathFor = (id: string) => `/staff/requests/${id}`;
+const pathFor = (id: string) => `/requests/${id}`;
 const message = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong');
 
 export async function assign(requestId: string, staffId: string | null): Promise<ActionResult> {
@@ -76,6 +76,6 @@ export async function close(requestId: string, reason: SupportCloseReason): Prom
   } catch (err) {
     return { ok: false, error: message(err) };
   }
-  revalidatePath('/staff');
+  revalidatePath('/');
   return { ok: true };
 }

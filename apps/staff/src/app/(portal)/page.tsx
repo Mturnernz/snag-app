@@ -1,7 +1,8 @@
 import Link from 'next/link';
-import { describeWait, getStaffQueue, snagHeadline } from '@snag/supabase-queries';
+import { snagHeadline } from '@snag/supabase-queries';
+import { describeWait, getStaffQueue } from '@snag/supabase-queries/staff';
 import { SUPPORT_CLOSE_REASON_LABELS, type StaffQueueRow, type StaffQueueTab } from '@snag/shared-types';
-import { createStaffClient, signPhotos } from '@/lib/supabase/staff';
+import { createStaffClient, signPhotos } from '@/lib/supabase';
 import { day } from '@/lib/when';
 import styles from '../staff.module.css';
 
@@ -62,7 +63,7 @@ export default async function Queue({
         {TABS.map((t) => (
           <Link
             key={t.tab}
-            href={`/staff?tab=${t.tab}`}
+            href={`/?tab=${t.tab}`}
             className={styles.tab}
             aria-current={t.tab === tab ? 'page' : undefined}
           >
@@ -123,7 +124,7 @@ function QueueRow({ row, photo }: { row: StaffQueueRow; photo?: string }) {
   // A closed question cannot be opened — the page would only say so — so the
   // row is not a link.
   return row.open ? (
-    <Link href={`/staff/requests/${row.id}`} className={styles.row}>
+    <Link href={`/requests/${row.id}`} className={styles.row}>
       {body}
     </Link>
   ) : (

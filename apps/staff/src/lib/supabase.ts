@@ -4,21 +4,23 @@ import { createServerClient } from '@supabase/ssr';
 /**
  * The staff portal's Supabase client, on the server.
  *
- * **Separate from `recovery.ts`, and it has to stay separate.** Password
- * recovery is implicit-flow with no stored session, because a PKCE recovery
- * link only works in the browser that asked for it (see that file). The portal
- * is the opposite case: a Google sign-in that starts and finishes in the same
- * browser, with a session in a cookie. Using this client for recovery would
- * break every reset link opened on a different device from the one that asked.
+ * **This site is its own origin, on purpose.** It used to be a path on
+ * www.snaghq.co.nz, beside password recovery, with the cookie scoped to
+ * `/staff` — but a cookie path is not a browser security boundary: any page on
+ * the same origin can open a window at the portal and read what it holds. A
+ * separate host is a boundary, so a staff session is reachable from nothing
+ * but the portal's own pages.
  *
- * The cookie is scoped to `/staff`, so nothing else this host serves ever sees
- * a staff session — the recovery pages included.
+ * It also keeps the two Supabase clients apart. Recovery (apps/web) is
+ * implicit-flow with no stored session, because a PKCE recovery link only works
+ * in the browser that asked for it; this is PKCE with a session in a cookie,
+ * because a Google sign-in starts and finishes in one browser.
  *
  * Bound to the `home` schema, like the app's own client. Every read and write
  * the portal makes goes through a `staff_*` function that checks the caller is
  * on the staff list; nothing here is trusted to do that checking.
  */
-export const STAFF_COOKIE_OPTIONS = { path: '/staff', sameSite: 'lax' as const };
+export const STAFF_COOKIE_OPTIONS = { sameSite: 'lax' as const };
 
 export function supabaseEnv(): { url: string; key: string } {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -42,7 +44,7 @@ export async function createStaffClient() {
           list.forEach(({ name, value, options }) => store.set(name, value, options));
         } catch {
           // A server component cannot set cookies. The proxy refreshes the
-          // session on every /staff request, so there is nothing to do here.
+          // session on every request, so there is nothing to do here.
         }
       },
     },

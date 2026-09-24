@@ -1,13 +1,8 @@
 import Link from 'next/link';
-import {
-  adviceDraftFrom,
-  describeCycle,
-  describeWait,
-  getStaffRequestPage,
-  snagHeadline,
-} from '@snag/supabase-queries';
+import { describeCycle, snagHeadline } from '@snag/supabase-queries';
+import { adviceDraftFrom, describeWait, getStaffRequestPage } from '@snag/supabase-queries/staff';
 import { ADVICE_VERDICT_LABELS, type StaffLogEntry, type StaffRequestPage } from '@snag/shared-types';
-import { createStaffClient, signPhotos } from '@/lib/supabase/staff';
+import { createStaffClient, signPhotos } from '@/lib/supabase';
 import { day, dayTime } from '@/lib/when';
 import { AssignControl, CloseControl, NoteForm, ReplyComposer, ResendEmail } from './Controls';
 import styles from '../../../staff.module.css';
@@ -44,7 +39,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
     return (
       <main className={styles.page}>
         <p>
-          <Link href="/staff">← Questions</Link>
+          <Link href="/">← Questions</Link>
         </p>
         <h1 className={styles.h1}>This question isn&rsquo;t open</h1>
         <p className={styles.muted}>{(err as Error).message}</p>
@@ -60,7 +55,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
   return (
     <main className={styles.page}>
       <p>
-        <Link href="/staff">← Questions</Link>
+        <Link href="/">← Questions</Link>
       </p>
       <div>
         <h1 className={styles.h1}>{headline}</h1>

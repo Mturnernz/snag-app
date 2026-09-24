@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-// Accessibility. axe-core against the public routes this host serves.
+// Accessibility. axe-core against the three routes this host still serves.
 //
 // Small surface, but it's the account-recovery path: someone reaches it locked
 // out, usually on a phone, usually from an email client's in-app browser. If
@@ -23,7 +23,7 @@ function describe(violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violat
     .join('\n');
 }
 
-const ROUTES = ['/', '/forgot-password', '/reset-password', '/staff/sign-in'] as const;
+const ROUTES = ['/', '/forgot-password', '/reset-password'] as const;
 
 test.describe('accessibility', () => {
   for (const path of ROUTES) {
@@ -44,15 +44,11 @@ test('reset-password reads its tokens from the fragment, not the query', async (
   await expect(page.getByText(/link/i).first()).toBeVisible();
 });
 
-test('the staff portal sends a signed-out visitor to sign in', async ({ page }) => {
-  // The proxy is not the security boundary — every portal read goes through a
-  // staff_* function that refuses anybody not on the staff list — but a
-  // signed-out visitor should meet the front door, not a page that can only
-  // say no.
-  await page.goto('/staff', { waitUntil: 'networkidle' });
-  await expect(page).toHaveURL(/\/staff\/sign-in$/);
-  await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
-
-  await page.goto('/staff/requests/00000000-0000-0000-0000-000000000000', { waitUntil: 'networkidle' });
-  await expect(page).toHaveURL(/\/staff\/sign-in$/);
+test('the old portal path points at the staff site', async ({ request }) => {
+  // The portal lived at /staff on this host for one unmerged branch, and moved
+  // to its own origin before shipping (see CLAUDE.md, *The staff portal*).
+  // Anything still pointing here lands on the right site rather than a 404.
+  const res = await request.get('/staff/requests/abc', { maxRedirects: 0 });
+  expect(res.status()).toBe(308);
+  expect(res.headers()['location']).toBe('https://staff.snaghq.co.nz/requests/abc');
 });

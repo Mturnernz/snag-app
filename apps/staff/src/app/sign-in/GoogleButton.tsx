@@ -19,12 +19,12 @@ export function GoogleButton() {
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      { cookieOptions: { path: '/staff', sameSite: 'lax' } }
+      { cookieOptions: { sameSite: 'lax' } }
     );
     const { error: failed } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/staff/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback`,
         queryParams: { hd: 'snaghq.co.nz', prompt: 'select_account' },
       },
     });

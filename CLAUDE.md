@@ -1482,6 +1482,14 @@ by `projectSummary.test.ts`:
   option** (so the total never surprises upwards); unpriced expected costs; additional ballparks.
   The user chose "dearest", not "cheapest", and chose to show it as its own row rather than hide it
   inside the total.
+- **An open quote for the whole job or a room counts in Undecided too**, at the dearest
+  (`openScopeQuotes`), but only where nothing at that level is agreed or billed yet. A planned job
+  whose one price was a tree surgeon's unagreed quote read $0 and had no row to find it under; the
+  quote was neither agreed nor a thing. Once something there is agreed or billed, an open quote
+  could be a variation or an alternative and the app cannot tell which, so it is listed, not
+  counted. The *Whole job* row appears whenever such a quote exists, saying *N quotes not agreed*.
+- **Paperwork on a price or a part is listed on the page** (`TaggedFiles`, *On prices and parts*),
+  not only on its own sheet — a quote's PDF was on the record and on no screen but the quote's.
 - The list card shows **Agreed**, not the expected total: the card has no per-item data and a
   figure it had to approximate would disagree with the page.
 

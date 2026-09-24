@@ -430,7 +430,9 @@ def build_wattyl():
         rows.append(row(
             brand='Wattyl / Taubmans', name=html.unescape(name), code=p.get('code', ''), maker_id=slug,
             collection='Roofing steel' if roofing else 'Colour Designer', status='current', aliases='',
-            rgb=rgb, lrv=lrv, tone=1.0, basis='Wattyl RGB hue' if newer else 'Wattyl RGB as published',
+            rgb=rgb, lrv=lrv, tone=1.0,
+            basis=('Wattyl listing swatch (the colour has no page of its own)' if not p.get('ok')
+                   else 'Wattyl RGB hue' if newer else 'Wattyl RGB as published'),
             anchor_to_lrv=newer, not_flat=False, source=f'https://www.wattyl.co.nz/paint-colour/{slug}/'))
     return rows
 
@@ -625,18 +627,27 @@ def write(rows):
     usable = [r for r in rows if r['lab_d50_L'] != '' and not r['lab_quality'].startswith('poor')]
 
     def slim(name, subset):
-        with open(os.path.join(OUT, name), 'w', newline='', encoding='utf-8-sig') as fh:
+        path = os.path.join(OUT, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', newline='', encoding='utf-8-sig') as fh:
             w = csv.writer(fh, quoting=csv.QUOTE_ALL, lineterminator='\r\n')
             w.writerow(['Name', 'L', 'a', 'b', 'Hex', 'Comment'])
             for r in subset:
-                label = f"{r['brand']} {r['name']}" + (f" {r['code']}" if r['code'] else '')
+                # 'Aalto Black' is already a name with the maker in it.
+                brand = r['brand'].split(' / ')[0]
+                label = ('' if r['name'].startswith(brand) else brand + ' ') + r['name']
+                label += f" {r['code']}" if r['code'] else ''
                 w.writerow([label, r['lab_d50_L'], r['lab_d50_a'], r['lab_d50_b'], r['hex_published'],
                             f"{r['collection']} · {r['status']} · Lab {r['lab_quality'].split(' ')[0]} · id {r['id']}"])
         return len(subset)
 
-    n_all = slim('nix-import-all.csv', usable)
-    n_gaps = slim('nix-import-gaps.csv', [r for r in usable if r['in_nix_already'] != 'yes'])
-    print(f'\n{len(rows)} colours · {n_all} with a usable Lab · {n_gaps} not already in a Nix library')
+    # The gaps file is only what is certainly not in a Nix library. 'check'
+    # stays out of it — the Dulux atlas alone is 4,900 colours that are very
+    # likely Nix's own World of Colour atlas — and lives in the per-brand files.
+    n_gaps = slim('nix-import-gaps.csv', [r for r in usable if r['in_nix_already'] == 'no'])
+    for brand in sorted({r['brand'] for r in usable}):
+        slim(f"nix-by-brand/{slugify(brand)}.csv", [r for r in usable if r['brand'] == brand])
+    print(f'\n{len(rows)} colours · {len(usable)} with a usable Lab · {n_gaps} certainly not in a Nix library')
     by = {}
     for r in rows:
         b = by.setdefault(r['brand'], {'rows': 0, 'good': 0, 'approx': 0, 'poor': 0, 'none': 0, 'archived': 0})

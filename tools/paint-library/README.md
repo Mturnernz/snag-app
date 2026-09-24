@@ -12,17 +12,19 @@ closer to each other than that estimate can tell apart. A match gives you a
 
 ## What gets built
 
-`python3 build.py` writes three files into `out/`:
+`python3 build.py` writes these into `out/`:
 
 | File | What it is |
 |---|---|
-| `nz-paint-library.csv` | Every colour, every column (below). The master copy. |
-| `nix-import-gaps.csv` | Only the colours Nix does **not** already ship a library for. This is the one to load into Nix. |
-| `nix-import-all.csv` | Every colour with a usable Lab, in the same slim layout. |
+| `nz-paint-library.csv` | Every colour, every column (below). The master copy: 11,381 colours as of September 2026. |
+| `nix-import-gaps.csv` | Only the colours that are **certainly not** in any Nix library (2,336). This is the one to load into Nix. It holds archived and non-Nix Resene ranges, all of Aalto, and the Dulux Colours of NZ colours with no atlas twin. |
+| `nix-by-brand/<brand>.csv` | One file per maker, every colour with a usable Lab. Use these for a maker whose Nix coverage is marked `check`, if the test in step 2 below says Nix doesn't have it. |
 
-The two `nix-import-*` files have six columns: `Name, L, a, b, Hex, Comment`.
+The `nix-*` files have six columns: `Name, L, a, b, Hex, Comment`.
 L, a and b are **D50 / 2°**, which is the Nix Toolkit's default setting.
-Rows with no Lab, or whose Lab is rated `poor`, are left out.
+Rows with no Lab, or whose Lab is rated `poor`, are left out. The `Comment`
+column carries each row's `id`, so a match can be traced back to the master
+file.
 
 ### Columns in `nz-paint-library.csv`
 
@@ -49,6 +51,14 @@ Rows with no Lab, or whose Lab is rated `poor`, are left out.
 2. **Match against Nix's own libraries first.** Nix already ships the current
    Resene, Porter's and Wattyl ranges, plus Dulux's *World of Colour Series II
    Atlas*. A match against Nix's own library beats anything in this file.
+   Two quick tests tell you whether Nix covers the `check` ranges:
+   - **Dulux:** search Nix for *Snowy Mountains Half*.
+   - **Wattyl/Taubmans:** search Nix for *Teal*, which is CW 102.3 in New
+     Zealand's Colour Designer range.
+
+   If either is missing, load that maker's file from `nix-by-brand/` as well.
+   About half of Dulux's Colours of NZ are atlas colours under NZ names; the
+   `aliases` column gives the atlas name to look for.
 3. **For everything else, make a custom library in the Toolkit**: *Manage and
    browse libraries → Create & manage custom libraries → new library.* Then
    either:
@@ -102,8 +112,16 @@ and undone (a power on linear RGB).
 | Resene, archived colours missing from that book | 2016 "visual" RGB | −7.10 ± 4.19 | ^0.77 → −0.01 ± 2.08 |
 | Dulux | Colour Atlas | −3.31 ± 1.87 | ^0.87 → +0.09 ± 0.67 |
 | Porter's (DuluxGroup) | all-colours page | −3.65 ± 2.49 | ^0.87 → −0.03 ± 1.79 |
-| Wattyl / Taubmans | colour pages | fitted at build time; the build prints it | |
-| Aalto | colour pages | fitted at build time; the build prints it | |
+| Wattyl / Taubmans, whole-number LRV (991) | colour pages | −0.04 ± 1.37; 956 within 1 L\* | used as published |
+| Wattyl / Taubmans, two-decimal LRV (609) | colour pages | +2.21 ± 1.98; no single curve fits | hue from the RGB, lightness from the LRV |
+| Aalto (581) | colour pages | 234 within 1 L\*; the rest mostly 3–5 L\* light, plus a few LRV typos | hue from the RGB, lightness from the LRV |
+
+"Lightness from the LRV" keeps the RGB's chromaticity and scales its luminance
+to the maker's measured LRV. `lrv_check` still reports how far apart the maker's
+own two figures were, so a row whose inputs disagreed never reads as `good`.
+An LRV over 100, or one more than 15 L\* from its own RGB (Aalto's Tinto at 105,
+Scoria at 70), is treated as a typo: that row uses its RGB as published and is
+marked `poor`.
 
 Lightness is checked this way. **Hue and chroma can't be checked**, because
 nothing else published says what they should be. And even where every figure
@@ -151,4 +169,6 @@ away from zero. That's the signal to re-fit them with `fit_tone()`.
   and there's no archive to draw on. Resene and Aalto both publish theirs.
 - **Wattyl/Taubmans in Nix.** Nix's Wattyl libraries carry Australian range
   names. Whether they cover New Zealand's *Colour Designer* range is marked
-  `check`; see whether a colour like *Teal* (CW 102.3) matches in the app.
+  `check`; see the test in step 2.
+- **14 Wattyl swatches have no page** on Wattyl's site. They keep the listing's
+  hex, with no code or LRV.

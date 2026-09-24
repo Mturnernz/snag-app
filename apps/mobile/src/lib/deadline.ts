@@ -107,10 +107,17 @@ export const AUTH_TIMEOUT_MS = 15_000;
 export const REQUEST_TIMEOUT_MS = 20_000;
 export const UPLOAD_TIMEOUT_MS = 60_000;
 export const LABEL_TIMEOUT_MS = 45_000;
+/**
+ * *Read again* on an emailed card reads every paper it holds, in parallel,
+ * with the busy-model fallback — longer than one label. The function gives the
+ * model 45s so it answers in words before this runs out.
+ */
+export const READ_AGAIN_TIMEOUT_MS = 60_000;
 
 export function deadlineFor(url: string): number {
   if (url.includes('/auth/v1/')) return AUTH_TIMEOUT_MS;
   if (url.includes('/functions/v1/read-label')) return LABEL_TIMEOUT_MS;
+  if (url.includes('/functions/v1/reread-bill')) return READ_AGAIN_TIMEOUT_MS;
   // Asking for a signed URL, not sending or fetching the bytes behind one.
   if (url.includes('/storage/v1/object/sign')) return REQUEST_TIMEOUT_MS;
   if (url.includes('/storage/v1/')) return UPLOAD_TIMEOUT_MS;

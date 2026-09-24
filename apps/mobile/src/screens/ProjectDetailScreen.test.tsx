@@ -40,6 +40,8 @@ const mock_payBill = jest.fn().mockResolvedValue(undefined);
 const mock_getSupplierNames = jest.fn().mockResolvedValue(['Reece']);
 const mock_approveInvoiceReview = jest.fn().mockResolvedValue({});
 const mock_clearFigure = jest.fn().mockResolvedValue(undefined);
+const mock_filePaperwork = jest.fn().mockResolvedValue({});
+const mock_rereadInvoiceReview = jest.fn().mockResolvedValue({ cards: 4 });
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -48,6 +50,8 @@ jest.mock('../lib/supabase', () => {
     getSupplierNames: (...a: unknown[]) => mock_getSupplierNames(...a),
     approveInvoiceReview: (...a: unknown[]) => mock_approveInvoiceReview(...a),
     clearFigure: (...a: unknown[]) => mock_clearFigure(...a),
+    filePaperwork: (...a: unknown[]) => mock_filePaperwork(...a),
+    rereadInvoiceReview: (...a: unknown[]) => mock_rereadInvoiceReview(...a),
     declineInvoiceReview: jest.fn(), restoreInvoiceReview: jest.fn(), deleteInvoiceReview: jest.fn(),
     addExpectedCostLine: jest.fn(), addMilestone: jest.fn(), addQuoteLine: jest.fn(),
     createElement: jest.fn(), createExpectedCost: jest.fn(), createLocation: jest.fn(),
@@ -350,6 +354,74 @@ describe('a bill that looks like one already on the job', () => {
     }));
     const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
     expect(text).not.toContain('Looks like');
+  });
+});
+
+describe('one email, several papers', () => {
+  /** A `Button`, found by the word on it. */
+  const pressButton = async (r: ReturnType<typeof render>, label: string) => {
+    const node = r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.label === label && n.props?.onPress, { deep: true },
+    )[0];
+    await TestRenderer.act(async () => { node.props.onPress(); });
+  };
+  const card = (over: any = {}) => ({
+    id: 'rv1', projectId: 'p1', state: 'pending', kind: 'invoice', addressedTo: null,
+    sourceRef: 'em_var', sourcePart: 0, sourceSubject: 'Fwd: Variations',
+    supplier: 'ReliaBuilder', amount: 6325, amountInclGst: true, invoiceNumber: 'INV-0184', paid: false,
+    createdAt: '2026-09-24T00:00:00Z', inferred: [], photoPaths: [], documentPaths: [],
+    roomIds: [], roomAmounts: null, ...over,
+  });
+  const variations = [
+    card(),
+    card({ id: 'rv2', sourcePart: 1, kind: 'paperwork', supplier: 'Force Plumbing', addressedTo: 'ReliaBuilder', invoiceNumber: null, amount: 1200 }),
+    card({ id: 'rv3', sourcePart: 2, kind: 'paperwork', supplier: 'Good Connection', detail: 'Certificate of compliance', invoiceNumber: null, amount: null }),
+  ];
+
+  it('keeps an email’s cards together under what it held', async () => {
+    const r = await arrange(downstairs({ invoiceReviews: variations }));
+    r.getByText('Fwd: Variations — 1 bill · 2 to file');
+    r.getByText('Good Connection · Certificate of compliance');
+  });
+
+  it('files paperwork through its own sheet, and never allocates it', async () => {
+    const r = await arrange(downstairs({ invoiceReviews: variations }));
+    const cert = r.root.findAll((n: any) => n.props?.onApprove && n.props?.review?.id === 'rv3', { deep: true })[0];
+    await TestRenderer.act(async () => { cert.props.onApprove(); });
+    expect(mock_approveInvoiceReview).not.toHaveBeenCalled();
+    r.getByText('Where does it go?');
+    await press(r, 'File it');
+    expect(mock_filePaperwork).toHaveBeenCalledWith('rv3', { quoteId: null, elementId: null });
+    expect(mock_showToast).toHaveBeenCalledWith('Filed with the job’s paperwork');
+  });
+
+  it('adds a quote as a quote, and says nothing is agreed', async () => {
+    const r = await arrange(downstairs({ invoiceReviews: [card({ kind: 'quote', invoiceNumber: 'QU-0111' })] }));
+    const approve = r.root.findAll((n: any) => n.props?.onApprove, { deep: true })[0];
+    await TestRenderer.act(async () => { approve.props.onApprove(); });
+    expect(mock_approveInvoiceReview).toHaveBeenCalledWith('rv1');
+    expect(mock_showToast).toHaveBeenCalledWith('Added as a quote — nothing’s agreed yet');
+  });
+
+  it('reads a blank card again, and says how many papers came back', async () => {
+    const r = await arrange(downstairs({
+      invoiceReviews: [card({ supplier: null, amount: null, invoiceNumber: null, documentPaths: ['h/docs/1-0-a.pdf', 'h/docs/1-1-b.pdf'] })],
+    }));
+    const calls = mock_getProjectPage.mock.calls.length;
+    await pressButton(r, 'Read again');
+    expect(mock_rereadInvoiceReview).toHaveBeenCalledWith('rv1');
+    expect(mock_showToast).toHaveBeenCalledWith('Read — that email held 4 papers');
+    expect(mock_getProjectPage.mock.calls.length).toBe(calls + 1);
+  });
+
+  it('says why when nothing could be read, and leaves the card', async () => {
+    mock_rereadInvoiceReview.mockRejectedValueOnce(new Error('The reader is busy right now — try again in a minute.'));
+    const r = await arrange(downstairs({
+      invoiceReviews: [card({ supplier: null, amount: null, invoiceNumber: null })],
+    }));
+    await pressButton(r, 'Read again');
+    expect(mock_showToast).toHaveBeenCalledWith('The reader is busy right now — try again in a minute.');
+    r.getByText('Nothing was read off this yet.');
   });
 });
 

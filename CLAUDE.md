@@ -2739,14 +2739,16 @@ sixteen hex digits and is **not** the security model on its own — the sender c
 model.** Resend receives the mail and posts `email.received`; the function checks the Svix
 signature (JWT verification is off — Resend has no Supabase token — so the signature is the lock),
 finds the project, fetches the attachments, stores PDFs under `<household>/docs/` and photos beside
-the others (the app's own layouts, so no screen needed changing to open them), asks Gemini what the
-bill says, and files the card through `home.file_emailed_bill`. Four rules:
+the others (the app's own layouts, so no screen needed changing to open them), asks Gemini what
+**each paper** is, and files **a card per paper** through `home.file_emailed_bill` — see *One
+email, one card per paper* below. Four rules:
 
 - **It answers Resend at once and works afterwards** (`EdgeRuntime.waitUntil`). Reading a PDF takes
-  longer than a webhook waits, and a retried webhook is a second card — which `file_emailed_bill`
-  refuses anyway, one card per email id (`invoice_reviews_one_per_email`; the older index includes
-  `invoice_number`, and a null there made two rows distinct).
-- **Every field is checked before it reaches a card** (`reviewFromReading` in `bill.ts`, pure and
+  longer than a webhook waits, and a retried webhook is a second set of cards — which
+  `file_emailed_bill` refuses anyway, one card per email id and paper (`invoice_reviews_one_per_part`,
+  which replaced both older indexes; the one keyed on `invoice_number` also refused two papers in
+  one email carrying the same number).
+- **Every field is checked before it reaches a card** (`paperFromReading` in `bill.ts`, pure and
   pinned by `inboundBill.test.ts`). An amount must be a positive number; a date must be one the
   calendar has; a GST basis the bill did not state defaults to *incl* **and is marked guessed**, so
   the card says it beside the figure; and a paid flag with no sentence behind it is dropped, the
@@ -2768,7 +2770,7 @@ it did not. Deleting a card from the bin clears its files too, since nothing els
 
 `inboundBill.test.ts` pins the address parsing, the signature (a changed body, a wrong secret, a
 stale timestamp, a rotation's two signatures), the attachment filter (the signature logo dropped,
-PDFs first, the caps), the stored paths, and every refusal in `reviewFromReading`.
+PDFs first, the caps), the stored paths, and every refusal in `paperFromReading`.
 `InvoiceReviewCard.test.tsx` pins the attachments and the guessed marks; `ReviewEditSheet.test.tsx`
 the load, the one write with an emptied box as a clear, the part chosen, no part offered while the
 layer is implicit, and a date the calendar has not got holding the sheet open.
@@ -2777,6 +2779,129 @@ layer is implicit, and a date the calendar has not got holding the sheet open.
 `RESEND_INBOUND_API_KEY` and `RESEND_WEBHOOK_SECRET` as function secrets, and the function deployed
 with `--no-verify-jwt`. **Nothing sends anything**: no reply to the forwarder, no notification. If
 a forward does not appear, the function's logs say which of the four reasons it was.
+
+### One email, one card per paper
+
+The first real email forwarded to a job carried four PDFs and a photo: the builder's variation
+invoice (INV-0184), a plumber's and an electrician's variations **made out to the builder**, the
+electrician's certificate of compliance, and a picture of the deck. It landed as one card, and had
+the model been answering it would have been asked for one supplier and one total from five papers.
+There was no way to allocate the invoice and file the certificate, and the two subcontractors'
+variations are already inside the builder's invoice — recorded as bills to the household, the same
+money counts twice. `20260924120000` is the fix, and it has four parts.
+
+**Each paper is read on its own.** `inbound-bill` sends every attachment to the model as its own
+request (`read.ts`, in parallel so ten papers cost about what one does), with the email's words
+beside it and the other papers named only so it knows to ignore them. A figure or a name on one
+paper cannot be read off another, because the model is only ever shown one. The attachment cap
+went from five to ten.
+
+**A card says what kind of paper it is** (`invoice_reviews.kind`): **invoice**, **quote** or
+**paperwork**. The model also answers *photo* and *nothing*, which never become a kind of their
+own: photos of the work share one *Photos* card, filed as paperwork, because six pictures of a
+deck are one thing to put on the job rather than six decisions. `cardsFromReadings` decides the
+cards and is pure; every file lands on exactly one card, and a PDF nobody could read is still an
+invoice card with its kind marked *guessed*, which is what the one card per email always was.
+
+- **An invoice** allocates exactly as before.
+- **A quote allocates as a quote, `tbc`.** `approve_invoice_review` used to hard-code `invoice`, so
+  an emailed $49,482.20 deck quote would have landed in *Invoiced* and *To pay* unsigned. It is
+  never paid and has no due date.
+- **Paperwork is filed, never allocated** — `approve_invoice_review` refuses it in words.
+  `file_review_paperwork` appends its files to a bill on the job, a part, or the job itself, so
+  they roll up through `project_files` like any attachment, and **no figure moves**. The card's
+  button says *File it*, never *Allocate*, and `FilePaperworkSheet` asks only where: the bill from
+  the same business first and chosen already (`paperworkHomes`, matched on `businessKey`, which
+  reads *RELIABUILDER LIMITED* and *ReliaBuilder* as one business), then the job and its parts, then
+  every other live bill. A declined quote is never offered.
+
+**A bill made out to somebody else is paperwork, with the name kept.** The model is told who is on
+the job (`home.project_people`) and asked whether each bill is made out to them. Only a plain *no*
+turns a bill into paperwork, with `addressed_to` set, and the card says *"Made out to
+ReliaBuilder, not you — kept as paperwork so it isn't counted twice"*, the figure beside it muted
+and counted nowhere. A bill that names nobody stays the household's, because that is the ordinary
+case. Paperwork is also kept out of the duplicate check: a subcontractor's variation can carry the
+figure of a line on the builder's invoice, and a warning about that would teach people to ignore
+the warning.
+
+**A blank card can be read again.** On the day this was first used every model answered 503 for
+three minutes and three of four cards arrived with nothing on them, with no way to try again. A
+card nothing was read off (`isUnreadReview`, the same test as `home.review_is_unread`) shows
+*Read again*, which calls `reread-bill`: it downloads the card's files **as the caller**, reads
+them exactly as the inbound function would, and `home.refile_review` replaces the blank card with
+the cards that reading makes — one or several. Three refusals keep it honest: only a pending,
+blank card (a reading must not throw away somebody's answers); only files the card already held;
+and **every** file it held, because a file no card points at is one nobody can open or delete.
+Nothing changes when nothing was read, and the toast says why in words. It spends one of the
+household's fifty daily model reads per paper, the ceiling label reading keeps.
+
+The cards from one email stay visibly one email: the page groups them (`reviewGroups`) under a
+line counting what arrived — *"Fwd: Variations — 1 bill · 3 to file"* — so what was forwarded can
+be checked against what landed. A card nothing could be read off is named by its own file rather
+than the subject every card from that email shares.
+
+`inboundBill.test.ts` pins the one-paper request, a bill made out to somebody else becoming
+paperwork, a quote and a certificate never paid, and `cardsFromReadings` — a card per paper, every
+file on exactly one card, photos gathered, an unread PDF an invoice with a guessed kind.
+`supabase/tests/emailed_papers.sql` replays the Variations email through the functions: a retried
+part filing nothing, the pre-migration call still filing an invoice, paperwork refused by
+allocate and filed onto the builder's bill and the job without moving Committed, a quote staying
+`tbc` and off the bills, and `refile_review`'s three refusals. `FilePaperworkSheet.test.tsx`,
+`InvoiceReviewCard.test.tsx`, `ReviewEditSheet.test.tsx`, `invoiceReviews.test.ts` and
+`ProjectDetailScreen.test.tsx` pin the rest of the page.
+
+### A bill can be inside another bill
+
+The Variations email showed the gap the reader cannot always close. Good Connections' invoice said
+it was made out to "Relia Builder LTD", so it became paperwork; Force Plumbing's did not say, so it
+came in as the household's own bill and the $1,138.71 inside ReliaBuilder's INV-0184 counted twice.
+A reading can only see what the paper says, so **a person has to be able to say it too**.
+
+*Part of another bill?* on `PriceSheet` points a bill at the one it is inside. **It is not a new
+column and not an "ignore" flag**: it writes `billed_through_id`, which every rollup already reads as
+*passed through* — the invoice leaves Invoiced, Paid and the scope's fallback in
+`project_scope_money`, the supplier rows and `project_bills` — so not one view changed and the
+supplier rows still sum to Committed. `agreedContribution` drops it the same way, so the room
+breakdown agrees. Two rules:
+
+- **It names the bill, never merely "ignored".** A figure that stops counting says why, in words the
+  paper can be checked against: *Inside RELIABUILDER LIMITED · INV-0184 — not counted on its own*. A
+  generic ignore switch is a way to make any figure vanish with no reason on record, which is the
+  shape the override rules exist to refuse.
+- **The bill it is inside says what it includes**, with *the rest of this bill* as the figure the
+  builder charged for their own work. That is the reconciliation somebody would otherwise do by hand.
+
+Offered only on a bill of its own (`billHosts`, `papers.ts`): not on a progress claim, which counts
+through its contract already; not on a price answering a set-aside, where the same link means
+billed through the builder's contract and `ThingSheet` decides it; never pointing at a bill that is
+itself inside another, because a chain leaves the reader following links to find what counts; and
+not on a bill that already holds others. The room sheet lists an inner bill under its host, as it
+lists a claim under its contract. `billsInside.test.ts` and `PriceSheet.test.tsx` pin it.
+
+### A file says what it is
+
+A job's paperwork was a pile of PDFs by filename, and the one somebody gets asked for — the
+certificate of compliance, at code compliance or by an insurer — could only be found by opening
+every file. `home.file_tags` (`20260925090000`) tags a file **Compliance certificate**, **Product
+sheet**, **Warranty** or **Other**.
+
+- **The tag belongs to the file**, keyed by storage path like `label_readings`, not a column on each
+  of the six arrays a file can live in. A file removed from its record stops being shown; a stale
+  row names nothing anybody can see. Absence is untagged. Invoices and quotes are never tagged —
+  the price they sit on already says what they are. `set_file_tags` takes several paths and checks
+  each one's household folder against the caller.
+- **The tags ride in `project_page`** (`fileTags`), limited to the files `project_files` shows, rather
+  than a read per sheet — the pool is ten connections and every sheet shows files.
+- **Set on the file**, as a pill beside each document in `Attachments` (on the job, a part and a
+  price) opening `FileTagChips` — the app's one chip, wrapping because four long labels do not fit
+  across a phone, and pressing the lit one clears it.
+- **Asked when paperwork is filed**, because that is the one moment it is in somebody's hand.
+  `guessFileTag` reads the card's words and filenames and lights a suggestion, said as one;
+  compliance first, because a certificate's title often names the product it certifies; *Other* is
+  never guessed. A card with no PDF is not asked — a photo of the deck is not a certificate.
+- **Gathered on the project page** by `TaggedFiles` — *Compliance certificates*, *Product sheets*,
+  *Warranties* — each row saying where the file is attached. A read over `project_files`, never a
+  second place a file lives, and absent until something is tagged.
 
 ### A bill can be shared between rooms
 

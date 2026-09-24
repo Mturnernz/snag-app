@@ -149,7 +149,8 @@ export function billFactsOfReview(review: InvoiceReview): BillFacts {
 /**
  * Each waiting card that looks like a bill already on the job, or like an
  * earlier card still waiting — the same email forwarded twice is two cards.
- * Keyed by review id; a card with no likely twin is absent.
+ * Keyed by review id; a card with no likely twin is absent. Paperwork is
+ * never checked, and never matched against.
  */
 export function duplicateReviews(
   quotes: ProjectQuote[],
@@ -160,6 +161,11 @@ export function duplicateReviews(
   const earlier: (BillFacts & { review: InvoiceReview })[] = [];
 
   for (const review of pending) {
+    // Paperwork is filed, never paid, so it cannot be a bill paid twice. A
+    // subcontractor's variation made out to the builder can carry the same
+    // figure as a line on the builder's invoice, and warning about that would
+    // teach people to ignore the warning.
+    if (review.kind === 'paperwork') continue;
     const facts = billFactsOfReview(review);
     const hit = findDuplicateBill(onJob, facts);
     if (hit) {

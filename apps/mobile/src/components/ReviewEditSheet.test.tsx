@@ -13,7 +13,7 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 const review: InvoiceReview = {
-  id: 'r1', projectId: 'p1', elementId: null,
+  id: 'r1', projectId: 'p1', elementId: null, kind: 'invoice', addressedTo: null, sourcePart: 0,
   supplier: 'Reliabuilder', detail: null, amount: 43987.5, amountInclGst: true,
   invoiceNumber: 'INV-0208', dated: '2026-09-20', dueOn: null,
   paid: false, paidOn: null, paidEvidence: null, category: null,
@@ -170,4 +170,26 @@ it('holds the sheet open over a date the calendar has not got', async () => {
   expect(onSave).not.toHaveBeenCalled();
   expect(onClose).not.toHaveBeenCalled();
   expect(r.queryByText('The due date isn’t a day the calendar has.')).not.toBeNull();
+});
+
+describe('what kind of paper it is', () => {
+  it('asks, and saves the answer with the rest', async () => {
+    const { r, onSave } = await open();
+    expect(r.queryByText('What is it?')).not.toBeNull();
+    await TestRenderer.act(async () => { tap(r, 'Quote').props.onPress(); });
+    await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
+    expect(onSave.mock.calls[0][0]).toMatchObject({ kind: 'quote', dueOn: null });
+  });
+
+  // Paperwork is filed on one level and counts towards nothing, so it is not
+  // asked when it is due or how it splits between rooms.
+  it('asks paperwork neither a due date nor rooms, and saves no split', async () => {
+    const { r, onSave } = await open([element('e1', 'Bathroom')], { kind: 'paperwork', elementId: 'e1' });
+    expect(r.queryByText('Check this paperwork')).not.toBeNull();
+    expect(r.queryByText('Due')).toBeNull();
+    expect(r.queryByText('Bathroom')).toBeNull();
+    expect(boxes(r)['Number on it']).toBeDefined();
+    await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ kind: 'paperwork' }), { ids: [], amounts: null });
+  });
 });

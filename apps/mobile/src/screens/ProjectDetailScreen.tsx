@@ -17,6 +17,8 @@ import ScheduleSheet from '../components/ScheduleSheet';
 import InvoiceReviewCard from '../components/InvoiceReviewCard';
 import InvoiceReviewSheet from '../components/InvoiceReviewSheet';
 import ReviewEditSheet from '../components/ReviewEditSheet';
+import FilePaperworkSheet from '../components/FilePaperworkSheet';
+import TaggedFiles from '../components/TaggedFiles';
 import EmailBillsSheet from '../components/EmailBillsSheet';
 import ReviewBell from '../components/ReviewBell';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
@@ -41,11 +43,13 @@ import {
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  billFactsOfReview, dayKey, describeDuplicate, duplicateReviews, exportDateStamp, formatExactDate,
+  billFactsOfReview, dayKey, describeDuplicate, describeEmailGroup, duplicateReviews, exportDateStamp, formatExactDate,
   formatLooseDate, groupBySupplier, pendingReviews, projectDossierTable,
-  projectExportPhotos, reviewAlert, type ThingInput,
+  projectExportPhotos, reviewAlert, reviewGroups, type ThingInput,
 } from '@snag/supabase-queries';
-import { getFileUrl, getFileUrls, setInvoiceReviewRooms, updateInvoiceReview } from '../lib/supabase';
+import {
+  filePaperwork, setFileTags, getFileUrl, getFileUrls, rereadInvoiceReview, setInvoiceReviewRooms, updateInvoiceReview,
+} from '../lib/supabase';
 import { describeRooms } from '../components/RoomSplit';
 import { openUrl } from '../lib/openUrl';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
@@ -117,6 +121,8 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [reviewSheetOpen, setReviewSheetOpen] = useState(false);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [checking, setChecking] = useState<InvoiceReview | null>(null);
+  const [filing, setFiling] = useState<InvoiceReview | null>(null);
+  const [rereadingId, setRereadingId] = useState<string | null>(null);
   const [emailOpen, setEmailOpen] = useState(false);
   const [payingId, setPayingId] = useState<string | null>(null);
   const [foldedPayees, setFoldedPayees] = useState<Set<string>>(() => new Set());
@@ -199,6 +205,21 @@ export default function ProjectDetailScreen({ route }: Props) {
     },
     [page, changed, showToast]
   );
+
+  // *Read again*: a card that came in blank, read as if it had just arrived.
+  // It can come back as several — one per paper the email carried.
+  const reread = useCallback(async (review: InvoiceReview) => {
+    if (rereadingId) return;
+    setRereadingId(review.id);
+    try {
+      const { cards } = await rereadInvoiceReview(review.id);
+      await changed(cards > 1 ? `Read — that email held ${cards} papers` : 'Read — check it before you allocate it');
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Couldn’t read that one just now');
+    } finally {
+      if (alive.current) setRereadingId(null);
+    }
+  }, [rereadingId, changed, showToast]);
 
   const openFile = useCallback(async (path: string) => {
     const url = await getFileUrl(path);
@@ -410,35 +431,57 @@ export default function ProjectDetailScreen({ route }: Props) {
         {reviews.length > 0 ? (
           <View style={groupedStyles.block}>
             <SectionTitle title={reviewAlert(page.invoiceReviews) ?? 'Bills waiting'} />
-            {reviews.map((review) => {
-              const twin = duplicates.get(review.id);
-              return (
-              <InvoiceReviewCard
-                key={review.id}
-                review={review}
-                busy={decidingId === review.id}
-                duplicate={
-                  twin?.quote ? describeDuplicate(twin.quote, 'on the job')
-                    : twin?.review ? describeDuplicate(billFactsOfReview(twin.review), 'waiting')
-                      : null
-                }
-                onOpenDuplicate={twin?.quote ? () => setOpenPrice(twin.quote!.id) : undefined}
-                onEdit={() => setChecking(review)}
-                onOpenFile={openFile}
-                landsOn={
-                  review.roomIds.length > 0
-                    ? describeRooms(review.roomIds, review.roomAmounts, review.amount, elements)
-                    : elements.find((e) => e.id === review.elementId && !e.implicit)?.name ?? 'Whole job'
-                }
-                onApprove={() => rule(
-                  review,
-                  () => approveInvoiceReview(review.id),
-                  review.paid && review.amount !== null ? 'Added, and recorded as paid' : 'Added to the job',
-                )}
-                onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — it’s under the bell')}
-              />
-              );
-            })}
+            {reviewGroups(reviews).map((group) => (
+              <View key={group.key} style={styles.emailGroup}>
+                {/*
+                  One email, several papers. The line above them says so and
+                  counts them, so what was forwarded can be checked against what
+                  arrived: five papers sent, five cards here.
+                */}
+                {group.reviews.length > 1 ? (
+                  <Text style={groupedStyles.caption} numberOfLines={2}>
+                    {[group.subject ?? 'One email', describeEmailGroup(group.reviews)].join(' — ')}
+                  </Text>
+                ) : null}
+                {group.reviews.map((review) => {
+                  const twin = duplicates.get(review.id);
+                  const paperwork = review.kind === 'paperwork';
+                  return (
+                  <InvoiceReviewCard
+                    key={review.id}
+                    review={review}
+                    busy={decidingId === review.id}
+                    rereading={rereadingId === review.id}
+                    onReread={() => reread(review)}
+                    duplicate={
+                      twin?.quote ? describeDuplicate(twin.quote, 'on the job')
+                        : twin?.review ? describeDuplicate(billFactsOfReview(twin.review), 'waiting')
+                          : null
+                    }
+                    onOpenDuplicate={twin?.quote ? () => setOpenPrice(twin.quote!.id) : undefined}
+                    onEdit={() => setChecking(review)}
+                    onOpenFile={openFile}
+                    landsOn={
+                      paperwork ? null
+                        : review.roomIds.length > 0
+                          ? describeRooms(review.roomIds, review.roomAmounts, review.amount, elements)
+                          : elements.find((e) => e.id === review.elementId && !e.implicit)?.name ?? 'Whole job'
+                    }
+                    onApprove={() => (paperwork
+                      ? setFiling(review)
+                      : rule(
+                        review,
+                        () => approveInvoiceReview(review.id),
+                        review.kind === 'quote'
+                          ? 'Added as a quote — nothing’s agreed yet'
+                          : review.paid && review.amount !== null ? 'Added, and recorded as paid' : 'Added to the job',
+                      ))}
+                    onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — it’s under the bell')}
+                  />
+                  );
+                })}
+              </View>
+            ))}
           </View>
         ) : null}
 
@@ -663,9 +706,19 @@ export default function ProjectDetailScreen({ route }: Props) {
 
         {/* ── documents ────────────────────────────────────────────────── */}
         <View style={groupedStyles.block}>
+          <TaggedFiles files={page.files} tags={page.fileTags} />
           <SectionTitle title="Documents" count={page.files.length || undefined} />
           <View style={styles.docs}>
             <Attachments
+              tags={page.fileTags}
+              onTag={async (path, tag) => {
+                try {
+                  await setFileTags([path], tag);
+                  await changed(tag ? 'Tagged' : 'Tag removed');
+                } catch (err: unknown) {
+                  showToast(err instanceof Error ? err.message : 'That tag didn’t save');
+                }
+              }}
               householdId={household.id}
               photoPaths={project.photoPaths}
               documentPaths={project.documentPaths}
@@ -718,6 +771,22 @@ export default function ProjectDetailScreen({ route }: Props) {
         }}
       />
 
+      <FilePaperworkSheet
+        review={filing}
+        quotes={quotes}
+        elements={elements}
+        onClose={() => setFiling(null)}
+        onFile={async (where, tag) => {
+          if (!filing) return;
+          await filePaperwork(filing.id, where);
+          // Filed first: a tag on a file nothing yet holds would name a file
+          // nobody can see. Its PDFs only — a photo of the deck is not a
+          // certificate, whatever the paper beside it was.
+          if (tag) await setFileTags(filing.documentPaths, tag);
+          await changed('Filed with the job’s paperwork');
+        }}
+      />
+
       <ThingSheet
         visible={thing !== null && money === null}
         item={thing}
@@ -747,6 +816,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         locations={locations}
         quoteRooms={page.quoteRooms}
         onAddRoom={addRoomToJob}
+        fileTags={page.fileTags}
       />
 
       <RoomSheet
@@ -984,6 +1054,7 @@ export function describeWhatGoes(element: ProjectElement): string {
 }
 
 const styles = StyleSheet.create({
+  emailGroup: { gap: Spacing.sm + 2 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
   nav: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

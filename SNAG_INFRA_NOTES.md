@@ -186,8 +186,11 @@ call rather than a tidy-up. Not done.
 ### Edge functions the home app uses
 
 `read-label` (JWT on) reads a photographed rating plate or paint tin; `inbound-bill` (JWT **off**,
-Svix-signed) files bills emailed to a project. Their source is in `supabase/functions/`, and both
-share `read-label/gemini.ts` for the model plumbing.
+Svix-signed) files bills emailed to a project, one card per paper; `reread-bill` (JWT on) is the
+*Read again* button on a card that came in blank. Their source is in `supabase/functions/`. All
+three share `read-label/gemini.ts` for the model plumbing, and the two bill functions share
+`inbound-bill/bill.ts` and `inbound-bill/read.ts`, so a card read again comes out as it would have
+the first time. **Deploy both bill functions together** whenever either shared file changes.
 
 ### Edge functions — the five below belong to the retired product, and are to be deleted
 
@@ -291,6 +294,23 @@ one-command check that it is deployed and refusing strangers.
 
 To test end to end: open a project, *+* → *Email it in instead*, copy the address, and forward a
 bill to it **from the address you sign in with**. Anything else is logged and dropped.
+
+**One card per paper** (`20260924120000`). The order is the usual one, and the migration is safe to
+apply first: `file_emailed_bill`'s new arguments all have defaults, so the function deployed before
+it keeps filing one invoice card per email until it is redeployed.
+
+1. Apply `20260924120000_one_card_per_paper.sql`, and check it with
+   `supabase/tests/emailed_papers.sql` against a local stack.
+2. `supabase functions deploy inbound-bill --no-verify-jwt` and `supabase functions deploy reread-bill`
+   (JWT on). `reread-bill` uses the secrets already set: `GEMINI_API_KEY`, and
+   `RESEND_INBOUND_API_KEY` to give the reading the email's words again (optional).
+3. Forward an email with several attachments and check a card arrives for each paper, then merge.
+
+*Read again* counts against the household's fifty model reads a day, the ceiling label reading
+keeps (`home.claim_label_read`), one per paper. The inbound function's cards count against the
+fifty emailed cards a day in `file_emailed_bill` — one per paper, so an email of ten spends ten.
+If a card came in blank, the function's log line says why: `models busy`, or `GEMINI_API_KEY
+missing or refused`.
 
 The sender must be on a verified domain. `onboarding@resend.dev` delivers only to the Resend
 account's own address and rejects everything else with a 403 that nothing surfaces.

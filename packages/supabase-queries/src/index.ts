@@ -50,6 +50,7 @@ import type {
   Project,
   ProjectAllowanceKind,
   InvoiceReview,
+  InvoiceReviewKind,
   ProjectBill,
   ProjectElement,
   ProjectExpectedCost,
@@ -70,8 +71,11 @@ import type {
   ProjectStatus,
   ProjectSupplierTotals,
   ProjectTotals,
+  FileTag,
+  FileTags,
 } from '@snag/shared-types';
 import {
+  FILE_TAGS,
   ROOM_SUGGESTIONS,
   STATUS_LABELS,
   THING_KIND_LABELS,
@@ -3454,6 +3458,9 @@ function mapInvoiceReview(row: Row): InvoiceReview {
   return {
     id: row.id,
     projectId: row.project_id,
+    kind: row.kind === 'quote' || row.kind === 'paperwork' ? row.kind : 'invoice',
+    addressedTo: row.addressed_to ?? null,
+    sourcePart: typeof row.source_part === 'number' ? row.source_part : 0,
     elementId: row.element_id ?? null,
     supplier: row.supplier ?? null,
     detail: row.detail ?? null,
@@ -4357,6 +4364,8 @@ export interface ProjectPage extends ProjectContents {
    * somebody is pressing something else.
    */
   invoiceReviews: InvoiceReview[];
+  /** What each of the project's files has been tagged as, by storage path. */
+  fileTags: FileTags;
 }
 
 /**
@@ -4410,7 +4419,34 @@ export async function getProjectPage(
     things: (page.things ?? []).map(mapThing),
     snags: (page.snags ?? []).map(mapSnag),
     invoiceReviews: (page.invoiceReviews ?? []).map(mapInvoiceReview),
+    fileTags: mapFileTags(page.fileTags),
   };
+}
+
+/** Keeps only tags this app knows, so a value added later is untagged rather than mislabelled. */
+function mapFileTags(raw: unknown): FileTags {
+  const tags: FileTags = {};
+  if (!raw || typeof raw !== 'object') return tags;
+  for (const [path, tag] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof tag === 'string' && (FILE_TAGS as string[]).includes(tag)) tags[path] = tag as FileTag;
+  }
+  return tags;
+}
+
+/**
+ * Tags several files at once, or untags them with `null`.
+ *
+ * Several because filing an emailed paper tags every PDF it carried in one
+ * gesture. The server checks each file's household folder against the caller.
+ */
+export async function setFileTags(
+  client: SupabaseClient,
+  paths: string[],
+  tag: FileTag | null
+): Promise<void> {
+  if (paths.length === 0) return;
+  const { error } = await client.rpc('set_file_tags', { p_paths: paths, p_tag: tag });
+  if (error) throw new Error(error.message || "That tag didn't save");
 }
 
 
@@ -5711,6 +5747,8 @@ const INVOICE_REVIEW_CLEARABLE: Record<string, string> = {
  * an amount is saying they no longer know it.
  */
 export interface InvoiceReviewUpdate {
+  /** A bill, a quote or paperwork. Answering it clears the *guessed* mark. */
+  kind?: InvoiceReviewKind;
   supplier?: string | null;
   detail?: string | null;
   amount?: number | null;
@@ -5745,6 +5783,7 @@ export async function updateInvoiceReview(
     p_paid_on: update.paidOn ?? null,
     p_category: update.category ?? null,
     p_clear: clear,
+    p_kind: update.kind ?? null,
   });
   return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
 }
@@ -5813,6 +5852,57 @@ export async function setQuoteRooms(
   });
   if (error) throw asError(error, "That didn’t save");
   return ((data ?? []) as Row[]).map(mapQuoteRoom);
+}
+
+/**
+ * Where a piece of paperwork goes: onto a bill already on the job, onto a part
+ * of it, or — with neither — onto the job itself.
+ *
+ * Its files join that row's own, so they roll up into the project's files
+ * exactly as one attached by hand does, and **no figure moves**: a certificate
+ * of compliance is not a price, and a subcontractor's bill made out to the
+ * builder is already inside the builder's. The server refuses anything that is
+ * not paperwork, so a bill cannot be filed away by mistake.
+ */
+export async function filePaperwork(
+  client: SupabaseClient,
+  reviewId: string,
+  where: { quoteId?: string | null; elementId?: string | null }
+): Promise<InvoiceReview> {
+  const { data, error } = await client.rpc('file_review_paperwork', {
+    p_review_id: reviewId,
+    p_quote_id: where.quoteId ?? null,
+    p_element_id: where.quoteId ? null : where.elementId ?? null,
+  });
+  return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t file"));
+}
+
+/**
+ * *Read again* — a card that came in blank, read as if the email had just
+ * arrived. It may come back as several cards: an email of four PDFs and a
+ * photo is four or five. The function says in words why nothing changed, when
+ * nothing did: busy, not set up, or nothing readable.
+ */
+export async function rereadInvoiceReview(
+  client: SupabaseClient,
+  reviewId: string
+): Promise<{ cards: number }> {
+  const { data, error } = await client.functions.invoke('reread-bill', { body: { reviewId } });
+  if (error) {
+    let words: string | null = null;
+    const context = (error as { context?: unknown }).context;
+    if (context && typeof (context as Response).json === 'function') {
+      try {
+        const body = await (context as Response).json();
+        words = typeof body?.error === 'string' ? body.error : null;
+      } catch {
+        words = null;
+      }
+    }
+    throw new Error(words ?? "Couldn't read that one just now");
+  }
+  const cards = typeof data?.cards === 'number' ? data.cards : 1;
+  return { cards };
 }
 
 /** No — it leaves the deck, and it is still there to be put back. */
@@ -5887,12 +5977,20 @@ export function reviewAlert(reviews: InvoiceReview[]): string | null {
 export function invoiceReviewHeadline(review: InvoiceReview): string {
   const supplier = review.supplier?.trim();
   const number = review.invoiceNumber?.trim();
+  // Paperwork is named by what it is: "Good Connection · Certificate of
+  // compliance" says more than a certificate number ever will.
+  const detail = review.kind === 'paperwork' ? review.detail?.trim() : null;
+  if (supplier && detail) return `${supplier} · ${detail}`;
   if (supplier && number) return `${supplier} · ${number}`;
   if (supplier) return supplier;
+  if (detail) return detail;
   if (number) return number;
+  // One email can carry several papers, and a card nobody could read shares
+  // its subject with the rest — so its own file's name comes first.
+  if (review.documentPaths.length === 1) return documentName(review.documentPaths[0]);
   const subject = review.sourceSubject?.trim();
   if (subject) return subject;
-  return 'An invoice';
+  return review.kind === 'paperwork' ? 'Paperwork' : review.kind === 'quote' ? 'A quote' : 'An invoice';
 }
 
 /** Where a project's bills are emailed: `<token>@` this. See `supabase/functions/inbound-bill`. */
@@ -5967,3 +6065,4 @@ export function describeDuplicate(
 export * from './summary';
 export * from './duplicates';
 export * from './split';
+export * from './papers';

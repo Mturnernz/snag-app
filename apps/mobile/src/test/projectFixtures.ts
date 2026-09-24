@@ -74,7 +74,7 @@ export const bill = (over: any = {}): any => ({
 export const page = (over: any = {}): any => ({
   project: project(), elements: [element()], items: [], quotes: [], lines: [],
   payments: [], milestones: [], expected: [], expectedCostLines: [], bills: [],
-  suppliers: [], files: [], things: [], snags: [], invoiceReviews: [], quoteRooms: [], ...over,
+  suppliers: [], files: [], things: [], snags: [], invoiceReviews: [], quoteRooms: [], fileTags: {}, ...over,
 });
 
 /**

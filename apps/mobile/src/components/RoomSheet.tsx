@@ -5,7 +5,7 @@ import Sheet from './Sheet';
 import { AddRow, Group, Row, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { formatMoney, inclGst, isUndecided } from '../lib/supabase';
-import { formatExactDate, groupBySupplier } from '@snag/supabase-queries';
+import { formatExactDate, groupBySupplier, isInsideAnotherBill } from '@snag/supabase-queries';
 import type { ProjectExpectedCost, ProjectItem, ProjectQuote, ProjectQuoteRoom } from '../types';
 import type { RoomRow } from '../lib/supabase';
 
@@ -61,8 +61,9 @@ export default function RoomSheet({
   );
   const prices = quotes.filter((q) =>
     room.elementId ? q.elementId === room.elementId || shares.has(q.id) : q.projectId !== null)
-    // A progress bill is shown under the price it is part of, not beside it.
-    .filter((q) => q.againstQuoteId === null);
+    // A progress bill is shown under the price it is part of, not beside it,
+    // and a bill inside another bill under the bill it is inside.
+    .filter((q) => q.againstQuoteId === null && !isInsideAnotherBill(q));
   const expecting = expected.filter((x) =>
     x.settledBy === null && (room.elementId ? x.elementId === room.elementId : x.elementId === null));
 

@@ -5,11 +5,13 @@ import * as DocumentPicker from 'expo-document-picker';
 import { openUrl } from '../lib/openUrl';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { documentFileName, documentName } from '@snag/supabase-queries';
+import { FILE_TAG_LABELS, type FileTag, type FileTags } from '@snag/shared-types';
 import { getFileUrl, getFileUrls, uploadFile } from '../lib/supabase';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import { showAlert } from '../lib/alert';
 import Icon from './Icon';
 import PhotoViewer from './PhotoViewer';
+import FileTagChips from './FileTagChips';
 
 interface Props {
   householdId: string;
@@ -27,6 +29,13 @@ interface Props {
   /** What this level calls itself, for the empty line: "Nothing on the bathroom yet". */
   emptyLabel?: string;
   disabled?: boolean;
+  /**
+   * What each document has been tagged as. With `onTag`, every document row
+   * carries a tag pill; without, documents are listed as they always were.
+   */
+  tags?: FileTags;
+  /** Tags one document, or untags it with `null`. The caller owns the write. */
+  onTag?: (path: string, tag: FileTag | null) => Promise<void>;
 }
 
 function failureReason(err: unknown): string {
@@ -73,7 +82,10 @@ export default function Attachments({
   onChange,
   emptyLabel,
   disabled = false,
+  tags,
+  onTag,
 }: Props) {
+  const [tagging, setTagging] = useState<string | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [viewerAt, setViewerAt] = useState<number | null>(null);
@@ -204,35 +216,69 @@ export default function Attachments({
         </ScrollView>
       ) : null}
 
-      {documentPaths.map((path) => (
-        <View key={path} style={styles.doc}>
-          <Pressable
-            onPress={() => openDocument(path)}
-            style={styles.docOpen}
-            accessibilityRole="button"
-            accessibilityLabel={`Open ${documentName(path)}`}
-          >
-            <Icon name="document-text-outline" size="sm" color={Colors.textSecondary} />
-            <Text style={styles.docName} numberOfLines={2}>
-              {documentName(path)}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() =>
-              onChange(
-                { documentPaths: documentPaths.filter((p) => p !== path) },
-                'Document removed'
-              )
-            }
-            style={styles.docRemove}
-            disabled={disabled}
-            accessibilityRole="button"
-            accessibilityLabel={`Remove ${documentName(path)}`}
-          >
-            <Icon name="close" size="sm" color={Colors.textMuted} />
-          </Pressable>
-        </View>
-      ))}
+      {documentPaths.map((path) => {
+        const tag = tags?.[path] ?? null;
+        return (
+          <View key={path}>
+            <View style={styles.doc}>
+              <Pressable
+                onPress={() => openDocument(path)}
+                style={styles.docOpen}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${documentName(path)}`}
+              >
+                <Icon name="document-text-outline" size="sm" color={Colors.textSecondary} />
+                <Text style={styles.docName} numberOfLines={2}>
+                  {documentName(path)}
+                </Text>
+              </Pressable>
+              {/* The tag, the door and the × are siblings, never nested. */}
+              {onTag ? (
+                <Pressable
+                  onPress={() => setTagging(tagging === path ? null : path)}
+                  disabled={disabled}
+                  style={styles.tagTap}
+                  accessibilityRole="button"
+                  accessibilityLabel={tag ? `${FILE_TAG_LABELS[tag]} — change what ${documentName(path)} is` : `Say what ${documentName(path)} is`}
+                  accessibilityState={{ expanded: tagging === path }}
+                >
+                  <View style={[styles.tagPill, tag ? null : styles.tagPillEmpty]}>
+                    <Text style={[styles.tagLabel, tag ? null : styles.tagLabelEmpty]} numberOfLines={1}>
+                      {tag ? FILE_TAG_LABELS[tag] : 'Tag'}
+                    </Text>
+                  </View>
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={() =>
+                  onChange(
+                    { documentPaths: documentPaths.filter((p) => p !== path) },
+                    'Document removed'
+                  )
+                }
+                style={styles.docRemove}
+                disabled={disabled}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${documentName(path)}`}
+              >
+                <Icon name="close" size="sm" color={Colors.textMuted} />
+              </Pressable>
+            </View>
+            {onTag && tagging === path ? (
+              <View style={styles.tagChoices}>
+                <FileTagChips
+                  value={tag}
+                  accessibilityLabel={`What ${documentName(path)} is`}
+                  onChange={(next) => {
+                    setTagging(null);
+                    onTag(path, next);
+                  }}
+                />
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
 
       {unsigned > 0 ? (
         <Text style={styles.unsigned}>
@@ -331,6 +377,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  tagTap: {
+    minHeight: MIN_TOUCH_TARGET,
+    maxWidth: 170,
+    justifyContent: 'center',
+    paddingLeft: Spacing.xs,
+  },
+  // The app's one chip shape: a sunken well, no border. A tag is a fact about
+  // the file, so it stays neutral — no hue is spent on what a file is.
+  tagPill: {
+    height: 28,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    justifyContent: 'center',
+    backgroundColor: Colors.sunken,
+  },
+  tagPillEmpty: { backgroundColor: 'transparent', borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.border },
+  tagLabel: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textSecondary },
+  tagLabelEmpty: { color: Colors.textMuted },
+  tagChoices: { paddingBottom: Spacing.sm },
   empty: {
     fontSize: Typography.sm,
     color: Colors.textMuted,

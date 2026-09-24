@@ -119,3 +119,16 @@ describe('describeSupplierGroup', () => {
       .toEqual({ subtitle: '2 quotes', value: null });
   });
 });
+
+// A bill inside another bill is listed under that bill, the way a progress
+// claim is listed under its contract — never beside it, where it would read as
+// a second thing owed.
+describe('a bill inside another bill', () => {
+  it('is left off the list, with the bill it is inside still on it', () => {
+    const builder = quote({ id: 'rb', projectId: 'p1', kind: 'invoice', supplier: 'RELIABUILDER LIMITED', amount: 5587.85, unpaid: 5587.85 });
+    const plumber = quote({ id: 'fp', projectId: 'p1', kind: 'invoice', supplier: 'Force Plumbing', amount: 1138.71, unpaid: 1138.71, billedThroughId: 'rb' });
+    const r = arrange([builder, plumber]);
+    r.getByText('RELIABUILDER LIMITED');
+    expect(r.queryByText('Force Plumbing')).toBeNull();
+  });
+});

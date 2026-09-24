@@ -8,15 +8,17 @@ import DateField from './DateField';
 import Attachments from './Attachments';
 import ConfirmDialog from './ConfirmDialog';
 import RoomSplit, { describeRooms, resolveSplit, splitValueFrom, type RoomSplitValue } from './RoomSplit';
-import { Group, PrimaryButton, Row, Segmented, TextButton, groupedStyles } from './Grouped';
+import { Group, PrimaryButton, RadioRow, Row, Segmented, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   addPayment, deletePayment, deleteQuote, deleteStoredFiles, formatMoney, payBill,
-  setQuoteRooms, setQuoteStatus, updateQuote,
+  setFileTags, setQuoteRooms, setQuoteStatus, updateQuote,
 } from '../lib/supabase';
-import { dayKey, formatDayFirst, formatExactDate, inclGst, parseLooseDate } from '@snag/supabase-queries';
+import {
+  billHosts, billsInside, dayKey, formatDayFirst, formatExactDate, inclGst, isInsideAnotherBill, parseLooseDate,
+} from '@snag/supabase-queries';
 import type {
-  Location, ProjectElement, ProjectPayment, ProjectQuote, ProjectQuoteLine, ProjectQuoteRoom,
+  FileTags, Location, ProjectElement, ProjectPayment, ProjectQuote, ProjectQuoteLine, ProjectQuoteRoom,
 } from '../types';
 
 interface Props {
@@ -37,6 +39,8 @@ interface Props {
   quoteRooms: ProjectQuoteRoom[];
   /** Adds a room to the job, answering with its element id or null. */
   onAddRoom: (name: string) => Promise<string | null>;
+  /** What each file on the job has been tagged as. */
+  fileTags?: FileTags;
 }
 
 const parseAmount = (text: string): number | null => {
@@ -62,12 +66,21 @@ const parseAmount = (text: string): number | null => {
  * rooms and — if anybody knows — how it splits, which is what the room
  * breakdown reads. A price on one room already says so; a claim follows its
  * contract, so it is the contract that is shared.
+ *
+ * **A bill can be inside another bill.** A plumber's variation made out to the
+ * builder is already in the builder's invoice; recorded as its own bill the
+ * same money counts twice. *Part of another bill?* points it at the one it is
+ * inside (`billed_through_id`), which the views already read as passed
+ * through: it leaves Agreed, To pay and the supplier rows, keeps its figure
+ * and its paper, and the builder's bill lists it under *Includes*. It says
+ * which bill, never merely "ignored" — a figure that stops counting says why.
  */
 export default function PriceSheet({
   visible, quote, householdId, quotes, payments, lines, onClose, onChanged,
-  onOpenBuildUp, onOpenSchedule, onOpen, elements, locations, quoteRooms, onAddRoom,
+  onOpenBuildUp, onOpenSchedule, onOpen, elements, locations, quoteRooms, onAddRoom, fileTags,
 }: Props) {
   const [editing, setEditing] = useState(false);
+  const [placing, setPlacing] = useState(false);
   const [rooming, setRooming] = useState(false);
   const [rooms, setRooms] = useState<RoomSplitValue>({ ids: [], kind: 'even', typed: {} });
   const [roomError, setRoomError] = useState<string | null>(null);
@@ -85,6 +98,7 @@ export default function PriceSheet({
   useEffect(() => {
     if (!visible || !quote) return;
     setEditing(false);
+    setPlacing(false);
     setRooming(false);
     setRoomError(null);
     setPaying(false);
@@ -100,6 +114,15 @@ export default function PriceSheet({
   if (!quote) return null;
 
   const isBill = quote.kind === 'invoice';
+  const inside = isInsideAnotherBill(quote);
+  const host = inside ? quotes.find((q) => q.id === quote.billedThroughId) ?? null : null;
+  const hosts = billHosts(quote, quotes);
+  const holds = billsInside(quote, quotes);
+  // Only a bill of its own can be put inside another: a claim counts through
+  // its contract already, and a price answering a set-aside uses the same link
+  // for the builder's contract, which the thing's own sheet decides.
+  const canPlace = isBill && quote.againstQuoteId === null && quote.supersedesLineId === null
+    && (inside || (hosts.length > 0 && holds.length === 0));
   const mine = payments.filter((p) => p.quoteId === quote.id);
   const unpaid = quote.unpaid ?? 0;
   const contract = quote.againstQuoteId ? quotes.find((q) => q.id === quote.againstQuoteId) ?? null : null;
@@ -155,19 +178,23 @@ export default function PriceSheet({
     }), 'Saved').then(() => setEditing(false));
   }
 
-  const status = !isBill
+  const hostName = (q: ProjectQuote) => [q.supplier ?? 'No supplier', q.invoiceNumber].filter(Boolean).join(' · ');
+
+  const status = inside ? 'Inside another bill' : !isBill
     ? quote.status === 'accepted' ? 'Agreed' : quote.status === 'declined' ? 'Turned down' : 'Not agreed yet'
     : unpaid <= 0 ? 'Paid'
       : overdue ? `Overdue since ${formatExactDate(quote.dueOn)}`
         : quote.dueOn ? `Due ${formatExactDate(quote.dueOn)}`
           : mine.length > 0 ? 'Part paid' : 'To pay';
-  const tone = !isBill ? 'neutral' : unpaid <= 0 ? 'neutral' : overdue ? 'overdue' : 'due';
+  const tone = inside || !isBill ? 'neutral' : unpaid <= 0 ? 'neutral' : overdue ? 'overdue' : 'due';
 
-  const footer = rooming
+  const footer = placing
+    ? null
+    : rooming
     ? <PrimaryButton label="Save" onPress={saveRooms} busy={busy} />
     : editing
     ? <PrimaryButton label="Save" onPress={saveEdit} busy={busy} />
-    : isBill && unpaid > 0 && !paying
+    : isBill && !inside && unpaid > 0 && !paying
       ? (
         <>
           <PrimaryButton
@@ -199,13 +226,42 @@ export default function PriceSheet({
     <>
       <Sheet
         visible={visible && !confirmDelete}
-        title={rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'A bill' : 'A price')}
+        title={placing ? 'Part of another bill?' : rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'A bill' : 'A price')}
         subtitle={editing ? null : quote.supplier}
-        onClose={rooming ? () => setRooming(false) : editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
-        closeLabel={rooming || editing || paying ? 'Cancel' : 'Done'}
+        onClose={placing ? () => setPlacing(false) : rooming ? () => setRooming(false) : editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
+        closeLabel={placing || rooming || editing || paying ? 'Cancel' : 'Done'}
         footer={footer}
       >
-        {rooming ? (
+        {placing ? (
+          <>
+            <Group>
+              <RadioRow
+                title="No — we pay this one"
+                selected={!inside}
+                onPress={() => {
+                  if (!inside) { setPlacing(false); return; }
+                  run(() => updateQuote(quote.id, { billedThroughId: null }), 'Counted on its own').then(() => setPlacing(false));
+                }}
+              />
+            </Group>
+            <Text style={styles.heading}>Inside</Text>
+            <Group>
+              {hosts.map((q) => (
+                <RadioRow
+                  key={q.id}
+                  title={hostName(q)}
+                  subtitle={[q.kind === 'invoice' ? 'Bill' : 'Agreed price', formatMoney(q.amountIncl), q.dated ? formatExactDate(q.dated) : null]
+                    .filter(Boolean).join(' · ')}
+                  selected={quote.billedThroughId === q.id}
+                  onPress={() => {
+                    if (quote.billedThroughId === q.id) { setPlacing(false); return; }
+                    run(() => updateQuote(quote.id, { billedThroughId: q.id }), 'Counted inside that bill').then(() => setPlacing(false));
+                  }}
+                />
+              ))}
+            </Group>
+          </>
+        ) : rooming ? (
           <>
             <RoomSplit
               elements={elements}
@@ -275,6 +331,13 @@ export default function PriceSheet({
               {isBill && unpaid > 0 && mine.length > 0 ? <Row title="Still to pay" value={formatMoney(unpaid)} bold /> : null}
               {isBill && quote.invoiceNumber ? <Row title="Invoice" value={quote.invoiceNumber} tone="muted" /> : null}
               {isBill && quote.dueOn ? <Row title="Due" value={formatExactDate(quote.dueOn)} tone="muted" /> : null}
+              {canPlace ? (
+                <Row
+                  title="Part of another bill?"
+                  subtitle={host ? `Inside ${hostName(host)} — not counted on its own` : 'No — we pay this one'}
+                  onPress={() => setPlacing(true)}
+                />
+              ) : null}
               {contract ? (
                 <Row title="Part of" value={contract.detail ?? 'Agreed price'} tone="muted" onPress={() => onOpen(contract)} />
               ) : null}
@@ -308,6 +371,30 @@ export default function PriceSheet({
               ) : null}
               <Row title="Recorded" value={formatExactDate(dayKey(quote.createdAt))} tone="muted" />
             </Group>
+
+            {holds.length > 0 ? (
+              <View style={groupedStyles.block}>
+                <Text style={styles.heading}>Includes</Text>
+                <Group>
+                  {holds.map((inner) => (
+                    <Row
+                      key={inner.id}
+                      title={inner.supplier ?? 'No supplier'}
+                      subtitle={inner.invoiceNumber ?? inner.detail}
+                      value={formatMoney(inner.amountIncl)}
+                      onPress={() => onOpen(inner)}
+                    />
+                  ))}
+                  {quote.amountIncl !== null ? (
+                    <Row
+                      title="The rest of this bill"
+                      value={formatMoney(Math.round((quote.amountIncl - holds.reduce((t, q) => t + (q.amountIncl ?? 0), 0)) * 100) / 100)}
+                      tone="muted"
+                    />
+                  ) : null}
+                </Group>
+              </View>
+            ) : null}
 
             {claims.length > 0 ? (
               <View style={groupedStyles.block}>
@@ -367,6 +454,8 @@ export default function PriceSheet({
                   photoPaths={quote.photoPaths}
                   documentPaths={quote.documentPaths}
                   onChange={async (next, toast) => { await run(() => updateQuote(quote.id, next), toast); }}
+                  tags={fileTags}
+                  onTag={async (path, tag) => { await run(() => setFileTags([path], tag), tag ? 'Tagged' : 'Tag removed'); }}
                 />
               </View>
             </Group>

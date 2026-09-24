@@ -228,6 +228,42 @@ Because `auth.users` sits outside both schemas, none of this needed touching:
   `redirectTo`, so it falls back to the Site URL and can sign someone in without asking for a new
   password.
 
+### The staff portal — Google sign-in, a staff list, and one email
+
+`www.snaghq.co.nz/staff` is where SnagHQ employees answer questions households ask about a job
+(`20260925090000`; *The staff portal* in `CLAUDE.md`). None of what makes it work is in git, and
+the order matters — **apply the migration first**, then:
+
+1. **Google as an Auth provider.** A Google Cloud OAuth client (Web application) in the
+   snaghq.co.nz Workspace, with the authorised redirect URI
+   `https://wpkdpukpllxuyqqlxkxf.supabase.co/auth/v1/callback`. Its client id and secret go in
+   Supabase → Auth → Providers → Google. Setting the OAuth consent screen to **Internal** keeps
+   anybody outside the Workspace from getting past Google at all; the staff list is the check
+   either way.
+2. **Redirect allow-list** — add `https://www.snaghq.co.nz/staff/auth/callback` (and
+   `http://localhost:3000/staff/auth/callback` for local work). Missing, the sign-in lands on the
+   Site URL and never reaches the portal, with nothing said.
+3. **Who is staff** — by hand, one row per employee, after they have signed in once so their
+   `auth.users` row exists:
+
+   ```sql
+   insert into home.staff (user_id, display_name, email)
+   select id, 'Sam', lower(email) from auth.users where email = 'sam@snaghq.co.nz';
+   ```
+
+   `home.is_staff()` also wants the token's email to match and the account to have Google as a
+   provider, so an email-and-password account with a snaghq.co.nz address is not staff. Somebody
+   leaving is `update home.staff set active = false` — never a delete: their name is on every
+   reply and log entry they wrote.
+4. **The reply email** — `RESEND_API_KEY` (a **sending-only** key) and optionally
+   `SUPPORT_EMAIL_FROM` as environment variables on the **web** Netlify site, not as function
+   secrets: the portal sends from a Next server action. The from address (default
+   `help@snaghq.co.nz`) has to be on a domain verified for sending in Resend. Without the key,
+   replies still save and the portal says they were not emailed.
+
+Checking it: a signed-in non-staff account on `/staff` sees *This account isn't on the SnagHQ
+staff list*; and `select home.is_staff()` run as a staff token is `true`.
+
 ### The CI test account needs a household, not just a login
 
 The authenticated mobile specs sign in as the `E2E_EMAIL` / `E2E_PASSWORD` repository secrets and
@@ -252,7 +288,7 @@ where u.email = '<E2E_EMAIL>';
 
 | Host | Serves |
 |---|---|
-| `www.snaghq.co.nz` | `apps/web` — being reduced to the password-reset landing page |
+| `www.snaghq.co.nz` | `apps/web` — the password-reset landing page, and the staff portal at `/staff` |
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the actual app |
 | `snagv1.netlify.app` | redirect to `app.snaghq.co.nz`; must keep resolving (printed QR codes, old notification links) |
 
@@ -260,9 +296,10 @@ Apex redirects to `www`. DNS is Netlify-managed.
 
 ## Resend
 
-One account, three entirely separate paths into it, which fail independently:
+One account, four entirely separate paths into it, which fail independently:
 
-- **HTTP API** — used by `notify-snag` (retired product only).
+- **HTTP API** — used by `notify-snag` (retired product only), and by the staff portal's reply
+  email (a Next server action on the web site; see *The staff portal* above).
 - **SMTP** — used by Supabase Auth for password recovery. This is the one the home app depends on.
 - **Receiving** — `bills.snaghq.co.nz`, a receive-only domain (sending disabled), for bills
   forwarded to a project. Resend posts `email.received` to the `inbound-bill` edge function.

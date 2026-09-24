@@ -142,3 +142,85 @@ describe('projectSummary — without a builder', () => {
     expect(s.bills.map((b) => b.id)).toEqual(['soon', 'later']);
   });
 });
+
+describe('projectSummary — a bill shared between rooms', () => {
+  // Tile Space's $3,000 bill is on the whole job: tiles for the bathroom floor
+  // and the laundry splashback. The views count it once, on the whole job; a
+  // share only says how the room breakdown reads it.
+  const tiles = quote({ id: 'tl', projectId: 'p1', supplier: 'Tile Space', amount: 3000, kind: 'invoice', status: 'accepted' });
+  const shared = (quoteRooms: any[], extra: any[] = [tiles]) => {
+    const base = downstairs();
+    return projectSummary({
+      ...base,
+      project: { ...base.project, committedTotal: base.project.committedTotal + 3000 },
+      quotes: [...base.quotes, ...extra],
+      quoteRooms,
+    });
+  };
+  const byName = (s: ReturnType<typeof projectSummary>) => Object.fromEntries(s.rooms.map((r) => [r.name, r]));
+  const unshared = byName(shared([]));
+
+  it('moves each share out of Whole job onto its room, and the total does not move', () => {
+    const s = shared([
+      { quoteId: 'tl', elementId: 'eB', amount: 2000, sortOrder: 0 },
+      { quoteId: 'tl', elementId: 'eL', amount: 1000, sortOrder: 1 },
+    ]);
+    const rooms = byName(s);
+    expect(rooms.Bathroom.agreed).toBe(unshared.Bathroom.agreed + 2000);
+    expect(rooms.Laundry.agreed).toBe(unshared.Laundry.agreed + 1000);
+    expect(rooms['Whole job'].agreed).toBe(unshared['Whole job'].agreed - 3000);
+    expect(s.expected).toBe(208320 + 3000);
+    expect(s.rooms.reduce((a, r) => a + r.total, 0)).toBe(s.expected);
+    expect(describeRoom(rooms.Bathroom, money)).toBe('$12,000 set aside · 3 to decide · $2,000 of shared bills');
+  });
+
+  it('leaves what a split does not cover on Whole job', () => {
+    const rooms = byName(shared([{ quoteId: 'tl', elementId: 'eB', amount: 1800, sortOrder: 0 }]));
+    expect(rooms.Bathroom.shared).toBe(1800);
+    expect(rooms['Whole job'].agreed).toBe(unshared['Whole job'].agreed - 1800);
+  });
+
+  it('records the rooms without moving money when nobody said how it splits', () => {
+    const rooms = byName(shared([
+      { quoteId: 'tl', elementId: 'eB', amount: null, sortOrder: 0 },
+      { quoteId: 'tl', elementId: 'eL', amount: null, sortOrder: 1 },
+    ]));
+    expect(rooms.Bathroom.agreed).toBe(unshared.Bathroom.agreed);
+    expect(rooms['Whole job'].agreed).toBe(unshared['Whole job'].agreed);
+    expect(rooms.Laundry.sharedCount).toBe(1);
+    expect(describeRoom(rooms.Laundry, money)).toBe('$1,400 over the $8,000 set aside');
+    expect(describeRoom({ ...rooms.Laundry, setAside: null }, money)).toBe('On 1 shared bill');
+  });
+
+  it('shares an ex-GST bill in GST-inclusive dollars, adding up to the cent', () => {
+    const exGst = quote({
+      id: 'tl', projectId: 'p1', supplier: 'Tile Space', amount: 1000, amountInclGst: false,
+      amountIncl: 1150, effectiveAmount: 1150, kind: 'invoice', status: 'accepted',
+    });
+    const s = shared([
+      { quoteId: 'tl', elementId: 'eB', amount: 333.34, sortOrder: 0 },
+      { quoteId: 'tl', elementId: 'eL', amount: 333.33, sortOrder: 1 },
+      { quoteId: 'tl', elementId: 'eX', amount: 333.33, sortOrder: 2 },
+    ], [exGst]);
+    const rooms = byName(s);
+    // eX is not a part of this job, so it holds nothing and its third stays on the job.
+    expect(rooms.Bathroom.shared + rooms.Laundry.shared).toBe(766.67);
+  });
+
+  it('moves nothing for a bill that is a draw on a signed contract, a claim, or declined', () => {
+    const draw = quote({ id: 'rb', projectId: 'p1', supplier: 'ReliaBuilder', amount: 5000, kind: 'invoice' });
+    const claim = quote({ id: 'cl', projectId: 'p1', supplier: 'ReliaBuilder', amount: 5000, kind: 'invoice', againstQuoteId: 'c1' });
+    const declined = quote({ id: 'dq', projectId: 'p1', supplier: 'Tile Depot', amount: 5000, status: 'declined' });
+    const rows = ['rb', 'cl', 'dq'].map((quoteId) => ({ quoteId, elementId: 'eB', amount: 5000, sortOrder: 0 }));
+    const rooms = byName(shared(rows, [tiles, draw, claim, declined]));
+    expect(rooms.Bathroom.shared).toBe(0);
+  });
+
+  it('scales shares that somehow add up to more than the bill back to it', () => {
+    const rooms = byName(shared([
+      { quoteId: 'tl', elementId: 'eB', amount: 3000, sortOrder: 0 },
+      { quoteId: 'tl', elementId: 'eL', amount: 3000, sortOrder: 1 },
+    ]));
+    expect(rooms.Bathroom.shared + rooms.Laundry.shared).toBe(3000);
+  });
+});

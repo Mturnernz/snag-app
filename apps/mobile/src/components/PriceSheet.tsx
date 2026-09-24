@@ -7,14 +7,17 @@ import MoneyField from './MoneyField';
 import DateField from './DateField';
 import Attachments from './Attachments';
 import ConfirmDialog from './ConfirmDialog';
+import RoomSplit, { describeRooms, resolveSplit, splitValueFrom, type RoomSplitValue } from './RoomSplit';
 import { Group, PrimaryButton, Row, Segmented, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   addPayment, deletePayment, deleteQuote, deleteStoredFiles, formatMoney, payBill,
-  setQuoteStatus, updateQuote,
+  setQuoteRooms, setQuoteStatus, updateQuote,
 } from '../lib/supabase';
 import { dayKey, formatDayFirst, formatExactDate, inclGst, parseLooseDate } from '@snag/supabase-queries';
-import type { ProjectPayment, ProjectQuote, ProjectQuoteLine } from '../types';
+import type {
+  Location, ProjectElement, ProjectPayment, ProjectQuote, ProjectQuoteLine, ProjectQuoteRoom,
+} from '../types';
 
 interface Props {
   visible: boolean;
@@ -28,6 +31,12 @@ interface Props {
   onOpenBuildUp: (quote: ProjectQuote) => void;
   onOpenSchedule: (quote: ProjectQuote) => void;
   onOpen: (quote: ProjectQuote) => void;
+  /** The parts of the job, which rooms a price on the whole job can be shared with. */
+  elements: ProjectElement[];
+  locations: Location[];
+  quoteRooms: ProjectQuoteRoom[];
+  /** Adds a room to the job, answering with its element id or null. */
+  onAddRoom: (name: string) => Promise<string | null>;
 }
 
 const parseAmount = (text: string): number | null => {
@@ -46,12 +55,22 @@ const parseAmount = (text: string): number | null => {
  * **Mark as paid writes a payment**, for exactly what is still owing, dated
  * today, the same row a part payment writes. Nothing flips a flag the rollup
  * would then have to trust.
+ *
+ * **A price on the whole job says which rooms it is for.** The tiles that went
+ * on two floors, the builder's contract that covers three rooms: the price
+ * stays on the whole job, where every total reads it, and *Rooms* records which
+ * rooms and — if anybody knows — how it splits, which is what the room
+ * breakdown reads. A price on one room already says so; a claim follows its
+ * contract, so it is the contract that is shared.
  */
 export default function PriceSheet({
   visible, quote, householdId, quotes, payments, lines, onClose, onChanged,
-  onOpenBuildUp, onOpenSchedule, onOpen,
+  onOpenBuildUp, onOpenSchedule, onOpen, elements, locations, quoteRooms, onAddRoom,
 }: Props) {
   const [editing, setEditing] = useState(false);
+  const [rooming, setRooming] = useState(false);
+  const [rooms, setRooms] = useState<RoomSplitValue>({ ids: [], kind: 'even', typed: {} });
+  const [roomError, setRoomError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [partAmount, setPartAmount] = useState('');
   const [supplier, setSupplier] = useState('');
@@ -65,6 +84,8 @@ export default function PriceSheet({
   useEffect(() => {
     if (!visible || !quote) return;
     setEditing(false);
+    setRooming(false);
+    setRoomError(null);
     setPaying(false);
     setPartAmount('');
     setSupplier(quote.supplier ?? '');
@@ -84,6 +105,23 @@ export default function PriceSheet({
   const setAsideCount = lines.filter((l) => l.quoteId === quote.id && l.isAllowance).length;
   const today = dayKey(new Date());
   const overdue = isBill && unpaid > 0 && quote.dueOn !== null && quote.dueOn < today;
+  const shareable = quote.projectId !== null && quote.againstQuoteId === null;
+  const mineRooms = quoteRooms.filter((r) => r.quoteId === quote.id).sort((a, b) => a.sortOrder - b.sortOrder);
+  const roomIds = mineRooms.map((r) => r.elementId);
+  const roomAmounts = mineRooms.some((r) => r.amount === null) ? null : mineRooms.map((r) => r.amount);
+  const onePart = quote.elementId ? elements.find((e) => e.id === quote.elementId && !e.implicit) ?? null : null;
+
+  function openRooms() {
+    setRooms(splitValueFrom(roomIds, roomAmounts, quote!.amount, 1));
+    setRoomError(null);
+    setRooming(true);
+  }
+
+  function saveRooms() {
+    const split = resolveSplit(rooms, quote!.amount, 1);
+    if ('error' in split) { setRoomError(split.error); return; }
+    run(() => setQuoteRooms(quote!.id, split.ids, split.amounts), 'Saved').then(() => setRooming(false));
+  }
 
   async function run(work: () => Promise<unknown>, message: string, close = false) {
     if (busy) return;
@@ -123,7 +161,9 @@ export default function PriceSheet({
           : mine.length > 0 ? 'Part paid' : 'To pay';
   const tone = !isBill ? 'neutral' : unpaid <= 0 ? 'neutral' : overdue ? 'overdue' : 'due';
 
-  const footer = editing
+  const footer = rooming
+    ? <PrimaryButton label="Save" onPress={saveRooms} busy={busy} />
+    : editing
     ? <PrimaryButton label="Save" onPress={saveEdit} busy={busy} />
     : isBill && unpaid > 0 && !paying
       ? (
@@ -157,13 +197,27 @@ export default function PriceSheet({
     <>
       <Sheet
         visible={visible && !confirmDelete}
-        title={editing ? 'Edit' : quote.detail ?? (isBill ? 'A bill' : 'A price')}
+        title={rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'A bill' : 'A price')}
         subtitle={editing ? null : quote.supplier}
-        onClose={editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
-        closeLabel={editing || paying ? 'Cancel' : 'Done'}
+        onClose={rooming ? () => setRooming(false) : editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
+        closeLabel={rooming || editing || paying ? 'Cancel' : 'Done'}
         footer={footer}
       >
-        {editing ? (
+        {rooming ? (
+          <>
+            <RoomSplit
+              elements={elements}
+              locations={locations}
+              value={rooms}
+              onChange={setRooms}
+              total={quote.amount}
+              inclusive={quote.amountInclGst}
+              splitFrom={1}
+              onAddRoom={onAddRoom}
+            />
+            {roomError ? <Text style={styles.error} accessibilityLiveRegion="polite">{roomError}</Text> : null}
+          </>
+        ) : editing ? (
           <Group>
             <View style={styles.field}>
               <TextInput style={styles.input} value={supplier} onChangeText={setSupplier} placeholder="Who it’s from" placeholderTextColor={Colors.textMuted} accessibilityLabel="Who it’s from" />
@@ -235,6 +289,14 @@ export default function PriceSheet({
               ) : null}
               {!isBill && quote.status === 'accepted' ? (
                 <Row title="Payment schedule" onPress={() => onOpenSchedule(quote)} />
+              ) : null}
+              {onePart ? <Row title="Room" value={onePart.name} tone="muted" /> : null}
+              {shareable ? (
+                <Row
+                  title="Rooms"
+                  subtitle={describeRooms(roomIds, roomAmounts, quote.amount, elements)}
+                  onPress={openRooms}
+                />
               ) : null}
               <Row title="Recorded" value={formatExactDate(dayKey(quote.createdAt))} tone="muted" />
             </Group>
@@ -348,4 +410,5 @@ const styles = StyleSheet.create({
   input: { fontSize: Typography.body, color: Colors.textPrimary, minHeight: 32 },
   remove: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },
   actions: { flexDirection: 'row', justifyContent: 'space-between' },
+  error: { fontSize: Typography.sm, color: Colors.danger, paddingHorizontal: 4 },
 });

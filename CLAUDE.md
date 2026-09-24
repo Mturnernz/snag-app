@@ -2721,6 +2721,55 @@ layer is implicit, and a date the calendar has not got holding the sheet open.
 with `--no-verify-jwt`. **Nothing sends anything**: no reply to the forwarder, no notification. If
 a forward does not appear, the function's logs say which of the four reasons it was.
 
+### A bill can be shared between rooms
+
+A tile order goes on the bathroom floor and the laundry splashback. A bill could sit on **one**
+part of the job or on the whole job, so that order was either filed under a room it only half
+belonged to or under *Whole job*, where nothing said which rooms it was for — and "which tile went
+in the laundry" had no answer on the record. `20260924100000` adds `home.project_quote_rooms`.
+
+**The price stays on the whole job; the table only says how the room breakdown reads it.** A quote
+attaches to exactly one level and every rollup sums it from there, so not one view changed:
+Committed, Invoiced, Paid, the supplier rows and the bills are exactly what they were. What moves is
+`projectSummary`'s room rows, which were already the rooms plus a *Whole job* **remainder** — a
+share (`roomShares`) takes its slice out of *Whole job* and puts it on the room. **A wrong split can
+put money in the wrong room and cannot make the total disagree with itself**, which is the property
+`projectSummary.test.ts` pins. `agreedContribution` mirrors the views' rules to know what a whole-job
+price puts in Agreed (a signed quote less its open set-asides; a bill unless it is a claim or a draw
+on the same supplier's signed price) — and getting that wrong only leaves money on *Whole job*.
+
+Three answers, not two, and the third is the one that keeps it honest:
+
+- **No rooms** — the whole job.
+- **Rooms, not split** — the contract covers the bathroom and the laundry and nobody itemised it.
+  The rooms go on record (the room sheet lists the bill, *Shared, not split*) and the money stays on
+  *Whole job* rather than a split the app invented.
+- **Rooms and amounts.** Evenly is the default because it is the commonest true answer for materials
+  bought for two rooms, and it is **stored as dollars**, worked out to the cent by `evenSplit` — a
+  third of $1,000 is $333.34, $333.33, $333.33, never three rows and a cent left on *Whole job* for
+  ever. By amount says as it is typed what stays on the whole job. Amounts are in the bill's own GST
+  basis and are grossed with its flag; the server refuses shares that add up to more than the bill.
+
+Only a price **on the whole job** can be shared: one on a part already says which room, one on a
+thing is in its thing's room, and a **claim** counts through its contract, so the contract is what
+gets shared. `set_quote_rooms` replaces the whole set in one call and touches nothing on the quote.
+Taking a room off the job cascades its share away, which hands it back to *Whole job*.
+
+**On a waiting bill the rooms are ticked, not chosen.** `ReviewEditSheet`'s single *Which part of the
+job?* became `RoomSplit`: tick rooms, and *Add a room…* makes one there and then — a room of the house
+through `create_location` if it is not one yet, then a part of this job through `create_element`,
+ticked the moment it exists, because the moment somebody notices the laundry is in this bill too is
+the moment they are checking the bill. `set_invoice_review_rooms` is the one writer of where a card
+lands: one room puts the bill **on** that room, exactly as `element_id` always meant; two or more keep
+it on the whole job and `approve_invoice_review` carries the rooms into `set_quote_rooms`. The card
+says where it will land (*For*) before anybody presses Allocate. A price already on the whole job
+takes the same control from a *Rooms* row on `PriceSheet`.
+
+`split.test.ts` pins the cents and the read-back of a stored split; `projectSummary.test.ts` the
+shares moving between rows and never the total, the partial split, the unsplit tag, the ex-GST
+bill, the draw, claim and declined cases, and the over-share scaled back; `ReviewEditSheet.test.tsx`
+and `PriceSheet.test.tsx` the picker, the three answers, the refusals and the room made in place.
+
 ### Four things that stay exactly as they are
 
 - **No compose bar on this tab, ever.** A project is started deliberately, at a desk, like a thing —

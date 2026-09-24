@@ -1629,6 +1629,30 @@ export interface InvoiceReview {
    */
   photoPaths: string[];
   documentPaths: string[];
+  /**
+   * The rooms it is shared between, when there are two or more. One room is
+   * `elementId`; none is the whole job. See `ProjectQuoteRoom`.
+   */
+  roomIds: string[];
+  /** Each room's share, in the bill's own GST basis, or null for "rooms, not split". */
+  roomAmounts: number[] | null;
+}
+
+/**
+ * One room a price on the whole job is for, and its share of it.
+ *
+ * **The price stays on the whole job; this only says how the room breakdown
+ * reads it.** Every rollup still sums the price from its one scope, so a share
+ * moves money between rows of the room breakdown — out of *Whole job*, onto the
+ * room — and never changes a total. `amount` is null when somebody has said
+ * which rooms but not how much each, which leaves the money on *Whole job*.
+ * Amounts are in the price's own GST basis, as it was typed.
+ */
+export interface ProjectQuoteRoom {
+  quoteId: string;
+  elementId: string;
+  amount: number | null;
+  sortOrder: number;
 }
 
 /**

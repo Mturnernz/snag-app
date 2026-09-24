@@ -23,6 +23,13 @@
  *   - a cost somebody warned about that nobody has priced: its rough figure;
  *   - an extra the builder said to budget on top: its figure.
  *
+ * **Where it is going** is one row per room plus *Whole job*, and the rows add
+ * up to the total because *Whole job* is whatever the rooms do not hold. A bill
+ * on the whole job that somebody has **shared between rooms** moves its share
+ * of Agreed onto those rooms (`roomShares`) — out of *Whole job*, never out of
+ * the total. So a wrong split can put money in the wrong room, and cannot make
+ * the page's figure disagree with itself.
+ *
  * Pure, so `projectSummary.test.ts` can pin it without a network.
  */
 import type {
@@ -53,6 +60,10 @@ export interface RoomRow {
   total: number;
   toDecide: number;
   supplierCount: number;
+  /** Agreed money this room holds from bills on the whole job shared with it. */
+  shared: number;
+  /** Bills and quotes on the whole job that say they are for this room, split or not. */
+  sharedCount: number;
   /** Set-aside amounts chosen against in this room, when every thing on them is decided. */
   setAside: number | null;
   chosen: number | null;
@@ -107,6 +118,67 @@ export function liveSetAsides(page: Pick<ProjectPage, 'quotes' | 'lines'>): Proj
     page.quotes.filter((q) => q.kind === 'quote' && q.status === 'accepted').map((q) => q.id),
   );
   return page.lines.filter((l) => l.isAllowance && !l.additional && signed.has(l.quoteId));
+}
+
+const supplierKey = (name: string | null): string | null => {
+  const key = name?.trim().toLowerCase();
+  return key ? key : null;
+};
+
+/**
+ * What one price on the whole job puts in Agreed, which is the only part of
+ * it a room share can move.
+ *
+ * The same rules the views apply, read off the row: a signed quote counts what
+ * it contributes less its open set-asides; a bill counts unless it is a claim
+ * (its contract counts instead) or the same supplier has a signed price on the
+ * whole job (it is a draw on that). Anything declined, unsigned, or standing
+ * in for a set-aside counts nothing here. Getting one of these wrong can only
+ * leave money on *Whole job* — the room rows are a remainder, not a second sum.
+ */
+export function agreedContribution(page: Pick<ProjectPage, 'quotes'>, q: ProjectQuote): number {
+  if (q.status === 'declined' || q.supersedesLineId || q.againstQuoteId) return 0;
+  if (q.kind === 'quote') {
+    return q.status === 'accepted'
+      ? round((q.effectiveAmount ?? q.amountIncl ?? 0) - q.allowanceOpen)
+      : 0;
+  }
+  const key = supplierKey(q.supplier);
+  const signed = key !== null && page.quotes.some((o) =>
+    o.id !== q.id && o.kind === 'quote' && o.status === 'accepted'
+      && o.projectId !== null && o.projectId === q.projectId && supplierKey(o.supplier) === key);
+  return signed ? 0 : q.amountIncl ?? 0;
+}
+
+/**
+ * How much of Agreed each room holds from shared bills, by element id.
+ *
+ * Each share is the room's fraction of the bill as typed, applied to what the
+ * bill contributes. Shares that somehow add up to more than the bill are scaled
+ * back to it; shares that cover all of it are rounded so they add up to the
+ * cent, or *Whole job* would carry a one-cent row for ever.
+ */
+export function roomShares(page: Pick<ProjectPage, 'quotes' | 'quoteRooms' | 'elements'>): Map<string, number> {
+  const shares = new Map<string, number>();
+  const known = new Set(page.elements.map((e) => e.id));
+  for (const q of page.quotes) {
+    if (q.projectId === null || q.againstQuoteId || !q.amount) continue;
+    const rows = (page.quoteRooms ?? [])
+      .filter((r) => r.quoteId === q.id && r.amount !== null && known.has(r.elementId));
+    if (rows.length === 0) continue;
+    const contribution = agreedContribution(page, q);
+    if (contribution === 0) continue;
+
+    let fractions = rows.map((r) => (r.amount as number) / (q.amount as number));
+    const whole = sum(fractions);
+    if (whole > 1) fractions = fractions.map((f) => f / whole);
+    const covered = Math.abs(sum(fractions) - 1) < 1e-9;
+
+    const amounts = fractions.map((f) => round(contribution * f));
+    if (covered) amounts[amounts.length - 1] = round(contribution - sum(amounts.slice(0, -1)));
+    rows.forEach((r, i) => shares.set(r.elementId, round((shares.get(r.elementId) ?? 0) + amounts[i])));
+  }
+  return shares;
 }
 
 export function projectSummary(page: ProjectPage): ProjectSummary {
@@ -181,21 +253,29 @@ export function projectSummary(page: ProjectPage): ProjectSummary {
     return null;
   };
 
+  const shares = roomShares(page);
+  const sharedWith = (elementId: string): ProjectQuote[] => {
+    const ids = new Set((page.quoteRooms ?? []).filter((r) => r.elementId === elementId).map((r) => r.quoteId));
+    return page.quotes.filter((q) => ids.has(q.id) && q.status !== 'declined');
+  };
+
   const rooms: RoomRow[] = elements.map((e) => {
     const inRoom = toDecide.filter((d) => d.item.elementId === e.id);
     const lines = setAsides.filter((l) => lineElement.get(l.id) === e.id);
     const lineAmount = sum(lines.map((l) => gross(l.amount, l.amountInclGst)));
     const lineChosen = sum(lines.map((l) => chosenAgainst(page, l.id)));
     const settled = lines.length > 0 && lines.every((l) => lineUndecided.get(l.id) === 0 && chosenAgainst(page, l.id) > 0);
-    const roomAgreed = round((e.committedTotal ?? 0) - e.allowanceOpen);
+    const shared = shares.get(e.id) ?? 0;
+    const tagged = sharedWith(e.id);
+    const roomAgreed = round((e.committedTotal ?? 0) - e.allowanceOpen + shared);
     const roomUndecided = round(
       sum(inRoom.map(itemUndecided))
         + sum(lines.map((l) => lineUndecided.get(l.id) ?? 0))
         + e.expectedOpen,
     );
     const suppliers = new Set(
-      page.quotes
-        .filter((q) => quoteElement(q) === e.id && q.status !== 'declined' && q.supplier)
+      [...page.quotes.filter((q) => quoteElement(q) === e.id && q.status !== 'declined'), ...tagged]
+        .filter((q) => q.supplier)
         .map((q) => q.supplier!.trim().toLowerCase()),
     );
     return {
@@ -207,6 +287,8 @@ export function projectSummary(page: ProjectPage): ProjectSummary {
       total: round(roomAgreed + roomUndecided),
       toDecide: inRoom.length,
       supplierCount: suppliers.size,
+      shared,
+      sharedCount: tagged.length,
       setAside: lines.length ? lineAmount : null,
       chosen: lines.length ? lineChosen : null,
       settled,
@@ -230,6 +312,8 @@ export function projectSummary(page: ProjectPage): ProjectSummary {
       total: round(jobAgreed + jobUndecided),
       toDecide: 0,
       supplierCount: suppliers.size,
+      shared: 0,
+      sharedCount: 0,
       setAside: null,
       chosen: null,
       settled: false,
@@ -270,6 +354,10 @@ export function describeRoom(room: RoomRow, money: (n: number) => string): strin
   const parts: string[] = [];
   if (room.setAside !== null) parts.push(`${money(room.setAside)} set aside`);
   if (room.toDecide > 0) parts.push(`${room.toDecide} to decide`);
+  if (room.shared > 0) parts.push(`${money(room.shared)} of shared bills`);
+  else if (room.sharedCount > 0) {
+    parts.push(room.sharedCount === 1 ? 'On 1 shared bill' : `On ${room.sharedCount} shared bills`);
+  }
   if (parts.length === 0 && room.supplierCount > 0) {
     parts.push(room.supplierCount === 1 ? '1 supplier' : `${room.supplierCount} suppliers`);
   }

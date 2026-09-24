@@ -7,12 +7,13 @@ import Icon from './Icon';
 import Button from './Button';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
-  describePaidInference, documentName, formatLooseDate, formatMoney, invoiceReviewHeadline, wasInferred,
+  describeAddressedTo, describePaidInference, documentName, formatLooseDate, formatMoney, invoiceReviewHeadline,
+  isUnreadReview, wasInferred,
 } from '@snag/supabase-queries';
 import {
   isHorizontalDrag, swipeDecision, swipeLean, swipeProgress, type SwipeDecision,
 } from '../lib/swipeDecision';
-import type { InvoiceReview } from '../types';
+import type { InvoiceReview, InvoiceReviewKind } from '../types';
 
 interface Props {
   review: InvoiceReview;
@@ -36,7 +37,26 @@ interface Props {
   duplicate?: string | null;
   /** Opens the bill it looks like, when that bill is on the job. */
   onOpenDuplicate?: () => void;
+  /**
+   * *Read again*, offered only on a card nothing was read off — the email
+   * arrived while the reader was busy. It may come back as several cards.
+   */
+  onReread?: () => void;
+  /** While a reading is on the wire. */
+  rereading?: boolean;
 }
+
+/**
+ * What each kind of paper is called, and what saying yes to it does. Paperwork
+ * is *filed*, never allocated: it is a certificate or a photo or somebody
+ * else's bill, and it moves no figure — so its button must not use the word
+ * that puts money on the job.
+ */
+const KIND: Record<InvoiceReviewKind, { label: string; yes: string; rail: string; number: string }> = {
+  invoice: { label: 'Invoice', yes: 'Allocate', rail: 'Allocate it', number: 'Invoice' },
+  quote: { label: 'Quote', yes: 'Add quote', rail: 'Add it', number: 'Quote' },
+  paperwork: { label: 'Paperwork', yes: 'File it', rail: 'File it', number: 'Number' },
+};
 
 /**
  * One bill that has arrived and not been ruled on.
@@ -82,7 +102,7 @@ interface Props {
  * reading the card can.
  */
 export default function InvoiceReviewCard({
-  review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate,
+  review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate, onReread, rereading,
 }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
@@ -146,9 +166,17 @@ export default function InvoiceReviewCard({
     [pan]
   );
 
+  const kind = KIND[review.kind] ?? KIND.invoice;
+  const paperwork = review.kind === 'paperwork';
+  // Paperwork with no figure has nothing to say in the money column — "Not
+  // priced" would call a certificate an unpriced bill. With one (a
+  // subcontractor's bill made out to the builder) it is shown for reference,
+  // quieter than a figure that is about to count.
   const amount = review.amount === null
-    ? 'Not priced'
+    ? (paperwork ? null : 'Not priced')
     : `${formatMoney(review.amount)}${review.amountInclGst ? '' : ' + GST'}`;
+  const addressed = describeAddressedTo(review);
+  const unread = isUnreadReview(review);
   // The figure is the field a guess costs most on, and GST is a guess the
   // reader makes whenever a bill does not say — so either marks it.
   const amountGuessed = review.amount !== null
@@ -171,7 +199,7 @@ export default function InvoiceReviewCard({
       <View style={styles.rails} pointerEvents="none">
         <View style={[styles.rail, styles.railYes, { opacity: lean === 'approve' ? progress : 0 }]}>
           <Icon name="checkmark-circle-outline" size="lg" color={Colors.primary} />
-          <Text style={[styles.railLabel, { color: Colors.primary }]}>Allocate it</Text>
+          <Text style={[styles.railLabel, { color: Colors.primary }]}>{kind.rail}</Text>
         </View>
         <View style={[styles.rail, styles.railNo, { opacity: lean === 'decline' ? progress : 0 }]}>
           <Text style={[styles.railLabel, { color: Colors.due.overdueFg }]}>Remove it</Text>
@@ -182,40 +210,55 @@ export default function InvoiceReviewCard({
       <Animated.View
         {...responder.panHandlers}
         style={[styles.card, { transform: [{ translateX: pan }] }]}
-        accessibilityLabel={`${invoiceReviewHeadline(review)}, ${amount}`}
+        accessibilityLabel={[kind.label, invoiceReviewHeadline(review), amount].filter(Boolean).join(', ')}
       >
         <View style={styles.headRow}>
           <View style={styles.headText}>
             <Text style={styles.headline} numberOfLines={2}>
               {invoiceReviewHeadline(review)}
             </Text>
-            {review.category ? (
+            <View style={styles.chips}>
+              {/*
+                What kind of paper it is, always — one email can hold a bill, a
+                quote and a certificate, and the button below does something
+                different for each.
+              */}
               <View style={styles.categoryChip}>
-                <Text style={styles.categoryText}>{review.category}</Text>
-                {wasInferred(review, 'category') ? <Guessed /> : null}
+                <Text style={styles.categoryText}>{kind.label}</Text>
+                {wasInferred(review, 'kind') ? <Guessed /> : null}
               </View>
-            ) : null}
+              {review.category ? (
+                <View style={styles.categoryChip}>
+                  <Text style={styles.categoryText}>{review.category}</Text>
+                  {wasInferred(review, 'category') ? <Guessed /> : null}
+                </View>
+              ) : null}
+            </View>
           </View>
           {/*
             The figure does not shrink; the name beside it does. It is what the
             card is read for, and half a number is worse than a clipped noun —
             the rule a project's own item rows already follow.
           */}
-          <View style={styles.amountCol}>
-            <Text style={styles.amount} numberOfLines={1}>{amount}</Text>
-            {amountGuessed ? <Guessed /> : null}
-          </View>
+          {amount ? (
+            <View style={styles.amountCol}>
+              <Text style={[styles.amount, paperwork ? styles.amountAside : null]} numberOfLines={1}>{amount}</Text>
+              {amountGuessed ? <Guessed /> : null}
+            </View>
+          ) : null}
         </View>
 
         {review.supplier && wasInferred(review, 'supplier') ? (
           <Text style={styles.guessed}>supplier guessed</Text>
         ) : null}
 
-        {review.detail ? <Text style={styles.detail}>{review.detail}</Text> : null}
+        {review.detail && !paperwork ? <Text style={styles.detail}>{review.detail}</Text> : null}
+
+        {addressed ? <Text style={styles.detail}>{addressed}</Text> : null}
 
         <View style={styles.facts}>
           {review.invoiceNumber ? (
-            <Fact label="Invoice" value={review.invoiceNumber} mono guessed={wasInferred(review, 'invoice_number')} />
+            <Fact label={kind.number} value={review.invoiceNumber} mono guessed={wasInferred(review, 'invoice_number')} />
           ) : null}
           {review.dated ? (
             <Fact label="Dated" value={formatLooseDate(review.dated) ?? review.dated} guessed={wasInferred(review, 'dated')} />
@@ -231,14 +274,35 @@ export default function InvoiceReviewCard({
           somebody disagree with it, and a tick gives them nothing to disagree
           with.
         */}
-        <View style={[styles.paidRow, review.paid ? styles.paidYes : styles.paidNo]}>
-          <Icon
-            name={review.paid ? 'checkmark-circle-outline' : 'ellipse-outline'}
-            size="sm"
-            color={review.paid ? Colors.status.done : Colors.status.doingFg}
-          />
-          <Text style={styles.paidText}>{describePaidInference(review)}</Text>
-        </View>
+        {review.kind === 'invoice' ? (
+          <View style={[styles.paidRow, review.paid ? styles.paidYes : styles.paidNo]}>
+            <Icon
+              name={review.paid ? 'checkmark-circle-outline' : 'ellipse-outline'}
+              size="sm"
+              color={review.paid ? Colors.status.done : Colors.status.doingFg}
+            />
+            <Text style={styles.paidText}>{describePaidInference(review)}</Text>
+          </View>
+        ) : null}
+
+        {/*
+          Nothing was read off it — the reader was busy, or not set up, when the
+          email came in. One press reads it as if it had just arrived, and a card
+          holding four papers comes back as four.
+        */}
+        {unread && onReread ? (
+          <View style={styles.unread}>
+            <Text style={styles.unreadText}>Nothing was read off this yet.</Text>
+            <Button
+              label="Read again"
+              variant="outline"
+              onPress={onReread}
+              loading={rereading}
+              disabled={busy}
+              style={styles.unreadButton}
+            />
+          </View>
+        ) : null}
 
         {onOpenFile && files.length > 0 ? (
           <View style={styles.files}>
@@ -299,7 +363,14 @@ export default function InvoiceReviewCard({
             the snag page.
           */}
           <Button label="Remove" variant="outline" onPress={onDecline} disabled={busy} style={styles.action} />
-          <Button label="Allocate" variant="primary" onPress={onApprove} loading={busy} style={styles.action} />
+          <Button
+            label={kind.yes}
+            variant="primary"
+            onPress={onApprove}
+            loading={busy}
+            disabled={rereading}
+            style={styles.action}
+          />
         </View>
       </Animated.View>
     </View>
@@ -373,6 +444,7 @@ const styles = StyleSheet.create({
   },
   detail: { fontSize: Typography.sm, color: Colors.textSecondary },
 
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -411,6 +483,13 @@ const styles = StyleSheet.create({
 
   source: { fontSize: Typography.xs, color: Colors.textMuted },
   amountCol: { alignItems: 'flex-end' },
+  amountAside: { color: Colors.textMuted, fontWeight: Typography.regular },
+  unread: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    borderRadius: Radius.chip, backgroundColor: Colors.sunken, paddingLeft: Spacing.sm,
+  },
+  unreadText: { flex: 1, minWidth: 0, fontSize: Typography.sm, color: Colors.textSecondary },
+  unreadButton: { minWidth: 120 },
   files: { gap: 2 },
   file: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,

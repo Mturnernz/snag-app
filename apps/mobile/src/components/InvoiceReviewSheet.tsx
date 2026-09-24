@@ -90,7 +90,8 @@ export default function InvoiceReviewSheet({
                     </Text>
                     <Text style={styles.rowMeta} numberOfLines={1}>
                       {[
-                        review.amount === null ? 'Not priced' : formatMoney(review.amount),
+                        review.kind === 'paperwork' ? 'Paperwork'
+                          : review.amount === null ? 'Not priced' : formatMoney(review.amount),
                         review.category,
                         review.decidedAt
                           ? `removed ${formatLooseDate(review.decidedAt.slice(0, 10))}`

@@ -3,12 +3,16 @@
 // Every project has an address, `<token>@bills.snaghq.co.nz`
 // (`home.project_inbox_token`). Resend receives the mail and posts
 // `email.received` here; this finds the project, checks the sender is somebody
-// on that place, stores the PDFs and photographs, asks Gemini what the bill says,
-// and files a **pending** review (`home.file_emailed_bill`). The person opening
-// the project answers it. Nothing here reaches a figure: approving still goes
-// through `create_quote`, the one door every price comes through.
+// on that place, stores the PDFs and photographs, asks Gemini what **each
+// paper** is, and files a **pending** card per paper (`home.file_emailed_bill`):
+// the builder's invoice, the plumber's variation made out to the builder, the
+// certificate of compliance and the photos of the deck each get their own, so
+// each can be allocated or filed where it belongs. The person opening the
+// project answers them. Nothing here reaches a figure: allocating still goes
+// through `create_quote`, the one door every price comes through, and filing
+// paperwork moves none.
 //
-// Four rules, each a way this could put something untrue in front of somebody:
+// Five rules, each a way this could put something untrue in front of somebody:
 //
 // - **Only Resend, and only from us.** JWT verification is off because Resend
 //   has no Supabase token, so the Svix signature (`verifyWebhook`) is the lock.
@@ -17,12 +21,16 @@
 //   put convincing cards in front of somebody.
 // - **It answers Resend at once and works afterwards** (`EdgeRuntime.waitUntil`).
 //   Reading a PDF takes longer than a webhook waits, and a retried webhook is a
-//   second card — which `file_emailed_bill` refuses anyway, by email id.
+//   second set of cards — which `file_emailed_bill` refuses anyway, by email
+//   and part.
+// - **One paper, one reading.** A figure or a name on one paper can never be
+//   read off another, because the model is only ever shown one (`read.ts`).
 // - **What was read is marked, and a guess says so.** The card shows `inferred`
 //   fields as guesses, and a paid flag with no sentence behind it is dropped.
 // - **A reading that fails still files the card.** The bill arrived; the card
-//   holds the PDF and the subject, and the person types the rest. A card that
-//   silently never appeared would be the worst answer.
+//   holds the PDF and the subject, and the person presses *Read again*
+//   (`reread-bill`) or types the rest. A card that silently never appeared
+//   would be the worst answer.
 //
 // Secrets: RESEND_INBOUND_API_KEY (a full-access Resend key — reading received
 // mail needs one),
@@ -33,17 +41,17 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  GEMINI_ENDPOINT, isBusy, modelsToTry, readingFromGemini,
-} from '../read-label/gemini.ts';
-import {
-  NOTHING_READ, billAttachments, billRequest, bytesToBase64, emailAddress, inboxToken,
-  reviewFromReading, storedPath, verifyWebhook, type AttachmentMeta, type BillFields,
+  billAttachments, bytesToBase64, cardFromEmail, cardsFromReadings, emailAddress, inboxToken,
+  storedPath, stripHtml, verifyWebhook, type AttachmentMeta, type PaperCard, type StoredPaper,
 } from './bill.ts';
+import { readPapers, type PaperFile } from './read.ts';
 
 const BUCKET = 'home-photos';
 const RESEND_API = 'https://api.resend.com';
+// The papers are read together, so this is about one paper's worth of waiting
+// with room for the busy-model fallback — inside the platform's limit on
+// background work after the webhook has been answered.
 const MODEL_BUDGET_MS = 90_000;
-const EARLY_ATTEMPT_MS = 40_000;
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
@@ -116,9 +124,8 @@ async function file(data: Json): Promise<void> {
   const listed = await resend(apiKey, `/emails/receiving/${emailId}/attachments`);
   const metas: (AttachmentMeta & { download_url?: string })[] = Array.isArray(listed?.data) ? listed.data : [];
 
-  const photoPaths: string[] = [];
-  const documentPaths: string[] = [];
-  const forModel: { mimeType: string; base64: string }[] = [];
+  const stored: StoredPaper[] = [];
+  const forModel: PaperFile[] = [];
   for (const [index, meta] of billAttachments(metas).entries()) {
     const url = (meta as { download_url?: string }).download_url;
     if (!url) continue;
@@ -139,99 +146,72 @@ async function file(data: Json): Promise<void> {
       console.warn(`inbound-bill: ${emailId} — could not store ${meta.id}:`, uploadError.message);
       continue;
     }
-    (meta.content_type === 'application/pdf' ? documentPaths : photoPaths).push(path);
-    forModel.push({ mimeType: meta.content_type!, base64: bytesToBase64(bytes) });
+    stored.push({ path, isPdf: meta.content_type === 'application/pdf' });
+    forModel.push({
+      mimeType: meta.content_type!,
+      base64: bytesToBase64(bytes),
+      name: meta.filename ?? (meta.content_type === 'application/pdf' ? 'a PDF' : 'a photo'),
+    });
   }
 
-  const fields = await read(forModel, {
+  // Who "you" are, so a subcontractor's bill made out to the builder is told
+  // from one made out to the household. Never fatal: without it every paper is
+  // simply taken as the household's, which is what it always was.
+  const { data: people } = await db.rpc('project_people', { p_project_id: inbox.project_id });
+
+  const words = {
     from: email?.from ?? data.from ?? null,
     subject: email?.subject ?? data.subject ?? null,
     text: email?.text ?? stripHtml(email?.html),
-  });
+  };
+  const read = await readPapers(
+    forModel, words, Array.isArray(people) ? people : [], MODEL_BUDGET_MS, `inbound-bill: ${emailId}`,
+  );
+  const cards: PaperCard[] = stored.length > 0
+    ? cardsFromReadings(stored, read.readings)
+    : [cardFromEmail(read.fromEmail)];
 
-  const { error: fileError } = await db.rpc('file_emailed_bill', {
-    p_project_id: inbox.project_id,
-    p_sender_id: inbox.sender_id,
-    p_source_ref: emailId,
-    p_source_subject: email?.subject ?? data.subject ?? null,
-    p_source_from: email?.from ?? data.from ?? null,
-    p_source_at: email?.created_at ?? data.created_at ?? null,
-    p_supplier: fields.supplier,
-    p_detail: fields.detail,
-    p_amount: fields.amount,
-    p_amount_incl_gst: fields.amountInclGst,
-    p_invoice_number: fields.invoiceNumber,
-    p_dated: fields.dated,
-    p_due_on: fields.dueOn,
-    p_paid: fields.paid,
-    p_paid_on: fields.paidOn,
-    p_paid_evidence: fields.paidEvidence,
-    p_inferred: fields.inferred,
-    p_photo_paths: photoPaths,
-    p_document_paths: documentPaths,
-  });
-  if (fileError) throw fileError;
-  console.log(`inbound-bill: ${emailId} — filed on project ${inbox.project_id}`);
+  // One card per paper, each filed on its own: the daily ceiling or a bad row
+  // stopping the fourth paper must not lose the first three.
+  for (const [part, card] of cards.entries()) {
+    const { error: fileError } = await db.rpc('file_emailed_bill', {
+      p_project_id: inbox.project_id,
+      p_sender_id: inbox.sender_id,
+      p_source_ref: emailId,
+      p_source_subject: words.subject,
+      p_source_from: words.from,
+      p_source_at: email?.created_at ?? data.created_at ?? null,
+      p_supplier: card.supplier,
+      p_detail: card.detail,
+      p_amount: card.amount,
+      p_amount_incl_gst: card.amountInclGst,
+      p_invoice_number: card.invoiceNumber,
+      p_dated: card.dated,
+      p_due_on: card.dueOn,
+      p_paid: card.paid,
+      p_paid_on: card.paidOn,
+      p_paid_evidence: card.paidEvidence,
+      p_inferred: card.inferred,
+      p_photo_paths: card.photoPaths,
+      p_document_paths: card.documentPaths,
+      p_source_part: part,
+      p_kind: card.kind,
+      p_addressed_to: card.addressedTo,
+    });
+    if (fileError) {
+      console.error(`inbound-bill: ${emailId} part ${part} — not filed:`, fileError.message);
+      continue;
+    }
+  }
+  console.log(
+    `inbound-bill: ${emailId} — ${cards.length} card${cards.length === 1 ? '' : 's'} on project ${inbox.project_id}`
+      + (read.busy ? ' (some papers unread: models busy)' : '')
+      + (read.notSetUp ? ' (unread: GEMINI_API_KEY missing or refused)' : ''),
+  );
 }
 
 async function resend(apiKey: string, path: string): Promise<Json> {
   const answer = await fetch(`${RESEND_API}${path}`, { headers: { Authorization: `Bearer ${apiKey}` } });
   if (!answer.ok) throw new Error(`Resend ${path} answered ${answer.status}: ${(await answer.text()).slice(0, 300)}`);
   return answer.json();
-}
-
-function stripHtml(html: string | null | undefined): string | null {
-  if (!html) return null;
-  return html
-    .replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/tr>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/[ \t]+/g, ' ')
-    .trim();
-}
-
-/** The model's reading, or nothing read — never a reason not to file the card. */
-async function read(
-  files: { mimeType: string; base64: string }[],
-  email: { from: string | null; subject: string | null; text: string | null }
-): Promise<BillFields> {
-  const apiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey || (files.length === 0 && !email.text)) return NOTHING_READ;
-
-  const models = modelsToTry(Deno.env.get('GEMINI_MODEL'), Deno.env.get('GEMINI_FALLBACK_MODEL'));
-  const body = JSON.stringify(billRequest(files, email));
-  const deadline = Date.now() + MODEL_BUDGET_MS;
-
-  for (const [index, model] of models.entries()) {
-    const left = deadline - Date.now();
-    if (left < 10_000) break;
-    const last = index === models.length - 1;
-    try {
-      const answer = await fetch(`${GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body,
-        signal: AbortSignal.timeout(last ? left : Math.min(left, EARLY_ATTEMPT_MS)),
-      });
-      if (!answer.ok) {
-        console.error(`inbound-bill: ${model} ${answer.status}:`, (await answer.text()).slice(0, 300));
-        if (isBusy(answer.status)) {
-          await new Promise((resolve) => setTimeout(resolve, 1_000));
-          continue;
-        }
-        return NOTHING_READ;
-      }
-      const outcome = readingFromGemini(await answer.json().catch(() => null));
-      if (!outcome.ok) {
-        console.error('inbound-bill: no reading —', outcome.reason);
-        return NOTHING_READ;
-      }
-      return reviewFromReading(outcome.reading);
-    } catch (err) {
-      console.error(`inbound-bill: ${model} unreachable or too slow:`, err);
-    }
-  }
-  return NOTHING_READ;
 }

@@ -1523,6 +1523,19 @@ and *Undo* on the chosen one.
 today — never a flag), a part payment, Edit, Delete. Before V2 a bill on the whole job or a part
 could not be tapped, so it could never be paid, corrected or deleted and *To pay* only grew.
 
+**A supplier who has sent more than one is one heading.** An engineer billing monthly was four
+rows reading *MSC Consulting Group Ltd* on the *Whole job* sheet, and the same again under *To pay*.
+`groupBySupplier` (`summary.ts`) gathers them on the trimmed, lower-cased name — the rule
+`project_supplier_totals` groups on — shown in the most recently dated spelling, keeping the list's
+own order. The bills sit beneath as indented rows, each still opening and still carrying its own
+*Paid*, and the heading folds (open by default) without losing its figure. **The heading's figure is
+only drawn when it is the sum of the rows under it**: on *To pay* that is what is owed; on a room
+sheet it is drawn for bills alone, because a quote and a bill from one supplier add up to nothing
+(the bill may be a draw on the quote), so a mixed heading says *$X billed* in words instead. A row
+naming nobody is never grouped — two bills with no supplier are not known to be from one place.
+A supplier with one price is the one row it always was. Pinned by `RoomSheet.test.tsx`,
+`projectSummary.test.ts` and `ProjectDetailScreen.test.tsx`.
+
 **Nothing new can be typed over a figure.** `EditFigureSheet` is deleted. Overrides already in the
 database still count, so the page says *Some figures were typed in by hand*, names what the prices
 come to, and offers **Use the prices** (`clear_figure` on each). The view columns stay.

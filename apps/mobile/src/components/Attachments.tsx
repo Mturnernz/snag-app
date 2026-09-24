@@ -6,7 +6,7 @@ import { openUrl } from '../lib/openUrl';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { documentFileName, documentName } from '@snag/supabase-queries';
 import { getFileUrl, getFileUrls, uploadFile } from '../lib/supabase';
-import { addPhotos } from '../lib/addPhotos';
+import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import { showAlert } from '../lib/alert';
 import Icon from './Icon';
 import PhotoViewer from './PhotoViewer';
@@ -117,14 +117,14 @@ export default function Attachments({
    */
   const unsigned = asked ? photoPaths.filter((path) => !urls[path]).length : 0;
 
-  async function attachPhotos() {
+  async function attachPhotos(source: PhotoSource) {
     if (busy || disabled) return;
     setBusy(true);
     try {
       await addPhotos(householdId, (added) => onChange(
         { photoPaths: [...photoPaths, ...added] },
         added.length === 1 ? 'Photo added' : `${added.length} photos added`
-      ));
+      ), source);
     } finally {
       setBusy(false);
     }
@@ -248,14 +248,24 @@ export default function Attachments({
 
       <View style={styles.row}>
         <Pressable
-          onPress={attachPhotos}
+          onPress={() => attachPhotos('camera')}
           disabled={busy || disabled}
           style={styles.add}
           accessibilityRole="button"
-          accessibilityLabel="Add photos"
+          accessibilityLabel="Take a photo"
         >
           <Icon name="camera-outline" size="sm" color={Colors.primary} />
-          <Text style={styles.addLabel}>Add photos</Text>
+          <Text style={styles.addLabel}>Take photo</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => attachPhotos('library')}
+          disabled={busy || disabled}
+          style={styles.add}
+          accessibilityRole="button"
+          accessibilityLabel="Choose photos"
+        >
+          <Icon name="images-outline" size="sm" color={Colors.primary} />
+          <Text style={styles.addLabel}>Choose photos</Text>
         </Pressable>
         <Pressable
           onPress={attachDocument}

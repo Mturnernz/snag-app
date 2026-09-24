@@ -17,14 +17,15 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createSnag, getFileUrls, getSnags, getThings, markListSeen, setPartBought, updateSnag,
+  createSnag, getFileUrls, getSnags, getThings, markListSeen, setPartBought, setSnagStatus,
+  updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import FoldAllPill from '../components/FoldAllPill';
 import {
-  assessmentBrief, exportDateStamp, isDoneForNow, shoppingCount, shoppingList,
-  snagExportPhotos, snagExportTable,
+  assessmentBrief, dueState, exportDateStamp, isDoneForNow, shoppingCount, shoppingList,
+  snagExportPhotos, snagExportTable, snagHeadline,
 } from '@snag/supabase-queries';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag, Thing } from '../types';
@@ -59,27 +60,22 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  *   the product has to offer.
  */
 
+/**
+ * Everything, or the jobs waiting on a trip to the shop — and the cart in the
+ * header is the only way between them.
+ *
+ * There used to be a *Show me* button beside it opening a sheet with two lenses
+ * and three sorts. The *Needs parts* lens was the cart again by another door;
+ * *Due* is answered by the **Due soon** section now, without asking; *Newest*
+ * by **New** and **Just added**. What was left was a button that opened a sheet
+ * to confirm the default, so it went.
+ */
 type Lens = 'all' | 'parts';
-type Sort = 'room' | 'newest' | 'due';
-
-// Two, where there were four. **Mine** read `assignee_id` and **Urgent** read
-// `priority`, and nothing in the app writes either any more — a lens over a
-// column nothing can set is a filter that comes back empty for ever and tells
-// nobody why. What is left is the one that answers a question somebody actually
-// arrives with: is there a trip to the shop in this.
-const LENSES: { key: Lens; label: string }[] = [
-  { key: 'all', label: 'Everything' },
-  { key: 'parts', label: 'Needs parts' },
-];
-
-const SORTS: { key: Sort; label: string }[] = [
-  { key: 'room', label: 'By room' },
-  { key: 'newest', label: 'Newest' },
-  { key: 'due', label: 'Due' },
-];
 
 const NO_ROOM = 'Everywhere else';
 const DONE_WINDOW_DAYS = 7;
+/** How long the last capture's room is offered to the next one. */
+const ROOM_MEMORY_MS = 10 * 60_000;
 
 /** "since Tuesday" for this week, a date once it stops being this week. */
 function describeSince(iso: string | null): string | null {
@@ -109,8 +105,6 @@ export default function SnagListScreen() {
    */
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [lens, setLens] = useState<Lens>('all');
-  const [sort, setSort] = useState<Sort>('room');
-  const [filterOpen, setFilterOpen] = useState(false);
   const [placesOpen, setPlacesOpen] = useState(false);
 
   const [snags, setSnags] = useState<Snag[]>([]);
@@ -155,10 +149,7 @@ export default function SnagListScreen() {
   const load = useCallback(async () => {
     try {
       const [open, finished] = await Promise.all([
-        getSnags(
-          { propertyId, excludeProjectSnags, status: ['open', 'doing'] },
-          sort === 'due' ? 'due' : 'newest',
-        ),
+        getSnags({ propertyId, excludeProjectSnags, status: ['open', 'doing'] }, 'newest'),
         // Small by construction — a household finishes a handful a week, and
         // only the last week of them is ever rendered.
         getSnags({ propertyId, excludeProjectSnags, status: ['done'] }, 'newest'),
@@ -175,7 +166,7 @@ export default function SnagListScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propertyId, sort, excludeProjectSnags]);
+  }, [propertyId, excludeProjectSnags]);
 
   useEffect(() => {
     setLoading(true);
@@ -389,8 +380,27 @@ export default function SnagListScreen() {
     // they do. It comes back up on its own when the date arrives.
     const settled = rest0(visible).filter((s) => isDoneForNow(s));
     const settledIds = new Set(settled.map((s) => s.id));
+    /**
+     * **Due soon** — overdue, or due in the next seven days — sits under New
+     * and above every room.
+     *
+     * This product sends nobody anything, so this screen is the only reminder
+     * there is. Grouped by room, a job due on Saturday sat in Outside with
+     * everything else and the overdue filter change sat in the Laundry, and
+     * the only ways to see what was coming were a sort behind a button and a
+     * whole other tab. Soonest first. A parked repeat is left out: it comes
+     * back up on its own the day its date arrives, and then it is overdue.
+     */
+    const soon = rest0(visible)
+      .filter((s) => !freshIds.has(s.id) && !settledIds.has(s.id))
+      .filter((s) => {
+        const state = dueState(s);
+        return state === 'overdue' || state === 'due-soon';
+      })
+      .sort((a, b) => new Date(a.dueAt!).getTime() - new Date(b.dueAt!).getTime());
+    const soonIds = new Set(soon.map((s) => s.id));
     const rest = visible.filter((s) =>
-      !freshIds.has(s.id) && s.id !== pinnedId && !settledIds.has(s.id));
+      !freshIds.has(s.id) && s.id !== pinnedId && !settledIds.has(s.id) && !soonIds.has(s.id));
     // A key that survives the count in the title changing, and the section
     // moving up or down the list as work is filed and finished. Folding by
     // index would fold whatever slid into that position.
@@ -401,31 +411,26 @@ export default function SnagListScreen() {
       const others = fresh.filter((s) => s.id !== pinnedId);
       if (others.length > 0) out.push({ key: 'new', title: 'New', isNew: true, data: others });
     }
+    if (soon.length > 0) {
+      out.push({ key: 'due-soon', title: `Due soon · ${soon.length}`, data: soon });
+    }
 
-    if (sort === 'room') {
-      // Seeded order first, so the rooms read the way the chips did, then
-      // anything filed under a tag that has since been removed.
-      const order = locations.map((l) => l.name);
-      const byRoom = new Map<string, Snag[]>();
-      for (const snag of rest) {
-        const room = snag.room ?? NO_ROOM;
-        if (!byRoom.has(room)) byRoom.set(room, []);
-        byRoom.get(room)!.push(snag);
-      }
-      const known = order.filter((name) => byRoom.has(name));
-      const extra = [...byRoom.keys()].filter((n) => !order.includes(n) && n !== NO_ROOM).sort();
-      for (const name of [...known, ...extra, ...(byRoom.has(NO_ROOM) ? [NO_ROOM] : [])]) {
-        out.push({
-          key: `room:${name}`,
-          title: `${name} · ${byRoom.get(name)!.length}`,
-          data: byRoom.get(name)!,
-        });
-      }
-    } else if (rest.length > 0) {
+    // Seeded order first, so the rooms read the way the chips did, then
+    // anything filed under a tag that has since been removed.
+    const order = locations.map((l) => l.name);
+    const byRoom = new Map<string, Snag[]>();
+    for (const snag of rest) {
+      const room = snag.room ?? NO_ROOM;
+      if (!byRoom.has(room)) byRoom.set(room, []);
+      byRoom.get(room)!.push(snag);
+    }
+    const known = order.filter((name) => byRoom.has(name));
+    const extra = [...byRoom.keys()].filter((n) => !order.includes(n) && n !== NO_ROOM).sort();
+    for (const name of [...known, ...extra, ...(byRoom.has(NO_ROOM) ? [NO_ROOM] : [])]) {
       out.push({
-        key: 'rest',
-        title: sort === 'due' ? 'By when' : 'Everything else',
-        data: rest,
+        key: `room:${name}`,
+        title: `${name} · ${byRoom.get(name)!.length}`,
+        data: byRoom.get(name)!,
       });
     }
 
@@ -439,7 +444,7 @@ export default function SnagListScreen() {
       out.push({ key: 'done', title: 'Done this week', data: recentlyDone });
     }
     return out;
-  }, [fresh, visible, sort, locations, showDone, recentlyDone, justAdded]);
+  }, [fresh, visible, locations, showDone, recentlyDone, justAdded]);
 
   /**
    * The same sections, with the folded ones emptied rather than removed.
@@ -497,7 +502,7 @@ export default function SnagListScreen() {
     }
   }, [anyOpen, sections, shoppingRooms, fold, foldShop]);
 
-  async function handleAdd(input: { photoPath: string | null; description: string | null }) {
+  async function handleAdd(input: { photoPaths: string[]; description: string | null }) {
     if (!activeProperty) {
       showAlert('No place yet', 'Add a place before adding something to the list.');
       return;
@@ -505,7 +510,7 @@ export default function SnagListScreen() {
     const snag = await createSnag({
       propertyId: activeProperty.id,
       description: input.description,
-      photoPaths: input.photoPath ? [input.photoPath] : [],
+      photoPaths: input.photoPaths,
     });
     setJustAdded(snag);
     await load();
@@ -537,17 +542,74 @@ export default function SnagListScreen() {
     }
   }, []);
 
-  async function amend(update: Parameters<typeof updateSnag>[1], toast: string) {
+  /**
+   * No toast. The sheet itself shows the answer landing — the words stay in
+   * the box, the room lights up — and a toast reading "Kitchen" over a sheet
+   * that has just been told "Kitchen" is the app repeating somebody back to
+   * themselves. A failure still says so, because that one is news.
+   */
+  async function amend(update: Parameters<typeof updateSnag>[1]) {
     if (!justAdded) return;
     setAmending(true);
     try {
       setJustAdded(await updateSnag(justAdded.id, update));
-      showToast(toast);
+      if (update.room) lastRoom.current = { room: update.room, at: Date.now() };
       await load();
     } catch (err: any) {
       showAlert("Couldn't change that", err?.message ?? 'Please try again.');
     } finally {
       setAmending(false);
+    }
+  }
+
+  /**
+   * The room the last capture went to, if it was recent enough to be the same
+   * walk round. Ten minutes is a room's worth of photographs, not a morning.
+   */
+  const lastRoom = useRef<{ room: string; at: number } | null>(null);
+  const recentRoom = lastRoom.current && Date.now() - lastRoom.current.at < ROOM_MEMORY_MS
+    ? lastRoom.current.room
+    : null;
+
+  /**
+   * Finishing a job from its card.
+   *
+   * The same RPC the job's own *Mark done* calls, and the same two outcomes
+   * read off the row that comes back rather than off what was asked for: a
+   * one-off leaves the list, a repeat rolls forward and stays. No dialog here
+   * — the reward is the card leaving, which is on screen — but an **Undo**,
+   * because a one-tap state change on a list of lookalike rows will
+   * occasionally land on the wrong one.
+   */
+  const [finishing, setFinishing] = useState<Set<string>>(() => new Set());
+  async function finish(snag: Snag) {
+    if (finishing.has(snag.id)) return;
+    setFinishing((was) => new Set(was).add(snag.id));
+    try {
+      const updated = await setSnagStatus(snag.id, 'done');
+      await load();
+      const headline = snagHeadline(snag);
+      if (updated.status === 'open') {
+        showToast(`Done — back on the list ${updated.dueAt ? 'when it’s next due' : 'again'}`);
+      } else {
+        showToast(`Done: ${headline}`, {
+          label: 'Undo',
+          onPress: () => {
+            setSnagStatus(snag.id, 'open')
+              .then(() => load())
+              .catch((err: any) =>
+                showAlert("Couldn't reopen that", err?.message ?? 'Please try again.'));
+          },
+        });
+      }
+    } catch (err: any) {
+      showAlert("Couldn't update that", err?.message ?? 'Please try again.');
+    } finally {
+      setFinishing((was) => {
+        const next = new Set(was);
+        next.delete(snag.id);
+        return next;
+      });
     }
   }
 
@@ -581,7 +643,10 @@ export default function SnagListScreen() {
             centred against the title while the two squares line up with each
             other, which is the relationship that actually matters. */}
         <View style={styles.headerBtns}>
-          {toGet > 0 ? (
+          {/* Still there with nothing left to get while the trip sheet is up:
+              it is the only way back to the jobs, and the last tick of a trip
+              must not strand somebody on an empty lens. */}
+          {toGet > 0 || lens === 'parts' ? (
             <Pressable
               onPress={() => setLens(lens === 'parts' ? 'all' : 'parts')}
               style={styles.shopTap}
@@ -604,13 +669,15 @@ export default function SnagListScreen() {
                   size="md"
                   color={lens === 'parts' ? Colors.white : Colors.textSecondary}
                 />
-                <View style={[styles.shopBadge, lens === 'parts' && styles.shopBadgeOn]}>
-                  <Text
-                    style={[styles.shopBadgeText, lens === 'parts' && styles.shopBadgeTextOn]}
-                  >
-                    {toGet > 99 ? '99+' : toGet}
-                  </Text>
-                </View>
+                {toGet > 0 ? (
+                  <View style={[styles.shopBadge, lens === 'parts' && styles.shopBadgeOn]}>
+                    <Text
+                      style={[styles.shopBadgeText, lens === 'parts' && styles.shopBadgeTextOn]}
+                    >
+                      {toGet > 99 ? '99+' : toGet}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
               {/* A cart with a number on it says there is shopping; it does not
                   say that pressing it swaps what the screen is showing, and a
@@ -623,18 +690,6 @@ export default function SnagListScreen() {
             </Pressable>
           ) : null}
 
-          <Pressable
-            onPress={() => setFilterOpen(true)}
-            style={[styles.iconBtn, (lens !== 'all' || sort !== 'room') && styles.iconBtnOn]}
-            accessibilityRole="button"
-            accessibilityLabel="Show me"
-          >
-            <Icon
-              name="options-outline"
-              size="md"
-              color={lens !== 'all' || sort !== 'room' ? Colors.white : Colors.textSecondary}
-            />
-          </Pressable>
         </View>
       </View>
 
@@ -762,6 +817,8 @@ export default function SnagListScreen() {
             snag={item}
             photoUrl={item.photoPaths[0] ? photoUrls[item.photoPaths[0]] : null}
             onPress={() => navigation.navigate('SnagDetail', { snagId: item.id })}
+            onDone={() => finish(item)}
+            finishing={finishing.has(item.id)}
           />
         )}
         ListFooterComponent={
@@ -822,8 +879,9 @@ export default function SnagListScreen() {
           snag={justAdded}
           locations={locations}
           busy={amending}
-          onSaveNote={(text) => amend({ description: text }, 'Added')}
-          onSetRoom={(room) => amend({ room }, room ?? 'Tag removed')}
+          onSaveNote={(text) => amend({ description: text })}
+          onSetRoom={(room) => amend({ room })}
+          suggestedRoom={recentRoom}
           onOpenDetail={() => {
             const id = justAdded.id;
             setJustAdded(null);
@@ -851,42 +909,6 @@ export default function SnagListScreen() {
         onExport={handleExport}
         onCancel={() => setShowExport(false)}
       />
-
-      {/* ─────────────────────────────────────────────── show me */}
-      <Modal visible={filterOpen} transparent animationType="slide" onRequestClose={() => setFilterOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setFilterOpen(false)} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
-          <View style={styles.grab} />
-          <Text style={styles.sheetTitle}>Show me</Text>
-          <View style={styles.chips}>
-            {LENSES.map(({ key, label }) => (
-              <Pressable
-                key={key}
-                onPress={() => setLens(key)}
-                style={[styles.chip, lens === key && styles.chipOn]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: lens === key }}
-              >
-                <Text style={[styles.chipLabel, lens === key && styles.chipLabelOn]}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Text style={styles.sheetLabel}>Sort</Text>
-          <View style={styles.chips}>
-            {SORTS.map(({ key, label }) => (
-              <Pressable
-                key={key}
-                onPress={() => setSort(key)}
-                style={[styles.chip, sort === key && styles.chipOn]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: sort === key }}
-              >
-                <Text style={[styles.chipLabel, sort === key && styles.chipLabelOn]}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-      </Modal>
 
       {/* ─────────────────────────────────────────────── which place */}
       <Modal visible={placesOpen} transparent animationType="slide" onRequestClose={() => setPlacesOpen(false)}>
@@ -1048,19 +1070,6 @@ const styles = StyleSheet.create({
   shoppingFor: { fontSize: Typography.sm, color: Colors.textMuted },
   doneLine: { paddingVertical: Spacing.lg, alignItems: 'center' },
   doneText: { fontSize: Typography.sm, color: Colors.textMuted },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  chip: {
-    minHeight: MIN_TOUCH_TARGET - Spacing.md,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.button,
-    backgroundColor: Colors.sunken,
-  },
-  chipOn: { backgroundColor: Colors.primary },
-  chipAlert: { backgroundColor: Colors.priority.highBg },
-  chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
-  chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
-  chipAlertLabel: { color: Colors.priority.high, fontWeight: Typography.semibold },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
   sheet: {
     position: 'absolute',
@@ -1075,13 +1084,6 @@ const styles = StyleSheet.create({
   },
   grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
   sheetTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
-  sheetLabel: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.semibold,
-    color: Colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
   placeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, minHeight: MIN_TOUCH_TARGET },
   placeLabel: { fontSize: Typography.base, color: Colors.textSecondary },
   placeLabelOn: { color: Colors.textPrimary, fontWeight: Typography.semibold },

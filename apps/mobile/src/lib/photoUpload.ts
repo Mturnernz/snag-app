@@ -113,12 +113,12 @@ export const PHOTO_PICK_LIMIT = 5;
 /**
  * Opens the picker for **several** photographs at once.
  *
- * On the build people actually install this is also the way to the camera: the
- * web path renders `<input type="file" accept="image/*">`, and a phone browser
- * answers that with its own sheet — *Take Photo*, *Photo Library*, *Browse* —
- * so one control covers both without the app asking a question first. On native
- * it is the library only; `takePhoto` remains for the two screens whose whole
- * gesture is the shutter (the compose bar, and the walkthrough's rating plate).
+ * **This is the library, and only the library.** It was once relied on as the
+ * way to the camera too, on the grounds that a phone browser answers
+ * `<input type="file" accept="image/*">` with its own *Take Photo* sheet. iOS
+ * does; Android Chrome omits the camera from that sheet whenever `multiple` is
+ * set, and the native build is the library only. So every place that adds
+ * photographs offers `takePhoto` beside this — see `PhotoSourceButtons`.
  *
  * Returns what was chosen and how many were left behind, because a cap that
  * says nothing is a cap that looks like a bug.

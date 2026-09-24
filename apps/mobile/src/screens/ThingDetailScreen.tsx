@@ -26,7 +26,7 @@ import {
   createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getSnags, getThing,
   updateSnag, updateThing, uploadFile,
 } from '../lib/supabase';
-import { PHOTO_PICK_LIMIT, compressAndUpload, photoFileName, pickPhotos } from '../lib/photoUpload';
+import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
@@ -338,50 +338,16 @@ export default function ThingDetailScreen() {
    * the PDF export follows for a photograph that will not come, and the paste
    * screen follows for a write that fails part way.
    */
-  async function attachPhotos() {
+  async function attachPhotos(source: PhotoSource) {
     if (!thing || !household || busy) return;
-    const { uris, dropped } = await pickPhotos();
-    if (uris.length === 0) return;
-
     setBusy(true);
-    const added: string[] = [];
-    let lastError: unknown = null;
     try {
-      for (const uri of uris) {
-        try {
-          const { path, error } = await compressAndUpload(uri, photoFileName(household.id));
-          if (error || !path) throw error ?? new Error('The photo did not upload');
-          added.push(path);
-        } catch (err: unknown) {
-          lastError = err;
-        }
-      }
-
-      if (added.length > 0) {
-        await patch(
-          { photoPaths: [...thing.photoPaths, ...added] },
-          added.length === 1 ? 'Photo added' : `${added.length} photos added`,
-        );
-      }
-    } catch (err: unknown) {
-      lastError = err;
+      await addPhotos(household.id, (added) => patch(
+        { photoPaths: [...thing.photoPaths, ...added] },
+        added.length === 1 ? 'Photo added' : `${added.length} photos added`,
+      ), source);
     } finally {
       setBusy(false);
-    }
-
-    const missed = uris.length - added.length;
-    if (missed > 0) {
-      showAlert(
-        added.length > 0 ? `${missed} of ${uris.length} didn't save` : "That photo didn't save",
-        failureReason(lastError),
-      );
-    } else if (dropped > 0) {
-      // Said out loud rather than dropped in silence — a cap nobody is told
-      // about is indistinguishable from photographs that failed.
-      showAlert(
-        `${PHOTO_PICK_LIMIT} at a time`,
-        `${added.length} added. Choose the other ${dropped} in another go.`,
-      );
     }
   }
 
@@ -854,20 +820,29 @@ export default function ThingDetailScreen() {
             wraps rather than squeezing three labels onto one phone-width
             line. */}
         <View style={styles.attachRow}>
-          {/* One control, not a camera and a *Choose one* beside it. Those were
-              two controls with one outcome — and on the build people install
-              the distinction was never the app's to make: the file input's own
-              sheet offers *Take Photo* above the library, so asking first only
-              added a tap. It takes several at once. */}
+          {/* A camera and the library, side by side. It was one *Add photos*
+              on the belief that the phone's own file sheet offers *Take Photo*
+              — Android Chrome does not once several files are allowed, so the
+              camera meant leaving the app. See lib/addPhotos.ts. */}
           <Pressable
-            onPress={attachPhotos}
+            onPress={() => attachPhotos('camera')}
             disabled={busy}
             style={styles.addDetail}
             accessibilityRole="button"
-            accessibilityLabel="Add photos"
+            accessibilityLabel="Take a photo"
           >
             <Icon name="camera-outline" size="sm" color={Colors.primary} />
-            <Text style={styles.addDetailLabel}>Add photos</Text>
+            <Text style={styles.addDetailLabel}>Take photo</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => attachPhotos('library')}
+            disabled={busy}
+            style={styles.addDetail}
+            accessibilityRole="button"
+            accessibilityLabel="Choose photos"
+          >
+            <Icon name="images-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.addDetailLabel}>Choose photos</Text>
           </Pressable>
           <Pressable
             onPress={attachDocument}

@@ -8,12 +8,13 @@ import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
+import { addPhotos } from '../lib/addPhotos';
 
 interface Props {
   /** `<household_id>` — the storage folder the RLS policies read. */
   pathPrefix: string | null;
-  /** Files a snag with a photo, a line of text, or both. */
-  onAdd: (input: { photoPath: string | null; description: string | null }) => Promise<void>;
+  /** Files a snag with photos, a line of text, or both. */
+  onAdd: (input: { photoPaths: string[]; description: string | null }) => Promise<void>;
   /** Stacked above a tab bar, which already clears the home indicator. */
   stacked?: boolean;
   /**
@@ -86,7 +87,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
       // tick, and a bar still holding the words that are now on screen reads
       // as "that didn't send".
       setDraft('');
-      await onAdd({ photoPath: null, description: text });
+      await onAdd({ photoPaths: [], description: text });
     } catch (err: any) {
       setDraft(text);
       showAlert("Couldn't add that", err?.message ?? 'Please try again.');
@@ -108,9 +109,30 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
       // someone typing and then reaching for the camera meant one snag.
       const description = draft.trim() || null;
       setDraft('');
-      await onAdd({ photoPath: path, description });
+      await onAdd({ photoPaths: [path], description });
     } catch (err: unknown) {
       showAlert("Couldn't add that photo", failureReason(err) ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * A photograph somebody already has — taken earlier with the phone's own
+   * camera, or sent over by the other person. The bar only ever opened the
+   * camera, so filing one meant typing a snag and then adding the photo on its
+   * page. The shutter stays the one-tap default; this sits at the far end of
+   * the field, where the send arrow goes once there are words to send.
+   */
+  async function handleLibrary() {
+    if (busy || !pathPrefix) return;
+    setBusy(true);
+    try {
+      const description = draft.trim() || null;
+      await addPhotos(pathPrefix, async (paths) => {
+        setDraft('');
+        await onAdd({ photoPaths: paths, description });
+      }, 'library');
     } finally {
       setBusy(false);
     }
@@ -170,7 +192,17 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
         accessibilityLabel={promptLabel}
       />
 
-      {draft.trim().length > 0 ? (
+      {draft.trim().length === 0 ? (
+        <Pressable
+          onPress={handleLibrary}
+          disabled={off}
+          style={styles.library}
+          accessibilityRole="button"
+          accessibilityLabel="Choose a photo you already have"
+        >
+          <Icon name="images-outline" size="md" color={off ? Colors.textMuted : Colors.textSecondary} />
+        </Pressable>
+      ) : (
         <Pressable
           onPress={handleText}
           disabled={!canSend}
@@ -180,7 +212,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words }: Props)
         >
           <Icon name="arrow-up" size="md" color={canSend ? Colors.white : Colors.textMuted} />
         </Pressable>
-      ) : null}
+      )}
     </View>
   );
 }
@@ -226,4 +258,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendOff: { backgroundColor: Colors.sunken },
+  library: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

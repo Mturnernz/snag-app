@@ -14,7 +14,10 @@ jest.mock('react-native-safe-area-context', () => ({
 
 const mock_takePhoto = jest.fn();
 const mock_compressAndUpload = jest.fn();
+const mock_pickPhotos = jest.fn();
 jest.mock('../lib/photoUpload', () => ({
+  PHOTO_PICK_LIMIT: 5,
+  pickPhotos: (...a: unknown[]) => mock_pickPhotos(...a),
   takePhoto: (...a: unknown[]) => mock_takePhoto(...a),
   compressAndUpload: (...a: unknown[]) => mock_compressAndUpload(...a),
   photoFileName: () => 'house-1/1.jpg',
@@ -58,7 +61,7 @@ describe('ComposeBar', () => {
     await TestRenderer.act(async () => field(result).props.onChangeText('Gutters'));
     await TestRenderer.act(async () => labelled(result, 'Add to the list').props.onPress());
 
-    expect(onAdd).toHaveBeenCalledWith({ photoPath: null, description: 'Gutters' });
+    expect(onAdd).toHaveBeenCalledWith({ photoPaths: [], description: 'Gutters' });
   });
 
   it('gives the words back when the send fails', async () => {
@@ -83,7 +86,7 @@ describe('ComposeBar', () => {
     await TestRenderer.act(async () => labelled(result, 'Take a photo').props.onPress());
 
     // Typing and then reaching for the camera meant one snag, not two.
-    expect(onAdd).toHaveBeenCalledWith({ photoPath: 'house-1/1.jpg', description: 'Hinge sheared off' });
+    expect(onAdd).toHaveBeenCalledWith({ photoPaths: ['house-1/1.jpg'], description: 'Hinge sheared off' });
   });
 
   it('is only ever a way to file something new', async () => {
@@ -102,7 +105,7 @@ describe('ComposeBar', () => {
     await TestRenderer.act(async () => field(result).props.onChangeText('Gutters'));
     await TestRenderer.act(async () => labelled(result, 'Add to the list').props.onPress());
 
-    expect(onAdd).toHaveBeenCalledWith({ photoPath: null, description: 'Gutters' });
+    expect(onAdd).toHaveBeenCalledWith({ photoPaths: [], description: 'Gutters' });
   });
 
   it('refuses the camera until it knows where photos go', async () => {
@@ -161,5 +164,30 @@ describe('which way of filing is the default', () => {
     const result = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
     await TestRenderer.act(async () => labelled(result, 'Take a photo').props.onPress());
     expect(mock_takePhoto).toHaveBeenCalled();
+  });
+
+  it('files a photo somebody already has, carrying the words in the bar', async () => {
+    mock_pickPhotos.mockResolvedValue({ uris: ['blob:a', 'blob:b'], dropped: 0 });
+    mock_compressAndUpload
+      .mockResolvedValueOnce({ path: 'house-1/a.jpg', error: null })
+      .mockResolvedValueOnce({ path: 'house-1/b.jpg', error: null });
+    const onAdd = jest.fn().mockResolvedValue(undefined);
+    const r = render(<ComposeBar pathPrefix="house-1" onAdd={onAdd} />);
+
+    await TestRenderer.act(async () => {
+      await labelled(r, 'Choose a photo you already have').props.onPress();
+    });
+
+    expect(mock_takePhoto).not.toHaveBeenCalled();
+    expect(onAdd).toHaveBeenCalledWith({
+      photoPaths: ['house-1/a.jpg', 'house-1/b.jpg'], description: null,
+    });
+  });
+
+  it('swaps the library for the send arrow once there are words', async () => {
+    const r = render(<ComposeBar pathPrefix="house-1" onAdd={jest.fn()} />);
+    expect(() => labelled(r, 'Choose a photo you already have')).not.toThrow();
+    await TestRenderer.act(async () => { field(r).props.onChangeText('Gutters'); });
+    expect(() => labelled(r, 'Choose a photo you already have')).toThrow();
   });
 });

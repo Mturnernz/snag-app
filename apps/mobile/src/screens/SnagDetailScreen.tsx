@@ -31,7 +31,7 @@ import {
   getThingNotes, getThings, setSnagThings,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { addPhotos } from '../lib/addPhotos';
+import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import LinkedText from '../components/LinkedText';
 import {
   dayKey, describeCycle, dueState, formatLooseDate, parseLooseDate, snagHeadline,
@@ -337,14 +337,14 @@ export default function SnagDetailScreen() {
   }
 
   /** Another angle, or the plate you went back for. */
-  async function handleAddPhotos() {
+  async function handleAddPhotos(source: PhotoSource) {
     if (!snag || busy) return;
     setBusy(true);
     try {
       await addPhotos(snag.householdId, async (added) => {
         setSnag(await updateSnag(snag.id, { photoPaths: [...snag.photoPaths, ...added] }));
         showToast(added.length === 1 ? 'Photo added' : `${added.length} photos added`);
-      });
+      }, source);
     } finally {
       setBusy(false);
     }
@@ -527,19 +527,29 @@ export default function SnagDetailScreen() {
             </Pressable>
           ))}
 
+          {/* Two tiles, the camera first. One tile opened the library and
+              trusted the phone to offer a camera from there — Android Chrome
+              does not once several files are allowed, so photographing the
+              crack you had just noticed meant leaving the app. */}
           <Pressable
-            onPress={handleAddPhotos}
+            onPress={() => handleAddPhotos('camera')}
             disabled={busy}
             style={[styles.photoAdd, busy && styles.photoAddOff]}
             accessibilityRole="button"
-            accessibilityLabel={
-              snag.photoPaths.length > 0 ? 'Add another photo' : 'Add a photo'
-            }
+            accessibilityLabel="Take a photo"
           >
             <Icon name="camera-outline" size="md" color={Colors.primary} />
-            <Text style={styles.photoAddLabel}>
-              {snag.photoPaths.length > 0 ? 'Add another' : 'Add a photo'}
-            </Text>
+            <Text style={styles.photoAddLabel}>Take photo</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => handleAddPhotos('library')}
+            disabled={busy}
+            style={[styles.photoAdd, busy && styles.photoAddOff]}
+            accessibilityRole="button"
+            accessibilityLabel="Choose photos"
+          >
+            <Icon name="images-outline" size="md" color={Colors.primary} />
+            <Text style={styles.photoAddLabel}>Choose photos</Text>
           </Pressable>
         </ScrollView>
 
@@ -1330,8 +1340,9 @@ const styles = StyleSheet.create({
   // photographs would be the loudest thing on a page whose whole job is the
   // picture.
   photoAdd: {
-    width: 130,
+    width: 120,
     height: 165,
+    marginRight: Spacing.sm,
     borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: Colors.border,

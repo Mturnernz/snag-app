@@ -1121,7 +1121,7 @@ export default function ThingDetailScreen() {
           style={styles.remove}
           accessibilityRole="button"
         >
-          <Text style={styles.removeLabel}>Remove from the record</Text>
+          <Text style={styles.removeLabel}>Remove this item</Text>
         </Pressable>
       </ScrollView>
 

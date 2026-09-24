@@ -77,7 +77,7 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words, embedded
   const off = busy || !pathPrefix;
 
   const cameraLabel = words?.cameraLabel ?? 'Take a photo';
-  const prompt = words?.placeholder ?? 'Capture new issue';
+  const prompt = words?.placeholder ?? 'Capture a new job';
   // The accessible name is the prompt without its trailing ellipsis: a screen
   // reader saying "Say what it is dot dot dot" is reading punctuation aloud.
   const promptLabel = prompt.replace(/[….]+$/, '');

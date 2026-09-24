@@ -100,7 +100,7 @@ describe('ComposeBar', () => {
     // The prompt never changes meaning, and the send button says one thing.
     // It names what the whole bar does rather than describing the field, which
     // is what lets the camera beside it go back to being an icon.
-    expect(field(result).props.placeholder).toBe('Capture new issue');
+    expect(field(result).props.placeholder).toBe('Capture a new job');
 
     await TestRenderer.act(async () => field(result).props.onChangeText('Gutters'));
     await TestRenderer.act(async () => labelled(result, 'Add to the list').props.onPress());

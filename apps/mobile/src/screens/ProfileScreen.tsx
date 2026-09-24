@@ -340,7 +340,7 @@ export default function ProfileScreen() {
         title="Delete your account?"
         message={
           "You'll be signed out for good. Any household you're the only one in is deleted with " +
-          'every snag, thing and photo in it. This cannot be undone.'
+          'every job, item and photo in it. This cannot be undone.'
         }
         confirmLabel="Delete"
         confirmText={profile.displayName}

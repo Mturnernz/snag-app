@@ -295,7 +295,7 @@ export default function HouseScreen() {
     try {
       const created = await createThing({ ...input, propertyId: activeProperty.id });
       setSheetOpen(false);
-      showToast((await fileServiceJob(created)) ?? 'In the record');
+      showToast((await fileServiceJob(created)) ?? 'Added to the house');
       await load();
     } catch (err: any) {
       // The sheet stays open on a failure: everything typed is still in it, and

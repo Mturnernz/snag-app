@@ -835,7 +835,7 @@ export default function HouseholdScreen() {
       <ConfirmDialog
         visible={confirmDeleteHouse}
         title={`Delete ${household.name}?`}
-        message="You're the only one here, so this deletes the household and everything in it — every place, every snag, every photo. It cannot be undone."
+        message="You're the only one here, so this deletes the household and everything in it — every place, every job, every photo. It cannot be undone."
         confirmLabel="Delete"
         confirmText={household.name}
         destructive
@@ -848,8 +848,8 @@ export default function HouseholdScreen() {
         title={`Delete ${confirmPlace?.name ?? ''}?`}
         message={
           confirmPlace
-            ? `${confirmPlace.snags} ${confirmPlace.snags === 1 ? 'snag' : 'snags'} and ` +
-              `${confirmPlace.things} ${confirmPlace.things === 1 ? 'thing' : 'things'} go with it, ` +
+            ? `${confirmPlace.snags} ${confirmPlace.snags === 1 ? 'job' : 'jobs'} and ` +
+              `${confirmPlace.things} ${confirmPlace.things === 1 ? 'item' : 'items'} go with it, ` +
               'along with its rooms and every photo. It cannot be undone.'
             : undefined
         }

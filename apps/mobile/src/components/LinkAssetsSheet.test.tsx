@@ -87,7 +87,7 @@ describe('choosing what a job is about', () => {
     ]);
 
     await TestRenderer.act(async () => {
-      field(r, 'Search assets').props.onChangeText('XF12');
+      field(r, 'Search items').props.onChangeText('XF12');
     });
     expect(byLabel(r, 'Extractor fan')).toBeDefined();
     expect(byLabel(r, 'Dishwasher')).toBeUndefined();

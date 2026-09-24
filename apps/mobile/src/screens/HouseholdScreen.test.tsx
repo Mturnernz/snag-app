@@ -190,7 +190,7 @@ describe('deleting a place', () => {
     // Singular and plural both, because "1 snags" is the kind of thing nobody
     // notices until it is in front of somebody about to delete their house.
     expect(r.queryByText(
-      '2 snags and 1 thing go with it, along with its rooms and every photo. It cannot be undone.'
+      '2 jobs and 1 item go with it, along with its rooms and every photo. It cannot be undone.'
     )).not.toBeNull();
 
     expect(input(r, (props) => props.accessibilityLabel === 'Type The bach to confirm')).toBeDefined();

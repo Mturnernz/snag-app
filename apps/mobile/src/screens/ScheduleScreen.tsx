@@ -410,7 +410,7 @@ export default function ScheduleScreen() {
             <EmptyState
               icon="calendar-outline"
               title={selected ? 'Nothing on this day' : `Nothing in ${MONTHS[monthOf]}`}
-              message="Dates come from a snag's due date and from when it was added or finished."
+              message="Dates come from a job's due date and from when it was added or finished."
             />
           )
         ) : (

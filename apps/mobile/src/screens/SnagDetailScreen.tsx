@@ -760,7 +760,7 @@ export default function SnagDetailScreen() {
         <Card elevation="md" style={styles.section}>
           <View style={styles.assetHead}>
             <Text style={styles.sectionTitle}>
-              {linked.length > 0 ? `Linked assets (${linked.length})` : 'Linked assets'}
+              {linked.length > 0 ? `Linked items (${linked.length})` : 'Linked items'}
             </Text>
             {linked.length > 0 ? (
               <Pressable
@@ -768,10 +768,10 @@ export default function SnagDetailScreen() {
                 disabled={busy}
                 style={styles.assetAdd}
                 accessibilityRole="button"
-                accessibilityLabel="Add asset"
+                accessibilityLabel="Add item"
               >
                 <Icon name="add" size="sm" color={Colors.primary} />
-                <Text style={styles.assetAddLabel}>Add asset</Text>
+                <Text style={styles.assetAddLabel}>Add item</Text>
               </Pressable>
             ) : null}
           </View>
@@ -785,10 +785,10 @@ export default function SnagDetailScreen() {
               disabled={busy}
               style={styles.assetEmpty}
               accessibilityRole="button"
-              accessibilityLabel="Link an appliance or fixture"
+              accessibilityLabel="Link an item from the house"
             >
               <Icon name="add" size="sm" color={Colors.primary} />
-              <Text style={styles.assetAddLabel}>Link an appliance or fixture</Text>
+              <Text style={styles.assetAddLabel}>Link an item from the house</Text>
             </Pressable>
           ) : (
             linked.map((item) => (

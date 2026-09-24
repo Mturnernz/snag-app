@@ -263,7 +263,7 @@ describe('linked assets', () => {
     mock_getThings.mockClear();
     const r = await arrange(snag({ linkedThings: [], room: null }));
 
-    expect(byLabel(r, 'Link an appliance or fixture')).toBeDefined();
+    expect(byLabel(r, 'Link an item from the house')).toBeDefined();
     // With no room there is no shortlist to offer, so nothing to read.
     expect(mock_getThings).not.toHaveBeenCalled();
   });
@@ -302,11 +302,11 @@ describe('linked assets', () => {
       linkedThings: [linked(), linked({ id: 't2', name: 'Extractor fan', model: 'XF12' })],
     }));
 
-    expect(r.queryByText('Linked assets (2)')).not.toBeNull();
+    expect(r.queryByText('Linked items (2)')).not.toBeNull();
     expect(r.queryByText('Mitsubishi MSZ-AP50VGK')).not.toBeNull();
     expect(byLabel(r, 'Open Heat pump')).toBeDefined();
     // Never the whole inventory: only what the job says it is about.
-    expect(byLabel(r, 'Link an appliance or fixture')).toBeUndefined();
+    expect(byLabel(r, 'Link an item from the house')).toBeUndefined();
   });
 
   it('opens the record only when the picker is asked for', async () => {
@@ -314,7 +314,7 @@ describe('linked assets', () => {
     mock_getThings.mockResolvedValue([]);
     const r = await arrange(snag({ linkedThings: [] }));
 
-    await press(byLabel(r, 'Link an appliance or fixture'));
+    await press(byLabel(r, 'Link an item from the house'));
     expect(mock_getThings).toHaveBeenCalledWith('p');
   });
 
@@ -708,7 +708,7 @@ describe('the order down the page', () => {
     const flat = (node: any): string =>
       (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : flat(c))).join('');
 
-    const wanted = ['Linked assets', 'Anything to pick up?', 'Notes', "When's it due?",
+    const wanted = ['Linked items', 'Anything to pick up?', 'Notes', "When's it due?",
       'Repeats'];
     const seen = r.getAllByType('Text')
       .map((n: any) => flat(n).trim())

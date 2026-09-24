@@ -98,7 +98,7 @@ export default function LinkAssetsSheet({
         <View style={styles.grab} />
 
         <View style={styles.head}>
-          <Text style={styles.title}>Select assets</Text>
+          <Text style={styles.title}>Select items</Text>
           <Text style={styles.count}>
             {chosen.length === 0 ? 'None selected' : `${chosen.length} selected`}
           </Text>
@@ -114,7 +114,7 @@ export default function LinkAssetsSheet({
             placeholderTextColor={Colors.textMuted}
             autoCorrect={false}
             autoCapitalize="none"
-            accessibilityLabel="Search assets"
+            accessibilityLabel="Search items"
           />
           {query.length > 0 ? (
             <Pressable

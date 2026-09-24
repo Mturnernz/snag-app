@@ -68,6 +68,8 @@ export interface RoomRow {
   setAside: number | null;
   chosen: number | null;
   settled: boolean;
+  /** Quotes for this room (or the whole job) nobody has agreed or turned down yet. */
+  openQuotes: number;
 }
 
 export interface ProjectSummary {
@@ -89,6 +91,41 @@ const round = (n: number): number => Math.round(n * 100) / 100;
 function gross(amount: number | null, incl: boolean): number {
   if (amount === null) return 0;
   return incl ? amount : round(amount * 1.15);
+}
+
+/**
+ * Quotes for the whole job or a room that are still waiting on a decision.
+ *
+ * A quote for a thing is an option on it and is counted through the thing.
+ * A quote for the job or a room had nowhere to count: not in Agreed, because
+ * nobody agreed it, and not in Undecided, which only held things and
+ * set-asides — so a planned job whose one price was a tree surgeon's quote
+ * read $0 and had no row to find it under. Now, where **nothing at that level
+ * is agreed or billed yet**, its open quotes are the decision still to make and
+ * count in Undecided at the dearest, the rule things already follow so the
+ * total never surprises upwards. Once anything there is agreed or billed, an
+ * open quote could be a variation or an alternative and the app cannot tell
+ * which, so it is listed and not counted.
+ *
+ * Keyed by element id, or `'job'`.
+ */
+export function openScopeQuotes(page: Pick<ProjectPage, 'quotes'>): Map<string, { count: number; dearest: number }> {
+  const scopeOf = (q: ProjectQuote): string | null =>
+    q.itemId ? null : q.elementId ?? (q.projectId ? 'job' : null);
+  const settled = new Set<string>();
+  const open = new Map<string, { count: number; dearest: number }>();
+  for (const q of page.quotes) {
+    const scope = scopeOf(q);
+    if (scope === null || q.status === 'declined') continue;
+    if ((q.kind === 'quote' && q.status === 'accepted') || q.kind === 'invoice') settled.add(scope);
+  }
+  for (const q of page.quotes) {
+    const scope = scopeOf(q);
+    if (scope === null || settled.has(scope) || q.kind !== 'quote' || q.status !== 'tbc') continue;
+    const prev = open.get(scope) ?? { count: 0, dearest: 0 };
+    open.set(scope, { count: prev.count + 1, dearest: Math.max(prev.dearest, q.amountIncl ?? 0) });
+  }
+  return open;
 }
 
 /** Whether a thing still needs choosing: not excluded, and nothing agreed or billed. */
@@ -232,8 +269,11 @@ export function projectSummary(page: ProjectPage): ProjectSummary {
   const itemUndecided = (d: DecisionRow): number =>
     d.setAside ? 0 : d.high ?? 0;
 
+  const scopeQuotes = openScopeQuotes(page);
+
   const undecided = round(
-    sum([...lineUndecided.values()])
+    sum([...scopeQuotes.values()].map((o) => o.dearest))
+      + sum([...lineUndecided.values()])
       // An allowance on a signed quote but not marked as a set-aside line above
       // (an additional one, or on a quote we could not see) still counts.
       + Math.max(project.allowanceOpen - sum(setAsides
@@ -271,7 +311,8 @@ export function projectSummary(page: ProjectPage): ProjectSummary {
     const tagged = sharedWith(e.id);
     const roomAgreed = round((e.committedTotal ?? 0) - e.allowanceOpen + shared);
     const roomUndecided = round(
-      sum(inRoom.map(itemUndecided))
+      (scopeQuotes.get(e.id)?.dearest ?? 0)
+        + sum(inRoom.map(itemUndecided))
         + sum(lines.map((l) => lineUndecided.get(l.id) ?? 0))
         + e.expectedOpen,
     );
@@ -294,12 +335,14 @@ export function projectSummary(page: ProjectPage): ProjectSummary {
       setAside: lines.length ? lineAmount : null,
       chosen: lines.length ? lineChosen : null,
       settled,
+      openQuotes: scopeQuotes.get(e.id)?.count ?? 0,
     };
   });
 
   const jobAgreed = round(agreed - sum(rooms.map((r) => r.agreed)));
   const jobUndecided = round(undecided - sum(rooms.map((r) => r.undecided)));
-  if (Math.abs(jobAgreed) >= 0.01 || Math.abs(jobUndecided) >= 0.01) {
+  const jobQuotes = scopeQuotes.get('job')?.count ?? 0;
+  if (Math.abs(jobAgreed) >= 0.01 || Math.abs(jobUndecided) >= 0.01 || jobQuotes > 0) {
     const suppliers = new Set(
       page.quotes
         .filter((q) => quoteElement(q) === null && q.status !== 'declined' && q.supplier)
@@ -319,6 +362,7 @@ export function projectSummary(page: ProjectPage): ProjectSummary {
       setAside: null,
       chosen: null,
       settled: false,
+      openQuotes: jobQuotes,
     });
   }
 
@@ -337,7 +381,7 @@ export function projectSummary(page: ProjectPage): ProjectSummary {
     toPay: project.dueToPay,
     toDecide,
     bills,
-    rooms: rooms.filter((r) => r.total !== 0 || r.toDecide > 0 || r.key !== 'job'),
+    rooms: rooms.filter((r) => r.total !== 0 || r.toDecide > 0 || r.openQuotes > 0 || r.key !== 'job'),
   };
 }
 
@@ -356,6 +400,9 @@ export function describeRoom(room: RoomRow, money: (n: number) => string): strin
   const parts: string[] = [];
   if (room.setAside !== null) parts.push(`${money(room.setAside)} set aside`);
   if (room.toDecide > 0) parts.push(`${room.toDecide} to decide`);
+  if (room.openQuotes > 0) {
+    parts.push(room.openQuotes === 1 ? '1 quote not agreed' : `${room.openQuotes} quotes not agreed`);
+  }
   if (room.shared > 0) parts.push(`${money(room.shared)} of shared bills`);
   else if (room.sharedCount > 0) {
     parts.push(room.sharedCount === 1 ? 'On 1 shared bill' : `On ${room.sharedCount} shared bills`);

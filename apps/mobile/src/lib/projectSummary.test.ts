@@ -249,3 +249,64 @@ describe('groupBySupplier', () => {
     expect(groups.every((g) => g.supplier === null)).toBe(true);
   });
 });
+
+// A planned job whose only price is a quote nobody has agreed yet. It read $0
+// and had no row to find the quote under.
+describe('projectSummary — an open quote for the whole job or a room', () => {
+  const tree = (over: any = {}) => quote({
+    projectId: 'p1', kind: 'quote', status: 'tbc', supplier: 'Shore Tree Services Limited', ...over,
+  });
+
+  it('counts the dearest open quote on the whole job as undecided, and gives it a row', () => {
+    const s = projectSummary(page({
+      elements: [element({ implicit: true })],
+      quotes: [tree({ id: 'a', amount: 1092.5, amountIncl: 1092.5 }), tree({ id: 'b', amount: 950, amountIncl: 950 })],
+    }));
+    expect(s.undecided).toBe(1092.5);
+    expect(s.expected).toBe(1092.5);
+    expect(s.agreed).toBe(0);
+    const job = s.rooms.find((r) => r.key === 'job')!;
+    expect(job.openQuotes).toBe(2);
+    expect(job.total).toBe(1092.5);
+    expect(describeRoom(job, money)).toContain('2 quotes not agreed');
+  });
+
+  it('still gives the whole job a row for a quote with no figure, and counts nothing for it', () => {
+    const s = projectSummary(page({ quotes: [tree({ id: 'a', amount: null, amountIncl: null })] }));
+    expect(s.undecided).toBe(0);
+    expect(s.rooms.find((r) => r.key === 'job')?.openQuotes).toBe(1);
+  });
+
+  it('counts a room\'s open quote in that room, so the rows still add up to the total', () => {
+    const s = projectSummary(page({
+      elements: [element({ id: 'e1', name: 'Outside' }), element({ id: 'e2', name: 'Deck' })],
+      quotes: [tree({ id: 'a', projectId: null, elementId: 'e2', amount: 800, amountIncl: 800 })],
+    }));
+    const deck = s.rooms.find((r) => r.key === 'e2')!;
+    expect(deck.undecided).toBe(800);
+    expect(deck.openQuotes).toBe(1);
+    expect(s.rooms.reduce((t, r) => t + r.total, 0)).toBe(s.expected);
+  });
+
+  // Once something there is agreed or billed, an open quote could be a
+  // variation or an alternative, and the app cannot tell which.
+  it('counts nothing where a price is already agreed or billed', () => {
+    for (const settled of [
+      tree({ id: 's', status: 'accepted', amount: 1000, amountIncl: 1000 }),
+      tree({ id: 's', kind: 'invoice', status: 'tbc', amount: 1000, amountIncl: 1000 }),
+    ]) {
+      const s = projectSummary(page({ quotes: [settled, tree({ id: 'o', amount: 5000, amountIncl: 5000 })] }));
+      expect(s.undecided).toBe(0);
+    }
+  });
+
+  it('never counts a declined quote, or a quote for a thing, this way', () => {
+    const s = projectSummary(page({
+      quotes: [
+        tree({ id: 'd', status: 'declined', amount: 700, amountIncl: 700 }),
+        tree({ id: 'i', projectId: null, itemId: 'it1', amount: 300, amountIncl: 300 }),
+      ],
+    }));
+    expect(s.rooms.find((r) => r.key === 'job')).toBeUndefined();
+  });
+});

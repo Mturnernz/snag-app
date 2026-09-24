@@ -21,7 +21,7 @@ const HEADINGS = {
 } as const;
 
 /**
- * The job's tagged paperwork, gathered by what it is, wherever it is attached.
+ * The job's paperwork, gathered by what it is, wherever it is attached.
  *
  * The certificate somebody is asked for at code compliance was filed on the
  * electrician's bill, the product sheet on the heat pump, the warranty on the
@@ -29,12 +29,19 @@ const HEADINGS = {
  * `project_files`, never a second place a file lives — and every row says
  * where it is attached, so the answer to "where's the CoC" is one screen.
  *
- * Absent entirely until something is tagged: a heading over nothing is a
+ * **Untagged paperwork on a price or a part is listed too**, under *On prices
+ * and parts*. The section below this shows only the files on the job itself,
+ * so a quote's PDF — the one piece of paper a planned job has — was on the
+ * record and on no screen but the quote's own. Files on the job itself are not
+ * repeated here; they are directly underneath.
+ *
+ * Absent entirely when there is nothing to gather: a heading over nothing is a
  * prompt nobody asked for, the shopping pill's rule at zero.
  */
 export default function TaggedFiles({ files, tags }: Props) {
   const tagged = files.filter((f) => f.kind === 'document' && tags[f.path]);
-  if (tagged.length === 0) return null;
+  const elsewhere = files.filter((f) => f.kind === 'document' && !tags[f.path] && f.level !== 'project');
+  if (tagged.length === 0 && elsewhere.length === 0) return null;
 
   async function open(path: string) {
     const url = await getFileUrl(path);
@@ -67,6 +74,22 @@ export default function TaggedFiles({ files, tags }: Props) {
           </View>
         );
       })}
+      {elsewhere.length > 0 ? (
+        <View>
+          <SectionTitle title="On prices and parts" count={elsewhere.length} />
+          <Group>
+            {elsewhere.map((f) => (
+              <Row
+                key={f.path}
+                title={documentName(f.path)}
+                subtitle={`On ${f.ownerName}`}
+                onPress={() => open(f.path)}
+                accessibilityLabel={`Open ${documentName(f.path)}`}
+              />
+            ))}
+          </Group>
+        </View>
+      ) : null}
     </View>
   );
 }

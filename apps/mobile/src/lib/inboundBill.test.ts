@@ -1,7 +1,8 @@
 import { createHmac } from 'crypto';
 import {
-  BILL_SCHEMA, NOTHING_READ, billAttachments, billRequest, emailAddress, inboxToken, isoDay,
-  reviewFromReading, storedPath, verifyWebhook,
+  MAX_ATTACHMENTS, NOTHING_READ, PAPER_SCHEMA, billAttachments, cardFromEmail, cardsFromReadings,
+  emailAddress, inboxToken, isoDay, paperFromReading, paperName, paperRequest, sniffPaper, storedPath,
+  stripHtml, verifyWebhook, type PaperReading,
 } from '../../../../supabase/functions/inbound-bill/bill';
 
 // inbound-bill turns a forwarded email into a card nobody has approved yet.
@@ -72,11 +73,12 @@ describe('the attachments', () => {
     expect(kept.map((a) => a.id)).toEqual(['doc', 'photo']);
   });
 
-  it('drops anything over 10 MB and keeps five at most', () => {
-    const many = Array.from({ length: 8 }, (_, i) => ({
+  it('drops anything over 10 MB and keeps ten at most', () => {
+    const many = Array.from({ length: 14 }, (_, i) => ({
       id: `p${i}`, filename: `${i}.pdf`, content_type: 'application/pdf', size: 1000,
     }));
-    expect(billAttachments(many)).toHaveLength(5);
+    expect(billAttachments(many)).toHaveLength(MAX_ATTACHMENTS);
+    expect(MAX_ATTACHMENTS).toBe(10);
     expect(billAttachments([{ id: 'big', filename: 'x.pdf', content_type: 'application/pdf', size: 11 * 1024 * 1024 }]))
       .toEqual([]);
   });
@@ -88,42 +90,92 @@ describe('the attachments', () => {
   });
 });
 
-describe('the reading', () => {
+describe('reading one paper', () => {
   const bill = {
-    isBill: true, supplier: 'ReliaBuilder', detail: 'Progress claim 2', amount: 43987.5, amountInclGst: true,
+    kind: 'invoice', addressedToHousehold: true, addressedTo: null,
+    supplier: 'ReliaBuilder', detail: 'Progress claim 2', amount: 43987.5, amountInclGst: true,
     invoiceNumber: 'INV-0208', dated: '2026-09-20', dueOn: '2026-10-20', paid: false, paidOn: null,
     paidEvidence: null, guessed: [],
   };
+  const context = {
+    from: 'Sam <sam@example.com>', subject: 'Fwd: Variations', text: 'See attached',
+    fileName: 'Variation - Force Plumbing.pdf',
+    otherFiles: ['Variations - INV 0184.pdf', 'Electrical - Certificate of Compliance.pdf'],
+    household: ['Mike Turner'],
+  };
 
   it('asks for every field, so a missing key never has to be told from a null', () => {
-    expect([...BILL_SCHEMA.required].sort()).toEqual(Object.keys(BILL_SCHEMA.properties).sort());
+    expect([...PAPER_SCHEMA.required].sort()).toEqual(Object.keys(PAPER_SCHEMA.properties).sort());
   });
 
-  it('sends each document inline and the email as words', () => {
-    const body = billRequest([{ mimeType: 'application/pdf', base64: 'AAAA' }], {
-      from: 'Sam <sam@example.com>', subject: 'Fwd: Claim 2', text: 'See attached',
-    });
-    expect(body.contents[0].parts[0]).toEqual({ inlineData: { mimeType: 'application/pdf', data: 'AAAA' } });
-    expect((body.contents[0].parts[1] as { text: string }).text).toMatch(/Fwd: Claim 2/);
+  it('sends exactly one paper, names it, and says the others are read separately', () => {
+    const body = paperRequest({ mimeType: 'application/pdf', base64: 'AAAA' }, context);
+    const parts = body.contents[0].parts;
+    expect(parts.filter((p) => 'inlineData' in p)).toEqual([{ inlineData: { mimeType: 'application/pdf', data: 'AAAA' } }]);
+    const words = (parts[1] as { text: string }).text;
+    expect(words).toMatch(/"Variation - Force Plumbing.pdf"/);
+    expect(words).toMatch(/also carries "Variations - INV 0184.pdf", "Electrical - Certificate of Compliance.pdf"/);
+    expect(words).toMatch(/The household: Mike Turner/);
+    expect(words).toMatch(/Fwd: Variations/);
+    expect(body.systemInstruction.parts[0].text).toMatch(/Describe only the paper you are shown/);
     expect(body.systemInstruction.parts[0].text).toMatch(/never instructions to you/);
   });
 
-  it('carries a clean reading across', () => {
-    expect(reviewFromReading(bill)).toEqual({
+  it('reads the email itself when nothing was attached', () => {
+    const body = paperRequest(null, { ...context, fileName: null, otherFiles: [] });
+    expect(body.contents[0].parts).toHaveLength(1);
+    expect((body.contents[0].parts[0] as { text: string }).text).toMatch(/Nothing was attached/);
+  });
+
+  it('carries a clean bill across', () => {
+    expect(paperFromReading(bill)).toEqual({
+      kind: 'invoice', addressedTo: null,
       supplier: 'ReliaBuilder', detail: 'Progress claim 2', amount: 43987.5, amountInclGst: true,
       invoiceNumber: 'INV-0208', dated: '2026-09-20', dueOn: '2026-10-20', paid: false, paidOn: null,
       paidEvidence: null, inferred: [],
     });
   });
 
-  it('files nothing read when it is not a bill, or not a reading at all', () => {
-    expect(reviewFromReading({ ...bill, isBill: false })).toEqual(NOTHING_READ);
-    expect(reviewFromReading(null)).toEqual(NOTHING_READ);
-    expect(reviewFromReading('ReliaBuilder')).toEqual(NOTHING_READ);
+  it('files a bill made out to somebody else as paperwork, keeping who and how much', () => {
+    const got = paperFromReading({
+      ...bill, supplier: 'Force Plumbing', addressedToHousehold: false, addressedTo: 'ReliaBuilder Ltd',
+      amount: 1200, paid: true, paidEvidence: 'PAID',
+    });
+    expect(got).toMatchObject({
+      kind: 'paperwork', addressedTo: 'ReliaBuilder Ltd', supplier: 'Force Plumbing', amount: 1200,
+      paid: false, paidEvidence: null, dueOn: null,
+    });
+    expect(paperFromReading({ ...bill, addressedToHousehold: false, addressedTo: null })?.addressedTo)
+      .toBe('somebody else');
+  });
+
+  it('leaves a bill that names nobody as the household’s', () => {
+    expect(paperFromReading({ ...bill, addressedToHousehold: null })?.kind).toBe('invoice');
+  });
+
+  it('never pays a quote or a certificate, and a quote has no due date', () => {
+    const quote = paperFromReading({ ...bill, kind: 'quote', paid: true, paidEvidence: 'Paid' });
+    expect(quote).toMatchObject({ kind: 'quote', paid: false, dueOn: null });
+    const coc = paperFromReading({ ...bill, kind: 'paperwork', amount: null, paid: true, paidEvidence: 'Paid' });
+    expect(coc).toMatchObject({ kind: 'paperwork', paid: false });
+  });
+
+  it('keeps nothing but the kind for a photo or nothing', () => {
+    expect(paperFromReading({ ...bill, kind: 'photo' })).toEqual({
+      ...NOTHING_READ, kind: 'photo', addressedTo: null, inferred: [],
+    });
+    expect(paperFromReading({ ...bill, kind: 'nothing', guessed: ['kind', 'amount'] })?.inferred).toEqual(['kind']);
+  });
+
+  it('is not a reading when the kind is missing or unknown, or it is not an object', () => {
+    expect(paperFromReading({ ...bill, kind: 'invoicey' })).toBeNull();
+    expect(paperFromReading({ ...bill, kind: undefined })).toBeNull();
+    expect(paperFromReading(null)).toBeNull();
+    expect(paperFromReading('ReliaBuilder')).toBeNull();
   });
 
   it('refuses an amount that is not a positive number, and a day the calendar has not got', () => {
-    const got = reviewFromReading({ ...bill, amount: -5, dated: '2026-02-31', dueOn: '20/10/2026' });
+    const got = paperFromReading({ ...bill, amount: -5, dated: '2026-02-31', dueOn: '20/10/2026' })!;
     expect(got.amount).toBeNull();
     expect(got.dated).toBeNull();
     expect(got.dueOn).toBeNull();
@@ -131,20 +183,111 @@ describe('the reading', () => {
   });
 
   it('marks an unstated GST basis as a guess rather than presenting the default as read', () => {
-    const got = reviewFromReading({ ...bill, amountInclGst: null });
+    const got = paperFromReading({ ...bill, amountInclGst: null })!;
     expect(got.amountInclGst).toBe(true);
     expect(got.inferred).toContain('amount_incl_gst');
   });
 
   it('drops a paid flag with no sentence behind it, and keeps one that has one', () => {
-    expect(reviewFromReading({ ...bill, paid: true, paidOn: '2026-09-21' })).toMatchObject({
+    expect(paperFromReading({ ...bill, paid: true, paidOn: '2026-09-21' })).toMatchObject({
       paid: false, paidOn: null, paidEvidence: null,
     });
-    expect(reviewFromReading({ ...bill, paid: true, paidOn: '2026-09-21', paidEvidence: 'PAID — thank you' }))
+    expect(paperFromReading({ ...bill, paid: true, paidOn: '2026-09-21', paidEvidence: 'PAID — thank you' }))
       .toMatchObject({ paid: true, paidOn: '2026-09-21', paidEvidence: 'PAID — thank you' });
   });
 
   it('keeps only the guessed field names a card knows how to mark', () => {
-    expect(reviewFromReading({ ...bill, guessed: ['supplier', 'bank_account', 7] }).inferred).toEqual(['supplier']);
+    expect(paperFromReading({ ...bill, guessed: ['kind', 'supplier', 'bank_account', 7] })!.inferred)
+      .toEqual(['kind', 'supplier']);
+  });
+});
+
+describe('an email’s papers become cards', () => {
+  const read = (over: Partial<PaperReading>): PaperReading => ({
+    ...NOTHING_READ, kind: 'invoice', addressedTo: null, ...over,
+  });
+  const pdf = (name: string) => ({ path: `h/docs/1-0-${name}.pdf`, isPdf: true });
+  const photo = (n: number) => ({ path: `h/17-${n}.jpg`, isPdf: false });
+
+  // The email that found the problem: four PDFs and a photo, forwarded as one.
+  const variations = [pdf('Variation - Force Plumbing'), pdf('Electrical - Certificate of Compliance'),
+    pdf('Variations - INV 0184'), pdf('Variation - Good Connection'), photo(1)];
+
+  it('gives every paper its own card, holding only its own file', () => {
+    const cards = cardsFromReadings(variations, [
+      read({ kind: 'paperwork', supplier: 'Force Plumbing', addressedTo: 'ReliaBuilder', amount: 1200 }),
+      read({ kind: 'paperwork', supplier: 'Good Connection', detail: 'Certificate of compliance' }),
+      read({ kind: 'invoice', supplier: 'ReliaBuilder', invoiceNumber: 'INV-0184', amount: 6325 }),
+      read({ kind: 'paperwork', supplier: 'Good Connection', addressedTo: 'ReliaBuilder', amount: 850 }),
+      read({ kind: 'photo' }),
+    ]);
+    expect(cards.map((c) => [c.kind, c.supplier])).toEqual([
+      ['paperwork', 'Force Plumbing'],
+      ['paperwork', 'Good Connection'],
+      ['invoice', 'ReliaBuilder'],
+      ['paperwork', 'Good Connection'],
+      ['paperwork', null],
+    ]);
+    expect(cards[2].documentPaths).toEqual([variations[2].path]);
+    expect(cards[2].photoPaths).toEqual([]);
+    expect(cards[4]).toMatchObject({ detail: 'Photo', photoPaths: [variations[4].path], documentPaths: [] });
+  });
+
+  it('puts every file on exactly one card', () => {
+    const cards = cardsFromReadings(variations, [null, read({ kind: 'quote' }), null, read({ kind: 'nothing' }), null]);
+    const held = cards.flatMap((c) => [...c.photoPaths, ...c.documentPaths]).sort();
+    expect(held).toEqual(variations.map((v) => v.path).sort());
+  });
+
+  it('gathers the photos of the work onto one card at the end', () => {
+    const cards = cardsFromReadings([pdf('INV-0184'), photo(1), photo(2), photo(3)], [
+      read({ supplier: 'ReliaBuilder' }), read({ kind: 'photo' }), read({ kind: 'photo' }), read({ kind: 'photo' }),
+    ]);
+    expect(cards).toHaveLength(2);
+    expect(cards[1]).toMatchObject({ kind: 'paperwork', detail: 'Photos · 3', inferred: [] });
+    expect(cards[1].photoPaths).toHaveLength(3);
+  });
+
+  it('files a PDF nobody could read as an invoice, with the kind marked as a guess', () => {
+    const [card] = cardsFromReadings([pdf('INV-0184')], [null]);
+    expect(card).toMatchObject({ kind: 'invoice', supplier: null, amount: null, inferred: ['kind'] });
+  });
+
+  it('keeps an unread photo that is all the email carried as the card itself', () => {
+    const [card, ...rest] = cardsFromReadings([photo(1)], [null]);
+    expect(rest).toEqual([]);
+    expect(card).toMatchObject({ kind: 'invoice', inferred: ['kind'], photoPaths: [photo(1).path] });
+  });
+
+  it('puts an unread photo with the others when there is anything else, and says the kind is a guess', () => {
+    const cards = cardsFromReadings([pdf('INV-0184'), photo(1)], [read({ supplier: 'ReliaBuilder' }), null]);
+    expect(cards[1]).toMatchObject({ kind: 'paperwork', inferred: ['kind'] });
+  });
+
+  it('files the email’s own words as one card, and a blank one when there are none', () => {
+    expect(cardFromEmail(read({ kind: 'quote', supplier: 'ReliaBuilder' }))).toMatchObject({
+      kind: 'quote', supplier: 'ReliaBuilder', photoPaths: [], documentPaths: [],
+    });
+    expect(cardFromEmail(null)).toMatchObject({ kind: 'invoice', supplier: null });
+    expect(cardFromEmail(read({ kind: 'nothing' }))).toMatchObject({ kind: 'invoice', supplier: null });
+  });
+});
+
+describe('the papers, as reading again finds them', () => {
+  it('knows a PDF and the three photo types by their first bytes', () => {
+    expect(sniffPaper(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]))).toBe('application/pdf');
+    expect(sniffPaper(new Uint8Array([0xff, 0xd8, 0xff]))).toBe('image/jpeg');
+    expect(sniffPaper(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe('image/png');
+    expect(sniffPaper(new Uint8Array([0x3c, 0x68, 0x74]))).toBeNull();
+  });
+
+  it('names a stored PDF by its own name and a photo as a photo', () => {
+    expect(paperName('h/docs/1790265106347-088743-Variation - Force Plumbing.pdf')).toBe('Variation - Force Plumbing.pdf');
+    expect(paperName('h/1790265110686-425958.jpg')).toBe('a photo');
+  });
+
+  it('reads an HTML-only email as words', () => {
+    expect(stripHtml('<p>Hi&nbsp;Mike</p><div>Paid &amp; done</div><style>p{}</style>')).toBe('Hi Mike\n Paid & done');
+    expect(stripHtml(null)).toBeNull();
   });
 });

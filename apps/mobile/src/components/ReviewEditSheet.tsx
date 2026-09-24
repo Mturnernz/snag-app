@@ -5,10 +5,16 @@ import Sheet from './Sheet';
 import MoneyField from './MoneyField';
 import DateField from './DateField';
 import RoomSplit, { resolveSplit, splitValueFrom, type RoomSplitValue } from './RoomSplit';
-import { Group, PrimaryButton } from './Grouped';
+import { Group, PrimaryButton, Segmented, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { formatDayFirst, parseLooseDate, type InvoiceReviewUpdate } from '@snag/supabase-queries';
-import type { InvoiceReview, Location, ProjectElement } from '../types';
+import type { InvoiceReview, InvoiceReviewKind, Location, ProjectElement } from '../types';
+
+const KINDS: { value: InvoiceReviewKind; label: string }[] = [
+  { value: 'invoice', label: 'Invoice' },
+  { value: 'quote', label: 'Quote' },
+  { value: 'paperwork', label: 'Paperwork' },
+];
 
 /** Where the bill will land: no rooms is the whole job, one is that room, more is shared. */
 export interface ReviewRooms {
@@ -56,11 +62,19 @@ const parseAmount = (text: string): number | null | undefined => {
  * out against the figure in the box as it is saved, so correcting the amount
  * and the rooms together cannot leave them disagreeing.
  *
+ * **What kind of paper it is comes first**, because it decides what the rest
+ * means. An invoice is allocated as a bill; a quote as a price nobody has
+ * agreed; paperwork — a certificate, a photo, a subcontractor's bill made out to
+ * the builder — is filed and moves no figure, so it is not asked when it is due
+ * or which rooms it splits between. The reader of an email can only guess
+ * which one it is; the person holding the paper knows.
+ *
  * Every box loads what the card holds and an emptied one clears it, the
  * convention every update in this schema follows. A date or a figure it cannot
  * read holds the sheet open and says which, rather than saving something else.
  */
 export default function ReviewEditSheet({ review, elements, locations, onAddRoom, onClose, onSave }: Props) {
+  const [kind, setKind] = useState<InvoiceReviewKind>('invoice');
   const [supplier, setSupplier] = useState('');
   const [detail, setDetail] = useState('');
   const [amount, setAmount] = useState('');
@@ -74,6 +88,7 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
 
   useEffect(() => {
     if (!review) return;
+    setKind(review.kind);
     setSupplier(review.supplier ?? '');
     setDetail(review.detail ?? '');
     setAmount(review.amount === null ? '' : String(review.amount));
@@ -95,20 +110,23 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
     if (figure === undefined) { setError('That amount isn’t a figure.'); return; }
     if (datedIso === undefined) { setError('The date on the bill isn’t a day the calendar has.'); return; }
     if (dueIso === undefined) { setError('The due date isn’t a day the calendar has.'); return; }
-    const split = resolveSplit(rooms, figure, 2);
+    const paperwork = kind === 'paperwork';
+    // Paperwork is filed on one level when it is filed, so it carries no split.
+    const split = paperwork ? { ids: [], amounts: null } : resolveSplit(rooms, figure, 2);
     if ('error' in split) { setError(split.error); return; }
 
     setBusy(true);
     setError(null);
     try {
       await onSave({
+        kind,
         supplier: supplier.trim() || null,
         detail: detail.trim() || null,
         amount: figure,
         amountInclGst: incl,
         invoiceNumber: invoiceNo.trim() || null,
         dated: datedIso,
-        dueOn: dueIso,
+        dueOn: kind === 'invoice' ? dueIso : null,
       }, split);
       onClose();
     } catch (err: unknown) {
@@ -121,11 +139,22 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
   return (
     <Sheet
       visible={review !== null}
-      title="Check this bill"
+      title={kind === 'paperwork' ? 'Check this paperwork' : kind === 'quote' ? 'Check this quote' : 'Check this bill'}
       subtitle={review?.sourceSubject ?? null}
       onClose={onClose}
       footer={<PrimaryButton label="Save" onPress={save} busy={busy} />}
     >
+      <Text style={groupedStyles.question}>What is it?</Text>
+      <Segmented<InvoiceReviewKind>
+        options={KINDS}
+        value={kind}
+        onChange={setKind}
+        accessibilityLabel="What kind of paper this is"
+      />
+      {kind === 'paperwork' ? (
+        <Text style={groupedStyles.hint}>Filed on the job — it doesn’t count towards any figure.</Text>
+      ) : null}
+
       <Group>
         <View style={styles.field}>
           <TextInput
@@ -157,30 +186,34 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
             style={styles.input}
             value={invoiceNo}
             onChangeText={setInvoiceNo}
-            placeholder="Invoice number"
+            placeholder={kind === 'quote' ? 'Quote number' : kind === 'paperwork' ? 'Number on it' : 'Invoice number'}
             placeholderTextColor={Colors.textMuted}
             autoCapitalize="characters"
-            accessibilityLabel="Invoice number"
+            accessibilityLabel={kind === 'quote' ? 'Quote number' : kind === 'paperwork' ? 'Number on it' : 'Invoice number'}
           />
         </View>
         <View style={styles.field}>
           <DateField label="Dated" value={dated} onChangeValue={setDated} pickerTitle="The date on the bill" />
         </View>
-        <View style={styles.field}>
-          <DateField label="Due" value={due} onChangeValue={setDue} pickerTitle="When it’s due" />
-        </View>
+        {kind === 'invoice' ? (
+          <View style={styles.field}>
+            <DateField label="Due" value={due} onChangeValue={setDue} pickerTitle="When it’s due" />
+          </View>
+        ) : null}
       </Group>
 
-      <RoomSplit
-        elements={elements}
-        locations={locations}
-        value={rooms}
-        onChange={setRooms}
-        total={parseAmount(amount) ?? null}
-        inclusive={incl}
-        splitFrom={2}
-        onAddRoom={onAddRoom}
-      />
+      {kind !== 'paperwork' ? (
+        <RoomSplit
+          elements={elements}
+          locations={locations}
+          value={rooms}
+          onChange={setRooms}
+          total={parseAmount(amount) ?? null}
+          inclusive={incl}
+          splitFrom={2}
+          onAddRoom={onAddRoom}
+        />
+      ) : null}
 
       {error ? <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text> : null}
     </Sheet>

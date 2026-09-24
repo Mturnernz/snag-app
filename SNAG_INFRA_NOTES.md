@@ -234,7 +234,7 @@ Because `auth.users` sits outside both schemas, none of this needed touching:
 ### The staff portal — Google sign-in, a staff list, and one email
 
 `staff.snaghq.co.nz` (`apps/staff`) is where SnagHQ employees answer questions households ask about
-a job (`20260925090000`; *The staff portal* in `CLAUDE.md`). It is its own Netlify site, separate
+a job (`20260925100000`; *The staff portal* in `CLAUDE.md`). It is its own Netlify site, separate
 from the app's and from `www`'s. None of what makes it work is in git, and the order matters —
 **apply the migration first**, then:
 

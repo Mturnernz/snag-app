@@ -3162,7 +3162,7 @@ export function adviceSource(now = new Date()): string {
 // nothing else, so none of the portal's code ships in the app households
 // install. `apps/mobile/src/lib/staffSeparation.test.ts` fails the build if the
 // app ever imports it, or if a staff function reappears here. See
-// `20260925090000_a_job_can_be_asked_about.sql`.
+// `20260925100000_a_job_can_be_asked_about.sql`.
 
 /** Package-internal: exported for `staff.ts`, not for callers. */
 export function mapSupportMessage(row: Row): SupportMessage {

@@ -806,7 +806,7 @@ export interface SnagAdvice {
 // **Staff see the job that was asked about, and only while the question is
 // open.** Open means waiting on SnagHQ, or within `SUPPORT_ACCESS_DAYS` of
 // SnagHQ's last reply. After that the portal cannot read the job at all; see
-// `20260925090000_a_job_can_be_asked_about.sql`.
+// `20260925100000_a_job_can_be_asked_about.sql`.
 
 /** Whose court the ball is in: SnagHQ's, the household's, or nobody's. */
 export type SupportStatus = 'waiting' | 'replied' | 'closed';

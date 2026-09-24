@@ -70,7 +70,17 @@ import type {
   ProjectStatus,
   ProjectSupplierTotals,
   ProjectTotals,
+  AdviceDraft,
+  StaffMember,
+  StaffQueue,
+  StaffQueueRow,
+  StaffQueueTab,
+  StaffRequestPage,
+  SupportCloseReason,
+  SupportMessage,
+  SupportRequest,
 } from '@snag/shared-types';
+import { cleanAdviceDraft } from './support';
 import {
   ROOM_SUGGESTIONS,
   STATUS_LABELS,
@@ -828,7 +838,7 @@ export async function getSnag(client: SupabaseClient, snagId: string): Promise<S
  * it by where it is beats "Untitled": on a list that is mostly photographs, the
  * picture carries the what and this only has to carry the where.
  */
-export function snagHeadline(snag: Snag): string {
+export function snagHeadline(snag: Pick<Snag, 'description' | 'room'>): string {
   if (snag.description) return snag.description;
   return snag.room ? `Something in the ${snag.room.toLowerCase()}` : 'Something to sort out';
 }
@@ -3143,6 +3153,298 @@ export function formatDayFirst(iso: string | null): string {
 /** "Pasted 15 Sep" — the source line under the advice. */
 export function adviceSource(now = new Date()): string {
   return `Pasted ${now.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}`;
+}
+
+// ---------------------------------------------------------------- asking SnagHQ
+//
+// The household's half reads the table (RLS: members of the place); the
+// staff half reads through `staff_*` functions only, because no policy lets a
+// staff member read a household's job directly. See
+// `20260925090000_a_job_can_be_asked_about.sql`.
+
+function mapSupportMessage(row: Row): SupportMessage {
+  return {
+    id: row.id,
+    fromStaff: row.from_staff ?? row.staff_id != null,
+    authorName: row.author_name,
+    body: row.body ?? null,
+    internal: row.internal ?? false,
+    withAdvice: row.with_advice ?? false,
+    emailedAt: row.emailed_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+function mapSupportRequest(row: Row): SupportRequest {
+  const messages = ((row.support_messages ?? []) as Row[])
+    .map(mapSupportMessage)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return {
+    id: row.id,
+    snagId: row.snag_id,
+    status: row.status,
+    question: row.question,
+    createdAt: row.created_at,
+    waitingSince: row.waiting_since,
+    firstSeenAt: row.first_seen_at ?? null,
+    lastStaffReplyAt: row.last_staff_reply_at ?? null,
+    closedAt: row.closed_at ?? null,
+    closedBy: row.closed_by ?? null,
+    messages,
+  };
+}
+
+/**
+ * The latest question about this job, open or not — a closed one still shows
+ * what SnagHQ said. One request: the thread is embedded.
+ */
+export async function getSupportRequestForSnag(
+  client: SupabaseClient,
+  snagId: string
+): Promise<SupportRequest | null> {
+  const { data, error } = await client
+    .from('support_requests')
+    .select(
+      'id, snag_id, status, question, created_at, waiting_since, first_seen_at, ' +
+        'last_staff_reply_at, closed_at, closed_by, ' +
+        'support_messages (id, staff_id, author_name, body, with_advice, emailed_at, created_at)'
+    )
+    .eq('snag_id', snagId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw asError(error, "Couldn't load your question to SnagHQ");
+  return data ? mapSupportRequest(data as Row) : null;
+}
+
+/** Asking does not touch the job — it is not a note, and it does not start it. */
+export async function createSupportRequest(
+  client: SupabaseClient,
+  snagId: string,
+  question: string
+): Promise<void> {
+  const { error } = await client.rpc('create_support_request', {
+    p_snag_id: snagId,
+    p_question: question,
+  });
+  if (error) throw asError(error, "Couldn't send that to SnagHQ");
+}
+
+export async function addSupportMessage(
+  client: SupabaseClient,
+  requestId: string,
+  body: string
+): Promise<void> {
+  const { error } = await client.rpc('add_support_message', {
+    p_request_id: requestId,
+    p_body: body,
+  });
+  if (error) throw asError(error, "Couldn't send that to SnagHQ");
+}
+
+/** Ends SnagHQ's access to the job at once. */
+export async function closeSupportRequest(client: SupabaseClient, requestId: string): Promise<void> {
+  const { error } = await client.rpc('close_support_request', { p_request_id: requestId });
+  if (error) throw asError(error, "Couldn't close that question");
+}
+
+// The staff half.
+
+/** Whether this session is somebody on the SnagHQ staff list. */
+export async function isStaff(client: SupabaseClient): Promise<boolean> {
+  const { data, error } = await client.rpc('is_staff');
+  if (error) throw asError(error, "Couldn't check the staff list");
+  return data === true;
+}
+
+function mapQueueRow(row: Row): StaffQueueRow {
+  return {
+    id: row.id,
+    status: row.status,
+    open: row.open,
+    question: row.question,
+    reference: row.reference,
+    createdAt: row.created_at,
+    waitingSince: row.waiting_since,
+    firstSeenAt: row.first_seen_at ?? null,
+    lastStaffReplyAt: row.last_staff_reply_at ?? null,
+    closedAt: row.closed_at ?? null,
+    closedBy: row.closed_by ?? null,
+    closeReason: row.close_reason ?? null,
+    assignedTo: row.assigned_to ?? null,
+    assignedName: row.assigned_name ?? null,
+    job: row.job
+      ? {
+          description: row.job.description ?? null,
+          room: row.job.room ?? null,
+          photoPath: row.job.photo_path ?? null,
+          photoCount: row.job.photo_count ?? 0,
+          suburb: row.job.suburb ?? null,
+          town: row.job.town ?? null,
+        }
+      : null,
+  };
+}
+
+const mapStaffMember = (row: Row): StaffMember => ({
+  userId: row.user_id,
+  displayName: row.display_name,
+});
+
+/** The whole queue for one tab, in one request. */
+export async function getStaffQueue(client: SupabaseClient, tab: StaffQueueTab): Promise<StaffQueue> {
+  const { data, error } = await client.rpc('staff_queue', { p_tab: tab });
+  const payload = unwrap<Row>(data, error, "Couldn't load the queue");
+  return {
+    rows: ((payload.rows ?? []) as Row[]).map(mapQueueRow),
+    counts: {
+      unclaimed: payload.counts?.unclaimed ?? 0,
+      mine: payload.counts?.mine ?? 0,
+      open: payload.counts?.open ?? 0,
+      waiting: payload.counts?.waiting ?? 0,
+      oldestWaitingSince: payload.counts?.oldest_waiting_since ?? null,
+    },
+    me: payload.me ? mapStaffMember(payload.me) : null,
+  };
+}
+
+/** Everything the request page draws. Opening it is logged. */
+export async function getStaffRequestPage(
+  client: SupabaseClient,
+  requestId: string
+): Promise<StaffRequestPage> {
+  const { data, error } = await client.rpc('staff_request_page', { p_request_id: requestId });
+  const p = unwrap<Row>(data, error, "Couldn't open that question");
+  const r = p.request as Row;
+  const j = p.job as Row;
+  return {
+    request: {
+      id: r.id,
+      snagId: r.snag_id,
+      status: r.status,
+      question: r.question,
+      createdAt: r.created_at,
+      waitingSince: r.waiting_since,
+      firstSeenAt: r.first_seen_at ?? null,
+      lastStaffReplyAt: r.last_staff_reply_at ?? null,
+      assignedTo: r.assigned_to ?? null,
+      askedByName: r.asked_by_name ?? null,
+    },
+    job: {
+      id: j.id,
+      reference: j.reference,
+      description: j.description ?? null,
+      room: j.room ?? null,
+      photoPaths: j.photo_paths ?? [],
+      status: j.status,
+      parts: j.parts ?? [],
+      bought: j.bought ?? [],
+      dueAt: j.due_at ?? null,
+      repeatDays: j.repeat_days ?? null,
+      createdAt: j.created_at,
+      doneAt: j.done_at ?? null,
+      lastDoneAt: j.last_done_at ?? null,
+      reporterName: j.reporter_name ?? null,
+      propertyName: j.property_name ?? null,
+      linkedThings: ((j.linked_things ?? []) as Row[]).map((t) => ({
+        id: t.id,
+        name: t.name,
+        room: t.room ?? null,
+        make: t.make ?? null,
+        model: t.model ?? null,
+      })),
+    },
+    place: {
+      name: p.place?.name ?? '',
+      suburb: p.place?.suburb ?? null,
+      town: p.place?.town ?? null,
+    },
+    notes: ((p.notes ?? []) as Row[]).map((n) => ({
+      id: n.id,
+      body: n.body,
+      createdAt: n.created_at,
+      authorName: n.author_name ?? null,
+    })),
+    advice: p.advice ? mapAdvice(p.advice as Row) : null,
+    messages: ((p.messages ?? []) as Row[]).map(mapSupportMessage),
+    log: ((p.log ?? []) as Row[]).map((l) => ({
+      action: l.action,
+      at: l.at,
+      staffName: l.staff_name,
+    })),
+    staff: ((p.staff ?? []) as Row[]).map(mapStaffMember),
+    me: p.me,
+  };
+}
+
+/** Claim (your own id), assign (a colleague's) or release (null). */
+export async function staffAssign(
+  client: SupabaseClient,
+  requestId: string,
+  staffId: string | null
+): Promise<void> {
+  const { error } = await client.rpc('staff_assign', { p_request_id: requestId, p_staff_id: staffId });
+  if (error) throw asError(error, "Couldn't change who has it");
+}
+
+export async function staffAddNote(client: SupabaseClient, requestId: string, body: string): Promise<void> {
+  const { error } = await client.rpc('staff_add_note', { p_request_id: requestId, p_body: body });
+  if (error) throw asError(error, "Couldn't save that note");
+}
+
+/**
+ * A reply, with or without an assessment. Returns the message id, which the
+ * portal passes to `staffMarkEmailed` once the email has actually gone.
+ */
+export async function staffReply(
+  client: SupabaseClient,
+  requestId: string,
+  body: string | null,
+  advice: AdviceDraft | null
+): Promise<string> {
+  const { data, error } = await client.rpc('staff_reply', {
+    p_request_id: requestId,
+    p_body: body,
+    p_advice: advice ? cleanAdviceDraft(advice) : null,
+  });
+  return unwrap<string>(data as string | null, error, "Couldn't send that reply");
+}
+
+/** Where the reply's email goes. Only ever called server-side. */
+export async function staffReplyEmailTarget(
+  client: SupabaseClient,
+  requestId: string
+): Promise<{ email: string; snagId: string; headline: string; askedByName: string | null } | null> {
+  const { data, error } = await client
+    .rpc('staff_reply_email_target', { p_request_id: requestId })
+    .maybeSingle();
+  if (error) throw asError(error, "Couldn't find who asked");
+  if (!data) return null;
+  const row = data as Row;
+  return {
+    email: row.email,
+    snagId: row.snag_id,
+    headline: snagHeadline({ description: row.description ?? null, room: row.room ?? null }),
+    askedByName: row.asked_by_name ?? null,
+  };
+}
+
+export async function staffMarkEmailed(client: SupabaseClient, messageId: string): Promise<void> {
+  const { error } = await client.rpc('staff_mark_emailed', { p_message_id: messageId });
+  if (error) throw asError(error, "Couldn't record that the email went");
+}
+
+export async function staffCloseRequest(
+  client: SupabaseClient,
+  requestId: string,
+  reason: SupportCloseReason
+): Promise<void> {
+  const { error } = await client.rpc('staff_close_request', {
+    p_request_id: requestId,
+    p_reason: reason,
+  });
+  if (error) throw asError(error, "Couldn't close that question");
 }
 
 // ---------------------------------------------------------------- projects
@@ -5937,3 +6239,4 @@ export function describePaidInference(review: InvoiceReview): string {
 
 export * from './summary';
 export * from './split';
+export * from './support';

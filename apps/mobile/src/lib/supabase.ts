@@ -311,6 +311,15 @@ export const recordSnagAdvice = (
 
 export const deleteSnagAdvice = (snagId: string) => queries.deleteSnagAdvice(supabase, snagId);
 
+export const getSupportRequestForSnag = (snagId: string) =>
+  queries.getSupportRequestForSnag(supabase, snagId);
+export const createSupportRequest = (snagId: string, question: string) =>
+  queries.createSupportRequest(supabase, snagId, question);
+export const addSupportMessage = (requestId: string, body: string) =>
+  queries.addSupportMessage(supabase, requestId, body);
+export const closeSupportRequest = (requestId: string) =>
+  queries.closeSupportRequest(supabase, requestId);
+
 export const getComments = (snagId: string) => queries.getComments(supabase, snagId);
 
 export const getThingNotes = (thingId: string, exceptSnagId: string) =>

@@ -2,22 +2,22 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
- * Which list's folds these are. Three surfaces fold rooms away now — the list's
- * own sections, the shopping card inside it, and the House tab — and they are
- * deliberately separate: folding the Garage away on the House tab is a
- * statement about the record you are reading, not about the jobs filed there,
- * and one key would have each surface silently reaching into the others.
+ * Which list's folds these are. Two surfaces fold rooms away — the list's own
+ * sections and the shopping card inside it — and they are deliberately
+ * separate: a room folded on the trip sheet is a statement about the shopping,
+ * not about the jobs, and one key would have each silently reaching into the
+ * other. (The House tab folded its rooms too, until each room became a page of
+ * its own and there was nothing left to fold.)
  *
- * Namespacing here rather than in three callers keeps the guards in one place:
+ * Namespacing here rather than in each caller keeps the guards in one place:
  * every read and write below has to survive storage being absent, full or
- * throwing, and that is not a thing to copy out three times.
+ * throwing, and that is not a thing to copy out twice.
  */
-export type CollapseScope = 'list' | 'shopping' | 'house';
+export type CollapseScope = 'list' | 'shopping';
 
 const KEYS: Record<CollapseScope, string> = {
   list: 'snag.list.collapsed',
   shopping: 'snag.shopping.collapsed',
-  house: 'snag.house.collapsed',
 };
 
 /**

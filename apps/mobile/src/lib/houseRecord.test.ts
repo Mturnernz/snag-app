@@ -1,8 +1,8 @@
 import {
   assetPickerOrder,
-  catalogueSuggestions, describeCycle, documentFileName, documentName, formatLooseDate,
-  ghostsForRoom, matchSuggestions, parseLooseDate, searchThings, thingDetailLine,
-  thingHeadline, thingSearchText, thingsInArea,
+  catalogueSuggestions, describeCycle, describeHouseRoom, documentFileName, documentName,
+  formatLooseDate, ghostsForRoom, houseRooms, matchSuggestions, parseLooseDate, searchThings,
+  thingDetailLine, thingHeadline, thingKindGroups, thingSearchText, thingsInArea,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -433,5 +433,89 @@ describe('assetPickerOrder', () => {
 
   it('matches a room whatever its case', () => {
     expect(assetPickerOrder(all, [], 'kitchen').map((one) => one.id)[0]).toBe('b');
+  });
+});
+
+describe('the rooms the House tab shows', () => {
+  // The tab is a grid of rooms now, each opening a page of its own, and these
+  // are the rules the grid used to keep inline: seeded order shared with the
+  // List tab, Whole house last and bare, and a ghost never counted as a row.
+  const at = (id: string, name: string, room: string | null, kind: Thing['kind'] = 'appliance') =>
+    thing({ id, name, room, kind });
+
+  it('keeps the seeded order, and puts a room the vocabulary lost after it', () => {
+    const things = [at('a', 'Kettle', 'Sleepout'), at('b', 'Dryer', 'Laundry'), at('c', 'Stain', 'Deck', 'finish')];
+    expect(houseRooms(['Laundry', 'Deck'], things, []).map((r) => r.name))
+      .toEqual(['Laundry', 'Deck', 'Sleepout']);
+  });
+
+  it('puts Whole house last, and never furnishes it', () => {
+    const rooms = houseRooms(['Laundry'], [at('a', 'Alarm', null)], []);
+    expect(rooms.map((r) => r.name)).toEqual(['Laundry', 'Whole house']);
+    expect(rooms[1]).toMatchObject({ room: null, ghosts: [] });
+  });
+
+  it('leaves out a room with nothing recorded and nothing to suggest', () => {
+    expect(houseRooms(['Elsewhere', 'Under the house'], [], [])).toEqual([]);
+  });
+
+  it('draws a room somebody added, because it still has walls', () => {
+    expect(houseRooms(['Garden shed'], [], [])[0].ghosts.map((g) => g.name)).toEqual(['Paint']);
+  });
+
+  it('lists what is recorded in the order of its headlines', () => {
+    const things = [at('a', 'Washing machine', 'Laundry'), at('b', 'Dryer', 'Laundry')];
+    expect(houseRooms(['Laundry'], things, [])[0].recorded.map((t) => t.name))
+      .toEqual(['Dryer', 'Washing machine']);
+  });
+});
+
+describe('what a room tile says', () => {
+  const at = (id: string, name: string, room: string) => thing({ id, name, room });
+
+  it('counts recorded against what is still suggested, never as a percentage', () => {
+    const [laundry] = houseRooms(['Laundry'], [at('a', 'Dryer', 'Laundry')], []);
+    expect(describeHouseRoom(laundry).count).toBe('1 of 4');
+  });
+
+  it('is a bare total once nothing is left to suggest', () => {
+    const [deck] = houseRooms(['Deck'], [thing({ id: 'a', name: 'Stain', room: 'Deck', kind: 'finish' })], []);
+    expect(describeHouseRoom(deck).count).toBe('1');
+  });
+
+  it('names what is recorded, and only that, once anything is', () => {
+    const [laundry] = houseRooms(['Laundry'], [at('a', 'Dryer', 'Laundry')], []);
+    expect(describeHouseRoom(laundry).facts).toBe('Dryer');
+  });
+
+  it('says a suggestion is not recorded, in words, before naming it', () => {
+    const [garage] = houseRooms(['Garage'], [], []);
+    const { facts } = describeHouseRoom(garage);
+    expect(facts.startsWith('Not recorded yet · ')).toBe(true);
+    expect(facts).toContain('Lawnmower');
+  });
+});
+
+describe("a room's things by kind", () => {
+  it('puts a tile with paint rather than with the appliances', () => {
+    const groups = thingKindGroups([
+      thing({ id: 'a', name: 'Oven' }),
+      thing({ id: 'b', name: 'Floor tile', kind: 'tile' }),
+      thing({ id: 'c', name: 'Wan White', kind: 'finish' }),
+    ]);
+    expect(groups.map((g) => [g.title, g.things.map((t) => t.id)])).toEqual([
+      ['Appliances', ['a']],
+      ['Paint and finishes', ['b', 'c']],
+    ]);
+  });
+
+  it('draws no heading over nothing', () => {
+    expect(thingKindGroups([thing({ id: 'a', kind: 'finish' })]).map((g) => g.key)).toEqual(['finishes']);
+    expect(thingKindGroups([])).toEqual([]);
+  });
+
+  it('keeps the kinds nobody can add yet together, and only when one exists', () => {
+    const groups = thingKindGroups([thing({ id: 'a', kind: 'fitting' }), thing({ id: 'b', kind: 'contact' })]);
+    expect(groups.map((g) => g.title)).toEqual(['Other']);
   });
 });

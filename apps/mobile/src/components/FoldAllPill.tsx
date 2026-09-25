@@ -10,13 +10,12 @@ interface Props {
 }
 
 /**
- * The one control that reaches every room at once, on the tabs that group by
- * room.
+ * The one control that reaches every room at once, on the List tab — its own
+ * sections and the trip sheet's rooms together.
  *
- * **One component, because two tabs folding rooms away must not invent two
- * controls for it.** The List tab and the House tab describe the same house in
- * the same words and the same order — that rule already governs their headings,
- * and it governs the control that closes them too.
+ * **One component, so that a surface folding rooms away never invents a second
+ * control for it.** The House tab used it too until each room there became a
+ * page of its own; if rooms are ever folded somewhere else, this is the control.
  *
  * **It says what pressing it does**, deciding from whether anything is still
  * open, so the press on offer is never a no-op: with every room already folded

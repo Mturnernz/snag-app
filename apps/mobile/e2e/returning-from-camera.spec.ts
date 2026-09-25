@@ -71,6 +71,10 @@ test('the walkthrough survives the tab going away and coming back', async ({ pag
   await signIn(page);
 
   await page.getByText('House', { exact: true }).first().click();
+  // The House tab is a grid of rooms, and a room's + is on its own page. The
+  // tile's label carries the room's count ("Kitchen, 3 of 7"), which depends on
+  // what this account has recorded, so it is matched on the name alone.
+  await page.getByRole('button', { name: /^Kitchen, \d/ }).click();
   await page.getByLabel('Add something to Kitchen').click();
   await expect(page.getByText('What is it?')).toBeVisible({ timeout: 30_000 });
 

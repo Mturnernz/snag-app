@@ -94,6 +94,68 @@ function gross(amount: number | null, incl: boolean): number {
 }
 
 /**
+ * How much of the budget the money already paid has left, for a project card.
+ *
+ * **Budget less paid, and only once something is paid.** It is the cash view
+ * the household asked for on the list, and it is deliberately not the page's
+ * *Left in budget*, which takes off everything expected rather than what has
+ * gone out. The card says *Budget remaining* beside *Quoted*, so a signed
+ * contract that has barely been drawn on is still on screen beside it.
+ *
+ * The tone is the whole point of the line: fern while more than 15% is left,
+ * brass from 15% down to just over 5%, clay at 5% or less and over. Brass and
+ * clay are the palette's existing warning and alarm hues, so no colour is new.
+ */
+export type RemainingTone = 'good' | 'warn' | 'danger';
+
+export const REMAINING_WARN = 0.15;
+export const REMAINING_DANGER = 0.05;
+
+export interface BudgetRemaining {
+  /** The budget, GST-inclusive, which is what paid is measured in. */
+  budget: number;
+  /** Budget less paid. Negative when more has gone out than was budgeted. */
+  remaining: number;
+  /** `remaining / budget`. */
+  share: number;
+  tone: RemainingTone;
+  over: boolean;
+}
+
+export function budgetRemaining(
+  budget: number | null,
+  budgetInclGst: boolean,
+  paid: number | null,
+): BudgetRemaining | null {
+  if (budget === null || budget <= 0 || paid === null || paid <= 0.005) return null;
+  const total = gross(budget, budgetInclGst);
+  const remaining = round(total - paid);
+  const share = remaining / total;
+  const tone: RemainingTone = share > REMAINING_WARN ? 'good' : share > REMAINING_DANGER ? 'warn' : 'danger';
+  return { budget: total, remaining, share, tone, over: remaining < 0 };
+}
+
+/**
+ * The line's label and figure: *Budget remaining* · *$18,700 · 10% left*, or
+ * *Over budget* · *$2,200 · 5% over*.
+ *
+ * The percentage rides beside the figure so colour is never the only way to
+ * read it. What is left is rounded **up**, so the words agree with the colour
+ * at the edges: 15.4% left is fern and says 16%, never a fern "15% left".
+ */
+export function describeRemaining(
+  r: BudgetRemaining,
+  money: (n: number) => string,
+): { label: string; value: string } {
+  if (r.over) {
+    const pct = Math.max(Math.round((-r.remaining / r.budget) * 100), 1);
+    return { label: 'Over budget', value: `${money(-r.remaining)} · ${pct}% over` };
+  }
+  const pct = Math.ceil(r.share * 100 - 1e-9);
+  return { label: 'Budget remaining', value: `${money(r.remaining)} · ${pct}% left` };
+}
+
+/**
  * Quotes for the whole job or a room that are still waiting on a decision.
  *
  * A quote for a thing is an option on it and is counted through the thing.

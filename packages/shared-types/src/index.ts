@@ -984,7 +984,8 @@ export type ProjectStatus = 'planned' | 'underway' | 'done';
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   planned: 'Planned',
   underway: 'Underway',
-  done: 'Done',
+  // The enum value stays `done`; the Projects tab's word is Complete.
+  done: 'Complete',
 };
 
 /** What the tab groups by, in the order the sections read down the screen. */
@@ -2010,24 +2011,43 @@ export interface ProjectSupplierTotals {
  * came from. Opening the bathroom element does *not* show the project's
  * consent, because that document is not about the bathroom.
  */
-export type ProjectFileLevel = 'project' | 'element' | 'item' | 'quote';
+export type ProjectFileLevel = 'project' | 'element' | 'item' | 'quote' | 'payment' | 'expected_line';
 
 export const PROJECT_FILE_LEVEL_LABELS: Record<ProjectFileLevel, string> = {
   project: 'The project',
   element: 'Part of the job',
   item: 'An item',
   quote: 'A quote',
+  payment: 'A payment',
+  expected_line: 'A payment on an expected cost',
 };
 
 export interface ProjectFile {
   projectId: string;
   level: ProjectFileLevel;
-  /** The row it is attached to — the project, element, item or quote id. */
+  /**
+   * The row it is attached to — the project, element, item, quote, payment or
+   * expected-cost payment id.
+   */
   ownerId: string;
   /** What to call that row on screen, so a list can say where a file lives. */
   ownerName: string;
   kind: 'photo' | 'document';
   path: string;
+  /**
+   * Who the file came from: the supplier on the price it hangs off, the
+   * supplier of the bill a payment settles, or an expected cost's likely
+   * supplier. Null for a file on the job, a part or an item, which came from
+   * nobody in particular. Free text, grouped the way the money is — trimmed
+   * and lower-cased.
+   */
+  supplier: string | null;
+  /**
+   * What on that row the file is attached to, in the paper's own words: the
+   * invoice number or detail of a price, a payment's reference, the name of an
+   * expected cost. Null where the owner's name already says it.
+   */
+  ownerDetail: string | null;
 }
 
 /**

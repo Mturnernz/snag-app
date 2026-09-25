@@ -19,6 +19,10 @@ import InvoiceReviewSheet from '../components/InvoiceReviewSheet';
 import ReviewEditSheet from '../components/ReviewEditSheet';
 import FilePaperworkSheet from '../components/FilePaperworkSheet';
 import TaggedFiles from '../components/TaggedFiles';
+import FilesBySupplier from '../components/FilesBySupplier';
+import SupplierList from '../components/SupplierList';
+import SupplierSheet from '../components/SupplierSheet';
+import ProjectStatusSheet from '../components/ProjectStatusSheet';
 import EmailBillsSheet from '../components/EmailBillsSheet';
 import ReviewBell from '../components/ReviewBell';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
@@ -39,13 +43,14 @@ import {
   declineInvoiceReview, deleteExpectedCost, deleteExpectedCostLine, deleteInvoiceReview,
   deleteMilestone, deleteProject, deleteQuoteLine, deleteStoredFiles, describeRoom,
   formatMoney, getProjectPage, getSupplierNames, liveSetAsides, payBill, projectSummary,
-  restoreInvoiceReview, setExpectedCostConfirmed, updateExpectedCost, updateExpectedCostLine,
+  renameSupplier, restoreInvoiceReview, setExpectedCostConfirmed, updateExpectedCost, updateExpectedCostLine,
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  billFactsOfReview, dayKey, describeDuplicate, describeEmailGroup, duplicateReviews, exportDateStamp, formatExactDate,
-  formatLooseDate, groupBySupplier, pendingReviews, projectDossierTable,
-  projectExportPhotos, reviewAlert, reviewGroups, type ThingInput,
+  billFactsOfReview, dayKey, describeDuplicate, describeEmailGroup, describeRenameReach, duplicateReviews,
+  exportDateStamp, filesBySupplier, formatExactDate, formatLooseDate, groupBySupplier, pendingReviews,
+  projectDossierTable, projectExportPhotos, reviewAlert, reviewGroups, supplierDirectory,
+  type SupplierEntry, type ThingInput,
 } from '@snag/supabase-queries';
 import {
   filePaperwork, setFileTags, getFileUrl, getFileUrls, rereadInvoiceReview, setInvoiceReviewRooms, updateInvoiceReview,
@@ -53,8 +58,10 @@ import {
 import { describeRooms } from '../components/RoomSplit';
 import { openUrl } from '../lib/openUrl';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
-import type {
-  InvoiceReview, ProjectBill, ProjectElement, ProjectExpectedCost, ProjectItem, ProjectQuote, RootStackParamList,
+import {
+  PROJECT_STATUS_LABELS,
+  type InvoiceReview, type ProjectBill, type ProjectElement, type ProjectExpectedCost, type ProjectFile,
+  type ProjectItem, type ProjectQuote, type ProjectStatus, type RootStackParamList,
 } from '../types';
 
 /** How much of the handover list is shown before it asks — a sitting's worth. */
@@ -126,6 +133,11 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [emailOpen, setEmailOpen] = useState(false);
   const [payingId, setPayingId] = useState<string | null>(null);
   const [foldedPayees, setFoldedPayees] = useState<Set<string>>(() => new Set());
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [supplierOpen, setSupplierOpen] = useState<string | null>(null);
+  const [merging, setMerging] = useState<{ from: SupplierEntry; to: SupplierEntry } | null>(null);
+  // True while a supplier row is lifted: the page stops scrolling under it.
+  const [dragging, setDragging] = useState(false);
 
   const refreshing = useRef(false);
   const pending = useRef(false);
@@ -243,6 +255,10 @@ export default function ProjectDetailScreen({ route }: Props) {
   const installed = items.filter((i) => i.status === 'installed');
   const handedOver = new Set(page.things.map((t) => t.projectItemId).filter(Boolean) as string[]);
   const today = dayKey(new Date());
+  const suppliers = supplierDirectory(page);
+  const supplierNames = new Map(suppliers.map((s) => [s.key, s.name]));
+  const fileGroups = filesBySupplier(page.files, supplierNames);
+  const openSupplier = suppliers.find((s) => s.key === supplierOpen) ?? null;
 
   /**
    * Figures somebody typed over the prices, from before V2 took the editor away.
@@ -290,6 +306,31 @@ export default function ProjectDetailScreen({ route }: Props) {
       showToast(err instanceof Error ? err.message : 'That didn’t save');
     } finally {
       setPayingId(null);
+    }
+  }
+
+  /**
+   * The one write behind renaming and merging: every row on the job naming
+   * `from` now names `to`. A merge is a rename to the other supplier's
+   * spelling, so the rollups group them as one.
+   */
+  async function renameAcross(from: SupplierEntry, to: string, message: string) {
+    await renameSupplier(project.id, from.name, to);
+    await changed(message);
+  }
+
+  /** Takes a file off the job itself. Files elsewhere are removed where they hang. */
+  async function removeJobFile(file: ProjectFile) {
+    try {
+      if (file.kind === 'photo') {
+        await updateProject(project.id, { photoPaths: project.photoPaths.filter((p) => p !== file.path) });
+        await changed('Photo removed');
+      } else {
+        await updateProject(project.id, { documentPaths: project.documentPaths.filter((p) => p !== file.path) });
+        await changed('Document removed');
+      }
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'That didn’t save');
     }
   }
 
@@ -422,10 +463,30 @@ export default function ProjectDetailScreen({ route }: Props) {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" scrollEnabled={!dragging}>
         <View style={styles.titleBlock}>
           <Text style={groupedStyles.largeTitle} accessibilityRole="header">{project.name}</Text>
-          {started || finished ? <Text style={groupedStyles.caption}>{finished ?? started}</Text> : null}
+          <View style={styles.statusLine}>
+            {/*
+              Where the project is up to, and the one way to change it. A pill
+              beside the date rather than a row of chips, which were taken off
+              this page for the height they cost.
+            */}
+            <Pressable
+              onPress={() => setStatusOpen(true)}
+              style={styles.statusTap}
+              accessibilityRole="button"
+              accessibilityLabel={`${PROJECT_STATUS_LABELS[project.status]}. Change where it’s up to`}
+            >
+              <View style={[styles.statusPill, STATUS_TINT[project.status]]}>
+                <Text style={[styles.statusLabel, { color: STATUS_INK[project.status] }]}>
+                  {PROJECT_STATUS_LABELS[project.status]}
+                </Text>
+                <Icon name="chevron-down" size={14} color={STATUS_INK[project.status]} />
+              </View>
+            </Pressable>
+            {started || finished ? <Text style={groupedStyles.caption}>{finished ?? started}</Text> : null}
+          </View>
         </View>
 
         {reviews.length > 0 ? (
@@ -704,21 +765,41 @@ export default function ProjectDetailScreen({ route }: Props) {
           </View>
         ) : null}
 
+        {/* ── suppliers ────────────────────────────────────────────────── */}
+        {suppliers.length > 0 ? (
+          <View style={groupedStyles.block}>
+            <SectionTitle title="Suppliers" count={suppliers.length} />
+            <SupplierList
+              suppliers={suppliers}
+              money={money$}
+              onOpen={(s) => setSupplierOpen(s.key)}
+              onMerge={(from, to) => { setSupplierOpen(null); setMerging({ from, to }); }}
+              onDragChange={setDragging}
+            />
+          </View>
+        ) : null}
+
         {/* ── documents ────────────────────────────────────────────────── */}
         <View style={groupedStyles.block}>
           <TaggedFiles files={page.files} tags={page.fileTags} />
           <SectionTitle title="Documents" count={page.files.length || undefined} />
-          <View style={styles.docs}>
+          <FilesBySupplier
+            groups={fileGroups}
+            tags={page.fileTags}
+            onTag={async (path, tag) => {
+              try {
+                await setFileTags([path], tag);
+                await changed(tag ? 'Tagged' : 'Tag removed');
+              } catch (err: unknown) {
+                showToast(err instanceof Error ? err.message : 'That tag didn’t save');
+              }
+            }}
+            onRemove={removeJobFile}
+          />
+          {/* Added here, a file is the job's own, and lands under Not from a supplier. */}
+          <View style={styles.docAdds}>
             <Attachments
-              tags={page.fileTags}
-              onTag={async (path, tag) => {
-                try {
-                  await setFileTags([path], tag);
-                  await changed(tag ? 'Tagged' : 'Tag removed');
-                } catch (err: unknown) {
-                  showToast(err instanceof Error ? err.message : 'That tag didn’t save');
-                }
-              }}
+              controlsOnly
               householdId={household.id}
               photoPaths={project.photoPaths}
               documentPaths={project.documentPaths}
@@ -942,6 +1023,51 @@ export default function ProjectDetailScreen({ route }: Props) {
         }}
       />
 
+      <ProjectStatusSheet
+        visible={statusOpen}
+        status={project.status}
+        startedOn={project.startedOn}
+        finishedOn={project.finishedOn}
+        onClose={() => setStatusOpen(false)}
+        onSave={async (update) => {
+          await updateProject(project.id, update);
+          await changed(
+            update.status === project.status ? 'Saved'
+              : update.status === 'done' ? 'Marked complete'
+                : update.status === 'underway' ? 'Underway' : 'Back to planned',
+          );
+        }}
+      />
+
+      <SupplierSheet
+        supplier={openSupplier}
+        all={suppliers}
+        money={money$}
+        onClose={() => setSupplierOpen(null)}
+        onRename={(from, to) => renameAcross(from, to, `Renamed on ${describeRenameReach(from)}`)}
+        onMerge={(from, to) => { setSupplierOpen(null); setMerging({ from, to }); }}
+      />
+
+      <ConfirmDialog
+        visible={merging !== null}
+        title={merging ? `Merge “${merging.from.name}” into “${merging.to.name}”?` : ''}
+        message={merging
+          ? `${describeRenameReach(merging.from)} will be renamed “${merging.to.name}” on this job, so their bills, payments and files sit under one supplier. Agreed and To pay may change once they count as one.`
+          : undefined}
+        confirmLabel="Merge"
+        onCancel={() => setMerging(null)}
+        onConfirm={async () => {
+          if (!merging) return;
+          const { from, to } = merging;
+          setMerging(null);
+          try {
+            await renameAcross(from, to.name, `Merged into ${to.name}`);
+          } catch (err: unknown) {
+            showToast(err instanceof Error ? err.message : 'That didn’t merge');
+          }
+        }}
+      />
+
       <EditBudgetSheet
         visible={budgetOpen}
         budget={project.budget}
@@ -1053,6 +1179,22 @@ export function describeWhatGoes(element: ProjectElement): string {
   return parts.length ? `${parts.join(' and ')} go with it.` : '';
 }
 
+/**
+ * A project's status in the palette's status hues, the same vocabulary a job's
+ * `StatusBadge` speaks: planned is open (slate), underway is doing (brass),
+ * complete is done (neutral — fern is not "done").
+ */
+const STATUS_TINT: Record<ProjectStatus, { backgroundColor: string }> = {
+  planned: { backgroundColor: Colors.status.openBg },
+  underway: { backgroundColor: Colors.status.doingBg },
+  done: { backgroundColor: Colors.status.doneBg },
+};
+const STATUS_INK: Record<ProjectStatus, string> = {
+  planned: Colors.status.openFg,
+  underway: Colors.status.doingFg,
+  done: Colors.status.doneFg,
+};
+
 const styles = StyleSheet.create({
   emailGroup: { gap: Spacing.sm + 2 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
@@ -1070,6 +1212,15 @@ const styles = StyleSheet.create({
   },
   content: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxxl * 2, gap: Spacing.xxl + 4 },
   titleBlock: { gap: 4, paddingHorizontal: 4 },
+  statusLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: Spacing.md },
+  // The pill is 30pt; the tap is the 48pt minimum, pulled back so the line
+  // stays the caption's height rather than growing for the target.
+  statusTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', marginVertical: -8 },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, height: 30,
+    paddingLeft: Spacing.md, paddingRight: Spacing.sm + 2, borderRadius: Radius.pill,
+  },
+  statusLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold },
   summary: {
     backgroundColor: Colors.surface, borderRadius: Radius.card,
     paddingTop: Spacing.xl, paddingHorizontal: Spacing.lg + 2, paddingBottom: 4,
@@ -1109,5 +1260,5 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary, letterSpacing: -0.3, fontVariant: ['tabular-nums'],
   },
   badgeSlot: { paddingLeft: Spacing.sm },
-  docs: { backgroundColor: Colors.surface, borderRadius: Radius.card, padding: Spacing.lg },
+  docAdds: { paddingHorizontal: 4 },
 });

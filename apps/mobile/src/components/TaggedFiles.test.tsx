@@ -14,26 +14,28 @@ jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 
 const file = (over: any) => ({
   projectId: 'p1', level: 'quote', ownerId: 'q1', ownerName: 'Shore Tree Services Limited', kind: 'document',
-  path: 'h/docs/1790290589511-065591-Quote QU4068.pdf', ...over,
+  path: 'h/docs/1790290589511-065591-Quote QU4068.pdf', supplier: 'Shore Tree Services Limited', ownerDetail: null,
+  ...over,
 });
 
-it('lists a quote\'s PDF and says which price it is on', () => {
+it('leaves untagged paperwork to the Documents list, which groups it by supplier', () => {
   const r = render(<TaggedFiles files={[file({})]} tags={{}} />);
-  r.getByText('On prices and parts');
-  r.getByText('Quote QU4068.pdf');
-  r.getByText('On Shore Tree Services Limited');
-});
-
-it('does not repeat a file on the job itself, which is listed directly beneath', () => {
-  const r = render(<TaggedFiles files={[file({ level: 'project', ownerName: 'Tree trimming' })]} tags={{}} />);
   expect(r.queryByText('On prices and parts')).toBeNull();
+  expect(r.toJSON()).toBeNull();
 });
 
-it('puts a tagged file under its tag rather than twice', () => {
+it('gathers a tagged file under its tag, naming who it came from', () => {
   const f = file({});
   const r = render(<TaggedFiles files={[f]} tags={{ [f.path]: 'compliance' }} />);
   r.getByText('Compliance certificates');
-  expect(r.queryByText('On prices and parts')).toBeNull();
+  r.getByText('Quote QU4068.pdf');
+  r.getByText('Compliance certificate · from Shore Tree Services Limited');
+});
+
+it('says where a tagged file is when nobody sent it', () => {
+  const f = file({ level: 'element', ownerName: 'Bathroom', supplier: null });
+  const r = render(<TaggedFiles files={[f]} tags={{ [f.path]: 'warranty' }} />);
+  r.getByText('Warranty · on Bathroom');
 });
 
 it('draws nothing when there is nothing to gather', () => {

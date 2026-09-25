@@ -3619,6 +3619,12 @@ function mapProjectFile(row: Row): ProjectFile {
     ownerName: row.owner_name,
     kind: row.kind,
     path: row.path,
+    // A view from before `supplier` existed still named a quote's supplier in
+    // `owner_name`, so a price's paperwork groups under who sent it either way.
+    supplier: row.supplier !== undefined
+      ? row.supplier ?? null
+      : row.level === 'quote' && row.owner_name !== 'A price' ? row.owner_name ?? null : null,
+    ownerDetail: row.owner_detail ?? null,
   };
 }
 
@@ -6211,3 +6217,4 @@ export * from './duplicates';
 export * from './split';
 export * from './support';
 export * from './papers';
+export * from './suppliers';

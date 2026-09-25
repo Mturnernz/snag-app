@@ -1492,13 +1492,11 @@ by `projectSummary.test.ts`:
   quote was neither agreed nor a thing. Once something there is agreed or billed, an open quote
   could be a variation or an alternative and the app cannot tell which, so it is listed, not
   counted. The *Whole job* row appears whenever such a quote exists, saying *N quotes not agreed*.
-- **Paperwork on a price or a part is listed on the page** (`TaggedFiles`, *On prices and parts*),
-  not only on its own sheet — a quote's PDF was on the record and on no screen but the quote's.
-- The list card shows **Agreed**, not the expected total: the card has no per-item data and a
-  figure it had to approximate would disagree with the page. Under it, **"$X quoted"** whenever
-  that differs from Agreed — the page's Quoted figure, summed from the supplier rows by
-  `getProjectsQuoted` in one read for the whole list, never fatal. A planned job whose one price
-  was an unagreed quote read *$0 agreed* and nothing else, as though no price had arrived.
+- **Paperwork on a price, a part or a payment is listed on the page**, grouped by supplier under
+  *Documents* — a quote's PDF was on the record and on no screen but the quote's. See *The list
+  card, status, suppliers and files* below.
+- The list card shows **Budgeted, Quoted and Paid**, and **Budget remaining** once something is
+  paid. It used to lead with Agreed, which households did not read; see the section below.
 
 **Every line of small text is a fact the reader can add up** — a count, a date, a supplier, a
 figure compared with another figure on the screen ("$1,400 over the $8,000 set aside"). The
@@ -1580,6 +1578,86 @@ handover, punch list and documents are reused as they were.
 
 The vocabulary change is **Projects-tab only**, by the user's decision: the rest of the app keeps
 its words and takes only the V2 look (see *Design System*).
+
+### The list card, status, suppliers and files (September 2026)
+
+Four changes asked for together, and each reverses something written further down. **Where they
+disagree, this section wins.**
+
+**The card says Budgeted, Quoted, Paid.** Three stacked rows, label left and figure right, on one
+line each: project totals are the longest answers in the app, and three across a phone cuts
+`$182,103.71` in half. Budgeted is the typed budget grossed to incl GST, Quoted is
+`getProjectsQuoted` (the supplier rows' sum, never fatal), Paid is `paid_total`. A figure nobody
+has is words, never `$0`: *Not set*, *No quotes*, *Nothing yet*. While the quoted read has not
+answered, Quoted says *—*, because *No quotes* is a claim. The facts line (*N to decide · $X to
+pay*) stays: it is the list's denominator rule. A complete project carries the same figures,
+dimmed.
+
+**Budget remaining is budget less paid, by the user's decision, and only once something is
+paid.** It is the cash view, deliberately not the page's *Left in budget*, which takes off
+everything expected. Quoted sits two lines above it for that reason: a signed contract that has
+barely been drawn on still shows. `budgetRemaining` / `describeRemaining` (`summary.ts`) colour
+it **fern** while more than 15% is left, **brass** from 15% down to just over 5%, and **clay** at
+5% or less and over (*Over budget $X*). The percentage rides beside the figure, rounded *up* for
+what is left so the words agree with the colour at the edges. Brass and clay are the palette's
+warning and alarm hues, so no hue was added.
+
+**Status is a pill beside the date.** `done` reads **Complete** (`PROJECT_STATUS_LABELS`); the
+enum is unchanged. Nothing could change a project's status after it was started. The pill under
+the name opens `ProjectStatusSheet`: Planned · Underway · Complete, with the date each move needs
+(Started, Finished) filled with today when empty. It is one `update_project` on Done, and a date
+the calendar has not got holds the sheet open. Leaving Complete clears the finish date, and going
+back to Planned leaves the start date alone. The pill takes the status hues a job's
+`StatusBadge` uses. It replaces nothing: the status chips below were removed for the height they
+cost, and a pill in the caption's line costs none.
+
+**Suppliers can be renamed and merged**, in a *Suppliers* section above *Documents*.
+- The list is `supplierDirectory` (`suppliers.ts`): every name the job's quotes, bills and
+  expected costs use, declined ones included, grouped on the trimmed, lower-cased name like the
+  money.
+- A tap opens `SupplierSheet`, which renames across the job and lists every other supplier to
+  merge into.
+- **A merge is a rename to the other spelling**, since that is all the rollups need to see one
+  supplier. `home.rename_supplier` (`20260926090000`) now reaches expected costs and bills still
+  waiting as well as prices, matches on `reach_project_id`, and refuses a blank name.
+- **A merge can move Agreed.** Under the pair rule a bill from a supplier with a signed price at
+  that scope is a draw on it, so merging "RELIABUILDER LIMITED" into "ReliaBuilder" can turn a
+  variation into a draw. The confirm says the figures may change, and `project_scenarios.sql`
+  (S6) pins it with the supplier rows still summing to Committed.
+
+**Merging is press, hold and drop** (`SupplierList`): hold a supplier for 400ms, drag it onto
+another, confirm, done. Four things are load-bearing:
+- **It is hand-rolled on `PanResponder`**, like `PhotoViewer`. A long press on the row's
+  `Pressable` lifts it. The list's responder then claims every move
+  (`onMoveShouldSetPanResponderCapture`), which ends the press so no tap fires. The target is
+  the row under the lifted row's centre, read from `onLayout` bands, so no window coordinates
+  are involved.
+- **The page stops scrolling under it.** `scrollEnabled={!dragging}`, and on web a non-passive
+  `touchmove` listener cancels the move for the drag's length. `touch-action` is read at
+  touchstart, and the hold means the first move is still cancelable.
+- **Nothing under the finger may unmount mid-drag.** A touch belongs to the element it started
+  on. When the row swapped its facts line for *Drop to merge into…* as a new element, the
+  browser stopped delivering the touch: the row followed the finger and never heard it lift.
+  Mouse events are hit-tested afresh, so this only broke on a phone. The line now changes its
+  words in place, and `SupplierList.test.tsx` pins that.
+- **It is never the only way.** A name that looks like another business (`businessKey`) says
+  *Looks like ReliaBuilder · hold and drop onto it to merge* and carries a Merge pill. The
+  sheet lists every supplier with a Merge beside each. The row's accessibility action opens that
+  sheet. The drag does not auto-scroll, so a supplier off screen is merged from the sheet.
+
+**Every file is listed, grouped by supplier** (`FilesBySupplier`, `filesBySupplier`).
+- `home.project_files` now carries `supplier` and `owner_detail`, and includes **payments' and
+  expected-cost payments' files**, which were on the record and on no screen.
+- Groups are sorted by name, with **Not from a supplier** (the job's own files, a part's, an
+  item's) last. Each row says what the file hangs off (`describeFileHome`).
+- The **×** is only on the job's own files; everything else is removed where it is attached.
+- `TaggedFiles` keeps its tag headings (*where's the CoC* is a different question) and lost *On
+  prices and parts*. The job's add controls are `Attachments` with `controlsOnly`, so the upload
+  rules are still in one place.
+
+`ProjectsScreen.test.tsx`, `suppliers.test.ts`, `ProjectStatusSheet.test.tsx`,
+`SupplierSheet.test.tsx`, `SupplierList.test.tsx` and `ProjectDetailScreen.test.tsx` pin the
+above; `project_scenarios.sql` S6 pins the merge and the payment file.
 
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;
@@ -1691,7 +1769,9 @@ feature must not take.
 
 **And there are no status chips.** *Planned / Underway / Done* sat under the figures; the list
 groups on the same column and is where a renovation is read as finished, so a second writer here
-was three taps of vertical rent on a page opened for a different question.
+was three taps of vertical rent on a page opened for a different question. (Status is changed now
+from a pill in the caption line, which costs no height — see *The list card, status, suppliers and
+files*.)
 
 Three rules inside that, and each answers a way the first pass was wrong:
 
@@ -2261,7 +2341,8 @@ draw once the contract is signed — nothing on the row tells the two apart.
 Supplier stays **free text**, because a supplier list somebody has to fill in before they can
 record a quote is setup, and this app does not do setup. It groups on the trimmed, lower-cased
 name and displays the spelling used most recently, and `home.rename_supplier` fixes a typo across
-a whole job — a rollup nobody can correct is a rollup nobody trusts.
+a whole job — a rollup nobody can correct is a rollup nobody trusts. The page's *Suppliers*
+section is where that happens, by rename or by dropping one supplier onto another.
 
 ### One price, and a header that says where it's up to
 
@@ -2655,7 +2736,7 @@ rather than in parallel, what arrived is kept, opening and removing as siblings,
 with a signed URL rather than embedded (`object-src 'none'`).
 
 **`home.project_files` is the union that rolls them up**, and it names which level each file came
-from. So the project's page shows the whole folder with a line saying where each file lives, and
+from — and, since `20260926090000`, who it came from and payments' files too. So the project's page shows the whole folder with a line saying where each file lives, and
 opening the bathroom does *not* show the project's consent — because that document is not about the
 bathroom. No second bucket: `home-photos` under `<household_id>/docs/`, through
 `HOUSEHOLD_FILES_BUCKET` and `getFileUrl`, so not one storage policy changed.

@@ -1469,8 +1469,8 @@ and **paying** (a builder's bill arrived). So the page answers four questions, i
 are asked:
 
 1. **Are we on budget?** *Expected total* in large type, with **Agreed** and **Undecided** as the
-   rows under it — they add up to it, on screen — then *Left in budget* (or *Over budget*, in words
-   and clay), then *Budget*. Two tiles: **Paid** and **To pay**. Committed, Invoiced, Quoted and
+   rows under it — they add up to it, on screen — then *Budget remaining* (or *Over budget*, in
+   words and clay; brass within 15% — the list card's figure and colours), then *Budget*. Two tiles: **Paid** and **To pay**. Committed, Invoiced, Quoted and
    Forecast are no longer words on the page; they are the accounting, and nobody asked it.
 2. **What's left to decide?** Every thing not yet chosen, with its option count and price range.
 3. **What do we have to pay?** Every bill still owing, with a **Paid** pill on the row.
@@ -1593,14 +1593,36 @@ answered, Quoted says *—*, because *No quotes* is a claim. The facts line (*N 
 pay*) stays: it is the list's denominator rule. A complete project carries the same figures,
 dimmed.
 
-**Budget remaining is budget less paid, by the user's decision, and only once something is
-paid.** It is the cash view, deliberately not the page's *Left in budget*, which takes off
-everything expected. Quoted sits two lines above it for that reason: a signed contract that has
-barely been drawn on still shows. `budgetRemaining` / `describeRemaining` (`summary.ts`) colour
-it **fern** while more than 15% is left, **brass** from 15% down to just over 5%, and **clay** at
-5% or less and over (*Over budget $X*). The percentage rides beside the figure, rounded *up* for
-what is left so the words agree with the colour at the edges. Brass and clay are the palette's
-warning and alarm hues, so no hue was added.
+**Budget remaining is budget less the page's Expected total, and only once something is paid.**
+It was budget less paid for one commit, by the user's first decision, and the first real job
+showed why that was wrong: two of the builder's four claims were paid and the other two were
+earmarked as expected costs, so the card read *$68,101.19 left* while the page said $54,230.18
+over. Money that has not gone out is still money the budget has to cover — the user's words were
+"technically we are over budget". So the card now carries a fourth row, **Expected total**, and
+*Budget remaining* / *Over budget* is budget less that.
+
+- **The figure is the page's own**, never a second sum. `getExpectedTotal` reads `project_page`
+  and runs `projectSummary`, because the page counts undecided things at their dearest and open
+  quotes on the job, which no column in `projects_with_totals` carries. A cheaper sum would be the
+  card saying "left" beside a page saying "over". The page's line is renamed *Budget remaining* to
+  match and takes the same tone (`remainingTone`), since it is the same number.
+- **It is the heaviest read in the app, so the list asks one project at a time**, and only for
+  cards that show the line (a budget and something paid). A newer load abandons an older loop.
+  Until the figure arrives, or if it cannot be read, *Expected total* and the line say *—* —
+  never budget less paid in the meantime, which is the figure being replaced.
+- **The figure stands alone on its row and never shrinks**; the label gives way. It was
+  *$68,101.19 · 38% l…* on a phone. Every figure on the card is `flexShrink: 0` now. The
+  percentage moves to a line of its own beneath, with what the total counts that nobody has billed
+  (*30% over · $87,975 not billed yet*, expected less `invoiced_total`), so colour is never the
+  only cue and the reason a job with money in the bank is already over is on the card.
+- **The bar is paid, then the rest of the expected total, against the budget**: paid solid, the
+  rest the same hue lighter, drawn to the total when it runs past the budget with a notch where
+  the budget ends.
+
+Tone as before: `budgetRemaining` / `describeRemaining` (`summary.ts`) colour it **fern** while
+more than 15% is left, **brass** from 15% down to just over 5%, and **clay** at 5% or less and
+over. What is left is rounded *up* so the words agree with the colour at the edges. Brass and clay
+are the palette's warning and alarm hues, so no hue was added.
 
 **Status is a pill beside the date.** `done` reads **Complete** (`PROJECT_STATUS_LABELS`); the
 enum is unchanged. Nothing could change a project's status after it was started. The pill under

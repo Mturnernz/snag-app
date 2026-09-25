@@ -88,6 +88,7 @@ import {
   PROJECT_QUOTE_KIND_LABELS,
   PROJECT_QUOTE_STATUS_LABELS,
 } from '@snag/shared-types';
+import { projectSummary } from './summary';
 
 /** Supabase row shapes are snake_case `any`; this is the one place that's true. */
 type Row = Record<string, any>;
@@ -4565,6 +4566,27 @@ export async function getProjectPage(
     invoiceReviews: (page.invoiceReviews ?? []).map(mapInvoiceReview),
     fileTags: mapFileTags(page.fileTags),
   };
+}
+
+/**
+ * A project's Expected total, worked out exactly as its page works it out.
+ *
+ * The list card's *Budget remaining* is budget less this. It goes through the
+ * page's own request and the page's own arithmetic (`projectSummary`) rather
+ * than a cheaper sum over `projects_with_totals`, because the page counts an
+ * undecided thing at its dearest option and an open quote on the job, and no
+ * column carries either — a second way of adding it up would be the card
+ * saying "left" beside a page saying "over".
+ *
+ * It is the heaviest read there is, so callers ask for one project at a time
+ * and only for cards that show the line. The pool is ten connections; see
+ * *What a press costs* in CLAUDE.md.
+ */
+export async function getExpectedTotal(
+  client: SupabaseClient,
+  projectId: string
+): Promise<number> {
+  return projectSummary(await getProjectPage(client, projectId)).expected;
 }
 
 /** Keeps only tags this app knows, so a value added later is untagged rather than mislabelled. */

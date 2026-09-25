@@ -377,6 +377,10 @@ export const getProject = (projectId: string) => queries.getProject(supabase, pr
 export const getProjectPage = (projectId: string) =>
   queries.getProjectPage(supabase, projectId);
 
+/** The page's Expected total, for a project card. One project per call. */
+export const getExpectedTotal = (projectId: string) =>
+  queries.getExpectedTotal(supabase, projectId);
+
 
 export const createProject = (input: queries.ProjectInput) =>
   queries.createProject(supabase, input);

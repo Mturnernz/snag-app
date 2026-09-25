@@ -33,11 +33,13 @@ jest.mock('../components/AddProjectSheet', () => {
 const mock_getProjects = jest.fn();
 const mock_createProject = jest.fn();
 const mock_getProjectsQuoted = jest.fn();
+const mock_getExpectedTotal = jest.fn();
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
     getProjects: (...a: unknown[]) => mock_getProjects(...a),
     getProjectsQuoted: (...a: unknown[]) => mock_getProjectsQuoted(...a),
+    getExpectedTotal: (...a: unknown[]) => mock_getExpectedTotal(...a),
     createProject: (...a: unknown[]) => mock_createProject(...a),
     // The pure helpers are the real ones: mocking `describeTotals` would mock
     // away the exact rule these specs exist to hold.
@@ -76,6 +78,7 @@ const project = (over: Partial<any> = {}): any => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mock_getProjectsQuoted.mockResolvedValue(new Map());
+  mock_getExpectedTotal.mockRejectedValue(new Error('not asked for'));
   (global as any).__nav = { navigate: mock_navigate, addListener: () => () => {} };
   (global as any).__household = {
     household: { id: 'h', name: 'Home', createdAt: '2026-01-01T00:00:00Z' },
@@ -101,9 +104,17 @@ function cardFor(r: ReturnType<typeof render>, name: string) {
   return found[0];
 }
 
-async function arrange(projects: any[], quoted: Record<string, number> = {}) {
+async function arrange(
+  projects: any[],
+  quoted: Record<string, number> = {},
+  expected: Record<string, number> = {},
+) {
   mock_getProjects.mockResolvedValue(projects);
   mock_getProjectsQuoted.mockResolvedValue(new Map(Object.entries(quoted)));
+  mock_getExpectedTotal.mockImplementation(async (id: string) => {
+    if (!(id in expected)) throw new Error('offline');
+    return expected[id];
+  });
   const r = render(<ProjectsScreen />);
   await TestRenderer.act(async () => {});
   return r;
@@ -184,57 +195,125 @@ describe('the tab', () => {
 });
 
 describe('budget remaining', () => {
+  const textOf = (r: ReturnType<typeof render>) => r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
   const colourOf = (r: ReturnType<typeof render>, text: string) => flattenStyle(r.getByText(text).props.style).color;
 
-  it('is absent until something has been paid', async () => {
+  it('is absent until something has been paid, and asks for nothing', async () => {
     const r = await arrange([project({ budget: 100000, paidTotal: null })]);
     expect(r.queryByText('Budget remaining')).toBeNull();
+    expect(r.queryByText('Expected total')).toBeNull();
+    expect(mock_getExpectedTotal).not.toHaveBeenCalled();
   });
 
   it('is absent without a budget, whatever has been paid', async () => {
     const r = await arrange([project({ budget: null, paidTotal: 40000 })]);
     expect(r.queryByText('Budget remaining')).toBeNull();
     expect(r.queryByText('Over budget')).toBeNull();
+    expect(mock_getExpectedTotal).not.toHaveBeenCalled();
   });
 
-  it('is budget less paid, in fern while more than 15% is left', async () => {
-    const r = await arrange([project({ budget: 100000, paidTotal: 84000 })]);
+  it('counts what is expected, not only what is paid — two claims earmarked put a job over', async () => {
+    // The live job: paid alone left $68,101.19 of $180,000, and the card said
+    // so while its own page said $54,230.18 over.
+    const r = await arrange(
+      [project({ budget: 180000, paidTotal: 111898.81, invoicedTotal: 146255.18 })],
+      {},
+      { p1: 234230.18 },
+    );
+    expect(mock_getExpectedTotal).toHaveBeenCalledWith('p1');
+    r.getByText('Expected total');
+    r.getByText('$234,230.18');
+    r.getByText('Over budget');
+    expect(r.queryByText('Budget remaining')).toBeNull();
+    expect(colourOf(r, '$54,230.18')).toBe(Colors.danger);
+    r.getByText('30% over · $87,975 not billed yet');
+    expect(textOf(r)).not.toContain('68,101');
+  });
+
+  it('never cuts the figure short: it stands alone, the percentage beneath it', async () => {
+    const r = await arrange([project({ budget: 180000, paidTotal: 111898.81, invoicedTotal: 180000 - 68101.19 })], {}, { p1: 180000 - 68101.19 });
+    const figure = r.getByText('$68,101.19');
+    expect(figure.props.numberOfLines).toBe(1);
+    expect(flattenStyle(figure.props.style).flexShrink).toBe(0);
+    r.getByText('38% left');
+  });
+
+  it('is in fern while more than 15% is left', async () => {
+    const r = await arrange([project({ budget: 100000, paidTotal: 50000, invoicedTotal: 84000 })], {}, { p1: 84000 });
     r.getByText('Budget remaining');
-    expect(colourOf(r, '$16,000 · 16% left')).toBe(Colors.primary);
+    expect(colourOf(r, '$16,000')).toBe(Colors.primary);
+    r.getByText('16% left');
   });
 
   it('turns brass at 15% left, and stays brass down to just over 5%', async () => {
-    const at15 = await arrange([project({ budget: 100000, paidTotal: 85000 })]);
-    expect(colourOf(at15, '$15,000 · 15% left')).toBe(Colors.status.doing);
+    const at15 = await arrange([project({ budget: 100000, paidTotal: 50000, invoicedTotal: 85000 })], {}, { p1: 85000 });
+    expect(colourOf(at15, '$15,000')).toBe(Colors.status.doing);
     at15.unmount();
-    const at6 = await arrange([project({ budget: 100000, paidTotal: 94000 })]);
-    expect(colourOf(at6, '$6,000 · 6% left')).toBe(Colors.status.doing);
+    const at6 = await arrange([project({ budget: 100000, paidTotal: 50000, invoicedTotal: 94000 })], {}, { p1: 94000 });
+    expect(colourOf(at6, '$6,000')).toBe(Colors.status.doing);
   });
 
   it('turns clay at 5% left', async () => {
-    const r = await arrange([project({ budget: 100000, paidTotal: 95000 })]);
-    expect(colourOf(r, '$5,000 · 5% left')).toBe(Colors.danger);
+    const r = await arrange([project({ budget: 100000, paidTotal: 50000, invoicedTotal: 95000 })], {}, { p1: 95000 });
+    expect(colourOf(r, '$5,000')).toBe(Colors.danger);
   });
 
-  it('says Over budget, in clay, once more has gone out than was budgeted', async () => {
-    const r = await arrange([project({ budget: 100000, paidTotal: 103000 })]);
-    r.getByText('Over budget');
-    expect(r.queryByText('Budget remaining')).toBeNull();
-    expect(colourOf(r, '$3,000 · 3% over')).toBe(Colors.danger);
+  it('measures against the budget grossed up when it was typed ex GST', async () => {
+    // $100,000 + GST is $115,000; $100,000 expected leaves $15,000, 13% — brass.
+    const r = await arrange(
+      [project({ budget: 100000, budgetInclGst: false, paidTotal: 50000, invoicedTotal: 100000 })],
+      {},
+      { p1: 100000 },
+    );
+    expect(colourOf(r, '$15,000')).toBe(Colors.status.doing);
+    r.getByText('14% left');
   });
 
-  it('measures paid against the budget grossed up when it was typed ex GST', async () => {
-    // $100,000 + GST is $115,000; $100,000 paid leaves $15,000, 13% — brass.
-    const r = await arrange([project({ budget: 100000, budgetInclGst: false, paidTotal: 100000 })]);
-    expect(colourOf(r, '$15,000 · 14% left')).toBe(Colors.status.doing);
+  it('says — until the page’s figure arrives, never budget less paid in the meantime', async () => {
+    mock_getProjects.mockResolvedValue([project({ budget: 180000, paidTotal: 111898.81 })]);
+    mock_getExpectedTotal.mockReturnValue(new Promise(() => {}));
+    const r = render(<ProjectsScreen />);
+    await TestRenderer.act(async () => {});
+    r.getByText('Budget remaining');
+    expect(r.getAllByText('—').length).toBeGreaterThanOrEqual(2);
+    expect(textOf(r)).not.toContain('68,101');
+    expect(r.queryByText('Over budget')).toBeNull();
+  });
+
+  it('says — when the page could not be read, and the card still draws', async () => {
+    const r = await arrange([project({ budget: 180000, paidTotal: 111898.81 })]);
+    r.getByText('Downstairs laundry');
+    r.getByText('$111,898.81');
+    expect(textOf(r)).not.toContain('68,101');
+    expect(r.queryByText('Over budget')).toBeNull();
+  });
+
+  it('reads one page at a time, never all at once', async () => {
+    let answer!: (n: number) => void;
+    mock_getProjects.mockResolvedValue([
+      project({ id: 'a', name: 'Bathroom', budget: 30000, paidTotal: 1000 }),
+      project({ id: 'b', name: 'Deck', budget: 20000, paidTotal: 1000 }),
+      project({ id: 'c', name: 'Shed', budget: 5000, paidTotal: null }),
+    ]);
+    mock_getExpectedTotal.mockImplementation(() => new Promise<number>((resolve) => { answer = resolve; }));
+    render(<ProjectsScreen />);
+    await TestRenderer.act(async () => {});
+    expect(mock_getExpectedTotal).toHaveBeenCalledTimes(1);
+    await TestRenderer.act(async () => { answer(12000); });
+    expect(mock_getExpectedTotal).toHaveBeenCalledTimes(2);
+    await TestRenderer.act(async () => { answer(9000); });
+    // Nothing paid on the shed: it never asks.
+    expect(mock_getExpectedTotal.mock.calls.map((c) => c[0])).toEqual(['a', 'b']);
   });
 
   it('is on a complete project too, dimmed with the rest of the card', async () => {
-    const r = await arrange([
-      project({ id: 'k', name: 'Kitchen', status: 'done', budget: 62000, paidTotal: 58300, finishedOn: '2024-11-20' }),
-    ]);
+    const r = await arrange(
+      [project({ id: 'k', name: 'Kitchen', status: 'done', budget: 62000, paidTotal: 58300, invoicedTotal: 58300, finishedOn: '2024-11-20' })],
+      {},
+      { k: 58300 },
+    );
     r.getByText('Budget remaining');
-    r.getByText('$58,300');
+    expect(r.getAllByText('$58,300')).toHaveLength(2);
     expect(flattenStyle(cardFor(r, 'Kitchen').props.style).opacity).toBe(0.62);
   });
 });

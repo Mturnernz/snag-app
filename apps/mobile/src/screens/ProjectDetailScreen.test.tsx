@@ -1,6 +1,7 @@
 import React from 'react';
 import TestRenderer from 'react-test-renderer';
-import { render } from '../test/render';
+import { render, flattenStyle } from '../test/render';
+import { Colors } from '../constants/theme';
 import ProjectDetailScreen, { describeWhatGoes, elementHoldsSomething } from './ProjectDetailScreen';
 import { bill, downstairs, element, item, page, project, quote } from '../test/projectFixtures';
 import { dayKey } from '@snag/supabase-queries';
@@ -125,8 +126,9 @@ describe('are we on budget', () => {
     r.getByText('Undecided');
     // Once in the summary, once against the bathroom it is set aside for.
     expect(r.getAllByText('$12,000')).toHaveLength(2);
-    r.getByText('Left in budget');
-    r.getByText('$21,680');
+    // The list card's name for the same figure, and its colours: 9% left is brass.
+    r.getByText('Budget remaining');
+    expect(flattenStyle(r.getByText('$21,680').props.style).color).toBe(Colors.status.doing);
     r.getByText('$230,000');
   });
 
@@ -139,7 +141,7 @@ describe('are we on budget', () => {
   it('offers to set a budget rather than inventing one', async () => {
     const r = await arrange(downstairs({ project: { budget: null } }));
     r.getByText('Set a budget');
-    expect(r.queryByText('Left in budget')).toBeNull();
+    expect(r.queryByText('Budget remaining')).toBeNull();
     await press(r, 'Set a budget');
     r.getByText('budget sheet open');
   });

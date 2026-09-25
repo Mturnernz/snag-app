@@ -7,13 +7,15 @@ import {
   filesBySupplier,
   formatMoney,
   NO_SUPPLIER_HEADING,
+  remainingTone,
+  showsBudgetRemaining,
   supplierDirectory,
 } from '@snag/supabase-queries';
 import { quote } from '../test/projectFixtures';
 
 /**
- * Who a job's money and paperwork came from, and how much of the budget the
- * money paid has left. All pure, all read off the page already in hand.
+ * Who a job's money and paperwork came from, and how much of the budget is
+ * left once everything expected is counted. All pure, all read off the page already in hand.
  */
 
 const money = (n: number) => formatMoney(n) ?? '';
@@ -30,44 +32,65 @@ const expected = (over: any = {}): any => ({
 });
 
 describe('budgetRemaining', () => {
-  it('is nothing until something has been paid, and nothing without a budget', () => {
-    expect(budgetRemaining(100000, true, null)).toBeNull();
-    expect(budgetRemaining(100000, true, 0)).toBeNull();
-    expect(budgetRemaining(null, true, 5000)).toBeNull();
-    expect(budgetRemaining(0, true, 5000)).toBeNull();
+  const figures = (over: any = {}) => ({
+    budget: 100000, budgetInclGst: true, paidTotal: 50000, invoicedTotal: 50000, ...over,
   });
 
-  it('is budget less paid, with the share of the budget that is left', () => {
-    const r = budgetRemaining(195000, true, 92165)!;
-    expect(r.remaining).toBe(102835);
-    expect(r.share).toBeCloseTo(0.5274, 4);
-    expect(r.tone).toBe('good');
-    expect(r.over).toBe(false);
+  it('is nothing until something has been paid, and nothing without a budget', () => {
+    expect(budgetRemaining(figures({ paidTotal: null }), 80000)).toBeNull();
+    expect(budgetRemaining(figures({ paidTotal: 0 }), 80000)).toBeNull();
+    expect(budgetRemaining(figures({ budget: null }), 80000)).toBeNull();
+    expect(budgetRemaining(figures({ budget: 0 }), 80000)).toBeNull();
+    expect(showsBudgetRemaining(figures({ paidTotal: 0 }))).toBe(false);
+    expect(showsBudgetRemaining(figures())).toBe(true);
+  });
+
+  it('is budget less everything expected, not budget less paid', () => {
+    // The live job: two of the builder's four claims paid, two earmarked as
+    // expected costs. Paid alone left $68,101.19; what is expected is over.
+    const r = budgetRemaining(
+      figures({ budget: 180000, paidTotal: 111898.81, invoicedTotal: 146255.18 }),
+      234230.18,
+    )!;
+    expect(r.remaining).toBe(-54230.18);
+    expect(r.over).toBe(true);
+    expect(r.tone).toBe('danger');
+    expect(r.unbilled).toBe(87975);
   });
 
   it('turns warn at 15% left and danger at 5%, inclusive at both edges', () => {
-    const tone = (paid: number) => budgetRemaining(100000, true, paid)!.tone;
+    const tone = (expected: number) => budgetRemaining(figures(), expected)!.tone;
     expect(tone(84000)).toBe('good');
     expect(tone(85000)).toBe('warn');
     expect(tone(94999)).toBe('warn');
     expect(tone(95000)).toBe('danger');
     expect(tone(120000)).toBe('danger');
+    expect(remainingTone(0.16)).toBe('good');
+    expect(remainingTone(-0.01)).toBe('danger');
   });
 
   it('measures against the budget grossed up when it was typed ex GST', () => {
-    const r = budgetRemaining(100000, false, 100000)!;
+    const r = budgetRemaining(figures({ budgetInclGst: false }), 100000)!;
     expect(r.budget).toBe(115000);
     expect(r.remaining).toBe(15000);
   });
 
-  it('says it in words, the percentage agreeing with the colour at the edges', () => {
-    expect(describeRemaining(budgetRemaining(100000, true, 84000)!, money))
-      .toEqual({ label: 'Budget remaining', value: '$16,000 · 16% left' });
+  it('never counts a bill as unbilled, even when paid runs past it', () => {
+    expect(budgetRemaining(figures({ invoicedTotal: 90000 }), 84000)!.unbilled).toBe(0);
+  });
+
+  it('puts the figure alone, and the percentage and what is not billed beneath it', () => {
+    expect(describeRemaining(budgetRemaining(figures(), 84000)!, money))
+      .toEqual({ label: 'Budget remaining', value: '$16,000', caption: '16% left · $34,000 not billed yet' });
     // 15.4% left is still fern, so it must not read "15% left".
-    expect(describeRemaining(budgetRemaining(100000, true, 84600)!, money).value).toBe('$15,400 · 16% left');
-    expect(describeRemaining(budgetRemaining(100000, true, 90000)!, money).value).toBe('$10,000 · 10% left');
-    expect(describeRemaining(budgetRemaining(45000, true, 47200)!, money))
-      .toEqual({ label: 'Over budget', value: '$2,200 · 5% over' });
+    expect(describeRemaining(budgetRemaining(figures({ invoicedTotal: 84600 }), 84600)!, money).caption)
+      .toBe('16% left');
+    expect(describeRemaining(budgetRemaining(figures({ invoicedTotal: 90000 }), 90000)!, money).caption)
+      .toBe('10% left');
+    expect(describeRemaining(
+      budgetRemaining(figures({ budget: 180000, paidTotal: 111898.81, invoicedTotal: 146255.18 }), 234230.18)!,
+      money,
+    )).toEqual({ label: 'Over budget', value: '$54,230.18', caption: '30% over · $87,975 not billed yet' });
   });
 });
 

@@ -253,3 +253,38 @@ describe('reading again', () => {
     expect(allocate.props.disabled).toBe(true);
   });
 });
+
+describe('a bill for money that was earmarked', () => {
+  const earmark = (over: any = {}): any => ({
+    id: 'x1', projectId: 'p1', elementId: null, name: 'ReliaBuilder payment 3/4',
+    amount: 43987.5, amountInclGst: true, likelySupplier: null, note: null,
+    confirmed: false, settledBy: null, createdAt: '2026-09-24T09:33:57Z', ...over,
+  });
+  const match = (over: any = {}) => ({ expected: earmark(over), strength: 'strong' as const, difference: 0 });
+
+  it('offers the earmark ticked, and allocating sends it', () => {
+    const { r, onApprove } = arrange({}, { paysOff: [match()] });
+    r.getByText('Pays off ReliaBuilder payment 3/4 · $43,987.50');
+    r.getByText('Takes it off Expected to pay');
+    press(r, 'Allocate');
+    expect(onApprove).toHaveBeenCalledWith(expect.objectContaining({ id: 'x1' }));
+  });
+
+  it('allocates on its own once the tick is taken off', () => {
+    const { r, onApprove } = arrange({}, { paysOff: [match()] });
+    const tick = r.root.findAll(
+      (n: any) => n.props?.accessibilityRole === 'checkbox' && n.props?.onPress, { deep: true },
+    )[0];
+    TestRenderer.act(() => tick.props.onPress());
+    r.getByText('Stays on Expected to pay');
+    press(r, 'Allocate');
+    expect(onApprove).toHaveBeenCalledWith(null);
+  });
+
+  it('says nothing when nothing matches', () => {
+    const { r, onApprove } = arrange();
+    expect(r.queryByText('Takes it off Expected to pay')).toBeNull();
+    press(r, 'Allocate');
+    expect(onApprove).toHaveBeenCalledWith(null);
+  });
+});

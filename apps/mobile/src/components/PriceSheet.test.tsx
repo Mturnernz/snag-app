@@ -25,6 +25,7 @@ const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
 const mock_updateQuote = jest.fn().mockResolvedValue(undefined);
 const mock_setQuoteStatus = jest.fn().mockResolvedValue(undefined);
 const mock_setQuoteRooms = jest.fn().mockResolvedValue([]);
+const mock_updateExpectedCost = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -37,6 +38,7 @@ jest.mock('../lib/supabase', () => {
     setQuoteStatus: (...a: unknown[]) => mock_setQuoteStatus(...a),
     setQuoteRooms: (...a: unknown[]) => mock_setQuoteRooms(...a),
     setFileTags: jest.fn().mockResolvedValue(undefined),
+    updateExpectedCost: (...a: unknown[]) => mock_updateExpectedCost(...a),
     formatMoney: real.formatMoney,
   };
 });
@@ -276,5 +278,27 @@ describe('a bill inside another bill', () => {
   it('is not offered when there is no other bill to be inside', () => {
     const { r } = open(plumber, { quotes: [plumber] });
     expect(r.queryByText('Part of another bill?')).toBeNull();
+  });
+});
+
+describe('a bill that paid off an earmark', () => {
+  const earmark = (over: any = {}): any => ({
+    id: 'x1', projectId: 'p1', elementId: null, name: 'ReliaBuilder payment 3/4',
+    amount: 43987.5, amountInclGst: true, likelySupplier: null, note: null,
+    confirmed: false, settledBy: 'b1', createdAt: '2026-09-24T09:33:57Z', ...over,
+  });
+
+  it('says which, and Undo puts it back on Expected to pay', async () => {
+    const { r, onChanged } = open(bill, { expected: [earmark()] });
+    r.getByText('Pays off ReliaBuilder payment 3/4');
+    r.getByText('$43,987.50 expected · off Expected to pay');
+    await press(r, 'Put ReliaBuilder payment 3/4 back on Expected to pay');
+    expect(mock_updateExpectedCost).toHaveBeenCalledWith('x1', { settledBy: null });
+    expect(onChanged).toHaveBeenCalledWith('ReliaBuilder payment 3/4 is back on Expected to pay');
+  });
+
+  it('says nothing about an earmark another bill paid off', () => {
+    const { r } = open(bill, { expected: [earmark({ settledBy: 'someone-else' })] });
+    expect(r.queryByText('Pays off ReliaBuilder payment 3/4')).toBeNull();
   });
 });

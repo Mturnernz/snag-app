@@ -2,19 +2,20 @@ import React from 'react';
 import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import HouseScreen from './HouseScreen';
-import { writeCollapsed } from '../lib/collapsed';
 
-// The House tab arrives furnished, and the rule the whole design rests on is
-// that a ghost is never a row. These pin the two places that distinction can
-// silently blur — the counts and the search — plus the seeded room order the
-// List tab shares, and the two things that were taken away: the by-kind
-// grouping and the line that undid a dismissal.
+// The House tab is a grid of rooms, each opening a page of its own. It still
+// arrives furnished, and the rule the whole design rests on is still that a
+// ghost is never a row. These pin the places that distinction can silently
+// blur — the counts, the tile's facts line and the search — plus the seeded
+// room order the List tab shares, the door into each room, and the controls
+// that were taken away: the by-kind rail and the fold.
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+const mock_navigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: jest.fn(), addListener: () => () => {} }),
+  useNavigation: () => ({ navigate: mock_navigate, addListener: () => () => {} }),
 }));
 jest.mock('../components/AddThingSheet', () => {
   const React = require('react');
@@ -43,6 +44,7 @@ jest.mock('../lib/supabase', () => ({
   createThing: jest.fn(),
   createLocation: (...a: unknown[]) => mock_createLocation(...a),
 }));
+jest.mock('../lib/serviceJob', () => ({ fileServiceJob: jest.fn() }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
@@ -96,6 +98,17 @@ const pressable = (r: ReturnType<typeof render>, label: string) =>
     { deep: true }
   )[0];
 
+/** Every room tile, in the order drawn — "Laundry, 0 of 4". */
+const tiles = (r: ReturnType<typeof render>) => {
+  const labels = r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && !!n.props?.onPress
+      && /^.+, \d+( of \d+)?$/.test(n.props?.accessibilityLabel ?? ''),
+    { deep: true },
+  ).map((n: any) => n.props.accessibilityLabel as string);
+  // A Pressable renders through more than one composite; keep each label once.
+  return labels.filter((label, i) => labels.indexOf(label) === i);
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   arrange();
@@ -114,15 +127,20 @@ describe('HouseScreen', () => {
     const result = render(<HouseScreen />);
     await settle();
 
-    const all = texts(result);
-    expect(all).not.toContain('Nothing recorded yet');
-    expect(all).toContain('Laundry · 0 of 4');
-    expect(all).toContain('Deck · 0 of 1');
+    expect(texts(result)).not.toContain('Nothing recorded yet');
     // Elsewhere is the location seed's escape hatch — suggesting its contents
-    // would be nonsense, so it gets no section at all.
-    expect(all.some((t) => t.startsWith('Elsewhere'))).toBe(false);
-    expect(all).toContain('Washing machine');
-    expect(all).toContain('Not recorded yet');
+    // would be nonsense, so it gets no tile at all.
+    expect(tiles(result)).toEqual(['Laundry, 0 of 4', 'Deck, 0 of 1']);
+  });
+
+  it('says a suggestion is not recorded before it names one', async () => {
+    // A tile for a room with nothing recorded names what it probably has —
+    // which is exactly where a suggestion could be read as a record, so the
+    // words come first.
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(texts(result)).toContain('Not recorded yet · Washing machine, Dryer, Water filter, Paint');
   });
 
   it('counts what is recorded against what the room still offers', async () => {
@@ -133,8 +151,10 @@ describe('HouseScreen', () => {
     const result = render(<HouseScreen />);
     await settle();
 
+    expect(tiles(result)).toContain('Laundry, 2 of 4');
     const all = texts(result);
-    expect(all).toContain('Laundry · 2 of 4');
+    // Once anything is recorded the tile names the records, and only those.
+    expect(all).toContain('Dryer, Washing machine');
     // The header counts records, never ghosts — the first place the two would
     // blur is a number that includes both.
     expect(all).toContain('2 recorded');
@@ -148,11 +168,25 @@ describe('HouseScreen', () => {
     const result = render(<HouseScreen />);
     await settle();
 
-    const headings = texts(result).filter((t) => t.includes(' · ') || t.startsWith('Whole house'));
-    expect(headings[headings.length - 1]).toBe('Whole house · 1');
+    const all = tiles(result);
+    expect(all[all.length - 1]).toBe('Whole house, 1');
   });
 
-  it('answers a search flat, with no ghosts in the result', async () => {
+  it('opens a room on its own page', async () => {
+    mock_getThings.mockResolvedValue([thing({ id: '1', name: 'Meter box', room: null })]);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    await TestRenderer.act(async () => pressable(result, 'Laundry, 0 of 4').props.onPress());
+    expect(mock_navigate).toHaveBeenCalledWith('HouseRoom', { room: 'Laundry' });
+
+    // Whole house is the page for things with no room, so it goes as null
+    // rather than as a room called "Whole house".
+    await TestRenderer.act(async () => pressable(result, 'Whole house, 1').props.onPress());
+    expect(mock_navigate).toHaveBeenCalledWith('HouseRoom', { room: null });
+  });
+
+  it('answers a search flat, with no ghosts and no tiles in the result', async () => {
     // A ghost in a search result is the app offering something it does not
     // have, to somebody standing in a shop.
     mock_getThings.mockResolvedValue([
@@ -164,10 +198,22 @@ describe('HouseScreen', () => {
 
     const all = texts(result);
     expect(all).toContain('1 found');
-    expect(all).not.toContain('Not recorded yet');
+    expect(all).toContain('Washing machine');
+    expect(all.some((t) => t.startsWith('Not recorded yet'))).toBe(false);
+    expect(tiles(result)).toEqual([]);
     // The record's own count is about the record, not about the answer on
     // screen, so it stands down while a search is running.
     expect(all).not.toContain('1 recorded');
+  });
+
+  it('opens a search result on its spec sheet', async () => {
+    mock_getThings.mockResolvedValue([thing({ id: 'w1', name: 'Washing machine', room: 'Laundry' })]);
+    const result = render(<HouseScreen />);
+    await settle();
+    await search(result, 'wash');
+
+    await TestRenderer.act(async () => pressable(result, 'Washing machine').props.onPress());
+    expect(mock_navigate).toHaveBeenCalledWith('ThingDetail', { thingId: 'w1' });
   });
 
   it('adds a room to the tags everything else uses, not just this tab', async () => {
@@ -191,36 +237,29 @@ describe('HouseScreen', () => {
   });
 
   it('shows a brand-new room rather than swallowing it', async () => {
-    // Nothing is catalogued for a conservatory, and a section with no things
-    // and no ghosts is not drawn — so without the universal paint prompt
-    // somebody would add a room and watch nothing happen.
+    // Nothing is catalogued for a conservatory, and a room with no things and
+    // no ghosts gets no tile — so without the universal paint prompt somebody
+    // would add a room and watch nothing happen.
     arrange(['Laundry', 'Conservatory']);
     const result = render(<HouseScreen />);
     await settle();
 
-    expect(texts(result)).toContain('Conservatory · 0 of 1');
+    expect(tiles(result)).toContain('Conservatory, 0 of 1');
   });
 
-  it('hides what this house has not got, for good', async () => {
-    // Dismissing used to leave a rescue line under the room. It doesn't: "no
-    // dryer here" is a small certain fact about this house, and a standing
-    // offer to un-say it is clutter on top of the answer. The + is how a dryer
-    // that does turn up gets recorded.
+  it('leaves out what this house has not got', async () => {
+    mock_getAbsentThings.mockResolvedValue([{ propertyId: 'p', room: 'Laundry', name: 'Dryer' }]);
     const result = render(<HouseScreen />);
     await settle();
-    await TestRenderer.act(async () => pressable(result, 'No dryer here').props.onPress());
 
-    expect(mock_markThingAbsent).toHaveBeenCalledWith('p', 'Laundry', 'Dryer');
-    const all = texts(result);
-    expect(all).toContain('Laundry · 0 of 3');
-    expect(all.some((t) => t.includes('bring it back'))).toBe(false);
+    expect(tiles(result)).toContain('Laundry, 0 of 3');
   });
 
-  it('groups by room and offers no other layout', async () => {
-    // The By room / By kind rail is gone. It charged a control rail on every
-    // visit to answer a question the search field above it already answers,
-    // and one layout is what keeps this tab and the List tab describing the
-    // house in the same words.
+  it('groups by room, and offers no other layout and nothing to fold', async () => {
+    // The By room / By kind rail went because the search field above it
+    // already answers "what appliances do we have". The fold went with the
+    // long list it existed to manage: a room is a page now, and a grid of
+    // tiles has nothing to collapse.
     mock_getThings.mockResolvedValue([
       thing({ id: '1', name: 'Dryer', room: 'Laundry' }),
       thing({ id: '2', name: 'Deck stain', room: 'Deck', kind: 'finish' }),
@@ -229,10 +268,10 @@ describe('HouseScreen', () => {
     await settle();
 
     const all = texts(result);
-    expect(all).not.toContain('By room');
-    expect(all).not.toContain('By kind');
+    for (const gone of ['By room', 'By kind', 'Collapse all', 'Expand all']) {
+      expect(all).not.toContain(gone);
+    }
     expect(all).toContain('2 recorded');
-    expect(all.some((t) => t.startsWith('Laundry · '))).toBe(true);
   });
 });
 
@@ -277,72 +316,5 @@ describe('taking the house record out', () => {
     expect(table.rows).toHaveLength(1);
     expect(table.rows[0]).toContain('Dryer');
     expect(table.name).toBe('Home house');
-  });
-});
-
-// ─── folding a room away ──────────────────────────────────────────────────────
-
-describe('folding rooms on the House tab', () => {
-  const byLabel = (r: ReturnType<typeof render>, label: string) =>
-    r.root.findAll(
-      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
-        && !!n.props?.onPress,
-      { deep: true },
-    )[0];
-
-  // The fold persists by design, so a test that folds a room would otherwise
-  // fold it for whatever ran next.
-  beforeEach(async () => { await writeCollapsed([], 'house'); });
-
-  it('keeps the heading and its count when a room is folded', async () => {
-    mock_getThings.mockResolvedValue([
-      thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
-    ]);
-    const r = render(<HouseScreen />);
-    await settle();
-
-    expect(texts(r)).toContain('Washing machine');
-
-    await TestRenderer.act(async () => byLabel(r, 'Laundry · 1 of 4').props.onPress());
-
-    // The heading is the whole point of the grouping, so a fold keeps it.
-    expect(texts(r)).toContain('Laundry · 1 of 4');
-    expect(texts(r)).not.toContain('Washing machine');
-  });
-
-  // Same component and same words as the List tab, so two tabs grouping the
-  // same house by the same rooms cannot grow two controls for closing them.
-  it('offers to collapse everything, then to expand everything', async () => {
-    mock_getThings.mockResolvedValue([
-      thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
-    ]);
-    const r = render(<HouseScreen />);
-    await settle();
-
-    expect(byLabel(r, 'Collapse all')).toBeDefined();
-    await TestRenderer.act(async () => byLabel(r, 'Collapse all').props.onPress());
-
-    expect(byLabel(r, 'Expand all')).toBeDefined();
-    expect(texts(r)).not.toContain('Washing machine');
-  });
-
-  // A search is one flat answer over real records; there is nothing to fold,
-  // and a control that could only be a no-op is a control dressed as a choice.
-  it('offers no fold control while searching', async () => {
-    mock_getThings.mockResolvedValue([
-      thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
-    ]);
-    const r = render(<HouseScreen />);
-    await settle();
-
-    const box = r.root.findAll(
-      (n: any) => typeof n.type !== 'string'
-        && n.props?.accessibilityLabel === 'Search the house record',
-      { deep: true },
-    )[0];
-    await TestRenderer.act(async () => box.props.onChangeText('washing'));
-
-    expect(byLabel(r, 'Collapse all')).toBeUndefined();
-    expect(byLabel(r, 'Expand all')).toBeUndefined();
   });
 });

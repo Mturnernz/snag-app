@@ -2006,6 +2006,121 @@ export function ghostsForRoom(
   });
 }
 
+/**
+ * What the House tab calls things that belong to the place rather than to a
+ * room in it — `room === null` on the row. It is not a room: it has no walls,
+ * so it is never furnished, and it is never a `locations` tag.
+ */
+export const WHOLE_HOUSE = 'Whole house';
+
+/** One tile on the House tab, and the page it opens. */
+export interface HouseRoom {
+  /** The `things.room` value — null for Whole house. */
+  room: string | null;
+  /** What the screen calls it. */
+  name: string;
+  /** Real rows only, in the order of their headlines. */
+  recorded: Thing[];
+  /** What the room probably has and nobody has recorded or dismissed. Never rows. */
+  ghosts: ThingSuggestion[];
+}
+
+/**
+ * The rooms the House tab shows, in the order it shows them.
+ *
+ * **Seeded order, exactly as the List tab groups snags** — the two tabs have
+ * to describe the house in the same words and the same order, or the room a
+ * snag is in and the room a thing is in stop reading as the same place. A room
+ * the vocabulary no longer holds sorts after the seeded ones rather than
+ * jumping to the top, because `things.room` is TEXT precisely so history
+ * survives a tag being removed. Whole house is last and never furnished.
+ *
+ * A room with nothing recorded and nothing to suggest is not drawn:
+ * `Elsewhere` and `Under the house` are catalogued empty on purpose, and a
+ * tile that can only say "nothing" is vertical rent.
+ */
+export function houseRooms(
+  roomOrder: string[],
+  things: Thing[],
+  absent: AbsentThing[]
+): HouseRoom[] {
+  const rooms: HouseRoom[] = [];
+  const add = (room: string) => {
+    const recorded = thingsInArea(things, room);
+    const ghosts = ghostsForRoom(room, things, absent);
+    if (recorded.length === 0 && ghosts.length === 0) return;
+    rooms.push({ room, name: room, recorded, ghosts });
+  };
+
+  for (const room of roomOrder) add(room);
+  const extra = [...new Set(things.map((t) => t.room).filter((r): r is string => !!r))]
+    .filter((room) => !roomOrder.includes(room))
+    .sort((a, b) => a.localeCompare(b));
+  for (const room of extra) add(room);
+
+  const placeWide = thingsInArea(things, null);
+  if (placeWide.length > 0) {
+    rooms.push({ room: null, name: WHOLE_HOUSE, recorded: placeWide, ghosts: [] });
+  }
+  return rooms;
+}
+
+/**
+ * What a room's tile says: a count and a line of facts.
+ *
+ * The count is **"2 of 8" and never a percentage** — recorded against recorded
+ * plus what is still suggested, so the denominator shrinks honestly as things
+ * are dismissed. A room with nothing left to suggest is its bare total.
+ *
+ * The facts are what is recorded, by headline. A room with nothing recorded
+ * names what it probably has instead, which is how the tab still arrives
+ * furnished — and it says **Not recorded yet** first, in words, because a
+ * suggestion that reads as a record is the one failure this tab is built
+ * against.
+ */
+export function describeHouseRoom(room: HouseRoom): { count: string; facts: string } {
+  const recorded = room.recorded.length;
+  const total = recorded + room.ghosts.length;
+  const count = room.ghosts.length > 0 ? `${recorded} of ${total}` : `${recorded}`;
+  const facts = recorded > 0
+    ? room.recorded.map(thingHeadline).join(', ')
+    : `Not recorded yet · ${room.ghosts.map((g) => g.name).join(', ')}`;
+  return { count, facts };
+}
+
+export type ThingKindGroupKey = 'appliances' | 'finishes' | 'other';
+
+export interface ThingKindGroup {
+  key: ThingKindGroupKey;
+  title: string;
+  things: Thing[];
+}
+
+/**
+ * A tile is paint's shape, not an appliance's: one on the floor and another on
+ * the walls, told apart by where each went. So it sits with paint. The three
+ * unbuilt kinds share one group that only appears when a row of one exists.
+ */
+const KIND_GROUPS: { key: ThingKindGroupKey; title: string; kinds: ThingKind[] }[] = [
+  { key: 'appliances', title: 'Appliances', kinds: ['appliance'] },
+  { key: 'finishes', title: 'Paint and finishes', kinds: ['finish', 'tile'] },
+  { key: 'other', title: 'Other', kinds: ['fitting', 'fabric', 'contact'] },
+];
+
+/**
+ * A room's things by kind, keeping the order they came in. Empty groups are
+ * left out — a heading over nothing is a heading pretending to be a category.
+ */
+export function thingKindGroups(things: Thing[]): ThingKindGroup[] {
+  return KIND_GROUPS
+    .map(({ key, title, kinds }) => ({
+      key,
+      title,
+      things: things.filter((thing) => kinds.includes(thing.kind)),
+    }))
+    .filter((group) => group.things.length > 0);
+}
+
 export async function getAbsentThings(
   client: SupabaseClient,
   propertyId: string

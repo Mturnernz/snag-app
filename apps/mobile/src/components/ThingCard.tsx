@@ -2,12 +2,12 @@ import React from 'react';
 import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 
 import Icon from './Icon';
-import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Thing, ThingKind, ThingSuggestion } from '../types';
 import { describeCycle, swatchColour, thingDetailLine, thingHeadline } from '@snag/supabase-queries';
 
 /**
- * One thing in the house record.
+ * One thing in the house record, as a row in a white group.
  *
  * **The card shows the answer, not the name.** "Heat pump" is what somebody
  * already knew when they opened this tab; `MSZ-AP50VGK` is what they came for.
@@ -19,6 +19,10 @@ import { describeCycle, swatchColour, thingDetailLine, thingHeadline } from '@sn
  * No new colour. Kind is an outline icon and nothing more: the palette's four
  * hues are spent on state, and a thing has no state. The one badge that can
  * appear is a service reminder, in brass, on the same reasoning as a due date.
+ *
+ * It has no surface of its own: it sits in a `Group`, which draws the white,
+ * the corners and the hairline between rows — the V2 grouped list, the same as
+ * every other list of things to open in this app. The chevron says it opens.
  */
 
 const KIND_ICONS: Record<ThingKind, React.ComponentProps<typeof Icon>['name']> = {
@@ -107,6 +111,7 @@ export default function ThingCard({ thing, photoUrl, onPress }: Props) {
           ) : null}
         </View>
       </View>
+      <Icon name="chevron-forward" size={16} color={Colors.chevron} />
     </Pressable>
   );
 }
@@ -119,13 +124,13 @@ const styles = StyleSheet.create({
     // thumbnail leaves it floating above a gap.
     alignItems: 'center',
     gap: Spacing.md,
-    // V2: a recorded thing is white on plaster with no outline, which is also
-    // what keeps it apart from a ghost — the ghost is the only dashed edge.
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    padding: Spacing.md,
-    minHeight: MIN_TOUCH_TARGET,
-    ...Shadow.sm,
+    // The group behind it is the white; a recorded thing sits in one and a
+    // ghost never does, which is what keeps the two apart — the ghost is the
+    // only dashed edge on the screen.
+    paddingVertical: Spacing.md,
+    paddingLeft: Spacing.lg,
+    paddingRight: Spacing.md,
+    minHeight: 52,
   },
   thumb: {
     width: 44,
@@ -134,7 +139,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.sunken,
   },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
-  body: { flex: 1, gap: 2 },
+  body: { flex: 1, minWidth: 0, gap: 2 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   // A hairline edge on purpose: most paint is a white, and a white circle on a
   // white card is not there at all.
@@ -145,18 +150,20 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
   },
+  // V2 row sizes: 17 for what it is, 15 for the facts under it.
   title: {
     flexShrink: 1,
-    fontSize: Typography.base,
-    fontWeight: Typography.semibold,
+    fontSize: Typography.body,
+    lineHeight: 22,
     color: Colors.textPrimary,
   },
   detail: {
     fontFamily: Fonts.mono,
-    fontSize: Typography.sm,
+    fontSize: Typography.subhead,
+    lineHeight: 20,
     color: Colors.textSecondary,
   },
-  note: { fontSize: Typography.sm, color: Colors.textSecondary },
+  note: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textSecondary },
   meta: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: 2 },
   ghost: {
     flexDirection: 'row',
@@ -182,20 +189,19 @@ const styles = StyleSheet.create({
   // Deliberately lighter than a ThingCard, not merely different from one: a
   // room with six unrecorded things was six full-size dashed cards, and a
   // tab-length wall of grey is the "reads as homework" failure this design's
-  // whole argument has to survive. A ghost has no thumbnail and no second line
-  // of its own weight, so it is about two-thirds the height of a record — the
-  // distinction is carried by size as well as by style and words.
-  ghostTitle: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
-  ghostNote: { fontSize: Typography.xs, color: Colors.textMuted },
+  // whole argument has to survive. A ghost has no thumbnail and no second line,
+  // so it is about two-thirds the height of a record — the distinction is
+  // carried by size as well as by style and words.
+  ghostTitle: { fontSize: Typography.subhead, fontWeight: Typography.medium, color: Colors.textSecondary },
   ghostDismiss: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  service: { fontSize: Typography.xs, color: Colors.status.doing },
-  consumable: { fontSize: Typography.xs, color: Colors.textMuted, flexShrink: 1 },
-  snags: { fontSize: Typography.xs, color: Colors.status.open },
+  service: { fontSize: Typography.footnote, color: Colors.status.doing },
+  consumable: { fontSize: Typography.footnote, color: Colors.textMuted, flexShrink: 1 },
+  snags: { fontSize: Typography.footnote, color: Colors.status.open },
 });
 
 
@@ -204,11 +210,13 @@ const styles = StyleSheet.create({
  *
  * Deliberately built from the same measurements as `ThingCard` and deliberately
  * not mistakable for one. Dashed rather than solid, transparent rather than
- * white, and it says *Not recorded yet* in words — because the entire argument
- * for putting these on screen collapses the moment somebody reads one as a
- * record. The × is a second control, not a corner of the first: dismissing
- * "no dryer here" and opening the walkthrough are opposite intentions and must
- * not share a tap target.
+ * white, outside any group, and always under a heading that says *Not recorded
+ * yet* in words — because the entire argument for putting these on screen
+ * collapses the moment somebody reads one as a record. (The words were on each
+ * card while ghosts sat between records; under their own heading, saying it on
+ * every row as well was the heading repeated.) The × is a second control, not a
+ * corner of the first: dismissing "no dryer here" and opening the walkthrough
+ * are opposite intentions and must not share a tap target.
  */
 export function GhostCard({
   suggestion, onPress, onDismiss,
@@ -228,7 +236,6 @@ export function GhostCard({
         <Icon name="add" size="sm" color={Colors.textMuted} />
         <View style={styles.body}>
           <Text style={styles.ghostTitle} numberOfLines={1}>{suggestion.name}</Text>
-          <Text style={styles.ghostNote}>Not recorded yet</Text>
         </View>
       </Pressable>
       <Pressable

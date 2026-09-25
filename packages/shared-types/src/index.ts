@@ -2083,6 +2083,14 @@ export type RootStackParamList = {
   /** A thing's spec sheet. Presented as a sheet, like SnagDetail. */
   ThingDetail: { thingId: string };
   /**
+   * One room of the house record, opened from its tile on the House tab.
+   *
+   * `null` is Whole house — the things that belong to the place rather than a
+   * room in it. A push rather than a sheet, so a thing's spec sheet can open
+   * over it and come back to the room rather than to the grid.
+   */
+  HouseRoom: { room: string | null };
+  /**
    * One renovation: the money, the parts of it, the paperwork.
    *
    * A push rather than a sheet, unlike SnagDetail and ThingDetail. Those are a

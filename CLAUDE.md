@@ -42,7 +42,7 @@ snag/
 │   │       ├── constants/theme.ts # ALL design tokens
 │   │       ├── lib/supabase.ts    # client (schema: home), auth, photo upload
 │   │       ├── hooks/useHousehold.tsx
-│   │       ├── screens/           # SnagList (home), SnagDetail, House, ThingDetail,
+│   │       ├── screens/           # SnagList (home), SnagDetail, House, HouseRoom, ThingDetail,
 │   │       │                       #   Household, LocationTags, Profile, Auth, Setup
 │   │       └── components/
 │   ├── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
@@ -594,27 +594,21 @@ they last looked.
   rather than only the rooms currently listed, because a room whose items have all been bought
   drops out of the card and would otherwise come back shut the next time something was added to it.
 
-  **It is `FoldAllPill`, and the House tab uses the same one.** Both tabs group the same house by
-  the same rooms in the same seeded order — that rule already governs their headings, and it
-  governs the control that closes them too, so there is one component rather than two that drift.
-  It is a **pill** rather than a chevron beside a word: on a plaster ground an unbounded glyph and
+  **It is `FoldAllPill`**, one component so that no surface folding rooms away invents a second
+  control for it. (The House tab used it too, until each room there became a page of its own and
+  there was nothing left to fold — see *A room is a page*.) It is a **pill** rather than a chevron beside a word: on a plaster ground an unbounded glyph and
   a line of muted text reads as a *caption*, something the screen is telling you, and this is
   something to press. The app's one chip shape says so — a sunken well, no border, the label
   inside it — and it stays sunken in both states, because it is a momentary action rather than a
   filter that is on or off and solid fern is reserved for the latter. The pill is ~34px inside a
   48px target, as every chip in this app is.
 
-  On the House tab the heading folds and **the + stays its sibling**: a `Pressable` inside a
-  `Pressable` is a coin toss about which one gets the tap, which is the rule that already keeps
-  opening and removing separate on a photo tile. The fold control is absent while searching, since
-  a search is one flat answer with nothing to fold — the same rule as the shopping pill at zero.
-
-  **Three fold scopes, three keys** (`CollapseScope` in `lib/collapsed.ts`): the list's sections,
-  the trip sheet's rooms, and the House tab's rooms. Separate deliberately — folding the Garage
-  away on the House tab is a statement about the record you are reading, not about the jobs filed
-  there, and one key would have each surface silently folding the others. Namespaced in the module
-  rather than in three callers so the guards stay in one place: every read and write has to survive
-  storage being absent, full or throwing, and that is not a thing to copy out three times.
+  **Two fold scopes, two keys** (`CollapseScope` in `lib/collapsed.ts`): the list's sections and
+  the trip sheet's rooms. Separate deliberately — a room folded on the trip sheet is a statement
+  about the shopping, not about the jobs, and one key would have each surface silently folding the
+  other. Namespaced in the module rather than in each caller so the guards stay in one place: every
+  read and write has to survive storage being absent, full or throwing, and that is not a thing to
+  copy out twice. (There was a third, for the House tab's rooms; it went with the fold.)
 
   The fold is remembered **per device** (`lib/collapsed.ts`) and keyed **by section, never by
   index**: sections come and go as work is filed and finished, and an index would fold whatever
@@ -915,24 +909,30 @@ always about a thing — the heat pump, the hallway paint, the toilet cistern �
 knew that, so "which filter", "which green", "which model" got answered from scratch every time
 someone stood in a shop.
 
+**The tab is a grid of rooms, and a room is a page** (`HouseRoomScreen`) — see *A room is a
+page* below.
+
 **The tab arrives furnished.** Every room holds greyed, dashed entries for what a house of this
 kind probably has — a rangehood in the kitchen, a dryer in the laundry — until somebody records
-the real one. This is the answer to the thing that kills every inventory product: an empty record
-answers nothing, and a tab that answers nothing on the day it ships never gets opened again.
+the real one. A room with nothing recorded still has a tile, reading *Not recorded yet ·
+Oven, Cooktop, …*, and its page is that list. This is the answer to the thing that kills every
+inventory product: an empty record answers nothing, and a tab that answers nothing on the day it
+ships never gets opened again.
 
 **The rule the whole arrangement rests on, and the easiest one to erode: a ghost is not a row.**
 It comes from `ROOM_SUGGESTIONS`, a constant in `shared-types`; it never reaches `home.things`,
 never appears in a search result, and can never be pointed at by a snag. A record full of entries
 nobody has confirmed *looks* full and answers nothing, and that is worse than an empty one — you
 believe it, check it in the shop, and find nothing there. **If the ghost/real distinction ever
-blurs, the furniture goes rather than the distinction.** Two places it would blur first, both
-pinned by `HouseScreen.test.tsx`: the header count says "recorded" and counts only real things,
-and a search returns real things only.
+blurs, the furniture goes rather than the distinction.** Three places it would blur first, all
+pinned by `HouseScreen.test.tsx`: the header count says "recorded" and counts only real things, a
+search returns real things only, and a tile naming suggestions says *Not recorded yet* before it
+names them.
 
 Three consequences:
 
-- **Progress is per room, never a percentage.** "Kitchen · 2 of 8" is a unit of work somebody can
-  finish on a Saturday. A global completeness meter is the shaming number that gets an app closed
+- **Progress is per room, never a percentage.** "Kitchen · 2 of 8" — on the tile, "2 of 8" under
+  the name — is a unit of work somebody can finish on a Saturday. A global completeness meter is the shaming number that gets an app closed
   and not reopened — there is deliberately no such meter anywhere.
 - **A ghost weighs less than a record**, and not only differently: no thumbnail, smaller type,
   about two-thirds the height. Six full-size dashed cards in one room was a tab-length wall of
@@ -950,11 +950,53 @@ Three consequences:
 - **There is one layout, and it is by room.** A *By room / By kind* rail used to sit above the
   list. By kind answered "what appliances do we have" — which the search field directly above it
   already answers — and charged a control rail on every visit to do it. One layout also means
-  this tab and the List tab cannot drift apart about how the house is organised.
-- **A room folds away here too**, through the same `FoldAllPill` the list uses and on its own
-  storage key. See *A room can be folded away* above for all of it — the heading surviving the
-  fold, the + staying a sibling of the tap rather than a child of it, the control's absence while
-  searching, and why the three scopes are kept apart.
+  this tab and the List tab cannot drift apart about how the house is organised. Grouping by kind
+  *inside* a room's page is a heading, not a second layout, and there is no control for it.
+
+### A room is a page
+
+The tab was one long list — every room's records and suggestions inline, a dozen rooms running to
+two thousand pixels, and a fold control to manage it. **It is a 2-column grid of rooms now** (the
+layout was chosen from a preview, over grouped rows), and each tile opens that room on
+`HouseRoomScreen`. The search field stays on top of the grid, and a search is still one flat
+answer across every room.
+
+- **A tile says three things**: the name, the count, and what is in the room by headline
+  (`houseRooms`, `describeHouseRoom`). The count is `2 of 8` while anything is still suggested and
+  a bare total after, and it goes muted while nothing is recorded, because then the line under it
+  is suggestions — and says so first, in words. Seeded order, a room the vocabulary lost after
+  the seeded ones, Whole house last; a room with nothing recorded and nothing to suggest gets no
+  tile, as `Elsewhere` and `Under the house` never did.
+- **Two to a row, as pairs rather than a wrapped flex line.** React Native cannot express a
+  percentage width with a gap, and a lone last tile must stay half width rather than stretching
+  into a banner. White on plaster, `Radius.card`, no outline and no shadow — a tile is a V2 group
+  of one row.
+- **The page is a push, not a sheet**, like `ProjectDetail`. A thing on it opens `ThingDetail`,
+  which is a modal screen, and a room drawn as an RN `Modal` sheet would sit *above* it — the spec
+  sheet would open underneath. Pushed, the thing opens over the room and back lands in the room.
+  `HouseRoom: { room: string | null }`, with null for Whole house; not in `linking.ts`, on the same
+  terms as `ThingDetail`, because a room is not something anybody sends.
+- **Grouped by kind only when there is more than one kind** (`thingKindGroups`): *Appliances*,
+  *Paint and finishes* (a tile goes with paint, for paint's reason) and *Other* for the three
+  unbuilt kinds, drawn only if a row of one exists. A hallway with one paint is just the paint.
+  That is the Projects tab's implicit-layer rule — a middle layer appears only when it earns its
+  place — and a heading over the only group there is, is a heading pretending to be a category.
+- **Not recorded yet is its own section, under the records and open.** Not a drawer that starts
+  shut: a closed drawer is the furniture taken away, and on a page of one room the scroll it
+  would save is short. Under a heading of its own a ghost cannot be read as one of the rows above
+  it, which is the distinction made *more* visible rather than less. The ghost card itself lost
+  its *Not recorded yet* line for the same reason: under that heading it was the heading repeated.
+- **Recorded things are rows in a white `Group`**, 17pt with the mono answer at 15pt under it and a
+  chevron, where they were separate shadowed cards — the V2 grouped list, like every other list of
+  things to open in this app. A ghost stays a dashed, transparent card outside any group.
+- **The + is in the page's header**, opening the walkthrough on step two with the room chosen;
+  the FAB on the grid opens it on step one. Both screens share `useAddThing`, so recording a thing
+  is one write path wherever the + was.
+
+`HouseRoomScreen.test.tsx` pins the kind headings appearing only at two kinds, a tile under *Paint
+and finishes*, the suggestions under their own heading after the records, a dismissal that is
+final and put back on a refusal, the + and a tapped ghost opening the walkthrough where they
+should, Whole house never furnished, and only this room's covers being signed.
 
 ### Paint is the one suggestion that works differently
 
@@ -983,8 +1025,8 @@ serviced; asking it those two questions was two whole steps of the sheet interro
 
 ### Adding a room, from the tab that shows the house
 
-**A room added on the House tab is a room everywhere.** The *Add a room* line at the foot of the
-list and the *Add a room…* chip on step one of the walkthrough both call `home.create_location`
+**A room added on the House tab is a room everywhere.** The *Add a room* row under the grid and
+the *Add a room…* chip on step one of the walkthrough both call `home.create_location`
 against the active property and then `reloadLocations()` — so a conservatory, a study or a movie
 room joins the tags the List tab groups by and capture offers, not just this screen. Rooms are a
 property's vocabulary, not one tab's; two screens keeping separate ideas of what rooms exist is
@@ -1014,10 +1056,10 @@ describe. The obvious absentees — the toby, the switchboard, meter numbers, ba
 fittings — are `fabric` and `fitting`, and suggesting something the spec sheet cannot then word
 properly is how a prompt becomes a dead end. They arrive with those kinds.
 
-### A + on every room heading, and a picker that admits houses differ
+### A + on every room, and a picker that admits houses differ
 
-Every room heading carries a **subtle, muted +** — small, at the end of the rule, under *By room*
-only (a kind heading is not a place you can put something). It opens the walkthrough on **step
+Every room's page carries a **+ in its header**. (It was a subtle, muted + at the end of each room
+heading, when the rooms were headings in one long list.) It opens the walkthrough on **step
 two** with the room already chosen, because pressing + on the Kitchen has plainly answered "which
 room". `start.room` therefore distinguishes `null` — Whole house, chosen deliberately — from
 *absent*, which is nobody having chosen yet; collapsing the two sent people back to a question
@@ -1435,9 +1477,11 @@ than a create followed by an update.
 being mistaken for the prefix, and two uploads never colliding (`upsert: false` makes a collision a
 failure, not an overwrite).
 
-`HouseScreen.test.tsx` pins the furnished day-one screen, the per-room counts, Whole house last
-and unfurnished, a search answering flat with no ghosts in it, a dismissal leaving no way back,
-and the absence of any grouping control. `houseRecord.test.ts` pins the catalogue being deduplicated, reaching across
+`HouseScreen.test.tsx` pins the furnished day-one grid, the per-room counts, the *Not recorded
+yet* words before any suggestion a tile names, Whole house last and unfurnished, a tile opening
+its room (null for Whole house), a search answering flat with no ghosts and no tiles in it, a
+dismissed suggestion leaving the count, and the absence of any grouping or fold control.
+`houseRecord.test.ts` pins `houseRooms`, `describeHouseRoom` and `thingKindGroups`. `houseRecord.test.ts` pins the catalogue being deduplicated, reaching across
 rooms and carrying only describable kinds, the substring matcher (including "wash" finding the
 dishwasher, which is right rather than a near miss) and the miss that puts *Add it yourself* on
 screen. It also pins the consumables search (the
@@ -3684,7 +3728,8 @@ code never renders as somebody waiting to arrive.
 ## Taking a list out of the app
 
 A **CSV** to sort, a **PDF** to send to somebody. Both offered from the foot of the scrolled
-content on the List and House tabs — `ListFooterComponent`, deliberately **not** pinned to the
+content on the List and House tabs — the list's `ListFooterComponent` and the foot of the House
+tab's grid, deliberately **not** pinned to the
 bottom of the screen, because on the List tab that is the compose bar and nothing goes on the
 compose bar. An export is a thing you go looking for at a desk once a month; reaching the end of
 the list is the cheapest possible place for something that rare.

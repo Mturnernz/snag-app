@@ -18,6 +18,7 @@ import HouseholdScreen from '../screens/HouseholdScreen';
 import LocationTagsScreen from '../screens/LocationTagsScreen';
 import PasteAdviceScreen from '../screens/PasteAdviceScreen';
 import ThingDetailScreen from '../screens/ThingDetailScreen';
+import HouseRoomScreen from '../screens/HouseRoomScreen';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -139,6 +140,13 @@ export default function RootNavigator() {
           is about what the app offers, not about what it refuses to show when
           asked directly. */}
       <Stack.Screen name="ProjectDetail" component={ProjectDetailScreen} />
+      {/* A push, like ProjectDetail. A room is a page of things read one after
+          another, and each of them opens ThingDetail as a sheet over it — which
+          a room drawn as a sheet itself could not have under it, because a
+          React Native `Modal` sits above every screen the navigator pushes.
+          Not in `linking.ts`, on the same terms as ThingDetail: a room is not
+          something anybody sends. */}
+      <Stack.Screen name="HouseRoom" component={HouseRoomScreen} />
       <Stack.Screen name="Household" component={HouseholdScreen} />
       <Stack.Screen name="LocationTags" component={LocationTagsScreen} />
       {/* A push, not a sheet: it is a paste and then a list of what that paste

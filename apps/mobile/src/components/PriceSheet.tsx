@@ -10,17 +10,19 @@ import ConfirmDialog from './ConfirmDialog';
 import KindPill from './KindPill';
 import KindSheet, { type KindOption } from './KindSheet';
 import RoomSplit, { describeRooms, resolveSplit, splitValueFrom, type RoomSplitValue } from './RoomSplit';
-import { Group, PrimaryButton, RadioRow, Row, Segmented, TextButton, groupedStyles } from './Grouped';
+import { Group, Pill, PrimaryButton, RadioRow, Row, Segmented, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   addPayment, deletePayment, deleteQuote, deleteStoredFiles, formatMoney, payBill,
-  setFileTags, setQuoteKind, setQuoteRooms, setQuoteStatus, updateQuote,
+  setFileTags, setQuoteKind, setQuoteRooms, setQuoteStatus, updateExpectedCost, updateQuote,
 } from '../lib/supabase';
 import {
-  billHosts, billsInside, dayKey, formatDayFirst, formatExactDate, inclGst, isInsideAnotherBill, parseLooseDate,
+  billHosts, billsInside, dayKey, expectedAmountIncl, expectedPaidBy, formatDayFirst, formatExactDate, inclGst,
+  isInsideAnotherBill, parseLooseDate,
 } from '@snag/supabase-queries';
 import type {
-  FileTags, Location, ProjectElement, ProjectPayment, ProjectQuote, ProjectQuoteLine, ProjectQuoteRoom,
+  FileTags, Location, ProjectElement, ProjectExpectedCost, ProjectPayment, ProjectQuote, ProjectQuoteLine,
+  ProjectQuoteRoom,
 } from '../types';
 
 interface Props {
@@ -43,6 +45,8 @@ interface Props {
   onAddRoom: (name: string) => Promise<string | null>;
   /** What each file on the job has been tagged as. */
   fileTags?: FileTags;
+  /** The job's expected payments, so a bill can say which one it paid off. */
+  expected?: ProjectExpectedCost[];
 }
 
 /** What a price can be said to be. Paperwork is a waiting card's answer, never a price's. */
@@ -92,7 +96,7 @@ const parseAmount = (text: string): number | null => {
  */
 export default function PriceSheet({
   visible, quote, householdId, quotes, payments, lines, onClose, onChanged,
-  onOpenBuildUp, onOpenSchedule, onOpen, elements, locations, quoteRooms, onAddRoom, fileTags,
+  onOpenBuildUp, onOpenSchedule, onOpen, elements, locations, quoteRooms, onAddRoom, fileTags, expected = [],
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -152,6 +156,10 @@ export default function PriceSheet({
   const roomIds = mineRooms.map((r) => r.elementId);
   const roomAmounts = mineRooms.some((r) => r.amount === null) ? null : mineRooms.map((r) => r.amount);
   const onePart = quote.elementId ? elements.find((e) => e.id === quote.elementId && !e.implicit) ?? null : null;
+  // The earmark this bill paid off. Linking is always one press from undone:
+  // a wrong match puts the earmark back on *Expected to pay* and nothing else.
+  const paidOff = expectedPaidBy(quote.id, expected);
+  const paidOffAmount = paidOff ? expectedAmountIncl(paidOff) : null;
 
   function openRooms() {
     setRooms(splitValueFrom(roomIds, roomAmounts, quote!.amount, 1));
@@ -354,6 +362,25 @@ export default function PriceSheet({
               {isBill && unpaid > 0 && mine.length > 0 ? <Row title="Still to pay" value={formatMoney(unpaid)} bold /> : null}
               {isBill && quote.invoiceNumber ? <Row title="Invoice" value={quote.invoiceNumber} tone="muted" /> : null}
               {isBill && quote.dueOn ? <Row title="Due" value={formatExactDate(quote.dueOn)} tone="muted" /> : null}
+              {paidOff ? (
+                <Row
+                  title={`Pays off ${paidOff.name}`}
+                  subtitle={paidOffAmount !== null
+                    ? `${formatMoney(paidOffAmount)} expected · off Expected to pay`
+                    : 'Off Expected to pay'}
+                  accessory={(
+                    <Pill
+                      label="Undo"
+                      disabled={busy}
+                      accessibilityLabel={`Put ${paidOff.name} back on Expected to pay`}
+                      onPress={() => run(
+                        () => updateExpectedCost(paidOff.id, { settledBy: null }),
+                        `${paidOff.name} is back on Expected to pay`,
+                      )}
+                    />
+                  )}
+                />
+              ) : null}
               {canPlace ? (
                 <Row
                   title="Part of another bill?"

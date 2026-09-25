@@ -47,6 +47,7 @@ const mock_rereadInvoiceReview = jest.fn().mockResolvedValue({ cards: 4 });
 const mock_renameSupplier = jest.fn().mockResolvedValue(1);
 const mock_updateProject = jest.fn().mockResolvedValue({});
 const mock_updateInvoiceReview = jest.fn().mockResolvedValue({});
+const mock_updateExpectedCost = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -65,7 +66,7 @@ jest.mock('../lib/supabase', () => {
     createThing: jest.fn(), deleteElement: jest.fn(), deleteExpectedCost: jest.fn(),
     deleteExpectedCostLine: jest.fn(), deleteMilestone: jest.fn(), deleteProject: jest.fn(),
     deleteQuoteLine: jest.fn(), deleteStoredFiles: jest.fn(), setExpectedCostConfirmed: jest.fn(),
-    updateExpectedCost: jest.fn(), updateExpectedCostLine: jest.fn(),
+    updateExpectedCost: (...a: unknown[]) => mock_updateExpectedCost(...a), updateExpectedCostLine: jest.fn(),
     updateProject: (...a: unknown[]) => mock_updateProject(...a),
     getFileUrls: jest.fn().mockResolvedValue({}),
     // The pure ones are real: mocking the summary would mock away the rule.
@@ -609,5 +610,135 @@ describe('the name', () => {
     expect(mock_updateProject).toHaveBeenCalledWith('p1', { name: 'Downstairs and deck' });
     expect(mock_showToast).toHaveBeenCalledWith('Renamed');
     expect(mock_getProjectPage.mock.calls.length).toBe(reads + 1);
+  });
+});
+
+describe('expected to pay', () => {
+  const x = (over: any = {}) => ({
+    id: 'x1', projectId: 'p1', elementId: null, name: 'ReliaBuilder payment 3/4',
+    amount: 43987.5, amountInclGst: true, likelySupplier: null, note: null,
+    confirmed: false, settledBy: null, createdAt: '2026-09-24T09:33:57Z', ...over,
+  });
+  const earmarked = [
+    x(),
+    x({ id: 'x2', name: 'ReliaBuilder payment 4/4', createdAt: '2026-09-24T09:34:47Z' }),
+    x({ id: 'x3', name: 'Council fees', amount: null, createdAt: '2026-09-25T00:00:00Z' }),
+  ];
+  const claim = quote({
+    id: 'b9', projectId: 'p1', kind: 'invoice', status: 'accepted', supplier: 'RELIABUILDER LIMITED',
+    invoiceNumber: 'INV-0231', amount: 43987.5, createdAt: '2026-09-26T00:00:00Z',
+  });
+  const text = (r: ReturnType<typeof render>) => r.getAllByType('Text').map((n) => n.children.join('')).join(' | ');
+
+  it('totals what is earmarked in a tile of its own, and counts the unpriced in words', async () => {
+    const r = await arrange(downstairs({ expected: earmarked }));
+    // The tile and the section's heading.
+    expect(r.getAllByText('Expected to pay')).toHaveLength(2);
+    // The tile and the builder's group.
+    expect(r.getAllByText('$87,975')).toHaveLength(2);
+    r.getByText('+ 1 not priced');
+  });
+
+  it('lists them under the business their names spell, beside those with nobody named', async () => {
+    const r = await arrange(downstairs({ expected: earmarked }));
+    r.getByText('2 payments');
+    r.getByText('ReliaBuilder payment 3/4');
+    r.getByText('ReliaBuilder payment 4/4');
+    r.getByText('Council fees');
+    r.getByText('Not priced');
+    expect(r.getAllByText('Whole job · undecided').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('is absent when nothing is earmarked, and when everything earmarked is paid off', async () => {
+    const none = await arrange(downstairs());
+    expect(text(none)).not.toContain('Expected to pay');
+    none.unmount();
+    const paid = await arrange(downstairs({ expected: [x({ settledBy: 'b9' })], quotes: [...downstairs().quotes, claim] }));
+    expect(text(paid)).not.toContain('Expected to pay');
+  });
+
+  it('asks which bill paid it, offers the builder’s claim first, and links the one chosen', async () => {
+    const r = await arrange(downstairs({ expected: earmarked, quotes: [...downstairs().quotes, claim] }));
+    await press(r, 'Say which bill paid ReliaBuilder payment 3/4');
+    r.getByText('Which bill paid this?');
+    r.getByText('From ReliaBuilder');
+    await press(r, 'Paid by RELIABUILDER LIMITED INV-0231, $43,987.50');
+    expect(mock_updateExpectedCost).toHaveBeenCalledWith('x1', { settledBy: 'b9' });
+    expect(mock_showToast).toHaveBeenCalledWith('Paid off by INV-0231');
+    expect(mock_getProjectPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('records the bill when it is not on the job yet, starting from the earmark', async () => {
+    const r = await arrange(downstairs({ expected: earmarked }));
+    await press(r, 'Say which bill paid ReliaBuilder payment 3/4');
+    r.getByText('No bill from ReliaBuilder within 10% of it on the job yet.');
+    await press(r, 'Record the bill');
+    const sheet = r.getAllByType('Text').map((n) => n.children.join('')).find((t) => t.startsWith('money sheet open'));
+    expect(sheet).toContain('"kind":"bill"');
+    expect(sheet).toContain('"settle":{"id":"x1"');
+    expect(text(r)).not.toContain('Which bill paid this?');
+  });
+
+  describe('an emailed claim that looks like one', () => {
+    const card = (over: any = {}) => ({
+      id: 'rv1', projectId: 'p1', state: 'pending', kind: 'invoice', addressedTo: null,
+      supplier: 'RELIABUILDER LIMITED', amount: 43987.5, amountInclGst: true, invoiceNumber: 'INV-0231',
+      paid: false, createdAt: '2026-09-26T00:00:00Z', sourceAt: '2026-09-26T00:00:00Z', inferred: [],
+      photoPaths: [], documentPaths: [], roomIds: [], roomAmounts: null, ...over,
+    });
+    /** The card's own button, so the tick it carries is what is sent. */
+    const allocate = async (r: ReturnType<typeof render>) => {
+      const button = r.root.findAll(
+        (n: any) => typeof n.type !== 'string' && n.props?.label === 'Allocate' && n.props?.onPress, { deep: true },
+      )[0];
+      await TestRenderer.act(async () => { button.props.onPress(); });
+    };
+
+    it('offers to pay it off, ticked, and allocating links it to the bill that lands', async () => {
+      mock_approveInvoiceReview.mockResolvedValueOnce({ id: 'b9' });
+      const r = await arrange(downstairs({ expected: earmarked, invoiceReviews: [card()] }));
+      r.getByText('Pays off ReliaBuilder payment 3/4 · $43,987.50');
+      r.getByText('Takes it off Expected to pay');
+      await allocate(r);
+      expect(mock_approveInvoiceReview).toHaveBeenCalledWith('rv1');
+      expect(mock_updateExpectedCost).toHaveBeenCalledWith('x1', { settledBy: 'b9' });
+      expect(mock_showToast).toHaveBeenCalledWith('Added to the job · pays off ReliaBuilder payment 3/4');
+    });
+
+    it('links nothing once it is unticked', async () => {
+      mock_approveInvoiceReview.mockResolvedValueOnce({ id: 'b9' });
+      const r = await arrange(downstairs({ expected: earmarked, invoiceReviews: [card()] }));
+      await press(r, 'Pays off ReliaBuilder payment 3/4 · $43,987.50');
+      r.getByText('Stays on Expected to pay');
+      await allocate(r);
+      expect(mock_approveInvoiceReview).toHaveBeenCalledWith('rv1');
+      expect(mock_updateExpectedCost).not.toHaveBeenCalled();
+      expect(mock_showToast).toHaveBeenCalledWith('Added to the job');
+    });
+
+    it('says so, and keeps the bill, when the link is refused', async () => {
+      mock_approveInvoiceReview.mockResolvedValueOnce({ id: 'b9' });
+      mock_updateExpectedCost.mockRejectedValueOnce(new Error('That price belongs to a different job'));
+      const r = await arrange(downstairs({ expected: earmarked, invoiceReviews: [card()] }));
+      await allocate(r);
+      expect(mock_showToast).toHaveBeenCalledWith(
+        'Added to the job, but not linked to ReliaBuilder payment 3/4 — use Billed on Expected to pay',
+      );
+    });
+
+    it('offers two waiting claims the two payments, the older card the earlier one', async () => {
+      const r = await arrange(downstairs({
+        expected: earmarked,
+        invoiceReviews: [
+          card({ id: 'rv2', invoiceNumber: 'INV-0240', sourceAt: '2026-09-27T00:00:00Z' }),
+          card(),
+        ],
+      }));
+      const offered = (id: string) => r.root.findAll(
+        (n: any) => n.props?.onApprove && n.props?.review?.id === id, { deep: true },
+      )[0].props.paysOff.map((m: any) => m.expected.id);
+      expect(offered('rv1')).toEqual(['x1', 'x2']);
+      expect(offered('rv2')).toEqual(['x2']);
+    });
   });
 });

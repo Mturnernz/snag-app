@@ -1473,7 +1473,8 @@ are asked:
    words and clay; brass within 15% — the list card's figure and colours), then *Budget*. Two tiles: **Paid** and **To pay**. Committed, Invoiced, Quoted and
    Forecast are no longer words on the page; they are the accounting, and nobody asked it.
 2. **What's left to decide?** Every thing not yet chosen, with its option count and price range.
-3. **What do we have to pay?** Every bill still owing, with a **Paid** pill on the row.
+3. **What do we have to pay?** Every bill still owing, with a **Paid** pill on the row — and,
+   under it, what is earmarked and not billed yet (*Expected to pay*, below).
 4. **Where is it going?** One row per room plus *Whole job*, the rows summing to the total.
 
 `projectSummary` (`packages/supabase-queries/src/summary.ts`) is that arithmetic, pure and pinned
@@ -3071,6 +3072,60 @@ billed through the builder's contract and `ThingSheet` decides it; never pointin
 itself inside another, because a chain leaves the reader following links to find what counts; and
 not on a bill that already holds others. The room sheet lists an inner bill under its host, as it
 lists a claim under its contract. `billsInside.test.ts` and `PriceSheet.test.tsx` pin it.
+
+### Expected to pay, and the bill that pays it off
+
+The Downstairs job had two of the builder's four claims earmarked as expected costs (*Reliabuilder
+payment 3/4* and *4/4*, $43,987.50 each). When claim 3 arrives it is recorded as a bill and the
+earmark goes on counting, so the Expected total, *Over budget* and the list card carry the same
+claim twice until somebody deletes the earmark by hand — which also loses what was guessed.
+Measured on the live job, rolled back: recording claim 3 took Forecast from $234,230.18 to
+$278,217.68; linking it put Forecast back to $234,230.18 with Committed up by the claim and the
+supplier rows still summing to it.
+
+**No migration.** `project_expected_costs.settled_by` has always been that link, every rollup
+already drops a settled expectation, and `update_expected_cost` already refuses a bill from
+another job. Nothing in the app ever set it. Now three places do, and one undoes it:
+
+- **The money sheet.** A bill or receipt from the business an earmark names, within 10%, shows
+  *Pays off Reliabuilder payment 3/4 · $43,987.50* under the invoice number, **ticked** (the user's
+  choice: a line to tick every time is one that gets forgotten). *Not this one* steps to the next
+  match and then to none. Saving creates the bill, then links it. A refused link never holds the
+  sheet open over a bill that exists, because saving again would record it twice — it says so, and
+  leaves it to *Billed*.
+- **An emailed bill.** The same line on `InvoiceReviewCard`; allocating links the quote
+  `approve_invoice_review` returns. `matchExpectedEach` takes the waiting cards oldest first and
+  sets each one's best match aside, so two claims waiting side by side offer 3/4 and 4/4 rather
+  than 3/4 twice.
+- ***Billed*** on the earmark opens `SettleExpectedSheet` — *Which bill paid this?* — for a bill
+  already on the job, with *Record the bill* opening the money sheet filled in from the earmark and
+  already paying it off. A tap on *This one* links it; a pill, not a chevron, because it is a choice
+  rather than a door.
+- **The bill's own sheet** says *Pays off …* with **Undo**, which clears `settled_by`.
+
+**The match** (`expectations.ts`, pure, pinned by `expectations.test.ts`): the same business by
+`businessKey`, read from `likely_supplier` or, when there is none, from a run of whole words in the
+earmark's **name** — which is how the live earmarks were written, and whole words so "cabinet" is
+not the business "AB". GST-inclusive both sides; **strong** within 1% or a dollar, **possible**
+within 10% or when the earmark has no figure, nothing further out. Strong first, then closest, then
+oldest. Only a live bill that counts on its own can settle one (not a quote, not declined, not
+inside another bill); a progress claim can, since that is exactly what these earmarks are. One bill
+pays off one earmark. And **a bill recorded before the earmark was made is never a suggested
+match** on the *Billed* sheet — the deposit and claim 2 are the same $43,987.50 as claims 3 and 4,
+and offering them would be offering to count a paid claim as the unpaid one. They stay listed
+under *A bill on the job*, where a person can still choose one.
+
+**On the page**: a full-width *Expected to pay* tile under *Paid* and *To pay* (three six-figure
+figures at that size do not fit across a phone), the unpriced counted in words, and a section of
+the same name under *To pay*, grouped by supplier with `groupBySupplier` so the two builder claims
+sit under the builder. Both are absent when nothing is earmarked. The figure is every unsettled
+earmark, agreed or not — it is what is still to be billed, not what is decided. Each row says
+*agreed* or *undecided*, the words the top of the page files them under; never *estimate*, which is
+a quote's `basis`.
+
+`ProjectDetailScreen.test.tsx` pins the tile, the grouping, the absence, the sheet's link and its
+*Record the bill*, and the card's tick, untick, refused link and the two-card split;
+`MoneySheet.test.tsx`, `InvoiceReviewCard.test.tsx` and `PriceSheet.test.tsx` pin their halves.
 
 ### A file says what it is
 

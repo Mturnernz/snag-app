@@ -29,6 +29,7 @@ const mock_createElement = jest.fn();
 const mock_createItem = jest.fn();
 const mock_setItemSetAside = jest.fn().mockResolvedValue(undefined);
 const mock_createExpectedCost = jest.fn().mockResolvedValue({});
+const mock_updateExpectedCost = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -39,6 +40,7 @@ jest.mock('../lib/supabase', () => {
     createItem: (...a: unknown[]) => mock_createItem(...a),
     setItemSetAside: (...a: unknown[]) => mock_setItemSetAside(...a),
     createExpectedCost: (...a: unknown[]) => mock_createExpectedCost(...a),
+    updateExpectedCost: (...a: unknown[]) => mock_updateExpectedCost(...a),
     formatMoney: real.formatMoney,
   };
 });
@@ -310,5 +312,100 @@ describe('a cost we are expecting', () => {
       name: 'Council consent', amount: null, elementId: null,
     }));
     expect(mock_createQuote).not.toHaveBeenCalled();
+  });
+});
+
+describe('a bill for money that was earmarked', () => {
+  const x = (over: any = {}): any => ({
+    id: 'x1', projectId: 'p1', elementId: null, name: 'ReliaBuilder payment 3/4',
+    amount: 43987.5, amountInclGst: true, likelySupplier: null, note: null,
+    confirmed: false, settledBy: null, createdAt: '2026-09-24T09:33:57Z', ...over,
+  });
+  const claim3 = x();
+  const claim4 = x({ id: 'x2', name: 'ReliaBuilder payment 4/4', createdAt: '2026-09-24T09:34:47Z' });
+
+  async function billFrom(r: ReturnType<typeof render>, supplier: string, amount: string) {
+    await press(r, 'An invoice');
+    await pickSupplier(r, supplier);
+    await type(r, 'Amount', amount);
+  }
+
+  it('says which earmark it pays off, ticked, and saving links the two', async () => {
+    const { r, onSaved } = open({ expected: [claim3, claim4] });
+    await billFrom(r, 'RELIABUILDER LIMITED', '43987.50');
+    r.getByText('Pays off ReliaBuilder payment 3/4 · $43,987.50');
+    r.getByText('Takes it off Expected to pay');
+    await press(r, 'Save');
+    expect(mock_createQuote).toHaveBeenCalledWith(expect.objectContaining({ kind: 'invoice', supplier: 'RELIABUILDER LIMITED' }));
+    expect(mock_updateExpectedCost).toHaveBeenCalledWith('x1', { settledBy: 'new' });
+    expect(onSaved).toHaveBeenCalledWith('Recorded · pays off ReliaBuilder payment 3/4');
+  });
+
+  it('says how far the figures are apart, up to 10%, and nothing past it', async () => {
+    const { r } = open({ expected: [claim3] });
+    await billFrom(r, 'ReliaBuilder', '46000');
+    r.getByText('Takes it off Expected to pay · $2,012.50 different from expected');
+    await type(r, 'Amount', '49000');
+    expect(text(r)).not.toContain('Pays off');
+  });
+
+  it('links nothing once it is unticked', async () => {
+    const { r, onSaved } = open({ expected: [claim3] });
+    await billFrom(r, 'ReliaBuilder', '43987.50');
+    await press(r, 'Pays off ReliaBuilder payment 3/4 · $43,987.50');
+    r.getByText('Stays on Expected to pay');
+    await press(r, 'Save');
+    expect(mock_createQuote).toHaveBeenCalled();
+    expect(mock_updateExpectedCost).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledWith('Recorded');
+  });
+
+  it('steps to the next earmark, and then to none', async () => {
+    const { r } = open({ expected: [claim3, claim4] });
+    await billFrom(r, 'ReliaBuilder', '43987.50');
+    await press(r, 'Not this one');
+    r.getByText('Pays off ReliaBuilder payment 4/4 · $43,987.50');
+    r.getByText('Takes it off Expected to pay');
+    await press(r, 'Not this one');
+    r.getByText('Stays on Expected to pay');
+  });
+
+  it('never offers it on a quote, or for a business the earmark does not name', async () => {
+    const quoteSheet = open({ expected: [claim3] });
+    await press(quoteSheet.r, 'A quote or price');
+    await pickSupplier(quoteSheet.r, 'ReliaBuilder');
+    await type(quoteSheet.r, 'Amount', '43987.50');
+    expect(text(quoteSheet.r)).not.toContain('Pays off');
+    quoteSheet.r.unmount();
+
+    const other = open({ expected: [claim3] });
+    await billFrom(other.r, 'MSC Consulting', '43987.50');
+    expect(text(other.r)).not.toContain('Pays off');
+  });
+
+  it('opened from the earmark, starts on its bill already filled in and paying it off', async () => {
+    const earlier = quote({
+      id: 'b2', projectId: 'p1', kind: 'invoice', status: 'accepted', supplier: 'RELIABUILDER LIMITED',
+      invoiceNumber: 'INV-0208', amount: 40000,
+    });
+    const { r } = open({ quotes: [earlier], expected: [claim3, claim4], start: { kind: 'bill', settle: claim4 } });
+    r.getByText('Pays off ReliaBuilder payment 4/4 · $43,987.50');
+    await press(r, 'Save');
+    expect(mock_createQuote).toHaveBeenCalledWith(expect.objectContaining({
+      supplier: 'RELIABUILDER LIMITED', amount: 43987.5, detail: 'ReliaBuilder payment 4/4', kind: 'invoice',
+    }));
+    expect(mock_updateExpectedCost).toHaveBeenCalledWith('x2', { settledBy: 'new' });
+  });
+
+  it('keeps the bill and says so when the link is refused, rather than saving it twice', async () => {
+    mock_updateExpectedCost.mockRejectedValueOnce(new Error('That price belongs to a different job'));
+    const { r, onSaved, onClose } = open({ expected: [claim3] });
+    await billFrom(r, 'ReliaBuilder', '43987.50');
+    await press(r, 'Save');
+    expect(mock_createQuote).toHaveBeenCalledTimes(1);
+    expect(onSaved).toHaveBeenCalledWith(
+      'Recorded, but not linked to ReliaBuilder payment 3/4 — use Billed on Expected to pay',
+    );
+    expect(onClose).toHaveBeenCalled();
   });
 });

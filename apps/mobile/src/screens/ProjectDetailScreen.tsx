@@ -32,6 +32,7 @@ import MoneySheet, { type MoneyKind } from '../components/MoneySheet';
 import ThingSheet from '../components/ThingSheet';
 import PriceSheet from '../components/PriceSheet';
 import RoomSheet from '../components/RoomSheet';
+import SettleExpectedSheet from '../components/SettleExpectedSheet';
 import { AddRow, Group, Pill, Row, SectionTitle, TextButton, groupedStyles } from '../components/Grouped';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
@@ -49,8 +50,9 @@ import {
 } from '../lib/supabase';
 import {
   billFactsOfReview, dayKey, describeDuplicate, describeEmailGroup, describeRenameReach, duplicateReviews,
-  exportDateStamp, filesBySupplier, formatExactDate, formatLooseDate, groupBySupplier, pendingReviews,
-  projectDossierTable, projectExportPhotos, remainingTone, reviewAlert, reviewGroups, supplierDirectory,
+  expectedAmountIncl, expectedPayee, expectedToPay, exportDateStamp, filesBySupplier, formatExactDate,
+  formatLooseDate, groupBySupplier, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
+  remainingTone, reviewAlert, reviewGroups, supplierDirectory,
   type RemainingTone, type SupplierEntry, type ThingInput,
 } from '@snag/supabase-queries';
 import {
@@ -69,6 +71,10 @@ import {
 const HANDOVER_PREVIEW = 5;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProjectDetail'>;
+/** Where the money sheet opens: a kind, a place, a thing, or an expected payment's bill. */
+type MoneyStart = {
+  kind?: MoneyKind; elementId?: string | null; itemId?: string | null; settle?: ProjectExpectedCost;
+};
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /**
@@ -110,7 +116,7 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [loading, setLoading] = useState(true);
   const [knownSuppliers, setKnownSuppliers] = useState<string[]>([]);
 
-  const [money, setMoney] = useState<{ kind?: MoneyKind; elementId?: string | null; itemId?: string | null } | null>(null);
+  const [money, setMoney] = useState<MoneyStart | null>(null);
   const [openThing, setOpenThing] = useState<string | null>(null);
   const [openPrice, setOpenPrice] = useState<string | null>(null);
   const [openRoom, setOpenRoom] = useState<string | null>(null);
@@ -134,6 +140,8 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [emailOpen, setEmailOpen] = useState(false);
   const [payingId, setPayingId] = useState<string | null>(null);
   const [foldedPayees, setFoldedPayees] = useState<Set<string>>(() => new Set());
+  const [foldedExpected, setFoldedExpected] = useState<Set<string>>(() => new Set());
+  const [settling, setSettling] = useState<ProjectExpectedCost | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
   const [supplierOpen, setSupplierOpen] = useState<string | null>(null);
   const [merging, setMerging] = useState<{ from: SupplierEntry; to: SupplierEntry } | null>(null);
@@ -182,13 +190,23 @@ export default function ProjectDetailScreen({ route }: Props) {
     () => (page ? duplicateReviews(page.quotes, pendingReviews(page.invoiceReviews)) : new Map()),
     [page],
   );
+  // Which earmarked payment each waiting bill looks like — oldest card first, so
+  // two claims waiting side by side offer 3/4 and 4/4 rather than 3/4 twice.
+  const cardPaysOff = useMemo(() => {
+    if (!page) return new Map();
+    const bills = pendingReviews(page.invoiceReviews)
+      .filter((r) => r.kind === 'invoice')
+      .map((r) => ({ ...billFactsOfReview(r), at: r.sourceAt ?? r.createdAt }))
+      .sort((a, b) => a.at.localeCompare(b.at));
+    return matchExpectedEach(bills, page.expected);
+  }, [page]);
   const thingStart = useMemo(() => {
     if (!thingFor || !page) return null;
     const element = page.elements.find((e) => e.id === thingFor.elementId);
     return { name: thingFor.name, room: element?.room ?? null };
   }, [thingFor?.id, page?.elements]);
 
-  const openMoney = useCallback(async (start: { kind?: MoneyKind; elementId?: string | null; itemId?: string | null }) => {
+  const openMoney = useCallback(async (start: MoneyStart) => {
     setMoney(start);
     // Read when the sheet opens rather than with the page: the pool is ten
     // connections, and a name list that will not load leaves you typing.
@@ -200,15 +218,16 @@ export default function ProjectDetailScreen({ route }: Props) {
   }, []);
 
   // ------------------------------------------------------ invoice reviews
+  /** Rules on a card: `decide` writes, and may word the toast itself from what happened. */
   const rule = useCallback(
-    async (review: InvoiceReview, decide: () => Promise<unknown>, said: string) => {
+    async (review: InvoiceReview, decide: () => Promise<unknown>, said?: string) => {
       if (!page) return;
       const before = page;
       setDecidingId(review.id);
       setPage({ ...page, invoiceReviews: page.invoiceReviews.filter((r) => r.id !== review.id) });
       try {
-        await decide();
-        await changed(said);
+        const worded = await decide();
+        await changed(typeof worded === 'string' ? worded : said ?? 'Saved');
       } catch (err: unknown) {
         setPage(before);
         showToast(err instanceof Error ? err.message : 'That didn’t save');
@@ -260,6 +279,16 @@ export default function ProjectDetailScreen({ route }: Props) {
   const supplierNames = new Map(suppliers.map((s) => [s.key, s.name]));
   const fileGroups = filesBySupplier(page.files, supplierNames);
   const openSupplier = suppliers.find((s) => s.key === supplierOpen) ?? null;
+  // What has been earmarked and not billed yet. Grouped under the business its
+  // name spells, so "Reliabuilder payment 3/4" sits under the builder.
+  const toExpect = expectedToPay(page.expected);
+  const expectedRows = page.expected
+    .filter((x) => x.settledBy === null)
+    .map((x) => ({ id: x.id, supplier: expectedPayee(x, quotes), dated: x.createdAt, x }));
+  const expectedPlace = (x: ProjectExpectedCost): string => {
+    const element = elements.find((e) => e.id === x.elementId);
+    return element && !element.implicit ? element.room ?? element.name : 'Whole job';
+  };
 
   /**
    * Figures somebody typed over the prices, from before V2 took the editor away.
@@ -542,14 +571,27 @@ export default function ProjectDetailScreen({ route }: Props) {
                           ? describeRooms(review.roomIds, review.roomAmounts, review.amount, elements)
                           : elements.find((e) => e.id === review.elementId && !e.implicit)?.name ?? 'Whole job'
                     }
-                    onApprove={() => (paperwork
+                    paysOff={cardPaysOff.get(review.id)}
+                    onApprove={(paysOff) => (paperwork
                       ? setFiling(review)
                       : rule(
                         review,
-                        () => approveInvoiceReview(review.id),
-                        review.kind === 'quote'
-                          ? 'Added as a quote — nothing’s agreed yet'
-                          : review.paid && review.amount !== null ? 'Added, and recorded as paid' : 'Added to the job',
+                        async () => {
+                          const said = review.kind === 'quote'
+                            ? 'Added as a quote — nothing’s agreed yet'
+                            : review.paid && review.amount !== null ? 'Added, and recorded as paid' : 'Added to the job';
+                          const bill = await approveInvoiceReview(review.id);
+                          if (!paysOff) return said;
+                          // The bill is on the job now; a refused link must not
+                          // put the card back, or allocating again would record
+                          // it twice. So it is said, and left to *Billed*.
+                          try {
+                            await updateExpectedCost(paysOff.id, { settledBy: bill.id });
+                            return `${said} · pays off ${paysOff.name}`;
+                          } catch {
+                            return `${said}, but not linked to ${paysOff.name} — use Billed on Expected to pay`;
+                          }
+                        },
                       ))}
                     onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — it’s under the bell')}
                   />
@@ -614,15 +656,31 @@ export default function ProjectDetailScreen({ route }: Props) {
           </Group>
         ) : null}
 
-        <View style={styles.tiles}>
-          <View style={styles.tile}>
-            <Text style={styles.tileLabel}>Paid</Text>
-            <Text style={styles.tileFigure}>{money$(summary.paid)}</Text>
+        <View style={styles.tileStack}>
+          <View style={styles.tiles}>
+            <View style={styles.tile}>
+              <Text style={styles.tileLabel}>Paid</Text>
+              <Text style={styles.tileFigure}>{money$(summary.paid)}</Text>
+            </View>
+            <View style={styles.tile}>
+              <Text style={styles.tileLabel}>To pay</Text>
+              <Text style={styles.tileFigure}>{money$(summary.toPay)}</Text>
+            </View>
           </View>
-          <View style={styles.tile}>
-            <Text style={styles.tileLabel}>To pay</Text>
-            <Text style={styles.tileFigure}>{money$(summary.toPay)}</Text>
-          </View>
+          {/*
+            Its own row: three six-figure amounts at this size do not fit across a
+            phone, and half a number is worse than a tile a row lower. Absent when
+            nothing is earmarked, like the section it heads.
+          */}
+          {toExpect.count > 0 ? (
+            <View style={styles.tileWide}>
+              <Text style={styles.tileLabel}>Expected to pay</Text>
+              <Text style={styles.tileFigure} numberOfLines={1}>{money$(toExpect.total)}</Text>
+              {toExpect.unpriced > 0 ? (
+                <Text style={styles.tileFacts}>+ {toExpect.unpriced} not priced</Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         {/* ── what's left to decide ────────────────────────────────────── */}
@@ -705,6 +763,74 @@ export default function ProjectDetailScreen({ route }: Props) {
                     accessibilityLabel={`${group.supplier}, ${subtitle}, ${money$(owed)} to pay`}
                   />,
                   ...(open ? group.rows.map((bill) => billRow(bill, true)) : []),
+                ];
+              })}
+            </Group>
+          </View>
+        ) : null}
+
+        {/*
+          ── what we expect to pay ──────────────────────────────────────────
+          Money earmarked before anybody billed for it. *Billed* says which bill
+          paid it, and it leaves: the bill counts, and the earmark stops.
+        */}
+        {toExpect.count > 0 ? (
+          <View style={groupedStyles.block}>
+            <SectionTitle title="Expected to pay" count={toExpect.count} />
+            <Group>
+              {groupBySupplier(expectedRows).flatMap((group) => {
+                const expectedRow = (row: (typeof expectedRows)[number], sub: boolean) => {
+                  const { x } = row;
+                  const amount = expectedAmountIncl(x);
+                  return (
+                    <Row
+                      key={x.id}
+                      indent={sub}
+                      title={sub || !row.supplier ? x.name : row.supplier}
+                      subtitle={[
+                        sub || !row.supplier ? null : x.name,
+                        expectedPlace(x),
+                        // The page's own words: an unconfirmed earmark is in Undecided.
+                        x.confirmed ? 'agreed' : 'undecided',
+                      ].filter(Boolean).join(' · ')}
+                      value={amount !== null ? money$(amount) : 'Not priced'}
+                      tone={x.confirmed ? 'default' : 'muted'}
+                      bold={!sub}
+                      onPress={() => { setEditingExpected(x); setExpectedOpen(true); }}
+                      accessibilityLabel={sub ? `${row.supplier}, ${x.name}` : undefined}
+                      accessory={(
+                        <Pill
+                          label="Billed"
+                          accessibilityLabel={`Say which bill paid ${x.name}`}
+                          onPress={() => setSettling(x)}
+                        />
+                      )}
+                    />
+                  );
+                };
+                if (group.rows.length === 1) return [expectedRow(group.rows[0], false)];
+                const open = !foldedExpected.has(group.key);
+                const total = group.rows.reduce((sum, r) => sum + (expectedAmountIncl(r.x) ?? 0), 0);
+                const unpriced = group.rows.filter((r) => r.x.amount === null).length;
+                const subtitle = [`${group.rows.length} payments`, unpriced > 0 ? `${unpriced} not priced` : null]
+                  .filter(Boolean).join(' · ');
+                return [
+                  <Row
+                    key={group.key}
+                    title={group.supplier ?? 'Expected'}
+                    subtitle={subtitle}
+                    value={money$(total)}
+                    bold
+                    expanded={open}
+                    onPress={() => setFoldedExpected((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(group.key)) next.delete(group.key);
+                      else next.add(group.key);
+                      return next;
+                    })}
+                    accessibilityLabel={`${group.supplier}, ${subtitle}, ${money$(total)} expected`}
+                  />,
+                  ...(open ? group.rows.map((row) => expectedRow(row, true)) : []),
                 ];
               })}
             </Group>
@@ -842,11 +968,29 @@ export default function ProjectDetailScreen({ route }: Props) {
         quotes={quotes}
         locations={locations}
         knownSuppliers={knownSuppliers}
+        expected={page.expected}
         start={money}
         onClose={() => setMoney(null)}
         onSaved={changed}
         onEmailIn={() => { setMoney(null); setEmailOpen(true); }}
         onOpenBill={(q) => { setMoney(null); setOpenPrice(q.id); }}
+      />
+
+      <SettleExpectedSheet
+        expected={money === null ? settling : null}
+        quotes={quotes}
+        all={page.expected}
+        onClose={() => setSettling(null)}
+        onChoose={async (bill) => {
+          if (!settling) return;
+          await updateExpectedCost(settling.id, { settledBy: bill.id });
+          await changed(`Paid off by ${bill.invoiceNumber ?? bill.supplier ?? 'that bill'}`);
+        }}
+        onRecord={() => {
+          const x = settling;
+          setSettling(null);
+          if (x) openMoney({ kind: 'bill', settle: x });
+        }}
       />
 
       <EmailBillsSheet visible={emailOpen} projectId={project.id} onClose={() => setEmailOpen(false)} />
@@ -912,6 +1056,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         quoteRooms={page.quoteRooms}
         onAddRoom={addRoomToJob}
         fileTags={page.fileTags}
+        expected={page.expected}
       />
 
       <RoomSheet
@@ -1265,12 +1410,20 @@ const styles = StyleSheet.create({
   budgetLabel: { fontSize: Typography.body, color: Colors.textMuted, paddingLeft: 20 },
   budgetValue: { fontSize: Typography.body, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
   link: { color: Colors.primary },
+  tileStack: { gap: Spacing.md },
   tiles: { flexDirection: 'row', gap: Spacing.md },
   tile: {
     flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.card,
     paddingVertical: Spacing.md + 2, paddingHorizontal: Spacing.lg, gap: 4,
   },
+  // Not `flex: 0` — react-native-web writes that as a zero basis, and the
+  // tile collapses round its label with the figure clipped to nothing.
+  tileWide: {
+    backgroundColor: Colors.surface, borderRadius: Radius.card,
+    paddingVertical: Spacing.md + 2, paddingHorizontal: Spacing.lg, gap: 4,
+  },
   tileLabel: { fontSize: Typography.subhead, color: Colors.textMuted },
+  tileFacts: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textMuted },
   tileFigure: {
     fontSize: Typography.title2, lineHeight: 28, fontWeight: Typography.semibold,
     color: Colors.textPrimary, letterSpacing: -0.3, fontVariant: ['tabular-nums'],

@@ -5,19 +5,23 @@ import {
 
 import Icon from './Icon';
 import Button from './Button';
+import KindPill from './KindPill';
+import KindSheet, { type KindOption } from './KindSheet';
+import PaysOffLine, { usePaysOff } from './PaysOffLine';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   describeAddressedTo, describePaidInference, documentName, formatLooseDate, formatMoney, invoiceReviewHeadline,
-  isUnreadReview, wasInferred,
+  isUnreadReview, wasInferred, type ExpectedMatch,
 } from '@snag/supabase-queries';
 import {
   isHorizontalDrag, swipeDecision, swipeLean, swipeProgress, type SwipeDecision,
 } from '../lib/swipeDecision';
-import type { InvoiceReview, InvoiceReviewKind } from '../types';
+import type { InvoiceReview, InvoiceReviewKind, ProjectExpectedCost } from '../types';
 
 interface Props {
   review: InvoiceReview;
-  onApprove: () => void;
+  /** Allocates it — and, when the *Pays off* line is ticked, the expected payment it pays off. */
+  onApprove: (paysOff: ProjectExpectedCost | null) => void;
   onDecline: () => void;
   /** Opens the card to correct what was read off the email before ruling on it. */
   onEdit?: () => void;
@@ -44,6 +48,16 @@ interface Props {
   onReread?: () => void;
   /** While a reading is on the wire. */
   rereading?: boolean;
+  /**
+   * Says what the paper is — invoice, quote or paperwork — from the pill on the
+   * card. Absent, the pill is a label; the pencil's sheet still asks it.
+   */
+  onChangeKind?: (next: InvoiceReviewKind) => Promise<void>;
+  /**
+   * The expected payments this bill looks like, best first (`matchExpected`).
+   * The best arrives ticked, and allocating pays it off.
+   */
+  paysOff?: ExpectedMatch[];
 }
 
 /**
@@ -52,11 +66,20 @@ interface Props {
  * else's bill, and it moves no figure — so its button must not use the word
  * that puts money on the job.
  */
+const NO_MATCHES: ExpectedMatch[] = [];
+
 const KIND: Record<InvoiceReviewKind, { label: string; yes: string; rail: string; number: string }> = {
   invoice: { label: 'Invoice', yes: 'Allocate', rail: 'Allocate it', number: 'Invoice' },
   quote: { label: 'Quote', yes: 'Add quote', rail: 'Add it', number: 'Quote' },
   paperwork: { label: 'Paperwork', yes: 'File it', rail: 'File it', number: 'Number' },
 };
+
+/** The three answers the pill offers, each saying what it does to the money. */
+export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
+  { value: 'invoice', label: 'Invoice', hint: 'Allocated to the job as something to pay' },
+  { value: 'quote', label: 'Quote', hint: 'Added as a price nobody has agreed to yet' },
+  { value: 'paperwork', label: 'Paperwork', hint: 'Filed on the job — it counts towards no figure' },
+];
 
 /**
  * One bill that has arrived and not been ruled on.
@@ -103,8 +126,12 @@ const KIND: Record<InvoiceReviewKind, { label: string; yes: string; rail: string
  */
 export default function InvoiceReviewCard({
   review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate, onReread, rereading,
+  onChangeKind, paysOff: matches = NO_MATCHES,
 }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
+  const [choosingKind, setChoosingKind] = useState(false);
+  const paysOff = usePaysOff(matches);
+  const approve = () => onApprove(paysOff.chosen);
   const [width, setWidth] = useState(0);
   const [lean, setLean] = useState<SwipeDecision | null>(null);
   const [progress, setProgress] = useState(0);
@@ -112,8 +139,8 @@ export default function InvoiceReviewCard({
   // Read through refs rather than closed over: a `PanResponder` is created once
   // and would otherwise go on calling the first render's handlers for ever,
   // which on this card means approving whichever invoice was first in the deck.
-  const state = useRef({ width, busy, onApprove, onDecline });
-  state.current = { width, busy, onApprove, onDecline };
+  const state = useRef({ width, busy, onApprove: approve, onDecline });
+  state.current = { width, busy, onApprove: approve, onDecline };
 
   const responder = useMemo(
     () =>
@@ -221,12 +248,15 @@ export default function InvoiceReviewCard({
               {/*
                 What kind of paper it is, always — one email can hold a bill, a
                 quote and a certificate, and the button below does something
-                different for each.
+                different for each. It is also the way to say otherwise: the
+                reader only guessed, and the person holding the paper knows.
               */}
-              <View style={styles.categoryChip}>
-                <Text style={styles.categoryText}>{kind.label}</Text>
-                {wasInferred(review, 'kind') ? <Guessed /> : null}
-              </View>
+              <KindPill
+                label={kind.label}
+                guessed={wasInferred(review, 'kind')}
+                onPress={onChangeKind && !busy ? () => setChoosingKind(true) : undefined}
+                accessibilityLabel={`${kind.label}${wasInferred(review, 'kind') ? ', guessed' : ''}. Change what it is`}
+              />
               {review.category ? (
                 <View style={styles.categoryChip}>
                   <Text style={styles.categoryText}>{review.category}</Text>
@@ -330,6 +360,23 @@ export default function InvoiceReviewCard({
           </Text>
         ) : null}
 
+        {/*
+          An emailed claim the household had earmarked: allocating it takes the
+          earmark off *Expected to pay*, so the claim is not counted twice.
+          Ticked already, and one tap takes it back.
+        */}
+        {paysOff.match ? (
+          <PaysOffLine
+            match={paysOff.match}
+            ticked={paysOff.ticked}
+            more={paysOff.more}
+            money={(n) => formatMoney(n) ?? ''}
+            onToggle={paysOff.toggle}
+            onNext={paysOff.next}
+            style={styles.paysOff}
+          />
+        ) : null}
+
         {duplicate ? (
           <View style={styles.duplicate} accessibilityLiveRegion="polite">
             <Icon name="copy-outline" size="sm" color={Colors.status.doingFg} />
@@ -366,13 +413,24 @@ export default function InvoiceReviewCard({
           <Button
             label={kind.yes}
             variant="primary"
-            onPress={onApprove}
+            onPress={approve}
             loading={busy}
             disabled={rereading}
             style={styles.action}
           />
         </View>
       </Animated.View>
+
+      {onChangeKind ? (
+        <KindSheet<InvoiceReviewKind>
+          visible={choosingKind}
+          subtitle={review.supplier}
+          options={REVIEW_KIND_OPTIONS}
+          value={review.kind}
+          onPick={onChangeKind}
+          onClose={() => setChoosingKind(false)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -419,6 +477,7 @@ const styles = StyleSheet.create({
   railNo: { justifyContent: 'flex-end' },
   railLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold },
 
+  paysOff: { backgroundColor: Colors.sunken, paddingHorizontal: Spacing.md },
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,

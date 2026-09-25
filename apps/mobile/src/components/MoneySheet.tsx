@@ -6,18 +6,20 @@ import Sheet from './Sheet';
 import MoneyField from './MoneyField';
 import DateField from './DateField';
 import Attachments from './Attachments';
+import PaysOffLine, { usePaysOff } from './PaysOffLine';
 import {
   AddRow, Group, PrimaryButton, RadioRow, Row, Segmented, TextButton, groupedStyles,
 } from './Grouped';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   addPayment, addQuoteLine, createElement, createExpectedCost, createItem, createQuote,
-  formatMoney, setItemSetAside,
+  formatMoney, setItemSetAside, updateExpectedCost,
 } from '../lib/supabase';
 import {
-  billsOnJob, dayKey, describeDuplicate, findDuplicateBill, inclGst, parseLooseDate,
+  billsOnJob, dayKey, describeDuplicate, expectedPayee, findDuplicateBill, inclGst, matchExpected,
+  parseLooseDate, type ExpectedMatch,
 } from '@snag/supabase-queries';
-import type { Location, ProjectElement, ProjectItem, ProjectQuote } from '../types';
+import type { Location, ProjectElement, ProjectExpectedCost, ProjectItem, ProjectQuote } from '../types';
 
 export type MoneyKind = 'quote' | 'bill' | 'receipt' | 'expected';
 
@@ -30,8 +32,15 @@ interface Props {
   quotes: ProjectQuote[];
   locations: Location[];
   knownSuppliers: string[];
-  /** Where the sheet was opened from: a thing's "Add an option" starts on a quote for it. */
-  start?: { kind?: MoneyKind; elementId?: string | null; itemId?: string | null } | null;
+  /** What is expected but not billed yet, so a bill can say which of it it pays off. */
+  expected?: ProjectExpectedCost[];
+  /**
+   * Where the sheet was opened from: a thing's "Add an option" starts on a quote
+   * for it, and *Billed* on an expected payment starts on its bill, filled in.
+   */
+  start?: {
+    kind?: MoneyKind; elementId?: string | null; itemId?: string | null; settle?: ProjectExpectedCost;
+  } | null;
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
   /** The paper is in an inbox rather than a hand: this job's address for forwarding it. */
@@ -49,7 +58,7 @@ interface SetAsideRow { name: string; amount: string; incl: boolean; place: Plac
 
 const KINDS: { kind: MoneyKind; title: string; subtitle: string; icon: 'document-text-outline' | 'receipt-outline' | 'checkmark-circle-outline' | 'time-outline'; tint: string; ink: string }[] = [
   { kind: 'quote', title: 'A quote or price', subtitle: 'Something you’re considering', icon: 'document-text-outline', tint: Colors.status.openBg, ink: Colors.status.open },
-  { kind: 'bill', title: 'A bill', subtitle: 'Something to pay', icon: 'receipt-outline', tint: Colors.status.doingBg, ink: Colors.status.doing },
+  { kind: 'bill', title: 'An invoice', subtitle: 'Something to pay', icon: 'receipt-outline', tint: Colors.status.doingBg, ink: Colors.status.doing },
   { kind: 'receipt', title: 'A receipt', subtitle: 'Already paid', icon: 'checkmark-circle-outline', tint: Colors.primaryLight, ink: Colors.primary },
   { kind: 'expected', title: 'A cost we’re expecting', subtitle: 'No price yet', icon: 'time-outline', tint: Colors.sunken, ink: Colors.textMuted },
 ];
@@ -91,9 +100,17 @@ const sameName = (a: string | null, b: string | null) =>
  * naming the bill it matches, and Save reads *Save anyway*. Never a refusal:
  * two progress claims for the same figure are two bills, and the person holding
  * the paper is the one who can tell. See `findDuplicateBill`.
+ *
+ * **A bill that looks like an expected payment says it pays it off, ticked.**
+ * The same business within 10% (`matchExpected`) puts *Pays off Reliabuilder
+ * payment 3/4* under the invoice number, and saving links the two
+ * (`settled_by`), which takes the expectation off *Expected to pay* and out of
+ * every total so the claim is not counted twice. Untick it and nothing is
+ * linked. Opened from an expected payment's *Billed*, the sheet starts on that
+ * bill already filled in and already paying it off.
  */
 export default function MoneySheet({
-  visible, projectId, householdId, elements, items, quotes, locations, knownSuppliers,
+  visible, projectId, householdId, elements, items, quotes, locations, knownSuppliers, expected = [],
   start, onClose, onSaved, onEmailIn, onOpenBill,
 }: Props) {
   const [step, setStep] = useState<Step>('kind');
@@ -122,11 +139,17 @@ export default function MoneySheet({
   useEffect(() => {
     if (!visible) return;
     const startKind = start?.kind ?? null;
-    setStep(startKind ? (startKind === 'expected' ? 'form' : 'supplier') : 'kind');
+    const settle = start?.settle ?? null;
+    const payee = settle ? expectedPayee(settle, quotes) : null;
+    setStep(startKind ? (startKind === 'expected' || payee ? 'form' : 'supplier') : 'kind');
     setKind(startKind ?? 'bill');
-    setSupplier(null); setSearch(''); setAmount(''); setIncl(true); setDetail('');
+    setSupplier(payee); setSearch('');
+    setAmount(settle?.amount !== null && settle?.amount !== undefined ? String(settle.amount) : '');
+    setIncl(settle ? settle.amountInclGst : true);
+    setDetail(settle?.name ?? '');
     setInvoiceNo(''); setDue(''); setPaid(false); setAgreed(null); setPartOf(null);
-    setPlace(start?.elementId ? { kind: 'element', id: start.elementId } : { kind: 'job' });
+    const elementId = start?.elementId ?? settle?.elementId ?? null;
+    setPlace(elementId ? { kind: 'element', id: elementId } : { kind: 'job' });
     setPlaceOpen(false);
     setThingId(start?.itemId ?? null); setNewThing('');
     setPhotoPaths([]); setDocumentPaths([]);
@@ -194,6 +217,22 @@ export default function MoneySheet({
       dated: null,
     });
   }, [isBill, step, quotes, supplier, invoiceNo, money, incl]);
+
+  // The expected payments this bill could pay off, best first — and the one it
+  // was opened from first of all, whatever the figures now say.
+  const expectedMatches = useMemo((): ExpectedMatch[] => {
+    if (!isBill || step !== 'form') return [];
+    const found = matchExpected(
+      { supplier, amountIncl: money === null ? null : inclGst(money, incl) },
+      expected,
+    );
+    const pinned = start?.settle ?? null;
+    if (!pinned) return found;
+    const own = found.find((m) => m.expected.id === pinned.id)
+      ?? { expected: pinned, strength: 'possible' as const, difference: null };
+    return [own, ...found.filter((m) => m.expected.id !== pinned.id)];
+  }, [isBill, step, supplier, money, incl, expected, start]);
+  const paysOff = usePaysOff(expectedMatches);
 
   const missing: string | null = (() => {
     if (kind === 'expected') return detail.trim() ? null : 'Say what the cost is for';
@@ -271,6 +310,21 @@ export default function MoneySheet({
         await addPayment(created.id, { amount: money, amountInclGst: incl, paidOn: dayKey(new Date()) });
       }
 
+      // The bill is saved; linking it is a second write, and a refusal here must
+      // not hold the sheet open over a bill that exists — saving again would
+      // record it twice. So a failed link is said, and left to *Billed*.
+      let paidOff: string | null = null;
+      if (paysOff.chosen) {
+        try {
+          await updateExpectedCost(paysOff.chosen.id, { settledBy: created.id });
+          paidOff = paysOff.chosen.name;
+        } catch {
+          await onSaved(`Recorded, but not linked to ${paysOff.chosen.name} — use Billed on Expected to pay`);
+          onClose();
+          return;
+        }
+      }
+
       if (kind === 'quote' && !scope.itemId && agreed === 'yes') {
         // The next question only makes sense for a price that was agreed.
         setSaved(created);
@@ -280,11 +334,10 @@ export default function MoneySheet({
         return;
       }
 
-      await onSaved(
-        kind === 'receipt' || paid ? 'Recorded as paid'
-          : forAThing ? 'Added as an option'
-            : contract ? 'Progress bill recorded' : 'Recorded'
-      );
+      const said = kind === 'receipt' || paid ? 'Recorded as paid'
+        : forAThing ? 'Added as an option'
+          : contract ? 'Progress bill recorded' : 'Recorded';
+      await onSaved(paidOff ? `${said} · pays off ${paidOff}` : said);
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'That didn’t save');
@@ -591,6 +644,17 @@ export default function MoneySheet({
                 ) : null}
               </View>
             </View>
+          ) : null}
+
+          {paysOff.match ? (
+            <PaysOffLine
+              match={paysOff.match}
+              ticked={paysOff.ticked}
+              more={paysOff.more}
+              money={(n) => formatMoney(n) ?? ''}
+              onToggle={paysOff.toggle}
+              onNext={paysOff.next}
+            />
           ) : null}
 
           {kind !== 'expected' ? (

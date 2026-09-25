@@ -215,3 +215,41 @@ describe('a room typed but not ticked', () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ rooms: [] }));
   });
 });
+
+/**
+ * An already-finished project cannot have finished before it started — the
+ * status sheet's rule, from the one other place both dates are asked. The box
+ * just changed wins, and the other moves to meet it.
+ */
+describe('an already-finished project', () => {
+  async function toWhen(r: ReturnType<typeof render>) {
+    await toRooms(r);
+    await TestRenderer.act(async () => byLabel(r, 'Next').props.onPress());
+    await TestRenderer.act(async () => byLabel(r, 'Already finished').props.onPress());
+  }
+
+  it('moves the start back to a finish set before it', async () => {
+    const { r, onCreate } = arrange();
+    await toWhen(r);
+    await TestRenderer.act(async () => inputByLabel(r, 'Started').props.onChangeText('01/08/2024'));
+    await TestRenderer.act(async () => inputByLabel(r, 'Finished').props.onChangeText('25/06/2024'));
+    await TestRenderer.act(async () => inputByLabel(r, 'Finished').props.onBlur());
+    expect(inputByLabel(r, 'Started').props.value).toBe('25/06/2024');
+    r.getByText('Started moved to 25/06/2024 — a job can’t finish before it starts.');
+    await TestRenderer.act(async () => byLabel(r, 'Start it').props.onPress());
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ startedOn: '2024-06-25', finishedOn: '2024-06-25' })
+    );
+  });
+
+  it('moves the finish forward to a start set after it, even without leaving the box', async () => {
+    const { r, onCreate } = arrange();
+    await toWhen(r);
+    await TestRenderer.act(async () => inputByLabel(r, 'Finished').props.onChangeText('25/06/2024'));
+    await TestRenderer.act(async () => inputByLabel(r, 'Started').props.onChangeText('01/08/2024'));
+    await TestRenderer.act(async () => byLabel(r, 'Start it').props.onPress());
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ startedOn: '2024-08-01', finishedOn: '2024-08-01' })
+    );
+  });
+});

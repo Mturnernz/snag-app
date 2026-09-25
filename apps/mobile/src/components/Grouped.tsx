@@ -66,6 +66,12 @@ interface RowProps {
   /** Sits under a heading row: the bills beneath a supplier's name. */
   indent?: boolean;
   /**
+   * A small label at the start of the subtitle line — what kind of paper the
+   * row is. Never a control: the row is already the tap, and a `Pressable`
+   * inside a `Pressable` is a coin toss about which one gets it.
+   */
+  tag?: React.ReactNode;
+  /**
    * The row folds what is under it rather than opening something: a chevron
    * pointing down or up instead of the forward one, which promises navigation.
    */
@@ -74,7 +80,7 @@ interface RowProps {
 
 export function Row({
   title, subtitle, value, tone = 'default', onPress, accessory, leading,
-  accessibilityLabel, dim, bold, indent, expanded,
+  accessibilityLabel, dim, bold, indent, expanded, tag,
 }: RowProps) {
   const folds = expanded !== undefined;
   const body = (
@@ -82,7 +88,12 @@ export function Row({
       {leading}
       <View style={styles.titles}>
         <Text style={[styles.title, bold && styles.bold]} numberOfLines={2}>{title}</Text>
-        {subtitle ? <Text style={styles.subtitle} numberOfLines={2}>{subtitle}</Text> : null}
+        {tag ? (
+          <View style={styles.tagLine}>
+            {tag}
+            {subtitle ? <Text style={[styles.subtitle, styles.tagSubtitle]} numberOfLines={2}>{subtitle}</Text> : null}
+          </View>
+        ) : subtitle ? <Text style={styles.subtitle} numberOfLines={2}>{subtitle}</Text> : null}
       </View>
       {value ? (
         <Text
@@ -313,6 +324,10 @@ const styles = StyleSheet.create({
   titles: { flex: 1, minWidth: 0, gap: 2 },
   title: { fontSize: Typography.body, lineHeight: 22, color: Colors.textPrimary },
   subtitle: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textMuted },
+  tagLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs + 2 },
+  // `minWidth: 0` so a long subtitle wraps beside the tag rather than pushing
+  // the row's figure off the screen, which a flexed text on web will otherwise do.
+  tagSubtitle: { flexShrink: 1, minWidth: 0 },
   value: {
     fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'],
     flexShrink: 0,

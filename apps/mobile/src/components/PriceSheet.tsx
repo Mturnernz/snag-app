@@ -7,18 +7,22 @@ import MoneyField from './MoneyField';
 import DateField from './DateField';
 import Attachments from './Attachments';
 import ConfirmDialog from './ConfirmDialog';
+import KindPill from './KindPill';
+import KindSheet, { type KindOption } from './KindSheet';
 import RoomSplit, { describeRooms, resolveSplit, splitValueFrom, type RoomSplitValue } from './RoomSplit';
-import { Group, PrimaryButton, RadioRow, Row, Segmented, TextButton, groupedStyles } from './Grouped';
+import { Group, Pill, PrimaryButton, RadioRow, Row, Segmented, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   addPayment, deletePayment, deleteQuote, deleteStoredFiles, formatMoney, payBill,
-  setFileTags, setQuoteRooms, setQuoteStatus, updateQuote,
+  setFileTags, setQuoteKind, setQuoteRooms, setQuoteStatus, updateExpectedCost, updateQuote,
 } from '../lib/supabase';
 import {
-  billHosts, billsInside, dayKey, formatDayFirst, formatExactDate, inclGst, isInsideAnotherBill, parseLooseDate,
+  billHosts, billsInside, dayKey, expectedAmountIncl, expectedPaidBy, formatDayFirst, formatExactDate, inclGst,
+  isInsideAnotherBill, parseLooseDate,
 } from '@snag/supabase-queries';
 import type {
-  FileTags, Location, ProjectElement, ProjectPayment, ProjectQuote, ProjectQuoteLine, ProjectQuoteRoom,
+  FileTags, Location, ProjectElement, ProjectExpectedCost, ProjectPayment, ProjectQuote, ProjectQuoteLine,
+  ProjectQuoteRoom,
 } from '../types';
 
 interface Props {
@@ -41,7 +45,15 @@ interface Props {
   onAddRoom: (name: string) => Promise<string | null>;
   /** What each file on the job has been tagged as. */
   fileTags?: FileTags;
+  /** The job's expected payments, so a bill can say which one it paid off. */
+  expected?: ProjectExpectedCost[];
 }
+
+/** What a price can be said to be. Paperwork is a waiting card's answer, never a price's. */
+const PRICE_KIND_OPTIONS: KindOption<'quote' | 'invoice'>[] = [
+  { value: 'quote', label: 'Quote', hint: 'A price — it counts once you’ve agreed to it' },
+  { value: 'invoice', label: 'Invoice', hint: 'Something you’ve been charged for, and pay' },
+];
 
 const parseAmount = (text: string): number | null => {
   const n = Number(text.replace(/[^0-9.]/g, ''));
@@ -74,10 +86,17 @@ const parseAmount = (text: string): number | null => {
  * through: it leaves Agreed, To pay and the supplier rows, keeps its figure
  * and its paper, and the builder's bill lists it under *Includes*. It says
  * which bill, never merely "ignored" — a figure that stops counting says why.
+ *
+ * **It says what it is, and can be told otherwise.** The pill above the figure
+ * reads *Quote* or *Invoice* and opens the choice between them. The change is
+ * `setQuoteKind`'s alone, because it moves money between Agreed and Invoiced:
+ * the server refuses the ones that would leave the figures lying — a paid
+ * invoice becoming a quote, a contract with progress bills becoming an invoice
+ * — and says so in the chooser. Either way it comes back *not agreed yet*.
  */
 export default function PriceSheet({
   visible, quote, householdId, quotes, payments, lines, onClose, onChanged,
-  onOpenBuildUp, onOpenSchedule, onOpen, elements, locations, quoteRooms, onAddRoom, fileTags,
+  onOpenBuildUp, onOpenSchedule, onOpen, elements, locations, quoteRooms, onAddRoom, fileTags, expected = [],
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -94,12 +113,14 @@ export default function PriceSheet({
   const [due, setDue] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [choosingKind, setChoosingKind] = useState(false);
 
   useEffect(() => {
     if (!visible || !quote) return;
     setEditing(false);
     setPlacing(false);
     setRooming(false);
+    setChoosingKind(false);
     setRoomError(null);
     setPaying(false);
     setPartAmount('');
@@ -135,6 +156,10 @@ export default function PriceSheet({
   const roomIds = mineRooms.map((r) => r.elementId);
   const roomAmounts = mineRooms.some((r) => r.amount === null) ? null : mineRooms.map((r) => r.amount);
   const onePart = quote.elementId ? elements.find((e) => e.id === quote.elementId && !e.implicit) ?? null : null;
+  // The earmark this bill paid off. Linking is always one press from undone:
+  // a wrong match puts the earmark back on *Expected to pay* and nothing else.
+  const paidOff = expectedPaidBy(quote.id, expected);
+  const paidOffAmount = paidOff ? expectedAmountIncl(paidOff) : null;
 
   function openRooms() {
     setRooms(splitValueFrom(roomIds, roomAmounts, quote!.amount, 1));
@@ -225,8 +250,8 @@ export default function PriceSheet({
   return (
     <>
       <Sheet
-        visible={visible && !confirmDelete}
-        title={placing ? 'Part of another bill?' : rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'A bill' : 'A price')}
+        visible={visible && !confirmDelete && !choosingKind}
+        title={placing ? 'Part of another bill?' : rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'An invoice' : 'A quote')}
         subtitle={editing ? null : quote.supplier}
         onClose={placing ? () => setPlacing(false) : rooming ? () => setRooming(false) : editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
         closeLabel={placing || rooming || editing || paying ? 'Cancel' : 'Done'}
@@ -250,7 +275,7 @@ export default function PriceSheet({
                 <RadioRow
                   key={q.id}
                   title={hostName(q)}
-                  subtitle={[q.kind === 'invoice' ? 'Bill' : 'Agreed price', formatMoney(q.amountIncl), q.dated ? formatExactDate(q.dated) : null]
+                  subtitle={[q.kind === 'invoice' ? 'Invoice' : 'Agreed price', formatMoney(q.amountIncl), q.dated ? formatExactDate(q.dated) : null]
                     .filter(Boolean).join(' · ')}
                   selected={quote.billedThroughId === q.id}
                   onPress={() => {
@@ -300,6 +325,12 @@ export default function PriceSheet({
         ) : (
           <>
             <View style={styles.hero}>
+              <KindPill
+                label={isBill ? 'Invoice' : 'Quote'}
+                onPress={() => setChoosingKind(true)}
+                accessibilityLabel={`${isBill ? 'Invoice' : 'Quote'}. Change what it is`}
+                style={styles.kind}
+              />
               <Text style={styles.amount}>{formatMoney(quote.amountIncl) ?? '—'}</Text>
               <View style={[styles.badge, tone === 'overdue' && styles.badgeOverdue, tone === 'due' && styles.badgeDue]}>
                 <Text style={[styles.badgeLabel, tone === 'overdue' && styles.badgeLabelOverdue, tone === 'due' && styles.badgeLabelDue]}>
@@ -331,6 +362,25 @@ export default function PriceSheet({
               {isBill && unpaid > 0 && mine.length > 0 ? <Row title="Still to pay" value={formatMoney(unpaid)} bold /> : null}
               {isBill && quote.invoiceNumber ? <Row title="Invoice" value={quote.invoiceNumber} tone="muted" /> : null}
               {isBill && quote.dueOn ? <Row title="Due" value={formatExactDate(quote.dueOn)} tone="muted" /> : null}
+              {paidOff ? (
+                <Row
+                  title={`Pays off ${paidOff.name}`}
+                  subtitle={paidOffAmount !== null
+                    ? `${formatMoney(paidOffAmount)} expected · off Expected to pay`
+                    : 'Off Expected to pay'}
+                  accessory={(
+                    <Pill
+                      label="Undo"
+                      disabled={busy}
+                      accessibilityLabel={`Put ${paidOff.name} back on Expected to pay`}
+                      onPress={() => run(
+                        () => updateExpectedCost(paidOff.id, { settledBy: null }),
+                        `${paidOff.name} is back on Expected to pay`,
+                      )}
+                    />
+                  )}
+                />
+              ) : null}
               {canPlace ? (
                 <Row
                   title="Part of another bill?"
@@ -462,15 +512,27 @@ export default function PriceSheet({
 
             <View style={styles.actions}>
               <TextButton label="Edit" onPress={() => setEditing(true)} />
-              <TextButton label={isBill ? 'Delete bill' : 'Delete'} tone="danger" onPress={() => setConfirmDelete(true)} />
+              <TextButton label={isBill ? 'Delete invoice' : 'Delete quote'} tone="danger" onPress={() => setConfirmDelete(true)} />
             </View>
           </>
         )}
       </Sheet>
 
+      <KindSheet<'quote' | 'invoice'>
+        visible={visible && choosingKind}
+        subtitle={quote.supplier}
+        options={PRICE_KIND_OPTIONS}
+        value={isBill ? 'invoice' : 'quote'}
+        onPick={async (next) => {
+          await setQuoteKind(quote.id, next);
+          await onChanged(next === 'invoice' ? 'Now an invoice' : 'Now a quote — not agreed yet');
+        }}
+        onClose={() => setChoosingKind(false)}
+      />
+
       <ConfirmDialog
         visible={confirmDelete}
-        title={isBill ? 'Delete this bill?' : 'Delete this price?'}
+        title={isBill ? 'Delete this invoice?' : 'Delete this quote?'}
         message={mine.length > 0 ? `${mine.length === 1 ? 'Its payment goes' : `Its ${mine.length} payments go`} with it.` : undefined}
         confirmLabel="Delete"
         destructive
@@ -489,6 +551,7 @@ export default function PriceSheet({
 
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', gap: Spacing.sm, paddingVertical: Spacing.sm },
+  kind: { alignSelf: 'center' },
   amount: {
     fontSize: 44, lineHeight: 52, fontWeight: Typography.bold, color: Colors.textPrimary,
     letterSpacing: -1, fontVariant: ['tabular-nums'],

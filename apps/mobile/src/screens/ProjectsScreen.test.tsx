@@ -2,6 +2,7 @@ import React from 'react';
 import TestRenderer from 'react-test-renderer';
 import { render, flattenStyle } from '../test/render';
 import ProjectsScreen from './ProjectsScreen';
+import { Colors } from '../constants/theme';
 
 /**
  * The Projects tab.
@@ -100,14 +101,6 @@ function cardFor(r: ReturnType<typeof render>, name: string) {
   return found[0];
 }
 
-/** Every line on screen reading "… quoted". */
-function quotedLines(r: ReturnType<typeof render>) {
-  return r
-    .getAllByType('Text')
-    .map((n) => n.children.join(''))
-    .filter((t) => t.endsWith(' quoted'));
-}
-
 async function arrange(projects: any[], quoted: Record<string, number> = {}) {
   mock_getProjects.mockResolvedValue(projects);
   mock_getProjectsQuoted.mockResolvedValue(new Map(Object.entries(quoted)));
@@ -117,73 +110,65 @@ async function arrange(projects: any[], quoted: Record<string, number> = {}) {
 }
 
 describe('the tab', () => {
-  it('groups by state, underway first and done last', async () => {
+  it('groups by state, underway first and complete last', async () => {
     const r = await arrange([
       project({ id: 'a', name: 'Heat pump install', status: 'done' }),
       project({ id: 'b', name: 'Back deck', status: 'planned' }),
       project({ id: 'c', name: 'Downstairs laundry', status: 'underway' }),
     ]);
-    // Each word appears twice — once as the section heading, once on the card's
-    // own status badge — so this asserts the order they first appear in, which
-    // is the order the sections are drawn in.
     const seen: string[] = [];
     for (const node of r.getAllByType('Text')) {
       const text = node.children.join('');
-      if (['Underway', 'Planned', 'Done'].includes(text) && !seen.includes(text)) seen.push(text);
+      if (['Underway', 'Planned', 'Complete'].includes(text) && !seen.includes(text)) seen.push(text);
     }
-    expect(seen).toEqual(['Underway', 'Planned', 'Done']);
+    // The enum is still `done`; the word on the tab is Complete.
+    expect(seen).toEqual(['Underway', 'Planned', 'Complete']);
+    expect(r.queryByText('Done')).toBeNull();
+    r.getByText('1 underway · 1 planned · 1 complete');
   });
 
-  it('leads with what has been agreed, against the budget', async () => {
-    // Agreed is committed with the builder's open set-aside amounts taken out —
-    // the same figure the project page puts beside Undecided, so the list and
-    // the page cannot disagree.
-    const r = await arrange([
-      project({ committedTotal: 208320, allowanceOpen: 12000, budget: 230000 }),
-    ]);
-    r.getByText('$196,320');
-    r.getByText('agreed of $230,000');
-  });
-
-  it('says what has been quoted when it differs from what is agreed', async () => {
-    // The Tree trimming case: one unagreed quote, nothing signed. Agreed is
-    // honestly $0, and the card said nothing else — as though no price had
-    // arrived.
+  it('shows what was budgeted, what has been quoted and what has been paid', async () => {
     const r = await arrange(
-      [project({ id: 'trees', name: 'Tree trimming', status: 'planned', budget: 1000 })],
-      { trees: 1092.5 }
+      [project({ id: 'p1', budget: 230000, paidTotal: 50000 })],
+      { p1: 210000 },
     );
-    r.getByText('$0');
-    r.getByText('$1,092.50 quoted');
-    expect(mock_getProjectsQuoted).toHaveBeenCalledWith(['trees']);
+    r.getByText('Budgeted');
+    r.getByText('$230,000');
+    r.getByText('Quoted');
+    r.getByText('$210,000');
+    r.getByText('Paid');
+    r.getByText('$50,000');
+    expect(mock_getProjectsQuoted).toHaveBeenCalledWith(['p1']);
   });
 
-  it('does not repeat Agreed as Quoted, and says nothing where nobody has quoted', async () => {
-    const r = await arrange(
-      [
-        project({ id: 'signed', name: 'Signed job', committedTotal: 5000 }),
-        project({ id: 'none', name: 'Unquoted job' }),
-      ],
-      { signed: 5000 }
-    );
-    expect(quotedLines(r)).toEqual([]);
+  it('grosses an ex-GST budget before showing it', async () => {
+    const r = await arrange([project({ budget: 100000, budgetInclGst: false })]);
+    r.getByText('$115,000');
   });
 
-  it('still draws the cards when the quoted read fails', async () => {
+  it('says what nobody has in words, never as $0', async () => {
+    const r = await arrange([project({ id: 'p1' })]);
+    r.getByText('Not set');
+    r.getByText('No quotes');
+    r.getByText('Nothing yet');
+    expect(r.queryByText('$0')).toBeNull();
+  });
+
+  it('never claims nobody has quoted when the quoted read has not answered', async () => {
     mock_getProjects.mockResolvedValue([project({ name: 'Downstairs laundry' })]);
     mock_getProjectsQuoted.mockRejectedValue(new Error('offline'));
     const r = render(<ProjectsScreen />);
     await TestRenderer.act(async () => {});
     cardFor(r, 'Downstairs laundry');
-    expect(quotedLines(r)).toEqual([]);
+    expect(r.queryByText('No quotes')).toBeNull();
+    r.getByText('—');
   });
 
   it('never shows a figure without saying what is still undecided', async () => {
-    // The denominator rule, in V2 words: $8,990 agreed on a job with four
-    // things nobody has chosen is not the cost of the job, and the card says so
-    // in the same breath.
+    // The denominator rule: $8,990 paid on a job with four things nobody has
+    // chosen is not the cost of the job, and the card says so in the same breath.
     const r = await arrange([
-      project({ committedTotal: 8990, itemCount: 9, pricedCount: 5, dueToPay: 5000 }),
+      project({ paidTotal: 8990, itemCount: 9, pricedCount: 5, dueToPay: 5000 }),
     ]);
     r.getByText('$8,990');
     r.getByText('4 to decide   ·   $5,000 to pay');
@@ -194,9 +179,67 @@ describe('the tab', () => {
     r.getByText('2 to decide');
     const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
     expect(text).not.toContain('to pay');
-    expect(text).not.toContain('agreed of $');
+    expect(text).not.toContain('Budget remaining');
+  });
+});
+
+describe('budget remaining', () => {
+  const colourOf = (r: ReturnType<typeof render>, text: string) => flattenStyle(r.getByText(text).props.style).color;
+
+  it('is absent until something has been paid', async () => {
+    const r = await arrange([project({ budget: 100000, paidTotal: null })]);
+    expect(r.queryByText('Budget remaining')).toBeNull();
   });
 
+  it('is absent without a budget, whatever has been paid', async () => {
+    const r = await arrange([project({ budget: null, paidTotal: 40000 })]);
+    expect(r.queryByText('Budget remaining')).toBeNull();
+    expect(r.queryByText('Over budget')).toBeNull();
+  });
+
+  it('is budget less paid, in fern while more than 15% is left', async () => {
+    const r = await arrange([project({ budget: 100000, paidTotal: 84000 })]);
+    r.getByText('Budget remaining');
+    expect(colourOf(r, '$16,000 · 16% left')).toBe(Colors.primary);
+  });
+
+  it('turns brass at 15% left, and stays brass down to just over 5%', async () => {
+    const at15 = await arrange([project({ budget: 100000, paidTotal: 85000 })]);
+    expect(colourOf(at15, '$15,000 · 15% left')).toBe(Colors.status.doing);
+    at15.unmount();
+    const at6 = await arrange([project({ budget: 100000, paidTotal: 94000 })]);
+    expect(colourOf(at6, '$6,000 · 6% left')).toBe(Colors.status.doing);
+  });
+
+  it('turns clay at 5% left', async () => {
+    const r = await arrange([project({ budget: 100000, paidTotal: 95000 })]);
+    expect(colourOf(r, '$5,000 · 5% left')).toBe(Colors.danger);
+  });
+
+  it('says Over budget, in clay, once more has gone out than was budgeted', async () => {
+    const r = await arrange([project({ budget: 100000, paidTotal: 103000 })]);
+    r.getByText('Over budget');
+    expect(r.queryByText('Budget remaining')).toBeNull();
+    expect(colourOf(r, '$3,000 · 3% over')).toBe(Colors.danger);
+  });
+
+  it('measures paid against the budget grossed up when it was typed ex GST', async () => {
+    // $100,000 + GST is $115,000; $100,000 paid leaves $15,000, 13% — brass.
+    const r = await arrange([project({ budget: 100000, budgetInclGst: false, paidTotal: 100000 })]);
+    expect(colourOf(r, '$15,000 · 14% left')).toBe(Colors.status.doing);
+  });
+
+  it('is on a complete project too, dimmed with the rest of the card', async () => {
+    const r = await arrange([
+      project({ id: 'k', name: 'Kitchen', status: 'done', budget: 62000, paidTotal: 58300, finishedOn: '2024-11-20' }),
+    ]);
+    r.getByText('Budget remaining');
+    r.getByText('$58,300');
+    expect(flattenStyle(cardFor(r, 'Kitchen').props.style).opacity).toBe(0.62);
+  });
+});
+
+describe('the tab, still', () => {
   it('dims a finished project rather than letting it leave', async () => {
     const r = await arrange([project({ id: 'a', name: 'Heat pump install', status: 'done' })]);
     // "Done leaves" is the *list's* rule, and the reward there is a shorter

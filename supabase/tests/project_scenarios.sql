@@ -1,5 +1,5 @@
--- Five renovations, replayed through the app's own functions, checked against
--- figures worked out by hand.
+-- Five renovations and a supplier merge, replayed through the app's own
+-- functions, checked against figures worked out by hand.
 --
 --   psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/project_scenarios.sql
 --
@@ -229,6 +229,50 @@ begin
   perform home.set_item_excluded(i_skylight, true);
   -- 38,000 + 3,450 + 13,225 + 11,390 + 185,000 + 32,000 + 31,280 + 18,500 + 41,000
   perform pg_temp.check(p, 'S5 whole house', 373845);
+
+  -- ── 6 · one builder under two spellings, merged ─────────────────────────
+  -- The emailed invoice came in as "RELIABUILDER LIMITED". As two suppliers
+  -- the variation counts on its own; merged into "ReliaBuilder" it becomes a
+  -- bill from a supplier with a signed price at the same scope, which the pair
+  -- rule (`20260923090000`) reads as a draw on the contract. So Committed
+  -- moves by the variation, and the supplier rows still sum to it either way.
+  p := (home.create_project(p_property_id => prop, p_name => 'S6 Merge', p_status => 'underway',
+        p_summary => null, p_rooms => array['Laundry'], p_started_on => null, p_target_on => null,
+        p_finished_on => null, p_budget => 195000, p_budget_incl_gst => true,
+        p_photo_paths => null, p_document_paths => null)).id;
+  c := pg_temp.q(p, 'ReliaBuilder', 100000, 'quote');
+  v := pg_temp.q(p, 'RELIABUILDER LIMITED', 2140);
+  perform pg_temp.q(p, 'Force Plumbing', 1138.71);
+  perform pg_temp.check(p, 'S6 two spellings', 103278.71);
+
+  -- A payment's paperwork is a file on the job, under the bill's supplier.
+  perform home.add_payment(p_quote_id => v, p_amount => 2140, p_reference => 'Deposit',
+    p_document_paths => array['s6/docs/1-1-bank.pdf']);
+  if not exists (
+    select 1 from home.project_files f
+     where f.project_id = p and f.level = 'payment' and f.path = 's6/docs/1-1-bank.pdf'
+       and f.supplier = 'RELIABUILDER LIMITED' and f.owner_name = 'Deposit'
+  ) then
+    raise exception 'S6 — a payment''s file should be on the job, under the bill''s supplier';
+  end if;
+
+  begin
+    perform home.rename_supplier(p, '  ', 'ReliaBuilder');
+    raise exception 'S6 — a blank name to rename must be refused';
+  exception when raise_exception then
+    if sqlerrm not like 'Which supplier%' then raise; end if;
+  end;
+
+  if home.rename_supplier(p, ' reliabuilder limited ', 'ReliaBuilder') <> 1 then
+    raise exception 'S6 — the rename should have reached the one bill';
+  end if;
+  if exists (select 1 from home.project_quotes q where q.reach_project_id = p and q.supplier = 'RELIABUILDER LIMITED') then
+    raise exception 'S6 — the old spelling is still on the job';
+  end if;
+  if not exists (select 1 from home.project_files f where f.project_id = p and f.level = 'payment' and f.supplier = 'ReliaBuilder') then
+    raise exception 'S6 — the payment''s file should follow the rename';
+  end if;
+  perform pg_temp.check(p, 'S6 merged', 101138.71);
 end;
 $$;
 

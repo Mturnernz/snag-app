@@ -3,6 +3,7 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import ProjectDetailScreen, { describeWhatGoes, elementHoldsSomething } from './ProjectDetailScreen';
 import { bill, downstairs, element, item, page, project, quote } from '../test/projectFixtures';
+import { dayKey } from '@snag/supabase-queries';
 
 /**
  * One project's page, V2.
@@ -42,6 +43,8 @@ const mock_approveInvoiceReview = jest.fn().mockResolvedValue({});
 const mock_clearFigure = jest.fn().mockResolvedValue(undefined);
 const mock_filePaperwork = jest.fn().mockResolvedValue({});
 const mock_rereadInvoiceReview = jest.fn().mockResolvedValue({ cards: 4 });
+const mock_renameSupplier = jest.fn().mockResolvedValue(1);
+const mock_updateProject = jest.fn().mockResolvedValue({});
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -52,13 +55,15 @@ jest.mock('../lib/supabase', () => {
     clearFigure: (...a: unknown[]) => mock_clearFigure(...a),
     filePaperwork: (...a: unknown[]) => mock_filePaperwork(...a),
     rereadInvoiceReview: (...a: unknown[]) => mock_rereadInvoiceReview(...a),
+    renameSupplier: (...a: unknown[]) => mock_renameSupplier(...a),
     declineInvoiceReview: jest.fn(), restoreInvoiceReview: jest.fn(), deleteInvoiceReview: jest.fn(),
     addExpectedCostLine: jest.fn(), addMilestone: jest.fn(), addQuoteLine: jest.fn(),
     createElement: jest.fn(), createExpectedCost: jest.fn(), createLocation: jest.fn(),
     createThing: jest.fn(), deleteElement: jest.fn(), deleteExpectedCost: jest.fn(),
     deleteExpectedCostLine: jest.fn(), deleteMilestone: jest.fn(), deleteProject: jest.fn(),
     deleteQuoteLine: jest.fn(), deleteStoredFiles: jest.fn(), setExpectedCostConfirmed: jest.fn(),
-    updateExpectedCost: jest.fn(), updateExpectedCostLine: jest.fn(), updateProject: jest.fn(),
+    updateExpectedCost: jest.fn(), updateExpectedCostLine: jest.fn(),
+    updateProject: (...a: unknown[]) => mock_updateProject(...a),
     getFileUrls: jest.fn().mockResolvedValue({}),
     // The pure ones are real: mocking the summary would mock away the rule.
     projectSummary: real.projectSummary,
@@ -182,7 +187,8 @@ describe('what is left to decide', () => {
 describe('what do we have to pay', () => {
   it('lists what is owed with its due date', async () => {
     const r = await arrange();
-    r.getByText('ReliaBuilder');
+    // Named twice: once owed under To pay, once under Suppliers.
+    expect(r.getAllByText('ReliaBuilder')).toHaveLength(2);
     r.getByText('Progress bill 1 · Due 5 Oct 2026');
   });
 
@@ -457,5 +463,119 @@ describe('taking a part off the job', () => {
   it('says what goes in counts', () => {
     expect(describeWhatGoes(element({ itemCount: 2, photoPaths: ['a.jpg'] })))
       .toBe('2 things and their prices and 1 file go with it.');
+  });
+});
+
+describe('where it is up to', () => {
+  it('says the status beside the date, and changes it in one write from a sheet', async () => {
+    const r = await arrange(downstairs({ project: { status: 'underway', startedOn: '2026-03-03' } }));
+    r.getByText('Underway');
+    await press(r, 'Underway. Change where it’s up to');
+    r.getByText('Where’s it up to?');
+    await press(r, 'Complete');
+    await press(r, 'Done');
+    expect(mock_updateProject).toHaveBeenCalledTimes(1);
+    expect(mock_updateProject).toHaveBeenCalledWith('p1', {
+      status: 'done', startedOn: '2026-03-03', finishedOn: dayKey(new Date()),
+    });
+    expect(mock_showToast).toHaveBeenCalledWith('Marked complete');
+    expect(mock_getProjectPage).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('suppliers', () => {
+  // The dialog's buttons are the shared Button, found by the word on them.
+  const dialogButton = async (r: ReturnType<typeof render>, label: string) => {
+    const [button] = r.root.findAll((n: any) => n.props?.label === label && n.props?.onPress && 'variant' in n.props, { deep: true });
+    if (!button) throw new Error(`No dialog button "${label}"`);
+    await TestRenderer.act(async () => { button.props.onPress(); });
+  };
+
+  const twoSpellings = () => downstairs({
+    quotes: [
+      ...downstairs().quotes,
+      quote({ id: 'rl', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', kind: 'invoice', amount: 2140, status: 'accepted' }),
+    ],
+  });
+
+  it('lists everybody the job names, and says which two look like one business', async () => {
+    const r = await arrange(twoSpellings());
+    r.getByText('Suppliers');
+    r.getByText('Looks like ReliaBuilder · hold and drop onto it to merge');
+  });
+
+  it('confirms a merge before writing it, then renames across the job once', async () => {
+    const r = await arrange(twoSpellings());
+    await press(r, 'Merge RELIABUILDER LIMITED into ReliaBuilder');
+    r.getByText('Merge “RELIABUILDER LIMITED” into “ReliaBuilder”?');
+    expect(mock_renameSupplier).not.toHaveBeenCalled();
+    await dialogButton(r, 'Merge');
+    expect(mock_renameSupplier).toHaveBeenCalledTimes(1);
+    expect(mock_renameSupplier).toHaveBeenCalledWith('p1', 'RELIABUILDER LIMITED', 'ReliaBuilder');
+    expect(mock_showToast).toHaveBeenCalledWith('Merged into ReliaBuilder');
+    expect(mock_getProjectPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('writes nothing when the merge is cancelled', async () => {
+    const r = await arrange(twoSpellings());
+    await press(r, 'Merge RELIABUILDER LIMITED into ReliaBuilder');
+    await dialogButton(r, 'Cancel');
+    expect(mock_renameSupplier).not.toHaveBeenCalled();
+  });
+
+  it('stops the page scrolling while a supplier is held', async () => {
+    const r = await arrange(twoSpellings());
+    const scroll = () => r.root.findAll((n: any) => typeof n.type !== 'string' && 'scrollEnabled' in (n.props ?? {}), { deep: true })[0];
+    expect(scroll().props.scrollEnabled).toBe(true);
+    const row = r.root.findAll((n: any) => n.props?.onLongPress && String(n.props.accessibilityLabel).startsWith('RELIABUILDER LIMITED'), { deep: true })[0];
+    await TestRenderer.act(async () => { row.props.onLongPress(); });
+    expect(scroll().props.scrollEnabled).toBe(false);
+  });
+});
+
+describe('documents', () => {
+  const withFiles = () => downstairs({
+    project: { documentPaths: ['h/docs/1790000000000-1-Floor plan.pdf'] },
+    files: [
+      { projectId: 'p1', level: 'project', ownerId: 'p1', ownerName: 'Downstairs conversion', kind: 'document',
+        path: 'h/docs/1790000000000-1-Floor plan.pdf', supplier: null, ownerDetail: null },
+      { projectId: 'p1', level: 'quote', ownerId: 'n1', ownerName: 'Auckland Council', kind: 'document',
+        path: 'h/docs/1790000000000-2-Consent fee.pdf', supplier: 'Auckland Council', ownerDetail: 'BC-2291' },
+      { projectId: 'p1', level: 'payment', ownerId: 'pay1', ownerName: 'Deposit', kind: 'document',
+        path: 'h/docs/1790000000000-3-Bank confirmation.pdf', supplier: 'ReliaBuilder', ownerDetail: 'INV-0184' },
+    ],
+  });
+
+  it('groups every file by who it came from, a payment’s under the supplier it paid', async () => {
+    const r = await arrange(withFiles());
+    r.getByText('Consent fee.pdf');
+    r.getByText('On BC-2291');
+    r.getByText('Bank confirmation.pdf');
+    r.getByText('Deposit · paying INV-0184');
+    r.getByText('Floor plan.pdf');
+    r.getByText('On the job');
+  });
+
+  it('puts what came from nobody last', async () => {
+    const r = await arrange(withFiles());
+    const headings = r.getAllByType('Text')
+      .map((n) => n.children.join(''))
+      .filter((t) => ['Auckland Council', 'ReliaBuilder', 'Not from a supplier'].includes(t));
+    // The last heading on the page is the job's own.
+    expect(headings[headings.length - 1]).toBe('Not from a supplier');
+  });
+
+  it('offers × only on a file on the job itself; the rest are removed where they hang', async () => {
+    const r = await arrange(withFiles());
+    byLabel(r, 'Remove Floor plan.pdf');
+    expect(() => byLabel(r, 'Remove Consent fee.pdf')).toThrow();
+    expect(() => byLabel(r, 'Remove Bank confirmation.pdf')).toThrow();
+  });
+
+  it('takes a file off the job in one write', async () => {
+    const r = await arrange(withFiles());
+    await press(r, 'Remove Floor plan.pdf');
+    expect(mock_updateProject).toHaveBeenCalledWith('p1', { documentPaths: [] });
+    expect(mock_showToast).toHaveBeenCalledWith('Document removed');
   });
 });

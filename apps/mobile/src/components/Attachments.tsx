@@ -36,6 +36,13 @@ interface Props {
   tags?: FileTags;
   /** Tags one document, or untags it with `null`. The caller owns the write. */
   onTag?: (path: string, tag: FileTag | null) => Promise<void>;
+  /**
+   * Only the ways to add a file, with nothing listed. For a level whose files
+   * are shown somewhere else — the project's own, which the Documents section
+   * lists grouped by supplier beside every other file on the job. The upload
+   * rules stay here either way, so there is still one implementation of them.
+   */
+  controlsOnly?: boolean;
 }
 
 function failureReason(err: unknown): string {
@@ -84,6 +91,7 @@ export default function Attachments({
   disabled = false,
   tags,
   onTag,
+  controlsOnly = false,
 }: Props) {
   const [tagging, setTagging] = useState<string | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -102,7 +110,7 @@ export default function Attachments({
   useEffect(() => {
     let cancelled = false;
     setAsked(false);
-    if (photoPaths.length === 0) {
+    if (photoPaths.length === 0 || controlsOnly) {
       setUrls({});
       return;
     }
@@ -181,7 +189,7 @@ export default function Attachments({
 
   return (
     <View>
-      {photoPaths.length > 0 ? (
+      {!controlsOnly && photoPaths.length > 0 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
           {photoPaths.map((path, index) => (
             <View key={path} style={styles.tileWrap}>
@@ -216,7 +224,7 @@ export default function Attachments({
         </ScrollView>
       ) : null}
 
-      {documentPaths.map((path) => {
+      {(controlsOnly ? [] : documentPaths).map((path) => {
         const tag = tags?.[path] ?? null;
         return (
           <View key={path}>
@@ -280,7 +288,7 @@ export default function Attachments({
         );
       })}
 
-      {unsigned > 0 ? (
+      {!controlsOnly && unsigned > 0 ? (
         <Text style={styles.unsigned}>
           {unsigned === 1
             ? "1 photo couldn't be loaded just now — it's still on the record."
@@ -288,7 +296,7 @@ export default function Attachments({
         </Text>
       ) : null}
 
-      {photoPaths.length === 0 && documentPaths.length === 0 && emptyLabel ? (
+      {!controlsOnly && photoPaths.length === 0 && documentPaths.length === 0 && emptyLabel ? (
         <Text style={styles.empty}>{emptyLabel}</Text>
       ) : null}
 

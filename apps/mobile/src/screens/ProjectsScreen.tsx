@@ -17,7 +17,10 @@ import {
   createLocation, createProject, formatMoney, getProjects, getProjectsQuoted, inclGst, projectSubtitle,
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
-import { exportDateStamp, groupProjectsByStatus, projectExportTable } from '@snag/supabase-queries';
+import {
+  budgetRemaining, describeRemaining, exportDateStamp, groupProjectsByStatus, projectExportTable,
+  type RemainingTone,
+} from '@snag/supabase-queries';
 import { writeExport, type ExportFormat } from '../lib/exportFile';
 import { showAlert } from '../lib/alert';
 import {
@@ -34,7 +37,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * a budget, a span of rooms, a folder of quotes, and an answer to "what did the
  * bathroom actually cost".
  *
- * **Grouped by state, never by date.** Underway, then Planned, then Done — the
+ * **Grouped by state, never by date.** Underway, then Planned, then Complete — the
  * order somebody actually cares about them in, and the reason there is no
  * filter rail on this screen. A household has three or four projects, not
  * forty; a filter over four rows is a control charging vertical rent to answer
@@ -69,7 +72,9 @@ export default function ProjectsScreen() {
   const { showToast } = useToast();
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [quoted, setQuoted] = useState<Map<string, number>>(new Map());
+  // Null until the quoted read answers, and again if it fails: "No quotes" is
+  // a claim, and a read that has not come back cannot make it.
+  const [quoted, setQuoted] = useState<Map<string, number> | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -83,7 +88,7 @@ export default function ProjectsScreen() {
       const next = await getProjects(activeProperty.id);
       setProjects(next);
       // Never fatal: a card without its quoted line is still a card.
-      getProjectsQuoted(next.map((p) => p.id)).then(setQuoted, () => setQuoted(new Map()));
+      getProjectsQuoted(next.map((p) => p.id)).then(setQuoted, () => setQuoted(null));
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't load the projects");
     } finally {
@@ -182,7 +187,7 @@ export default function ProjectsScreen() {
     ? [
         counts[0] ? `${counts[0]} underway` : null,
         counts[1] ? `${counts[1]} planned` : null,
-        counts[2] ? `${counts[2]} done` : null,
+        counts[2] ? `${counts[2]} complete` : null,
       ]
         .filter(Boolean)
         .join(' · ')
@@ -249,7 +254,7 @@ export default function ProjectsScreen() {
           renderItem={({ item, section }) => (
             <ProjectCard
               project={item}
-              quoted={quoted.get(item.id) ?? null}
+              quoted={quoted ? quoted.get(item.id) ?? null : undefined}
               dim={section.status === 'done'}
               onPress={() => navigation.navigate('ProjectDetail', { projectId: item.id })}
             />
@@ -340,24 +345,34 @@ export default function ProjectsScreen() {
 }
 
 /**
- * One project on the tab, V2.
+ * One project on the tab: what was budgeted, what the suppliers have quoted,
+ * and what has actually been paid.
  *
- * **The figure is Agreed**, the same number the project page puts beside
- * Undecided — committed with the builder's open set-aside amounts taken out —
- * so the list and the page cannot disagree. The page's Expected total needs
- * every option on every thing to work out, which is a read per project this
- * list does not make; the card says the part it can say exactly.
+ * **Three figures, stacked.** Label left, figure right, one line each: a
+ * project's totals are the longest answers in the app, and three across a
+ * phone is where `$182,103.71` gets cut in half. Each is the page's own figure
+ * or the view's — Budgeted is the typed budget grossed to incl GST, Quoted is
+ * the supplier rows' sum (`getProjectsQuoted`, never fatal), Paid is
+ * `paid_total` — so nothing here is a second way of adding something up. A
+ * figure nobody has is said in words, never as `$0`.
  *
- * Under it: against the budget when there is one, then what the suppliers
- * have quoted, then how many things are left to decide and what is owed.
- * Counts and sums, nothing to believe.
+ * **Budget remaining appears once money has gone out**, and it is budget less
+ * paid: the cash view, coloured by how much of the budget is left (fern above
+ * 15%, brass down to 5%, clay at 5% or less and over), with the percentage
+ * beside it so colour is never the only way to read it. It is deliberately not
+ * the page's *Left in budget*, which takes off everything expected; Quoted sits
+ * two lines above it for exactly that reason.
  *
- * **Quoted is said whenever it differs from Agreed.** A planned job whose one
- * price is a tree surgeon's unagreed quote read $0 agreed and nothing else, so
- * the card claimed no price had arrived. It is the page's own Quoted figure —
- * every quote not declined, signed ones included — and it goes unsaid where it
- * would only repeat the figure above it.
+ * Under it: how many things are left to decide and what is owed — counts and
+ * sums, nothing to believe. A complete project carries the same figures,
+ * dimmed, because "what did it cost" is the question it is opened to answer.
  */
+const TONE: Record<RemainingTone, string> = {
+  good: Colors.primary,
+  warn: Colors.status.doing,
+  danger: Colors.danger,
+};
+
 function ProjectCard({
   project,
   quoted,
@@ -365,12 +380,15 @@ function ProjectCard({
   onPress,
 }: {
   project: Project;
-  quoted: number | null;
+  /** Undefined while the quoted read is out or has failed; null when nobody has quoted. */
+  quoted: number | null | undefined;
   dim: boolean;
   onPress: () => void;
 }) {
-  const agreed = (project.committedTotal ?? 0) - project.allowanceOpen;
   const budget = inclGst(project.budget, project.budgetInclGst);
+  const paid = project.paidTotal;
+  const left = budgetRemaining(project.budget, project.budgetInclGst, paid);
+  const remaining = left ? describeRemaining(left, (n) => formatMoney(n) ?? '') : null;
   const toDecide = Math.max(project.itemCount - project.pricedCount, 0);
   const facts = [
     toDecide > 0 ? `${toDecide} to decide` : null,
@@ -378,46 +396,56 @@ function ProjectCard({
     project.openSnagCount > 0 ? `${project.openSnagCount} to sort out` : null,
   ].filter(Boolean);
 
-  if (dim) {
-    return (
-      <Pressable
-        onPress={onPress}
-        style={[styles.card, styles.cardDone]}
-        accessibilityRole="button"
-        accessibilityLabel={project.name}
-      >
-        <View style={styles.cardTitles}>
-          <Text style={styles.doneName}>{project.name}</Text>
-          <Text style={styles.cardSub} numberOfLines={1}>{projectSubtitle(project)}</Text>
-        </View>
-        <Text style={styles.doneFigure}>{formatMoney(project.paidTotal ?? agreed) ?? ''}</Text>
-      </Pressable>
-    );
-  }
+  const figures: { label: string; value: string | null; blank: string }[] = [
+    { label: 'Budgeted', value: budget !== null && budget > 0 ? formatMoney(budget) : null, blank: 'Not set' },
+    {
+      label: 'Quoted',
+      value: quoted !== undefined && quoted !== null ? formatMoney(quoted) : null,
+      blank: quoted === undefined ? '—' : 'No quotes',
+    },
+    { label: 'Paid', value: paid !== null && paid > 0.005 ? formatMoney(paid) : null, blank: 'Nothing yet' },
+  ];
 
   return (
     <Pressable
       onPress={onPress}
-      style={styles.card}
+      style={[styles.card, dim && styles.cardDone]}
       accessibilityRole="button"
       accessibilityLabel={project.name}
     >
       <View style={styles.cardTop}>
-        <Text style={styles.cardName}>{project.name}</Text>
+        <View style={styles.cardTitles}>
+          <Text style={styles.cardName}>{project.name}</Text>
+          {dim ? <Text style={styles.cardSub} numberOfLines={1}>{projectSubtitle(project)}</Text> : null}
+        </View>
         <Icon name="chevron-forward" size={16} color={Colors.chevron} />
       </View>
-      <View style={styles.figureRow}>
-        <Text style={styles.figure}>{formatMoney(agreed) ?? '$0'}</Text>
-        <Text style={styles.figureOf}>
-          {budget !== null ? `agreed of ${formatMoney(budget)}` : 'agreed'}
-        </Text>
+      <View style={styles.figures}>
+        {figures.map((f) => (
+          <View key={f.label} style={styles.figureRow}>
+            <Text style={styles.figureLabel}>{f.label}</Text>
+            <Text style={[styles.figureValue, f.value === null && styles.figureBlank]} numberOfLines={1}>
+              {f.value ?? f.blank}
+            </Text>
+          </View>
+        ))}
       </View>
-      {quoted !== null && Math.abs(quoted - agreed) > 0.005 ? (
-        <Text style={styles.quoted}>{`${formatMoney(quoted)} quoted`}</Text>
-      ) : null}
-      {budget !== null && budget > 0 ? (
-        <View style={styles.bar}>
-          <View style={[styles.barFill, { width: `${Math.min(agreed / budget, 1) * 100}%` }]} />
+      {left && remaining ? (
+        <View style={styles.remaining}>
+          <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <View
+              style={[
+                styles.barFill,
+                { width: `${Math.min(Math.max((paid ?? 0) / left.budget, 0), 1) * 100}%`, backgroundColor: TONE[left.tone] },
+              ]}
+            />
+          </View>
+          <View style={styles.figureRow}>
+            <Text style={styles.remainingLabel}>{remaining.label}</Text>
+            <Text style={[styles.remainingValue, { color: TONE[left.tone] }]} numberOfLines={1}>
+              {remaining.value}
+            </Text>
+          </View>
         </View>
       ) : null}
       {facts.length > 0 ? (
@@ -464,25 +492,27 @@ const styles = StyleSheet.create({
   },
   // The same translucency a parked repeat takes on the list, for the same
   // reason: there is nothing to do about this one, and it stays findable.
-  cardDone: { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.lg, gap: Spacing.md, opacity: 0.62 },
+  cardDone: { opacity: 0.62 },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   cardTitles: { flex: 1, minWidth: 0, gap: 2 },
-  cardName: { flex: 1, fontSize: Typography.body, lineHeight: 22, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  cardName: { fontSize: Typography.body, lineHeight: 22, fontWeight: Typography.semibold, color: Colors.textPrimary },
   cardSub: { fontSize: Typography.subhead, color: Colors.textMuted },
-  doneName: { fontSize: Typography.body, color: Colors.textPrimary },
-  doneFigure: { fontSize: Typography.body, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
-  figureRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.sm },
-  figure: {
-    fontSize: Typography.title1, lineHeight: 34, fontWeight: Typography.bold,
-    color: Colors.textPrimary, letterSpacing: -0.4, fontVariant: ['tabular-nums'],
+  figures: { gap: Spacing.xs + 2 },
+  figureRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.md },
+  figureLabel: { fontSize: Typography.subhead, color: Colors.textMuted, flexShrink: 0 },
+  figureValue: {
+    fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'],
+    flexShrink: 1, minWidth: 0, textAlign: 'right',
   },
-  figureOf: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
-  quoted: {
-    fontSize: Typography.subhead, color: Colors.textSecondary,
-    fontVariant: ['tabular-nums'], marginTop: -Spacing.sm,
+  figureBlank: { fontSize: Typography.subhead, color: Colors.textMuted },
+  remaining: { gap: Spacing.sm, marginTop: Spacing.xs },
+  remainingLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.textPrimary, flexShrink: 0 },
+  remainingValue: {
+    fontSize: Typography.body, fontWeight: Typography.semibold, fontVariant: ['tabular-nums'],
+    flexShrink: 1, minWidth: 0, textAlign: 'right',
   },
   bar: { height: 6, borderRadius: 3, backgroundColor: Colors.track, overflow: 'hidden' },
-  barFill: { height: 6, backgroundColor: Colors.primary },
+  barFill: { height: 6 },
   facts: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
   factsOverdue: { color: Colors.danger },
 

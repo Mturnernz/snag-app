@@ -54,11 +54,14 @@ export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
   const [pasted, setPasted] = useState('');
   const pastedToken = parseJoinToken(pasted);
 
-  // Only ever looked for once there is a profile to accept with — accept_invitation
-  // needs one, and asking before the name is saved would find nothing and say so
-  // for the wrong reason.
+  // Looked for straight away, **profile or not**. It used to wait for one, on
+  // the belief that asking first would find nothing — but `my_invitations`
+  // matches on the signed-in address, never on a profile, and waiting is what
+  // put somebody invited by email in front of *Set up your house* with *Create
+  // it* as the first offer: the Alyssa bug, fixed for a scanned code and still
+  // open for an invitation. The name `accept_invitation` needs is asked for on
+  // the invitation itself, the way JoinScreen asks a scanner.
   const loadInvitations = useCallback(async () => {
-    if (!profile) return;
     setChecking(true);
     try {
       setInvitations(await getMyInvitations());
@@ -67,7 +70,7 @@ export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
     } finally {
       setChecking(false);
     }
-  }, [profile]);
+  }, []);
 
   useEffect(() => {
     loadInvitations();
@@ -105,9 +108,13 @@ export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
   }
 
   async function handleAnswer(invitationId: string, join: boolean) {
+    if (join && !profile && !name.trim()) return;
     setAnswering(true);
     try {
       if (join) {
+        // accept_invitation refuses an account with no name, because a member
+        // with none is a blank row in every list. Declining needs no name.
+        if (!profile) await upsertProfile(name.trim());
         await acceptInvitation(invitationId);
         // App.tsx re-gates on this and lands them in the house.
         await onReady();
@@ -127,29 +134,55 @@ export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
   // should not have to guess that the answer is behind the second button.
   if (invitations.length > 0) {
     const invitation = invitations[0];
+    const needsName = !profile;
     return (
-      <View style={[styles.centered, { paddingTop: insets.top }]}>
-        <Icon name="home-outline" size="xxl" color={Colors.primary} />
-        <Text style={styles.title}>{invitation.householdName} wants to add you</Text>
-        <Text style={styles.body}>
-          {invitation.invitedByName} invited you. Everyone in a household can see and change
-          everything in it, and you can leave whenever you like.
-        </Text>
-        <Button
-          label="Join"
-          onPress={() => handleAnswer(invitation.id, true)}
-          loading={answering}
-          disabled={answering}
-          fullWidth
-        />
-        <Button
-          label="No thanks"
-          variant="outline"
-          onPress={() => handleAnswer(invitation.id, false)}
-          disabled={answering}
-          fullWidth
-        />
-      </View>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={[styles.centered, { paddingTop: insets.top }]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Icon name="home-outline" size="xxl" color={Colors.primary} />
+          <Text style={styles.title}>{invitation.householdName} wants to add you</Text>
+          <Text style={styles.body}>
+            {invitation.invitedByName} invited you. Everyone in a household can see and change
+            everything in it, and you can leave whenever you like.
+          </Text>
+
+          {needsName ? (
+            <>
+              <Text style={[styles.label, styles.stretch]}>What should we call you?</Text>
+              <TextInput
+                style={[styles.input, styles.stretch]}
+                value={name}
+                onChangeText={setName}
+                maxLength={80}
+                autoCapitalize="words"
+                autoComplete="name"
+                textContentType="name"
+                accessibilityLabel="What should we call you?"
+              />
+            </>
+          ) : null}
+
+          <Button
+            label="Join"
+            onPress={() => handleAnswer(invitation.id, true)}
+            loading={answering}
+            disabled={answering || (needsName && !name.trim())}
+            fullWidth
+          />
+          <Button
+            label="No thanks"
+            variant="outline"
+            onPress={() => handleAnswer(invitation.id, false)}
+            disabled={answering}
+            fullWidth
+          />
+        </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -160,7 +193,7 @@ export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
         <Text style={styles.title}>You're ready</Text>
         <Text style={styles.body}>
           Ask whoever set up your household to invite you — they'll need the email address you
-          just signed up with. Snag doesn't email you, so their invitation will simply be here when
+          just signed up with. Snag doesn't email invitations, so theirs will simply be here when
           you next look.
         </Text>
         <Button
@@ -222,10 +255,11 @@ export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
           style={styles.input}
           value={name}
           onChangeText={setName}
-          placeholder="Mike"
-          placeholderTextColor={Colors.textMuted}
           maxLength={80}
           autoCapitalize="words"
+          autoComplete="name"
+          textContentType="name"
+          accessibilityLabel="What should we call you?"
         />
 
         <Text style={styles.label}>And the house?</Text>
@@ -233,10 +267,9 @@ export default function SetupScreen({ profile, onReady, onJoinToken }: Props) {
           style={styles.input}
           value={householdName}
           onChangeText={setHouseholdName}
-          placeholder="Home"
-          placeholderTextColor={Colors.textMuted}
           maxLength={80}
           autoCapitalize="words"
+          accessibilityLabel="And the house?"
         />
 
         <Button
@@ -268,7 +301,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.xl, gap: Spacing.sm, alignItems: 'stretch' },
   centered: {
-    flex: 1,
+    flexGrow: 1,
     backgroundColor: Colors.background,
     padding: Spacing.xl,
     gap: Spacing.md,
@@ -297,6 +330,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   paste: { alignSelf: 'stretch', gap: Spacing.sm, marginTop: Spacing.lg },
+  stretch: { alignSelf: 'stretch' },
   pasteMiss: { fontSize: Typography.sm, color: Colors.textMuted },
   input: {
     backgroundColor: Colors.surface,

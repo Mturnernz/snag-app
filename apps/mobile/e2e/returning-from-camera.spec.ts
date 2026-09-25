@@ -31,8 +31,8 @@ test.skip(!EMAIL || !PASSWORD, 'Set E2E_EMAIL and E2E_PASSWORD to run the authen
 async function signIn(page: Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.getByText('Sign in', { exact: true })).toBeVisible({ timeout: 120_000 });
-  await page.getByPlaceholder('Email').fill(EMAIL!);
-  await page.getByPlaceholder('Password').fill(PASSWORD!);
+  await page.getByLabel('Email', { exact: true }).fill(EMAIL!);
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD!);
   await page.getByText('Sign in', { exact: true }).click();
   await expect(page.getByPlaceholder('Capture new issue')).toBeVisible({ timeout: 90_000 });
 }

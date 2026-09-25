@@ -11,7 +11,7 @@ import SetupScreen from './SetupScreen';
 //
 // What these pin: that an invitation is found and answered here, that the
 // answer is genuinely a choice rather than an instruction, and that the screen
-// never suggests an email is coming — nothing in this product emails anybody.
+// never suggests an invitation is coming by email — nothing emails one.
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -106,14 +106,76 @@ describe('an invitation waiting at sign-up', () => {
     expect(onReady).toHaveBeenCalled();
   });
 
-  // An account with no profile can't accept — accept_invitation needs one —
-  // so asking before the name is saved would find nothing and say so for a
-  // reason that has nothing to do with whether an invitation exists.
-  it('is not looked for before there is a name to accept with', async () => {
-    render(<SetupScreen profile={null} onReady={onReady} />);
+  // It used to wait for a profile, on the belief that asking first would find
+  // nothing. It wouldn't: my_invitations matches on the signed-in address. And
+  // waiting put somebody invited by email in front of *Set up your house*, with
+  // *Create it* first — where they made a second household of their own.
+  it('is looked for before there is a name, and beats the create form', async () => {
+    mock_getMyInvitations.mockResolvedValue([INVITATION]);
+    const r = render(<SetupScreen profile={null} onReady={onReady} />);
     await settle();
 
-    expect(mock_getMyInvitations).not.toHaveBeenCalled();
+    expect(mock_getMyInvitations).toHaveBeenCalled();
+    expect(r.queryByText('32 Le Roy wants to add you')).not.toBeNull();
+    expect(r.queryByText('Set up your house')).toBeNull();
+    expect(r.queryByText('Create it')).toBeNull();
+  });
+
+  // accept_invitation needs a name, so the invitation asks for it rather than
+  // sending them to a screen about setting up a house they aren't setting up.
+  it('asks a brand-new account for its name on the invitation, then joins', async () => {
+    mock_getMyInvitations.mockResolvedValue([INVITATION]);
+    const r = render(<SetupScreen profile={null} onReady={onReady} />);
+    await settle();
+
+    const join = pressableAround(r, 'Join');
+    expect(join.props.disabled).toBeTruthy();
+
+    const nameField = r.root.findAll(
+      (n: any) => typeof n.type === 'string' && n.type === 'TextInput'
+        && n.props.accessibilityLabel === 'What should we call you?'
+    )[0];
+    await TestRenderer.act(async () => nameField.props.onChangeText(' Alyssa '));
+    await press(pressableAround(r, 'Join'));
+
+    expect(mock_upsertProfile).toHaveBeenCalledWith('Alyssa');
+    expect(mock_acceptInvitation).toHaveBeenCalledWith('i1');
+    expect(mock_upsertProfile.mock.invocationCallOrder[0])
+      .toBeLessThan(mock_acceptInvitation.mock.invocationCallOrder[0]);
+    expect(onReady).toHaveBeenCalled();
+  });
+
+  it('lets a brand-new account decline without giving a name', async () => {
+    mock_getMyInvitations.mockResolvedValueOnce([INVITATION]).mockResolvedValue([]);
+    const r = render(<SetupScreen profile={null} onReady={onReady} />);
+    await settle();
+
+    await press(pressableAround(r, 'No thanks'));
+    expect(mock_declineInvitation).toHaveBeenCalledWith('i1');
+    expect(mock_upsertProfile).not.toHaveBeenCalled();
+    expect(r.queryByText('Set up your house')).not.toBeNull();
+  });
+
+  it('asks nobody with a name for it again', async () => {
+    mock_getMyInvitations.mockResolvedValue([INVITATION]);
+    const r = render(<SetupScreen profile={PROFILE} onReady={onReady} />);
+    await settle();
+
+    expect(r.queryByText('What should we call you?')).toBeNull();
+    await press(pressableAround(r, 'Join'));
+    expect(mock_upsertProfile).not.toHaveBeenCalled();
+  });
+});
+
+// "No example values in any box": a grey *Mike* under the name reads as a name
+// somebody already entered. The label above says what the box wants.
+describe('the create form', () => {
+  it('puts no example value in either box', async () => {
+    const r = render(<SetupScreen profile={null} onReady={onReady} />);
+    await settle();
+    const boxes = r.root.findAll((n: any) => typeof n.type === 'string' && n.type === 'TextInput');
+    expect(boxes.length).toBe(2);
+    for (const box of boxes) expect(box.props.placeholder).toBeUndefined();
   });
 });
 
@@ -152,7 +214,9 @@ describe('waiting to be invited', () => {
     expect(onJoinToken).not.toHaveBeenCalled();
   });
 
-  it('says nothing will arrive by email, because nothing will', async () => {
+  // Snag emails a sign-up code now, so the claim is narrowed to what is true:
+  // an invitation itself never arrives by email.
+  it('says the invitation will not arrive by email, because it will not', async () => {
     const r = render(<SetupScreen profile={null} onReady={onReady} />);
     await settle();
 
@@ -168,7 +232,7 @@ describe('waiting to be invited', () => {
       .findAll((n: any) => typeof n.type === 'string' && n.type === 'Text')
       .map((n: any) => JSON.stringify(n.children))
       .join(' ');
-    expect(said).toMatch(/doesn't email you/i);
+    expect(said).toMatch(/doesn't email invitations/i);
     // Saving the name is what makes accepting possible later.
     expect(mock_upsertProfile).toHaveBeenCalledWith('Alyssa');
   });

@@ -18,6 +18,8 @@ import {
 } from '../lib/supabase';
 import { looseEnds, type LooseEnd } from '@snag/supabase-queries';
 import { showAlert } from '../lib/alert';
+import { openUrl } from '../lib/openUrl';
+import { PORTAL_URL } from '../lib/appUrl';
 import { RootStackParamList } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -335,6 +337,17 @@ export default function ProfileScreen() {
         share stay, and so does what you filed in them.
       </Text>
 
+      {/* The statement Create account links to, reachable again once signed
+          in — the right to see and correct what is kept is not only for the
+          moment of signing up. */}
+      <Pressable
+        onPress={() => openUrl(`${PORTAL_URL}/privacy`)}
+        style={styles.privacyLink}
+        accessibilityRole="link"
+      >
+        <Text style={styles.privacyText}>Privacy statement</Text>
+      </Pressable>
+
       <ConfirmDialog
         visible={confirmDelete}
         title="Delete your account?"
@@ -437,6 +450,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
+  privacyLink: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignItems: 'center' },
+  privacyText: { fontSize: Typography.sm, color: Colors.textMuted },
   deleteHint: {
     fontSize: Typography.sm,
     color: Colors.textMuted,

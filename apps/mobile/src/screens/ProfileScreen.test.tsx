@@ -39,6 +39,8 @@ jest.mock('../lib/supabase', () => ({
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
+const mock_openUrl = jest.fn();
+jest.mock('../lib/openUrl', () => ({ openUrl: (...a: unknown[]) => mock_openUrl(...a) }));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
 
 function arrange() {
@@ -163,6 +165,16 @@ describe('deleting your account', () => {
  * *A global completeness meter is the shaming number that gets an app closed
  * and not reopened.* These pin the four ways this section would become one.
  */
+// Seeing and correcting what is kept is not only for the moment of signing
+// up, so the statement Create account links to is reachable from here too.
+describe('privacy', () => {
+  it('opens the privacy statement', async () => {
+    const r = await renderProfile();
+    await TestRenderer.act(async () => pressableAround(r, 'Privacy statement').props.onPress());
+    expect(mock_openUrl).toHaveBeenCalledWith('https://www.snaghq.co.nz/privacy');
+  });
+});
+
 describe('worth finishing', () => {
   const project = (over: Record<string, unknown> = {}) => ({
     id: 'p1', householdId: 'h', propertyId: 'prop', name: 'Downstairs laundry',

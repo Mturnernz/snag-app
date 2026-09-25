@@ -165,7 +165,9 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" />
-        <AuthScreen />
+        {/* A scanner arrives here first, with no account: the code opens the
+            screen on Create account and rides through the confirmation link. */}
+        <AuthScreen joinToken={joinToken} />
       </SafeAreaProvider>
     );
   }

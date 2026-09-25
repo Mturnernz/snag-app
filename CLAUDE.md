@@ -45,7 +45,7 @@ snag/
 │   │       ├── screens/           # SnagList (home), SnagDetail, House, ThingDetail,
 │   │       │                       #   Household, LocationTags, Profile, Auth, Setup
 │   │       └── components/
-│   ├── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
+│   ├── web/                       # Next.js — /, /forgot-password, /reset-password, /privacy. That's it.
 │   └── staff/                     # Next.js — the SnagHQ staff portal, staff.snaghq.co.nz
 ├── packages/
 │   ├── shared-types/              # @snag/shared-types — enums, row types, labels, nav params
@@ -3456,6 +3456,70 @@ Remove and add instead.
 **A second place is never a tag.** If someone asks for a "Bach" tag, the answer is
 `create_property`.
 
+## Signing up
+
+`AuthScreen` is email and a password, and **email confirmation is on** — which is load-bearing
+rather than a preference: an invitation waits on an *address*, and the confirmation email is the
+only thing proving the person signing up owns it. See *Signing up — the settings the app depends
+on* in `SNAG_INFRA_NOTES.md` for the dashboard half, and the query that checks it.
+
+**Confirmation answers with no session and no error, so the screen has to say what happens next.**
+It used to assume the auth listener would take over; nothing had signed in, no event came, and the
+spinner stopped over the form somebody had just filled in. Pressing *Create account* again hit a
+rate limit, and switching to *Sign in* got "Email not confirmed" in a browser alert with no way to
+ask for the email again. So there is a third stage, **Check your email**, and a sign-in refused for
+an unconfirmed address lands on it too.
+
+- **It takes the code as well as the link, and the code is the one that matters.** The link signs
+  in whichever browser the mail app opens — an in-app browser, another device, or a scanner that
+  prefetched it and spent it first. The code is typed into the tab that asked, which still has a
+  household's `/join/<token>` in its address bar. The template has to carry `{{ .Token }}`
+  (`supabase/templates/confirm-signup.html`), or the screen asks for something the email lacks.
+- **The link carries the join code anyway** (`confirmRedirectUrl`). Without `emailRedirectTo`, Auth
+  sends it to the Site URL, and a scanner who taps it lands on *Set up your house* — the Alyssa bug
+  by the email's door. Every value it can return has to be on the redirect allow-list.
+- **It never says whether an address has an account.** Auth answers sign-up for an existing address
+  exactly as it answers a new one, so *Check your email* offers *Sign in* to everybody; the reset
+  link's confirmation is worded "if … has an account"; a refused sign-in never says which half was
+  wrong.
+- **A join code opens the screen on *Create account***, with a line saying why they are here.
+  Somebody who has just scanned a QR has no account; signing up is their journey.
+
+**The button is never dead.** It used to disable until the password reached six characters, with
+nothing on screen saying so. Now it is live, and pressing it early says what the form still wants
+(`formProblem`). **New passwords need eight**, matching `/reset-password` — the two disagreed, so a
+password chosen at sign-up could not be chosen again at reset. **Sign-in checks no length**:
+accounts made under the old rule still get in, and Auth enforces its own minimum only when a
+password is set.
+
+**Every error is words on the screen, never a `window.alert`** — `describeAuthError` maps Auth's
+codes (a rate limit becomes how many seconds to wait; a breached password says so). Anything it
+does not recognise is shown as Auth said it: hiding an unfamiliar reason leaves nobody able to
+report what happened.
+
+**Labels stay put, and the browser is told what each box holds.** Visible labels, not placeholders
+that vanish while typing. `autoComplete` (`email`, `current-password`, `new-password`,
+`one-time-code`) beside `textContentType`, because `textContentType` is iOS-native only and the web
+build — the one people install — handed password managers nothing. Enter moves to the password and
+submits from it. The eye beside the password is a real 48pt sibling of the box, never `hitSlop`.
+
+**The privacy statement is linked where the details are collected** — *Create account*, not a
+settings page — because that is what principle 3 of the Privacy Act 2020 asks. It is `/privacy` on
+`www`, and the You tab links to it too. **Its list of services is a list of real dependencies**:
+adding a processor without adding it there makes the page untrue.
+
+**An anonymous session is not an account.** Anonymous sign-ins run as the `authenticated` role, so
+every function granted to `authenticated` answered one, and the three that make a membership
+asked only whether *somebody* was signed in. `20260926100000` puts triggers on `home.profiles` and
+`home.household_members` that refuse an anonymous user whatever function is inserting; the
+provider is also meant to be off. See *Anonymous sign-ins reached `home`* in `SNAG_INFRA_NOTES.md`.
+
+`AuthScreen.test.tsx` pins the three stages, the code and its refusals, the join code reaching
+`emailRedirectTo` and the resend, *Sign in* offered from *Check your email*, the live button, the
+old-password sign-in, the autofill hints, the labels, and the privacy line appearing on *Create
+account* only. `authForm.test.ts` pins the form rules and every error wording;
+`joinLink.test.ts` the redirect; `supabase/tests/anonymous_sessions.sql` the guard.
+
 ## Adding someone to a household
 
 **An invitation waits on an address, not on an account.** `home.invite_to_household` takes any
@@ -3499,8 +3563,11 @@ It is answered in two places, and both are needed:
 
 - **`SetupScreen`** — someone who has just signed up. The invitation beats *both* branches of that
   screen, because somebody staring at "Set up your house" must not have to guess the answer is
-  behind the second button. It is looked for only once a profile exists, since `accept_invitation`
-  needs one.
+  behind the second button. **It is looked for before a profile exists**, and the invitation asks
+  for the name `accept_invitation` needs, as `JoinScreen` does. It used to wait for a profile, on
+  the belief that asking first would find nothing — but `my_invitations` matches on the signed-in
+  address, never a profile, and waiting put an invitee in front of *Create it*: the Alyssa bug,
+  fixed for a scanned code and still open for an invitation by address.
 - **`HouseholdScreen`** — someone who already has a household. Without this an invitation to an
   existing user would be invisible: they never see Setup, and there is deliberately no household
   switcher. An invitation nothing can show is the silent failure the whole mechanism exists to end.
@@ -4175,7 +4242,7 @@ under *The staff portal*.
 | Host | What it serves |
 |---|---|
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the app people install |
-| `www.snaghq.co.nz` | `apps/web` — the root page and password recovery, nothing else |
+| `www.snaghq.co.nz` | `apps/web` — the root page, password recovery and the privacy statement |
 | `staff.snaghq.co.nz` | `apps/staff` — the SnagHQ staff portal |
 | `snagv1.netlify.app` | redirect to `app.snaghq.co.nz` |
 
@@ -4186,7 +4253,9 @@ the right screen rather than the default tab.
 
 ## Why apps/web still exists
 
-One reason: **password recovery has to land on a plain web page.**
+One reason: **password recovery has to land on a plain web page.** (The privacy statement,
+`/privacy`, lives here for the same reason — the sign-up screen links to it, and it has to open in
+any browser for somebody who has no account yet. See *Signing up*.)
 
 `@supabase/ssr` forces PKCE, and a PKCE recovery link only works in the browser that asked for it
 — auth-js wants the `code` *and* a stored verifier, and with the verifier missing it doesn't

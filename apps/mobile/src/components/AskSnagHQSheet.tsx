@@ -21,7 +21,8 @@ interface Props {
  * they see and for how long, and names what they do not. Nothing else in the
  * house: no other job, no house record, no renovation, no street address.
  *
- * It also says the one email out loud. Snag sends nothing else, and a reply
+ * It also says the one email out loud. Beyond the account emails somebody asks
+ * for — the sign-up code, a reset link — Snag sends nothing else, and a reply
  * arriving by email with no warning would be the product speaking unasked.
  *
  * Sending does not touch the job. It is not a note, and it does not start it.

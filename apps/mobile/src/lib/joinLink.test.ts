@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { clearJoinToken, parseJoinToken, readJoinToken } from './joinLink';
+import { clearJoinToken, confirmRedirectUrl, parseJoinToken, readJoinToken } from './joinLink';
 
 // A join code arrives in the address bar and nowhere else: the QR is scanned by
 // the scanner's own camera, which opens a URL in their browser. So this is the
@@ -99,5 +99,31 @@ describe('parseJoinToken', () => {
   it('reads nothing out of something that holds no code', () => {
     expect(parseJoinToken('https://app.snaghq.co.nz/snags/123')).toBeNull();
     expect(parseJoinToken('')).toBeNull();
+  });
+});
+
+// Where a sign-up confirmation email's link lands. Without a redirect Auth uses
+// the Site URL, which drops the join code — and somebody who scanned a QR then
+// lands on *Set up your house* instead of the question the code asks.
+describe('confirmRedirectUrl', () => {
+  it('carries the join code through the email', () => {
+    (global as any).window = { location: { origin: 'https://app.snaghq.co.nz', pathname: `/join/${TOKEN}` } };
+    expect(confirmRedirectUrl(TOKEN)).toBe(`https://app.snaghq.co.nz/join/${TOKEN}`);
+  });
+
+  it('lands on the root when there is no code', () => {
+    (global as any).window = { location: { origin: 'https://app.snaghq.co.nz', pathname: '/' } };
+    expect(confirmRedirectUrl(null)).toBe('https://app.snaghq.co.nz/');
+  });
+
+  // A local build confirms back to itself, not to production.
+  it("uses the page's own origin on the web", () => {
+    (global as any).window = { location: { origin: 'http://localhost:8081', pathname: '/' } };
+    expect(confirmRedirectUrl(null)).toBe('http://localhost:8081/');
+  });
+
+  it('uses the app host off the web, where there is no address bar', () => {
+    setPlatform('ios');
+    expect(confirmRedirectUrl(null)).toBe('https://app.snaghq.co.nz/');
   });
 });

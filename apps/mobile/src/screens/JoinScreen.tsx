@@ -149,10 +149,10 @@ export default function JoinScreen({ token, profile, onJoined, onDismiss }: Prop
               style={styles.input}
               value={name}
               onChangeText={setName}
-              placeholder="Alyssa"
-              placeholderTextColor={Colors.textMuted}
               maxLength={80}
               autoCapitalize="words"
+              autoComplete="name"
+              textContentType="name"
               accessibilityLabel="What should we call you?"
             />
           </>

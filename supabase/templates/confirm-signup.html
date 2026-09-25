@@ -1,0 +1,33 @@
+<!--
+  Supabase Auth → Email Templates → "Confirm signup". Not deployed by anything
+  in this repo: paste it into the dashboard (subject below) — see
+  SNAG_INFRA_NOTES.md, "Auth". Subject: Your Snag code is {{ .Token }}
+
+  It carries both a code and a link, and the code is the one that matters.
+  The app's *Check your email* screen asks for the code, because typing it
+  into the tab that asked keeps a household's join code in the address bar —
+  the link signs in whichever browser the mail app opens, and a mail scanner
+  that prefetches links can spend it before anybody taps it. If this template
+  loses `{{ .Token }}`, that screen asks for a code the email doesn't contain.
+-->
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #FAF7F2; padding: 32px 16px; color: #2B2724;">
+  <div style="max-width: 440px; margin: 0 auto; background: #FFFFFF; border-radius: 14px; padding: 28px 24px;">
+    <p style="font-weight: 700; font-size: 20px; margin: 0 0 20px;">Snag</p>
+    <p style="font-size: 16px; line-height: 1.5; margin: 0 0 16px;">
+      Here's the code to finish creating your Snag account:
+    </p>
+    <p style="font-size: 32px; font-weight: 700; letter-spacing: 6px; margin: 0 0 20px; font-family: ui-monospace, Menlo, monospace;">
+      {{ .Token }}
+    </p>
+    <p style="font-size: 16px; line-height: 1.5; margin: 0 0 16px;">
+      Type it into the app, where it's asking. Or use this link instead:
+    </p>
+    <p style="margin: 0 0 24px;">
+      <a href="{{ .ConfirmationURL }}" style="display: inline-block; background: #2E6A4F; color: #FFFFFF; text-decoration: none; font-weight: 600; padding: 12px 20px; border-radius: 12px;">Confirm my address</a>
+    </p>
+    <p style="font-size: 14px; line-height: 1.5; color: #6A6156; margin: 0;">
+      If you didn't try to make a Snag account, you can ignore this email — nothing happens
+      without the code.
+    </p>
+  </div>
+</div>

@@ -28,8 +28,8 @@ test.skip(!EMAIL || !PASSWORD, 'Set E2E_EMAIL and E2E_PASSWORD to run the authen
 async function signIn(page: Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.getByText('Sign in', { exact: true })).toBeVisible({ timeout: 120_000 });
-  await page.getByPlaceholder('Email').fill(EMAIL!);
-  await page.getByPlaceholder('Password').fill(PASSWORD!);
+  await page.getByLabel('Email', { exact: true }).fill(EMAIL!);
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD!);
   // The bar renders before the place it files under has loaded, and a send in
   // that gap is refused as "No place yet". The rooms are read only once a place
   // is chosen, so their arrival is the signal that capture can file.

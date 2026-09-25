@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { APP_URL } from './appUrl';
 
 /**
  * Reading a `/join/<token>` code out of the address bar, and clearing it again.
@@ -52,4 +53,27 @@ export function clearJoinToken(): void {
 export function parseJoinToken(text: string): string | null {
   const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/.exec(text);
   return match ? match[1].toLowerCase() : null;
+}
+
+/**
+ * Where the link in a sign-up confirmation email lands.
+ *
+ * Supabase sends it to the project's Site URL unless it is told otherwise, and
+ * the Site URL is one fixed address — so somebody who scanned a household's QR,
+ * signed up, and tapped the link would come back with no `/join/<token>` and be
+ * shown *Set up your house*. The Alyssa bug again, by the email's door. So the
+ * code rides along.
+ *
+ * The origin is the page's own on the web, so a local build confirms back to
+ * itself rather than to production; native has no address bar and no join
+ * code, and a link tapped on a phone opens the web app anyway. Every value
+ * this can return has to match an entry in Auth → URL Configuration → Redirect
+ * URLs, or Auth quietly substitutes the Site URL (see SNAG_INFRA_NOTES.md).
+ */
+export function confirmRedirectUrl(joinToken: string | null): string {
+  const origin =
+    Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin
+      ? window.location.origin
+      : APP_URL;
+  return joinToken ? `${origin}/join/${joinToken}` : `${origin}/`;
 }

@@ -157,24 +157,32 @@ in the backing store, which is a worse orphan than the one you started with. Use
 (Storage → `home-photos` → the household's folder) or the Storage API with a session that passes
 `home.can_use_photo_folder`. The anon key cannot: the delete policy needs a household member.
 
-### The advisor's anonymous-sign-in warning on `home` is noise — but its cause isn't
+### Anonymous sign-ins reached `home` — the old note here was wrong
 
-Supabase's security advisor flags all ten `home` tables under `auth_allow_anonymous_sign_ins`.
-Checked on 14 September 2026: **not exploitable, and two gates deep.**
+Supabase's security advisor flags the `home` tables under `auth_allow_anonymous_sign_ins`. On
+14 September 2026 this section called that noise, "two gates deep", and the second gate was the
+mistake: it said an anonymous caller "is stopped at the schema", because `usage on schema home`
+went to `authenticated` only. **Supabase runs an anonymous user as the `authenticated` role** — the
+only difference is an `is_anonymous` claim in the JWT — so every grant this schema makes to
+`authenticated` was theirs too.
 
-- Every `home` read policy qualifies on `home.is_member(...)` or `home.is_property_member(...)`,
-  which need a membership row. An anonymous user has neither a profile nor a membership, so the
-  policies return zero rows rather than leaking any.
-- It never gets that far anyway: `usage on schema home` went to `authenticated` only, never `anon`,
-  so an anonymous caller is stopped at the schema with `42501` — the same answer the check above
-  relies on.
+The first gate held and still does: every read policy asks for a membership, and no anonymous user
+had one. But nothing stopped one *making* one. `upsert_profile`, `create_household` and
+`accept_invitation_by_token` asked only whether somebody was signed in, so anybody with the anon key
+(it is in the web bundle) could `signInAnonymously()`, name themselves, create a household and use
+the whole app with no address and no confirmation email — including `read-label`, whose fifty daily
+reads are per household on the operator's Gemini key. Checked on 25 September 2026: the three
+anonymous users date from 27 July and none has a profile, so it was never used.
 
-The lint fires because the policies are declared `to public` and the *project* still has anonymous
-sign-ins enabled. That setting is a leftover: it existed for the retired product's QR public
-reporting (`?report=<token>`), which no longer has a client. **Turning it off at Auth → Providers
-→ Anonymous sign-ins would silence 46 advisories across both schemas and remove a sign-in route
-nothing uses** — but it would also disable that flow in the frozen archive, so it is a deliberate
-call rather than a tidy-up. Not done.
+Closed in two halves:
+
+- **`20260926100000_an_anonymous_session_is_not_an_account`** — triggers on `home.profiles` and
+  `home.household_members` refuse an anonymous user, whatever function is doing the inserting.
+  `supabase/tests/anonymous_sessions.sql` replays it. This holds however the switch below is set.
+- **Auth → Providers → Anonymous sign-ins: off.** The setting existed for the retired product's QR
+  public reporting (`?report=<token>`), which has no client. It was left on as "a deliberate call"
+  on the premise above; with the premise gone there is nothing on the other side of the call.
+  Turning it off also silences the advisories across both schemas.
 
 ### Storage buckets
 
@@ -214,9 +222,10 @@ Their function secrets, which are not recoverable from anywhere else:
 is used by nothing else — Auth's SMTP password is a *separate* Resend key — so it goes when the
 functions do.
 
-### Auth — shared by both schemas, unchanged by the pivot
+### Auth — shared by both schemas
 
-Because `auth.users` sits outside both schemas, none of this needed touching:
+Because `auth.users` sits outside both schemas, the pivot needed none of this touching. Signing up
+has since grown settings of its own, which are the second list below.
 
 - **SMTP** is custom, pointed at Resend. Username is literally `resend` (lowercase); the password
   is a Resend **API key**, not an account password. A wrong one shows as
@@ -230,6 +239,50 @@ Because `auth.users` sits outside both schemas, none of this needed touching:
 - Don't test recovery with the dashboard's **Send password recovery** button: it sends no
   `redirectTo`, so it falls back to the Site URL and can sign someone in without asking for a new
   password.
+
+#### Signing up — the settings the app depends on
+
+Set in the dashboard, and each one is silent when it is wrong. Recorded 25 September 2026.
+
+- **Confirm email: on** (Auth → Providers → Email). **This is load-bearing, not a preference.** An
+  invitation waits on an *address* (`home.invite_to_household`, matched through `home.my_email()`),
+  so the only thing proving the person signing up owns that address is the confirmation email. With
+  it off, anybody could sign up with an invitee's address and accept their invitation. It cannot be
+  guarded in SQL: with confirmation off, Auth stamps `email_confirmed_at` at sign-up, so an
+  unconfirmed address looks confirmed. Check it from the data rather than the dashboard — every
+  email-and-password account made in the last month should have been *sent* a confirmation:
+
+  ```sql
+  select count(*) as signed_up_unconfirmed_path
+  from auth.users
+  where created_at > now() - interval '30 days'
+    and not is_anonymous
+    and raw_app_meta_data->>'provider' = 'email'
+    and confirmation_sent_at is null;
+  ```
+
+  Anything but `0` means confirmation was off when those accounts were made (or they were created
+  by hand in the dashboard).
+- **Email template → Confirm signup** is `supabase/templates/confirm-signup.html`, pasted in, with
+  the subject `Your Snag code is {{ .Token }}`. It must carry `{{ .Token }}`: the app's *Check your
+  email* screen asks for the code, and without it that screen asks for something the email does not
+  contain. **Paste it before merging the sign-up change.** The code is what works across devices —
+  typed into the tab that asked, which keeps a household's `/join/<token>` in its address bar — and
+  what survives a mail scanner prefetching and spending the link.
+- **Redirect allow-list** must also contain `https://app.snaghq.co.nz/**` (and
+  `http://localhost:8081/**` for local work). `signUpWithEmail` sends `emailRedirectTo` as the app's
+  own origin plus `/join/<token>` when there is one; an address not on the list is swapped for the
+  Site URL without a word, and a scanner who taps the link lands on *Set up your house* instead of
+  the join question.
+- **Minimum password length: 8** (Auth → Providers → Email). The app says eight and so does
+  `/reset-password`; this is what enforces it. Existing shorter passwords still sign in — Auth
+  checks the minimum only when a password is set.
+- **Leaked password protection: on** (Auth → Providers → Email → *Prevent use of leaked
+  passwords*; Pro plan). The advisor flags it as off. The app words the refusal
+  (`weak_password` with reason `pwned`) as "has turned up in a data breach".
+- **Anonymous sign-ins: off.** See *Anonymous sign-ins reached `home`* above.
+- **Resend click tracking: off** for the domain Auth's SMTP sends from. Tracking rewrites every
+  link, and a rewritten confirmation or recovery link is one Auth no longer recognises.
 
 ### The staff portal — Google sign-in, a staff list, and one email
 
@@ -326,7 +379,8 @@ One account, four entirely separate paths into it, which fail independently:
 
 - **HTTP API** — used by `notify-snag` (retired product only), and by the staff portal's reply
   email (a Next server action on the staff site; see *The staff portal* above).
-- **SMTP** — used by Supabase Auth for password recovery. This is the one the home app depends on.
+- **SMTP** — used by Supabase Auth for password recovery and the sign-up code. This is the one the
+  home app depends on.
 - **Receiving** — `bills.snaghq.co.nz`, a receive-only domain (sending disabled), for bills
   forwarded to a project. Resend posts `email.received` to the `inbound-bill` edge function.
 

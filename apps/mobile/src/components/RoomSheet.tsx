@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 import Sheet from './Sheet';
+import KindPill from './KindPill';
 import { AddRow, Group, Row, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { formatMoney, inclGst, isUndecided } from '../lib/supabase';
 import { formatExactDate, groupBySupplier, isInsideAnotherBill } from '@snag/supabase-queries';
-import type { ProjectExpectedCost, ProjectItem, ProjectQuote, ProjectQuoteRoom } from '../types';
+import { PROJECT_QUOTE_KIND_LABELS, type ProjectExpectedCost, type ProjectItem, type ProjectQuote, type ProjectQuoteRoom } from '../types';
 import type { RoomRow } from '../lib/supabase';
 
 interface Props {
@@ -41,6 +42,11 @@ interface Props {
  * *MSC Consulting Group Ltd · 4 bills* rather than the same name four times.
  * The heading's figure is what the rows under it add up to, and it folds; a
  * supplier with one price is the one row it always was.
+ *
+ * **Every price says what it is.** The list mixes quotes and invoices, and a
+ * row reading *Not agreed yet* only implied it was a quote — so each row
+ * carries a *Quote* or *Invoice* pill (`KindPill`). A label, not a control: it
+ * is changed from the price's own sheet, which the row opens.
  */
 export default function RoomSheet({
   visible, room, items, quotes, quoteRooms, expected, onClose, onOpenThing, onOpenPrice, onOpenExpected, onAdd, onRemove,
@@ -121,6 +127,7 @@ export default function RoomSheet({
                   <Row
                     key={q.id}
                     title={q.supplier ?? 'No supplier named'}
+                    tag={<KindPill label={PROJECT_QUOTE_KIND_LABELS[q.kind]} />}
                     subtitle={[q.detail, shareText(q), statusText(q)].filter(Boolean).join(' · ')}
                     value={formatMoney(q.amountIncl)}
                     dim={q.status === 'declined'}
@@ -146,7 +153,8 @@ export default function RoomSheet({
                   <Row
                     key={q.id}
                     indent
-                    title={q.detail ?? (q.dated ? formatExactDate(q.dated) : q.kind === 'invoice' ? 'A bill' : 'A quote')}
+                    title={q.detail ?? (q.dated ? formatExactDate(q.dated) : q.kind === 'invoice' ? 'An invoice' : 'A quote')}
+                    tag={<KindPill label={PROJECT_QUOTE_KIND_LABELS[q.kind]} />}
                     subtitle={[
                       q.detail && q.dated ? formatExactDate(q.dated) : null,
                       shareText(q),
@@ -214,7 +222,7 @@ export function describeSupplierGroup(rows: ProjectQuote[]): { subtitle: string;
   const toPay = bills.reduce((total, q) => total + (q.unpaid ?? 0), 0);
   const parts = [
     quotes.length > 0 ? count(quotes.length, 'quote', 'quotes') : null,
-    bills.length > 0 ? count(bills.length, 'bill', 'bills') : null,
+    bills.length > 0 ? count(bills.length, 'invoice', 'invoices') : null,
     bills.length > 0 && quotes.length > 0 ? `${formatMoney(billed)} billed` : null,
     bills.length === 0 ? null : toPay > 0 ? `${formatMoney(toPay)} to pay` : 'Paid',
   ];

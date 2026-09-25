@@ -94,3 +94,76 @@ it('holds the sheet open on a date the calendar has not got', async () => {
   expect(onSave).not.toHaveBeenCalled();
   expect(onClose).not.toHaveBeenCalled();
 });
+
+/*
+ * A project cannot finish before it started. The box somebody just changed is
+ * the one they meant, and the other moves to meet it — with a line saying so.
+ */
+
+it('fills an empty start with the finish when the project already finished, never with today', async () => {
+  // The Roof: finished in June 2024, recorded in September 2026 with no start.
+  const { r, onSave } = open({ status: 'planned', finishedOn: '2024-06-25' });
+  TestRenderer.act(() => tap(r, 'Complete').props.onPress());
+  expect(boxes(r)[0].props.value).toBe('25/06/2024');
+  await done(r);
+  expect(onSave).toHaveBeenCalledWith({ status: 'done', startedOn: '2024-06-25', finishedOn: '2024-06-25' });
+});
+
+it('moves the start back to a finish set before it, and says so', async () => {
+  const { r, onSave } = open({ status: 'done', startedOn: '2026-03-03', finishedOn: '2026-09-01' });
+  const finished = boxes(r)[1];
+  TestRenderer.act(() => finished.props.onChangeText('25/06/2024'));
+  TestRenderer.act(() => boxes(r)[1].props.onBlur());
+  expect(boxes(r)[0].props.value).toBe('25/06/2024');
+  r.getByText('Started moved to 25/06/2024 — a job can’t finish before it starts.');
+  await done(r);
+  expect(onSave).toHaveBeenCalledWith({ status: 'done', startedOn: '2024-06-25', finishedOn: '2024-06-25' });
+});
+
+it('moves the finish forward to a start set after it', async () => {
+  const { r, onSave } = open({ status: 'done', startedOn: '2026-03-03', finishedOn: '2026-09-01' });
+  TestRenderer.act(() => boxes(r)[0].props.onChangeText('10/09/2026'));
+  TestRenderer.act(() => boxes(r)[0].props.onBlur());
+  expect(boxes(r)[1].props.value).toBe('10/09/2026');
+  r.getByText('Finished moved to 10/09/2026 — a job can’t finish before it starts.');
+  await done(r);
+  expect(onSave).toHaveBeenCalledWith({ status: 'done', startedOn: '2026-09-10', finishedOn: '2026-09-10' });
+});
+
+it('orders a day the calendar filled and blurred in one gesture', () => {
+  // The calendar writes the box and leaves it before React re-renders, so the
+  // blur has to read what was just written rather than the state before it.
+  const { r } = open({ status: 'done', startedOn: '2026-03-03', finishedOn: '2026-09-01' });
+  const finished = boxes(r)[1];
+  TestRenderer.act(() => {
+    finished.props.onChangeText('25/06/2024');
+    finished.props.onBlur();
+  });
+  expect(boxes(r)[0].props.value).toBe('25/06/2024');
+});
+
+it('orders the dates on Done when the box was never left, the edited one winning', async () => {
+  const { r, onSave } = open({ status: 'done', startedOn: '2026-03-03', finishedOn: '2026-09-01' });
+  TestRenderer.act(() => boxes(r)[1].props.onChangeText('01/01/2026'));
+  await done(r);
+  expect(onSave).toHaveBeenCalledWith({ status: 'done', startedOn: '2026-01-01', finishedOn: '2026-01-01' });
+});
+
+it('leaves dates in order alone and says nothing', async () => {
+  const { r, onSave } = open({ status: 'done', startedOn: '2026-03-03', finishedOn: '2026-09-01' });
+  TestRenderer.act(() => boxes(r)[1].props.onChangeText('02/09/2026'));
+  TestRenderer.act(() => boxes(r)[1].props.onBlur());
+  expect(r.root.findAll((n) => typeof n.props.children === 'string' && n.props.children.includes('moved to'))).toHaveLength(0);
+  await done(r);
+  expect(onSave).toHaveBeenCalledWith({ status: 'done', startedOn: '2026-03-03', finishedOn: '2026-09-02' });
+});
+
+it('does nothing when the status already chosen is pressed again', async () => {
+  // It used to re-run the fill, which is how an empty start became today on a
+  // project that finished two years ago.
+  const { r, onSave } = open({ status: 'done', finishedOn: '2024-06-25' });
+  TestRenderer.act(() => tap(r, 'Complete').props.onPress());
+  expect(boxes(r)[0].props.value).toBe('');
+  await done(r);
+  expect(onSave).toHaveBeenCalledWith({ status: 'done', startedOn: null, finishedOn: '2024-06-25' });
+});

@@ -1628,7 +1628,8 @@ are the palette's warning and alarm hues, so no hue was added.
 **Status is a pill beside the date.** `done` reads **Complete** (`PROJECT_STATUS_LABELS`); the
 enum is unchanged. Nothing could change a project's status after it was started. The pill under
 the name opens `ProjectStatusSheet`: Planned · Underway · Complete, with the date each move needs
-(Started, Finished) filled with today when empty. It is one `update_project` on Done, and a date
+(Started, Finished) filled when empty — today, or the finish when the project already finished (see
+*A project finishes after it starts* below). It is one `update_project` on Done, and a date
 the calendar has not got holds the sheet open. Leaving Complete clears the finish date, and going
 back to Planned leaves the start date alone. The pill takes the status hues a job's
 `StatusBadge` uses. It replaces nothing: the status chips below were removed for the height they
@@ -1681,6 +1682,71 @@ another, confirm, done. Four things are load-bearing:
 `ProjectsScreen.test.tsx`, `suppliers.test.ts`, `ProjectStatusSheet.test.tsx`,
 `SupplierSheet.test.tsx`, `SupplierList.test.tsx` and `ProjectDetailScreen.test.tsx` pin the
 above; `project_scenarios.sql` S6 pins the merge and the payment file.
+
+### A project finishes after it starts, has a name you can change, and every price says what it is
+
+Four fixes asked for together (September 2026). **Where they disagree with anything above, this
+section wins.**
+
+**A project cannot finish before it started.** The status sheet filled an empty *Started* with
+today whenever *Complete* was chosen and never looked at *Finished* — and `Segmented` fires on the
+option already lit, so tapping *Complete* again on a roof finished in June 2024 made it start in
+September 2026. Now:
+- **The box just changed wins, and the other moves to meet it**, with one line saying which moved
+  (*Started moved to 25/06/2024 — a job can't finish before it starts.*). Pull the finish back
+  and the start follows; push the start past the finish and the finish follows. The user chose
+  this over refusing. `orderProjectDates` and `defaultStartDate` (`projectDates.ts`, pinned by
+  `projectDates.test.ts`) are the rule, and both date sheets use them: `ProjectStatusSheet` and the
+  *Already finished* step of `AddProjectSheet`.
+- **It runs on blur and again on Done**, because on native a press does not reliably blur a box.
+  The boxes live in a ref beside the state, for the reason `draftRef` does on the thing page: the
+  calendar fills a box and blurs it before React re-renders.
+- **An empty start takes the finish when the finish is already past**, never today.
+- **Pressing the status already lit does nothing**, as every chip row here does.
+- **The server refuses it in words.** `20260927090000` adds a `before insert or update` trigger
+  on `home.projects` (*A project can't finish before it started*) and a check constraint
+  underneath it; no live project broke it when it was added.
+
+**A project's name changes from its title.** It was asked on the first step and never again.
+`ProjectTitle` makes the large title, with a pencil beside it, a box in the same type. It follows
+the saving rule: Return, leaving the box, and leaving the page (`beforeRemove`) write it; an
+unchanged name writes nothing; an emptied one puts the old name back, as an item's title box
+does. The box stops at the column's 80 characters, and the trigger words a longer name rather than
+letting `projects_name_check` surface. A one-box sheet with a Save button was rejected because the
+saving rule keeps buttons for sheets that edit two fields together.
+
+**Every price says what it is — `KindPill` — and the pill is how you change it.**
+- **On an emailed card** the *Invoice / Quote / Paperwork* pill opens `KindSheet`, and a press
+  writes `update_invoice_review(kind)`, clearing *guessed*. The pencil's sheet still asks it too;
+  the pill exists because nobody found it behind the pencil.
+- **On a price** (`PriceSheet`) the pill above the figure opens *Quote / Invoice*. Paperwork is
+  not offered, because a price cannot be paperwork. The change goes through
+  **`home.set_quote_kind`**, its own function for `set_quote_status`'s reason: it moves money
+  between Agreed and Invoiced. It refuses, in words naming the fix, every change the money model
+  says cannot exist:
+  - **To a quote:** refused while payments are recorded against it, while it is a claim or pays a
+    schedule stage, or while it sits inside another bill or holds one.
+  - **To an invoice:** refused while claims are against it, while it is broken into lines or sets
+    money aside, while it has a schedule, or while it answers a set-aside.
+  - **Either way** the status goes back to `tbc` (a declined quote that becomes an invoice counts
+    again, since an invoice counts unless declined), and a quote drops its due date.
+- **`update_quote` no longer changes the kind.** It keeps `p_kind` in its signature, because a
+  positional gap is a different function, but refuses one that differs. `QuoteUpdate` has no
+  `kind`, so a caller trying it gets a compile error.
+- **Every row under *Quotes and bills*** in a room sheet carries the pill as a label, through
+  `Row`'s `tag` slot. It is never a control there: the row is the tap, and the price's sheet is
+  where the kind is changed. Lists that hold one kind (*To pay*, *To decide*) do not repeat it.
+
+**The paper is an *invoice*, by the user's decision.** Where the project page names a single paper
+or counts them, it says invoice: *An invoice* on the + sheet's first question, *N invoices* under a
+supplier's heading, *Delete invoice*, and the pill. *To pay*, *billed* (a verb), *Bills waiting*
+(a deck that also holds quotes and paperwork) and *Part of another bill?* are unchanged.
+
+`ProjectStatusSheet.test.tsx`, `AddProjectSheet.test.tsx`, `ProjectTitle.test.tsx`,
+`InvoiceReviewCard.test.tsx`, `PriceSheet.test.tsx`, `RoomSheet.test.tsx`, `updateQuote.test.ts`
+and `ProjectDetailScreen.test.tsx` pin the above. `supabase/tests/kinds_and_dates.sql` replays
+every refusal through the functions against a local stack, and asserts that Invoiced moves when a
+kind changes.
 
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;

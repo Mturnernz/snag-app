@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
 } from 'react-native';
@@ -9,7 +9,9 @@ import MoneyField from './MoneyField';
 import DateField from './DateField';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
-import { parseLooseDate, formatLooseDate, type ProjectInput } from '@snag/supabase-queries';
+import {
+  parseLooseDate, formatDayFirst, formatLooseDate, orderProjectDates, type ProjectDateBox, type ProjectInput,
+} from '@snag/supabase-queries';
 import { Location, ProjectStatus, PROJECT_STATUS_LABELS } from '../types';
 
 type Step = 'name' | 'rooms' | 'when';
@@ -92,6 +94,11 @@ export default function AddProjectSheet({
   const [startedOn, setStartedOn] = useState('');
   const [targetOn, setTargetOn] = useState('');
   const [finishedOn, setFinishedOn] = useState('');
+  const [datesMoved, setDatesMoved] = useState<string | null>(null);
+  // What is in the two boxes, beside the state, for the reason the status
+  // sheet gives: the calendar writes and blurs a box before React re-renders.
+  const dates = useRef({ started: '', finished: '' });
+  const lastDate = useRef<ProjectDateBox>('finished');
   const [budget, setBudget] = useState('');
   const [budgetIncl, setBudgetIncl] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -107,6 +114,9 @@ export default function AddProjectSheet({
     setStartedOn('');
     setTargetOn('');
     setFinishedOn('');
+    setDatesMoved(null);
+    dates.current = { started: '', finished: '' };
+    lastDate.current = 'finished';
     setBudget('');
     setBudgetIncl(true);
     setBusy(false);
@@ -173,8 +183,36 @@ export default function AddProjectSheet({
     setStep(to);
   }
 
+  function typeDate(box: ProjectDateBox, text: string) {
+    dates.current[box] = text;
+    lastDate.current = box;
+    if (box === 'started') setStartedOn(text);
+    else setFinishedOn(text);
+  }
+
+  /**
+   * An already-finished project cannot have finished before it started. The box
+   * just changed wins and the other moves to meet it — `ProjectStatusSheet`'s
+   * rule, from the one other place both dates are asked.
+   */
+  function orderDates(edited: ProjectDateBox): { started: string | null; finished: string | null } {
+    const started = parseLooseDate(dates.current.started) ?? null;
+    const finished = parseLooseDate(dates.current.finished) ?? null;
+    if (status !== 'done') return { started, finished };
+    const next = orderProjectDates(started, finished, edited);
+    if (next.moved) {
+      const day = formatDayFirst(next.moved === 'started' ? next.startedOn : next.finishedOn);
+      dates.current[next.moved] = day;
+      if (next.moved === 'started') setStartedOn(day);
+      else setFinishedOn(day);
+      setDatesMoved(`${next.moved === 'started' ? 'Started' : 'Finished'} moved to ${day} — a job can’t finish before it starts.`);
+    }
+    return { started: next.startedOn, finished: next.finishedOn };
+  }
+
   async function save() {
     if (busy || !name.trim()) return;
+    const ordered = orderDates(lastDate.current);
     setBusy(true);
     try {
       await onCreate({
@@ -182,9 +220,9 @@ export default function AddProjectSheet({
         name: name.trim(),
         status,
         rooms,
-        startedOn: parseLooseDate(startedOn) ?? null,
+        startedOn: ordered.started,
         targetOn: parseLooseDate(targetOn) ?? null,
-        finishedOn: parseLooseDate(finishedOn) ?? null,
+        finishedOn: ordered.finished,
         budget: budget.trim() ? Number(budget.replace(/[^0-9.]/g, '')) || null : null,
         budgetInclGst: budgetIncl,
       });
@@ -346,7 +384,8 @@ export default function AddProjectSheet({
               <DateField
                 label="Started"
                 value={startedOn}
-                onChangeValue={setStartedOn}
+                onChangeValue={(text) => typeDate('started', text)}
+                onBlur={() => { lastDate.current = 'started'; orderDates('started'); }}
                 pickerTitle="When did it start?"
               />
             ) : null}
@@ -355,7 +394,8 @@ export default function AddProjectSheet({
               <DateField
                 label="Finished"
                 value={finishedOn}
-                onChangeValue={setFinishedOn}
+                onChangeValue={(text) => typeDate('finished', text)}
+                onBlur={() => { lastDate.current = 'finished'; orderDates('finished'); }}
                 pickerTitle="When did it finish?"
               />
             ) : (
@@ -367,6 +407,10 @@ export default function AddProjectSheet({
                 pickerTitle="Hoping to finish by"
               />
             )}
+
+            {datesMoved && status === 'done' ? (
+              <Text style={styles.hint} accessibilityLiveRegion="polite">{datesMoved}</Text>
+            ) : null}
 
             <MoneyField
               label="Budget, if there is one"

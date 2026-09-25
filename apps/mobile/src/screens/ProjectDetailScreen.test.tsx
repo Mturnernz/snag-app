@@ -46,6 +46,7 @@ const mock_filePaperwork = jest.fn().mockResolvedValue({});
 const mock_rereadInvoiceReview = jest.fn().mockResolvedValue({ cards: 4 });
 const mock_renameSupplier = jest.fn().mockResolvedValue(1);
 const mock_updateProject = jest.fn().mockResolvedValue({});
+const mock_updateInvoiceReview = jest.fn().mockResolvedValue({});
 const mock_updateExpectedCost = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
@@ -58,6 +59,7 @@ jest.mock('../lib/supabase', () => {
     filePaperwork: (...a: unknown[]) => mock_filePaperwork(...a),
     rereadInvoiceReview: (...a: unknown[]) => mock_rereadInvoiceReview(...a),
     renameSupplier: (...a: unknown[]) => mock_renameSupplier(...a),
+    updateInvoiceReview: (...a: unknown[]) => mock_updateInvoiceReview(...a),
     declineInvoiceReview: jest.fn(), restoreInvoiceReview: jest.fn(), deleteInvoiceReview: jest.fn(),
     addExpectedCostLine: jest.fn(), addMilestone: jest.fn(), addQuoteLine: jest.fn(),
     createElement: jest.fn(), createExpectedCost: jest.fn(), createLocation: jest.fn(),
@@ -218,7 +220,7 @@ describe('what do we have to pay', () => {
       ],
     }));
     r.getByText('MSC Consulting');
-    r.getByText('2 bills · 1 overdue');
+    r.getByText('2 invoices · 1 overdue');
     r.getByText('$4,002');
     r.getByText('Overdue since 20 Jul 2026');
     r.getByText('Due 30 Sep 2026');
@@ -234,7 +236,7 @@ describe('what do we have to pay', () => {
         bill({ id: 'm2', supplier: 'MSC', detail: 'August', unpaid: 50 }),
       ],
     }));
-    await press(r, 'MSC, 2 bills, $150 to pay');
+    await press(r, 'MSC, 2 invoices, $150 to pay');
     r.getByText('$150');
     expect(r.queryByText('June')).toBeNull();
   });
@@ -266,7 +268,7 @@ describe('one way in for money', () => {
   it('asks what you have got, and reads the supplier names only then', async () => {
     const r = await arrange();
     expect(mock_getSupplierNames).not.toHaveBeenCalled();
-    await press(r, 'Add a quote, bill or receipt');
+    await press(r, 'Add a quote, invoice or receipt');
     r.getByText('money sheet open: {}');
     expect(mock_getSupplierNames).toHaveBeenCalledTimes(1);
   });
@@ -402,6 +404,17 @@ describe('one email, several papers', () => {
     await press(r, 'File it');
     expect(mock_filePaperwork).toHaveBeenCalledWith('rv3', { quoteId: null, elementId: null });
     expect(mock_showToast).toHaveBeenCalledWith('Filed with the job’s paperwork');
+  });
+
+  it('says what a card is from the pill on it, writing only the card', async () => {
+    const r = await arrange(downstairs({ invoiceReviews: [card()] }));
+    const calls = mock_getProjectPage.mock.calls.length;
+    await press(r, 'Invoice. Change what it is');
+    await press(r, 'Quote');
+    expect(mock_updateInvoiceReview).toHaveBeenCalledWith('rv1', { kind: 'quote' });
+    expect(mock_approveInvoiceReview).not.toHaveBeenCalled();
+    expect(mock_showToast).toHaveBeenCalledWith('Now a quote');
+    expect(mock_getProjectPage.mock.calls.length).toBe(calls + 1);
   });
 
   it('adds a quote as a quote, and says nothing is agreed', async () => {
@@ -580,6 +593,23 @@ describe('documents', () => {
     await press(r, 'Remove Floor plan.pdf');
     expect(mock_updateProject).toHaveBeenCalledWith('p1', { documentPaths: [] });
     expect(mock_showToast).toHaveBeenCalledWith('Document removed');
+  });
+});
+
+describe('the name', () => {
+  it('is renamed from the title, in one write, and re-read', async () => {
+    const r = await arrange();
+    await press(r, 'Downstairs conversion. Rename this project');
+    const box = r.root.findAll(
+      (n: any) => typeof n.type === 'string' && n.props?.accessibilityLabel === 'Project name', { deep: true },
+    )[0];
+    TestRenderer.act(() => box.props.onChangeText('Downstairs and deck'));
+    const reads = mock_getProjectPage.mock.calls.length;
+    await TestRenderer.act(async () => { box.props.onBlur(); });
+    expect(mock_updateProject).toHaveBeenCalledTimes(1);
+    expect(mock_updateProject).toHaveBeenCalledWith('p1', { name: 'Downstairs and deck' });
+    expect(mock_showToast).toHaveBeenCalledWith('Renamed');
+    expect(mock_getProjectPage.mock.calls.length).toBe(reads + 1);
   });
 });
 

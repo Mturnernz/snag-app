@@ -5003,7 +5003,10 @@ export interface QuoteUpdate {
   detail?: string | null;
   amount?: number | null;
   amountInclGst?: boolean;
-  kind?: ProjectQuoteKind;
+  // No `kind`: whether a paper is a quote or an invoice moves money between
+  // Agreed and Invoiced, so it is `setQuoteKind`'s alone — trying to send it
+  // beside a corrected supplier is a compile error rather than a write the
+  // server now refuses.
   basis?: ProjectQuoteBasis;
   dated?: string | null;
   notes?: string | null;
@@ -5045,7 +5048,7 @@ export async function updateQuote(
     p_detail: update.detail ?? null,
     p_amount: update.amount ?? null,
     p_amount_incl_gst: update.amountInclGst ?? null,
-    p_kind: update.kind ?? null,
+    p_kind: null,
     p_basis: update.basis ?? null,
     p_dated: update.dated ?? null,
     p_notes: update.notes ?? null,
@@ -5083,6 +5086,29 @@ export async function setQuoteStatus(
     p_status: status,
   });
   if (error) throw asError(error, "That didn’t save");
+}
+
+/**
+ * Saying a paper is a quote or an invoice — deliberately not part of
+ * `updateQuote`, for `setQuoteStatus`'s reason: it moves money between Agreed
+ * and Invoiced, and is the one thing done to a price whose effect on the
+ * totals the server has to check.
+ *
+ * `home.set_quote_kind` refuses, in words naming the fix, any change the rest
+ * of the money model says cannot exist — a paid bill becoming a quote, a claim
+ * becoming a quote, a contract with claims or a build-up becoming a bill — and
+ * either way puts the status back to *not agreed yet*.
+ */
+export async function setQuoteKind(
+  client: SupabaseClient,
+  quoteId: string,
+  kind: Exclude<ProjectQuoteKind, 'receipt'>
+): Promise<void> {
+  const { error } = await client.rpc('set_quote_kind', {
+    p_quote_id: quoteId,
+    p_kind: kind,
+  });
+  if (error) throw asError(error, "That didn’t change");
 }
 
 // ------------------------------------------------------------- lines
@@ -6240,4 +6266,5 @@ export * from './split';
 export * from './support';
 export * from './papers';
 export * from './suppliers';
+export * from './projectDates';
 export * from './expectations';

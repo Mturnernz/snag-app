@@ -254,6 +254,53 @@ describe('reading again', () => {
   });
 });
 
+/*
+ * What the paper is, said on the card and changed from there. The reader only
+ * guessed; the person holding the paper knows, and should not have to find the
+ * pencil to say so.
+ */
+describe('the kind pill', () => {
+  const pill = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll((n: any) => n.props?.accessibilityLabel === label && !!n.props?.onPress, { deep: true })[0];
+
+  it('is a label, not a control, when nothing can change it', () => {
+    // Twice: the pill, and the label on the invoice number.
+    const { r } = arrange();
+    expect(r.getAllByText('Invoice')).toHaveLength(2);
+    expect(pill(r, 'Invoice. Change what it is')).toBeUndefined();
+  });
+
+  it('opens the three answers, each saying what it does to the money', () => {
+    const { r } = arrange({}, { onChangeKind: jest.fn().mockResolvedValue(undefined) });
+    TestRenderer.act(() => pill(r, 'Invoice. Change what it is').props.onPress());
+    r.getByText('Allocated to the job as something to pay');
+    r.getByText('Added as a price nobody has agreed to yet');
+    r.getByText('Filed on the job — it counts towards no figure');
+  });
+
+  it('writes the kind chosen, and says when the kind was a guess', async () => {
+    const onChangeKind = jest.fn().mockResolvedValue(undefined);
+    const { r } = arrange({ inferred: ['kind'] }, { onChangeKind });
+    const open = pill(r, 'Invoice, guessed. Change what it is');
+    TestRenderer.act(() => open.props.onPress());
+    await TestRenderer.act(async () => { pill(r, 'Paperwork').props.onPress(); });
+    expect(onChangeKind).toHaveBeenCalledWith('paperwork');
+  });
+
+  it('writes nothing when the kind it already is is chosen', async () => {
+    const onChangeKind = jest.fn().mockResolvedValue(undefined);
+    const { r } = arrange({ kind: 'quote' }, { onChangeKind });
+    TestRenderer.act(() => pill(r, 'Quote. Change what it is').props.onPress());
+    await TestRenderer.act(async () => { pill(r, 'Quote').props.onPress(); });
+    expect(onChangeKind).not.toHaveBeenCalled();
+  });
+
+  it('stops offering the change while the card is being ruled on', () => {
+    const { r } = arrange({}, { onChangeKind: jest.fn(), busy: true });
+    expect(pill(r, 'Invoice. Change what it is')).toBeUndefined();
+  });
+});
+
 describe('a bill for money that was earmarked', () => {
   const earmark = (over: any = {}): any => ({
     id: 'x1', projectId: 'p1', elementId: null, name: 'ReliaBuilder payment 3/4',

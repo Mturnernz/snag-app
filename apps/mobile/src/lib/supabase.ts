@@ -427,6 +427,8 @@ export const updateQuote = (quoteId: string, update: queries.QuoteUpdate) =>
 
 export const setQuoteStatus = (quoteId: string, status: ProjectQuoteStatus) =>
   queries.setQuoteStatus(supabase, quoteId, status);
+export const setQuoteKind = (quoteId: string, kind: 'quote' | 'invoice') =>
+  queries.setQuoteKind(supabase, quoteId, kind);
 
 export const deleteQuote = (quoteId: string) => queries.deleteQuote(supabase, quoteId);
 

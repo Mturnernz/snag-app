@@ -49,7 +49,7 @@ interface SetAsideRow { name: string; amount: string; incl: boolean; place: Plac
 
 const KINDS: { kind: MoneyKind; title: string; subtitle: string; icon: 'document-text-outline' | 'receipt-outline' | 'checkmark-circle-outline' | 'time-outline'; tint: string; ink: string }[] = [
   { kind: 'quote', title: 'A quote or price', subtitle: 'Something you’re considering', icon: 'document-text-outline', tint: Colors.status.openBg, ink: Colors.status.open },
-  { kind: 'bill', title: 'A bill', subtitle: 'Something to pay', icon: 'receipt-outline', tint: Colors.status.doingBg, ink: Colors.status.doing },
+  { kind: 'bill', title: 'An invoice', subtitle: 'Something to pay', icon: 'receipt-outline', tint: Colors.status.doingBg, ink: Colors.status.doing },
   { kind: 'receipt', title: 'A receipt', subtitle: 'Already paid', icon: 'checkmark-circle-outline', tint: Colors.primaryLight, ink: Colors.primary },
   { kind: 'expected', title: 'A cost we’re expecting', subtitle: 'No price yet', icon: 'time-outline', tint: Colors.sunken, ink: Colors.textMuted },
 ];

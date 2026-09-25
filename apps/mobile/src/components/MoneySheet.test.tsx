@@ -104,12 +104,12 @@ describe('what have you got?', () => {
   it('asks in the words on the paper', () => {
     const { r } = open();
     r.getByText('What have you got?');
-    for (const option of ['A quote or price', 'A bill', 'A receipt', 'A cost we’re expecting']) r.getByText(option);
+    for (const option of ['A quote or price', 'An invoice', 'A receipt', 'A cost we’re expecting']) r.getByText(option);
   });
 
   it('adds a supplier nobody has used before, with no list to set up first', async () => {
     const { r } = open();
-    await press(r, 'A bill');
+    await press(r, 'An invoice');
     await pickSupplier(r, 'Tile Space');
     r.getByText('New bill');
     r.getByText('Tile Space');
@@ -195,7 +195,7 @@ describe('a bill', () => {
 
   it('from somebody with an agreed price, asks whether it is part of it', async () => {
     const { r } = open({ quotes: [contract] });
-    await press(r, 'A bill');
+    await press(r, 'An invoice');
     await pickSupplier(r, 'ReliaBuilder');
     await type(r, 'Amount', '40000');
     r.getByText('Is this part of an agreed price?');
@@ -215,7 +215,7 @@ describe('a bill', () => {
   it('keeps asking however many agreed prices the supplier has', async () => {
     const variation = quote({ id: 'c2', projectId: 'p1', supplier: 'ReliaBuilder', detail: 'Variation — stone benchtop', amount: 1200, status: 'accepted' });
     const { r } = open({ quotes: [contract, variation] });
-    await press(r, 'A bill');
+    await press(r, 'An invoice');
     await pickSupplier(r, 'ReliaBuilder');
     r.getByText('Building contract');
     r.getByText('Variation — stone benchtop');
@@ -224,7 +224,7 @@ describe('a bill', () => {
 
   it('that is extra is not a claim on anything', async () => {
     const { r } = open({ quotes: [contract] });
-    await press(r, 'A bill');
+    await press(r, 'An invoice');
     await pickSupplier(r, 'ReliaBuilder');
     await type(r, 'Amount', '800');
     await press(r, 'No, it’s extra');
@@ -241,7 +241,7 @@ describe('a bill that is already on the job', () => {
 
   it('keeps the invoice number as a number, not folded into what it is for', async () => {
     const { r } = open();
-    await press(r, 'A bill');
+    await press(r, 'An invoice');
     await pickSupplier(r, 'Tile Space');
     await type(r, 'Amount', '120');
     await type(r, 'What it’s for', 'Grout');
@@ -255,7 +255,7 @@ describe('a bill that is already on the job', () => {
   it('says which bill it looks like as soon as the number matches, and still saves', async () => {
     const onOpenBill = jest.fn();
     const { r } = open({ quotes: [onJob], onOpenBill });
-    await press(r, 'A bill');
+    await press(r, 'An invoice');
     await pickSupplier(r, 'MSC Consulting');
     await type(r, 'Amount', '500');
     expect(r.queryByText('Save anyway')).toBeNull();
@@ -270,7 +270,7 @@ describe('a bill that is already on the job', () => {
 
   it('with no number, warns on the same supplier and figure', async () => {
     const { r } = open({ quotes: [onJob] });
-    await press(r, 'A bill');
+    await press(r, 'An invoice');
     await pickSupplier(r, 'MSC Consulting');
     await type(r, 'Amount', '437');
     r.getByText('Save anyway');
@@ -278,7 +278,7 @@ describe('a bill that is already on the job', () => {
 
   it('says nothing when the number is different, even for the same figure', async () => {
     const { r } = open({ quotes: [onJob] });
-    await press(r, 'A bill');
+    await press(r, 'An invoice');
     await pickSupplier(r, 'MSC Consulting');
     await type(r, 'Amount', '437');
     await type(r, 'Invoice number', 'INV87100');

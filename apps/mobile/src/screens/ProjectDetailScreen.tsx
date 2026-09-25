@@ -23,6 +23,7 @@ import FilesBySupplier from '../components/FilesBySupplier';
 import SupplierList from '../components/SupplierList';
 import SupplierSheet from '../components/SupplierSheet';
 import ProjectStatusSheet from '../components/ProjectStatusSheet';
+import ProjectTitle from '../components/ProjectTitle';
 import EmailBillsSheet from '../components/EmailBillsSheet';
 import ReviewBell from '../components/ReviewBell';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
@@ -457,7 +458,7 @@ export default function ProjectDetailScreen({ route }: Props) {
             onPress={() => openMoney({})}
             style={styles.addTap}
             accessibilityRole="button"
-            accessibilityLabel="Add a quote, bill or receipt"
+            accessibilityLabel="Add a quote, invoice or receipt"
           >
             <View style={styles.addDisc}>
               <Icon name="add" size={22} color={Colors.white} />
@@ -468,7 +469,13 @@ export default function ProjectDetailScreen({ route }: Props) {
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" scrollEnabled={!dragging}>
         <View style={styles.titleBlock}>
-          <Text style={groupedStyles.largeTitle} accessibilityRole="header">{project.name}</Text>
+          <ProjectTitle
+            name={project.name}
+            onRename={async (next) => {
+              await updateProject(project.id, { name: next });
+              await changed('Renamed');
+            }}
+          />
           <View style={styles.statusLine}>
             {/*
               Where the project is up to, and the one way to change it. A pill
@@ -524,6 +531,10 @@ export default function ProjectDetailScreen({ route }: Props) {
                     }
                     onOpenDuplicate={twin?.quote ? () => setOpenPrice(twin.quote!.id) : undefined}
                     onEdit={() => setChecking(review)}
+                    onChangeKind={async (next) => {
+                      await updateInvoiceReview(review.id, { kind: next });
+                      await changed(next === 'paperwork' ? 'Now paperwork' : next === 'quote' ? 'Now a quote' : 'Now an invoice');
+                    }}
                     onOpenFile={openFile}
                     landsOn={
                       paperwork ? null
@@ -650,7 +661,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                   <Row
                     key={bill.id}
                     indent={sub}
-                    title={sub ? bill.detail ?? (bill.dated ? formatExactDate(bill.dated) : 'A bill') : bill.supplier ?? 'A bill'}
+                    title={sub ? bill.detail ?? (bill.dated ? formatExactDate(bill.dated) : 'An invoice') : bill.supplier ?? 'An invoice'}
                     subtitle={[
                       sub ? null : bill.detail,
                       dueText(bill),
@@ -659,12 +670,12 @@ export default function ProjectDetailScreen({ route }: Props) {
                     tone={bill.overdue ? 'danger' : 'default'}
                     bold={!sub}
                     onPress={() => setOpenPrice(bill.id)}
-                    accessibilityLabel={sub ? `${bill.supplier}, ${bill.detail ?? 'bill'}` : undefined}
+                    accessibilityLabel={sub ? `${bill.supplier}, ${bill.detail ?? 'invoice'}` : undefined}
                     accessory={(
                       <Pill
                         label="Paid"
                         disabled={payingId !== null}
-                        accessibilityLabel={`Mark ${bill.supplier ?? 'this bill'}${sub && bill.detail ? ` ${bill.detail}` : ''} ${money$(bill.unpaid ?? 0)} as paid`}
+                        accessibilityLabel={`Mark ${bill.supplier ?? 'this invoice'}${sub && bill.detail ? ` ${bill.detail}` : ''} ${money$(bill.unpaid ?? 0)} as paid`}
                         onPress={() => pay(bill)}
                       />
                     )}
@@ -674,12 +685,12 @@ export default function ProjectDetailScreen({ route }: Props) {
                 const open = !foldedPayees.has(group.key);
                 const owed = group.rows.reduce((total, b) => total + (b.unpaid ?? 0), 0);
                 const overdue = group.rows.filter((b) => b.overdue).length;
-                const subtitle = [`${group.rows.length} bills`, overdue > 0 ? `${overdue} overdue` : null]
+                const subtitle = [`${group.rows.length} invoices`, overdue > 0 ? `${overdue} overdue` : null]
                   .filter(Boolean).join(' · ');
                 return [
                   <Row
                     key={group.key}
-                    title={group.supplier ?? 'A bill'}
+                    title={group.supplier ?? 'An invoice'}
                     subtitle={subtitle}
                     value={money$(owed)}
                     tone={overdue > 0 ? 'danger' : 'default'}

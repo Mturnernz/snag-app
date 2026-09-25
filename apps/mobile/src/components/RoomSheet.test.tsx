@@ -70,7 +70,7 @@ describe('a supplier with several bills', () => {
     // Named once, however it was typed on each bill.
     r.getByText('MSC Consulting Group Ltd');
     expect(r.queryByText('MSC CONSULTING GROUP LTD')).toBeNull();
-    r.getByText('3 bills · $437 to pay');
+    r.getByText('3 invoices · $437 to pay');
     r.getByText('$4,335.50');
     const text = r.getAllByType('Text').map((n) => n.children.join(''));
     const dates = text.filter((t) => /^\d+ \w+ 2026 · /.test(t));
@@ -93,25 +93,47 @@ describe('a supplier with several bills', () => {
 
   it('folds under its heading, keeping the heading and its figure', () => {
     const r = arrange();
-    TestRenderer.act(() => { pressable(r, 'MSC Consulting Group Ltd, 3 bills · $437 to pay').props.onPress(); });
+    TestRenderer.act(() => { pressable(r, 'MSC Consulting Group Ltd, 3 invoices · $437 to pay').props.onPress(); });
     r.getByText('MSC Consulting Group Ltd');
     r.getByText('$4,335.50');
     expect(r.queryByText('31 Aug 2026 · To pay')).toBeNull();
-    TestRenderer.act(() => { pressable(r, 'MSC Consulting Group Ltd, 3 bills · $437 to pay').props.onPress(); });
+    TestRenderer.act(() => { pressable(r, 'MSC Consulting Group Ltd, 3 invoices · $437 to pay').props.onPress(); });
     r.getByText('31 Aug 2026 · To pay');
+  });
+});
+
+// The list mixes the two kinds, and a row reading "Not agreed yet" only
+// implied it was a quote. Each price says what it is; a supplier's heading is
+// not a price and says nothing of the sort.
+describe('what each price is', () => {
+  it('puts an Invoice or Quote pill on every price, beneath a heading or on its own', () => {
+    const contract = quote({ id: 'c1', projectId: 'p1', supplier: 'Deck Co', amount: 9000, status: 'tbc' });
+    const r = arrange([...bills, contract]);
+    // Three MSC invoices beneath their heading, Gibson's on its own, and Deck Co's quote.
+    expect(r.getAllByText('Invoice')).toHaveLength(4);
+    expect(r.getAllByText('Quote')).toHaveLength(1);
+  });
+
+  it('is a label on the row, never a second thing to press', () => {
+    const r = arrange();
+    const pressablePills = r.root.findAll(
+      (n: any) => typeof n.props?.accessibilityLabel === 'string'
+        && n.props.accessibilityLabel.endsWith('Change what it is') && n.props.onPress,
+    );
+    expect(pressablePills).toHaveLength(0);
   });
 });
 
 describe('describeSupplierGroup', () => {
   it('draws a figure only when it is the sum of the rows beneath it', () => {
     expect(describeSupplierGroup([msc({ amount: 100 }), msc({ amount: 50, unpaid: 50 })]))
-      .toEqual({ subtitle: '2 bills · $50 to pay', value: '$150' });
+      .toEqual({ subtitle: '2 invoices · $50 to pay', value: '$150' });
   });
 
   it('says what is billed in words when a quote sits beside the bills', () => {
     const contract = quote({ supplier: 'MSC', amount: 3100, status: 'accepted' });
     expect(describeSupplierGroup([contract, msc({ amount: 437 })]))
-      .toEqual({ subtitle: '1 quote · 1 bill · $437 billed · Paid', value: null });
+      .toEqual({ subtitle: '1 quote · 1 invoice · $437 billed · Paid', value: null });
   });
 
   it('draws no figure for quotes alone, which may be alternatives', () => {

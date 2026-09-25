@@ -25,6 +25,7 @@ const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
 const mock_updateQuote = jest.fn().mockResolvedValue(undefined);
 const mock_setQuoteStatus = jest.fn().mockResolvedValue(undefined);
 const mock_setQuoteRooms = jest.fn().mockResolvedValue([]);
+const mock_setQuoteKind = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -35,6 +36,7 @@ jest.mock('../lib/supabase', () => {
     deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
     updateQuote: (...a: unknown[]) => mock_updateQuote(...a),
     setQuoteStatus: (...a: unknown[]) => mock_setQuoteStatus(...a),
+    setQuoteKind: (...a: unknown[]) => mock_setQuoteKind(...a),
     setQuoteRooms: (...a: unknown[]) => mock_setQuoteRooms(...a),
     setFileTags: jest.fn().mockResolvedValue(undefined),
     formatMoney: real.formatMoney,
@@ -129,7 +131,7 @@ describe('a bill', () => {
 
   it('can be deleted, and its files go with it', async () => {
     const { r, onClose } = open();
-    await press(r, 'Delete bill');
+    await press(r, 'Delete invoice');
     // The confirmation's button is the shared `Button`, found by its label prop.
     const confirm = r.root.findAll((n: any) => n.props?.label === 'Delete' && n.props?.onPress, { deep: true });
     await TestRenderer.act(async () => { confirm[0].props.onPress(); });
@@ -276,5 +278,52 @@ describe('a bill inside another bill', () => {
   it('is not offered when there is no other bill to be inside', () => {
     const { r } = open(plumber, { quotes: [plumber] });
     expect(r.queryByText('Part of another bill?')).toBeNull();
+  });
+});
+
+/**
+ * What it is, said above the figure and changed from there. The change is
+ * `setQuoteKind`'s alone, and a refusal is said in the chooser, not as a toast
+ * over a sheet that has closed.
+ */
+describe('what it is', () => {
+  it('says Invoice on a bill and Quote on a quote, as a way to change it', () => {
+    open().r.getByText('Invoice');
+    const { r } = open(quote({ id: 'q1', projectId: 'p1', supplier: 'Deck Co', amount: 9000, kind: 'quote' }));
+    node(r, 'Quote. Change what it is');
+  });
+
+  it('turns an invoice into a quote through setQuoteKind, never updateQuote', async () => {
+    const { r, onChanged } = open();
+    await press(r, 'Invoice. Change what it is');
+    await press(r, 'Quote');
+    expect(mock_setQuoteKind).toHaveBeenCalledWith('b1', 'quote');
+    expect(mock_updateQuote).not.toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalledWith('Now a quote — not agreed yet');
+  });
+
+  it('writes nothing when the kind it already is is chosen', async () => {
+    const { r } = open();
+    await press(r, 'Invoice. Change what it is');
+    await press(r, 'Invoice');
+    expect(mock_setQuoteKind).not.toHaveBeenCalled();
+  });
+
+  it('offers no paperwork, which a waiting card can be and a price cannot', async () => {
+    const { r } = open();
+    await press(r, 'Invoice. Change what it is');
+    expect(r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Paperwork', { deep: true })).toHaveLength(0);
+  });
+
+  it('says a refusal in the chooser and keeps it open', async () => {
+    mock_setQuoteKind.mockRejectedValueOnce(
+      new Error('A payment is recorded against it, and a quote can’t be paid — remove it first'),
+    );
+    const { r, onChanged } = open();
+    await press(r, 'Invoice. Change what it is');
+    await press(r, 'Quote');
+    r.getByText('A payment is recorded against it, and a quote can’t be paid — remove it first');
+    expect(onChanged).not.toHaveBeenCalled();
+    node(r, 'Quote');
   });
 });

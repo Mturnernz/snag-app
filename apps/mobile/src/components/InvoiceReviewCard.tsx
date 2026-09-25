@@ -5,6 +5,8 @@ import {
 
 import Icon from './Icon';
 import Button from './Button';
+import KindPill from './KindPill';
+import KindSheet, { type KindOption } from './KindSheet';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   describeAddressedTo, describePaidInference, documentName, formatLooseDate, formatMoney, invoiceReviewHeadline,
@@ -44,6 +46,11 @@ interface Props {
   onReread?: () => void;
   /** While a reading is on the wire. */
   rereading?: boolean;
+  /**
+   * Says what the paper is — invoice, quote or paperwork — from the pill on the
+   * card. Absent, the pill is a label; the pencil's sheet still asks it.
+   */
+  onChangeKind?: (next: InvoiceReviewKind) => Promise<void>;
 }
 
 /**
@@ -57,6 +64,13 @@ const KIND: Record<InvoiceReviewKind, { label: string; yes: string; rail: string
   quote: { label: 'Quote', yes: 'Add quote', rail: 'Add it', number: 'Quote' },
   paperwork: { label: 'Paperwork', yes: 'File it', rail: 'File it', number: 'Number' },
 };
+
+/** The three answers the pill offers, each saying what it does to the money. */
+export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
+  { value: 'invoice', label: 'Invoice', hint: 'Allocated to the job as something to pay' },
+  { value: 'quote', label: 'Quote', hint: 'Added as a price nobody has agreed to yet' },
+  { value: 'paperwork', label: 'Paperwork', hint: 'Filed on the job — it counts towards no figure' },
+];
 
 /**
  * One bill that has arrived and not been ruled on.
@@ -103,8 +117,10 @@ const KIND: Record<InvoiceReviewKind, { label: string; yes: string; rail: string
  */
 export default function InvoiceReviewCard({
   review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate, onReread, rereading,
+  onChangeKind,
 }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
+  const [choosingKind, setChoosingKind] = useState(false);
   const [width, setWidth] = useState(0);
   const [lean, setLean] = useState<SwipeDecision | null>(null);
   const [progress, setProgress] = useState(0);
@@ -221,12 +237,15 @@ export default function InvoiceReviewCard({
               {/*
                 What kind of paper it is, always — one email can hold a bill, a
                 quote and a certificate, and the button below does something
-                different for each.
+                different for each. It is also the way to say otherwise: the
+                reader only guessed, and the person holding the paper knows.
               */}
-              <View style={styles.categoryChip}>
-                <Text style={styles.categoryText}>{kind.label}</Text>
-                {wasInferred(review, 'kind') ? <Guessed /> : null}
-              </View>
+              <KindPill
+                label={kind.label}
+                guessed={wasInferred(review, 'kind')}
+                onPress={onChangeKind && !busy ? () => setChoosingKind(true) : undefined}
+                accessibilityLabel={`${kind.label}${wasInferred(review, 'kind') ? ', guessed' : ''}. Change what it is`}
+              />
               {review.category ? (
                 <View style={styles.categoryChip}>
                   <Text style={styles.categoryText}>{review.category}</Text>
@@ -373,6 +392,17 @@ export default function InvoiceReviewCard({
           />
         </View>
       </Animated.View>
+
+      {onChangeKind ? (
+        <KindSheet<InvoiceReviewKind>
+          visible={choosingKind}
+          subtitle={review.supplier}
+          options={REVIEW_KIND_OPTIONS}
+          value={review.kind}
+          onPick={onChangeKind}
+          onClose={() => setChoosingKind(false)}
+        />
+      ) : null}
     </View>
   );
 }

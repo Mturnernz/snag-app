@@ -1,4 +1,4 @@
-import { updateQuote } from '@snag/supabase-queries';
+import { setQuoteKind, updateQuote } from '@snag/supabase-queries';
 
 /**
  * What `updateQuote` actually sends.
@@ -47,13 +47,27 @@ it('sends a due date and a milestone', async () => {
 it('names every field an update can carry', async () => {
   const { client, calls } = capture();
   await updateQuote(client, 'q', {
-    supplier: 's', detail: 'd', amount: 1, amountInclGst: false, kind: 'invoice', basis: 'fixed',
+    supplier: 's', detail: 'd', amount: 1, amountInclGst: false, basis: 'fixed',
     dated: '2026-01-01', notes: 'n', supersedesLineId: 'l', photoPaths: ['p'], documentPaths: ['doc'],
     dueOn: '2026-02-02', billedThroughId: 'b', settlesMilestoneId: 'm', invoiceNumber: 'i',
   });
   const sent = Object.values(calls[0].args);
-  for (const value of ['s', 'd', 1, false, 'invoice', 'fixed', '2026-01-01', 'n', 'l', 'p', 'doc',
+  for (const value of ['s', 'd', 1, false, 'fixed', '2026-01-01', 'n', 'l', 'p', 'doc',
     '2026-02-02', 'b', 'm', 'i']) {
     expect(sent.flat()).toContain(value);
   }
+});
+
+// The kind is its own function: `update_quote` now refuses a change of kind,
+// so an update must never carry one, and the pill goes through set_quote_kind.
+it('never sends a kind with an update', async () => {
+  const { client, calls } = capture();
+  await updateQuote(client, 'q', { supplier: 's' });
+  expect(calls[0].args.p_kind).toBeNull();
+});
+
+it('changes the kind through set_quote_kind alone', async () => {
+  const { client, calls } = capture();
+  await setQuoteKind(client, 'q', 'invoice');
+  expect(calls).toEqual([{ fn: 'set_quote_kind', args: { p_quote_id: 'q', p_kind: 'invoice' } }]);
 });

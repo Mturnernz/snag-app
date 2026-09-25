@@ -49,8 +49,8 @@ import {
 import {
   billFactsOfReview, dayKey, describeDuplicate, describeEmailGroup, describeRenameReach, duplicateReviews,
   exportDateStamp, filesBySupplier, formatExactDate, formatLooseDate, groupBySupplier, pendingReviews,
-  projectDossierTable, projectExportPhotos, reviewAlert, reviewGroups, supplierDirectory,
-  type SupplierEntry, type ThingInput,
+  projectDossierTable, projectExportPhotos, remainingTone, reviewAlert, reviewGroups, supplierDirectory,
+  type RemainingTone, type SupplierEntry, type ThingInput,
 } from '@snag/supabase-queries';
 import {
   filePaperwork, setFileTags, getFileUrl, getFileUrls, rereadInvoiceReview, setInvoiceReviewRooms, updateInvoiceReview,
@@ -283,6 +283,9 @@ export default function ProjectDetailScreen({ route }: Props) {
   const barAgreed = budget ? Math.min(summary.agreed / Math.max(budget, summary.expected), 1) : 0;
   const barUndecided = budget ? Math.min(summary.undecided / Math.max(budget, summary.expected), 1 - barAgreed) : 0;
   const over = summary.left !== null && summary.left < 0;
+  // The list card's figure too, so it takes the card's colours: fern, brass
+  // within 15%, clay within 5% and over.
+  const leftTone = summary.left === null || !budget ? 'good' : remainingTone(summary.left / budget);
 
   async function usePrices() {
     try {
@@ -567,9 +570,9 @@ export default function ProjectDetailScreen({ route }: Props) {
             <>
               <SummaryLine
                 dot={Colors.track}
-                label={over ? 'Over budget' : 'Left in budget'}
+                label={over ? 'Over budget' : 'Budget remaining'}
                 value={money$(Math.abs(summary.left ?? 0))}
-                tone={over ? 'danger' : 'good'}
+                tone={leftTone}
               />
               <View style={styles.hairlineInset} />
             </>
@@ -1141,7 +1144,7 @@ function SummaryLine({
   dot: string;
   label: string;
   value: string;
-  tone?: 'good' | 'danger';
+  tone?: RemainingTone;
 }) {
   return (
     <View style={styles.summaryLine}>
@@ -1153,6 +1156,7 @@ function SummaryLine({
         style={[
           styles.summaryLineValue,
           tone === 'good' && styles.good,
+          tone === 'warn' && styles.warn,
           tone === 'danger' && styles.danger,
         ]}
       >
@@ -1242,6 +1246,7 @@ const styles = StyleSheet.create({
   summaryLineLabel: { fontSize: Typography.body, color: Colors.textPrimary },
   summaryLineValue: { fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'] },
   good: { color: Colors.primary, fontWeight: Typography.semibold },
+  warn: { color: Colors.status.doing, fontWeight: Typography.semibold },
   danger: { color: Colors.danger, fontWeight: Typography.semibold },
   hairline: { height: 1, backgroundColor: Colors.separator },
   hairlineInset: { height: 1, backgroundColor: Colors.separator, marginLeft: 20 },

@@ -94,65 +94,114 @@ function gross(amount: number | null, incl: boolean): number {
 }
 
 /**
- * How much of the budget the money already paid has left, for a project card.
+ * Where the budget stands on a project card, once money has gone out.
  *
- * **Budget less paid, and only once something is paid.** It is the cash view
- * the household asked for on the list, and it is deliberately not the page's
- * *Left in budget*, which takes off everything expected rather than what has
- * gone out. The card says *Budget remaining* beside *Quoted*, so a signed
- * contract that has barely been drawn on is still on screen beside it.
+ * **Budget less the page's Expected total** — what has been paid, what is
+ * billed and owed, what is agreed and not yet billed, what somebody has
+ * earmarked as a cost to expect, and what is still to decide at its dearest
+ * option. It was budget less *paid* for one commit, and on the first real job
+ * that read *$68,101.19 left* while two of the builder's four claims sat on the
+ * page as expected costs and the page itself said $54,230.18 over. Money that
+ * has not gone out yet is still money the budget has to cover.
+ *
+ * The expected figure is the page's own (`projectSummary(page).expected`, read
+ * by `getExpectedTotal`), never a second sum over `projects_with_totals`: the
+ * view has no column for undecided things at their dearest or for open quotes
+ * on the job, so a cheaper sum would be the card saying "left" beside a page
+ * saying "over".
+ *
+ * **Still shown only once something is paid** — the household's rule for when
+ * the line earns its place on the list.
  *
  * The tone is the whole point of the line: fern while more than 15% is left,
  * brass from 15% down to just over 5%, clay at 5% or less and over. Brass and
  * clay are the palette's existing warning and alarm hues, so no colour is new.
+ * The page's own *Budget remaining* line takes the same tone from
+ * `remainingTone`, because it is the same figure.
  */
 export type RemainingTone = 'good' | 'warn' | 'danger';
 
 export const REMAINING_WARN = 0.15;
 export const REMAINING_DANGER = 0.05;
 
+/** The tone for a share of the budget left: negative is over. */
+export function remainingTone(share: number): RemainingTone {
+  return share > REMAINING_WARN ? 'good' : share > REMAINING_DANGER ? 'warn' : 'danger';
+}
+
+/** The columns of a project the card's budget line reads. */
+export interface BudgetFigures {
+  budget: number | null;
+  budgetInclGst: boolean;
+  paidTotal: number | null;
+  invoicedTotal: number | null;
+}
+
+/** Whether a card carries the budget line at all: a budget, and something paid. */
+export function showsBudgetRemaining(p: BudgetFigures): boolean {
+  return p.budget !== null && p.budget > 0 && p.paidTotal !== null && p.paidTotal > 0.005;
+}
+
 export interface BudgetRemaining {
-  /** The budget, GST-inclusive, which is what paid is measured in. */
+  /** The budget, GST-inclusive, which is what every other figure is measured in. */
   budget: number;
-  /** Budget less paid. Negative when more has gone out than was budgeted. */
+  /** The page's Expected total. */
+  expected: number;
+  paid: number;
+  /** Budget less expected. Negative when the job is heading over. */
   remaining: number;
   /** `remaining / budget`. */
   share: number;
   tone: RemainingTone;
   over: boolean;
+  /** Of the expected total, what nobody has billed for yet. Never negative. */
+  unbilled: number;
 }
 
-export function budgetRemaining(
-  budget: number | null,
-  budgetInclGst: boolean,
-  paid: number | null,
-): BudgetRemaining | null {
-  if (budget === null || budget <= 0 || paid === null || paid <= 0.005) return null;
-  const total = gross(budget, budgetInclGst);
-  const remaining = round(total - paid);
+export function budgetRemaining(p: BudgetFigures, expected: number): BudgetRemaining | null {
+  if (!showsBudgetRemaining(p)) return null;
+  const total = gross(p.budget, p.budgetInclGst);
+  const remaining = round(total - expected);
   const share = remaining / total;
-  const tone: RemainingTone = share > REMAINING_WARN ? 'good' : share > REMAINING_DANGER ? 'warn' : 'danger';
-  return { budget: total, remaining, share, tone, over: remaining < 0 };
+  return {
+    budget: total,
+    expected,
+    paid: p.paidTotal ?? 0,
+    remaining,
+    share,
+    tone: remainingTone(share),
+    over: remaining < 0,
+    unbilled: Math.max(round(expected - (p.invoicedTotal ?? 0)), 0),
+  };
 }
 
 /**
- * The line's label and figure: *Budget remaining* · *$18,700 · 10% left*, or
- * *Over budget* · *$2,200 · 5% over*.
+ * The line's words: *Budget remaining* · *$18,700*, or *Over budget* ·
+ * *$54,230.18*, and under it *30% over · $87,975 not billed yet*.
  *
- * The percentage rides beside the figure so colour is never the only way to
- * read it. What is left is rounded **up**, so the words agree with the colour
- * at the edges: 15.4% left is fern and says 16%, never a fern "15% left".
+ * The figure stands alone on its row so it is never cut short — it was
+ * *$68,101.19 · 38% l…* on a phone. The percentage moves to the line beneath,
+ * so colour is still never the only way to read it, and beside it is what the
+ * figure is counting that has not been billed: the reason a job with money
+ * still in the bank can already be over. What is left is rounded **up**, so the
+ * words agree with the colour at the edges: 15.4% left is fern and says 16%,
+ * never a fern "15% left".
  */
 export function describeRemaining(
   r: BudgetRemaining,
   money: (n: number) => string,
-): { label: string; value: string } {
-  if (r.over) {
-    const pct = Math.max(Math.round((-r.remaining / r.budget) * 100), 1);
-    return { label: 'Over budget', value: `${money(-r.remaining)} · ${pct}% over` };
-  }
-  const pct = Math.ceil(r.share * 100 - 1e-9);
-  return { label: 'Budget remaining', value: `${money(r.remaining)} · ${pct}% left` };
+): { label: string; value: string; caption: string } {
+  const pct = r.over
+    ? `${Math.max(Math.round((-r.remaining / r.budget) * 100), 1)}% over`
+    : `${Math.ceil(r.share * 100 - 1e-9)}% left`;
+  const caption = [pct, r.unbilled > 0.005 ? `${money(r.unbilled)} not billed yet` : null]
+    .filter(Boolean)
+    .join(' · ');
+  return {
+    label: r.over ? 'Over budget' : 'Budget remaining',
+    value: money(Math.abs(r.remaining)),
+    caption,
+  };
 }
 
 /**

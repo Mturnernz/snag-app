@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View, Text, SectionList, Pressable, Modal, RefreshControl, ActivityIndicator, StyleSheet,
 } from 'react-native';
@@ -14,12 +14,13 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../consta
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createLocation, createProject, formatMoney, getProjects, getProjectsQuoted, inclGst, projectSubtitle,
+  createLocation, createProject, formatMoney, getExpectedTotal, getProjects, getProjectsQuoted, inclGst,
+  projectSubtitle,
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
 import {
   budgetRemaining, describeRemaining, exportDateStamp, groupProjectsByStatus, projectExportTable,
-  type RemainingTone,
+  showsBudgetRemaining, type RemainingTone,
 } from '@snag/supabase-queries';
 import { writeExport, type ExportFormat } from '../lib/exportFile';
 import { showAlert } from '../lib/alert';
@@ -75,6 +76,11 @@ export default function ProjectsScreen() {
   // Null until the quoted read answers, and again if it fails: "No quotes" is
   // a claim, and a read that has not come back cannot make it.
   const [quoted, setQuoted] = useState<Map<string, number> | null>(null);
+  // Each card with a budget line needs its page's Expected total. Absent until
+  // that read answers, and after one that failed: the line says — rather than
+  // falling back to a figure the page would contradict.
+  const [expected, setExpected] = useState<Map<string, number>>(() => new Map());
+  const generation = useRef(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -84,17 +90,47 @@ export default function ProjectsScreen() {
 
   const load = useCallback(async () => {
     if (!activeProperty) return;
+    const run = ++generation.current;
     try {
       const next = await getProjects(activeProperty.id);
       setProjects(next);
       // Never fatal: a card without its quoted line is still a card.
       getProjectsQuoted(next.map((p) => p.id)).then(setQuoted, () => setQuoted(null));
+      readExpected(next, run);
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't load the projects");
     } finally {
       setLoading(false);
     }
   }, [activeProperty?.id]);
+
+  /**
+   * The Expected total behind each card's budget line, **one project at a
+   * time**. It is the page's whole read (`project_page`) and the page's own
+   * arithmetic, so it is the heaviest request in the app; firing one per card
+   * at once is the fan-out *What a press costs* in CLAUDE.md is about. Only
+   * cards that show the line ask. A newer load abandons an older loop, and
+   * what an older loop already read stays on screen until it is replaced
+   * rather than flashing back to —.
+   */
+  async function readExpected(list: Project[], run: number) {
+    for (const p of list.filter(showsBudgetRemaining)) {
+      if (run !== generation.current) return;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const total = await getExpectedTotal(p.id);
+        if (run !== generation.current) return;
+        setExpected((m) => new Map(m).set(p.id, total));
+      } catch {
+        if (run !== generation.current) return;
+        setExpected((m) => {
+          const next = new Map(m);
+          next.delete(p.id);
+          return next;
+        });
+      }
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -255,6 +291,7 @@ export default function ProjectsScreen() {
             <ProjectCard
               project={item}
               quoted={quoted ? quoted.get(item.id) ?? null : undefined}
+              expected={expected.get(item.id)}
               dim={section.status === 'done'}
               onPress={() => navigation.navigate('ProjectDetail', { projectId: item.id })}
             />
@@ -354,14 +391,26 @@ export default function ProjectsScreen() {
  * or the view's — Budgeted is the typed budget grossed to incl GST, Quoted is
  * the supplier rows' sum (`getProjectsQuoted`, never fatal), Paid is
  * `paid_total` — so nothing here is a second way of adding something up. A
- * figure nobody has is said in words, never as `$0`.
+ * figure nobody has is said in words, never as `$0`. **A figure never
+ * shrinks**; the label beside it gives way instead, because half a number is
+ * worse than a clipped noun.
  *
- * **Budget remaining appears once money has gone out**, and it is budget less
- * paid: the cash view, coloured by how much of the budget is left (fern above
- * 15%, brass down to 5%, clay at 5% or less and over), with the percentage
- * beside it so colour is never the only way to read it. It is deliberately not
- * the page's *Left in budget*, which takes off everything expected; Quoted sits
- * two lines above it for exactly that reason.
+ * **Once money has gone out, the card says where the budget is heading.** A
+ * fourth row, *Expected total*, is the page's own figure — paid, owed, agreed,
+ * earmarked and still to decide — and under a bar comes *Budget remaining* or
+ * *Over budget*: budget less that total, not budget less paid. Two payments
+ * earmarked for the builder are money the budget still has to cover, and a
+ * card reading "$68,101 left" over a job its own page calls $54,230 over is
+ * the card the household stops believing. The line takes fern above 15% left,
+ * brass down to 5%, clay at 5% or less and over, and says the percentage and
+ * what is not billed yet underneath, so colour is never the only way to read
+ * it. See `budgetRemaining`.
+ *
+ * **The bar is paid, then the rest of what is expected, against the budget.**
+ * Paid is solid; the rest is the same hue, lighter, because it has not gone
+ * out yet. When the total runs past the budget the bar is drawn to the total
+ * and a notch marks where the budget ends, so the overrun is the part of the
+ * bar past the notch.
  *
  * Under it: how many things are left to decide and what is owed — counts and
  * sums, nothing to believe. A complete project carries the same figures,
@@ -376,19 +425,24 @@ const TONE: Record<RemainingTone, string> = {
 function ProjectCard({
   project,
   quoted,
+  expected,
   dim,
   onPress,
 }: {
   project: Project;
   /** Undefined while the quoted read is out or has failed; null when nobody has quoted. */
   quoted: number | null | undefined;
+  /** The page's Expected total; undefined until it has been read, or when it could not be. */
+  expected: number | undefined;
   dim: boolean;
   onPress: () => void;
 }) {
+  const money = (n: number) => formatMoney(n) ?? '';
   const budget = inclGst(project.budget, project.budgetInclGst);
   const paid = project.paidTotal;
-  const left = budgetRemaining(project.budget, project.budgetInclGst, paid);
-  const remaining = left ? describeRemaining(left, (n) => formatMoney(n) ?? '') : null;
+  const shows = showsBudgetRemaining(project);
+  const left = shows && expected !== undefined ? budgetRemaining(project, expected) : null;
+  const remaining = left ? describeRemaining(left, money) : null;
   const toDecide = Math.max(project.itemCount - project.pricedCount, 0);
   const facts = [
     toDecide > 0 ? `${toDecide} to decide` : null,
@@ -405,6 +459,9 @@ function ProjectCard({
     },
     { label: 'Paid', value: paid !== null && paid > 0.005 ? formatMoney(paid) : null, blank: 'Nothing yet' },
   ];
+  if (shows) {
+    figures.push({ label: 'Expected total', value: expected !== undefined ? money(expected) : null, blank: '—' });
+  }
 
   return (
     <Pressable
@@ -430,22 +487,24 @@ function ProjectCard({
           </View>
         ))}
       </View>
-      {left && remaining ? (
+      {shows ? (
         <View style={styles.remaining}>
-          <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <View
-              style={[
-                styles.barFill,
-                { width: `${Math.min(Math.max((paid ?? 0) / left.budget, 0), 1) * 100}%`, backgroundColor: TONE[left.tone] },
-              ]}
-            />
-          </View>
+          <BudgetBar
+            budget={budget ?? 0}
+            paid={paid ?? 0}
+            expected={expected}
+            colour={left ? TONE[left.tone] : Colors.chevron}
+          />
           <View style={styles.figureRow}>
-            <Text style={styles.remainingLabel}>{remaining.label}</Text>
-            <Text style={[styles.remainingValue, { color: TONE[left.tone] }]} numberOfLines={1}>
-              {remaining.value}
+            <Text style={styles.remainingLabel}>{remaining?.label ?? 'Budget remaining'}</Text>
+            <Text
+              style={[styles.remainingValue, left ? { color: TONE[left.tone] } : styles.figureBlank]}
+              numberOfLines={1}
+            >
+              {remaining?.value ?? '—'}
             </Text>
           </View>
+          {remaining?.caption ? <Text style={styles.remainingCaption}>{remaining.caption}</Text> : null}
         </View>
       ) : null}
       {facts.length > 0 ? (
@@ -454,6 +513,32 @@ function ProjectCard({
         </Text>
       ) : null}
     </Pressable>
+  );
+}
+
+/**
+ * Paid, then the rest of the expected total, measured against whichever is
+ * larger of the budget and that total — with a notch where the budget ends
+ * once the total has run past it. Until the total is known it is paid against
+ * the budget and nothing else.
+ */
+function BudgetBar({
+  budget, paid, expected, colour,
+}: {
+  budget: number;
+  paid: number;
+  expected: number | undefined;
+  colour: string;
+}) {
+  const base = Math.max(budget, paid, expected ?? 0, 1);
+  const pct = (n: number) => `${Math.min(Math.max(n / base, 0), 1) * 100}%` as const;
+  const rest = expected !== undefined ? Math.max(expected - paid, 0) : 0;
+  return (
+    <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <View style={[styles.barFill, { width: pct(paid), backgroundColor: colour }]} />
+      <View style={[styles.barFill, styles.barRest, { width: pct(rest), backgroundColor: colour }]} />
+      {base > budget + 0.005 ? <View style={[styles.barNotch, { left: pct(budget) }]} /> : null}
+    </View>
   );
 }
 
@@ -499,20 +584,28 @@ const styles = StyleSheet.create({
   cardSub: { fontSize: Typography.subhead, color: Colors.textMuted },
   figures: { gap: Spacing.xs + 2 },
   figureRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.md },
-  figureLabel: { fontSize: Typography.subhead, color: Colors.textMuted, flexShrink: 0 },
+  figureLabel: { fontSize: Typography.subhead, color: Colors.textMuted, flexShrink: 1, minWidth: 0 },
   figureValue: {
     fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'],
-    flexShrink: 1, minWidth: 0, textAlign: 'right',
+    flexShrink: 0, textAlign: 'right',
   },
   figureBlank: { fontSize: Typography.subhead, color: Colors.textMuted },
   remaining: { gap: Spacing.sm, marginTop: Spacing.xs },
-  remainingLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.textPrimary, flexShrink: 0 },
+  remainingLabel: {
+    fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.textPrimary,
+    flexShrink: 1, minWidth: 0,
+  },
   remainingValue: {
     fontSize: Typography.body, fontWeight: Typography.semibold, fontVariant: ['tabular-nums'],
-    flexShrink: 1, minWidth: 0, textAlign: 'right',
+    flexShrink: 0, textAlign: 'right',
   },
-  bar: { height: 6, borderRadius: 3, backgroundColor: Colors.track, overflow: 'hidden' },
+  remainingCaption: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'], marginTop: -Spacing.xs },
+  bar: { height: 6, borderRadius: 3, backgroundColor: Colors.track, overflow: 'hidden', flexDirection: 'row' },
   barFill: { height: 6 },
+  // Not gone out yet: the same hue as paid, lighter. No new colour.
+  barRest: { opacity: 0.35 },
+  // Where the budget ends, cut into the bar in the card's own white.
+  barNotch: { position: 'absolute', top: 0, bottom: 0, width: 2, marginLeft: -1, backgroundColor: Colors.surface },
   facts: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
   factsOverdue: { color: Colors.danger },
 

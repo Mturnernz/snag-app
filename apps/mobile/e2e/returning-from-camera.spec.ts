@@ -34,7 +34,7 @@ async function signIn(page: Page) {
   await page.getByPlaceholder('Email').fill(EMAIL!);
   await page.getByPlaceholder('Password').fill(PASSWORD!);
   await page.getByText('Sign in', { exact: true }).click();
-  await expect(page.getByPlaceholder('Capture new issue')).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByPlaceholder('Capture a new job')).toBeVisible({ timeout: 90_000 });
 }
 
 /**
@@ -82,7 +82,7 @@ test('the walkthrough survives the tab going away and coming back', async ({ pag
   // thing to assert on.
   await expect(page.getByText('What is it?')).toBeVisible();
   // The navigator must not have fallen back to its initial route.
-  await expect(page.getByPlaceholder('Capture new issue')).toBeHidden();
+  await expect(page.getByPlaceholder('Capture a new job')).toBeHidden();
 });
 
 test('a typed snag is not lost when the tab comes back', async ({ page }) => {
@@ -90,9 +90,9 @@ test('a typed snag is not lost when the tab comes back', async ({ page }) => {
 
   // The same unmount took everything else with it, and the compose bar is where
   // it costs most — the whole point of the bar is that it holds what you typed.
-  await page.getByPlaceholder('Capture new issue').fill('Gutters need clearing');
+  await page.getByPlaceholder('Capture a new job').fill('Gutters need clearing');
 
   await leaveAndComeBack(page);
 
-  await expect(page.getByPlaceholder('Capture new issue')).toHaveValue('Gutters need clearing');
+  await expect(page.getByPlaceholder('Capture a new job')).toHaveValue('Gutters need clearing');
 });

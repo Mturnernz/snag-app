@@ -40,7 +40,7 @@ async function signIn(page: Page) {
   await page.getByText('Sign in', { exact: true }).click();
   // The list is the initial route — there is no Add tab; capture is the bar at
   // the foot of this screen.
-  await expect(page.getByPlaceholder('Capture new issue')).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByPlaceholder('Capture a new job')).toBeVisible({ timeout: 90_000 });
   await placeChosen;
 }
 
@@ -63,7 +63,7 @@ test('a save that never comes back still stops spinning and says so', async ({ p
     dialog.dismiss().catch(() => {});
   });
 
-  await page.getByPlaceholder('Capture new issue').fill('Stalled network probe');
+  await page.getByPlaceholder('Capture a new job').fill('Stalled network probe');
   await page.getByLabel('Add to the list').click();
 
   // The deadline is 20s for a data call; allow for it plus the dialog.
@@ -71,6 +71,6 @@ test('a save that never comes back still stops spinning and says so', async ({ p
 
   // And the bar is usable again rather than stuck mid-send, with the words put
   // back so nobody has to retype them.
-  await expect(page.getByPlaceholder('Capture new issue')).toBeEnabled();
-  await expect(page.getByPlaceholder('Capture new issue')).toHaveValue('Stalled network probe');
+  await expect(page.getByPlaceholder('Capture a new job')).toBeEnabled();
+  await expect(page.getByPlaceholder('Capture a new job')).toHaveValue('Stalled network probe');
 });

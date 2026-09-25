@@ -1495,7 +1495,10 @@ by `projectSummary.test.ts`:
 - **Paperwork on a price or a part is listed on the page** (`TaggedFiles`, *On prices and parts*),
   not only on its own sheet — a quote's PDF was on the record and on no screen but the quote's.
 - The list card shows **Agreed**, not the expected total: the card has no per-item data and a
-  figure it had to approximate would disagree with the page.
+  figure it had to approximate would disagree with the page. Under it, **"$X quoted"** whenever
+  that differs from Agreed — the page's Quoted figure, summed from the supplier rows by
+  `getProjectsQuoted` in one read for the whole list, never fatal. A planned job whose one price
+  was an unagreed quote read *$0 agreed* and nothing else, as though no price had arrived.
 
 **Every line of small text is a fact the reader can add up** — a count, a date, a supplier, a
 figure compared with another figure on the screen ("$1,400 over the $8,000 set aside"). The

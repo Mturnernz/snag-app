@@ -4366,6 +4366,41 @@ export async function getProjects(
 }
 
 /**
+ * What the suppliers have quoted on each of these projects, by project id.
+ *
+ * The list card leads with Agreed, and a planned job whose one price is an
+ * unagreed quote read **$0** with nothing on the card to say a price had
+ * arrived. This is the page's Quoted figure — the **sum of the supplier rows**
+ * (`projectQuoted`), never a second expression — so the card and the page
+ * cannot disagree about it. One request for the whole list, not one per card;
+ * a project nobody has quoted on is absent rather than zero.
+ */
+export async function getProjectsQuoted(
+  client: SupabaseClient,
+  projectIds: readonly string[]
+): Promise<Map<string, number>> {
+  const quoted = new Map<string, number>();
+  if (projectIds.length === 0) return quoted;
+  const { data, error } = await client
+    .from('project_supplier_totals')
+    .select('project_id, quoted')
+    .in('project_id', [...projectIds]);
+
+  if (error) throw asError(error, "Couldn't load what's been quoted");
+  const byProject = new Map<string, { quoted: number | null }[]>();
+  for (const row of (data ?? []) as { project_id: string; quoted: unknown }[]) {
+    const rows = byProject.get(row.project_id) ?? [];
+    rows.push({ quoted: numberOrNull(row.quoted) });
+    byProject.set(row.project_id, rows);
+  }
+  for (const [id, rows] of byProject) {
+    const total = projectQuoted(rows);
+    if (total !== null) quoted.set(id, total);
+  }
+  return quoted;
+}
+
+/**
  * Every project at every place this person is linked to.
  *
  * No property filter at all, which is the Schedule tab's own argument: a date is

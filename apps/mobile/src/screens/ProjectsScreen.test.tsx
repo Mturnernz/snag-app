@@ -31,10 +31,12 @@ jest.mock('../components/AddProjectSheet', () => {
 
 const mock_getProjects = jest.fn();
 const mock_createProject = jest.fn();
+const mock_getProjectsQuoted = jest.fn();
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
     getProjects: (...a: unknown[]) => mock_getProjects(...a),
+    getProjectsQuoted: (...a: unknown[]) => mock_getProjectsQuoted(...a),
     createProject: (...a: unknown[]) => mock_createProject(...a),
     // The pure helpers are the real ones: mocking `describeTotals` would mock
     // away the exact rule these specs exist to hold.
@@ -72,6 +74,7 @@ const project = (over: Partial<any> = {}): any => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mock_getProjectsQuoted.mockResolvedValue(new Map());
   (global as any).__nav = { navigate: mock_navigate, addListener: () => () => {} };
   (global as any).__household = {
     household: { id: 'h', name: 'Home', createdAt: '2026-01-01T00:00:00Z' },
@@ -97,8 +100,17 @@ function cardFor(r: ReturnType<typeof render>, name: string) {
   return found[0];
 }
 
-async function arrange(projects: any[]) {
+/** Every line on screen reading "… quoted". */
+function quotedLines(r: ReturnType<typeof render>) {
+  return r
+    .getAllByType('Text')
+    .map((n) => n.children.join(''))
+    .filter((t) => t.endsWith(' quoted'));
+}
+
+async function arrange(projects: any[], quoted: Record<string, number> = {}) {
   mock_getProjects.mockResolvedValue(projects);
+  mock_getProjectsQuoted.mockResolvedValue(new Map(Object.entries(quoted)));
   const r = render(<ProjectsScreen />);
   await TestRenderer.act(async () => {});
   return r;
@@ -131,6 +143,39 @@ describe('the tab', () => {
     ]);
     r.getByText('$196,320');
     r.getByText('agreed of $230,000');
+  });
+
+  it('says what has been quoted when it differs from what is agreed', async () => {
+    // The Tree trimming case: one unagreed quote, nothing signed. Agreed is
+    // honestly $0, and the card said nothing else — as though no price had
+    // arrived.
+    const r = await arrange(
+      [project({ id: 'trees', name: 'Tree trimming', status: 'planned', budget: 1000 })],
+      { trees: 1092.5 }
+    );
+    r.getByText('$0');
+    r.getByText('$1,092.50 quoted');
+    expect(mock_getProjectsQuoted).toHaveBeenCalledWith(['trees']);
+  });
+
+  it('does not repeat Agreed as Quoted, and says nothing where nobody has quoted', async () => {
+    const r = await arrange(
+      [
+        project({ id: 'signed', name: 'Signed job', committedTotal: 5000 }),
+        project({ id: 'none', name: 'Unquoted job' }),
+      ],
+      { signed: 5000 }
+    );
+    expect(quotedLines(r)).toEqual([]);
+  });
+
+  it('still draws the cards when the quoted read fails', async () => {
+    mock_getProjects.mockResolvedValue([project({ name: 'Downstairs laundry' })]);
+    mock_getProjectsQuoted.mockRejectedValue(new Error('offline'));
+    const r = render(<ProjectsScreen />);
+    await TestRenderer.act(async () => {});
+    cardFor(r, 'Downstairs laundry');
+    expect(quotedLines(r)).toEqual([]);
   });
 
   it('never shows a figure without saying what is still undecided', async () => {

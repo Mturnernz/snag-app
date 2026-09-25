@@ -365,6 +365,9 @@ export const getProjects = (propertyId: string) => queries.getProjects(supabase,
 
 export const getAllProjects = () => queries.getAllProjects(supabase);
 
+export const getProjectsQuoted = (projectIds: readonly string[]) =>
+  queries.getProjectsQuoted(supabase, projectIds);
+
 export const getSupplierNames = () => queries.getSupplierNames(supabase);
 
 export const getProject = (projectId: string) => queries.getProject(supabase, projectId);

@@ -179,6 +179,8 @@ Closed in two halves:
 - **`20260926100000_an_anonymous_session_is_not_an_account`** — triggers on `home.profiles` and
   `home.household_members` refuse an anonymous user, whatever function is doing the inserting.
   `supabase/tests/anonymous_sessions.sql` replays it. This holds however the switch below is set.
+  **Applied 25 September 2026**, and probed on the live project as one of the existing anonymous
+  users: `upsert_profile` refused, nothing written.
 - **Auth → Providers → Anonymous sign-ins: off.** The setting existed for the retired product's QR
   public reporting (`?report=<token>`), which has no client. It was left on as "a deliberate call"
   on the premise above; with the premise gone there is nothing on the other side of the call.
@@ -244,6 +246,18 @@ has since grown settings of its own, which are the second list below.
 
 Set in the dashboard, and each one is silent when it is wrong. Recorded 25 September 2026.
 
+**Two of them can be read without the dashboard**, from Auth's public settings endpoint — the
+publishable key is in the web bundle anyway:
+
+```bash
+curl -s "https://wpkdpukpllxuyqqlxkxf.supabase.co/auth/v1/settings" \
+  -H "apikey: <publishable key>" | jq '{mailer_autoconfirm, anonymous: .external.anonymous_users}'
+```
+
+`mailer_autoconfirm` must be `false` (confirmation on) and `anonymous` must be `false`. On
+25 September 2026 it read `false` and `true` — confirmation on, anonymous sign-ins still on. The
+template, the redirect allow-list and the password minimum are not in that answer.
+
 - **Confirm email: on** (Auth → Providers → Email). **This is load-bearing, not a preference.** An
   invitation waits on an *address* (`home.invite_to_household`, matched through `home.my_email()`),
   so the only thing proving the person signing up owns that address is the confirmation email. With
@@ -282,7 +296,9 @@ Set in the dashboard, and each one is silent when it is wrong. Recorded 25 Septe
   (`weak_password` with reason `pwned`) as "has turned up in a data breach".
 - **Anonymous sign-ins: off.** See *Anonymous sign-ins reached `home`* above.
 - **Resend click tracking: off** for the domain Auth's SMTP sends from. Tracking rewrites every
-  link, and a rewritten confirmation or recovery link is one Auth no longer recognises.
+  link, and a rewritten confirmation or recovery link is one Auth no longer recognises. Checked
+  25 September 2026: open and click tracking are both off on `snaghq.co.nz` and
+  `bills.snaghq.co.nz`.
 
 ### The staff portal — Google sign-in, a staff list, and one email
 

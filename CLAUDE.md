@@ -2639,10 +2639,20 @@ Four rules now, and the second is the one that matters:
   fourteen separate reads used, so no figure can be arrived at a second way. It
   is SECURITY INVOKER over `security_invoker` views, so RLS filters it exactly
   as it filtered the REST calls; a non-member gets the refusal `.single()` used
-  to give. plpgsql rather than SQL for two reasons: the raise is what the client
-  already words, and plpgsql caches its statements' plans per session, so
-  `projects_with_totals`' planning is paid once per connection instead of per
-  request.
+  to give. plpgsql rather than SQL because the raise is what the client already
+  words.
+
+  **One request, but seventeen statements inside it.** It was written as one
+  `return jsonb_build_object(...)` holding every subquery, on the belief that
+  plpgsql would plan it once per connection. It did not: that statement was
+  re-planned on every call, and planning seventeen views-of-views at once was
+  nearly all of its cost — a 1.6s mean over 289 calls, a 7.9s worst, and
+  once 11.5s against an 8s `statement_timeout`. It lived just under the line
+  until the list card started reading it too (*Budget remaining*), and then
+  the Downstairs job would not open at all. `20260926100000` gives each key
+  its own `select … into`: the same views, filters and orders, output
+  byte-identical on every project, and ~0.3s warm, 0.4s cold. **Do not fold
+  it back into one statement** to tidy it.
 - **A refresh is single-flight, and the next one is queued rather than started.**
   One arriving while another is in flight sets `pending` and returns; the one
   running loops. However many presses land, there is at most one read on the

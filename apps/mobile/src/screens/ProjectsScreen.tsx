@@ -14,7 +14,7 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../consta
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  createLocation, createProject, formatMoney, getProjects, inclGst, projectSubtitle,
+  createLocation, createProject, formatMoney, getProjects, getProjectsQuoted, inclGst, projectSubtitle,
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
 import { exportDateStamp, groupProjectsByStatus, projectExportTable } from '@snag/supabase-queries';
@@ -69,6 +69,7 @@ export default function ProjectsScreen() {
   const { showToast } = useToast();
 
   const [projects, setProjects] = useState<Project[]>([]);
+  const [quoted, setQuoted] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -79,7 +80,10 @@ export default function ProjectsScreen() {
   const load = useCallback(async () => {
     if (!activeProperty) return;
     try {
-      setProjects(await getProjects(activeProperty.id));
+      const next = await getProjects(activeProperty.id);
+      setProjects(next);
+      // Never fatal: a card without its quoted line is still a card.
+      getProjectsQuoted(next.map((p) => p.id)).then(setQuoted, () => setQuoted(new Map()));
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't load the projects");
     } finally {
@@ -245,6 +249,7 @@ export default function ProjectsScreen() {
           renderItem={({ item, section }) => (
             <ProjectCard
               project={item}
+              quoted={quoted.get(item.id) ?? null}
               dim={section.status === 'done'}
               onPress={() => navigation.navigate('ProjectDetail', { projectId: item.id })}
             />
@@ -343,15 +348,24 @@ export default function ProjectsScreen() {
  * every option on every thing to work out, which is a read per project this
  * list does not make; the card says the part it can say exactly.
  *
- * Under it: against the budget when there is one, then how many things are
- * left to decide and what is owed. Counts and sums, nothing to believe.
+ * Under it: against the budget when there is one, then what the suppliers
+ * have quoted, then how many things are left to decide and what is owed.
+ * Counts and sums, nothing to believe.
+ *
+ * **Quoted is said whenever it differs from Agreed.** A planned job whose one
+ * price is a tree surgeon's unagreed quote read $0 agreed and nothing else, so
+ * the card claimed no price had arrived. It is the page's own Quoted figure —
+ * every quote not declined, signed ones included — and it goes unsaid where it
+ * would only repeat the figure above it.
  */
 function ProjectCard({
   project,
+  quoted,
   dim,
   onPress,
 }: {
   project: Project;
+  quoted: number | null;
   dim: boolean;
   onPress: () => void;
 }) {
@@ -398,6 +412,9 @@ function ProjectCard({
           {budget !== null ? `agreed of ${formatMoney(budget)}` : 'agreed'}
         </Text>
       </View>
+      {quoted !== null && Math.abs(quoted - agreed) > 0.005 ? (
+        <Text style={styles.quoted}>{`${formatMoney(quoted)} quoted`}</Text>
+      ) : null}
       {budget !== null && budget > 0 ? (
         <View style={styles.bar}>
           <View style={[styles.barFill, { width: `${Math.min(agreed / budget, 1) * 100}%` }]} />
@@ -460,6 +477,10 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary, letterSpacing: -0.4, fontVariant: ['tabular-nums'],
   },
   figureOf: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
+  quoted: {
+    fontSize: Typography.subhead, color: Colors.textSecondary,
+    fontVariant: ['tabular-nums'], marginTop: -Spacing.sm,
+  },
   bar: { height: 6, borderRadius: 3, backgroundColor: Colors.track, overflow: 'hidden' },
   barFill: { height: 6, backgroundColor: Colors.primary },
   facts: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },

@@ -1412,6 +1412,41 @@ export function swatchColour(spec: ThingSpec): string | null {
 }
 
 /**
+ * The colour of a room's main wall, from the paint recorded there — or null.
+ *
+ * What the House tab paints a room's tile in. It reads the one field that tells
+ * two paints in a room apart, *Where it went* (`notes`), and it only believes a
+ * paint that says it went on the walls: **"Main wall" first, then "Walls"**. A
+ * feature wall, a ceiling and the joinery are all real paints and none of them
+ * is what the room looks like, so none of them colours the tile — a bedroom
+ * painted white with one forest-green wall is a white room.
+ *
+ * The colour itself is `swatchColour`'s, so the same rule holds: a hex that
+ * does not parse draws nothing rather than a guess, and a tile left white is
+ * honest where a tile in the wrong colour is the one thing believed at a glance.
+ */
+export function wallColour(things: Thing[]): string | null {
+  const rank = (notes: string | null): number | null => {
+    const where = notes ?? '';
+    if (/\bmain\s+walls?\b/i.test(where)) return 0;
+    if (/\bwalls?\b/i.test(where) && !/feature/i.test(where)) return 1;
+    return null;
+  };
+  let best: { rank: number; headline: string; hex: string } | null = null;
+  for (const thing of things) {
+    if (thing.kind !== 'finish') continue;
+    const r = rank(thing.notes);
+    const hex = swatchColour(thing.spec);
+    if (r === null || !hex) continue;
+    const headline = thingHeadline(thing);
+    if (!best || r < best.rank || (r === best.rank && headline.localeCompare(best.headline) < 0)) {
+      best = { rank: r, headline, hex };
+    }
+  }
+  return best?.hex ?? null;
+}
+
+/**
  * The open job already waiting on this item for this thing, if there is one.
  *
  * What stops the cart beside a consumable filing the same filter twice: a
@@ -2028,12 +2063,21 @@ export interface HouseRoom {
 /**
  * The rooms the House tab shows, in the order it shows them.
  *
- * **Seeded order, exactly as the List tab groups snags** — the two tabs have
- * to describe the house in the same words and the same order, or the room a
- * snag is in and the room a thing is in stop reading as the same place. A room
- * the vocabulary no longer holds sorts after the seeded ones rather than
- * jumping to the top, because `things.room` is TEXT precisely so history
- * survives a tag being removed. Whole house is last and never furnished.
+ * **Most recorded first.** The grid is an index somebody reads to find where
+ * the record is, and the Kitchen holding ten things is where most of it is —
+ * so it leads, and a room nobody has recorded anything in sinks to the foot,
+ * still furnished with what it probably has. That is a deliberate departure
+ * from the List tab, which groups snags in seeded order: there the rooms are
+ * headings over work, here each one is a door, and a door is found by what is
+ * behind it. The room pickers, the room pages and the List tab keep the seeded
+ * order.
+ *
+ * **Ties keep the seeded order**, so two rooms of two things read the way the
+ * rest of the app arranges the house. A room the vocabulary no longer holds is
+ * placed after the seeded ones within its tie rather than jumping ahead of
+ * them, because `things.room` is TEXT precisely so history survives a tag being
+ * removed. Whole house is last whatever it holds: it is not a room, and never
+ * furnished.
  *
  * A room with nothing recorded and nothing to suggest is not drawn:
  * `Elsewhere` and `Under the house` are catalogued empty on purpose, and a
@@ -2058,6 +2102,9 @@ export function houseRooms(
     .sort((a, b) => a.localeCompare(b));
   for (const room of extra) add(room);
 
+  // `sort` is stable, so equal counts keep the order they were added in.
+  rooms.sort((a, b) => b.recorded.length - a.recorded.length);
+
   const placeWide = thingsInArea(things, null);
   if (placeWide.length > 0) {
     rooms.push({ room: null, name: WHOLE_HOUSE, recorded: placeWide, ghosts: [] });
@@ -2066,26 +2113,60 @@ export function houseRooms(
 }
 
 /**
- * What a room's tile says: a count and a line of facts.
+ * How many things a room's tile lists before it fades out. Four lines is the
+ * most a half-width tile carries before one busy room makes its whole row of
+ * the grid twice as tall as every other; the count above says how many there
+ * are, and the room's own page lists them all.
+ */
+export const TILE_BULLET_LIMIT = 4;
+
+/** What a room's tile says. */
+export interface HouseRoomDescription {
+  /** "2 of 8" while anything is still suggested, a bare total after. */
+  count: string;
+  /** Up to `TILE_BULLET_LIMIT` lines: records by headline, or suggestions. */
+  lines: string[];
+  /** True when the lines are suggestions — nothing is recorded yet. */
+  suggested: boolean;
+  /** True when the room holds more than the lines show. */
+  truncated: boolean;
+  /** The main wall's colour, to paint the tile in, or null for a white tile. */
+  wall: string | null;
+}
+
+/**
+ * What a room's tile says: a count, a short list, and a colour.
  *
  * The count is **"2 of 8" and never a percentage** — recorded against recorded
  * plus what is still suggested, so the denominator shrinks honestly as things
  * are dismissed. A room with nothing left to suggest is its bare total.
  *
- * The facts are what is recorded, by headline. A room with nothing recorded
+ * The lines are what is recorded, by headline, **in the order the room's page
+ * lists them** — appliances, then paint and tiles, then the rest — so the tile
+ * previews the first rows of the page it opens. A room with nothing recorded
  * names what it probably has instead, which is how the tab still arrives
- * furnished — and it says **Not recorded yet** first, in words, because a
- * suggestion that reads as a record is the one failure this tab is built
- * against.
+ * furnished — and `suggested` says so, because the tile writes **Not recorded
+ * yet** above those lines and draws their bullets hollow: a suggestion that
+ * reads as a record is the one failure this tab is built against.
+ *
+ * `wall` is `wallColour` over what is recorded, so a room with nothing
+ * recorded is never painted. Whole house has no walls and never is either.
  */
-export function describeHouseRoom(room: HouseRoom): { count: string; facts: string } {
+export function describeHouseRoom(room: HouseRoom): HouseRoomDescription {
   const recorded = room.recorded.length;
   const total = recorded + room.ghosts.length;
   const count = room.ghosts.length > 0 ? `${recorded} of ${total}` : `${recorded}`;
-  const facts = recorded > 0
-    ? room.recorded.map(thingHeadline).join(', ')
-    : `Not recorded yet · ${room.ghosts.map((g) => g.name).join(', ')}`;
-  return { count, facts };
+  const suggested = recorded === 0;
+  const all = suggested
+    ? room.ghosts.map((g) => g.name)
+    : thingKindGroups(room.recorded).flatMap((group) => group.things.map(thingHeadline));
+  return {
+    count,
+    lines: all.slice(0, TILE_BULLET_LIMIT),
+    suggested,
+    truncated: all.length > TILE_BULLET_LIMIT,
+    wall: room.room === null ? null : wallColour(room.recorded),
+  };
 }
 
 export type ThingKindGroupKey = 'appliances' | 'finishes' | 'other';

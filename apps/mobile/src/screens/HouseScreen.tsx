@@ -24,6 +24,8 @@ import { useAddThing } from '../hooks/useAddThing';
 import { getAbsentThings, getFileUrls, getThings } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
+import { roomIcon } from '../lib/roomIcon';
+import { TILE_SCRIM, tileInk } from '../lib/tileInk';
 import { AbsentThing, RootStackParamList, Thing } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -424,28 +426,90 @@ export default function HouseScreen() {
 }
 
 /**
- * One room, as a tile: its name, the count, and what is in it.
+ * How the list on a tile fades when the room holds more than it shows. The
+ * fade is the "and more" — the count above says how many — so it only happens
+ * when something is cut off: fading a complete list would hide its last line
+ * and claim there was more behind it.
+ */
+const TILE_FADE = [1, 0.85, 0.55, 0.25];
+
+/**
+ * One room, as a tile: an icon, its name, the count, and a short list.
  *
- * White on plaster with no outline and no shadow, like a V2 group — the tile
- * is a group of one row. The count is "2 of 8" while anything is still
- * suggested and a bare total after, and it goes muted while nothing is
- * recorded, because then the facts under it are suggestions and say so.
+ * **Painted in the room's main wall colour** when a paint recorded there says
+ * it went on the walls (`wallColour`), and white otherwise. That is the swatch
+ * rule at full size rather than an exception to the palette: the colour is the
+ * record's data, the same as the photograph of the tin, and a hex that does not
+ * parse leaves the tile white rather than guessing. The words on it are
+ * measured against the wall (`tileInk`) — ink or white, and a translucent panel
+ * behind them for the mid-tones where neither reads. A painted tile carries a
+ * hairline edge for the swatch dot's reason: most wall paint is a white, and
+ * Alabaster on the plaster ground is otherwise a tile with no edge at all.
+ *
+ * **Records are solid bullets, suggestions hollow.** A room with nothing
+ * recorded says *Not recorded yet* above its list, and its bullets are rings —
+ * the Schedule tab's hollow-means-not-real, because a suggestion that reads as a
+ * record is the one failure this tab is built against. Such a room is never
+ * painted either: it has no paint to paint it with.
+ *
+ * The count is "2 of 8" while anything is still suggested and a bare total
+ * after, and it goes muted on a white tile while nothing is recorded.
  */
 function RoomTile({ room, onPress }: { room: HouseRoom; onPress: () => void }) {
-  const { count, facts } = describeHouseRoom(room);
-  const nothingYet = room.recorded.length === 0;
+  const { count, lines, suggested, truncated, wall } = describeHouseRoom(room);
+  const paint = wall ? tileInk(wall) : null;
+  const ink = paint?.ink ?? Colors.textPrimary;
+  // On a painted tile every line takes the measured colour: the muted and
+  // secondary greys are measured against plaster and white, not against a wall.
+  const quiet = paint ? ink : Colors.textSecondary;
+  const muted = paint ? ink : Colors.textMuted;
+
+  const content = (
+    <>
+      <View style={styles.tileHead}>
+        <Text style={[styles.tileName, { color: ink }]} numberOfLines={2}>{room.name}</Text>
+        <View
+          style={styles.tileIcon}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          <Icon name={roomIcon(room.room)} size="md" color={paint ? ink : Colors.textSecondary} />
+        </View>
+      </View>
+      <Text style={[styles.tileCount, { color: suggested ? muted : ink }]}>{count}</Text>
+      <View style={styles.tileList}>
+        {suggested ? (
+          <Text style={[styles.tileNote, { color: muted }]}>Not recorded yet</Text>
+        ) : null}
+        {lines.map((line, i) => (
+          <View
+            key={`${i}-${line}`}
+            style={[styles.bulletRow, truncated && { opacity: TILE_FADE[i] ?? 0 }]}
+          >
+            <View
+              style={
+                suggested
+                  ? [styles.bulletHollow, { borderColor: muted }]
+                  : [styles.bullet, { backgroundColor: quiet }]
+              }
+            />
+            <Text style={[styles.bulletText, { color: suggested ? muted : quiet }]} numberOfLines={1}>
+              {line}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+
   return (
     <Pressable
       onPress={onPress}
-      style={styles.tile}
+      style={[styles.tile, wall ? [styles.tilePainted, { backgroundColor: wall }] : null]}
       accessibilityRole="button"
       accessibilityLabel={`${room.name}, ${count}`}
     >
-      <View style={styles.tileHead}>
-        <Text style={styles.tileName} numberOfLines={2}>{room.name}</Text>
-        <Text style={[styles.tileCount, nothingYet && styles.tileCountMuted]}>{count}</Text>
-      </View>
-      <Text style={styles.tileFacts} numberOfLines={3}>{facts}</Text>
+      {paint?.scrim ? <View style={styles.tileScrim}>{content}</View> : content}
     </Pressable>
   );
 }
@@ -495,18 +559,35 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
   },
+  // The wall colour's edge: ink at 10%, so it reads on Alabaster and vanishes
+  // into a dark green rather than outlining it.
+  tilePainted: { borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(43, 39, 36, 0.10)' },
+  tileScrim: {
+    gap: 6,
+    margin: -Spacing.xs,
+    padding: Spacing.sm,
+    borderRadius: Radius.input,
+    backgroundColor: TILE_SCRIM,
+  },
   tileSpacer: { flex: 1 },
-  tileHead: { gap: 2 },
+  tileHead: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   tileName: {
+    flex: 1, minWidth: 0,
     fontSize: Typography.body, lineHeight: 22, fontWeight: Typography.semibold,
     color: Colors.textPrimary,
   },
+  // Centred on the name's first line (22pt line, 20pt glyph).
+  tileIcon: { paddingTop: 1 },
   tileCount: {
     fontSize: Typography.subhead, lineHeight: 20, color: Colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
-  tileCountMuted: { color: Colors.textMuted },
-  tileFacts: { fontSize: Typography.footnote, lineHeight: 18, color: Colors.textMuted },
+  tileList: { gap: 3, paddingTop: 2 },
+  tileNote: { fontSize: Typography.footnote, lineHeight: 18, color: Colors.textMuted },
+  bulletRow: { flexDirection: 'row', alignItems: 'center', gap: 7, minWidth: 0 },
+  bullet: { width: 5, height: 5, borderRadius: 2.5 },
+  bulletHollow: { width: 6, height: 6, borderRadius: 3, borderWidth: 1.25 },
+  bulletText: { flex: 1, minWidth: 0, fontSize: Typography.footnote, lineHeight: 18 },
   fab: {
     position: 'absolute',
     right: Spacing.lg,

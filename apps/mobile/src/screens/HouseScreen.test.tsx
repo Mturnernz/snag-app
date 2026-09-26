@@ -1,14 +1,17 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
+import { Colors } from '../constants/theme';
 import HouseScreen from './HouseScreen';
 
 // The House tab is a grid of rooms, each opening a page of its own. It still
 // arrives furnished, and the rule the whole design rests on is still that a
 // ghost is never a row. These pin the places that distinction can silently
-// blur — the counts, the tile's facts line and the search — plus the seeded
-// room order the List tab shares, the door into each room, and the controls
-// that were taken away: the by-kind rail and the fold.
+// blur — the counts, the tile's list and the search — plus the order the grid
+// is read in, the wall colour a tile is painted in and the words measured
+// against it, the door into each room, and the controls that were taken away:
+// the by-kind rail and the fold.
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -92,6 +95,31 @@ async function search(r: ReturnType<typeof render>, query: string) {
   await TestRenderer.act(async () => field.props.onChangeText(query));
 }
 
+/** The tile for a room, whatever its count says. */
+const tile = (r: ReturnType<typeof render>, room: string) =>
+  r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && !!n.props?.onPress
+      && (n.props?.accessibilityLabel ?? '').startsWith(`${room}, `),
+    { deep: true },
+  )[0];
+
+const tileBackground = (r: ReturnType<typeof render>, room: string) =>
+  StyleSheet.flatten(tile(r, room).props.style).backgroundColor;
+
+/** The colour a host Text reading exactly `text` is drawn in. */
+const colourOf = (r: ReturnType<typeof render>, text: string) =>
+  StyleSheet.flatten(r.getByText(text).props.style).color;
+
+/** The opacity of the bullet row holding `line`, or undefined when it has none. */
+const rowOpacity = (r: ReturnType<typeof render>, line: string) => {
+  const rows = r.getAllByType('View').filter((n: any) => walk(n) === line
+    && StyleSheet.flatten(n.props.style)?.flexDirection === 'row');
+  return StyleSheet.flatten(rows[0].props.style).opacity;
+};
+
+const paint = (id: string, room: string, name: string, notes: string, hex: string) =>
+  thing({ id, name, room, kind: 'finish', notes, spec: { hex } });
+
 const pressable = (r: ReturnType<typeof render>, label: string) =>
   r.root.findAll(
     (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label && !!n.props?.onPress,
@@ -136,11 +164,17 @@ describe('HouseScreen', () => {
   it('says a suggestion is not recorded before it names one', async () => {
     // A tile for a room with nothing recorded names what it probably has —
     // which is exactly where a suggestion could be read as a record, so the
-    // words come first.
+    // words come first, and the tile is never painted: it has no paint.
     const result = render(<HouseScreen />);
     await settle();
 
-    expect(texts(result)).toContain('Not recorded yet · Washing machine, Dryer, Water filter, Paint');
+    const all = texts(result);
+    const note = all.indexOf('Not recorded yet');
+    expect(note).toBeGreaterThan(-1);
+    for (const name of ['Washing machine', 'Dryer', 'Water filter', 'Paint']) {
+      expect(all.indexOf(name)).toBeGreaterThan(note);
+    }
+    expect(tileBackground(result, 'Laundry')).toBe(Colors.surface);
   });
 
   it('counts what is recorded against what the room still offers', async () => {
@@ -153,11 +187,84 @@ describe('HouseScreen', () => {
 
     expect(tiles(result)).toContain('Laundry, 2 of 4');
     const all = texts(result);
-    // Once anything is recorded the tile names the records, and only those.
-    expect(all).toContain('Dryer, Washing machine');
+    // Once anything is recorded the tile names the records, and only those —
+    // a bullet each, and not one of what the room still suggests.
+    expect(all).toContain('Dryer');
+    expect(all).toContain('Washing machine');
+    expect(all).not.toContain('Water filter');
     // The header counts records, never ghosts — the first place the two would
     // blur is a number that includes both.
     expect(all).toContain('2 recorded');
+  });
+
+  it('leads with the room holding the most', async () => {
+    // The grid is an index somebody reads to find where the record is, so the
+    // busiest room is first — Deck's two things before Laundry's one, against
+    // the seeded order.
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Dryer', room: 'Laundry' }),
+      thing({ id: '2', name: 'Deck stain', room: 'Deck', kind: 'finish' }),
+      thing({ id: '3', name: 'Heater', room: 'Deck' }),
+    ]);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(tiles(result).map((label) => label.split(',')[0])).toEqual(['Deck', 'Laundry']);
+  });
+
+  it("paints a tile in its main wall's colour, and never a feature wall's", async () => {
+    // A bedroom painted white with one forest green wall is a white room.
+    arrange(['Hallway', 'Bedroom']);
+    mock_getThings.mockResolvedValue([
+      paint('1', 'Hallway', 'Wan White', 'Main wall', '#E4E2DC'),
+      paint('2', 'Bedroom', 'Half Forest Green', 'Feature wall', '#405341'),
+    ]);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(tileBackground(result, 'Hallway')).toBe('#E4E2DC');
+    expect(tileBackground(result, 'Bedroom')).toBe(Colors.surface);
+  });
+
+  it('writes in white on a dark wall and in ink on a pale one', async () => {
+    arrange(['Hallway', 'Bedroom']);
+    mock_getThings.mockResolvedValue([
+      paint('1', 'Hallway', 'Wan White', 'Main wall', '#E4E2DC'),
+      paint('2', 'Bedroom', 'Half Forest Green', 'Walls', '#405341'),
+    ]);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(tileBackground(result, 'Bedroom')).toBe('#405341');
+    expect(colourOf(result, 'Bedroom')).toBe(Colors.white);
+    expect(colourOf(result, 'Half Forest Green')).toBe(Colors.white);
+    expect(colourOf(result, 'Hallway')).toBe(Colors.textPrimary);
+  });
+
+  it('lists four and fades them out when a room holds more', async () => {
+    arrange(['Kitchen']);
+    const names = ['Chest freezer', 'Cooktop', 'Dishwasher', 'Fridge', 'Microwave'];
+    mock_getThings.mockResolvedValue(names.map((name, i) => thing({ id: `${i}`, name, room: 'Kitchen' })));
+    const result = render(<HouseScreen />);
+    await settle();
+
+    const all = texts(result);
+    for (const name of names.slice(0, 4)) expect(all).toContain(name);
+    expect(all).not.toContain('Microwave');
+    expect(rowOpacity(result, 'Chest freezer')).toBe(1);
+    expect(rowOpacity(result, 'Fridge')).toBeLessThan(rowOpacity(result, 'Dishwasher'));
+    expect(rowOpacity(result, 'Dishwasher')).toBeLessThan(rowOpacity(result, 'Cooktop'));
+  });
+
+  it('does not fade a list that is all there', async () => {
+    // Fading the last of four would hide a line and claim there was more.
+    arrange(['Kitchen']);
+    const names = ['Chest freezer', 'Cooktop', 'Dishwasher', 'Fridge'];
+    mock_getThings.mockResolvedValue(names.map((name, i) => thing({ id: `${i}`, name, room: 'Kitchen' })));
+    const result = render(<HouseScreen />);
+    await settle();
+
+    for (const name of names) expect(rowOpacity(result, name)).toBeUndefined();
   });
 
   it('puts things with no room under Whole house, last and unfurnished', async () => {

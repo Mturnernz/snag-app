@@ -16,8 +16,8 @@ closer to each other than that estimate can tell apart. A match gives you a
 
 | File | What it is |
 |---|---|
-| `nz-paint-library.csv` | Every colour, every column (below). The master copy: 11,381 colours as of September 2026. |
-| `nix-import-gaps.csv` | Only the colours that are **certainly not** in any Nix library (2,336). This is the one to load into Nix. It holds archived and non-Nix Resene ranges, all of Aalto, and the Dulux Colours of NZ colours with no atlas twin. |
+| `nz-paint-library.csv` | Every colour, every column (below). The master copy: 12,368 colours as of September 2026. |
+| `nix-import-gaps.csv` | Only the colours that are **certainly not** in any Nix library (2,657). This is the one to load into Nix. It holds archived and non-Nix Resene ranges, all of Aalto, the Dulux Colours of NZ colours with no atlas twin, and the Dulux consumer colours with no atlas code at all. |
 | `nix-by-brand/<brand>.csv` | One file per maker, every colour with a usable Lab. Use these for a maker whose Nix coverage is marked `check`, if the test in step 2 below says Nix doesn't have it. |
 
 The `nix-*` files have six columns: `Name, L, a, b, Hex, Comment`.
@@ -34,7 +34,7 @@ file.
 | `brand`, `name`, `code` | As the maker writes them. For Resene, `code` is the Total Colour Code (`Y91-020-082`); for Dulux, the atlas code (`NZ9H3`); for Wattyl/Taubmans, the Colour Designer code (`CW 102.3`). Porter's and Aalto publish no code. |
 | `collection` | The range or chart. For an archived Resene colour, this is the last few charts it appeared in. |
 | `status` | `current`, or `archived` when the maker no longer lists it in a current range. |
-| `aliases` | Other names for the same colour. Resene says so itself. For Dulux it is inferred: two colours whose RGB, LRV and solar absorptance all match exactly (for example Mt Aspiring Half and Snowy Mountains Half). |
+| `aliases` | Other names for the same colour. Resene says so itself. For Dulux it is inferred: two colours whose RGB, LRV and solar absorptance all match exactly (for example Mt Aspiring Half and Snowy Mountains Half), or a consumer colour whose code, RGB and LRV all match an atlas colour. A shared code alone is not enough — 14 consumer colours carry an atlas code but are a different colour. |
 | `hex_published`, `r`, `g`, `b` | The maker's own on-screen colour, exactly as published. |
 | `lrv` | The maker's light reflectance value, which is the Y in XYZ. |
 | `lab_d50_*`, `lab_d65_*` | The estimated CIELAB value under D50/2° (Nix's default) and D65/2°. There is no 10° observer column, because converting between observers needs a spectrum and no maker publishes one. |
@@ -110,7 +110,8 @@ and undone (a power on linear RGB).
 |---|---|---|---|
 | Resene | 2022 CAD colour book (Resene derives it from its master Lab) | +0.06 ± 1.44 | used as published |
 | Resene, archived colours missing from that book | 2016 "visual" RGB | −7.10 ± 4.19 | ^0.77 → −0.01 ± 2.08 |
-| Dulux | Colour Atlas | −3.31 ± 1.87 | ^0.87 → +0.09 ± 0.67 |
+| Dulux | Colour Atlas (4,974) | −3.31 ± 1.87 | ^0.87 → +0.09 ± 0.67 |
+| Dulux | consumer colour pages, not in the atlas (987) | — | ^0.87 → +0.10 ± 0.55 |
 | Porter's (DuluxGroup) | all-colours page | −3.65 ± 2.49 | ^0.87 → −0.03 ± 1.79 |
 | Wattyl / Taubmans, whole-number LRV (991) | colour pages | −0.04 ± 1.37; 956 within 1 L\* | used as published |
 | Wattyl / Taubmans, two-decimal LRV (609) | colour pages | +2.21 ± 1.98; no single curve fits | hue from the RGB, lightness from the LRV |
@@ -165,6 +166,11 @@ away from zero. That's the signal to re-fit them with `fit_tone()`.
 - **Stains, metallics and textures** (Resene Woodsman and Colorwood, Resene
   metallics, Porter's speciality finishes) are listed with no Lab. A sensor
   doesn't read them as a flat colour.
+- **Dulux's Colour Atlas is not its whole range.** About 1,000 colours are
+  only on the consumer colour pages (Blues, Greys, Heritage and so on). Some are
+  NZ names for atlas colours; 323 have no atlas code at all, like Rangitīkei
+  River Quarter. The builder reads both, and a consumer colour's `source_url`
+  is its own page.
 - **Older Dulux colours are missing.** Dulux publishes its current range only,
   and there's no archive to draw on. Resene and Aalto both publish theirs.
 - **Wattyl/Taubmans in Nix.** Nix's Wattyl libraries carry Australian range

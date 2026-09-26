@@ -358,6 +358,13 @@ def build_resene():
 # Dulux — the atlas page carries every current colour in one response.
 # ---------------------------------------------------------------------------
 
+DULUX_CONSUMER = {
+    'whites-and-neutrals': 'Whites & Neutrals', 'greys': 'Greys', 'browns': 'Browns', 'blues': 'Blues',
+    'yellows': 'Yellows', 'greens': 'Greens', 'oranges': 'Oranges', 'reds': 'Reds',
+    'purples-and-pinks': 'Purples & Pinks', 'heritage-collection': 'Heritage', 'colorsteel': 'Colorsteel',
+}
+
+
 def build_dulux():
     print('Dulux', flush=True)
     page = fetch('https://www.dulux.co.nz/specifier/colour/colour-atlas/', 'dulux/atlas.html').replace('\\"', '"')
@@ -369,28 +376,64 @@ def build_dulux():
     for m in pat.finditer(page):
         slug, name, code, cats, _brand, _hex, r, g, b, lrv, sa = m.groups()
         if slug not in found:
-            found[slug] = (js_unescape(name), code, cats, (int(r), int(g), int(b)), lrv, sa)
+            cat_names = list(dict.fromkeys(js_unescape(c) for c in re.findall(
+                r'"name":"([^"]+)","__typename":"ConsumerColourCategory"', cats)))
+            found[slug] = (js_unescape(name), code, '; '.join(cat_names), (int(r), int(g), int(b)), lrv, sa,
+                           'https://www.dulux.co.nz/specifier/colour/colour-atlas/', 'atlas')
+
+    # The atlas is not the whole range. Dulux's consumer colour pages carry
+    # about 880 more: NZ names for atlas positions (Mt Albert is SG6H6) and
+    # colours with no atlas code at all — Rangitīkei River Quarter is one, and
+    # it was missing from this library until a recorded paint turned out to be
+    # it. Each category page embeds its own colours whole, so no per-colour
+    # fetch is needed.
+    for key, label in DULUX_CONSUMER.items():
+        cat = fetch(f'https://www.dulux.co.nz/colour/{key}/', f'dulux/{key}.html').replace('\\"', '"')
+        paths = dict(re.findall(r'"colourCode":"(\d+_\d+)","slug":"(colour/[^"]+)"', cat))
+        heads = list(re.finditer(r'"slug":"(\d+_\d+)","chipNumber":"[^"]*","lrv":([\d.]+|null),'
+                                 r'"sa":([\d.]+|null),"specifierNumber":"([^"]*)"', cat))
+        for i, m in enumerate(heads):
+            slug, lrv, sa, code = m.groups()
+            if slug in found:
+                if found[slug][7] == 'consumer' and label not in found[slug][2]:
+                    f = found[slug]
+                    found[slug] = f[:2] + (f[2] + '; ' + label,) + f[3:]
+                continue
+            tail = cat[m.end():heads[i + 1].start() if i + 1 < len(heads) else len(cat)]
+            names = re.findall(r'"displayName":"([^"]*)"', cat[max(0, m.start() - 3000):m.start()])
+            rgb = re.search(r'"rgb":\{"hex":"[^"]*","r":(\d+),"g":(\d+),"b":(\d+)', tail)
+            if not (names and rgb):
+                continue
+            found[slug] = (js_unescape(names[-1]), code, label, tuple(int(x) for x in rgb.groups()), lrv, sa,
+                           'https://www.dulux.co.nz/' + paths.get(slug, f'colour/{key}/') + '/', 'consumer')
 
     # Colours of New Zealand is, for about half its length, the atlas under
     # other names: Mt Aspiring Half carries exactly the RGB, LRV and solar
     # absorptance of Snowy Mountains Half. Three published figures agreeing to
     # three decimals is the same paint, so each is named as the other's alias —
     # which is also how a colour Nix knows by its Australian name is found.
-    twins = {}
-    for slug, (name, code, _c, rgb, lrv, sa) in found.items():
-        twins.setdefault((rgb, lrv, sa), []).append(f'{name} {code}')
+    # Sharing an atlas code is NOT enough: 570 consumer colours carrying one
+    # match the atlas colour there exactly, but 14 do not (Arrow Rock is SG6H7
+    # and #A89A89; the atlas's SG6H7 is Grey Cabin, #58544F).
+    # Consumer pages publish no solar absorptance, so for them the same code
+    # with the same RGB and LRV is the test instead.
+    twins, at_code = {}, {}
+    for slug, (name, code, _c, rgb, lrv, sa, _u, source) in found.items():
+        twins.setdefault((rgb, lrv, sa), []).append(f'{name} {code}'.strip())
+        if code and source == 'atlas':
+            at_code[(code, rgb, lrv)] = f'{name} {code}'
 
     rows = []
-    for slug, (name, code, cats, rgb, lrv, sa) in found.items():
-        cat_names = list(dict.fromkeys(js_unescape(c) for c in
-                                       re.findall(r'"name":"([^"]+)","__typename":"ConsumerColourCategory"', cats)))
+    for slug, (name, code, collection, rgb, lrv, sa, url, source) in found.items():
+        me = f'{name} {code}'.strip()
+        same = twins[(rgb, lrv, sa)] + [at_code[(code, rgb, lrv)]] if (code, rgb, lrv) in at_code else twins[(rgb, lrv, sa)]
+        aliases = list(dict.fromkeys(t for t in same if t != me))
         rows.append(row(
             brand='Dulux', name=name, code=code, maker_id=slug,
-            collection='; '.join(cat_names), status='current',
-            aliases='; '.join(t for t in twins[(rgb, lrv, sa)] if t != f'{name} {code}'),
+            collection=collection, status='current', aliases='; '.join(aliases),
             rgb=rgb, lrv=None if lrv == 'null' else float(lrv),
-            tone=TONE['dulux'], basis='Dulux atlas RGB, display curve undone (^0.87)', not_flat=False,
-            source='https://www.dulux.co.nz/specifier/colour/colour-atlas/'))
+            tone=TONE['dulux'], basis=f'Dulux {source} RGB, display curve undone (^0.87)', not_flat=False,
+            source=url))
     return rows
 
 
@@ -560,7 +603,9 @@ NIX_HAS = {
     'Resene': lambda r: 'yes' if r['status'] == 'current' and NIX_RESENE & set(r['collection'].split('; ')) else 'no',
     # Colours of NZ is not a Nix library, but a colour in it with an atlas twin
     # may well be in Nix's atlas under the twin's name.
-    'Dulux': lambda r: 'no' if 'Colours of NZ' in r['collection'] and not r['aliases'] else 'check',
+    # A consumer colour with no atlas code is in no Nix library either.
+    'Dulux': lambda r: ('no' if not r['aliases'] and (not r['code'] or 'Colours of NZ' in r['collection'])
+                        else 'check'),
     'Wattyl / Taubmans': lambda r: 'yes' if r['collection'] == 'Roofing steel' else 'check',
     "Porter's Paints": lambda r: 'yes',
     'Aalto': lambda r: 'no',

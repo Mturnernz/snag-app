@@ -353,6 +353,12 @@ export const deleteThing = (thingId: string) => queries.deleteThing(supabase, th
 export const readLabel = (path: string, kind: Parameters<typeof queries.readLabel>[2]) =>
   queries.readLabel(supabase, path, kind);
 
+export const getLabelReadingsToCheck = (propertyId: string) =>
+  queries.getLabelReadingsToCheck(supabase, propertyId);
+
+export const resolveLabelReading = (readingId: string, outcome: 'used' | 'dismissed') =>
+  queries.resolveLabelReading(supabase, readingId, outcome);
+
 export const getAbsentThings = (propertyId: string) => queries.getAbsentThings(supabase, propertyId);
 
 // ------------------------------------------------------------------ projects

@@ -1,8 +1,8 @@
 import {
-  applyLabelReading, brandCase, consumableOnList, parseLabelReading, swatchColour,
-  type LabelFields, type LabelReading,
+  applyLabelReading, brandCase, consumableOnList, labelOffers, labelOffersUpdate, parseLabelGuess,
+  parseLabelReading, swatchColour, type LabelFields, type LabelReading,
 } from '@snag/supabase-queries';
-import type { Snag } from '../types';
+import type { Snag, Thing } from '../types';
 
 // Three small rules that each decide whether the house record can be believed
 // in a shop: a swatch is drawn only from a colour that parses, a label reading
@@ -202,5 +202,93 @@ describe('applyLabelReading', () => {
   it('gives a paint no serial and an appliance no swatch', () => {
     expect(applyLabelReading(blank, read({ serial: '123' }), 'finish').next.serial).toBe('');
     expect(applyLabelReading(blank, read({ hex: '#FFFFFF' }), 'appliance').next.spec).toEqual({});
+  });
+});
+
+// A reading that lands after *Add it* is offered on the thing's page rather
+// than written. These pin what it may offer: the empty boxes together, a
+// disagreement on its own, and nothing it already agrees with.
+describe('labelOffers', () => {
+  const thing = (over: Partial<Thing>): Thing => ({
+    id: 't', householdId: 'h', propertyId: 'p', kind: 'appliance',
+    name: 'Heat pump', room: 'Living room', photoPaths: ['h/plate.jpg'], documentPaths: [],
+    make: null, model: null, serial: null, consumables: [],
+    installedAt: null, warrantyUntil: null, serviceDays: null, spec: {}, notes: null,
+    createdBy: 'me', createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
+    propertyName: 'Home', snagCount: 0, openSnagCount: 0,
+    ...over,
+  });
+  const plate = (over: Partial<LabelReading> = {}): LabelReading => ({
+    legible: true, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871',
+    colourName: null, colourCode: null, product: null, sheen: null, tint: null, hex: null,
+    consumables: [], suggestedConsumables: [], suggestedServiceDays: null,
+    ...over,
+  });
+
+  it('offers every empty box together', () => {
+    const offers = labelOffers(thing({}), plate());
+    expect(offers.fill.map((one) => [one.key, one.value])).toEqual([
+      ['make', 'Mitsubishi Electric'], ['model', 'MSZ-AP50VGK'], ['serial', '7A204871'],
+    ]);
+    expect(offers.differ).toEqual([]);
+  });
+
+  it('never offers over a box somebody filled — a disagreement is its own row, with what the record says', () => {
+    const offers = labelOffers(thing({ model: 'MSZ-AP50', make: 'mitsubishi  electric' }), plate());
+    expect(offers.fill.map((one) => one.key)).toEqual(['serial']);
+    // Same words in other capitals and spacing is agreement, not a question.
+    expect(offers.differ).toEqual([
+      { key: 'model', label: 'Model', value: 'MSZ-AP50VGK', current: 'MSZ-AP50' },
+    ]);
+  });
+
+  it('offers nothing a record already agrees with', () => {
+    const offers = labelOffers(
+      thing({ make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871' }),
+      plate(),
+    );
+    expect(offers).toEqual({ fill: [], differ: [], parts: [], serviceDays: null });
+  });
+
+  it('keeps parts and a cycle as offers, and drops a part the thing already takes', () => {
+    const offers = labelOffers(
+      thing({ consumables: ['air filter mac-2360ft'] }),
+      plate({ suggestedConsumables: ['Air filter MAC-2360FT', 'Remote batteries AAA'], suggestedServiceDays: 365 }),
+    );
+    expect(offers.parts).toEqual(['Remote batteries AAA']);
+    expect(offers.serviceDays).toBe(365);
+    expect(labelOffers(thing({ serviceDays: 180 }), plate({ suggestedServiceDays: 365 })).serviceDays).toBeNull();
+  });
+
+  it('reads a paint as a paint: its code, its spec, and a swatch only for a named colour', () => {
+    const paint = thing({ kind: 'finish', name: 'Wan White' });
+    const offers = labelOffers(paint, plate({
+      make: 'Resene', model: null, serial: null, colourName: 'Wan White', colourCode: 'N93-005-105',
+      sheen: 'Low sheen', hex: '#EAE8DF',
+    }));
+    expect(offers.fill.map((one) => [one.key, one.label, one.value])).toEqual([
+      ['make', 'Brand', 'Resene'], ['model', 'Colour code', 'N93-005-105'],
+      ['sheen', 'Sheen', 'Low sheen'], ['hex', 'Swatch', '#EAE8DF'],
+    ]);
+    expect(offers.parts).toEqual([]);
+    const unnamed = labelOffers(paint, plate({ make: 'Resene', model: null, serial: null, hex: '#EAE8DF' }));
+    expect(unnamed.fill.some((one) => one.key === 'hex')).toBe(false);
+  });
+
+  it('writes what was taken in one update, columns and spec apart', () => {
+    expect(labelOffersUpdate([
+      { key: 'make', label: 'Brand', value: 'Resene', current: null },
+      { key: 'sheen', label: 'Sheen', value: 'Low sheen', current: null },
+    ])).toEqual({ make: 'Resene', spec: { sheen: 'Low sheen' } });
+  });
+});
+
+describe('parseLabelGuess', () => {
+  it('reads what the photo shows, with a capital, and only kinds the walkthrough offers', () => {
+    expect(parseLabelGuess({ whatItIs: 'heat pump', kindGuess: 'appliance' }))
+      .toEqual({ name: 'Heat pump', kind: 'appliance' });
+    expect(parseLabelGuess({ whatItIs: 'Paint', kindGuess: 'contact' })).toEqual({ name: 'Paint', kind: null });
+    expect(parseLabelGuess({ whatItIs: '  ', kindGuess: null })).toBeNull();
+    expect(parseLabelGuess(null)).toBeNull();
   });
 });

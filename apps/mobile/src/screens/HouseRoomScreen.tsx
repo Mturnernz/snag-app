@@ -16,6 +16,7 @@ import { Colors, Spacing, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useAddThing } from '../hooks/useAddThing';
 import { getAbsentThings, getFileUrls, getThings, markThingAbsent } from '../lib/supabase';
+import { labelsToCheck } from '../lib/labelChecks';
 import { showAlert } from '../lib/alert';
 import type { AbsentThing, RootStackParamList, Thing, ThingSuggestion } from '../types';
 
@@ -60,6 +61,8 @@ export default function HouseRoomScreen({ route }: Props) {
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  /** Things whose label reading waits on their page, marked on each row. Never fatal. */
+  const [labelChecks, setLabelChecks] = useState<string[]>([]);
 
   const propertyId = activeProperty?.id ?? null;
   const name = room ?? WHOLE_HOUSE;
@@ -71,12 +74,14 @@ export default function HouseRoomScreen({ route }: Props) {
       return;
     }
     try {
-      const [rows, hidden] = await Promise.all([
+      const [rows, hidden, checks] = await Promise.all([
         getThings(propertyId),
         getAbsentThings(propertyId),
+        labelsToCheck(propertyId),
       ]);
       setThings(rows);
       setAbsent(hidden);
+      setLabelChecks(checks);
       // Only this room's covers: signing every photograph in the house to draw
       // six thumbnails is a request whose cost grows with the wrong thing.
       const covers = thingsInArea(rows, room)
@@ -170,6 +175,7 @@ export default function HouseRoomScreen({ route }: Props) {
                   key={thing.id}
                   thing={thing}
                   photoUrl={thing.photoPaths[0] ? photoUrls[thing.photoPaths[0]] : null}
+                  labelToCheck={labelChecks.includes(thing.id)}
                   onPress={() => navigation.navigate('ThingDetail', { thingId: thing.id })}
                 />
               ))}

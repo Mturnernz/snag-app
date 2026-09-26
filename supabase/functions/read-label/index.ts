@@ -12,6 +12,13 @@
 //   still writes only on its last step, through `create_thing`, so a reading
 //   nobody confirmed can never reach the record. (It does count the read —
 //   see `home.claim_label_read` — which is a cost ceiling, not a record.)
+// - **It finishes whatever the phone does.** The work runs under
+//   `EdgeRuntime.waitUntil` and what it found is kept in `home.label_readings`,
+//   a waiting room rather than the record. So somebody can press *Add it*, or
+//   lock the phone, while the model is still looking, and the reading turns up
+//   as a card on the thing's own page to be checked there. An open sheet still
+//   gets the answer in the reply, as before. A busy model gets one more go in
+//   the background, after the caller has been told.
 // - **It reads the photo as the caller.** The client sends a storage path, not
 //   bytes, and the download uses the caller's own token — so the four storage
 //   policies on `home-photos` decide what can be read, exactly as they do
@@ -65,6 +72,85 @@ const EARLY_ATTEMPT_MS = 15_000;
 // A breath between a busy answer and the next ask — Google's own advice for 503.
 const BUSY_PAUSE_MS = 1_000;
 const COULD_NOT_READ = "Couldn't read that one — type what the label says.";
+const NOT_NOW = "Couldn't read the label just now — type what it says.";
+// Said to a sheet still open when the first round came back busy: the second
+// round runs in the background, and its answer lands on the thing's page.
+const BUSY_STILL_TRYING =
+  "The label reader is busy — it'll keep trying. Carry on, and check what it read on the item's page.";
+const USED_UP = "That's today's label reads used up — type what this one says.";
+// How long to leave a busy model before the background round. A 503 for
+// "high demand" clears in tens of seconds, not in one.
+const BACKGROUND_RETRY_PAUSE_MS = 20_000;
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
+
+type Asked =
+  | { kind: 'reply'; json: unknown }
+  | { kind: 'busy' }
+  | { kind: 'notSetUp' }
+  | { kind: 'error' };
+
+/**
+ * One round through the models: the default, then the fallbacks, each capped
+ * so a hang cannot spend the whole budget. Busy means every model said so (or
+ * was too slow); anything else that is not an answer would fail the same way
+ * on every model, so it stops there.
+ */
+async function askModels(models: string[], body: string, apiKey: string): Promise<Asked> {
+  const deadline = Date.now() + MODEL_TIMEOUT_MS;
+  let busy = false;
+
+  for (const [index, model] of models.entries()) {
+    const left = deadline - Date.now();
+    if (left < MIN_ATTEMPT_MS) break;
+    const last = index === models.length - 1;
+    let attempt: Response;
+    try {
+      attempt = await fetch(`${GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body,
+        signal: AbortSignal.timeout(last ? left : Math.min(left, EARLY_ATTEMPT_MS)),
+      });
+    } catch (err) {
+      // Too slow or unreachable is a kind of busy: the next model may answer.
+      console.error(`read-label: ${model} unreachable or too slow:`, err);
+      busy = true;
+      continue;
+    }
+    if (attempt.ok) return { kind: 'reply', json: await attempt.json().catch(() => null) };
+
+    const detail = await attempt.text().catch(() => '');
+    console.error(`read-label: ${model} ${attempt.status}:`, detail.slice(0, 500));
+    if (isBusy(attempt.status)) {
+      busy = true;
+      if (!last) await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSE_MS));
+      continue;
+    }
+    // A bad or revoked key comes back 400 ("API key not valid") or 401/403,
+    // and would on every model.
+    if (attempt.status === 401 || attempt.status === 403 || /API key/i.test(detail)) {
+      return { kind: 'notSetUp' };
+    }
+    return { kind: 'error' };
+  }
+  return busy ? { kind: 'busy' } : { kind: 'error' };
+}
+
+/** A reply, as what the waiting room keeps and what the caller is told. */
+function settle(asked: Asked):
+  | { status: 'read'; reading: unknown }
+  | { status: 'failed'; reason: 'illegible' | 'busy' | 'error'; http: number; words: string } {
+  if (asked.kind === 'busy') return { status: 'failed', reason: 'busy', http: 503, words: BUSY };
+  if (asked.kind === 'notSetUp') return { status: 'failed', reason: 'error', http: 503, words: NOT_SET_UP };
+  if (asked.kind === 'error') return { status: 'failed', reason: 'error', http: 502, words: NOT_NOW };
+  const outcome = readingFromGemini(asked.json);
+  if (!outcome.ok) {
+    console.error('read-label: no reading —', outcome.reason);
+    return { status: 'failed', reason: 'illegible', http: 422, words: COULD_NOT_READ };
+  }
+  return { status: 'read', reading: outcome.reading };
+}
 
 function answer(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -90,7 +176,8 @@ Deno.serve(async (req) => {
 
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   // Said in words, because the alternative reads to the person holding the
-  // phone as their photo having been unreadable.
+  // phone as their photo having been unreadable. No reading row either: the
+  // feature is off, and a card saying so on every thing would be noise.
   if (!apiKey) return answer(503, { error: NOT_SET_UP });
 
   const authorization = req.headers.get('Authorization');
@@ -101,7 +188,9 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     path = typeof body?.path === 'string' ? body.path : '';
-    kind = typeof body?.kind === 'string' ? body.kind : 'appliance';
+    // Empty is "nobody has said yet": the walkthrough takes the photo before
+    // it asks what the thing is, so the reader is asked to say.
+    kind = typeof body?.kind === 'string' ? body.kind : '';
   } catch {
     return answer(400, { error: "Couldn't read the label" });
   }
@@ -133,63 +222,72 @@ Deno.serve(async (req) => {
     p_household_id: segments[0],
   });
   if (claimError) return answer(403, { error: "Couldn't read the label" });
+
+  // The waiting room. If opening it fails the read still goes ahead and the
+  // caller still gets the answer — it just cannot outlive the sheet.
+  const { data: opened, error: openError } = await supabase.rpc('begin_label_reading', { p_path: path });
+  if (openError) console.error('read-label: could not open a reading —', openError.message);
+  const readingId: string | null = typeof opened === 'string' ? opened : null;
+
+  const keep = async (
+    status: 'read' | 'failed',
+    reading: unknown,
+    reason: string | null,
+  ): Promise<void> => {
+    if (!readingId) return;
+    const { error } = await supabase.rpc('finish_label_reading', {
+      p_id: readingId,
+      p_status: status,
+      p_reading: status === 'read' ? reading : null,
+      p_reason: reason,
+    });
+    if (error) console.error('read-label: could not keep the reading —', error.message);
+  };
+
+  // A photo the model could not read a label in is a failure to the waiting
+  // room — the card has to ask for typing — even though the open sheet is
+  // answered with the reading itself and words it there.
+  const keepRead = (reading: unknown): Promise<void> =>
+    // deno-lint-ignore no-explicit-any
+    (reading as any)?.legible === false ? keep('failed', null, 'illegible') : keep('read', reading, null);
+
   if (allowed !== true) {
-    return answer(429, { error: "That's today's label reads used up — type what this one says." });
+    await keep('failed', null, 'quota');
+    return answer(429, { error: USED_UP, readingId });
   }
 
-  // One read claimed above covers every model asked: falling back is our
-  // retry, not the household's second read.
+  // One read claimed above covers every model asked, and the background
+  // round too: falling back is our retry, not the household's second read.
   const models = modelsToTry(Deno.env.get('GEMINI_MODEL'), Deno.env.get('GEMINI_FALLBACK_MODEL'));
   const body = JSON.stringify(geminiRequest(kind, mimeType, encodeBase64(bytes)));
-  const deadline = Date.now() + MODEL_TIMEOUT_MS;
-  let reply: Response | null = null;
-  let busy = false;
 
-  for (const [index, model] of models.entries()) {
-    const left = deadline - Date.now();
-    if (reply !== null || left < MIN_ATTEMPT_MS) break;
-    const last = index === models.length - 1;
-    let attempt: Response;
-    try {
-      attempt = await fetch(`${GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body,
-        signal: AbortSignal.timeout(last ? left : Math.min(left, EARLY_ATTEMPT_MS)),
-      });
-    } catch (err) {
-      // Too slow or unreachable is a kind of busy: the next model may answer.
-      console.error(`read-label: ${model} unreachable or too slow:`, err);
-      busy = true;
-      continue;
+  // Everything from here runs under waitUntil, so a caller who pressed *Add
+  // it*, closed the sheet or locked the phone does not cut it short. The
+  // reply below waits on the first round only.
+  const first = askModels(models, body, apiKey).then(settle);
+  const whole = first.then(async (outcome) => {
+    if (outcome.status === 'failed' && outcome.reason === 'busy') {
+      await new Promise((resolve) => setTimeout(resolve, BACKGROUND_RETRY_PAUSE_MS));
+      const again = settle(await askModels(models, body, apiKey));
+      if (again.status === 'read') return keepRead(again.reading);
+      return keep('failed', null, again.reason);
     }
-    if (attempt.ok) {
-      reply = attempt;
-      break;
-    }
-    const detail = await attempt.text().catch(() => '');
-    console.error(`read-label: ${model} ${attempt.status}:`, detail.slice(0, 500));
-    if (isBusy(attempt.status)) {
-      busy = true;
-      if (!last) await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSE_MS));
-      continue;
-    }
-    // A bad or revoked key comes back 400 ("API key not valid") or 401/403,
-    // and would on every model.
-    if (attempt.status === 401 || attempt.status === 403 || /API key/i.test(detail)) {
-      return answer(503, { error: NOT_SET_UP });
-    }
-    return answer(502, { error: "Couldn't read the label just now — type what it says." });
-  }
+    if (outcome.status === 'read') return keepRead(outcome.reading);
+    return keep('failed', null, outcome.reason);
+  }).catch((err) => console.error('read-label: background work failed —', err));
+  EdgeRuntime.waitUntil(whole);
 
-  if (!reply) {
-    return answer(busy ? 503 : 504, { error: busy ? BUSY : "Couldn't read the label just now — type what it says." });
+  const outcome = await first;
+  if (outcome.status === 'failed' && outcome.reason === 'busy') {
+    // Answered now rather than after the second round, which would outlast
+    // the app's own deadline. The reading id lets the sheet say where the
+    // answer will turn up.
+    return answer(503, { error: readingId ? BUSY_STILL_TRYING : BUSY, readingId });
   }
-
-  const outcome = readingFromGemini(await reply.json().catch(() => null));
-  if (!outcome.ok) {
-    console.error('read-label: no reading —', outcome.reason);
-    return answer(422, { error: COULD_NOT_READ });
-  }
-  return answer(200, outcome.reading);
+  // Kept before answering, so a caller who uses the reading straight away is
+  // resolving a row that already says what it said.
+  await whole;
+  if (outcome.status === 'failed') return answer(outcome.http, { error: outcome.words, readingId });
+  const reading = outcome.reading && typeof outcome.reading === 'object' ? outcome.reading : {};
+  return answer(200, { ...reading, readingId });
 });

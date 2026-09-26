@@ -21,13 +21,16 @@ import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import {
   consumableOnList, describeCycle, documentFileName, documentName, formatLooseDate,
   parseLooseDate, serviceJobFor, swatchColour, thingHeadline, dayKey, formatDayFirst,
+  labelOffers, labelOffersUpdate, type LabelOffer, type LabelReadingToCheck,
 } from '@snag/supabase-queries';
 import {
-  createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getSnags, getThing,
-  setSnagStatus, updateSnag, updateThing, uploadFile,
+  createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getLabelReadingsToCheck,
+  getSnags, getThing, readLabel, resolveLabelReading, setSnagStatus, updateSnag, updateThing,
+  uploadFile,
 } from '../lib/supabase';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import ComposeBar from '../components/ComposeBar';
+import LabelReadingCard from '../components/LabelReadingCard';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
@@ -179,6 +182,12 @@ export default function ThingDetailScreen() {
    * source for the cycle this page shows — see `serviceJobFor`.
    */
   const [serviceJob, setServiceJob] = useState<Snag | null>(null);
+  /**
+   * A label reading that landed after the walkthrough's *Add it* — kept by the
+   * server, offered here, never written onto the record unseen.
+   */
+  const [labelCheck, setLabelCheck] = useState<LabelReadingToCheck | null>(null);
+  const [labelRetrying, setLabelRetrying] = useState(false);
   const [consumableDraft, setConsumableDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -214,6 +223,13 @@ export default function ThingDetailScreen() {
         }
         setServiceJob(serviceJobFor(open, found.id));
       }
+      // Never fatal either: a reading nobody can fetch leaves the record as it is.
+      try {
+        const waiting = await getLabelReadingsToCheck(found.propertyId);
+        setLabelCheck(waiting.filter((one) => one.thingId === found.id).pop() ?? null);
+      } catch {
+        setLabelCheck(null);
+      }
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'Please try again.');
     }
@@ -242,6 +258,75 @@ export default function ThingDetailScreen() {
     });
     return stop;
   }, [navigation]);
+
+  // A reading with nothing left to offer — everything used, or everything it
+  // said already on the record — ends itself, rather than a card with no rows.
+  useEffect(() => {
+    if (!thing || !labelCheck || labelCheck.status !== 'read' || !labelCheck.reading) return;
+    const left = labelOffers(thing, labelCheck.reading);
+    if (left.fill.length || left.differ.length || left.parts.length || left.serviceDays) return;
+    const id = labelCheck.id;
+    setLabelCheck(null);
+    resolveLabelReading(id, 'used').catch(() => {});
+  }, [thing, labelCheck]);
+
+  /** *Use these* or *Use*: one `update_thing`, whichever boxes they are. */
+  async function takeLabel(offers: LabelOffer[]) {
+    await patch(labelOffersUpdate(offers), 'Saved');
+    // The boxes on this page are a draft over the record, and a box left
+    // holding the old value would write it back the moment it was left.
+    const next = thingRef.current;
+    if (!next) return;
+    const fresh = draftFrom(next);
+    setDraft((d) => {
+      if (!d) return fresh;
+      const merged: Draft = { ...d, spec: { ...d.spec } };
+      for (const one of offers) {
+        if (one.key === 'name' || one.key === 'make' || one.key === 'model' || one.key === 'serial') {
+          merged[one.key] = fresh[one.key];
+        } else {
+          merged.spec[one.key] = fresh.spec[one.key] ?? '';
+        }
+      }
+      return merged;
+    });
+  }
+
+  async function dismissLabel() {
+    if (!labelCheck) return;
+    const id = labelCheck.id;
+    setLabelCheck(null);
+    try {
+      await resolveLabelReading(id, 'dismissed');
+    } catch (err: any) {
+      showAlert("That didn't save", err?.message ?? 'Please try again.');
+      await load();
+    }
+  }
+
+  /**
+   * Reads the photo again — a new read, counted like any other. Awaited here
+   * because the page is open and the card says it is looking; the answer is
+   * whatever the server kept, re-read, so the card and the waiting room
+   * cannot disagree.
+   */
+  async function retryLabel() {
+    if (!thing || !labelCheck || labelRetrying) return;
+    setLabelRetrying(true);
+    try {
+      await readLabel(labelCheck.photoPath, thing.kind);
+    } catch {
+      // Its words are on the row the server kept, which the re-read shows.
+    }
+    try {
+      const waiting = await getLabelReadingsToCheck(thing.propertyId);
+      setLabelCheck(waiting.filter((one) => one.thingId === thing.id).pop() ?? null);
+    } catch {
+      // Leave the card as it was.
+    } finally {
+      setLabelRetrying(false);
+    }
+  }
 
   async function patch(update: Parameters<typeof updateThing>[1], toast?: string) {
     if (!thing || busy) return;
@@ -561,9 +646,9 @@ export default function ThingDetailScreen() {
    * *Schedule service* has already said they want one, and making them pick
    * from four before anything is on screen is the rail this replaced.
    */
-  function openService() {
+  function openService(suggested?: number) {
     if (!thing) return;
-    const days = serviceJob?.repeatDays ?? thing.serviceDays ?? 180;
+    const days = suggested ?? serviceJob?.repeatDays ?? thing.serviceDays ?? 180;
     setService({
       days,
       by: thing.spec.servicedBy ?? '',
@@ -784,6 +869,20 @@ export default function ThingDetailScreen() {
               </View>
             ))}
           </ScrollView>
+        ) : null}
+
+        {labelCheck ? (
+          <LabelReadingCard
+            check={labelCheck}
+            thing={thing}
+            busy={busy}
+            retrying={labelRetrying}
+            onUse={takeLabel}
+            onAddPart={(item) => patch({ consumables: [...thing.consumables, item] }, 'Added')}
+            onService={(days) => openService(days)}
+            onDismiss={dismissLabel}
+            onRetry={retryLabel}
+          />
         ) : null}
 
         {/* There was an Appliance/Paint rail here, and it has gone. It existed

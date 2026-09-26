@@ -32,7 +32,9 @@ const mock_getThings = jest.fn();
 const mock_getAbsentThings = jest.fn();
 const mock_markThingAbsent = jest.fn();
 const mock_getFileUrls = jest.fn();
+const mock_getLabelReadingsToCheck = jest.fn();
 jest.mock('../lib/supabase', () => ({
+  getLabelReadingsToCheck: (...a: unknown[]) => mock_getLabelReadingsToCheck(...a),
   getThings: (...a: unknown[]) => mock_getThings(...a),
   getAbsentThings: (...a: unknown[]) => mock_getAbsentThings(...a),
   markThingAbsent: (...a: unknown[]) => mock_markThingAbsent(...a),
@@ -95,6 +97,7 @@ beforeEach(() => {
   mock_getAbsentThings.mockResolvedValue([]);
   mock_markThingAbsent.mockResolvedValue(undefined);
   mock_getFileUrls.mockResolvedValue({});
+  mock_getLabelReadingsToCheck.mockResolvedValue([]);
 });
 
 describe('reading a room', () => {
@@ -152,6 +155,34 @@ describe('reading a room', () => {
 
     await TestRenderer.act(async () => pressable(r, 'Dryer').props.onPress());
     expect(mock_navigate).toHaveBeenCalledWith('ThingDetail', { thingId: 'd1' });
+  });
+});
+
+describe('a label waiting to be checked', () => {
+  // A reading that landed after *Add it* waits on the thing's page, and the
+  // row is where somebody walking the room finds out. Never one still being
+  // read, and a read that fails costs the marker and nothing else.
+  it('marks the row whose label is waiting, and no other', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: '1', name: 'Oven', room: 'Kitchen' }),
+      thing({ id: '2', name: 'Dishwasher', room: 'Kitchen' }),
+      thing({ id: '3', name: 'Rangehood', room: 'Kitchen' }),
+    ]);
+    mock_getLabelReadingsToCheck.mockResolvedValue([
+      { id: 'r1', thingId: '1', status: 'read' },
+      { id: 'r3', thingId: '3', status: 'pending' },
+    ]);
+    const all = texts(await open('Kitchen'));
+    expect(all.filter((t) => t === 'Label to check')).toHaveLength(1);
+    expect(mock_getLabelReadingsToCheck).toHaveBeenCalledWith('p');
+  });
+
+  it('draws the room when the readings cannot be fetched', async () => {
+    mock_getThings.mockResolvedValue([thing({ id: '1', name: 'Oven', room: 'Kitchen' })]);
+    mock_getLabelReadingsToCheck.mockRejectedValue(new Error('offline'));
+    const all = texts(await open('Kitchen'));
+    expect(all).toContain('Oven');
+    expect(all).not.toContain('Label to check');
   });
 });
 

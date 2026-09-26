@@ -14,7 +14,7 @@ export type AddThingStart = { room?: string | null; name?: string | null; kind?:
 /**
  * Recording a thing, from whichever screen the + was pressed on.
  *
- * The House tab's grid and a room's own page both open the same four-step
+ * The House tab's grid and a room's own page both open the same
  * walkthrough, and both have to write the same way: `create_thing`, then the
  * service job its cycle asks for, then one toast. Two copies of that is two
  * places for "added to the house" to mean different things.
@@ -53,19 +53,32 @@ export function useAddThing(onAdded: () => void | Promise<void>) {
     }
   }
 
-  async function add(input: Omit<ThingInput, 'propertyId'>) {
+  /** Resolves false when the write was refused, so the sheet knows it is still open for a reason. */
+  async function add(input: Omit<ThingInput, 'propertyId'>): Promise<boolean> {
     if (!activeProperty) {
       showAlert('No place yet', 'Add a place before adding to the house record.');
-      return;
+      return false;
     }
     try {
       const created = await createThing({ ...input, propertyId: activeProperty.id });
       setVisible(false);
       showToast((await fileServiceJob(created)) ?? 'Added to the house');
       await onAdded();
+      return true;
     } catch (err: any) {
       showAlert("Couldn't add that", err?.message ?? 'Please try again.');
+      return false;
     }
+  }
+
+  /**
+   * A reading that landed after *Add it* is waiting on the thing's page. Said
+   * once while the app is open, and the screen re-read so its *Label to check*
+   * marker appears. Still no notifications: nothing is said once it is closed.
+   */
+  function lateReading(name: string, readable: boolean) {
+    showToast(readable ? `Read the label for ${name} — check it` : `Couldn't read the label for ${name}`);
+    onAdded();
   }
 
   return {
@@ -80,6 +93,7 @@ export function useAddThing(onAdded: () => void | Promise<void>) {
       onAddRoom: addRoom,
       onCancel: () => setVisible(false),
       onAdd: add,
+      onLateReading: lateReading,
     },
   };
 }

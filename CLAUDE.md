@@ -1022,9 +1022,9 @@ answer across every room.
 - **Recorded things are rows in a white `Group`**, 17pt with the mono answer at 15pt under it and a
   chevron, where they were separate shadowed cards — the V2 grouped list, like every other list of
   things to open in this app. A ghost stays a dashed, transparent card outside any group.
-- **The + is in the page's header**, opening the walkthrough on step two with the room chosen;
-  the FAB on the grid opens it on step one. Both screens share `useAddThing`, so recording a thing
-  is one write path wherever the + was.
+- **The + is in the page's header**, opening the walkthrough with the room chosen, so the room
+  step is passed over after the photo; the FAB on the grid opens it with nothing chosen. Both
+  screens share `useAddThing`, so recording a thing is one write path wherever the + was.
 
 `HouseRoomScreen.test.tsx` pins the kind headings appearing only at two kinds, a tile under *Paint
 and finishes*, the suggestions under their own heading after the records, a dismissal that is
@@ -1051,21 +1051,21 @@ Alabaster on the windows. Three rules follow, and they are the whole feature:
   "empty fields don't render". No other kind shows its note on a card — an appliance's note is not
   what distinguishes it from the appliance beside it.
 
-In the walkthrough, choosing Paint asks **which colour** rather than offering a name, step three
-photographs the **tin lid** rather than a rating plate, and step four asks **where it went**
-instead of what it takes and how often it is serviced. A tin of paint takes nothing and is never
-serviced; asking it those two questions was two whole steps of the sheet interrogating a tin.
+In the walkthrough, choosing Paint asks **which colour** rather than offering a name, the photo is
+of the **tin lid** rather than a rating plate, and the last step asks **where it went** instead of
+what it takes and how often it is serviced. A tin of paint takes nothing and is never serviced;
+asking it those two questions was the sheet interrogating a tin.
 
 ### Adding a room, from the tab that shows the house
 
 **A room added on the House tab is a room everywhere.** The *Add a room* row under the grid and
-the *Add a room…* chip on step one of the walkthrough both call `home.create_location`
+the *Add a room…* chip on the walkthrough's room step both call `home.create_location`
 against the active property and then `reloadLocations()` — so a conservatory, a study or a movie
 room joins the tags the List tab groups by and capture offers, not just this screen. Rooms are a
 property's vocabulary, not one tab's; two screens keeping separate ideas of what rooms exist is
 how the House tab and the list stop describing the same house.
 
-The chip is on step one because **the moment somebody notices the conservatory is missing is the
+The chip is on the room step because **the moment somebody notices the conservatory is missing is the
 moment they are trying to record something in it** — sending them to Profile → Location tags and
 back would lose the flow they were in. `LocationTagsScreen` still exists and is still where tags
 are *removed*; nothing about it changed.
@@ -1092,14 +1092,15 @@ properly is how a prompt becomes a dead end. They arrive with those kinds.
 ### A + on every room, and a picker that admits houses differ
 
 Every room's page carries a **+ in its header**. (It was a subtle, muted + at the end of each room
-heading, when the rooms were headings in one long list.) It opens the walkthrough on **step
-two** with the room already chosen, because pressing + on the Kitchen has plainly answered "which
-room". `start.room` therefore distinguishes `null` — Whole house, chosen deliberately — from
+heading, when the rooms were headings in one long list.) It opens the walkthrough with the room
+already chosen, and the room step is passed over after the photo, because pressing + on the Kitchen
+has plainly answered "which room" (Back still reaches it). `start.room` therefore distinguishes
+`null` — Whole house, chosen deliberately — from
 *absent*, which is nobody having chosen yet; collapsing the two sent people back to a question
 they had just answered.
 
-There is **one picker, not two**. The + does not open a list of its own; it opens step two, and
-step two is where the searching lives:
+There is **one picker, not two**. The + does not open a list of its own; it opens the walkthrough,
+and *What is it?* is where the searching lives:
 
 - **The list is bigger than the room's catalogue.** This room's suggestions come first, then the
   rest of the house's vocabulary under *Anything else* (`catalogueSuggestions`, deduplicated —
@@ -1117,8 +1118,19 @@ step two is where the searching lives:
 
 ### Adding is a + and a walkthrough, not the compose bar
 
-`AddThingSheet` — four steps, and **only the first is required**. Which room · what is it · the
-label · what it takes.
+`AddThingSheet` — the photo · which room · what is it · anything else. The room and the name are
+the only answers it needs; the photo and everything after *What is it?* can be skipped.
+
+**The photo comes first, and nobody waits on it.** Reading a label takes five to forty seconds, and
+a walk round the house recording the heat pump, then the dishwasher, then the dryer was a minute of
+spinner per appliance while the plate was read — the one cost a walk-round job cannot absorb. So
+the shutter is step one and the sheet moves on *the moment there is a picture*: the upload and the
+read carry on behind the room and the name, the photo's guess at what it is is offered on *What is
+it?*, and by *Anything else?* the boxes are usually already filled. **Add it waits on the upload
+and never on the read** — `create_thing` needs the stored key, and says *Uploading the photo…*
+while it waits; a photo that will not upload offers *Try again* or *without the photo*, never a
+silent save that drops it. A reading still out when *Add it* is pressed is not lost: see *A reading
+waits to be checked* below.
 
 **This is deliberately slower than capture, because it is a different moment.** A snag is filed in
 ten seconds standing in front of the problem; a thing is recorded at a workbench, or while a
@@ -1133,11 +1145,13 @@ weakest thing the record can hold. **Do not put the compose bar back on this tab
   add what you typed — and on both, the *Next* button is **hidden** when nothing matched, because
   a dead button under the one live control is a choice that isn't one. Step one grew that footer
   back the first time it was given a search box, and it read exactly as wrong there.
-- The room is pre-filled whenever the + was pressed inside a room, and **tapping a ghost opens on
-  step three**, because it has already answered the first two questions.
-- **The camera is still one tap** — it is just step three now, where a photograph of the rating
-  plate still captures make, model, serial and date of manufacture at once.
-- **Step three takes the paperwork and the notes as well as the plate.** An invoice or a
+- The room is pre-filled whenever the + was pressed inside a room, and **tapping a ghost goes from
+  the photo straight to *Anything else?***, because it has already answered the two questions in
+  between. Answered steps are passed over going forward and reachable going back.
+- **The camera is one tap, and it is the doorway again**, with *Choose a photo* beside it for a
+  plate somebody photographed earlier. A photograph of the rating plate still captures make, model
+  and serial at once.
+- **The last step takes the paperwork and the notes as well as the label.** An invoice or a
   certificate of safety is in somebody's hand at the moment they are recording the thing; asking
   for it later means asking them to go and find it, which is what this tab exists to stop. It is
   uploaded there and carried into `create_thing` through `p_document_paths` rather than written
@@ -1149,7 +1163,7 @@ weakest thing the record can hold. **Do not put the compose bar back on this tab
 - **Nothing is written until the last step**, which is the one real difference from the snag amend
   row and is forced: `create_thing` needs a kind, and a row half-created by somebody who walked
   away mid-flow is exactly the unconfirmed entry the ghost design exists to keep out.
-- Step three asks for nothing, so its button reads **"Skip for now"** until something is entered
+- The photo step asks for nothing, so its button reads **"Skip for now"** until there is a photo
   and **"Next"** after. It used to be a Next and a Skip side by side, which was two controls with
   one outcome.
 
@@ -1160,8 +1174,8 @@ thirty-field form, a house has four hundred things in it, and the record ends up
 
 ### The photographed label is read, and nothing it says is saved unseen
 
-Step three has always photographed the rating plate "because it carries the make, model and serial
-at once" — and then asked somebody to type all three off the photo they had just taken.
+The walkthrough has always photographed the rating plate "because it carries the make, model and
+serial at once" — and then asked somebody to type all three off the photo they had just taken.
 `supabase/functions/read-label` reads it, and the walkthrough lays the answer into the boxes.
 
 **This is the one place the app calls a model, and it is a deliberate exception** to the rule the
@@ -1196,7 +1210,7 @@ rules keep it that way, and they are the whole feature:
   its filter code, so the step asking *Anything you re-buy for it?* came back empty on every real
   appliance — and it was asked for. So the model also returns `suggestedConsumables` and
   `suggestedServiceMonths`, **from what it knows about that make and model**, and they arrive as
-  offers on step four under *Suggested for this model · check before you buy*: a row with a + per
+  offers on the last step under *Suggested for this model · check before you buy*: a row with a + per
   part, tapped to take, and a line saying the usual service cycle. **`applyLabelReading` never lays
   one into a box, even an empty box**, and no cycle is chosen for anybody. That is the distinction
   the unsourced-tradesman rule actually protects — a guess must not look like something read —
@@ -1263,6 +1277,56 @@ suggestion never fills a box; `readLabelGemini.test.ts` pins the request's shape
 surviving a late reading, the failure sentence, a paint's tin reaching `create_thing` as code,
 sheen and swatch, and the suggestions — offered not entered, gone once tapped, carried into the
 write beside what was typed, and the suggested cycle never chosen.
+
+### A reading waits to be checked, rather than making somebody wait for it
+
+The function now **finishes the read whatever the phone does** (`EdgeRuntime.waitUntil`, the
+`inbound-bill` pattern) and keeps what it found in **`home.label_readings`** (`20260924120100`).
+That table is a waiting room, the `invoice_reviews` shape: a reading is a suggestion *about* a
+record, never the record. An open sheet still gets the answer in the reply and lays it into the
+boxes as before; a reading that lands after *Add it* turns up as a **Read from the label** card on
+the thing's own page. The rule above — nothing it says is saved unseen — is unchanged; it just no
+longer needs somebody standing there while the model looks.
+
+- **Keyed by the photo's storage path, not by the thing.** The read starts before the thing exists
+  (the walkthrough writes only at *Add it*), and the path is the one identifier both ends already
+  share. `label_readings_to_check` joins it to the live thing whose `photo_paths` holds it, so a
+  thing deleted, or a photo removed, simply stops matching and its reading is never shown.
+- **The card offers, in three kinds** (`labelOffers`, pinned by `label.test.ts`). Boxes the record
+  left empty fill together with *Use these* — one `update_thing`. A box where the label
+  **disagrees** with what somebody typed is offered on its own row, beside what the record says,
+  and only its own *Use* writes it: they may have mistyped, and they are the only one who can say.
+  Parts and a service cycle stay offers, the cycle opening *Schedule service* pre-filled. A box
+  the label agrees with (any capitals, any spacing) is not mentioned, and a reading with nothing
+  left to offer marks itself `used` rather than leaving a card with no rows.
+- **Every way it can come to nothing is said.** Illegible asks for typing; busy, used up for the
+  day or a failure offer *Try again* (a new read, counted). A busy first round is answered at once
+  — *it'll keep trying* — and the function waits twenty seconds and tries the model chain once more
+  in the background, which is what the sheet could never afford to wait for. A reading still
+  `pending` three minutes on is reported as failed: it never will finish.
+- **No key, no row.** The row is opened after the day's read is claimed, so a household with the
+  feature switched off never grows a card per thing saying so.
+- **Seen is used.** A reading the sheet laid into the boxes is marked `used` at *Add it*; only one
+  nobody saw becomes a card. The House tab's grid says how many are waiting — **N labels to
+  check**, a `Pill` on the count line, absent at nought, opening the first — and *Label to check*
+  sits on the thing's row on its room's page and in a search (`lib/labelChecks.ts`, one read both
+  screens share, never fatal). A reading landing while the app is still open says so once in a
+  toast (`useAddThing`). Still no notifications.
+- **The reader also says what the thing is** (`whatItIs`, `kindGuess`) — not transcription, so it
+  is only ever an offer: pre-selected on *What is it?* when nothing has been chosen, never over a
+  tap, never a paint (whose name is a colour). It is asked because the photo now comes before the
+  kind is known; an empty `kind` asks the reader to say, and fill plate or paint fields to fit.
+
+**Deploy order**, because the client and the function move together: apply `20260924120100`,
+deploy `read-label` (its reply only gains `readingId`, so the live client keeps working), read one
+real plate and close the sheet before it lands to check the row appears, then merge.
+`AddThingSheet.test.tsx` pins the photo-first order, moving on before the read is back, *Add it*
+waiting on the upload and never the read, the late reading handed on rather than laid in, the
+failed-upload way out, *used* on a reading that was shown, and the guess never overriding a tap.
+`ThingDetailScreen.test.tsx` pins the card's one write, the disagreement's own tap, *Not right*,
+the self-closing reading, *Try again*, and the page surviving a failed read of the readings;
+`HouseScreen.test.tsx` the pill and its absence at nought; `HouseRoomScreen.test.tsx` the row's
+marker and the room surviving a failed read.
 
 ### Writing is rare and accidental; reading is under pressure, somewhere else
 
@@ -1338,7 +1402,7 @@ later, in an aisle, needing one exact string. So:
   the section that attaches things and found only a PDF, which reads as a record that does not take
   photographs at all. The strip itself stays at the top, because a rating plate is what this page is
   opened to *read*: the answer goes above the form and the controls that grow it live with the rest
-  of the attaching. The plate photo at creation is the walkthrough's step three and has not moved;
+  of the attaching. The plate photo at creation is the walkthrough's first step;
   these are for the extras that come later. `things.document_paths` holds PDFs in the
   **`home-photos`** bucket under `<household_id>/docs/`, reusing the four storage policies and
   `home.can_use_photo_folder` rather than standing up a second bucket. Its `allowed_mime_types` had
@@ -1393,7 +1457,7 @@ and tint formula) live in `spec`, which is jsonb and is the small tail, never th
 rather than five, because five would be five read policies, five write functions and five places
 to get the property check wrong.
 
-**The walkthrough asks the kind; the thing page no longer offers to change it.** Step two sets it
+**The walkthrough asks the kind; the thing page no longer offers to change it.** *What is it?* sets it
 from whatever was chosen — a suggestion carries its own kind, and naming something yourself asks
 in two chips. There used to be an Appliance/Paint rail at the top of the spec sheet, because
 capture filed everything as `appliance` without asking and the page had to be able to correct it.

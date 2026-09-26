@@ -91,9 +91,9 @@ answer and is *not* the same failure as `PGRST106`.
 ### "Everything has disappeared" has a second cause, and it is us
 
 `PGRST106` above is the platform-side one. The other is a **client asking for a column the database
-has not got yet**, and it has already happened once: a merge to `main` deploys `apps/mobile` to
-Netlify, so pushing code whose migration has not been applied puts exactly that client in front of
-people. `getMyProperties` names its columns — `select('id, household_id, name, suburb, town, …')` —
+has not got yet**, and it has already happened once: a merge to `main` then deployed `apps/mobile`
+straight to Netlify, so pushing code whose migration had not been applied put exactly that client in
+front of people. `getMyProperties` names its columns — `select('id, household_id, name, suburb, town, …')` —
 so PostgREST rejected the whole request rather than returning a row with two nulls, `useHousehold`
 came up with no properties, and the **House tab rendered empty**, because `getThings` needs an
 active property. Eighteen things sat untouched in `home.things` the whole time.
@@ -105,10 +105,11 @@ Two things to take from it:
   absent column came back as `undefined` and `mapSnag` defaulted it. Naming columns is still right
   — it is the same argument as granting by name — but it means a missing column is a **400 on the
   whole request**, not a gap in one field, so the screen that loses it loses everything.
-- **Apply the migration before the merge that deploys the code needing it**, never after. There is
-  no staging project and `main` is what `app.snaghq.co.nz` serves, so the window between the two is
-  a window in which the live app is broken for everybody. Order: apply, check the API answers,
-  then merge.
+- **Apply the migration before the merge**, and never deploy past one that has not been applied.
+  There is no staging database: `main--snagv1.netlify.app`, the preview every merge builds, reads
+  the live one exactly as `app.snaghq.co.nz` does. The live app is the `production` branch, and it
+  moves only when *Deploy to production* runs, which lists the migrations each deploy carries (see
+  *Deploys cost credits; previews don't*). Order: apply, check the API answers, merge, deploy.
 
 Checking it is one query rather than a judgement call — the columns the client names, against the
 schema it is reading:
@@ -4382,6 +4383,32 @@ printed and put on walls**. That's why it stays in `linking.ts`'s prefix list �
 redirect gets someone to the app, but the prefix list decides whether the path then resolves to
 the right screen rather than the default tab.
 
+## Deploys cost credits; previews don't
+
+A production deploy is 15 Netlify credits, and a Deploy Preview or a branch deploy costs none. Every
+merge used to be a production deploy on all three sites, whatever it touched. So **merging to
+`main` publishes nothing now.** Each site's production branch is `production`, and the one thing
+that moves it is *Deploy to production* (`.github/workflows/deploy.yml`, run by hand from Actions).
+It takes `main` or a commit on it, refuses one CI has not passed, fast-forwards `production`, and
+writes which sites will rebuild and which migrations are included. A change is looked at first in
+its PR's Deploy Preview and then on `main--snagv1.netlify.app`, both free. Several merges go out in
+one deploy.
+
+`scripts/netlify-ignore.sh` is every site's `ignore` step: a production build is skipped when nothing
+the site builds from has changed. `packages/` counts for the app and the portal and not for `www`,
+which imports none of it. **Anything uncertain builds, and previews always build**, because the
+failure to avoid is not a wasted 15 credits. It is a change that reached `production` and silently
+never went live. Two consequences:
+
+- **A site that gains a dependency on a new directory needs it added to the script's `case`**.
+  Without it, that site stops rebuilding when the directory changes, and nothing says so.
+- **Rolling back is Netlify's *Publish deploy* on an earlier deploy**, which is free. The workflow
+  only ever fast-forwards.
+
+`netlifyIgnore.test.ts` replays the script against a scratch repository and pins each
+`netlify.toml`'s path to it. The dashboard half (the production branch, and branch deploys for
+`main`) is not in git and is in `SNAG_INFRA_NOTES.md` under *Deploys*.
+
 ## Why apps/web still exists
 
 One reason: **password recovery has to land on a plain web page.**
@@ -4579,8 +4606,9 @@ npm run test:mobile  # jest
 ### Add a column or table
 1. New timestamped file in `supabase/migrations/` — never edit a past one
 2. Apply via the Supabase MCP (`apply_migration`) or the SQL Editor — **before** merging the code
-   that reads it. `main` is what `app.snaghq.co.nz` serves, and a client naming a column the
-   database has not got gets a 400 on the whole request, which reads on screen as an empty tab.
+   that reads it. The preview of `main` reads the live database and `production` follows `main` at
+   the next deploy, and a client naming a column the database has not got gets a 400 on the whole
+   request, which reads on screen as an empty tab.
    See *"Everything has disappeared" has a second cause* above.
 3. Add the type to `packages/shared-types/src/index.ts`
 4. Grant explicitly, by name

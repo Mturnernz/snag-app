@@ -8,5 +8,10 @@
 #   RESEND_API_KEY, SUPPORT_EMAIL_FROM                     — the reply email
 # See SNAG_INFRA_NOTES.md, *The staff portal*.
 
+[build]
+  # A production build is skipped when nothing this site builds from changed —
+  # see the script. Previews always build.
+  ignore = "bash ../../scripts/netlify-ignore.sh apps/staff"
+
 [build.environment]
   NODE_VERSION = "22"

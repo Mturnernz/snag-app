@@ -377,23 +377,63 @@ account's own address and rejects everything else with a 403 that nothing surfac
 
 ## Deploys
 
-Both Netlify sites are deployed by uploading the repo and building on Netlify's infra, so the
-site's own base directory and environment variables apply:
+Three Netlify sites, each linked to `mturnernz/snag-app` with its own base directory:
+
+| Site | id | Base directory | Serves |
+|---|---|---|---|
+| `snagv1` | `016c74e6-9a37-4b0f-8d23-94a5339bb850` | `apps/mobile` | app.snaghq.co.nz |
+| `snag-app-website` | `7fc0b551-9069-4b2c-b66f-c77dd9d4a808` | `apps/web` | www.snaghq.co.nz |
+| `snag-staff` | `c27cfb6a-6975-4cda-9dbf-1ba03784cd5c` | `apps/staff` | staff.snaghq.co.nz |
+
+**A production deploy costs 15 credits. A Deploy Preview, a branch deploy, a failed deploy and a
+rollback cost none.** Until 26 September 2026 every merge to `main` was a production deploy on
+every site (three once the portal existed): up to 45 credits a merge, roughly 1,500 in the week
+before, when nearly every merge touched the app alone. (This section used to say pushing to `main` triggered nothing and deploys were
+API-driven. The deploy records disagreed: each production deploy carried the merge commit and
+branch `main`, and all three landed in the same second as the push.)
+
+Two things now stand between a merge and a charge:
+
+- **Production is the `production` branch, not `main`.** A merge to `main` becomes a free branch
+  deploy at `main--snagv1.netlify.app`, `main--snag-app-website.netlify.app` and
+  `main--snag-staff.netlify.app`: everything merged so far, against the live database. A PR gets
+  its own Deploy Preview (`deploy-preview-<n>--snagv1.netlify.app`, linked from the PR's checks)
+  before that. **Deploy to production** (`.github/workflows/deploy.yml`, under Actions → *Run
+  workflow*) is the only thing that publishes. It takes `main` or a commit on it, refuses a commit
+  CI has not passed, fast-forwards `production`, and writes which sites will rebuild and which
+  migrations are included. It never goes backwards. To roll back, use *Publish deploy* on an
+  earlier production deploy in Netlify, which is free and rebuilds nothing.
+- **A site whose files did not change is not rebuilt.** `scripts/netlify-ignore.sh` is every site's
+  `ignore` step. Netlify's default check only diffs the base directory, which misses `packages/`,
+  and in practice skipped nothing here. A skipped build shows in the site's deploy list as
+  *Canceled build due to no content change*, which Netlify records as a failed deploy. That entry
+  means the script is working.
+
+**The dashboard half is not in git and has to be set on each of the three sites.** Project
+configuration → Build & deploy → Continuous deployment → *Branches and deploy contexts* →
+Configure:
+
+- **Production branch:** `production`
+- **Branch deploys:** *Let me add individual branches* → `main`
+- **Deploy Previews:** leave on *Any pull request against your production branch / branch deploy
+  branches*. PRs target `main`, which is now a branch-deploy branch, so they still get previews.
+
+The `production` branch does not exist until the workflow first runs. Until the dashboard is
+switched, `main` is still production: the ignore step still skips unchanged sites, and running the
+workflow only creates a branch Netlify does not build. The first promotion after switching rebuilds
+whichever sites changed since their last production deploy.
+
+Environment variables stay per context. `RESEND_API_KEY` is production-only on `snag-staff`, so
+neither a preview nor `main--snag-staff` sends a household email. Changing a variable reaches the
+bundle only on a rebuild. Trigger one with *Deploy project* on the `production` branch; the ignore
+step always builds a commit that has already been built, so that redeploy is not skipped.
+
+A deploy by hand still works (from the **repo root**, so the upload mirrors the layout the base
+directories assume), but it is a production deploy like any other, 15 credits:
 
 ```bash
 npx -y @netlify/mcp@latest --site-id <id> --proxy-path <token from the Netlify MCP>
 ```
-
-Run it from the **repo root**, not from the app directory — the sites are configured with
-`Base directory` set to `apps/mobile` and `apps/web`, and the upload has to mirror the repo
-layout those paths assume.
-
-| Site | id | Serves |
-|---|---|---|
-| `snagv1` | `016c74e6-9a37-4b0f-8d23-94a5339bb850` | app.snaghq.co.nz |
-| `snag-app-website` | `7fc0b551-9069-4b2c-b66f-c77dd9d4a808` | www.snaghq.co.nz |
-
-Pushing to `main` does **not** trigger a build — deploys are API-driven.
 
 ## Preservation
 

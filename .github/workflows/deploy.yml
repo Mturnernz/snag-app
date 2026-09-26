@@ -1,0 +1,157 @@
+name: Deploy to production
+
+# Merging to main publishes nothing. Each Netlify site's production branch is
+# `production`, and this workflow is the one thing that moves it — so the
+# live sites change only when somebody presses "Run workflow" here.
+#
+# Why: a production deploy costs 15 Netlify credits, and a merge used to cost
+# three of them (app, www and staff all rebuilt, whatever changed). Deploy
+# Previews on a PR and the branch deploy of main cost nothing, so that is where
+# a change gets looked at; this is where it goes live, as many merges at once
+# as have piled up. scripts/netlify-ignore.sh then skips any site whose files
+# did not change. See *Deploys* in SNAG_INFRA_NOTES.md for the dashboard side.
+#
+# It only ever fast-forwards. Going back is Netlify's "Publish deploy" on an
+# earlier production deploy, which costs no credits and rebuilds nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: What to deploy — main, or a commit on main
+        required: true
+        default: main
+      skip_ci_check:
+        description: Deploy even though CI has not passed on it
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote to production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the commit
+        id: target
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse --verify --quiet "origin/${REF}^{commit}" \
+            || git rev-parse --verify --quiet "${REF}^{commit}" \
+            || true)"
+          if [ -z "$sha" ]; then
+            echo "::error::'${REF}' is not a branch or commit in this repository."
+            exit 1
+          fi
+          # Production only ever takes what has been merged. A PR branch sent
+          # straight here would skip review and CI both.
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::${sha:0:7} is not on main. Merge it first, then deploy."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Deploying ${sha:0:7}: $(git log -1 --format=%s "$sha")"
+
+      - name: Check CI passed on it
+        if: ${{ !inputs.skip_ci_check }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&event=push&per_page=10" \
+            --jq '.workflow_runs | sort_by(.created_at) | last | select(. != null) | [.status, (.conclusion // "none"), .html_url] | @tsv')"
+          if [ -z "$run" ]; then
+            echo "::error::CI never ran on ${SHA:0:7} as a push to main. Deploy main's latest merge, or re-run with 'skip CI check' ticked."
+            exit 1
+          fi
+          IFS=$'\t' read -r status conclusion url <<< "$run"
+          if [ "$status" != "completed" ]; then
+            echo "::error::CI is still running on ${SHA:0:7} (${url}). Wait for it, then deploy."
+            exit 1
+          fi
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::CI ${conclusion} on ${SHA:0:7} (${url}). Fix main, or re-run with 'skip CI check' ticked."
+            exit 1
+          fi
+          echo "CI passed: ${url}"
+
+      - name: Compare with what is live
+        id: compare
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          prod="$(git rev-parse --verify --quiet origin/production || true)"
+          if [ "$prod" = "$SHA" ]; then
+            echo "::notice::${SHA:0:7} is already on production. Nothing to deploy."
+            echo "nothing=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$prod" ] && ! git merge-base --is-ancestor "$prod" "$SHA"; then
+            echo "::error::production (${prod:0:7}) has commits ${SHA:0:7} lacks, so this would go backwards. To roll back, publish an earlier deploy in Netlify instead — it costs nothing."
+            exit 1
+          fi
+          echo "nothing=false" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Deploying \`${SHA:0:7}\` to production"
+            echo
+            if [ -z "$prod" ]; then
+              echo "First promotion: the \`production\` branch is created here. Each site builds if it changed since its last production deploy."
+            else
+              echo "$(git rev-list --count --first-parent "${prod}..${SHA}") merge(s) since \`${prod:0:7}\`."
+              echo
+              echo "| Site | |"
+              echo "|---|---|"
+              for entry in "apps/mobile|app.snaghq.co.nz" "apps/web|www.snaghq.co.nz" "apps/staff|staff.snaghq.co.nz"; do
+                dir="${entry%%|*}"; host="${entry#*|}"
+                # The same script Netlify runs, asked the same question.
+                if CONTEXT=production CACHED_COMMIT_REF="$prod" COMMIT_REF="$SHA" \
+                    bash scripts/netlify-ignore.sh "$dir" > /dev/null; then
+                  echo "| ${host} | unchanged, skipped |"
+                else
+                  echo "| ${host} | **rebuilds** (15 credits) |"
+                fi
+              done
+              migrations="$(git diff --name-only --diff-filter=A "$prod" "$SHA" -- supabase/migrations)"
+              if [ -n "$migrations" ]; then
+                echo
+                echo "### Migrations in this deploy"
+                echo
+                echo "The code going out may read these. They should already be applied — see *\"Everything has disappeared\" has a second cause* in CLAUDE.md."
+                echo
+                # shellcheck disable=SC2016 # literal backticks, and $ is the sed anchor
+                echo "$migrations" | sed 's/^/- `/; s/$/`/'
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Move production
+        if: ${{ steps.compare.outputs.nothing == 'false' }}
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # Not forced: if production moved since the checkout, this refuses.
+          git push origin "${SHA}:refs/heads/production"
+          {
+            echo
+            echo "Netlify is building now:"
+            echo "[app](https://app.netlify.com/projects/snagv1/deploys) ·"
+            echo "[www](https://app.netlify.com/projects/snag-app-website/deploys) ·"
+            echo "[staff](https://app.netlify.com/projects/snag-staff/deploys)"
+          } >> "$GITHUB_STEP_SUMMARY"

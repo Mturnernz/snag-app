@@ -961,16 +961,49 @@ layout was chosen from a preview, over grouped rows), and each tile opens that r
 `HouseRoomScreen`. The search field stays on top of the grid, and a search is still one flat
 answer across every room.
 
-- **A tile says three things**: the name, the count, and what is in the room by headline
-  (`houseRooms`, `describeHouseRoom`). The count is `2 of 8` while anything is still suggested and
-  a bare total after, and it goes muted while nothing is recorded, because then the line under it
-  is suggestions — and says so first, in words. Seeded order, a room the vocabulary lost after
-  the seeded ones, Whole house last; a room with nothing recorded and nothing to suggest gets no
-  tile, as `Elsewhere` and `Under the house` never did.
+- **A tile says four things**: the name with an outline icon beside it, the count, and up to four
+  bullets of what is in the room (`houseRooms`, `describeHouseRoom`). The count is `2 of 8` while
+  anything is still suggested and a bare total after, and it goes muted while nothing is recorded.
+  The bullets are the records by headline **in the order the room's page lists them** —
+  appliances, then paint and tiles, then the rest — so the tile previews the page it opens.
+  A room with nothing recorded lists its suggestions instead, under the words *Not recorded yet*
+  and with **hollow** bullets where a record's are solid: the Schedule tab's hollow-means-not-real,
+  because a suggestion that reads as a record is the failure this tab is built against.
+- **Four bullets, fading when there are more** (`TILE_BULLET_LIMIT`). One busy room would
+  otherwise make its whole row of the grid twice the height of every other. The fade *is* the
+  "and more" — the count already says how many, and there is no "+6 more" line — so it happens
+  **only when something is cut off**: fading a complete list would hide its last line and claim
+  there was more behind it.
+- **Most recorded first, and that is a reversal.** It was seeded order, shared with the List tab.
+  The user decided otherwise: the grid is an index somebody reads to find where the record is,
+  and the Kitchen holding ten things is where most of it is. Ties keep the seeded order (a room
+  the vocabulary lost after the seeded ones), rooms with nothing recorded sink to the foot, and
+  Whole house is last whatever it holds. **Only this grid moved** — the List tab, the room
+  pickers and the room pages keep the seeded order. A room with nothing recorded and nothing to
+  suggest still gets no tile, as `Elsewhere` and `Under the house` never did.
+- **A tile is painted in its main wall colour** (`wallColour`): the paint whose *Where it went*
+  says *main wall*, then one saying *walls*. A feature wall, a ceiling and the joinery never
+  colour it — a white bedroom with one forest-green wall is a white room — and a hex
+  `swatchColour` will not parse leaves the tile white rather than guessing. This is the swatch
+  rule at full size, not an exception to the palette: the colour is the record's data. A room
+  with nothing recorded is never painted (it has no paint), and Whole house has no walls.
+- **The words on a painted tile are measured, not chosen** (`lib/tileInk.ts`). Ink or white,
+  whichever has the better WCAG ratio against that wall. Between the two there is a band of
+  mid-tones where neither reaches 4.5:1 (the worst is about 3.85:1), and there the words sit on
+  a translucent white panel, as anything over a photograph sits on `photoOverlay`: the wall
+  colour is never nudged lighter, because it is the answer somebody came to read. On a painted
+  tile every line takes that colour, since the muted greys were measured against plaster.
+  `tileInk.test.ts` pins that every one of the 4096 three-digit hexes is readable. A painted
+  tile carries a hairline edge for the swatch dot's reason: most wall paint is a white, and
+  Alabaster on the plaster ground has no edge otherwise.
+- **The icon is decoration and treated as such** (`lib/roomIcon.ts`): a neutral outline glyph,
+  never a hue, hidden from screen readers. Rooms are free text, so it is found from whole words
+  read in order — *Garden Shed* is a shed before it is a garden, *Downstairs Bathroom* a bathroom
+  — and a room the list does not know gets a plain box rather than a guess.
 - **Two to a row, as pairs rather than a wrapped flex line.** React Native cannot express a
   percentage width with a gap, and a lone last tile must stay half width rather than stretching
-  into a banner. White on plaster, `Radius.card`, no outline and no shadow — a tile is a V2 group
-  of one row.
+  into a banner. `Radius.card`, no shadow — a tile is a V2 group of one row — and white on plaster
+  unless it is painted.
 - **The page is a push, not a sheet**, like `ProjectDetail`. A thing on it opens `ThingDetail`,
   which is a modal screen, and a room drawn as an RN `Modal` sheet would sit *above* it — the spec
   sheet would open underneath. Pushed, the thing opens over the room and back lands in the room.
@@ -1458,9 +1491,10 @@ three unbuilt ones will want it.
   room.
 
 `things.room` is TEXT for exactly the reason `snags.room` is, and the House tab groups by
-`home.locations` in seeded order — the two tabs have to describe the house in the same words and
-the same order, or the room a snag is in and the room a thing is in stop reading as the same
-place. Things with no room fall under **Whole house**. Photos reuse `home-photos` and the existing
+`home.locations` — the two tabs have to describe the house in the same words, or the room a snag
+is in and the room a thing is in stop reading as the same place. (The *order* of the grid is its
+own, busiest room first, and ties fall back to the seeded order; see *A room is a page*.) Things
+with no room fall under **Whole house**. Photos reuse `home-photos` and the existing
 `<household_id>/<file>` layout, so no storage policy changed.
 
 **The tab is called House, not "My House".** The moment there is a bach, "my house" is the wrong
@@ -1478,10 +1512,13 @@ being mistaken for the prefix, and two uploads never colliding (`upsert: false` 
 failure, not an overwrite).
 
 `HouseScreen.test.tsx` pins the furnished day-one grid, the per-room counts, the *Not recorded
-yet* words before any suggestion a tile names, Whole house last and unfurnished, a tile opening
+yet* words before any suggestion a tile names, the busiest room first, a tile painted in its main
+wall and never a feature wall, white words on a dark wall, four bullets fading only when there are
+more, Whole house last and unfurnished, a tile opening
 its room (null for Whole house), a search answering flat with no ghosts and no tiles in it, a
 dismissed suggestion leaving the count, and the absence of any grouping or fold control.
-`houseRecord.test.ts` pins `houseRooms`, `describeHouseRoom` and `thingKindGroups`. `houseRecord.test.ts` pins the catalogue being deduplicated, reaching across
+`houseRecord.test.ts` pins `houseRooms`, `describeHouseRoom`, `wallColour` and `thingKindGroups`;
+`roomIcon.test.ts` the seeded twelve and the qualifier rule. `houseRecord.test.ts` pins the catalogue being deduplicated, reaching across
 rooms and carrying only describable kinds, the substring matcher (including "wash" finding the
 dishwasher, which is right rather than a near miss) and the miss that puts *Add it yourself* on
 screen. It also pins the consumables search (the

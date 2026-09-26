@@ -2,7 +2,8 @@ import {
   assetPickerOrder,
   catalogueSuggestions, describeCycle, describeHouseRoom, documentFileName, documentName,
   formatLooseDate, ghostsForRoom, houseRooms, matchSuggestions, parseLooseDate, searchThings,
-  thingDetailLine, thingHeadline, thingKindGroups, thingSearchText, thingsInArea,
+  thingDetailLine, thingHeadline, thingKindGroups, thingSearchText, thingsInArea, wallColour,
+  TILE_BULLET_LIMIT,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -437,16 +438,48 @@ describe('assetPickerOrder', () => {
 });
 
 describe('the rooms the House tab shows', () => {
-  // The tab is a grid of rooms now, each opening a page of its own, and these
-  // are the rules the grid used to keep inline: seeded order shared with the
-  // List tab, Whole house last and bare, and a ghost never counted as a row.
+  // The tab is a grid of rooms, each opening a page of its own. The grid leads
+  // with the rooms holding the most — it is an index read to find where the
+  // record is — while ties keep the seeded order the List tab uses, Whole house
+  // stays last and bare, and a ghost is never counted as a row.
   const at = (id: string, name: string, room: string | null, kind: Thing['kind'] = 'appliance') =>
     thing({ id, name, room, kind });
 
-  it('keeps the seeded order, and puts a room the vocabulary lost after it', () => {
+  it('leads with the room holding the most', () => {
+    const things = [
+      at('a', 'Dryer', 'Laundry'),
+      at('b', 'Oven', 'Kitchen'), at('c', 'Dishwasher', 'Kitchen'), at('d', 'Rangehood', 'Kitchen'),
+      at('e', 'Stain', 'Deck', 'finish'), at('f', 'Heater', 'Deck'),
+    ];
+    expect(houseRooms(['Laundry', 'Deck', 'Kitchen'], things, []).map((r) => r.name))
+      .toEqual(['Kitchen', 'Deck', 'Laundry']);
+  });
+
+  it('counts every kind, not only appliances', () => {
+    // A guest room with three paints is three things recorded, the same as a
+    // laundry with three machines.
+    const things = [
+      at('a', 'Dryer', 'Laundry'),
+      at('b', 'Alabaster', 'Guest room', 'finish'), at('c', 'Ceiling White', 'Guest room', 'finish'),
+    ];
+    expect(houseRooms(['Laundry', 'Guest room'], things, []).map((r) => r.name))
+      .toEqual(['Guest room', 'Laundry']);
+  });
+
+  it('keeps the seeded order in a tie, and puts a room the vocabulary lost after it', () => {
     const things = [at('a', 'Kettle', 'Sleepout'), at('b', 'Dryer', 'Laundry'), at('c', 'Stain', 'Deck', 'finish')];
     expect(houseRooms(['Laundry', 'Deck'], things, []).map((r) => r.name))
       .toEqual(['Laundry', 'Deck', 'Sleepout']);
+  });
+
+  it('sinks the rooms with nothing recorded, still in seeded order', () => {
+    expect(houseRooms(['Garage', 'Laundry', 'Deck'], [at('a', 'Stain', 'Deck', 'finish')], []).map((r) => r.name))
+      .toEqual(['Deck', 'Garage', 'Laundry']);
+  });
+
+  it('keeps Whole house last even when it holds the most', () => {
+    const things = [at('a', 'Alarm', null), at('b', 'Meter', null), at('c', 'Dryer', 'Laundry')];
+    expect(houseRooms(['Laundry'], things, []).map((r) => r.name)).toEqual(['Laundry', 'Whole house']);
   });
 
   it('puts Whole house last, and never furnishes it', () => {
@@ -485,14 +518,89 @@ describe('what a room tile says', () => {
 
   it('names what is recorded, and only that, once anything is', () => {
     const [laundry] = houseRooms(['Laundry'], [at('a', 'Dryer', 'Laundry')], []);
-    expect(describeHouseRoom(laundry).facts).toBe('Dryer');
+    expect(describeHouseRoom(laundry)).toMatchObject({ lines: ['Dryer'], suggested: false });
   });
 
-  it('says a suggestion is not recorded, in words, before naming it', () => {
+  it('lists in the order the room page does — appliances, then paint', () => {
+    const [kitchen] = houseRooms(['Kitchen'], [
+      thing({ id: 'p', name: 'Alabaster', room: 'Kitchen', kind: 'finish' }),
+      at('o', 'Oven', 'Kitchen'),
+      at('d', 'Dishwasher', 'Kitchen'),
+    ], []);
+    expect(describeHouseRoom(kitchen).lines).toEqual(['Dishwasher', 'Oven', 'Alabaster']);
+  });
+
+  it('stops at four, and says more was cut off', () => {
+    const names = ['Chest freezer', 'Cooktop', 'Dishwasher', 'Fridge', 'Microwave'];
+    const [kitchen] = houseRooms(['Kitchen'], names.map((n, i) => at(`${i}`, n, 'Kitchen')), []);
+    const tile = describeHouseRoom(kitchen);
+    expect(TILE_BULLET_LIMIT).toBe(4);
+    expect(tile.lines).toEqual(names.slice(0, 4));
+    expect(tile.truncated).toBe(true);
+    // The count is what says how many there are.
+    expect(tile.count).toMatch(/^5( of \d+)?$/);
+  });
+
+  it('is not cut off at exactly four', () => {
+    const names = ['Chest freezer', 'Cooktop', 'Dishwasher', 'Fridge'];
+    const [kitchen] = houseRooms(['Kitchen'], names.map((n, i) => at(`${i}`, n, 'Kitchen')), []);
+    expect(describeHouseRoom(kitchen).truncated).toBe(false);
+  });
+
+  it('lists suggestions only while nothing is recorded, and says they are', () => {
     const [garage] = houseRooms(['Garage'], [], []);
-    const { facts } = describeHouseRoom(garage);
-    expect(facts.startsWith('Not recorded yet · ')).toBe(true);
-    expect(facts).toContain('Lawnmower');
+    const tile = describeHouseRoom(garage);
+    expect(tile.suggested).toBe(true);
+    expect(tile.lines).toContain('Lawnmower');
+    expect(tile.wall).toBeNull();
+  });
+
+  it('is painted in the main wall colour', () => {
+    const [hall] = houseRooms(['Hallway'], [
+      thing({ id: 'w', name: 'Wan White', room: 'Hallway', kind: 'finish', notes: 'Main wall', spec: { hex: '#E4E2DC' } }),
+    ], []);
+    expect(describeHouseRoom(hall).wall).toBe('#E4E2DC');
+  });
+
+  it('never paints Whole house, which has no walls', () => {
+    const rooms = houseRooms([], [
+      thing({ id: 'w', name: 'Wan White', room: null, kind: 'finish', notes: 'Main wall', spec: { hex: '#E4E2DC' } }),
+    ], []);
+    expect(rooms[0].name).toBe('Whole house');
+    expect(describeHouseRoom(rooms[0]).wall).toBeNull();
+  });
+});
+
+describe('the colour of a room', () => {
+  const paint = (id: string, notes: string | null, hex?: string) =>
+    thing({ id, name: `Paint ${id}`, kind: 'finish', room: 'Bedroom', notes, spec: hex ? { hex } : {} });
+
+  it('is the main wall before any other wall', () => {
+    expect(wallColour([paint('a', 'Walls', '#111111'), paint('b', 'Main wall', '#E4E2DC')])).toBe('#E4E2DC');
+  });
+
+  it('reads the note in any case, one wall or several', () => {
+    expect(wallColour([paint('a', 'Main Walls', 'dfdad0')])).toBe('#DFDAD0');
+    expect(wallColour([paint('a', 'walls', '#abc')])).toBe('#AABBCC');
+  });
+
+  it('is never a feature wall, a ceiling or the joinery', () => {
+    // A white bedroom with one forest-green wall is a white room.
+    expect(wallColour([paint('a', 'Feature wall', '#405341')])).toBeNull();
+    expect(wallColour([paint('a', 'Ceiling', '#FFFFFF'), paint('b', 'Joinery', '#F4F3EF')])).toBeNull();
+    expect(wallColour([paint('a', 'Window frames', '#F4F3EF')])).toBeNull();
+    expect(wallColour([paint('a', null, '#F4F3EF')])).toBeNull();
+  });
+
+  it('draws nothing rather than a guess', () => {
+    expect(wallColour([paint('a', 'Main wall')])).toBeNull();
+    expect(wallColour([paint('a', 'Main wall', 'greenish')])).toBeNull();
+  });
+
+  it('comes from a paint, never an appliance', () => {
+    expect(wallColour([
+      thing({ id: 'x', name: 'Heat pump', kind: 'appliance', notes: 'Main wall', spec: { hex: '#FFFFFF' } }),
+    ])).toBeNull();
   });
 });
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, IconSize } from '../constants/theme';
 
-type IconName = keyof typeof Ionicons.glyphMap;
+export type IconName = keyof typeof Ionicons.glyphMap;
 
 interface Props {
   name: IconName;

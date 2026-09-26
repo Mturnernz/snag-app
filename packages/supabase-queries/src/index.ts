@@ -80,6 +80,7 @@ import {
   FILE_TAGS,
   ROOM_SUGGESTIONS,
   STATUS_LABELS,
+  THING_KIND_FIELD_LABELS,
   THING_KIND_LABELS,
   GST_RATE,
   PROJECT_STATUS_ORDER,
@@ -1532,6 +1533,18 @@ export interface LabelReading {
 }
 
 /**
+ * What the reader thinks the thing in the photo **is** — "Heat pump", paint —
+ * as opposed to what its label says. Never read off the label, so it is only
+ * ever an offer on the walkthrough's *What is it?* step, which the person sees
+ * and can change before anything is written. Kept apart from `LabelReading`
+ * because it can be answered from a photo whose label could not be read.
+ */
+export interface LabelGuess {
+  name: string | null;
+  kind: ThingKind | null;
+}
+
+/**
  * A brand in the case it writes itself in, when the label shouted it.
  *
  * Rating plates print the maker in capitals, and "MITSUBISHI ELECTRIC" in the
@@ -1608,6 +1621,18 @@ export function parseLabelReading(raw: unknown): LabelReading | null {
   };
 }
 
+const GUESSABLE_KINDS: ThingKind[] = ['appliance', 'finish', 'tile'];
+
+/** `whatItIs` and `kindGuess`, read as defensively as the rest. Null when neither says anything. */
+export function parseLabelGuess(raw: unknown): LabelGuess | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const name = labelText(r.whatItIs, 40);
+  const kind = GUESSABLE_KINDS.includes(r.kindGuess as ThingKind) ? (r.kindGuess as ThingKind) : null;
+  if (!name && !kind) return null;
+  return { name: name ? name.charAt(0).toUpperCase() + name.slice(1) : null, kind };
+}
+
 /** The walkthrough's boxes, as far as a label can answer them. */
 export interface LabelFields {
   name: string;
@@ -1682,38 +1707,244 @@ export function applyLabelReading(
 }
 
 /**
+ * What `read-label` answered: the reading (null when no label could be made
+ * out), what it thinks the thing is, and the id of the reading it keeps in
+ * `home.label_readings` — which is how a reading that arrives after the sheet
+ * has gone still reaches the thing's page.
+ */
+export interface LabelReadAnswer {
+  reading: LabelReading | null;
+  guess: LabelGuess | null;
+  readingId: string | null;
+}
+
+/**
+ * A read that came back without a reading, in the function's own words — with
+ * the id of the reading it kept, when it kept one. A busy model gets a second
+ * go in the background, so a `readingId` here means the answer may still turn
+ * up on the thing's page.
+ */
+export class LabelReadError extends Error {
+  readingId: string | null;
+  constructor(message: string, readingId: string | null) {
+    super(message);
+    this.name = 'LabelReadError';
+    this.readingId = readingId;
+  }
+}
+
+/**
  * Asks `read-label` what a photograph of a label says.
  *
  * The photo is already in `home-photos` by the time this is called, and the
  * function downloads it **as the caller**, so the storage policies decide
  * whether it can be read — a path to somebody else's household is refused the
- * same way it would be refused anywhere else. Nothing is written: the answer
- * goes into boxes a person then confirms.
+ * same way it would be refused anywhere else. Nothing is written to the
+ * record: the answer goes into boxes a person then confirms, or waits in
+ * `home.label_readings` to be checked on the thing's page.
  *
- * Throws with the function's own words when it gave some ("Label reading
- * isn't set up on this project"), so a missing key and an unreadable photo are
- * not one message.
+ * `kind` is null when nobody has said what the thing is yet — the walkthrough
+ * takes the photo first — and the reader is then asked to say.
+ *
+ * Throws a `LabelReadError` with the function's own words when it gave some
+ * ("Label reading isn't set up on this project"), so a missing key and an
+ * unreadable photo are not one message.
  */
 export async function readLabel(
   client: SupabaseClient,
   path: string,
-  kind: ThingKind
-): Promise<LabelReading | null> {
-  const { data, error } = await client.functions.invoke('read-label', { body: { path, kind } });
+  kind: ThingKind | null
+): Promise<LabelReadAnswer> {
+  const { data, error } = await client.functions.invoke('read-label', {
+    body: kind ? { path, kind } : { path },
+  });
   if (error) {
     let words: string | null = null;
+    let readingId: string | null = null;
     const context = (error as { context?: unknown }).context;
     if (context && typeof (context as Response).json === 'function') {
       try {
         const body = await (context as Response).json();
         words = typeof body?.error === 'string' ? body.error : null;
+        readingId = typeof body?.readingId === 'string' ? body.readingId : null;
       } catch {
         words = null;
       }
     }
-    throw new Error(words ?? "Couldn't read the label");
+    throw new LabelReadError(words ?? "Couldn't read the label", readingId);
   }
-  return parseLabelReading(data);
+  const readingId =
+    data && typeof data === 'object' && typeof (data as { readingId?: unknown }).readingId === 'string'
+      ? ((data as { readingId: string }).readingId)
+      : null;
+  return { reading: parseLabelReading(data), guess: parseLabelGuess(data), readingId };
+}
+
+/** Why a reading waiting on the thing's page came to nothing. */
+export type LabelReadingReason = 'illegible' | 'busy' | 'quota' | 'error';
+
+/**
+ * A reading of a thing's photographed label that nobody has answered yet —
+ * one that landed after *Add it*, or never landed at all.
+ */
+export interface LabelReadingToCheck {
+  id: string;
+  thingId: string;
+  thingName: string | null;
+  photoPath: string;
+  /** `pending` is still being read; a stalled one comes back `failed`. */
+  status: 'pending' | 'read' | 'failed';
+  reading: LabelReading | null;
+  reason: LabelReadingReason | null;
+  createdAt: string;
+}
+
+const READING_REASONS: LabelReadingReason[] = ['illegible', 'busy', 'quota', 'error'];
+
+/**
+ * Every reading at this place waiting on somebody, with the thing it is about.
+ * One request, for the House tab's count and the thing page's card alike.
+ */
+export async function getLabelReadingsToCheck(
+  client: SupabaseClient,
+  propertyId: string
+): Promise<LabelReadingToCheck[]> {
+  const { data, error } = await client.rpc('label_readings_to_check', { p_property_id: propertyId });
+  if (error) throw asError(error, "Couldn't load the label readings");
+  return ((data ?? []) as Row[]).map((row) => {
+    const reading = row.status === 'read' ? parseLabelReading(row.reading) : null;
+    // A reading that parses to nothing has nothing to offer, which is the
+    // illegible card rather than an empty one.
+    const status: LabelReadingToCheck['status'] =
+      row.status === 'read' && !reading ? 'failed' : row.status;
+    return {
+      id: row.id,
+      thingId: row.thing_id,
+      thingName: row.thing_name ?? null,
+      photoPath: row.photo_path,
+      status,
+      reading,
+      reason: status === 'failed'
+        ? (READING_REASONS.includes(row.reason) ? row.reason : 'illegible')
+        : null,
+      createdAt: row.created_at,
+    };
+  });
+}
+
+/**
+ * Ends a reading's card: `used` when somebody took what it said (the
+ * walkthrough, or *Use these*), `dismissed` for *Not right*. Neither touches
+ * the thing — using a reading is an `updateThing` made first.
+ */
+export async function resolveLabelReading(
+  client: SupabaseClient,
+  readingId: string,
+  outcome: 'used' | 'dismissed'
+): Promise<void> {
+  const { error } = await client.rpc('resolve_label_reading', { p_id: readingId, p_outcome: outcome });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+/** One box the check card offers to fill or change, in the words the thing page uses. */
+export interface LabelOffer {
+  key: 'name' | 'make' | 'model' | 'serial' | 'product' | 'sheen' | 'tint' | 'hex';
+  /** What the box is called, per kind: *Colour code* for a paint, *Model* otherwise. */
+  label: string;
+  value: string;
+  /** What the record holds now. Null when the box is empty. */
+  current: string | null;
+}
+
+export interface LabelOffers {
+  /** Boxes the record has left empty — *Use these* fills all of them in one write. */
+  fill: LabelOffer[];
+  /** Boxes where the label disagrees with what somebody typed — each its own *Use*. */
+  differ: LabelOffer[];
+  /** Parts not already on the thing: what the label printed, then what the model suggests. */
+  parts: string[];
+  /** A service cycle to offer, only when the thing has none. Never chosen for anybody. */
+  serviceDays: number | null;
+}
+
+const sameWords = (a: string, b: string) =>
+  a.trim().replace(/\s+/g, ' ').toLowerCase() === b.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * What a late reading has to say about a thing that already exists.
+ *
+ * The same rule as `applyLabelReading`, with the one difference a saved record
+ * makes: a box somebody filled is never overwritten, but where the label
+ * **disagrees** with them the card says so and offers it on its own — they may
+ * have mistyped, and they are the only one who can say. A box the label agrees
+ * with is not mentioned at all. A paint's colour is its name, its brand the
+ * make and its code the model, exactly as in the walkthrough; its name is only
+ * offered when the record has none, because a name is the person's own answer
+ * to *What is it?*.
+ *
+ * Nothing here is ever a suggestion laid into a box: `parts` and `serviceDays`
+ * are offers to tap, as on the walkthrough's last step.
+ */
+export function labelOffers(thing: Thing, reading: LabelReading): LabelOffers {
+  const fill: LabelOffer[] = [];
+  const differ: LabelOffer[] = [];
+  const colourKind = thing.kind === 'finish' || thing.kind === 'tile';
+  const words = THING_KIND_FIELD_LABELS[thing.kind] ?? THING_KIND_FIELD_LABELS.appliance;
+
+  const offer = (key: LabelOffer['key'], label: string, value: string | null, current: string | null) => {
+    if (!value) return;
+    const now = current && current.trim() ? current : null;
+    if (!now) fill.push({ key, label, value, current: null });
+    else if (!sameWords(now, value)) differ.push({ key, label, value, current: now });
+  };
+
+  if (colourKind) {
+    if (!thing.name?.trim() && reading.colourName) offer('name', 'Colour', reading.colourName, null);
+    offer('make', words.make, reading.make, thing.make);
+    offer('model', words.model, reading.colourCode ?? reading.model, thing.model);
+    if (thing.kind === 'finish') {
+      offer('product', 'Product', reading.product, thing.spec.product ?? null);
+      offer('sheen', 'Sheen', reading.sheen, thing.spec.sheen ?? null);
+      offer('tint', 'Tint formula', reading.tint, thing.spec.tint ?? null);
+      // A published hex belongs to a named colour, as in `applyLabelReading`.
+      if (reading.colourName || reading.colourCode) {
+        offer('hex', 'Swatch', reading.hex, thing.spec.hex ?? null);
+      }
+    }
+  } else {
+    offer('make', words.make, reading.make, thing.make);
+    offer('model', words.model, reading.model, thing.model);
+    offer('serial', 'Serial', reading.serial, thing.serial);
+  }
+
+  const onThing = (item: string) => thing.consumables.some((one) => sameWords(one, item));
+  const parts = colourKind
+    ? []
+    : [...reading.consumables, ...reading.suggestedConsumables]
+        .filter((one) => !onThing(one))
+        .filter((one, i, all) => all.findIndex((other) => sameWords(other, one)) === i);
+
+  return {
+    fill,
+    differ,
+    parts,
+    serviceDays: !colourKind && !thing.serviceDays ? reading.suggestedServiceDays : null,
+  };
+}
+
+/** The `ThingUpdate` that writes some offers — one call, whichever boxes they are. */
+export function labelOffersUpdate(offers: LabelOffer[]): ThingUpdate {
+  const update: ThingUpdate = {};
+  const spec: ThingSpec = {};
+  for (const one of offers) {
+    if (one.key === 'name' || one.key === 'make' || one.key === 'model' || one.key === 'serial') {
+      update[one.key] = one.value;
+    } else {
+      spec[one.key] = one.value;
+    }
+  }
+  if (Object.keys(spec).length) update.spec = spec;
+  return update;
 }
 
 /**

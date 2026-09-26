@@ -64,7 +64,13 @@ const mock_createSnag = jest.fn();
 const mock_getSnags = jest.fn();
 const mock_updateSnag = jest.fn();
 const mock_setSnagStatus = jest.fn();
+const mock_getLabelReadingsToCheck = jest.fn();
+const mock_resolveLabelReading = jest.fn();
+const mock_readLabel = jest.fn();
 jest.mock('../lib/supabase', () => ({
+  getLabelReadingsToCheck: (...a: unknown[]) => mock_getLabelReadingsToCheck(...a),
+  resolveLabelReading: (...a: unknown[]) => mock_resolveLabelReading(...a),
+  readLabel: (...a: unknown[]) => mock_readLabel(...a),
   setSnagStatus: (...a: unknown[]) => mock_setSnagStatus(...a),
   getThing: (...a: unknown[]) => mock_getThing(...a),
   updateThing: (...a: unknown[]) => mock_updateThing(...a),
@@ -139,6 +145,8 @@ async function open(over: Partial<any> = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mock_getSnags.mockResolvedValue([]);
+  mock_getLabelReadingsToCheck.mockResolvedValue([]);
+  mock_resolveLabelReading.mockResolvedValue(undefined);
 });
 
 /** Every text rendered on the page, flattened. */
@@ -596,5 +604,92 @@ describe('a paint swatch', () => {
   it('has no swatch box at all on an appliance', async () => {
     const r = await open({ kind: 'appliance' });
     expect(boxes(r)['Swatch (hex)']).toBeUndefined();
+  });
+});
+
+// A label read after the walkthrough's *Add it* waits here, and is never
+// written onto the record unseen. These pin the card's writes: the empty boxes
+// in one update, a disagreement only on its own tap, *Not right* ending it, and
+// a reading with nothing left to say ending itself.
+describe('a label reading waiting to be checked', () => {
+  const plate = {
+    legible: true, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871',
+    colourName: null, colourCode: null, product: null, sheen: null, tint: null, hex: null,
+    consumables: [], suggestedConsumables: [], suggestedServiceDays: null,
+  };
+  const check = (over: Partial<any> = {}) => ({
+    id: 'r1', thingId: 't1', thingName: 'Heat pump', photoPath: 'h1/plate.jpg',
+    status: 'read', reading: plate, reason: null, createdAt: '2026-09-24T00:00:00Z', ...over,
+  });
+
+  it('fills the empty boxes in one write, and the boxes show it', async () => {
+    mock_getLabelReadingsToCheck.mockResolvedValue([check()]);
+    mock_updateThing.mockResolvedValue(
+      thing({ name: 'Heat pump', make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871' })
+    );
+    const result = await open({ name: 'Heat pump', photoPaths: ['h1/plate.jpg'] });
+    expect(texts(result)).toContain('Read from the label');
+
+    await TestRenderer.act(async () => { await pressable(result, 'Use what the label says').props.onPress(); });
+    expect(mock_updateThing).toHaveBeenCalledTimes(1);
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', {
+      make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871',
+    });
+    expect(boxes(result).Model.props.value).toBe('MSZ-AP50VGK');
+    // Nothing left to offer, so the reading ends itself.
+    await TestRenderer.act(async () => {});
+    expect(mock_resolveLabelReading).toHaveBeenCalledWith('r1', 'used');
+    expect(texts(result)).not.toContain('Read from the label');
+  });
+
+  it('never writes over a typed box without its own tap', async () => {
+    mock_getLabelReadingsToCheck.mockResolvedValue([check()]);
+    const result = await open({
+      name: 'Heat pump', make: 'Mitsubishi Electric', model: 'MSZ-AP50', serial: '7A204871',
+    });
+    expect(texts(result)).toContain('The record says MSZ-AP50');
+    expect(pressable(result, 'Use what the label says')).toBeUndefined();
+
+    mock_updateThing.mockResolvedValue(thing({ model: 'MSZ-AP50VGK' }));
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Use MSZ-AP50VGK for Model').props.onPress();
+    });
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { model: 'MSZ-AP50VGK' });
+  });
+
+  it('ends on Not right, and writes nothing to the record', async () => {
+    mock_getLabelReadingsToCheck.mockResolvedValue([check()]);
+    const result = await open({ name: 'Heat pump' });
+    await TestRenderer.act(async () => { await pressable(result, 'Dismiss the label reading').props.onPress(); });
+    expect(mock_resolveLabelReading).toHaveBeenCalledWith('r1', 'dismissed');
+    expect(mock_updateThing).not.toHaveBeenCalled();
+    expect(texts(result)).not.toContain('Read from the label');
+  });
+
+  it('shows nothing for a reading the record already agrees with, and closes it', async () => {
+    mock_getLabelReadingsToCheck.mockResolvedValue([check()]);
+    const result = await open({
+      name: 'Heat pump', make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871',
+    });
+    expect(texts(result)).not.toContain('Read from the label');
+    expect(mock_resolveLabelReading).toHaveBeenCalledWith('r1', 'used');
+  });
+
+  it('says why a reading came to nothing, and a busy one can be read again', async () => {
+    mock_getLabelReadingsToCheck.mockResolvedValue([check({ status: 'failed', reading: null, reason: 'busy' })]);
+    mock_readLabel.mockResolvedValue({ reading: plate, guess: null, readingId: 'r1' });
+    const result = await open({ name: 'Heat pump' });
+    expect(texts(result)).toContain('The label reader was busy when this was added.');
+
+    mock_getLabelReadingsToCheck.mockResolvedValue([check()]);
+    await TestRenderer.act(async () => { await pressable(result, 'Read the label again').props.onPress(); });
+    expect(mock_readLabel).toHaveBeenCalledWith('h1/plate.jpg', 'appliance');
+    expect(texts(result)).toContain('Read from the label');
+  });
+
+  it('draws the record when the readings cannot be fetched', async () => {
+    mock_getLabelReadingsToCheck.mockRejectedValue(new Error('offline'));
+    const result = await open({ name: 'Heat pump' });
+    expect(boxes(result).Name.props.value).toBe('Heat pump');
   });
 });

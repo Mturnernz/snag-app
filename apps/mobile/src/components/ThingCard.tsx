@@ -40,9 +40,11 @@ interface Props {
   thing: Thing;
   photoUrl?: string | null;
   onPress: () => void;
+  /** A label reading waits on this thing's page. Said, not coloured: it is a prompt, not a state. */
+  labelToCheck?: boolean;
 }
 
-export default function ThingCard({ thing, photoUrl, onPress }: Props) {
+export default function ThingCard({ thing, photoUrl, onPress, labelToCheck }: Props) {
   const detail = thingDetailLine(thing);
   const consumable = thing.consumables[0];
   // A paint's own colour, when it has one this can draw. Not a breach of the
@@ -104,6 +106,7 @@ export default function ThingCard({ thing, photoUrl, onPress }: Props) {
               {thing.consumables.length > 1 ? ` +${thing.consumables.length - 1}` : ''}
             </Text>
           ) : null}
+          {labelToCheck ? <Text style={styles.snags}>Label to check</Text> : null}
           {thing.openSnagCount > 0 ? (
             <Text style={styles.snags}>
               {thing.openSnagCount} on the list

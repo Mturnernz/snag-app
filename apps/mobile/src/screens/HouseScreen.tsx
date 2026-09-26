@@ -16,12 +16,13 @@ import Icon from '../components/Icon';
 import AddThingSheet from '../components/AddThingSheet';
 import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
-import { AddRow, Group, SectionTitle, groupedStyles } from '../components/Grouped';
+import { AddRow, Group, Pill, SectionTitle, groupedStyles } from '../components/Grouped';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useAddThing } from '../hooks/useAddThing';
 import { getAbsentThings, getFileUrls, getThings } from '../lib/supabase';
+import { labelsToCheck } from '../lib/labelChecks';
 import { showAlert } from '../lib/alert';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { roomIcon } from '../lib/roomIcon';
@@ -91,6 +92,12 @@ export default function HouseScreen() {
   const [roomOpen, setRoomOpen] = useState(false);
   const [roomDraft, setRoomDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  /**
+   * Things with a label reading waiting on their page — one that landed after
+   * *Add it*, or never landed. Read beside the record and never fatal: a count
+   * nobody can fetch is a count of nought, which is also what it usually is.
+   */
+  const [labelChecks, setLabelChecks] = useState<string[]>([]);
 
   const propertyId = activeProperty?.id ?? null;
 
@@ -103,12 +110,14 @@ export default function HouseScreen() {
       return;
     }
     try {
-      const [rows, hidden] = await Promise.all([
+      const [rows, hidden, checks] = await Promise.all([
         getThings(propertyId),
         getAbsentThings(propertyId),
+        labelsToCheck(propertyId),
       ]);
       setThings(rows);
       setAbsent(hidden);
+      setLabelChecks(checks);
       // Covers for the search results, which are the only thing rows this
       // screen draws; a room's page signs its own.
       const covers = rows.map((t) => t.photoPaths[0]).filter(Boolean) as string[];
@@ -260,6 +269,15 @@ export default function HouseScreen() {
       {!searching ? (
         <View style={styles.countRow}>
           <Text style={styles.count}>{recorded} recorded</Text>
+          {/* Absent at nought, like the shopping pill: a control with nothing
+              behind it is a choice that isn't one. It opens the first thing
+              with a reading waiting; each thing's row says so too. */}
+          {labelChecks.length > 0 ? (
+            <Pill
+              label={labelChecks.length === 1 ? '1 label to check' : `${labelChecks.length} labels to check`}
+              onPress={() => navigation.navigate('ThingDetail', { thingId: labelChecks[0] })}
+            />
+          ) : null}
         </View>
       ) : null}
 
@@ -291,6 +309,7 @@ export default function HouseScreen() {
                     key={thing.id}
                     thing={thing}
                     photoUrl={thing.photoPaths[0] ? photoUrls[thing.photoPaths[0]] : null}
+                    labelToCheck={labelChecks.includes(thing.id)}
                     onPress={() => navigation.navigate('ThingDetail', { thingId: thing.id })}
                   />
                 ))}
@@ -543,7 +562,13 @@ const styles = StyleSheet.create({
   },
   search: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary, paddingVertical: Spacing.sm },
   clear: { padding: Spacing.xs },
-  countRow: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm },
+  countRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+  },
   count: { fontSize: Typography.footnote, color: Colors.textMuted },
   // Room for the + to float over without covering the export line.
   content: { paddingBottom: Spacing.xxxl * 3 },

@@ -192,6 +192,15 @@ three share `read-label/gemini.ts` for the model plumbing, and the two bill func
 `inbound-bill/bill.ts` and `inbound-bill/read.ts`, so a card read again comes out as it would have
 the first time. **Deploy both bill functions together** whenever either shared file changes.
 
+`read-label` finishes its work under `EdgeRuntime.waitUntil` and keeps what it read in
+`home.label_readings` (`20260924120100`), so the walkthrough never waits on it. **Order matters:**
+apply that migration *before* deploying the function (without it the function logs *could not
+open a reading* and the reading cannot outlive the sheet), deploy the function before merging the
+client, and check one real read with the sheet closed before it lands — the row should appear
+and the thing's page should show the card. A busy first round retries once in the background
+after 20s, so a single call can run for up to ~100s of wall clock: inside the platform's limit,
+but worth knowing when reading the logs.
+
 ### Edge functions — the five below belong to the retired product, and are to be deleted
 
 `notify-snag` (v20), `export-investigation`, `export-governance-report`, `worksheet`,

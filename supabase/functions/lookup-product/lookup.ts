@@ -492,7 +492,7 @@ export function pdfStrings(content: string): string {
       return ({ n: '\n', r: '\r', t: '\t', b: '', f: '' } as Record<string, string>)[esc] ?? esc;
     });
     // Only what reads as text: a glyph-index string is noise, not words.
-    if (/^[\x20-\x7e -ÿ]*$/.test(inner)) out.push(inner);
+    if (/^[\x20-\x7e\u00a0-\u00ff]*$/.test(inner)) out.push(inner);
   }
   return out.join('');
 }

@@ -48,7 +48,7 @@ const tap = async (r: RenderResult, label: string) => {
 const PLATE = {
   legible: true, make: 'Smeg', model: 'C6GMXA8', serial: '1690428', colourName: null,
   colourCode: null, product: null, sheen: null, tint: null, hex: null, consumables: [],
-  suggestedConsumables: [], suggestedServiceDays: null,
+  manufactured: null,
 };
 const answer = (reading: unknown, guess: unknown = null) => ({ reading, guess, readingId: 'r1' });
 
@@ -255,30 +255,40 @@ it('carries a paint’s tin into the record: code, sheen, tint and swatch', asyn
   }));
 });
 
-it('offers what the model suggests on the last step, and records only what is tapped', async () => {
+it('offers nothing the model remembers, and says the maker is being looked up instead', async () => {
+  // A reply from a function still deployed with the old instructions: its
+  // suggestions were the model's memory, and one heat pump got three sets.
   mock_readLabel.mockResolvedValue(answer({
-    ...PLATE, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: null,
-    suggestedConsumables: ['Air filter MAC-2360FT', 'Remote batteries AAA'], suggestedServiceDays: 365,
+    ...PLATE, make: 'Mitsubishi Electric', model: 'MSZ-GS60VFD', serial: null, manufactured: '2016',
+    suggestedConsumables: [{ item: 'Air cleaning filter', code: 'MAC-2370FT-E' }], suggestedServiceMonths: 12,
   }));
   const r = await openGhost('appliance', 'Heat pump');
   await shoot(r);
 
-  // Offered, labelled as a suggestion, and not in the box.
   expect(boxes(r)['What it takes'].props.value).toBe('');
-  expect(texts(r)).toContain('Suggested for this model · check before you buy');
-  expect(texts(r)).toContain('Suggested for this model: every year.');
+  expect(texts(r).join(' ')).not.toMatch(/Suggested for this model/);
+  expect(press(r, 'Add Air cleaning filter MAC-2370FT-E')).toBeUndefined();
+  // Said once, so nobody looks for the answer here: it lands on the thing's page.
+  expect(texts(r)).toContain(
+    "Mitsubishi Electric's own website is being searched for the MSZ-GS60VFD's manual, parts and servicing. What can be checked will be on its page.",
+  );
+  // The year made is the plate's, in a box to be checked.
+  expect(boxes(r)['Year made'].props.value).toBe('2016');
 
-  await tap(r, 'Add Air filter MAC-2360FT');
-  // Taken, so no longer offered, and removable.
-  expect(press(r, 'Add Air filter MAC-2360FT')).toBeUndefined();
-  expect(press(r, 'Remove Air filter MAC-2360FT')).toBeDefined();
-
-  await TestRenderer.act(async () => { boxes(r)['What it takes'].props.onChangeText('Drain hose'); });
   await tap(r, 'Add it to the house');
   expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({
     make: 'Mitsubishi Electric',
-    consumables: ['Air filter MAC-2360FT', 'Drain hose'],
-    // A suggested cycle is said, never chosen for them.
+    consumables: [],
     serviceDays: null,
+    spec: { manufactured: '2016' },
   }));
+});
+
+it('sends no spec for an appliance whose plate printed no year', async () => {
+  mock_readLabel.mockResolvedValue(answer({ ...PLATE }));
+  const r = await openGhost('appliance', 'Oven');
+  await shoot(r);
+  expect(boxes(r)['Year made']).toBeUndefined();
+  await tap(r, 'Add it to the house');
+  expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ make: 'Smeg', spec: undefined }));
 });

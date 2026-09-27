@@ -113,10 +113,17 @@ export const LABEL_TIMEOUT_MS = 45_000;
  * model 45s so it answers in words before this runs out.
  */
 export const READ_AGAIN_TIMEOUT_MS = 60_000;
+/**
+ * *Look it up* searches the web and then opens every page the answer cites, to
+ * check it — slower than reading a plate. The function stops at 55s so it can
+ * answer in words, and the search carries on behind it either way.
+ */
+export const LOOKUP_TIMEOUT_MS = 70_000;
 
 export function deadlineFor(url: string): number {
   if (url.includes('/auth/v1/')) return AUTH_TIMEOUT_MS;
   if (url.includes('/functions/v1/read-label')) return LABEL_TIMEOUT_MS;
+  if (url.includes('/functions/v1/lookup-product')) return LOOKUP_TIMEOUT_MS;
   if (url.includes('/functions/v1/reread-bill')) return READ_AGAIN_TIMEOUT_MS;
   // Asking for a signed URL, not sending or fetching the bytes behind one.
   if (url.includes('/storage/v1/object/sign')) return REQUEST_TIMEOUT_MS;

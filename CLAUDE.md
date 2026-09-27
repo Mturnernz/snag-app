@@ -1193,7 +1193,7 @@ rules keep it that way, and they are the whole feature:
   the plate has already answered, and a reading that overwrote them would be the app deciding a
   photograph knows better than the person holding the appliance. It also makes a late answer safe:
   the read is never awaited, and whatever was typed while it was out is kept.
-- **It transcribes into boxes, and suggests only as offers.** An ambiguous character is null,
+- **It transcribes into boxes, and nothing else.** An ambiguous character is null,
   never a best guess — a plausible wrong model number is worse than none in a shop. Every box it
   fills was printed on the thing in somebody's hand, where they can check it. `hex` is the one
   box it fills that was not printed, and it is **the maker's published value or nothing**: the
@@ -1203,20 +1203,22 @@ rules keep it that way, and they are the whole feature:
   *of*. A paint with no swatch is honest; a swatch that is somebody's guess at a colour is the one
   part of a paint record people believe at a glance. A serial, which the
   walkthrough never asks for, appears in a box of its own when read, so it is checked rather than
-  saved unseen.
+  saved unseen — and so does **the year it was made** (`manufactured`, into `spec.manufactured`),
+  only when the plate prints a date of manufacture, never worked out from a serial or a standard's
+  year.
 
-  **What it takes is the exception, and it is fenced rather than forbidden.** It used to come
-  "off the label or not at all", which in practice meant never: a heat pump's plate does not print
-  its filter code, so the step asking *Anything you re-buy for it?* came back empty on every real
-  appliance — and it was asked for. So the model also returns `suggestedConsumables` and
-  `suggestedServiceMonths`, **from what it knows about that make and model**, and they arrive as
-  offers on the last step under *Suggested for this model · check before you buy*: a row with a + per
-  part, tapped to take, and a line saying the usual service cycle. **`applyLabelReading` never lays
-  one into a box, even an empty box**, and no cycle is chosen for anybody. That is the distinction
-  the unsourced-tradesman rule actually protects — a guess must not look like something read —
-  and a heading naming it a suggestion plus a tap to accept it keeps that true. The instruction
-  asks for a part code only when the model is confident of it, and the item in plain words
-  otherwise; "Air filter" with no code still tells somebody what to ask for.
+  **What it takes is no longer the model's to say, and that is a reversal.** For a while the
+  reader also returned `suggestedConsumables` and `suggestedServiceMonths` "from what it knows
+  about that make and model", offered under *Suggested for this model · check before you buy*.
+  Then one Mitsubishi Electric MSZ-GS60VFD plate was read four times in five minutes on 27
+  September 2026: the plate came back identical every time, and the suggestions were three
+  different filter sets — MAC-2370FT-E (sold for the FT/AP/HR range, not the GS), MAC-3000FT-E,
+  MAC-EMF52FT-E (found nowhere) — and, twice, *"Air cleaning filter"* with no number. Same model,
+  first try each time, no fallback in the logs: the variation was the model's own sampling, and
+  the "code only when confident" gate was a coin toss. The owner's words were that a generic part
+  is not useful and wrong data devalues the trust in the app. So both fields are gone from the
+  schema and the instructions, and **nothing the reader says is ever about the model rather than
+  the unit**. What the maker says is looked up and checked — see *What the maker says* below.
 - **A brand is written the way the brand writes itself.** Rating plates shout, and "MITSUBISHI
   ELECTRIC" in the record reads as a label rather than a name. The model is asked for the brand's
   own casing; `brandCase` is the fallback when it copies the capitals anyway — it touches only a
@@ -1270,13 +1272,12 @@ tier submitted content may be used to improve their products, and these are phot
 inside of people's houses. Until the key is set the feature says it is not set up and everything
 else works.
 
-`label.test.ts` pins `swatchColour`, `consumableOnList`, the defensive parse, `brandCase`, the
-suggestions kept apart from what was read, and the fill-only-empty rule — including that a
-suggestion never fills a box; `readLabelGemini.test.ts` pins the request's shape and every refusal in
-`readingFromGemini`; `AddThingSheet.test.tsx` pins the boxes filled and named, a typed box
-surviving a late reading, the failure sentence, a paint's tin reaching `create_thing` as code,
-sheen and swatch, and the suggestions — offered not entered, gone once tapped, carried into the
-write beside what was typed, and the suggested cycle never chosen.
+`label.test.ts` pins `swatchColour`, `consumableOnList`, the defensive parse (including that an
+old deployment's suggestions are not read), `brandCase`, the year made, and the fill-only-empty
+rule; `readLabelGemini.test.ts` pins the request's shape — nothing asked from memory — and every
+refusal in `readingFromGemini`; `AddThingSheet.test.tsx` pins the boxes filled and named, a typed
+box surviving a late reading, the failure sentence, a paint's tin reaching `create_thing` as code,
+sheen and swatch, the year made reaching `spec`, and no suggestion offered anywhere.
 
 ### A reading waits to be checked, rather than making somebody wait for it
 
@@ -1296,7 +1297,7 @@ longer needs somebody standing there while the model looks.
   left empty fill together with *Use these* — one `update_thing`. A box where the label
   **disagrees** with what somebody typed is offered on its own row, beside what the record says,
   and only its own *Use* writes it: they may have mistyped, and they are the only one who can say.
-  Parts and a service cycle stay offers, the cycle opening *Schedule service* pre-filled. A box
+  A part number the label itself printed is an offer with a + (*Printed on the label*). A box
   the label agrees with (any capitals, any spacing) is not mentioned, and a reading with nothing
   left to offer marks itself `used` rather than leaving a card with no rows.
 - **Every way it can come to nothing is said.** Illegible asks for typing; busy, used up for the
@@ -1327,6 +1328,81 @@ failed-upload way out, *used* on a reading that was shown, and the guess never o
 the self-closing reading, *Try again*, and the page surviving a failed read of the readings;
 `HouseScreen.test.tsx` the pill and its absence at nought; `HouseRoomScreen.test.tsx` the row's
 marker and the room surviving a failed read.
+
+### What the maker says, looked up once and checked on the maker's own pages
+
+`supabase/functions/lookup-product` answers what the reader stopped guessing at: **the manual,
+the consumable parts a householder replaces, and the maker's recommended service interval**. The
+owner's rule for it is the whole design: *a return is only given if there is absolute confidence in
+the data, because wrong data devalues the trust in the app.* A model's confidence is not that — it
+was the thing that produced three answers for one heat pump — so **the model is not trusted
+either**. It searches (Gemini with Google Search grounding and URL context on) and says what it
+found and where; the function then **opens every page it cites itself** and keeps a value only
+when all of these hold (`verifyLookup`, pure, in `lookup.ts`):
+
+- **The page is on the maker's own website**, before and after any redirect (`isMakersSite`: the
+  registered domain is the make, run together, or its first word with one of a short list of
+  words makers add — `mitsubishi-electric`, `fisherpaykel`, `bosch-home`). Retailers, parts shops
+  and "compatible with" lists never count, and they are exactly where MAC-2370FT-E came from. It is
+  deliberately strict: a maker whose documents live on a domain that is not its name gets nothing
+  from there — a missed answer rather than a wrong one.
+- **The page is about this model**, by its number however spaced, or by a range or list that
+  includes it (`mentionsModel`: *MSZ-GS25-80VFD* covers a GS60). A manual's file name counts,
+  because it is often the only place its range is legible.
+- **A part number is written on the page**, and on a page covering several sizes **it is this
+  size's** (`codeIsForThisSize`). The GS manual prints *Every year: MAC-408FT-E  GS71/80: …* — one
+  code for most sizes and another for two — so the nearest size label before a code must not leave
+  this size out, and the nearest after it must not claim this size for itself. Only visible words
+  count: a part number that appears only in a link's address is not on the page. A "part" with no
+  digit, or the model's own number, is never one.
+- **A service interval is the maker's own sentence**, quoted, found on the page, talking about
+  servicing or inspection, and saying the interval claimed (`monthsSaid`). "Periodically" and
+  "after several seasons" are not intervals, and cleaning a filter yourself is not a service.
+
+A PDF is read by the function too — its Flate text streams inflated and their strings read
+(`pdfStreams`, `pdfStrings`); a PDF whose fonts do not map to ordinary characters reads as nothing,
+and nothing is kept from it. **Every rule is wrong only towards dropping a value.** Measured against
+Mitsubishi's real pages for the GS60: the NZ product page names no filter code in its text; the GS
+range manual is kept as the manual, keeps MAC-408FT-E for a GS60 (and not for a GS71), and gives no
+service interval — so none is shown. That is the honest answer, and it is the common one.
+
+**The year made is not here.** It is a fact about one unit, and a website knows when a model was
+sold, not when this one was built. It comes off the plate (`read-label`'s `manufactured`) or is
+typed into the thing page's *Year made* box (`spec.manufactured`).
+
+Four rules around it:
+
+- **Kept once per make and model, per household** (`home.product_lookups`, `20260927100000`,
+  keyed by `home.product_key` — letters and digits only, so `MSZ-GS60VFD` and `msz gs60vfd` are one
+  model). A second scan, or a second unit of the same model, shows the same answer and costs
+  nothing. `nothing` is an answer and is **never looked up again**; *Try again* exists only on a
+  failure (busy, used up for the day, an error). Asking again until something turns up is how one
+  model gets two answers. Per household rather than shared: a shared table would say which models
+  another household owns.
+- **It starts itself, and it can be asked.** `read-label` imports `lookup-product/run.ts` and, once
+  a plate gives a make and a model on anything that is not paint or tile, starts a lookup in its own
+  `waitUntil` after the reading is kept — never inside the work the sheet's reply waits on. The
+  walkthrough says so in one line. A thing recorded without a plate, or whose model was corrected,
+  gets **Look it up** on its page.
+- **It writes nothing to the record.** The thing page's **What *Make* says** card
+  (`ProductFactsCard`) shows the manual, the interval and the parts, **each row opening the page it
+  is written on**; a part is added to the thing's list with *Add* (as `Air filter MAC-408FT-E`,
+  `partLine`), and shown as *on its list* once its number is there however the line was written;
+  the interval opens *Schedule service* already set (`monthsToDays`, so 12 months is "every year").
+  A lookup still running is re-read every 8s while the page is open, and never fatally.
+- **It spends the household's daily reads**: one `claim_label_read` per search that actually runs,
+  so the fifty-a-day ceiling covers it. Google bills grounded searches separately from tokens; see
+  `SNAG_INFRA_NOTES.md`.
+
+`productLookup.test.ts` pins every rule above against the GS60's real pages and wording — the
+retailer refused, a redirect off the maker's site refused, another model's page refused, the range
+manual kept by its name, the per-size code, the quoted interval and its three refusals, the reply
+read out of prose, and the page text readers — plus `productOffers` and the defensive parse.
+`ThingDetailScreen.test.tsx` pins the card: the read keyed by make and model, *Look it up*, each
+row opening its page, *Add* writing words and number together and never offering it twice, the
+interval opening *Schedule service* and writing nothing, *nothing* said and not retried, *Try
+again* only on a failure, the pending state, the page surviving a failed read, and the *Year made*
+box on an appliance and not a paint.
 
 ### Writing is rare and accidental; reading is under pressure, somewhere else
 

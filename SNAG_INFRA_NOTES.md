@@ -185,7 +185,8 @@ call rather than a tidy-up. Not done.
 
 ### Edge functions the home app uses
 
-`read-label` (JWT on) reads a photographed rating plate or paint tin; `inbound-bill` (JWT **off**,
+`read-label` (JWT on) reads a photographed rating plate or paint tin; `lookup-product` (JWT on)
+looks a model up on its maker's website; `inbound-bill` (JWT **off**,
 Svix-signed) files bills emailed to a project, one card per paper; `reread-bill` (JWT on) is the
 *Read again* button on a card that came in blank. Their source is in `supabase/functions/`. All
 three share `read-label/gemini.ts` for the model plumbing, and the two bill functions share
@@ -200,6 +201,25 @@ client, and check one real read with the sheet closed before it lands — the ro
 and the thing's page should show the card. A busy first round retries once in the background
 after 20s, so a single call can run for up to ~100s of wall clock: inside the platform's limit,
 but worth knowing when reading the logs.
+
+`lookup-product` (JWT on) searches the maker's own website for a model's manual, the parts a
+householder replaces and the service interval, and keeps only what it has itself found written on
+the maker's pages (`20260927100000`, `home.product_lookups`). `read-label` imports
+`lookup-product/run.ts` and starts one in the background once a plate gives a make and a model,
+so **deploy the two together** whenever `lookup-product/run.ts` or `lookup.ts` changes. Order:
+apply `20260927100000`, deploy `lookup-product` and then `read-label` (both JWT on, no new
+secrets — they share `GEMINI_API_KEY`), press *Look it up* on one real appliance and read the
+function's log line (it names what the model claimed and what survived), then merge. Until the
+migration is applied `read-label` logs *could not begin* and reads the plate as before.
+
+**What it costs.** Each lookup that actually runs is one model call with Google Search
+grounding and URL context on, plus the function opening up to six of the maker's pages itself.
+Google bills the search queries a grounded call makes separately from its tokens, and the pages
+the model opens count as input tokens — check the current Gemini pricing page for the model in
+`GEMINI_MODEL`, and the project's own billing, rather than trusting a figure written here. A
+lookup is kept per make and model per household and never repeated unless it failed, and it
+spends one of the household's fifty daily reads (`claim_label_read`), so the ceiling that caps
+label reads caps this too.
 
 ### Edge functions — the five below belong to the retired product, and are to be deleted
 

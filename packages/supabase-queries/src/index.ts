@@ -1509,12 +1509,24 @@ export function serviceJobFor(snags: Snag[], thingId: string): Snag | null {
  * numbers on the label itself — a bulb spec guessed from general knowledge is
  * the same unverifiable claim an unsourced tradesman is, and a wrong one is a
  * wasted trip.
+ *
+ * There used to be two more fields, the parts a model takes and how often it
+ * is serviced, "from what the model knows about this make and model". They
+ * were never on the label, and four reads of one heat pump gave three
+ * different answers. What the maker says is `ProductLookup` now — searched
+ * for, and checked against the maker's own pages before anybody sees it.
  */
 export interface LabelReading {
   legible: boolean;
   make: string | null;
   model: string | null;
   serial: string | null;
+  /**
+   * The year this unit was made, as four digits — only when the plate prints
+   * a date of manufacture. A fact about the unit in somebody's hand, which is
+   * why it is read and never looked up.
+   */
+  manufactured: string | null;
   colourName: string | null;
   colourCode: string | null;
   product: string | null;
@@ -1522,14 +1534,6 @@ export interface LabelReading {
   tint: string | null;
   hex: string | null;
   consumables: string[];
-  /**
-   * **Not read off the label.** What the model knows goes with this make and
-   * model — "Air filter MAC-2360FT" — offered on the walkthrough's last step as
-   * rows somebody taps to add, and never laid into a box. See `applyLabelReading`.
-   */
-  suggestedConsumables: string[];
-  /** Likewise a suggestion: 180, 365 or 730, or null. Never chosen for them. */
-  suggestedServiceDays: number | null;
 }
 
 /**
@@ -1566,8 +1570,18 @@ export function brandCase(value: string): string {
     .join(' ');
 }
 
-/** Service intervals the walkthrough offers, by the months a model says them in. */
-const SUGGESTED_CYCLE_DAYS: Record<number, number> = { 6: 180, 12: 365, 24: 730 };
+/**
+ * A year of manufacture, as four digits between 1950 and this year — or null.
+ * A plate printing "2019.06" gives 2019; anything that is not plainly a year
+ * this unit could have been made in is dropped rather than guessed at.
+ */
+export function yearMade(value: unknown, now: Date = new Date()): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const match = /^\s*((?:19|20)\d{2})\b/.exec(String(value));
+  if (!match) return null;
+  const year = Number(match[1]);
+  return year >= 1950 && year <= now.getFullYear() ? match[1] : null;
+}
 
 function labelText(value: unknown, max = 80): string | null {
   if (typeof value !== 'string') return null;
@@ -1590,24 +1604,13 @@ export function parseLabelReading(raw: unknown): LabelReading | null {
   const consumables = Array.isArray(r.consumables)
     ? r.consumables.map((one) => labelText(one, 60)).filter((one): one is string => !!one).slice(0, 5)
     : [];
-  const suggestedConsumables = Array.isArray(r.suggestedConsumables)
-    ? r.suggestedConsumables
-        .map((one) => {
-          if (!one || typeof one !== 'object') return null;
-          const { item, code } = one as Record<string, unknown>;
-          const words = [labelText(item, 40), labelText(code, 40)].filter(Boolean).join(' ');
-          return words ? words.slice(0, 60) : null;
-        })
-        .filter((one): one is string => !!one)
-        .filter((one, i, all) => all.findIndex((other) => other.toLowerCase() === one.toLowerCase()) === i)
-        .slice(0, 4)
-    : [];
   const make = labelText(r.make);
   return {
     legible: true,
     make: make ? brandCase(make) : null,
     model: labelText(r.model),
     serial: labelText(r.serial),
+    manufactured: yearMade(r.manufactured),
     colourName: labelText(r.colourName),
     colourCode: labelText(r.colourCode),
     product: labelText(r.product),
@@ -1615,9 +1618,6 @@ export function parseLabelReading(raw: unknown): LabelReading | null {
     tint: labelText(r.tint, 120),
     hex: swatchColour({ hex: labelText(r.hex, 9) ?? '' }),
     consumables,
-    suggestedConsumables,
-    suggestedServiceDays:
-      typeof r.suggestedServiceMonths === 'number' ? SUGGESTED_CYCLE_DAYS[r.suggestedServiceMonths] ?? null : null,
   };
 }
 
@@ -1659,10 +1659,10 @@ export interface LabelFields {
  * Returns what it filled, in words, so the sheet can say which boxes to check
  * against the label rather than implying it read everything.
  *
- * The suggestions are deliberately **not** laid in here, even into an empty
- * box. Everything this fills was printed on the thing in somebody's hand and
- * they can check it against the label; a suggested filter code is the model's
- * memory of the model, and the only honest place for it is an offer they tap.
+ * Everything this fills was printed on the thing in somebody's hand, and they
+ * can check it against the label. What the maker says about the model — the
+ * manual, the parts, the service interval — is never laid in here: it is
+ * looked up separately (`ProductLookup`) and offered on the thing's page.
  */
 export function applyLabelReading(
   current: LabelFields,
@@ -1701,6 +1701,7 @@ export function applyLabelReading(
     put('make', reading.make, 'make');
     put('model', reading.model, 'model');
     put('serial', reading.serial, 'serial');
+    putSpec('manufactured', reading.manufactured, 'year made');
     put('takes', reading.consumables[0] ?? null, 'what it takes');
   }
   return { next, filled };
@@ -1848,7 +1849,7 @@ export async function resolveLabelReading(
 
 /** One box the check card offers to fill or change, in the words the thing page uses. */
 export interface LabelOffer {
-  key: 'name' | 'make' | 'model' | 'serial' | 'product' | 'sheen' | 'tint' | 'hex';
+  key: 'name' | 'make' | 'model' | 'serial' | 'manufactured' | 'product' | 'sheen' | 'tint' | 'hex';
   /** What the box is called, per kind: *Colour code* for a paint, *Model* otherwise. */
   label: string;
   value: string;
@@ -1861,10 +1862,8 @@ export interface LabelOffers {
   fill: LabelOffer[];
   /** Boxes where the label disagrees with what somebody typed — each its own *Use*. */
   differ: LabelOffer[];
-  /** Parts not already on the thing: what the label printed, then what the model suggests. */
+  /** Part numbers printed on the label itself that the thing does not list yet. */
   parts: string[];
-  /** A service cycle to offer, only when the thing has none. Never chosen for anybody. */
-  serviceDays: number | null;
 }
 
 const sameWords = (a: string, b: string) =>
@@ -1882,8 +1881,8 @@ const sameWords = (a: string, b: string) =>
  * offered when the record has none, because a name is the person's own answer
  * to *What is it?*.
  *
- * Nothing here is ever a suggestion laid into a box: `parts` and `serviceDays`
- * are offers to tap, as on the walkthrough's last step.
+ * `parts` are part numbers the label itself prints, offered to tap. What the
+ * maker says the model takes is `productOffers`' to offer, not this.
  */
 export function labelOffers(thing: Thing, reading: LabelReading): LabelOffers {
   const fill: LabelOffer[] = [];
@@ -1915,21 +1914,17 @@ export function labelOffers(thing: Thing, reading: LabelReading): LabelOffers {
     offer('make', words.make, reading.make, thing.make);
     offer('model', words.model, reading.model, thing.model);
     offer('serial', 'Serial', reading.serial, thing.serial);
+    offer('manufactured', 'Year made', reading.manufactured, thing.spec.manufactured ?? null);
   }
 
   const onThing = (item: string) => thing.consumables.some((one) => sameWords(one, item));
   const parts = colourKind
     ? []
-    : [...reading.consumables, ...reading.suggestedConsumables]
+    : reading.consumables
         .filter((one) => !onThing(one))
         .filter((one, i, all) => all.findIndex((other) => sameWords(other, one)) === i);
 
-  return {
-    fill,
-    differ,
-    parts,
-    serviceDays: !colourKind && !thing.serviceDays ? reading.suggestedServiceDays : null,
-  };
+  return { fill, differ, parts };
 }
 
 /** The `ThingUpdate` that writes some offers — one call, whichever boxes they are. */
@@ -1945,6 +1940,205 @@ export function labelOffersUpdate(offers: LabelOffer[]): ThingUpdate {
   }
   if (Object.keys(spec).length) update.spec = spec;
   return update;
+}
+
+// ---------------------------------------------------------------------------
+// What the maker says: the manual, the parts, the service interval
+// ---------------------------------------------------------------------------
+
+/**
+ * What the maker's own website says about a model — and only what
+ * `lookup-product` could check.
+ *
+ * Every value carries the page it is written on (`url`) and whose site that is
+ * (`source`), because the page is the only part of an answer like this anybody
+ * can follow back — the rule the assessment loop already applies to a
+ * tradesman. The function opened each page itself and found the value on it;
+ * nothing here is the model's memory. See `verifyLookup`.
+ */
+export interface ProductFacts {
+  manual: { url: string; source: string } | null;
+  /** How often the maker says it should be serviced, in the maker's own sentence. */
+  service: { months: number; quote: string; url: string; source: string } | null;
+  parts: { item: string; code: string; url: string; source: string }[];
+}
+
+/**
+ * The lookup kept for a make and model at this household. `nothing` is an
+ * answer — the search ran and nothing on the maker's site could be confirmed —
+ * and it is not asked again.
+ */
+export interface ProductLookup {
+  id: string;
+  make: string;
+  model: string;
+  status: 'pending' | 'found' | 'nothing' | 'failed';
+  reason: 'busy' | 'quota' | 'error' | null;
+  facts: ProductFacts | null;
+  finishedAt: string | null;
+}
+
+const webAddress = (value: unknown): string | null => {
+  const text = labelText(value, 600);
+  return text && /^https?:\/\//i.test(text) ? text : null;
+};
+
+/**
+ * A kept answer, read as defensively as a label reading: it came from a model
+ * by way of a function, and the screen draws links from it. A value without a
+ * web address, or a service interval that is not whole months, is dropped.
+ */
+export function parseProductFacts(raw: unknown): ProductFacts | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const source = (value: unknown, url: string) => labelText(value, 80) ?? url.replace(/^https?:\/\/(www\.)?/i, '').split('/')[0];
+
+  let manual: ProductFacts['manual'] = null;
+  if (r.manual && typeof r.manual === 'object') {
+    const m = r.manual as Record<string, unknown>;
+    const url = webAddress(m.url);
+    if (url) manual = { url, source: source(m.source, url) };
+  }
+
+  let service: ProductFacts['service'] = null;
+  if (r.service && typeof r.service === 'object') {
+    const v = r.service as Record<string, unknown>;
+    const url = webAddress(v.url);
+    const quote = labelText(v.quote, 400);
+    const months = typeof v.months === 'number' && Number.isInteger(v.months) && v.months >= 1 && v.months <= 120
+      ? v.months
+      : null;
+    if (url && quote && months) service = { months, quote, url, source: source(v.source, url) };
+  }
+
+  const parts = (Array.isArray(r.parts) ? r.parts : [])
+    .map((one) => {
+      if (!one || typeof one !== 'object') return null;
+      const p = one as Record<string, unknown>;
+      const url = webAddress(p.url);
+      const item = labelText(p.item, 60);
+      const code = labelText(p.code, 40);
+      return url && item && code ? { item, code, url, source: source(p.source, url) } : null;
+    })
+    .filter((one): one is ProductFacts['parts'][number] => !!one)
+    .slice(0, 4);
+
+  return { manual, service, parts };
+}
+
+const LOOKUP_STATUSES: ProductLookup['status'][] = ['pending', 'found', 'nothing', 'failed'];
+const LOOKUP_REASONS: NonNullable<ProductLookup['reason']>[] = ['busy', 'quota', 'error'];
+
+export function parseProductLookup(raw: unknown): ProductLookup | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const row = raw as Row;
+  if (typeof row.id !== 'string' || !LOOKUP_STATUSES.includes(row.status)) return null;
+  const facts = row.status === 'found' ? parseProductFacts(row.result) : null;
+  // A found answer that parses to nothing is nothing, rather than an empty card.
+  const found = !!facts && (!!facts.manual || !!facts.service || facts.parts.length > 0);
+  const status: ProductLookup['status'] = row.status === 'found' && !found ? 'nothing' : row.status;
+  return {
+    id: row.id,
+    make: row.make ?? '',
+    model: row.model ?? '',
+    status,
+    reason: status === 'failed' ? (LOOKUP_REASONS.includes(row.reason) ? row.reason : 'error') : null,
+    facts: status === 'found' ? facts : null,
+    finishedAt: row.finished_at ?? null,
+  };
+}
+
+/**
+ * The lookup kept for this make and model, or null when there is none yet —
+ * which is when the thing's page offers *Look it up*. No request at all
+ * without both halves: nothing can be looked up without a model number.
+ */
+export async function getProductLookup(
+  client: SupabaseClient,
+  householdId: string,
+  make: string | null,
+  model: string | null,
+): Promise<ProductLookup | null> {
+  if (!make?.trim() || !model?.trim()) return null;
+  const { data, error } = await client.rpc('product_lookup', {
+    p_household_id: householdId,
+    p_make: make.trim(),
+    p_model: model.trim(),
+  });
+  if (error) throw asError(error, "Couldn't load what the maker says");
+  const row = Array.isArray(data) ? data[0] : data;
+  return parseProductLookup(row);
+}
+
+/**
+ * Asks `lookup-product` to search the maker's website, and answers with the
+ * lookup it kept. A model already looked up is answered from what was kept,
+ * without a search — `again` asks afresh, and is only offered on a failure.
+ *
+ * Throws with the function's own words when it gave some, like `readLabel`.
+ */
+export async function lookUpProduct(
+  client: SupabaseClient,
+  ask: { householdId: string; make: string; model: string; name: string | null; again?: boolean },
+): Promise<ProductLookup | null> {
+  const { data, error } = await client.functions.invoke('lookup-product', {
+    body: { ...ask, again: !!ask.again },
+  });
+  if (error) {
+    let words: string | null = null;
+    const context = (error as { context?: unknown }).context;
+    if (context && typeof (context as Response).json === 'function') {
+      try {
+        const body = await (context as Response).json();
+        words = typeof body?.error === 'string' ? body.error : null;
+      } catch {
+        words = null;
+      }
+    }
+    throw new Error(words ?? "Couldn't look that up just now");
+  }
+  return parseProductLookup((data as { lookup?: unknown } | null)?.lookup ?? null);
+}
+
+/** Months as the days a repeat is kept in — whole years as years, so 12 reads "every year". */
+export function monthsToDays(months: number): number {
+  return months % 12 === 0 ? (months / 12) * 365 : months * 30;
+}
+
+/** A part as it goes on the thing's list: the words and the number, as "Air filter MAC-2370FT-E". */
+export function partLine(part: { item: string; code: string }): string {
+  return `${part.item} ${part.code}`;
+}
+
+export interface ProductOffers {
+  manual: ProductFacts['manual'];
+  /** The maker's interval, with its days — offered only while the thing has no service cycle. */
+  service: (NonNullable<ProductFacts['service']> & { days: number }) | null;
+  /** Parts whose number is not on the thing's list yet. */
+  parts: ProductFacts['parts'];
+  /** Parts whose number already is — shown as taken, never offered twice. */
+  taken: ProductFacts['parts'];
+}
+
+const partNumber = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/**
+ * What a lookup still has to offer a thing. A part counts as already on the
+ * thing when its number appears in any line of the thing's list, however that
+ * line was written. The service interval is offered only when nothing is
+ * arranged, because somebody who has chosen a cycle has answered.
+ */
+export function productOffers(thing: Thing, facts: ProductFacts): ProductOffers {
+  const listed = thing.consumables.map(partNumber);
+  const has = (code: string) => listed.some((line) => line.includes(partNumber(code)));
+  return {
+    manual: facts.manual,
+    service: facts.service && !thing.serviceDays
+      ? { ...facts.service, days: monthsToDays(facts.service.months) }
+      : null,
+    parts: facts.parts.filter((part) => !has(part.code)),
+    taken: facts.parts.filter((part) => has(part.code)),
+  };
 }
 
 /**

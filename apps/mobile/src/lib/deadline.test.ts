@@ -1,6 +1,7 @@
 import {
   withDeadline, failureReason, DeadlineError,
   deadlineFor, AUTH_TIMEOUT_MS, REQUEST_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, LABEL_TIMEOUT_MS, READ_AGAIN_TIMEOUT_MS,
+  LOOKUP_TIMEOUT_MS,
 } from './deadline';
 
 // The point of this helper is that no job can end in "still going" forever. The
@@ -126,6 +127,14 @@ describe('deadlineFor', () => {
     const AGAIN = 'https://p.supabase.co/functions/v1/reread-bill';
     expect(deadlineFor(AGAIN)).toBe(READ_AGAIN_TIMEOUT_MS);
     expect(READ_AGAIN_TIMEOUT_MS).toBeGreaterThan(45_000);
+  });
+
+  it('gives a lookup longer than the function gives its search', () => {
+    // It searches, then opens every page it cites to check them; the function
+    // stops at 55s so it can still answer in words.
+    const LOOKUP = 'https://p.supabase.co/functions/v1/lookup-product';
+    expect(deadlineFor(LOOKUP)).toBe(LOOKUP_TIMEOUT_MS);
+    expect(LOOKUP_TIMEOUT_MS).toBeGreaterThan(55_000);
   });
 
   it('treats asking for a signed URL as the data call it is', () => {

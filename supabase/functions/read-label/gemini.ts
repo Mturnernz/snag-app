@@ -45,9 +45,8 @@ export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: [
-    'legible', 'make', 'model', 'serial', 'colourName', 'colourCode', 'product',
-    'sheen', 'tint', 'hex', 'consumables', 'suggestedConsumables', 'suggestedServiceMonths',
-    'whatItIs', 'kindGuess',
+    'legible', 'make', 'model', 'serial', 'manufactured', 'colourName', 'colourCode', 'product',
+    'sheen', 'tint', 'hex', 'consumables', 'whatItIs', 'kindGuess',
   ],
   properties: {
     legible: { type: 'boolean' },
@@ -63,6 +62,10 @@ export const SCHEMA = {
     make: nullableText,
     model: nullableText,
     serial: nullableText,
+    // The year this unit was made, when the plate says so. A fact about the
+    // unit in somebody's hand, which is why it is read here and never looked
+    // up: a website knows when a model was sold, not when this one was built.
+    manufactured: nullableText,
     colourName: nullableText,
     colourCode: nullableText,
     product: nullableText,
@@ -70,18 +73,11 @@ export const SCHEMA = {
     tint: nullableText,
     hex: nullableText,
     consumables: { type: 'array', items: { type: 'string' } },
-    // Not transcribed: what is known about this make and model. The app shows
-    // these as offers somebody taps, never as a filled box.
-    suggestedConsumables: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['item', 'code'],
-        properties: { item: { type: 'string' }, code: nullableText },
-      },
-    },
-    suggestedServiceMonths: { type: ['integer', 'null'] },
+    // There were two more here — the parts this model takes and how often it
+    // is serviced, "from what you know about this make and model". They were
+    // the model's memory, not the label, and four reads of one heat pump gave
+    // three different filter sets. `lookup-product` answers both now, from the
+    // maker's own website, and keeps only what it can check.
   },
 };
 
@@ -92,15 +88,14 @@ Somebody will read what you return back in a shop, character by character, so a 
 - Return a value only when it is printed on the label and you can read it. If a character is ambiguous or the text is cut off, return null for that field rather than your best guess. Never complete a serial or model number from what such numbers usually look like.
 - make: the manufacturer or brand, written the way the brand writes its own name in ordinary text rather than in the label's capitals: "Mitsubishi Electric", "Fisher & Paykel", "Samsung", "LG", "De'Longhi" (for paint, the paint brand: "Resene", "Dulux").
 - model: the model number or part code. serial: the serial number. Keep the label's own capitals, spacing, slashes and dashes.
+- manufactured: the year this unit was made, as four digits like "2019", only when the label prints a date or year of manufacture as such ("MFG DATE 2019.06", "Date of manufacture: 03/2017"). Never work it out from a serial number, and never take a standard's year ("AS/NZS 60335.2.40:2019"), a copyright year or a test date for it. Null otherwise, and for paint and tile.
 - colourName, colourCode, product, sheen, tint: paint and tile only. tint is the tint formula exactly as printed.
 - hex: paint only. The paint maker's own published hex for this exact colour, as six digits like #A1B2C3 — only when the brand and the colour name or code on the tin identify a colour on that maker's published colour chart and you know the value the maker publishes for it. Never estimate it from the colour in the photo, and never give the hex of a similar colour. Null when there is no colour name or code, when you are not certain of the published value, and for tiles.
 - consumables: only part numbers the label itself prints for something the item takes or is replaced with (a filter cartridge code, a bulb type printed on the fitting). Usually empty.
 - legible: false if the photo is not a label, or nothing on it can be read. Then return null for every transcribed field and empty lists — whatItIs and kindGuess may still say what the item is, if the photo shows it.
 
-Two fields are not transcription. They are what you know about this make and model, and the household is told they are suggestions to check:
+Two fields are not transcription. They say what the item is, and the household sees them and can change them before anything is kept:
 
-- suggestedConsumables: for an appliance or fitting whose make and model you read, the parts a household re-buys for it — filters, bulbs, cartridges, bags, belts, seals. item is what it is in plain words ("Air filter", "Oven bulb"); code is the manufacturer's part number or bulb type only when you are confident it is right for this model, otherwise null. At most four. Empty for paint and tile, when you did not read a model, or when you do not know the model.
-- suggestedServiceMonths: how often the manufacturer recommends this model is serviced by a professional, as 6, 12 or 24. Null when it is not usually serviced, for paint and tile, or when you do not know.
 - whatItIs: what the item is, as the household would name it, in one to three ordinary words with a capital first letter: "Heat pump", "Dishwasher", "Rangehood", "Hot water cylinder", "Paint", "Floor tile". Not the brand, not the model. Null if you cannot tell.
 - kindGuess: "finish" for paint, "tile" for tiles, "appliance" for anything else with a rating plate or data label. Null if you cannot tell.
 

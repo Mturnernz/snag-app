@@ -21,16 +21,18 @@ import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import {
   consumableOnList, describeCycle, documentFileName, documentName, formatLooseDate,
   parseLooseDate, serviceJobFor, swatchColour, thingHeadline, dayKey, formatDayFirst,
-  labelOffers, labelOffersUpdate, type LabelOffer, type LabelReadingToCheck,
+  labelOffers, labelOffersUpdate, partLine, type LabelOffer, type LabelReadingToCheck,
+  type ProductFacts, type ProductLookup,
 } from '@snag/supabase-queries';
 import {
   createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getLabelReadingsToCheck,
-  getSnags, getThing, readLabel, resolveLabelReading, setSnagStatus, updateSnag, updateThing,
-  uploadFile,
+  getProductLookup, getSnags, getThing, lookUpProduct, readLabel, resolveLabelReading, setSnagStatus,
+  updateSnag, updateThing, uploadFile,
 } from '../lib/supabase';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import ComposeBar from '../components/ComposeBar';
 import LabelReadingCard from '../components/LabelReadingCard';
+import ProductFactsCard from '../components/ProductFactsCard';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
@@ -84,6 +86,15 @@ const DATE_FIELDS: { key: 'installedAt' | 'warrantyUntil'; label: string }[] = [
   { key: 'installedAt', label: 'Installed' },
   { key: 'warrantyUntil', label: 'Warranty until' },
 ];
+
+/**
+ * The year a unit was made, for the kinds with a plate. Read off the plate when
+ * it prints one, typed otherwise — a fact about this unit, never looked up.
+ */
+const MADE_FIELDS: { key: string; label: string }[] = [{ key: 'manufactured', label: 'Year made' }];
+
+/** How often a lookup still under way is asked about again, while the page is open. */
+const LOOKUP_POLL_MS = 8_000;
 
 /** What the regime sheet is holding while it is open. */
 type ServiceDraft = { days: number; by: string; first: string };
@@ -188,6 +199,12 @@ export default function ThingDetailScreen() {
    */
   const [labelCheck, setLabelCheck] = useState<LabelReadingToCheck | null>(null);
   const [labelRetrying, setLabelRetrying] = useState(false);
+  /**
+   * What the maker's own website says about this make and model, if it has
+   * been looked up — kept per model, so every thing of that model shows it.
+   */
+  const [lookup, setLookup] = useState<ProductLookup | null>(null);
+  const [looking, setLooking] = useState(false);
   const [consumableDraft, setConsumableDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -239,6 +256,33 @@ export default function ThingDetailScreen() {
     load();
   }, [load]);
 
+  // The lookup is keyed by the make and model, so it is read again whenever
+  // either is changed — a corrected model number is a different model. Never
+  // fatal: a page that cannot see what the maker says still shows the record.
+  const lookupKinds = !!thing && (KINDS_WITH_CONSUMABLES.includes(thing.kind) || KINDS_WITH_SERVICING.includes(thing.kind));
+  const refreshLookup = useCallback(async () => {
+    const current = thingRef.current;
+    if (!current) return;
+    try {
+      setLookup(await getProductLookup(current.householdId, current.make, current.model));
+    } catch {
+      setLookup(null);
+    }
+  }, []);
+  useEffect(() => {
+    if (!lookupKinds) return;
+    refreshLookup();
+  }, [lookupKinds, thing?.id, thing?.make, thing?.model, refreshLookup]);
+
+  // A lookup the label reader started when the plate was photographed is
+  // usually still running when this page first opens. Asked about again while
+  // it is, and never after — one small read, not a search.
+  useEffect(() => {
+    if (lookup?.status !== 'pending' || looking) return;
+    const timer = setTimeout(refreshLookup, LOOKUP_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [lookup, looking, refreshLookup]);
+
   /**
    * **Leaving saves.** The page used to be a form with one Save button, and a
    * back gesture over typed words asked *Leave without saving?* — a question
@@ -264,7 +308,7 @@ export default function ThingDetailScreen() {
   useEffect(() => {
     if (!thing || !labelCheck || labelCheck.status !== 'read' || !labelCheck.reading) return;
     const left = labelOffers(thing, labelCheck.reading);
-    if (left.fill.length || left.differ.length || left.parts.length || left.serviceDays) return;
+    if (left.fill.length || left.differ.length || left.parts.length) return;
     const id = labelCheck.id;
     setLabelCheck(null);
     resolveLabelReading(id, 'used').catch(() => {});
@@ -326,6 +370,42 @@ export default function ThingDetailScreen() {
     } finally {
       setLabelRetrying(false);
     }
+  }
+
+  /**
+   * *Look it up*, or *Try again* on one that failed. Awaited, because the page
+   * is open and the card says it is looking; the answer shown is whatever the
+   * server kept, re-read, so the card and the kept row cannot disagree. A
+   * refusal in words (not set up, no model number) is said once, as a toast.
+   */
+  async function lookItUp(again: boolean) {
+    const current = thingRef.current;
+    if (!current || looking || !current.make?.trim() || !current.model?.trim()) return;
+    setLooking(true);
+    let words: string | null = null;
+    try {
+      const kept = await lookUpProduct({
+        householdId: current.householdId,
+        make: current.make.trim(),
+        model: current.model.trim(),
+        name: current.name,
+        again,
+      });
+      if (kept) setLookup(kept);
+      else await refreshLookup();
+    } catch (err: any) {
+      words = err?.message ?? null;
+      // The search goes on behind a deadline that ran out; the row says where.
+      await refreshLookup();
+    } finally {
+      setLooking(false);
+    }
+    if (words) showToast(words);
+  }
+
+  async function addFactPart(part: ProductFacts['parts'][number]) {
+    if (!thing) return;
+    await patch({ consumables: [...thing.consumables, partLine(part)] }, `${part.code} added`);
   }
 
   async function patch(update: Parameters<typeof updateThing>[1], toast?: string) {
@@ -786,7 +866,9 @@ export default function ThingDetailScreen() {
   }
 
   const words = THING_KIND_FIELD_LABELS[thing.kind];
-  const specFields = thing.kind === 'finish' ? FINISH_SPEC_FIELDS : [];
+  const specFields = thing.kind === 'finish'
+    ? FINISH_SPEC_FIELDS
+    : KINDS_WITH_SERIAL.includes(thing.kind) ? MADE_FIELDS : [];
   // Every field the kind can answer is on screen, empty or not. It used to show
   // only what was filled in, with the rest behind an "Add a detail" row — which
   // reads as tidy and is why nobody could tell what the record could hold.
@@ -879,7 +961,6 @@ export default function ThingDetailScreen() {
             retrying={labelRetrying}
             onUse={takeLabel}
             onAddPart={(item) => patch({ consumables: [...thing.consumables, item] }, 'Added')}
-            onService={(days) => openService(days)}
             onDismiss={dismissLabel}
             onRetry={retryLabel}
           />
@@ -1098,6 +1179,23 @@ export default function ThingDetailScreen() {
             </Pressable>
           </View>
         )}
+
+        {/* ── what the maker says ──────────────────────────────────────
+            Beside what it takes and how it is serviced, because those are the
+            two things it answers — and each of its offers writes into one of
+            the two sections under it. */}
+        {lookupKinds ? (
+          <ProductFactsCard
+            thing={thing}
+            lookup={lookup}
+            looking={looking}
+            busy={busy}
+            onLookUp={lookItUp}
+            onOpen={openUrl}
+            onAddPart={addFactPart}
+            onService={(days) => openService(days)}
+          />
+        ) : null}
 
         {/* ── what it takes ──────────────────────────────────────────── */}
         {KINDS_WITH_CONSUMABLES.includes(thing.kind) ? (

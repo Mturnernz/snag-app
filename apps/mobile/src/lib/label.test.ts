@@ -1,6 +1,6 @@
 import {
   applyLabelReading, brandCase, consumableOnList, labelOffers, labelOffersUpdate, parseLabelGuess,
-  parseLabelReading, swatchColour, type LabelFields, type LabelReading,
+  parseLabelReading, swatchColour, yearMade, type LabelFields, type LabelReading,
 } from '@snag/supabase-queries';
 import type { Snag, Thing } from '../types';
 
@@ -74,9 +74,8 @@ describe('consumableOnList', () => {
 });
 
 const read = (over: Partial<LabelReading>): LabelReading => ({
-  legible: true, make: null, model: null, serial: null, colourName: null, colourCode: null,
-  product: null, sheen: null, tint: null, hex: null, consumables: [],
-  suggestedConsumables: [], suggestedServiceDays: null, ...over,
+  legible: true, make: null, model: null, serial: null, manufactured: null, colourName: null, colourCode: null,
+  product: null, sheen: null, tint: null, hex: null, consumables: [], ...over,
 });
 const blank: LabelFields = { name: '', make: '', model: '', serial: '', takes: '', spec: {} };
 
@@ -99,27 +98,35 @@ describe('parseLabelReading', () => {
     expect(parseLabelReading({ legible: true, make: 'MITSUBISHI ELECTRIC' })?.make).toBe('Mitsubishi Electric');
   });
 
-  it('keeps suggestions apart from what was read, as words somebody can buy', () => {
+  it('carries nothing the model remembers about the model — only what the label says', () => {
+    // A reply from a function still deployed with the old instructions: the
+    // suggestions it sends are not read, because they were never on the label.
     const got = parseLabelReading({
-      legible: true, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', consumables: [],
-      suggestedConsumables: [
-        { item: 'Air filter', code: 'MAC-2360FT' },
-        { item: 'Remote batteries', code: null },
-        { item: 'air filter', code: 'mac-2360ft' },
-        { item: '', code: null },
-        'nonsense',
-      ],
+      legible: true, make: 'Mitsubishi Electric', model: 'MSZ-GS60VFD', consumables: [],
+      suggestedConsumables: [{ item: 'Air cleaning filter', code: 'MAC-2370FT-E' }],
       suggestedServiceMonths: 12,
     });
+    expect(got).not.toHaveProperty('suggestedConsumables');
+    expect(got).not.toHaveProperty('suggestedServiceDays');
     expect(got?.consumables).toEqual([]);
-    expect(got?.suggestedConsumables).toEqual(['Air filter MAC-2360FT', 'Remote batteries']);
-    expect(got?.suggestedServiceDays).toBe(365);
   });
 
-  it('suggests only a cycle the walkthrough offers', () => {
-    expect(parseLabelReading({ legible: true, suggestedServiceMonths: 3 })?.suggestedServiceDays).toBeNull();
-    expect(parseLabelReading({ legible: true, suggestedServiceMonths: 6 })?.suggestedServiceDays).toBe(180);
-    expect(parseLabelReading({ legible: true })?.suggestedServiceDays).toBeNull();
+  it('keeps a year of manufacture only when it is plainly a year this unit could be', () => {
+    expect(parseLabelReading({ legible: true, manufactured: '2019' })?.manufactured).toBe('2019');
+    expect(parseLabelReading({ legible: true, manufactured: '2019.06' })?.manufactured).toBe('2019');
+    expect(parseLabelReading({ legible: true, manufactured: 2017 })?.manufactured).toBe('2017');
+    expect(parseLabelReading({ legible: true, manufactured: '06/2019' })?.manufactured).toBeNull();
+    expect(parseLabelReading({ legible: true, manufactured: '1890' })?.manufactured).toBeNull();
+    expect(parseLabelReading({ legible: true, manufactured: 'recent' })?.manufactured).toBeNull();
+    expect(parseLabelReading({ legible: true })?.manufactured).toBeNull();
+  });
+});
+
+describe('yearMade', () => {
+  it('refuses a year after this one', () => {
+    const now = new Date(2026, 8, 27);
+    expect(yearMade('2026', now)).toBe('2026');
+    expect(yearMade('2027', now)).toBeNull();
   });
 });
 
@@ -153,16 +160,15 @@ describe('applyLabelReading', () => {
     expect(filled).toEqual(['make', 'model', 'serial', 'what it takes']);
   });
 
-  it('never lays a suggestion into a box, even an empty one', () => {
-    // Everything filled is on the label in somebody's hand; a suggestion is the
-    // model's memory of the model, and is offered rather than entered.
-    const { next, filled } = applyLabelReading(
-      blank,
-      read({ make: 'Smeg', suggestedConsumables: ['Oven bulb E14 25W'], suggestedServiceDays: 365 }),
-      'appliance'
-    );
-    expect(next.takes).toBe('');
-    expect(filled).toEqual(['make']);
+  it('fills the year made from the plate, into the spec, and says so', () => {
+    const { next, filled } = applyLabelReading(blank, read({ make: 'Rinnai', manufactured: '2016' }), 'appliance');
+    expect(next.spec).toEqual({ manufactured: '2016' });
+    expect(filled).toEqual(['make', 'year made']);
+    // Typed first, kept.
+    const typed = applyLabelReading({ ...blank, spec: { manufactured: '2015' } }, read({ manufactured: '2016' }), 'appliance');
+    expect(typed.next.spec.manufactured).toBe('2015');
+    // A tin of paint was not "made" in a year anybody records.
+    expect(applyLabelReading(blank, read({ manufactured: '2016' }), 'finish').next.spec).toEqual({});
   });
 
   it('never writes over a box somebody typed into', () => {
@@ -219,9 +225,9 @@ describe('labelOffers', () => {
     ...over,
   });
   const plate = (over: Partial<LabelReading> = {}): LabelReading => ({
-    legible: true, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871',
+    legible: true, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871', manufactured: null,
     colourName: null, colourCode: null, product: null, sheen: null, tint: null, hex: null,
-    consumables: [], suggestedConsumables: [], suggestedServiceDays: null,
+    consumables: [],
     ...over,
   });
 
@@ -247,17 +253,24 @@ describe('labelOffers', () => {
       thing({ make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871' }),
       plate(),
     );
-    expect(offers).toEqual({ fill: [], differ: [], parts: [], serviceDays: null });
+    expect(offers).toEqual({ fill: [], differ: [], parts: [] });
   });
 
-  it('keeps parts and a cycle as offers, and drops a part the thing already takes', () => {
+  it('offers only part numbers the label printed, and drops one the thing already takes', () => {
     const offers = labelOffers(
-      thing({ consumables: ['air filter mac-2360ft'] }),
-      plate({ suggestedConsumables: ['Air filter MAC-2360FT', 'Remote batteries AAA'], suggestedServiceDays: 365 }),
+      thing({ consumables: ['gu10 35w'] }),
+      plate({ consumables: ['GU10 35W', 'Filter RFC-24'] }),
     );
-    expect(offers.parts).toEqual(['Remote batteries AAA']);
-    expect(offers.serviceDays).toBe(365);
-    expect(labelOffers(thing({ serviceDays: 180 }), plate({ suggestedServiceDays: 365 })).serviceDays).toBeNull();
+    expect(offers.parts).toEqual(['Filter RFC-24']);
+  });
+
+  it('offers the year made the plate printed, beside the other boxes', () => {
+    const offers = labelOffers(thing({ spec: {} }), plate({ manufactured: '2019' }));
+    expect(offers.fill.map((one) => one.key)).toContain('manufactured');
+    expect(labelOffersUpdate(offers.fill.filter((one) => one.key === 'manufactured')))
+      .toEqual({ spec: { manufactured: '2019' } });
+    const differ = labelOffers(thing({ spec: { manufactured: '2018' } }), plate({ manufactured: '2019' })).differ;
+    expect(differ).toEqual([{ key: 'manufactured', label: 'Year made', value: '2019', current: '2018' }]);
   });
 
   it('reads a paint as a paint: its code, its spec, and a swatch only for a named colour', () => {

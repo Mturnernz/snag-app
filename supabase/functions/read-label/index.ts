@@ -27,11 +27,12 @@
 //   Every field that lands in a box is what is printed on the label, or null.
 //   `hex` is the maker's published value for the named colour, or null —
 //   never judged from the photo, because lighting makes a white look grey.
-// - **What it takes is suggested, never entered.** A plate rarely prints its
-//   filter code, so `suggestedConsumables` and `suggestedServiceMonths` come
-//   from what the model knows about the make and model — and the walkthrough
-//   offers them under a heading calling them suggestions, one tap each, and
-//   never lays one into a box.
+// - **What it takes is looked up, never remembered.** A plate rarely prints
+//   its filter code, and this used to ask the model to supply one from memory:
+//   four reads of one heat pump gave three different answers. Once a plate has
+//   given a make and a model, `lookup-product`'s search runs here in the
+//   background instead — the maker's own website, every value checked against
+//   the page it came from — and its answer waits on the thing's page.
 //
 // The model is Gemini, called over REST (`gemini.ts` holds the request and the
 // reading of the reply, and is what the tests exercise). The app never knows
@@ -47,6 +48,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { encodeBase64 } from 'jsr:@std/encoding/base64';
 import { GEMINI_ENDPOINT, geminiRequest, isBusy, modelsToTry, readingFromGemini } from './gemini.ts';
+import { lookUpAndKeep } from '../lookup-product/run.ts';
 
 const BUCKET = 'home-photos';
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -81,6 +83,13 @@ const USED_UP = "That's today's label reads used up — type what this one says.
 // How long to leave a busy model before the background round. A 503 for
 // "high demand" clears in tens of seconds, not in one.
 const BACKGROUND_RETRY_PAUSE_MS = 20_000;
+// The lookup that follows a read runs in the same background work, which the
+// platform ends 150 seconds after the request arrived. A lookup is given what
+// is left of that, up to its own budget, and is not started with too little to
+// finish — the thing's page offers *Look it up* instead.
+const WALL_CLOCK_MS = 140_000;
+const LOOKUP_BUDGET_MS = 55_000;
+const LOOKUP_MIN_MS = 30_000;
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
@@ -170,7 +179,26 @@ function sniff(bytes: Uint8Array): 'image/jpeg' | 'image/png' | 'image/webp' | n
   return null;
 }
 
+/**
+ * The make and model a reading gives, when it is worth looking the model up:
+ * an appliance (or something nobody has named yet that is not paint or tile)
+ * whose plate gave both.
+ */
+function lookupFor(reading: unknown, kind: string): { make: string; model: string; name: string | null } | null {
+  // deno-lint-ignore no-explicit-any
+  const r = reading as any;
+  if (!r || r.legible !== true) return null;
+  const said = kind || (typeof r.kindGuess === 'string' ? r.kindGuess : '');
+  if (said === 'finish' || said === 'tile') return null;
+  const make = typeof r.make === 'string' ? r.make.trim() : '';
+  const model = typeof r.model === 'string' ? r.model.trim() : '';
+  if (!make || !model) return null;
+  const name = typeof r.whatItIs === 'string' && r.whatItIs.trim() ? r.whatItIs.trim().slice(0, 60) : null;
+  return { make: make.slice(0, 80), model: model.slice(0, 80), name };
+}
+
 Deno.serve(async (req) => {
+  const arrived = Date.now();
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return answer(405, { error: 'Only POST' });
 
@@ -244,21 +272,42 @@ Deno.serve(async (req) => {
     if (error) console.error('read-label: could not keep the reading —', error.message);
   };
 
+  // One read claimed above covers every model asked, and the background
+  // round too: falling back is our retry, not the household's second read.
+  // (A lookup that follows claims its own — it is a second request.)
+  const models = modelsToTry(Deno.env.get('GEMINI_MODEL'), Deno.env.get('GEMINI_FALLBACK_MODEL'));
+
+  // Once the plate has given a make and a model, the maker's website is
+  // searched for the rest — in the background, after the reading is kept, so
+  // it never holds up the sheet. Kept per model, so a second scan of the same
+  // heat pump finds the answer already there and searches nothing.
+  const lookUpAfter = async (reading: unknown): Promise<void> => {
+    const ask = lookupFor(reading, kind);
+    if (!ask) return;
+    const left = Math.min(LOOKUP_BUDGET_MS, arrived + WALL_CLOCK_MS - Date.now());
+    if (left < LOOKUP_MIN_MS) return;
+    await lookUpAndKeep(supabase, apiKey, models, { householdId: segments[0], ...ask }, left);
+  };
+
   // A photo the model could not read a label in is a failure to the waiting
   // room — the card has to ask for typing — even though the open sheet is
   // answered with the reading itself and words it there.
-  const keepRead = (reading: unknown): Promise<void> =>
+  const keepRead = async (reading: unknown): Promise<void> => {
     // deno-lint-ignore no-explicit-any
-    (reading as any)?.legible === false ? keep('failed', null, 'illegible') : keep('read', reading, null);
+    if ((reading as any)?.legible === false) return keep('failed', null, 'illegible');
+    await keep('read', reading, null);
+    // Its own background work, never part of `whole`: the open sheet is
+    // answered once the reading is kept, and must not wait on a search.
+    EdgeRuntime.waitUntil(
+      lookUpAfter(reading).catch((err) => console.error('read-label: lookup failed —', err)),
+    );
+  };
 
   if (allowed !== true) {
     await keep('failed', null, 'quota');
     return answer(429, { error: USED_UP, readingId });
   }
 
-  // One read claimed above covers every model asked, and the background
-  // round too: falling back is our retry, not the household's second read.
-  const models = modelsToTry(Deno.env.get('GEMINI_MODEL'), Deno.env.get('GEMINI_FALLBACK_MODEL'));
   const body = JSON.stringify(geminiRequest(kind, mimeType, encodeBase64(bytes)));
 
   // Everything from here runs under waitUntil, so a caller who pressed *Add

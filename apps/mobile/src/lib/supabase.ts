@@ -359,6 +359,12 @@ export const getLabelReadingsToCheck = (propertyId: string) =>
 export const resolveLabelReading = (readingId: string, outcome: 'used' | 'dismissed') =>
   queries.resolveLabelReading(supabase, readingId, outcome);
 
+export const getProductLookup = (householdId: string, make: string | null, model: string | null) =>
+  queries.getProductLookup(supabase, householdId, make, model);
+
+export const lookUpProduct = (ask: Parameters<typeof queries.lookUpProduct>[1]) =>
+  queries.lookUpProduct(supabase, ask);
+
 export const getAbsentThings = (propertyId: string) => queries.getAbsentThings(supabase, propertyId);
 
 // ------------------------------------------------------------------ projects

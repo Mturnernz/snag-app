@@ -67,7 +67,11 @@ const mock_setSnagStatus = jest.fn();
 const mock_getLabelReadingsToCheck = jest.fn();
 const mock_resolveLabelReading = jest.fn();
 const mock_readLabel = jest.fn();
+const mock_getProductLookup = jest.fn();
+const mock_lookUpProduct = jest.fn();
 jest.mock('../lib/supabase', () => ({
+  getProductLookup: (...a: unknown[]) => mock_getProductLookup(...a),
+  lookUpProduct: (...a: unknown[]) => mock_lookUpProduct(...a),
   getLabelReadingsToCheck: (...a: unknown[]) => mock_getLabelReadingsToCheck(...a),
   resolveLabelReading: (...a: unknown[]) => mock_resolveLabelReading(...a),
   readLabel: (...a: unknown[]) => mock_readLabel(...a),
@@ -94,6 +98,8 @@ jest.mock('../lib/photoUpload', () => ({
   compressAndUpload: (...a: unknown[]) => mock_compressAndUpload(...a),
   photoFileName: () => 'h1/whatever.jpg',
 }));
+const mock_openUrl = jest.fn();
+jest.mock('../lib/openUrl', () => ({ openUrl: (...a: unknown[]) => mock_openUrl(...a) }));
 const mock_showToast = jest.fn();
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: (...a: unknown[]) => mock_showToast(...a) }) }));
 const mock_showAlert = jest.fn();
@@ -147,6 +153,7 @@ beforeEach(() => {
   mock_getSnags.mockResolvedValue([]);
   mock_getLabelReadingsToCheck.mockResolvedValue([]);
   mock_resolveLabelReading.mockResolvedValue(undefined);
+  mock_getProductLookup.mockResolvedValue(null);
 });
 
 /** Every text rendered on the page, flattened. */
@@ -614,8 +621,9 @@ describe('a paint swatch', () => {
 describe('a label reading waiting to be checked', () => {
   const plate = {
     legible: true, make: 'Mitsubishi Electric', model: 'MSZ-AP50VGK', serial: '7A204871',
+    manufactured: null,
     colourName: null, colourCode: null, product: null, sheen: null, tint: null, hex: null,
-    consumables: [], suggestedConsumables: [], suggestedServiceDays: null,
+    consumables: [],
   };
   const check = (over: Partial<any> = {}) => ({
     id: 'r1', thingId: 't1', thingName: 'Heat pump', photoPath: 'h1/plate.jpg',
@@ -691,5 +699,134 @@ describe('a label reading waiting to be checked', () => {
     mock_getLabelReadingsToCheck.mockRejectedValue(new Error('offline'));
     const result = await open({ name: 'Heat pump' });
     expect(boxes(result).Name.props.value).toBe('Heat pump');
+  });
+});
+
+// What the maker's own website says, looked up once per model. These pin that
+// every value arrives with the page it is written on, that a part is only
+// ever an offer, that *nothing found* is said and never retried, and that the
+// page survives the lookup being unreadable.
+describe('what the maker says', () => {
+  const HEAT_PUMP = { name: 'Heat pump', make: 'Mitsubishi Electric', model: 'MSZ-GS60VFD', room: 'Living room' };
+  const MANUAL = 'https://www.mitsubishielectric.com.au/wp-content/uploads/2022/02/User_Manual-MSZ-GS25-80VFD-A1.pdf';
+  const PAGE = 'https://www.mitsubishi-electric.co.nz/heatpump/i/69337B/gs60';
+  const found = (over: Partial<any> = {}) => ({
+    id: 'l1', make: 'Mitsubishi Electric', model: 'MSZ-GS60VFD', status: 'found', reason: null,
+    finishedAt: '2026-09-27T00:00:00Z',
+    facts: {
+      manual: { url: MANUAL, source: 'mitsubishielectric.com.au' },
+      service: {
+        months: 12, quote: 'Have the unit inspected by your dealer once a year.', url: MANUAL,
+        source: 'mitsubishielectric.com.au',
+      },
+      parts: [{ item: 'Plasma Quad Connect filter', code: 'MAC-100FT-E', url: PAGE, source: 'mitsubishi-electric.co.nz' }],
+    },
+    ...over,
+  });
+
+  it('reads the lookup for this make and model, and asks nothing without both', async () => {
+    await open(HEAT_PUMP);
+    expect(mock_getProductLookup).toHaveBeenCalledWith('h1', 'Mitsubishi Electric', 'MSZ-GS60VFD');
+
+    const result = await open({ name: 'Heat pump', make: 'Mitsubishi Electric' });
+    expect(texts(result).some((t) => t.startsWith('What Mitsubishi Electric says'))).toBe(false);
+  });
+
+  it('offers to look it up when it never has been, and shows what was kept', async () => {
+    const result = await open(HEAT_PUMP);
+    expect(texts(result)).toContain('What Mitsubishi Electric says');
+    expect(texts(result)).toContain("Only what Mitsubishi Electric's own website says for the MSZ-GS60VFD");
+
+    mock_lookUpProduct.mockResolvedValue(found());
+    await TestRenderer.act(async () => {
+      await pressable(result, "Look up the MSZ-GS60VFD on Mitsubishi Electric's website").props.onPress();
+    });
+    expect(mock_lookUpProduct).toHaveBeenCalledWith({
+      householdId: 'h1', make: 'Mitsubishi Electric', model: 'MSZ-GS60VFD', name: 'Heat pump', again: false,
+    });
+    expect(texts(result)).toContain('Manual');
+    expect(texts(result)).toContain('Serviced every year');
+    expect(texts(result)).toContain('MAC-100FT-E · mitsubishi-electric.co.nz');
+  });
+
+  it('opens the page each value is written on', async () => {
+    mock_getProductLookup.mockResolvedValue(found());
+    const result = await open(HEAT_PUMP);
+    await TestRenderer.act(async () => {
+      pressable(result, 'Open the manual on mitsubishielectric.com.au').props.onPress();
+    });
+    expect(mock_openUrl).toHaveBeenCalledWith(MANUAL);
+    await TestRenderer.act(async () => {
+      pressable(result, 'Where Mitsubishi Electric lists MAC-100FT-E, on mitsubishi-electric.co.nz').props.onPress();
+    });
+    expect(mock_openUrl).toHaveBeenCalledWith(PAGE);
+  });
+
+  it('adds a part only when tapped, words and number together, and never offers it twice', async () => {
+    mock_getProductLookup.mockResolvedValue(found());
+    const saved = thing({ ...HEAT_PUMP, consumables: ['Plasma Quad Connect filter MAC-100FT-E'] });
+    mock_updateThing.mockResolvedValue(saved);
+    const result = await open(HEAT_PUMP);
+    expect(mock_updateThing).not.toHaveBeenCalled();
+
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Add Plasma Quad Connect filter MAC-100FT-E').props.onPress();
+    });
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', {
+      consumables: ['Plasma Quad Connect filter MAC-100FT-E'],
+    });
+    expect(pressable(result, 'Add Plasma Quad Connect filter MAC-100FT-E')).toBeUndefined();
+    expect(texts(result)).toContain('MAC-100FT-E · on its list');
+  });
+
+  it("opens Schedule service at the maker's interval, and chooses nothing", async () => {
+    mock_getProductLookup.mockResolvedValue(found());
+    const result = await open(HEAT_PUMP);
+    await TestRenderer.act(async () => {
+      pressable(result, 'Schedule a service every year').props.onPress();
+    });
+    expect(texts(result)).toContain('How often is it serviced?');
+    expect(mock_updateThing).not.toHaveBeenCalled();
+    expect(mock_createSnag).not.toHaveBeenCalled();
+  });
+
+  it('says plainly when nothing could be confirmed, and offers no second try', async () => {
+    mock_getProductLookup.mockResolvedValue(found({ status: 'nothing', facts: null }));
+    const result = await open(HEAT_PUMP);
+    expect(texts(result)).toContain(
+      "Nothing for the MSZ-GS60VFD could be confirmed on Mitsubishi Electric's own website, so nothing is suggested.",
+    );
+    expect(pressable(result, 'Look it up again')).toBeUndefined();
+  });
+
+  it('offers a second try only on a lookup that failed', async () => {
+    mock_getProductLookup.mockResolvedValue(found({ status: 'failed', reason: 'busy', facts: null }));
+    mock_lookUpProduct.mockResolvedValue(found());
+    const result = await open(HEAT_PUMP);
+    expect(texts(result)).toContain('The search was busy when this was looked up.');
+    await TestRenderer.act(async () => { await pressable(result, 'Look it up again').props.onPress(); });
+    expect(mock_lookUpProduct).toHaveBeenCalledWith(expect.objectContaining({ again: true }));
+    expect(texts(result)).toContain('Manual');
+  });
+
+  it('shows a lookup still under way as one, and draws the record if it cannot be read', async () => {
+    mock_getProductLookup.mockResolvedValue(found({ status: 'pending', facts: null }));
+    let result = await open(HEAT_PUMP);
+    expect(texts(result)).toContain(
+      "Looking on Mitsubishi Electric's own website and checking what it finds — this can take a minute.",
+    );
+    // Asked about again while it runs, and the timer goes with the page.
+    await TestRenderer.act(async () => { result.unmount(); });
+
+    mock_getProductLookup.mockRejectedValue(new Error('offline'));
+    result = await open(HEAT_PUMP);
+    expect(boxes(result).Name.props.value).toBe('Heat pump');
+  });
+
+  it('has a Year made box on an appliance, and none on a paint', async () => {
+    const result = await open({ ...HEAT_PUMP, spec: { manufactured: '2016' } });
+    expect(boxes(result)['Year made'].props.value).toBe('2016');
+    const paint = await open({ kind: 'finish', name: 'Wan White' });
+    expect(boxes(paint)['Year made']).toBeUndefined();
   });
 });

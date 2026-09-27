@@ -144,14 +144,10 @@ export default function AddThingSheet({
   const uploading = useRef<Promise<string | null> | null>(null);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [takes, setTakes] = useState('');
-  /**
-   * What the model knows goes with this make and model — never read off the
-   * label, so never laid into the box. Offered on the last step as rows to tap.
-   */
-  const [suggested, setSuggested] = useState<string[]>([]);
-  const [suggestedService, setSuggestedService] = useState<number | null>(null);
-  /** Suggestions somebody tapped, kept beside whatever they type in the box. */
-  const [picked, setPicked] = useState<string[]>([]);
+  // There were suggested parts and a suggested cycle here, "for this model",
+  // from the model's memory — four scans of one heat pump gave three different
+  // filter sets. What the maker says is looked up on its own website now, and
+  // checked, and it waits on the thing's page (`ProductFactsCard`).
   const [serviceDays, setServiceDays] = useState<number | null>(null);
   /** For a paint: which surface in the room. "Main wall", "Windows". */
   const [where, setWhere] = useState('');
@@ -192,9 +188,6 @@ export default function AddThingSheet({
     uploading.current = null;
     setPhotoPath(null);
     setTakes('');
-    setSuggested([]);
-    setSuggestedService(null);
-    setPicked([]);
     setServiceDays(null);
     setWhere('');
     setNote('');
@@ -411,8 +404,6 @@ export default function AddThingSheet({
         return;
       }
       landed.current = answer.reading;
-      setSuggested(answer.reading.suggestedConsumables ?? []);
-      setSuggestedService(answer.reading.suggestedServiceDays ?? null);
       setReading({ state: 'landed' });
     } catch (err: unknown) {
       const late = submitted.current.get(mine);
@@ -538,7 +529,9 @@ export default function AddThingSheet({
         // Both only ever arrive from the label. A paint has no serial, and
         // offering the row would invent one — the thing page's own rule.
         serial: !painting && serial.trim() ? serial.trim() : null,
-        spec: painting ? cleanSpec(spec) : undefined,
+        // A paint's sheen, tint and swatch; for anything else only the year
+        // it was made, which the plate gives and nothing else here asks.
+        spec: painting ? cleanSpec(spec) : cleanSpec({ manufactured: spec.manufactured ?? '' }),
         // A paint answers the last step with a surface; everything else answers
         // it with a part and a cycle. Neither carries the other's fields.
         consumables: painting ? [] : takesList,
@@ -572,15 +565,12 @@ export default function AddThingSheet({
     ? [spec.product, spec.sheen, spec.tint ? `tint ${spec.tint}` : null].filter(Boolean).join(' · ')
     : '';
   const nextLabel = step === 'photo' && !localUri ? 'Skip for now' : 'Next';
-  // What the thing will be recorded as taking: the tapped suggestions, then the
-  // box, each once whatever its capitals.
-  const takesList = [...picked, takes.trim()]
-    .filter(Boolean)
-    .filter((one, i, all) => all.findIndex((other) => other.toLowerCase() === one.toLowerCase()) === i);
-  // A suggestion already taken, or already typed, is not offered again.
-  const offers = suggested.filter(
-    (one) => !takesList.some((taken) => taken.toLowerCase() === one.toLowerCase())
-  );
+  const takesList = takes.trim() ? [takes.trim()] : [];
+  // The plate gave both halves, so read-label has started looking the model up
+  // on the maker's website. Said here so nobody goes looking for the answer in
+  // this sheet: it lands on the thing's page, checked, or says it found nothing.
+  const lookingUp =
+    kind === 'appliance' && reading.state === 'read' && !!landed.current?.make && !!landed.current?.model;
   const guessKind = guess?.kind ?? 'appliance';
 
   return (
@@ -954,6 +944,20 @@ export default function AddThingSheet({
                     accessibilityLabel="Serial"
                   />
                 ) : null}
+                {/* The same rule as the serial: only when the plate printed a
+                    date of manufacture, and in a box so it is checked. */}
+                {!painting && ((spec.manufactured ?? '') || (reading.state === 'read' && reading.filled.includes('year made'))) ? (
+                  <TextInput
+                    style={[styles.input, styles.inputMono]}
+                    value={spec.manufactured ?? ''}
+                    onChangeText={(v) => setSpec((all) => ({ ...all, manufactured: v }))}
+                    placeholder="Year made"
+                    placeholderTextColor={Colors.textMuted}
+                    maxLength={4}
+                    keyboardType="number-pad"
+                    accessibilityLabel="Year made"
+                  />
+                ) : null}
                 {painting && (swatch || specLine) ? (
                   <View style={styles.specRow}>
                     {swatch ? (
@@ -992,19 +996,6 @@ export default function AddThingSheet({
                 <>
                   <Text style={styles.question2}>Anything you re-buy for it?</Text>
                   <View style={styles.fields}>
-                    {picked.map((item) => (
-                      <View key={item} style={styles.pickedRow}>
-                        <Text style={styles.pickedText} numberOfLines={1}>{item}</Text>
-                        <Pressable
-                          onPress={() => setPicked((all) => all.filter((one) => one !== item))}
-                          style={styles.pickedRemove}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Remove ${item}`}
-                        >
-                          <Icon name="close" size="sm" color={Colors.textMuted} />
-                        </Pressable>
-                      </View>
-                    ))}
                     <TextInput
                       style={[styles.input, styles.inputMono]}
                       value={takes}
@@ -1016,24 +1007,10 @@ export default function AddThingSheet({
                       accessibilityLabel="What it takes"
                     />
                   </View>
-                  {offers.length ? (
-                    <View style={styles.offers}>
-                      {/* Said on the heading, because these are the one thing in
-                          this walkthrough nobody can check against the photo. */}
-                      <Text style={styles.sectionLabel}>Suggested for this model · check before you buy</Text>
-                      {offers.map((item) => (
-                        <Pressable
-                          key={item}
-                          onPress={() => setPicked((all) => [...all, item])}
-                          style={styles.offer}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Add ${item}`}
-                        >
-                          <Icon name="add-circle-outline" size="md" color={Colors.primary} />
-                          <Text style={styles.offerText} numberOfLines={1}>{item}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
+                  {lookingUp ? (
+                    <Text style={styles.hint}>
+                      {`${landed.current!.make}'s own website is being searched for the ${landed.current!.model}'s manual, parts and servicing. What can be checked will be on its page.`}
+                    </Text>
                   ) : null}
                   <Text style={styles.question2}>Serviced how often?</Text>
                   <View style={styles.chips}>
@@ -1054,11 +1031,6 @@ export default function AddThingSheet({
                   {serviceDays ? (
                     <Text style={styles.hint}>
                       {`It goes on the list as a job every ${describeCycle(serviceDays)}.`}
-                    </Text>
-                  ) : null}
-                  {suggestedService && serviceDays !== suggestedService ? (
-                    <Text style={styles.hint}>
-                      Suggested for this model: every {describeCycle(suggestedService)}.
                     </Text>
                   ) : null}
                   <View style={styles.fields}>
@@ -1291,24 +1263,6 @@ const styles = StyleSheet.create({
   },
   scroll: { flexGrow: 0 },
   hint: { fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19, marginTop: Spacing.sm },
-  pickedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: MIN_TOUCH_TARGET,
-    paddingLeft: Spacing.md,
-    backgroundColor: Colors.sunken,
-    borderRadius: Radius.input,
-  },
-  pickedText: { flex: 1, minWidth: 0, fontFamily: Fonts.mono, fontSize: Typography.base, color: Colors.textPrimary },
-  pickedRemove: {
-    width: MIN_TOUCH_TARGET,
-    minHeight: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  offers: { marginTop: Spacing.xs },
-  offer: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: MIN_TOUCH_TARGET },
-  offerText: { flex: 1, minWidth: 0, fontFamily: Fonts.mono, fontSize: Typography.base, color: Colors.textPrimary },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',

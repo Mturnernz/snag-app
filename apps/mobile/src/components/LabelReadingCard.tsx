@@ -3,9 +3,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 
 import { Group, Pill, Row, SectionTitle, TextButton } from './Grouped';
 import { Colors, Fonts, Spacing, Typography } from '../constants/theme';
-import {
-  describeCycle, labelOffers, type LabelOffer, type LabelReadingToCheck,
-} from '@snag/supabase-queries';
+import { labelOffers, type LabelOffer, type LabelReadingToCheck } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
 /**
@@ -22,9 +20,10 @@ import type { Thing } from '../types';
  *   offered on their own, beside what the record says. The person may have
  *   mistyped; they are the only one who can say, so nothing is overwritten
  *   without a tap on that row.
- * - **Parts and a service cycle are suggestions**, as on the walkthrough's last
- *   step: a + per part, and a cycle that opens the *Schedule service* modal
- *   rather than choosing one for anybody.
+ * - **Part numbers the label itself prints** are offered with a + each, since
+ *   the thing's list is where somebody looks for them in a shop. What the
+ *   maker says the model takes is not here — it is looked up and checked on
+ *   the maker's own website, and shown under *What … says* (`ProductFactsCard`).
  *
  * A reading that came to nothing says why in words, and the ones a second go
  * could fix (busy, used up for the day, a failure) offer *Try again*.
@@ -39,7 +38,6 @@ interface Props {
   retrying: boolean;
   onUse: (offers: LabelOffer[]) => void;
   onAddPart: (item: string) => void;
-  onService: (days: number) => void;
   onDismiss: () => void;
   onRetry: () => void;
 }
@@ -52,7 +50,7 @@ const FAILED_WORDS: Record<NonNullable<LabelReadingToCheck['reason']>, string> =
 };
 
 export default function LabelReadingCard({
-  check, thing, busy, retrying, onUse, onAddPart, onService, onDismiss, onRetry,
+  check, thing, busy, retrying, onUse, onAddPart, onDismiss, onRetry,
 }: Props) {
   if (check.status === 'pending' || retrying) {
     return (
@@ -124,11 +122,9 @@ export default function LabelReadingCard({
         ))}
       </Group>
 
-      {offers.parts.length || offers.serviceDays ? (
+      {offers.parts.length ? (
         <>
-          {/* Said on the heading, as on the walkthrough: these are the one
-              part of a reading nobody can check against the photo. */}
-          <Text style={styles.suggested}>Suggested for this model · check before you buy</Text>
+          <Text style={styles.suggested}>Printed on the label</Text>
           <Group>
             {offers.parts.map((item) => (
               <Row
@@ -144,19 +140,6 @@ export default function LabelReadingCard({
                 }
               />
             ))}
-            {offers.serviceDays ? (
-              <Row
-                title={`Serviced every ${describeCycle(offers.serviceDays)}`}
-                accessory={
-                  <Pill
-                    label="Schedule"
-                    onPress={() => onService(offers.serviceDays!)}
-                    disabled={busy}
-                    accessibilityLabel={`Schedule a service every ${describeCycle(offers.serviceDays)}`}
-                  />
-                }
-              />
-            ) : null}
           </Group>
         </>
       ) : null}

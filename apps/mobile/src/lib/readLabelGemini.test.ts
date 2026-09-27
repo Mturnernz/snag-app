@@ -30,13 +30,24 @@ describe('the request', () => {
     expect([...SCHEMA.required].sort()).toEqual(Object.keys(SCHEMA.properties).sort());
   });
 
-  it('asks for the brand in its own capitals, and fences what is suggested from what is read', () => {
+  it('asks for the brand in its own capitals, and nothing the model would have to remember', () => {
     expect(SYSTEM).toMatch(/Mitsubishi Electric/);
     expect(SYSTEM).toMatch(/not transcription/);
-    expect(SCHEMA.properties.suggestedConsumables.items.required).toEqual(['item', 'code']);
+    // Parts and a service cycle were asked "from what you know about this
+    // make and model", and one heat pump got three answers in four reads. The
+    // maker's website answers them now (lookup-product), checked.
+    expect(Object.keys(SCHEMA.properties)).not.toContain('suggestedConsumables');
+    expect(Object.keys(SCHEMA.properties)).not.toContain('suggestedServiceMonths');
+    expect(SYSTEM).not.toMatch(/what you know about this make and model/);
     // A swatch is the maker's published value or nothing — never read off the photo.
     expect(SYSTEM).toMatch(/published hex/);
     expect(SYSTEM).toMatch(/Never estimate it from the colour in the photo/);
+  });
+
+  it('asks for the year made only as the plate prints it, never worked out', () => {
+    expect(SCHEMA.properties.manufactured).toEqual({ type: ['string', 'null'] });
+    expect(SYSTEM).toMatch(/Never work it out from a serial number/);
+    expect(SYSTEM).toMatch(/standard's year/);
   });
 
   it('asks what the thing is when nobody has said, and says what it is when somebody has', () => {

@@ -1973,7 +1973,12 @@ export interface ProductLookup {
   make: string;
   model: string;
   status: 'pending' | 'found' | 'nothing' | 'failed';
-  reason: 'busy' | 'quota' | 'error' | null;
+  /**
+   * Why a failed one failed. `quota` is the household's own fifty a day;
+   * `limit` is Google refusing the search on the key's allowance — not busy,
+   * so a minute's wait will not fix it.
+   */
+  reason: 'busy' | 'quota' | 'limit' | 'error' | null;
   facts: ProductFacts | null;
   finishedAt: string | null;
 }
@@ -2027,7 +2032,7 @@ export function parseProductFacts(raw: unknown): ProductFacts | null {
 }
 
 const LOOKUP_STATUSES: ProductLookup['status'][] = ['pending', 'found', 'nothing', 'failed'];
-const LOOKUP_REASONS: NonNullable<ProductLookup['reason']>[] = ['busy', 'quota', 'error'];
+const LOOKUP_REASONS: NonNullable<ProductLookup['reason']>[] = ['busy', 'quota', 'limit', 'error'];
 
 export function parseProductLookup(raw: unknown): ProductLookup | null {
   if (!raw || typeof raw !== 'object') return null;

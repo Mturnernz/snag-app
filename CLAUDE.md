@@ -1393,6 +1393,14 @@ Four rules around it:
 - **It spends the household's daily reads**: one `claim_label_read` per search that actually runs,
   so the fifty-a-day ceiling covers it. Google bills grounded searches separately from tokens; see
   `SNAG_INFRA_NOTES.md`.
+- **Google refusing the search is not "busy".** The first live lookups all came back 429 *You
+  exceeded your current quota* on every model, seconds after a plain label read on the same key
+  and model had answered: an allowance on the key's Google project, not demand. `quotaRefusal`
+  (`read-label/gemini.ts`) reads the `QuotaFailure` detail, and the function logs which quota it
+  was, its limit and the retry delay. A per-minute limit is still `busy`; a used-up day, a limit
+  of 0, or anything not named per-minute is `limit` (`20260927110000`), and the card says *Google
+  wouldn't run the search* rather than inviting a Try again that cannot work. The fix for `limit`
+  is on the Google project, not in the app — see `SNAG_INFRA_NOTES.md`.
 
 `productLookup.test.ts` pins every rule above against the GS60's real pages and wording — the
 retailer refused, a redirect off the maker's site refused, another model's page refused, the range
@@ -1401,8 +1409,11 @@ read out of prose, and the page text readers — plus `productOffers` and the de
 `ThingDetailScreen.test.tsx` pins the card: the read keyed by make and model, *Look it up*, each
 row opening its page, *Add* writing words and number together and never offering it twice, the
 interval opening *Schedule service* and writing nothing, *nothing* said and not retried, *Try
-again* only on a failure, the pending state, the page surviving a failed read, and the *Year made*
-box on an appliance and not a paint.
+again* only on a failure, the pending state, the page surviving a failed read, the *Year made*
+box on an appliance and not a paint, and a refused search worded as Google's refusal rather than
+as busy. `readLabelGemini.test.ts` pins `quotaRefusal`: per-minute as a wait, a day or a limit of
+0 as not, any one daily allowance outweighing a per-minute one, and a bare 429 as the rate limit
+it always meant.
 
 ### Writing is rare and accidental; reading is under pressure, somewhere else
 

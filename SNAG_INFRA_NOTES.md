@@ -221,6 +221,18 @@ lookup is kept per make and model per household and never repeated unless it fai
 spends one of the household's fifty daily reads (`claim_label_read`), so the ceiling that caps
 label reads caps this too.
 
+**When the card says *Google wouldn't run the search*.** That is `reason = 'limit'`: Google
+answered 429 on every model with a quota that is not per-minute. It is an allowance on the Google
+project the `GEMINI_API_KEY` belongs to — usually search grounding not included on its tier, or its
+daily allowance used — and nothing in the app or the database can change it. The function log says
+which one: search `lookup-product:` for the line reading `429: quota — <metric> (<quota id>) limit
+<n> …`. Then open the key's project in Google AI Studio (Usage and rate limits, and Billing): a
+limit of 0 means the project's tier does not include it and needs billing turned on or a higher
+tier; a daily limit resets at midnight Pacific time. The first live lookups (27 Sep 2026) all hit
+this while plain label reads on the same key worked, so grounding is the allowance to check first.
+A 429 on plain label reads too points at the key being on the free tier, which the `read-label`
+section already says not to use.
+
 ### Edge functions — the five below belong to the retired product, and are to be deleted
 
 `notify-snag` (v20), `export-investigation`, `export-governance-report`, `worksheet`,

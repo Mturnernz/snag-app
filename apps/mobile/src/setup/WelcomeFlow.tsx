@@ -13,10 +13,10 @@ import { signInWithGoogle } from '../lib/googleSignIn';
 import { showAlert } from '../lib/alert';
 
 /**
- * The greetings the hello screen turns through — the languages a house in
- * Aotearoa is most likely to be spoken in, te reo first. Exported for the test.
+ * The greetings the hello screen turns through: *Welcome*, then the languages
+ * a house in Aotearoa is most likely to be spoken in. Exported for the test.
  */
-export const GREETINGS = ['Kia ora', 'Hello', 'Talofa', 'Mālō e lelei', 'Kia orana'];
+export const GREETINGS = ['Welcome', 'Hello', 'Talofa', 'Mālō e lelei', 'Kia orana'];
 
 /** How long each greeting stays before the next fades in. */
 const GREETING_MS = 2200;
@@ -105,7 +105,7 @@ export default function WelcomeFlow() {
         onBack={() => setPage('hello')}
         icon="person-circle-outline"
         title="Let's get you signed in"
-        body="Use your Google account, or your email — either works, new or old."
+        centered
         primary={{ label: 'Continue with Google', onPress: handleGoogle, loading: busy }}
         secondary={{ label: 'Use my email', onPress: () => setPage('email'), disabled: busy }}
       />

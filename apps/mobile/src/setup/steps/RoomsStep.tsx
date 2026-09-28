@@ -43,7 +43,7 @@ export default function RoomsStep({ ctx, progress, onBack, onNext }: StepProps) 
       onBack={onBack}
       icon="grid-outline"
       title="Here are your rooms"
-      body="Take out any you haven't got, and add any we've missed."
+      body="Here are your first rooms — you can add more when you're ready."
       primary={{ label: 'Continue', onPress: onNext }}
     >
       <RoomsEditor

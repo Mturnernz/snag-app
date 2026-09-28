@@ -29,6 +29,13 @@ interface Props {
   primary?: Action;
   /** Words to press under it — *Set up later*, *Take me to the list*. */
   secondary?: Action;
+  /**
+   * The question and its answers together in the middle of the screen, rather
+   * than the answers pinned to the foot. For a screen that is nothing but a
+   * choice between two buttons — sign-in — where a foot would leave the title
+   * alone at the top and the choice a screen away from it.
+   */
+  centered?: boolean;
 }
 
 /**
@@ -46,10 +53,34 @@ interface Props {
  * where the other is working (see lib/keyboardInset.ts).
  */
 export default function SetupShell({
-  progress, onBack, icon, title, body, children, primary, secondary,
+  progress, onBack, icon, title, body, children, primary, secondary, centered,
 }: Props) {
   const edge = useEdgeInsets();
   const keyboard = useKeyboardInset();
+
+  const actions = (
+    <>
+      {primary ? (
+        <Button
+          label={primary.label}
+          onPress={primary.onPress}
+          disabled={primary.disabled || primary.loading}
+          loading={primary.loading}
+          fullWidth
+        />
+      ) : null}
+      {secondary ? (
+        <Button
+          label={secondary.label}
+          variant="ghost"
+          onPress={secondary.onPress}
+          disabled={secondary.disabled || secondary.loading}
+          loading={secondary.loading}
+          fullWidth
+        />
+      ) : null}
+    </>
+  );
 
   return (
     <KeyboardAvoidingView
@@ -85,7 +116,7 @@ export default function SetupShell({
 
       <ScrollView
         style={styles.flex}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, centered && styles.contentCentered]}
         keyboardShouldPersistTaps="handled"
       >
         {icon ? (
@@ -96,34 +127,17 @@ export default function SetupShell({
         <Text style={styles.title} accessibilityRole="header">{title}</Text>
         {body ? <Text style={styles.body}>{body}</Text> : null}
         {children ? <View style={styles.children}>{children}</View> : null}
+        {centered && (primary || secondary) ? <View style={styles.inlineActions}>{actions}</View> : null}
       </ScrollView>
 
-      {primary || secondary ? (
+      {!centered && (primary || secondary) ? (
         <View
           style={[
             styles.foot,
             { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg },
           ]}
         >
-          {primary ? (
-            <Button
-              label={primary.label}
-              onPress={primary.onPress}
-              disabled={primary.disabled || primary.loading}
-              loading={primary.loading}
-              fullWidth
-            />
-          ) : null}
-          {secondary ? (
-            <Button
-              label={secondary.label}
-              variant="ghost"
-              onPress={secondary.onPress}
-              disabled={secondary.disabled || secondary.loading}
-              loading={secondary.loading}
-              fullWidth
-            />
-          ) : null}
+          {actions}
         </View>
       ) : null}
     </KeyboardAvoidingView>
@@ -191,6 +205,8 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   body: { fontSize: Typography.body, lineHeight: 24, color: Colors.textSecondary },
+  contentCentered: { flexGrow: 1, justifyContent: 'center', paddingBottom: Spacing.xxxl * 2 },
   children: { marginTop: Spacing.md, gap: Spacing.md },
+  inlineActions: { marginTop: Spacing.xl, gap: Spacing.xs },
   foot: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.sm, gap: Spacing.xs },
 });

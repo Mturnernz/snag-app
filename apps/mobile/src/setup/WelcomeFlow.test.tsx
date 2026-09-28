@@ -76,10 +76,10 @@ async function toEmail() {
 }
 
 describe('hello', () => {
-  it('opens on Kia ora and one button', async () => {
+  it('opens on Welcome and one button', async () => {
     const r = render(<WelcomeFlow />);
     await settle();
-    expect(r.queryByText('Kia ora')).not.toBeNull();
+    expect(r.queryByText('Welcome')).not.toBeNull();
     expect(r.queryByText('Get started')).not.toBeNull();
   });
 
@@ -103,7 +103,7 @@ describe('hello', () => {
       const r = render(<WelcomeFlow />);
       await settle();
       await TestRenderer.act(async () => { jest.advanceTimersByTime(10000); });
-      expect(r.queryByText('Kia ora')).not.toBeNull();
+      expect(r.queryByText('Welcome')).not.toBeNull();
       expect(r.queryByText(GREETINGS[1])).toBeNull();
     } finally {
       jest.useRealTimers();

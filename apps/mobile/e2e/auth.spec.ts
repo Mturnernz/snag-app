@@ -13,7 +13,7 @@ async function waitForApp(page: Page) {
 test('it opens on a greeting, not a form', async ({ page }) => {
   await waitForApp(page);
 
-  await expect(page.getByText('Kia ora', { exact: true })).toBeVisible();
+  await expect(page.getByText('Welcome', { exact: true })).toBeVisible();
   await expect(page.getByText('The list of things that need doing around the house')).toBeVisible();
   await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
 });

@@ -3834,8 +3834,9 @@ Remove and add instead.
 ## First run is a list of steps
 
 Signing up and getting into a house is set up the way a new phone is: a greeting that turns
-through *Kia ora*, *Hello*, *Talofa*, *Mālō e lelei* and *Kia orana* (held still for anybody who
-has asked for less motion), then **Continue with Google** or *Use my email*, then one question to a
+through *Welcome*, *Hello*, *Talofa*, *Mālō e lelei* and *Kia orana* (held still on *Welcome* for
+anybody who has asked for less motion), then **Continue with Google** or *Use my email* — centred
+under the title with no line of prose, because the screen is only that choice — then one question to a
 screen — your name, a new house or somebody else's, the house's name, **Here are your rooms**,
 **Bring someone in** — and *You're all set*, whose filled button is **Snap your first job**. It
 replaced a single screen that asked for a name and a house name at once and had nowhere to put a

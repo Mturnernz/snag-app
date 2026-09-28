@@ -272,6 +272,7 @@ export const declineInvitation = (invitationId: string) =>
 export const getMyOrphanFilePaths = () => queries.getMyOrphanFilePaths(supabase);
 
 export const deleteMyAccount = () => queries.deleteMyAccount(supabase);
+export const getMyData = () => queries.getMyData(supabase);
 
 export const getMyProperties = () => queries.getMyProperties(supabase);
 

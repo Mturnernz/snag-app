@@ -568,6 +568,21 @@ export async function deleteMyAccount(client: SupabaseClient): Promise<void> {
 }
 
 /**
+ * Everything Snag holds that this account can see, as one JSON document —
+ * *Download my data* on the You tab, and the answer to a Privacy Act request.
+ *
+ * `home.export_my_data` is SECURITY INVOKER over the tables themselves, so
+ * the row policies decide what is in it and there is nothing here to filter.
+ * Join-link and bill-address tokens are left out server-side; files are listed
+ * by storage path, never signed, because the file is made to be kept.
+ */
+export async function getMyData(client: SupabaseClient): Promise<Record<string, unknown>> {
+  const { data, error } = await client.rpc('export_my_data');
+  if (error) throw asError(error, "Couldn't gather your data");
+  return (data ?? {}) as Record<string, unknown>;
+}
+
+/**
  * The properties this person is linked to, in creation order.
  *
  * RLS already scopes this to their own links, so there is no household filter:

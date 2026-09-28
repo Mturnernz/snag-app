@@ -13,10 +13,11 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../consta
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  deleteMyAccount, deleteStoredFiles, getAllProjects, getMyOrphanFilePaths, getSnags, signOut,
-  setProjectsEnabled, upsertProfile,
+  deleteMyAccount, deleteStoredFiles, getAllProjects, getMyData, getMyOrphanFilePaths, getSnags,
+  signOut, setProjectsEnabled, upsertProfile,
 } from '../lib/supabase';
-import { looseEnds, type LooseEnd } from '@snag/supabase-queries';
+import { exportDateStamp, looseEnds, type LooseEnd } from '@snag/supabase-queries';
+import { saveFile } from '../lib/download';
 import { showAlert } from '../lib/alert';
 import { openUrl } from '../lib/openUrl';
 import { PORTAL_URL } from '../lib/appUrl';
@@ -44,6 +45,7 @@ export default function ProfileScreen() {
   const [ends, setEnds] = useState<LooseEnd[]>([]);
   const [endsOpen, setEndsOpen] = useState(false);
   const [savingProjects, setSavingProjects] = useState(false);
+  const [gathering, setGathering] = useState(false);
 
   /**
    * Turning the Projects tab on or off.
@@ -109,6 +111,30 @@ export default function ProfileScreen() {
       showAlert("Couldn't save that", err?.message ?? 'Please try again.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Everything Snag holds that this account can see, as one JSON file.
+   *
+   * One read, one file. The server decides what is in it (RLS, as the
+   * caller), so nothing here filters. It is a single JSON document rather
+   * than a zip, because a zip would be a dependency for a button pressed once
+   * a year. A refusal is a sentence rather than a thrown screen, because this
+   * is also the screen people sign out from.
+   */
+  async function handleDownloadData() {
+    if (gathering) return;
+    setGathering(true);
+    try {
+      const data = await getMyData();
+      const fileName = `snag-data-${exportDateStamp()}.json`;
+      const saved = await saveFile(fileName, JSON.stringify(data, null, 2), 'application/json');
+      showToast(saved.path ? `Saved to ${saved.path}` : 'Your data is downloading');
+    } catch (err: any) {
+      showAlert("Couldn't gather your data", err?.message ?? 'Please try again.');
+    } finally {
+      setGathering(false);
     }
   }
 
@@ -320,6 +346,16 @@ export default function ProfileScreen() {
         }}
         fullWidth
         style={styles.signOut}
+      />
+
+      {/* A copy of what is kept, which the Privacy Act says a person may ask
+          for. Quiet, beside the account's other rare doors. */}
+      <Button
+        label="Download my data"
+        variant="ghost"
+        onPress={handleDownloadData}
+        loading={gathering}
+        fullWidth
       />
 
       {/* Signing out is the everyday door and deleting is the other one, so it

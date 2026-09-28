@@ -982,7 +982,8 @@ answer across every room.
   pickers and the room pages keep the seeded order. A room with nothing recorded and nothing to
   suggest still gets no tile, as `Elsewhere` and `Under the house` never did.
 - **A tile is painted in its main wall colour** (`wallColour`): the paint whose *Where it went*
-  says *main wall*, then one saying *walls*. A feature wall, a ceiling and the joinery never
+  says *main wall*, then one saying *walls*, each place a paint went read on its own, so the walls
+  and a feature wall is still the walls. A feature wall, a ceiling and the joinery never
   colour it — a white bedroom with one forest-green wall is a white room — and a hex
   `swatchColour` will not parse leaves the tile white rather than guessing. This is the swatch
   rule at full size, not an exception to the palette: the colour is the record's data. A room
@@ -1050,6 +1051,14 @@ Alabaster on the windows. Three rules follow, and they are the whole feature:
   paints in one room apart, which is why it is the single field on the spec sheet exempt from
   "empty fields don't render". No other kind shows its note on a card — an appliance's note is not
   what distinguishes it from the appliance beside it.
+- **On the paint's own page, where it went is a row of pills, not a box.** One colour goes on the
+  walls *and* the ceiling, so it is one pill per place, in a single row between the header and the
+  photos that scrolls sideways rather than wrapping. Each pill carries a pencil and opens
+  `PaintAreaSheet` (the suggestions in `PAINT_AREA_SUGGESTIONS`, or a place typed in); a tap on a
+  place writes it at once, and the + adds another. **It is still one text column**: the places are
+  `notes` joined by ` · ` (`joinPaintAreas`) and read back by `paintAreas`, which also splits on
+  commas, semicolons and line breaks, so a list typed into the walkthrough's box arrives as pills.
+  The card line, the search, both extracts and `wallColour` read it exactly as they did.
 
 In the walkthrough, choosing Paint asks **which colour** rather than offering a name, the photo is
 of the **tin lid** rather than a rating plate, and the last step asks **where it went** instead of
@@ -1428,6 +1437,20 @@ later, in an aisle, needing one exact string. So:
   **every field the kind can answer is on screen, empty or not.** A paint still gets no Serial
   box: "every field" means every field the kind can answer.
 
+  **On screen is not the same as a box (September 2026).** Counted on the live record — 17
+  appliances, 13 paints — the three dates were empty on every appliance, and a paint's sheen, tint,
+  what's left and warranty on twelve in thirteen or more; a box each was most of the card's height.
+  Those fields (`OFFERED_FIELDS`: year made, installed, warranty until, sheen, tint formula, what's
+  left) are **small sunken pills at the foot of the card** — the chip's language, smaller — which
+  still name everything the record can hold, so the reversal above is kept. A tap opens the box
+  where it always sat, with the cursor in it; one left empty goes back to a pill; **one holding a
+  value is always a box**. `DateField`'s `onLeaveEmpty` is what says a date was left empty, and it
+  deliberately stays quiet when the focus has only moved to its own calendar: on the web that
+  button takes focus as it is pressed, and putting the pill back then would unmount the calendar
+  before it opened. Serial (24%) and a paint's product (23%) were just over the line and stay boxes;
+  notes, servicing and paperwork were left as they are, by the owner's choice. **A paint is not
+  asked when it went in** — one in thirteen had the date — and the column is left alone.
+
   **It writes each box when the box is left, and says *Saved*.** It had one Save button for a
   while, and a back gesture over typed words asked *Leave without saving?* — a question with a
   wrong answer that loses the words, on the one page in the app where every other kind of edit
@@ -1504,10 +1527,16 @@ later, in an aisle, needing one exact string. So:
   page or supplied with the label reading as the maker's **published** value for the colour the
   tin names (below) — never a colour judged from a photograph. `swatchColour` draws it only when it parses as three or six hex
   digits, and draws **nothing** otherwise rather than a guess, because a swatch is the one part of a
-  paint record somebody believes at a glance without reading the code beside it; a box holding
-  something else says *Six hex digits draw a swatch*. It carries a hairline edge because most paint
+  paint record somebody believes at a glance without reading the code beside it; a hex that does
+  not parse says *Six hex digits draw a swatch*. It carries a hairline edge because most paint
   is a white. It is always approximate — no screen shows paint true — so it sits **beside** the
   colour code and never replaces it: the code and the tint formula are what the counter matches.
+
+  **On a paint's page the swatch is a tile in the photo strip**, second after the first photo or
+  first when there is none, with the hex as a line of small mono text under the photos that a tap
+  opens as a box. The tile is **drawn from the hex, never stored** — it follows the hex, cannot go
+  stale, and has no ×, because it is not a photo. Its one word is measured against the colour with
+  `tileInk`, as a room tile's are.
 
 ### Five kinds, two built
 
@@ -1641,12 +1670,17 @@ with no room fall under **Whole house**. Photos reuse `home-photos` and the exis
 name for half of what it holds; the property name goes in the screen header instead, through the
 same picker capture has.
 
-`ThingDetailScreen.test.tsx` pins the reversal: every applicable field rendering as a box on an
-empty thing, no Serial on a paint, Save off until something is typed, one write carrying only what
-changed, and an emptied box clearing the column rather than leaving it alone. It also pins what
-was taken away — no example values, no kind rail, one room pill, no section prose, no *On the
-list* — and that scheduling a service is one `createSnag` carrying its own date and repeat rather
-than a create followed by an update.
+`ThingDetailScreen.test.tsx` pins the reversal: every applicable field named on an empty thing,
+the rarely used ones as pills that open in place, focused, go back when left empty and stay boxes
+once they hold something; no Serial and no Installed on a paint, Save off until something is typed,
+one write carrying only what changed, and an emptied box clearing the column rather than leaving it
+alone. It pins where a paint went — a pill per place however the line was written, one write per
+tap, never a place twice, the draft kept in step so leaving writes nothing — and the swatch tile's
+place in the strip and the hex under it. It also pins what was taken away — no example values, no
+kind rail, one room pill, no section prose, no *On the list* — and that scheduling a service is one
+`createSnag` carrying its own date and repeat rather than a create followed by an update.
+`PaintAreaSheet.test.tsx` pins the sheet, and `DateField.test.tsx` pins `onLeaveEmpty` staying
+quiet while the calendar is open.
 `houseRecord.test.ts` also pins the document key round-trip — the filename surviving, hyphens not
 being mistaken for the prefix, and two uploads never colliding (`upsert: false` makes a collision a
 failure, not an overwrite).

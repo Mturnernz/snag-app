@@ -3895,7 +3895,7 @@ adding a processor without adding it there makes the page untrue.
 
 **An anonymous session is not an account.** Anonymous sign-ins run as the `authenticated` role, so
 every function granted to `authenticated` answered one, and the three that make a membership
-asked only whether *somebody* was signed in. `20260926100000` puts triggers on `home.profiles` and
+asked only whether *somebody* was signed in. `20260925074528` puts triggers on `home.profiles` and
 `home.household_members` that refuse an anonymous user whatever function is inserting; the
 provider is also meant to be off. See *Anonymous sign-ins reached `home`* in `SNAG_INFRA_NOTES.md`.
 

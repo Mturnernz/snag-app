@@ -11,7 +11,7 @@
 -- sign-in as the `authenticated` role, so every function this schema grants to
 -- `authenticated` answered one — and the three that make a membership asked
 -- only whether *somebody* was signed in. See
--- 20260926100000_an_anonymous_session_is_not_an_account.sql.
+-- 20260925074528_an_anonymous_session_is_not_an_account.sql.
 
 begin;
 

@@ -176,7 +176,7 @@ anonymous users date from 27 July and none has a profile, so it was never used.
 
 Closed in two halves:
 
-- **`20260926100000_an_anonymous_session_is_not_an_account`** — triggers on `home.profiles` and
+- **`20260925074528_an_anonymous_session_is_not_an_account`** — triggers on `home.profiles` and
   `home.household_members` refuse an anonymous user, whatever function is doing the inserting.
   `supabase/tests/anonymous_sessions.sql` replays it. This holds however the switch below is set.
   **Applied 25 September 2026**, and probed on the live project as one of the existing anonymous

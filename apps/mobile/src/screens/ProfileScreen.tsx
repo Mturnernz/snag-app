@@ -9,6 +9,7 @@ import Button from '../components/Button';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
+import InstallCard from '../components/InstallCard';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -336,6 +337,11 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
       </Card>
+
+      {/* The list's card asks once; this stays for as long as Snag is open
+          in a browser tab, for somebody who closed the card and wants it
+          back. Absent everywhere else. */}
+      <InstallCard variant="row" />
 
       <Button
         label="Sign out"

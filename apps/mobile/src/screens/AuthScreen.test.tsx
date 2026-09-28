@@ -330,6 +330,12 @@ describe('privacy', () => {
     expect(mock_openUrl).toHaveBeenCalledWith('https://www.snaghq.co.nz/privacy');
   });
 
+  it('puts the terms beside the statement', async () => {
+    const r = await mount(<AuthScreen joinToken={TOKEN} />);
+    await press(pressableAround(r, 'Terms'));
+    expect(mock_openUrl).toHaveBeenCalledWith('https://www.snaghq.co.nz/terms');
+  });
+
   it('is not repeated at every sign-in', async () => {
     const r = await mount(<AuthScreen />);
     expect(r.queryByText('Privacy statement')).toBeNull();

@@ -30,7 +30,7 @@ export default function PrivacyPage() {
       </Link>
 
       <h1 className={styles.title}>Privacy</h1>
-      <p className={styles.updated}>Last updated 25 September 2026</p>
+      <p className={styles.updated}>Last updated 28 September 2026</p>
 
       <p>
         Snag is a shared list for looking after a house, run by SnagHQ in New Zealand. This page
@@ -93,19 +93,26 @@ export default function PrivacyPage() {
             <li>Netlify serves the app and this site.</li>
             <li>
               Resend sends Snag&apos;s emails, and receives bills you forward to a project&apos;s
-              address.
+              address (Japan).
             </li>
             <li>
-              Google&apos;s Gemini reads a photo of a label when you photograph one while adding
-              something to the house record, and reads bills emailed to a project, so the details
-              can be filled in for you to check.
+              Google&apos;s Gemini reads a photo of a label or a paint tin when you photograph one
+              while adding something to the house record, and reads bills emailed to a project, so
+              the details can be filled in for you to check. When a label gives a make and model,
+              Gemini also searches the maker&apos;s website for its manual and parts — it is sent
+              the make and model, not the photo.
+            </li>
+            <li>
+              Sentry is told when the app hits an error: what went wrong and on which screen. Links,
+              email addresses and anything you typed are removed first, and nothing records your
+              screen.
             </li>
           </ul>
         </li>
       </ul>
       <p>
         Some of these services store or process information outside New Zealand — in Australia,
-        the United States and elsewhere.
+        Japan, the United States and elsewhere.
       </p>
 
       <h2>How long</h2>
@@ -118,14 +125,19 @@ export default function PrivacyPage() {
 
       <h2>Seeing and correcting it</h2>
       <p>
-        Nearly everything Snag keeps about you can be seen and changed in the app. You can also ask
-        SnagHQ for a copy of it, or to correct it, at{' '}
+        Nearly everything Snag keeps about you can be seen and changed in the app, and{' '}
+        <strong>Download my data</strong>, on the You tab, gives you a copy of all of it as one
+        file. You can also ask SnagHQ for a copy, or to correct something, at{' '}
         <a href="mailto:help@snaghq.co.nz">help@snaghq.co.nz</a>. If you are not happy with the
         answer, you can complain to the{' '}
         <a href="https://www.privacy.org.nz/" rel="noopener noreferrer">
           Office of the Privacy Commissioner
         </a>
         .
+      </p>
+
+      <p>
+        The terms you use Snag under are on the <Link href="/terms">terms</Link> page.
       </p>
     </main>
   );

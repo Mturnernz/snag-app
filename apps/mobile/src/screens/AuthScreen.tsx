@@ -380,13 +380,22 @@ export default function AuthScreen({ joinToken = null }: Props) {
               Snag keeps your email address, your name and what your household adds, to run the
               app for you.
             </Text>
-            <Pressable
-              onPress={() => openUrl(`${PORTAL_URL}/privacy`)}
-              style={styles.link}
-              accessibilityRole="link"
-            >
-              <Text style={styles.linkText}>Privacy statement</Text>
-            </Pressable>
+            <View style={styles.legalLinks}>
+              <Pressable
+                onPress={() => openUrl(`${PORTAL_URL}/privacy`)}
+                style={styles.link}
+                accessibilityRole="link"
+              >
+                <Text style={styles.linkText}>Privacy statement</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => openUrl(`${PORTAL_URL}/terms`)}
+                style={styles.link}
+                accessibilityRole="link"
+              >
+                <Text style={styles.linkText}>Terms</Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
       </ScrollView>
@@ -493,4 +502,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
+  legalLinks: { flexDirection: 'row', justifyContent: 'center', gap: Spacing.lg },
 });

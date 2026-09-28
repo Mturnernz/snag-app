@@ -180,6 +180,12 @@ describe('privacy', () => {
     await TestRenderer.act(async () => pressableAround(r, 'Privacy statement').props.onPress());
     expect(mock_openUrl).toHaveBeenCalledWith('https://www.snaghq.co.nz/privacy');
   });
+
+  it('opens the terms beside it', async () => {
+    const r = await renderProfile();
+    await TestRenderer.act(async () => pressableAround(r, 'Terms').props.onPress());
+    expect(mock_openUrl).toHaveBeenCalledWith('https://www.snaghq.co.nz/terms');
+  });
 });
 
 // A copy of what is kept is the Privacy Act's own ask, so it is one press

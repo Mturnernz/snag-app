@@ -376,13 +376,22 @@ export default function ProfileScreen() {
       {/* The statement Create account links to, reachable again once signed
           in — the right to see and correct what is kept is not only for the
           moment of signing up. */}
-      <Pressable
-        onPress={() => openUrl(`${PORTAL_URL}/privacy`)}
-        style={styles.privacyLink}
-        accessibilityRole="link"
-      >
-        <Text style={styles.privacyText}>Privacy statement</Text>
-      </Pressable>
+      <View style={styles.legalLinks}>
+        <Pressable
+          onPress={() => openUrl(`${PORTAL_URL}/privacy`)}
+          style={styles.privacyLink}
+          accessibilityRole="link"
+        >
+          <Text style={styles.privacyText}>Privacy statement</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => openUrl(`${PORTAL_URL}/terms`)}
+          style={styles.privacyLink}
+          accessibilityRole="link"
+        >
+          <Text style={styles.privacyText}>Terms</Text>
+        </Pressable>
+      </View>
 
       <ConfirmDialog
         visible={confirmDelete}
@@ -486,7 +495,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
-  privacyLink: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignItems: 'center' },
+  legalLinks: { flexDirection: 'row', justifyContent: 'center', gap: Spacing.xl },
+  privacyLink: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.sm,
+  },
   privacyText: { fontSize: Typography.sm, color: Colors.textMuted },
   deleteHint: {
     fontSize: Typography.sm,

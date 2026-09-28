@@ -267,10 +267,20 @@ answers `410`. Nothing calls it any more: `overdue-actions-digest`, the cron job
 unscheduled. See *The archive stops answering* below. The other four are JWT-on and untouched,
 and still to be deleted.
 
-Their function secrets, which are not recoverable from anywhere else:
-`RESEND_API_KEY`, `SNAG_FROM_ADDRESS` (`noreply@snaghq.co.nz`), `SNAG_PORTAL_URL`. `RESEND_API_KEY`
-is used by nothing else — Auth's SMTP password is a *separate* Resend key — so it goes when the
-functions do.
+Their function secrets, checked in the dashboard on 28 September 2026: `RESEND_API_KEY`,
+`SNAG_PORTAL_URL` and `SNAG_INTERNAL_SECRET`. (`SNAG_FROM_ADDRESS`, which this note used to list,
+no longer exists.) **All three go when `notify-snag` does.** The functions the home app keeps
+(`read-label`, `lookup-product`, `inbound-bill`, `reread-bill`) read only `GEMINI_API_KEY`,
+`GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `RESEND_INBOUND_API_KEY`, `RESEND_WEBHOOK_SECRET` and the
+platform's `SUPABASE_*`. `RESEND_API_KEY` is a different key from Auth's SMTP password and from the
+staff portal's key, which lives on Netlify. `SNAG_INTERNAL_SECRET` is the header `notify-snag`
+compared against the database's Vault secret `snag_internal_secret`. That Vault secret stays with
+the archive: the retired `dispatch_*` functions read it, and deleting it changes nothing.
+
+**Nothing will call a deleted `notify-snag` in a way that matters.** Its callers were the digest
+cron job, now unscheduled, and four `public.dispatch_*` functions fired by two triggers on the frozen
+`public.snags` table. Nothing in the app writes that table. If anything ever did, the `pg_net` call is
+fire-and-forget and the dispatch functions swallow errors, so it would get a 404 and nothing else.
 
 ### The archive stops answering — its cron job and its functions
 

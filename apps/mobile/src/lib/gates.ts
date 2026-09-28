@@ -25,6 +25,15 @@ export interface GateState {
   hasJoinToken: boolean;
   hasProfile: boolean;
   hasHousehold: boolean;
+  /**
+   * A setup step this person has not been shown — see `setup/steps.ts`.
+   *
+   * Setup, not a gate of its own, so a household made half way through first
+   * run does not unmount the flow and throw away where it was: the same screen
+   * keeps going onto the rooms. A step added later reaches people who set up
+   * before it existed this way too.
+   */
+  hasPendingSteps?: boolean;
 }
 
 export function chooseGate(state: GateState): Gate {
@@ -39,5 +48,6 @@ export function chooseGate(state: GateState): Gate {
   // itself when there isn't one.
   if (state.hasJoinToken) return 'join';
   if (!state.hasProfile || !state.hasHousehold) return 'setup';
+  if (state.hasPendingSteps) return 'setup';
   return 'app';
 }

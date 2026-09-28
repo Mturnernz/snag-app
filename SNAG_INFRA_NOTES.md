@@ -318,6 +318,36 @@ Checking it: `curl -sI https://staff.snaghq.co.nz/` answers a redirect to `/sign
 `X-Robots-Tag: noindex, nofollow`; a signed-in non-staff account sees *This account isn't on the SnagHQ
 staff list*; and `select home.is_staff()` run as a staff token is `true`.
 
+### Households sign in with Google too — first-run setup
+
+First-run setup (`apps/mobile/src/setup/`; *First run is a list of steps* in `CLAUDE.md`) offers
+**Continue with Google** before email and password, on the web build and the native one. It reuses
+the staff portal's Google provider — Supabase has one per project — so none of it works until the
+following is done, **in this order, before the branch is merged**:
+
+1. **Apply `20260928090000_setup_is_a_list_of_steps.sql`.** It adds `profiles.setup_seen`, which
+   `getMyProfile` names; merged without it, every profile read is a 400 and the whole app reads as
+   signed out of its data. It also marks every account already in a household as having seen the
+   baseline steps, so nobody is walked through setup on the next open. Check with
+   `select count(*) from home.profiles where setup_seen = '{}'` — only people not yet in a household.
+2. **Open the OAuth consent screen to everybody.** It is **Internal** (step 2 of the staff portal
+   above), which stops anybody outside the snaghq.co.nz Workspace at Google. Set the user type to
+   **External** and publish it (Google Cloud → APIs & Services → OAuth consent screen). The staff
+   portal stays closed: `home.is_staff()` still wants a staff row, a matching email and Google as
+   a provider — the notes above already call the staff list "the check either way". Only the
+   `openid`, `email` and `profile` scopes are asked for, which are not sensitive scopes — Google may
+   still ask for brand verification if a logo is added to the consent screen.
+3. **Redirect allow-list** (Auth → URL Configuration) — add `https://app.snaghq.co.nz/**` (the web
+   build comes back to the path it left from, so a `/join/<token>` survives the trip) and
+   `snag://auth-callback` (the native build). Missing, the sign-in lands on the Site URL with
+   nothing said — the same trap as recovery.
+4. **Try it once on a throwaway Google account** on the web build: it should land on *What should
+   we call you?* with the first name already in the box. Then try an address that already has an
+   email-and-password account: Supabase links a verified Google identity to the same user, so it
+   should land in that person's house, not a new one.
+
+The native build also needs `expo-web-browser` in the next binary; the web build needs nothing.
+
 ### The CI test account needs a household, not just a login
 
 The authenticated mobile specs sign in as the `E2E_EMAIL` / `E2E_PASSWORD` repository secrets and
@@ -328,7 +358,9 @@ it had neither, and the three authenticated specs failed on every run from then 
 
 It now has a profile (*E2E test*) and its own household (*E2E test house*, one property, the
 seeded rooms), made through `upsert_profile` and `create_household` exactly as signing up would.
-Don't add it to a real household, and don't delete that one: the specs need a list to land on. If
+Don't add it to a real household, and don't delete that one: the specs need a list to land on.
+Being in a household before `20260928090000` also means the migration marked it as having seen
+setup; an account made after it would be walked through the setup steps and never reach the list. If
 they ever fail at sign-in again, check the account before the specs:
 
 ```sql

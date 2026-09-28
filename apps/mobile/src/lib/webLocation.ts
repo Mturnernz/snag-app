@@ -12,7 +12,7 @@ import { Platform } from 'react-native';
  *
  * Signing out breaks the arrangement. Sign Out lives on the Profile tab, so the
  * address bar always reads `/you` at the moment the session ends; App.tsx
- * then unmounts the navigator and shows AuthScreen without touching the URL.
+ * then unmounts the navigator and shows the welcome screens without touching the URL.
  * Signing back in remounts the container, which parses the leftover `/profile`
  * and lands there — the user never asked to go to Profile, they asked to log in.
  *

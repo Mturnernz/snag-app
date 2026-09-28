@@ -38,12 +38,13 @@ snag/
 │   ├── mobile/                    # the app
 │   │   ├── App.tsx                # three gates: signed in? in a household? go.
 │   │   │                           #   (Setup answers a waiting invitation before asking.)
+│   │   │                           #   Before any of it: src/setup/ — hello, sign-in, the steps.
 │   │   └── src/
 │   │       ├── constants/theme.ts # ALL design tokens
 │   │       ├── lib/supabase.ts    # client (schema: home), auth, photo upload
 │   │       ├── hooks/useHousehold.tsx
 │   │       ├── screens/           # SnagList (home), SnagDetail, House, HouseRoom, ThingDetail,
-│   │       │                       #   Household, LocationTags, Profile, Auth, Setup
+│   │       │                       #   Household, LocationTags, Profile, Join
 │   │       └── components/
 │   ├── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
 │   └── staff/                     # Next.js — the SnagHQ staff portal, staff.snaghq.co.nz
@@ -3830,6 +3831,78 @@ Remove and add instead.
 **A second place is never a tag.** If someone asks for a "Bach" tag, the answer is
 `create_property`.
 
+## First run is a list of steps
+
+Signing up and getting into a house is set up the way a new phone is: a greeting that turns
+through *Kia ora*, *Hello*, *Talofa*, *Mālō e lelei* and *Kia orana* (held still for anybody who
+has asked for less motion), then **Continue with Google** or *Use my email*, then one question to a
+screen — your name, a new house or somebody else's, the house's name, **Here are your rooms**,
+**Bring someone in** — and *You're all set*, whose filled button is **Snap your first job**. It
+replaced a single screen that asked for a name and a house name at once and had nowhere to put a
+third question.
+
+**The questions are data, in `apps/mobile/src/setup/steps.ts`, and that is the rule to keep.** Each
+step has a stable `id`, a `since`, `applies` and `answered` predicates read off the account, and
+whether it can be put off. `SetupFlow` only walks them; `App.tsx`'s gate asks the same
+`pendingSteps` whether there is anything to walk. Screens are a `Record<SetupStepId, …>` in
+`SetupFlow.tsx`, so a step without one is a compile error.
+
+- **Only "has this person been shown it" is stored** — `profiles.setup_seen`, appended by
+  `home.mark_setup_seen` (`20260928090000`) as each step is *left*, answered or skipped. Whether
+  the house has a name or anybody else is in it is read from the tables that hold it, never
+  recorded as done. A required step is asked until the data answers it, whatever `setup_seen`
+  says; a skippable one is asked once, because *Set up later* is an answer.
+- **A question added later reaches people who set up before it, and only that question.** Give it
+  `since` above `SETUP_BASELINE` and a `whatsNew` line. Anybody with it pending — and nothing
+  from the baseline — gets a short catch-up run (*One new thing*, then the step, then straight
+  back in, with no *You're all set*). **Never add a later step to the migration's backfill**: being
+  absent from it is how existing accounts get asked.
+- **An id is for ever.** It is stored; renaming one asks everybody again and reusing one makes a
+  new question look answered. `steps.test.ts` freezes every id that has shipped and fails if the
+  migration's backfill stops being exactly the baseline.
+- **One writer per fact.** A step writes through the component the settings screen uses —
+  `RoomsEditor` is Location tags' editor, `InviteLinkPanel` is the Household screen's — so setup
+  and the You tab cannot come to disagree about what an answer does. A skippable step says where
+  it can be changed later (`changeLater`), and the test requires it.
+- **The flow stays mounted while the account is re-read.** The gate is `setup` whenever anything
+  is pending, so making the house half way through carries on to the rooms rather than starting
+  again, and `onFinish` is what lets the app in (a `setup_seen` write that failed is asked again
+  next launch, never a run that loops).
+- **Who is asked what** comes from the data: the second person, arriving by invitation or join
+  code, sees their name, *Join*, the rooms (they may know about the room the first one missed,
+  and removing one asks, since it is the other person's too) and *All set* — never *Bring someone
+  in*, which applies only to somebody alone in the house.
+- **One name for the house.** *What do you call your place?* is written to both the household and
+  its first property (`createHousehold(name, name)`); "Home" under a house somebody called
+  32 Le Roy was a name nobody chose.
+- **Snap your first job opens the camera from its own press.** A browser opens it only inside a
+  tap, and the list mounts after the tap is over — so the photo is taken on that screen, handed
+  over through `useFirstCapture`, and filed by the list through `fileCapturedPhoto`, the shutter's
+  own path, capture sheet and all. Taken once: coming back to the list does not file it twice.
+
+**Google** (`lib/googleSignIn.ts`) is Supabase's redirect on the web build — the page leaves and
+comes back holding the session in the fragment, which `detectSessionInUrl` already reads — and the
+system auth browser plus `setSession` on native, via `snag://auth-callback`. The web redirect keeps
+the path worth keeping (`isPreservedUrl`), so somebody who scanned a join code and chose Google
+still lands on the join question. The first name Google knows is offered in the name box, and it
+is still the person's to change. Setup outside git — the consent screen opened to everybody and
+two allow-list entries — is in `SNAG_INFRA_NOTES.md` under *Households sign in with Google too*.
+
+**The join gate still comes first.** `JoinScreen` is untouched and still runs before a profile
+exists (the Alyssa bug in `gates.ts`); once it has joined somebody, the setup gate picks up the
+rest.
+
+`setup/steps.test.ts` pins the rules above as properties, including a pretend later step reaching
+only people who have set up. `setup/SetupFlow.test.tsx` pins the whole first run in order with its
+writes, the Google name, the invitation beating the question (carried over from the old Setup
+screen, with the waiting page, the pasted link and the no-email wording), the joiner's shorter run,
+*Set up later* becoming *Continue* once there is a link, and the camera on the last screen.
+`setup/WelcomeFlow.test.tsx` pins the greeting, the reduced-motion case, Google first, both email
+paths and recovery; `lib/googleSignIn.test.ts` the redirect target and the token parse;
+`gates.test.ts` the pending-step gate; `SnagListScreen.test.tsx` the first photo filed once.
+`e2e/auth.spec.ts` walks the front door in a browser, and `e2e/welcome.ts` is the one route through
+it the authenticated specs share.
+
 ## Adding someone to a household
 
 **An invitation waits on an address, not on an account.** `home.invite_to_household` takes any
@@ -3871,9 +3944,9 @@ household id. There is no read policy for them on the table at all.
 
 It is answered in two places, and both are needed:
 
-- **`SetupScreen`** — someone who has just signed up. The invitation beats *both* branches of that
-  screen, because somebody staring at "Set up your house" must not have to guess the answer is
-  behind the second button. It is looked for only once a profile exists, since `accept_invitation`
+- **The household step of first-run setup** (`setup/steps/HouseholdStep.tsx`) — someone who has
+  just signed up. The invitation beats *both* doors on that step, because somebody looking at
+  "Start a new house" must not have to guess the answer is behind the other one. It is looked for only once a profile exists, since `accept_invitation`
   needs one.
 - **`HouseholdScreen`** — someone who already has a household. Without this an invitation to an
   existing user would be invisible: they never see Setup, and there is deliberately no household
@@ -3973,7 +4046,7 @@ anyway and had to sign up with exactly that address; a link carries the invitati
 share must not break a link the first person has not opened. The QR code and the address
 invitation stay, beneath it. And the waiting screen (*Someone else set ours up*) takes a **pasted
 link** — `parseJoinToken` reads the code out of whatever a messaging app wrapped it in — and hands
-it to the same `JoinScreen` gate a tapped link reaches, through `SetupScreen`'s `onJoinToken`.
+it to the same `JoinScreen` gate a tapped link reaches, through the setup flow's `onJoinToken`.
 
 Typing an address assumes you know it and are willing to type it. Standing in the same kitchen both
 are friction, so an invitation can also be addressed to **whoever holds the link**:
@@ -4017,7 +4090,7 @@ household they just joined.
 in words — a screenshot of yesterday's code is not an error state), and a code for a house you are
 already in (people scan twice).
 
-`SetupScreen.test.tsx` pins the invitee's end, `ProfileScreen.test.tsx` the deletion order and that
+`setup/SetupFlow.test.tsx` pins the invitee's end, `ProfileScreen.test.tsx` the deletion order and that
 Delete sits quieter than Sign out, `JoinScreen.test.tsx` the three arrivals and the clear-before-
 re-gate order, `joinLink.test.ts` what is and isn't a join path, and `HouseholdScreen.test.tsx` the
 waiting rows, the cancel, the answerable invitation, the absence of the word "sent", and that a live
@@ -4793,6 +4866,14 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=
 ```
 
 It runs in one transaction and rolls back.
+
+### Add a setup question
+Add a step to `SETUP_STEPS` in `apps/mobile/src/setup/steps.ts` with the next `since`, a
+`whatsNew` line and, if it can be put off, `changeLater`; add its id to the union and to
+`EVER_SHIPPED` in `steps.test.ts`; give it a screen in `SetupFlow.tsx`'s `SCREENS`, built on
+`SetupShell` and writing through the same function the settings screen uses. No migration: the
+baseline backfill stays as it is, which is exactly how existing accounts come to be asked. See
+*First run is a list of steps*.
 
 ### Add a query
 `packages/supabase-queries/src/index.ts`. Each function takes a `SupabaseClient` so both apps can

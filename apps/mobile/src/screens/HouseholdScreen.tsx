@@ -10,22 +10,18 @@ import Button from '../components/Button';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
+import InviteLinkPanel from '../components/InviteLinkPanel';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { Invitation, InvitationToMe } from '../types';
 import { useToast } from '../hooks/useToast';
 import {
-  acceptInvitation, cancelInvitation, createInviteLink, createProperty, declineInvitation,
+  acceptInvitation, cancelInvitation, createProperty, declineInvitation,
   deleteHousehold, deleteProperty, deleteStoredFiles, getHouseholdFilePaths,
   getHouseholdInvitations, getMyInvitations, getPropertyMemberIds, getSnags, getThings,
-  inviteToHousehold, removeMember, renameProperty, revokeInviteLink, setPropertyLocation,
+  inviteToHousehold, removeMember, renameProperty, setPropertyLocation,
   setPropertyMember,
 } from '../lib/supabase';
-import { joinUrl } from '@snag/supabase-queries';
-import { APP_URL } from '../lib/appUrl';
-import { copyToClipboard } from '../lib/clipboard';
-import { shareLink } from '../lib/share';
-import QrCode, { QrCaption } from '../components/QrCode';
 import { showAlert } from '../lib/alert';
 
 /**
@@ -74,7 +70,6 @@ export default function HouseholdScreen() {
   const [busyInvite, setBusyInvite] = useState(false);
   /** The household's one live join code, if it is being shared right now. */
   const [link, setLink] = useState<Invitation | null>(null);
-  const [busyLink2, setBusyLink2] = useState(false);
 
   /** The place being renamed, and the text so far. Null when nothing is. */
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
@@ -252,67 +247,6 @@ export default function HouseholdScreen() {
       showAlert("Couldn't invite them", err?.message ?? 'Please try again.');
     } finally {
       setAdding(false);
-    }
-  }
-
-  /**
-   * The main way to add somebody: a link, into whatever they message on.
-   *
-   * The address invitation sends nothing, so the other person has to be told
-   * anyway — and has to sign up with exactly that address. A link carries the
-   * invitation itself, works whatever address they use, and goes through the
-   * phone's own share sheet in one tap. It reuses the live code rather than
-   * minting one, because minting kills the old one — and somebody sharing to a
-   * second person must not break the link the first has not opened yet.
-   */
-  async function handleShareLink() {
-    setBusyLink2(true);
-    try {
-      let live = link;
-      if (!live?.token) {
-        live = await createInviteLink(
-          household.id,
-          properties.length > 1 ? startOn : undefined
-        );
-        setLink(live);
-      }
-      const outcome = await shareLink(
-        joinUrl(APP_URL, live.token!),
-        `Join ${household.name} on Snag — the link is good for a day.`,
-      );
-      if (outcome === 'copied') showToast('Link copied — paste it into a message');
-      if (outcome === 'failed') showToast('Copy the link from under the code');
-    } catch (err: any) {
-      showAlert("Couldn't make a link", err?.message ?? 'Please try again.');
-    } finally {
-      setBusyLink2(false);
-    }
-  }
-
-  async function handleShowCode() {
-    setBusyLink2(true);
-    try {
-      setLink(await createInviteLink(
-        household.id,
-        properties.length > 1 ? startOn : undefined
-      ));
-    } catch (err: any) {
-      showAlert("Couldn't make a code", err?.message ?? 'Please try again.');
-    } finally {
-      setBusyLink2(false);
-    }
-  }
-
-  async function handleStopSharing() {
-    setBusyLink2(true);
-    try {
-      await revokeInviteLink(household.id);
-      setLink(null);
-      showToast('Code stopped');
-    } catch (err: any) {
-      showAlert("Couldn't stop sharing", err?.message ?? 'Please try again.');
-    } finally {
-      setBusyLink2(false);
     }
   }
 
@@ -690,53 +624,15 @@ export default function HouseholdScreen() {
               as the thing for somebody "standing right here", behind the
               address form — but the address invitation sends nothing, so the
               other person had to be told anyway, and had to sign up with
-              exactly that address. */}
-          <Button
-            label="Share an invite link"
-            onPress={handleShareLink}
-            loading={busyLink2}
-            disabled={busyLink2 || (properties.length > 1 && startOn.length === 0)}
-            fullWidth
-            icon="share-outline"
+              exactly that address. The same panel is first-run setup's
+              *Bring someone in* step. */}
+          <InviteLinkPanel
+            householdId={household.id}
+            householdName={household.name}
+            propertyIds={properties.length > 1 ? startOn : undefined}
+            link={link}
+            onLink={setLink}
           />
-
-          <View style={styles.codeBlock}>
-            {link?.token ? (
-              <>
-                <Text style={styles.orLine}>or let them scan it</Text>
-                <QrCode value={joinUrl(APP_URL, link.token)} />
-                <QrCaption text={joinUrl(APP_URL, link.token)} />
-                <View style={styles.codeActions}>
-                  <Button
-                    label="Copy link"
-                    variant="outline"
-                    onPress={async () => {
-                      await copyToClipboard(joinUrl(APP_URL, link.token!));
-                      showToast('Link copied');
-                    }}
-                    style={styles.codeButton}
-                  />
-                  <Button
-                    label="Stop sharing"
-                    variant="outline"
-                    onPress={handleStopSharing}
-                    disabled={busyLink2}
-                    style={styles.codeButton}
-                  />
-                </View>
-              </>
-            ) : (
-              <Button
-                label="Show a QR code"
-                variant="outline"
-                onPress={handleShowCode}
-                loading={busyLink2}
-                disabled={busyLink2 || (properties.length > 1 && startOn.length === 0)}
-                fullWidth
-                icon="qr-code-outline"
-              />
-            )}
-          </View>
 
           {/* The address invitation stays, second: somebody who has not got
               the other person's phone number can still name an address. It
@@ -915,8 +811,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 19,
   },
-  codeActions: { flexDirection: 'row', gap: Spacing.sm },
-  codeButton: { flex: 1 },
   placeRow: {
     paddingVertical: Spacing.sm,
     borderTopWidth: 1,

@@ -260,10 +260,57 @@ Deleting them is a dashboard job: **Edge Functions → the function → Settings
 Supabase MCP server can deploy and read functions but cannot delete one, so this cannot be done
 from a session here.
 
+**`notify-snag` is a tombstone until then** (version 24, 28 September 2026). It was redeployed as
+a function that returns `410 Gone` and reads no secret, with JWT verification now **on**. A
+signed-out `curl -X POST …/functions/v1/notify-snag` answers `401`, and one with the anon key
+answers `410`. Nothing calls it any more: `overdue-actions-digest`, the cron job that did, is
+unscheduled. See *The archive stops answering* below. The other four are JWT-on and untouched,
+and still to be deleted.
+
 Their function secrets, which are not recoverable from anywhere else:
 `RESEND_API_KEY`, `SNAG_FROM_ADDRESS` (`noreply@snaghq.co.nz`), `SNAG_PORTAL_URL`. `RESEND_API_KEY`
 is used by nothing else — Auth's SMTP password is a *separate* Resend key — so it goes when the
 functions do.
+
+### The archive stops answering — its cron job and its functions
+
+Two parts of the retired product were still live on 28 September 2026, and
+`20260928090000_the_archive_stops_speaking` closed both:
+
+- **A daily email.** `overdue-actions-digest` (pg_cron, 18:00 UTC) posted to `notify-snag`
+  whenever one of the pilot orgs had an overdue corrective action. One did, so *"1 overdue
+  corrective action"* went to three people every day from the pivot to 27 September. The job is
+  unscheduled. **`retention-minimisation` is left scheduled.** It blanks resolved niggles more
+  than three years old, which was promised to the pilot orgs, and it cannot match a row until
+  2029. It runs as `postgres`, so the revoke below does not touch it.
+- **116 functions any signed-in caller could run.** Every `public` SECURITY DEFINER function was
+  executable by `authenticated`, and three by `anon`. Every household account is `authenticated`,
+  so any of them could call `create_organisation_and_owner` and write into the archive. The
+  migration revokes EXECUTE on every `public` function from `public`, `anon` and
+  `authenticated`.
+
+**Four are granted back to `authenticated`, and they must stay granted:** `current_org_id()`,
+`"current_role"()`, `can_view_site(uuid)` and `is_org_active(uuid)`. The retired product's
+`storage.objects` policies call the first two. One of those policies reads `public.snags`, whose
+own policies call the other two. `storage.objects` is shared by both products, and a policy's
+functions are checked for EXECUTE as the caller when the query is planned. So revoking any of the
+four raises `42501` on **every** home photo read and upload.
+
+The list was found by rehearsing the migration inside a rolled-back transaction as a household
+member, not by reading. A text search of `pg_policies` misses `"current_role"` (the name is quoted)
+and `can_view_site` (no storage policy names it). **Check it the same way before touching a
+`public` grant again:**
+
+```bash
+# The closure from pg_depend, and every assertion. Reads the catalogue and rolls back.
+psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/archive_locked.sql
+```
+
+It passed against the live project on 28 September 2026. As a member, storage read 151 photos and
+53 documents, an insert and an update passed, and `public.accept_rca` was refused. Over HTTP,
+`/rest/v1/rpc/get_org_by_join_code` with the anon key answers `42501`, and a signed-out `home` read
+still answers `42501`. The advisor's `authenticated_security_definer_function_executable` goes
+from 116 findings to 4, and those four are deliberate.
 
 ### Auth — shared by both schemas
 
@@ -296,7 +343,8 @@ curl -s "https://wpkdpukpllxuyqqlxkxf.supabase.co/auth/v1/settings" \
 ```
 
 `mailer_autoconfirm` must be `false` (confirmation on) and `anonymous` must be `false`. On
-25 September 2026 it read `false` and `true` — confirmation on, anonymous sign-ins still on. The
+25 September 2026 it read `false` and `true` — confirmation on, anonymous sign-ins still on — and
+it still read that on 28 September. The
 template, the redirect allow-list and the password minimum are not in that answer.
 
 - **Confirm email: on** (Auth → Providers → Email). **This is load-bearing, not a preference.** An
@@ -423,7 +471,7 @@ where u.email = '<E2E_EMAIL>';
 
 | Host | Serves |
 |---|---|
-| `www.snaghq.co.nz` | `apps/web` — the password-reset landing page (`/staff/*` redirects to the portal) |
+| `www.snaghq.co.nz` | `apps/web` — the front page, `/privacy`, `/terms` and password recovery (`/staff/*` redirects to the portal) |
 | `staff.snaghq.co.nz` | `apps/staff` — the SnagHQ staff portal |
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the actual app |
 | `snagv1.netlify.app` | redirect to `app.snaghq.co.nz`; must keep resolving (printed QR codes, old notification links) |
@@ -504,7 +552,50 @@ layout those paths assume.
 | `snagv1` | `016c74e6-9a37-4b0f-8d23-94a5339bb850` | app.snaghq.co.nz |
 | `snag-app-website` | `7fc0b551-9069-4b2c-b66f-c77dd9d4a808` | www.snaghq.co.nz |
 
-Pushing to `main` does **not** trigger a build — deploys are API-driven.
+**Merging to `main` does deploy `snagv1`.** This note used to say otherwise. Checked on
+28 September 2026: the production deploy of `619814e` (the merge of #53) started two seconds
+after the merge commit, from `main`, with `manual_deploy: false`. Netlify reports
+`deploy_source: "api"` for it anyway, which is presumably where the old note came from. So the
+rule in CLAUDE.md stands: **apply a migration before merging the code that needs it**, because
+the merge is the deploy.
+
+## Error reporting (Sentry)
+
+The web build reports errors to Sentry once `EXPO_PUBLIC_SENTRY_DSN` is set on the `snagv1` site
+(a plain variable: a DSN is public by design and ships in the bundle). Until then nothing
+initialises and nothing is fetched. What it sends, and what is scrubbed first, is in
+`apps/mobile/src/lib/monitoring.web.ts` and `monitoringScrub.ts`.
+
+To switch it on:
+
+1. Create a **Browser / React** project in Sentry. In the project's settings, leave **Session
+   Replay** off and **data scrubbing** on (the app scrubs too; this is the second lock).
+2. Set `EXPO_PUBLIC_SENTRY_DSN` on `snagv1`, production context. Optionally set
+   `EXPO_PUBLIC_SENTRY_ENVIRONMENT` (defaults to `production`). Read it back, since "upserted" is
+   not evidence (see *The staff portal*).
+3. Check the DSN's ingest host is covered by `connect-src` in `apps/mobile/netlify.toml`
+   (`*.ingest.sentry.io`, `*.ingest.us.sentry.io`, `*.ingest.de.sentry.io`). A blocked report
+   fails silently.
+4. Redeploy. Expo inlines the variable at build time, so an existing deploy never sees it.
+
+The SDK is a separate 1.2 MB chunk loaded with `import()` only once a DSN exists. The main bundle
+moved by 2 KB. A static import had added 1.2 MB for every visitor.
+
+## Migration versions, file against live
+
+Migrations applied through the Supabase MCP get the timestamp of the moment they were applied,
+not the one in the file name, so the two can differ. What matters is that each file name is
+unique in `supabase/migrations/` (the CLI refuses a duplicate) and that every file has been
+applied:
+
+| File | Live version |
+|---|---|
+| `20260925074528_an_anonymous_session_is_not_an_account` | `20260925074528` (renamed to match; it had duplicated `20260926100000`) |
+| `20260926100000_the_project_page_is_read_part_by_part` | `20260925075301` |
+| `20260927100000_a_model_is_looked_up_once` | `20260927182857` |
+| `20260927110000_a_lookup_google_refused` | `20260927191658` |
+| `20260928090000_the_archive_stops_speaking` | `20260928014324` |
+| `20260928100000_what_snag_keeps_about_you` | `20260928015049` |
 
 ## Preservation
 

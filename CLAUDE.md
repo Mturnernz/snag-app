@@ -45,7 +45,7 @@ snag/
 │   │       ├── screens/           # SnagList (home), SnagDetail, House, HouseRoom, ThingDetail,
 │   │       │                       #   Household, LocationTags, Profile, Auth, Setup
 │   │       └── components/
-│   ├── web/                       # Next.js — /, /forgot-password, /reset-password, /privacy. That's it.
+│   ├── web/                       # Next.js — the front page, /privacy, /terms, /forgot-password, /reset-password
 │   └── staff/                     # Next.js — the SnagHQ staff portal, staff.snaghq.co.nz
 ├── packages/
 │   ├── shared-types/              # @snag/shared-types — enums, row types, labels, nav params
@@ -138,6 +138,20 @@ The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
 
 Don't write to `public`. Don't "tidy" it. Don't copy patterns out of its migrations without
 reading why they were there — a lot of them answer regulatory questions a house doesn't have.
+
+**Nothing in `public` answers a caller any more, bar four functions storage needs.** Until
+`20260928090000` every retired SECURITY DEFINER function was executable by `authenticated`. That
+includes every household account, so any of them could call `create_organisation_and_owner` and
+write into the archive. The retired digest cron was still emailing pilot users every day as well.
+Both are closed.
+
+`current_org_id`, `"current_role"`, `can_view_site` and `is_org_active` stay granted to
+`authenticated`. The retired `storage.objects` policies reach them, directly or through
+`public.snags`'s own policies, and storage is one table for both products. Revoke any of them and
+every home photo read raises `42501` — *An RLS policy's functions need EXECUTE*, one schema over.
+**The list is computed from `pg_depend`, never read off `pg_policies`**: a text search missed two
+of the four. `supabase/tests/archive_locked.sql` asserts the closure. Run it before touching any
+`public` grant.
 
 ### Writes go through RPCs
 
@@ -4019,6 +4033,27 @@ alone on. Files first, then the account, then `signOut`: the storage delete poli
 `home.is_member(<household id>)`, so an account that has deleted itself cannot clear up after
 itself. Same rule as deleting a household, written up under *Taking someone, or something, away*.
 
+### A copy of what is kept
+
+**Download my data** sits on the You tab, above Delete, and is Privacy Act principle 6 as one press.
+It replaces an email to somebody running queries by hand. `home.export_my_data()` is **SECURITY
+INVOKER** over the tables themselves, a named list of 31, so the row policies decide what is in the
+file: exactly what this person could open in the app. There is no filter in the function for a
+policy to disagree with.
+
+Three things are left out, each deliberately:
+
+- **The two tokens.** `invitations.token` is a live way into the household and
+  `projects.inbox_token` is the bill address. An export is a file that gets forwarded.
+- **The tables with no read policy** (`label_reads`, `staff`, `support_access_log`).
+- **Signed URLs.** Files are listed by storage path, so a forwarded file grants nothing.
+
+One `execute` per table, for `project_page`'s reason. A table added to `home` is not exported until
+it is added to that list. One JSON file, not a zip, because a zip is a dependency.
+`supabase/tests/export_my_data.sql` pins two households each seeing only their own, the tokens
+stripped, and a signed-out caller refused in words. `ProfileScreen.test.tsx` pins the one read, the
+file name and the refusal as a sentence.
+
 ### A profile outlives its login
 
 **`home.profiles.id` no longer cascades from `auth.users`**, and this is the load-bearing part.
@@ -4490,6 +4525,28 @@ grey mid-press reads as the action having failed.
   session, so `signOut` is bounded and falls back to dropping the stored session directly. Local
   scope, not global: signing out of a device means that device.
 
+## Error reporting, and what a report may carry
+
+The web build reports errors to Sentry, **inert until `EXPO_PUBLIC_SENTRY_DSN` is set**
+(`SNAG_INFRA_NOTES.md`, *Error reporting*). `lib/monitoring.web.ts` is the real one, and Metro picks
+it for the web export. `lib/monitoring.ts` is a no-op that native builds and jest resolve.
+
+- **The SDK is loaded with `import()`, and must stay that way.** Metro does not tree-shake, and a
+  static `import * as Sentry` took the main bundle from 3.60 MB to 4.81 MB for every visitor. Lazily
+  it is its own chunk, fetched only once a DSN exists.
+- **The privacy statement's sentence is `lib/monitoringScrub.ts`**: *links, email addresses and
+  anything you typed removed first, and nothing recording your screen*. It masks the join token in
+  `/join/<token>`. It drops every query string and fragment, which is where a storage signature and
+  a recovery session live. It masks emails, drops the user, body, cookies and headers, and drops
+  console breadcrumbs whole. Every `dataCollection` category is off, and there is no tracing or
+  replay. Changing what a report carries is changing that sentence on `/privacy`.
+  `monitoringScrub.test.ts` pins each secret.
+- **`enhanceFetchErrorMessages: 'report-only'`.** The app words a failed request from its own
+  message, and the SDK must not rewrite it.
+- **`AppErrorBoundary` wraps the root.** A render that throws says *Something went wrong* with a
+  Reload, rather than leaving a blank plaster page nobody can tell from a slow connection.
+- `connect-src` names Sentry's regional ingest hosts, pinned by `csp.test.ts`.
+
 ## The staff portal: SnagHQ answers a job it was asked about
 
 A household taps **Ask SnagHQ about this** on a job and types a question. A SnagHQ employee picks it
@@ -4628,7 +4685,7 @@ under *The staff portal*.
 | Host | What it serves |
 |---|---|
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the app people install |
-| `www.snaghq.co.nz` | `apps/web` — the root page, password recovery and the privacy statement |
+| `www.snaghq.co.nz` | `apps/web` — the front page, the privacy statement, the terms and password recovery |
 | `staff.snaghq.co.nz` | `apps/staff` — the SnagHQ staff portal |
 | `snagv1.netlify.app` | redirect to `app.snaghq.co.nz` |
 
@@ -4640,8 +4697,15 @@ the right screen rather than the default tab.
 ## Why apps/web still exists
 
 One reason: **password recovery has to land on a plain web page.** (The privacy statement,
-`/privacy`, lives here for the same reason — the sign-up screen links to it, and it has to open in
-any browser for somebody who has no account yet. See *Signing up*.)
+`/privacy`, and the terms, `/terms`, live here for the same reason — the sign-up screen links to
+both, and they have to open in any browser for somebody who has no account yet. See *Signing up*.)
+
+**It is also the front door.** `/` says what Snag is in the app's own words, gives the install
+steps (there is no store listing), and links privacy, terms, help and recovery. Every sentence on it
+is a rule in this file: capture asks after it files, suggestions are offers, nothing sends a
+notification. A claim there that the app cannot keep is the fastest way to lose somebody on their
+first day. `/terms` is a **draft** until its `DRAFT` flag is switched off, in the same change that
+fills in the entity, NZBN and address placeholders.
 
 `@supabase/ssr` forces PKCE, and a PKCE recovery link only works in the browser that asked for it
 — auth-js wants the `code` *and* a stored verifier, and with the verifier missing it doesn't
@@ -4774,6 +4838,25 @@ Four things about the change:
 navigation-bar plugin — two builds of one app disagreeing about whether Android's controls are on
 screen is drift nothing else would catch, since each is configured in a different file, in a
 different vocabulary, and neither build renders the other.
+
+### Asking once to be installed
+
+Snag is installed from the browser, so a tab has to be told there is anything to install, and a tab
+is the thing that gets closed and lost. `InstallCard` sits at the top of the list's header. It is
+**asked once**: its × is remembered per device, guarded like the list's folds. It shows only on the
+web build, in a phone's browser, when the display mode says the app is not installed
+(`installState.ts`: `fullscreen`, `standalone`, `minimal-ui` or iOS's `navigator.standalone`).
+
+- **An iPhone** gets Safari's share-sheet steps.
+- **Android** gets Chrome's menu steps, or a one-tap **Install** when `beforeinstallprompt` was
+  caught. It is caught at module load in `useInstallPrompt`, because Chrome fires it once, early,
+  and only to a listener already there.
+- **The You tab** keeps a permanent row with no ×, for somebody who closed the card.
+
+It is quiet: a white group, no hue, because it is neither a state nor something to act on now. It
+never says the installed app "stays signed in". On iOS a home-screen app has storage of its own and
+asks you to sign in once, and a card that promises otherwise is a card that lies on the first day.
+`installState.test.ts` and `InstallCard.test.tsx` pin it.
 
 ## Corners and edges, on an iPhone and on Android
 

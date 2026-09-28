@@ -264,19 +264,25 @@ What changed, top to bottom:
   done* is the one filled button); once asked, `SupportCard` takes that slot. `AdviceCard` stays
   under the items card, next to the list its parts go into.
 - **A one-off job has no due date.** The date box, *This weekend* / *Next week* and the *No date*
-  chip are gone, by the owner's decision. **Repeats is the last section**: a cycle dates an undated
-  job a cycle out and leaves a set date alone; pressing the lit cycle on an undated repeat dates
-  it; **Never clears the date as well as the repeat**, because with no box to clear it from, a
-  stopped repeat's date would sit under *Due soon* and go overdue for ever. The hint states the
-  next day (*Next due 08/11/2026*), since nothing else on the page does. `commitPending` has only
-  the shopping box left to commit. Checked when it shipped: no open one-off job had a date, so
-  nothing was stranded.
+  chip are gone, by the owner's decision. `commitPending` has only the shopping box left to
+  commit. Checked when it shipped: no open one-off job had a date, so nothing was stranded.
+- **Repeats is the last thing on the page: one row, *Repeats … Never ›*, that opens a sheet**
+  (`RepeatSheet`). It was a rail of five chips taking three lines; the owner chose the row. The
+  row's subtitle is the fact — *Next due 08/11/2026*, since nothing else on the page states the
+  day, or *No date yet* — and the sheet holds the choices as `RadioRow`s with one line under them
+  saying what marking it done does. **A press writes and closes**, so there is no *Done* to forget,
+  and closing without a press writes nothing: the modal behind a *Yes* that was removed from this
+  page once failed on exactly those two, and neither comes back. What a press writes is unchanged:
+  a cycle dates an undated job a cycle out and leaves a set date alone; picking the lit cycle on
+  an undated repeat dates it; **Never clears the date as well as the repeat**, because with no box
+  to clear it from, a stopped repeat's date would sit under *Due soon* and go overdue for ever. A
+  refused write keeps the sheet open with the reason under the choices.
 
 Proposed and turned down, so it is not proposed again:
 
 - **A status ▾** — status is derived, and *Mark done* is the one state change made by hand.
-- **A *Due* pill opening a sheet holding the date and the repeat** — dates are gone, and the repeat
-  stays one tap at the foot; a modal behind a *Yes* was removed from this page once already.
+- **A *Due* pill under the headline opening a sheet holding the date and the repeat** — dates are
+  gone, and the repeat has its own row at the foot rather than a second door at the top.
 - **Ask SnagHQ as an AI prompt card, or as an icon in the header** — SnagHQ is a person reading the
   job, not a model, and suggested prompts on every job would advertise a service. The owner chose
   one button under Notes.
@@ -296,7 +302,8 @@ drops it. Posting it would send a message nobody finished, so it needs a decisio
 
 `SnagDetailScreen.test.tsx` pins it: no date box and no quick dates, repeat or not; a cycle dating
 an undated job and leaving a set date alone; the lit cycle dating an undated repeat; *Never*
-clearing both; the hint's day; the meta row stating a date only when there is one and offering no
+clearing both; the row naming the answer and the day, the sheet shut until the row is pressed and
+closing on a pick, and a refusal keeping it open; the meta row stating a date only when there is one and offering no
 way to set one; the items card's two headings, the room's pills on their own row, and the
 checklist box adding once on Return-then-blur with no *Add* button; the photo buttons over the first
 photo and never inside its door, and the pills with no photo; *Added by* only for somebody else;
@@ -490,7 +497,7 @@ Adding one deliberately does not start the job — photographing something is no
 
 **A one-off job has no due date.** It had one — a `DateField` with *This weekend* and *Next week*,
 added because `due_at` was once reachable only through a repeat — and it came off by the owner's
-decision in *The job page review*. The date that remains is a repeat's: the *Repeats* chips at the
+decision in *The job page review*. The date that remains is a repeat's: the *Repeats* row at the
 foot of the page set it a cycle out, and *Never* clears it with the repeat. The Schedule tab's
 *Due* marks, *Due soon* and the overdue badge still read `due_at`, so they keep working for
 repeats; a one-off simply never has one. `DateField` is untouched and still takes every other date
@@ -833,27 +840,34 @@ RLS does the filtering rather than the query pretending to: the comments policy 
 property, so this returns exactly what this person could have read by opening those jobs one at a
 time.
 
-**Setting up a repeat is one tap, and it is the page's last section.** It was a due-date card,
-then a *Schedule a recurring job* card holding only Yes and No, then a modal behind the Yes asking
-how often and — again — *"When's the next one due?"* with its own date presets; then one *When*
-card with a date box above the chips. The date box has gone (see *The job page review*), so
-**Repeats** stands alone at the foot — *Never* and the `REPEAT_PRESETS` as chips that write when
-pressed, plus the job's own cycle when it is not a preset (a heat pump's 730 days from the thing
-page must not read as *Never*). Choosing a cycle dates an undated job a cycle out; a date already
-set is left alone; pressing the lit cycle on a repeat with no date dates it; *Never* clears the
-date with the repeat. One sentence under it states the next day, says what marking it done does
-and that it comes up under **Due soon** on the list — *Snag doesn't send reminders* is still said,
-because a repeat is exactly what somebody expects to be reminded about.
+**A repeat is set from one row at the foot of the page.** It was a due-date card, then a
+*Schedule a recurring job* card holding only Yes and No, then a modal behind the Yes asking how
+often and — again — *"When's the next one due?"* with its own date presets; then one *When* card
+with a date box above a rail of chips; then the rail alone. It is now **one row — *Repeats …
+Never ›*** — by the owner's decision, because the rail took three lines to hold one answer.
 
-**The sentence shows the day it is due.** `formatLooseDate` is built for date columns and reads a
-timestamp's day as nothing, so a job due on the 8th would show as *Nov 2026*. The hint uses
-`formatDayFirst(dayKey(due_at))` — the local day, day first.
+The row opens `RepeatSheet`: *Never* and the `REPEAT_PRESETS` as `RadioRow`s, plus the job's own
+cycle when it is not a preset (a heat pump's 730 days from the thing page must not read as
+*Never*, on the row or in the sheet). **A press writes and closes**; closing without one writes
+nothing. That is the difference from the modal this page removed, which opened on *Yes* without
+writing anything and so left *No* lit when dismissed — here the row always says what the row
+holds. Choosing a cycle dates an undated job a cycle out; a date already set is left alone;
+picking the lit cycle on a repeat with no date dates it; *Never* clears the date with the repeat.
+The sheet's one line says what marking it done does and that it comes up under **Due soon** on
+the list — *Snag doesn't send reminders* is still said, because a repeat is exactly what somebody
+expects to be reminded about.
+
+**The row shows the day it is due.** `formatLooseDate` is built for date columns and reads a
+timestamp's day as nothing, so a job due on the 8th would show as *Nov 2026*. The row's subtitle
+uses `formatDayFirst(dayKey(due_at))` — the local day, day first — and it is the only place on the
+page the day is written.
 
 `SnagDetailScreen.test.tsx` pins the edit sheet writing both fields in one call, the refusal on a
 photo-less job with no words, the linked-assets list offering this room only and writing nothing,
 its absence when the room is empty, the page surviving a failed record read, the history card and
-its exclusion, the repeats (one tap, a date left alone, an undated repeat dated by its lit chip,
-*Never* clearing both, a cycle the presets lack, the day stated) — and leaving: no Save or Close,
+its exclusion, the repeats (the row and its sheet, a pick writing and closing, a date left alone,
+an undated repeat dated by its lit choice, *Never* clearing both, a cycle the presets lack, the day
+stated, a refusal kept open) — and leaving: no Save or Close,
 nothing written when nothing is typed, one write for the shopping box on `beforeRemove`, staying
 put on a failure, and the box committed before *Mark done*.
 
@@ -3761,10 +3775,10 @@ day counts, and that each preset's label matches what `describeCycle` says about
 The weeks and days branches stay, because `create_snag` accepts any interval from 1 to 3650 and an
 extract should say what the row actually holds rather than round it into a lie.
 
-Setting one up is **one tap on the *Repeats* row**, the job page's last section: *Never* first and
-lit by default, then the presets. It was a yes/no card with the cycle and a second set of date
-controls in a modal behind the Yes, and later sat under a due-date box that has since gone — see
-*Setting up a repeat is one tap* under triage. A repeat with no date on it would never surface, so
+Setting one up is **the *Repeats* row**, the job page's last thing, and a pick in the sheet it
+opens: *Never* first and lit by default, then the presets. It was a yes/no card with the cycle and
+a second set of date controls in a modal behind the Yes, later a rail of chips under a due-date box
+— see *A repeat is set from one row* under triage. A repeat with no date on it would never surface, so
 choosing an interval sets one; an existing date is never clobbered; *Never* clears both.
 
 ## A date is typed or tapped, and never only tapped
@@ -4384,9 +4398,8 @@ Two badges carry the triage vocabulary, and their colour budget is deliberate:
 
 ### One chip, every rail
 
-The "Show me" sheet on `SnagListScreen`, the repeat modal's rails on `SnagDetailScreen`, the
-project-mode pair on `ProfileScreen` and the room rows in `RoomPicker` all say the same thing the
-same way: **a sunken well when off, solid fern when on, no border either way.** Two rules follow from that:
+The chip rails that remain — the project-mode pair on `ProfileScreen`, the room rows in
+`RoomPicker`, the export sheet's choices — all say the same thing the same way: **a sunken well when off, solid fern when on, no border either way.** Two rules follow from that:
 
 - **Never put an inactive control on `surface` with a border.** On a plaster ground a white
   bordered box is a *card*, so a row of filters styled that way reads as a row of things to read

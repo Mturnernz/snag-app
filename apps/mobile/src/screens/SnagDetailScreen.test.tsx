@@ -549,12 +549,29 @@ describe('the top of the page', () => {
 //
 // A one-off job has no due date any more: the date box and its two quick dates
 // came off the page by the owner's decision (September 2026). What still has a
-// date is a job that comes round, and the Repeats chips — the page's last
-// section — are what set it.
+// date is a job that comes round, and the Repeats row — the page's last thing —
+// is what sets it: one row stating the answer, opening a sheet of choices where
+// a press writes and closes.
 
 describe('repeats, and no due date', () => {
   const texts = (r: ReturnType<typeof render>) =>
     r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
+
+  /** The Repeats row on the page — its label carries the answer. */
+  const repeatsRow = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && !!n.props?.onPress
+      && typeof n.props?.accessibilityLabel === 'string'
+      && n.props.accessibilityLabel.startsWith('Repeats:'),
+    { deep: true },
+  )[0];
+
+  /** A choice in the sheet, by its words. Absent while the sheet is shut. */
+  const choice = (r: ReturnType<typeof render>, title: string) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.title === title
+      && typeof n.props?.selected === 'boolean',
+  )[0];
+
+  const openRepeats = async (r: ReturnType<typeof render>) => { await press(repeatsRow(r)); };
 
   it('has no date box and no quick dates, repeating or not', async () => {
     for (const row of [snag({ repeatDays: null, dueAt: null }), snag({ repeatDays: 180, dueAt: ahead(30) })]) {
@@ -568,26 +585,35 @@ describe('repeats, and no due date', () => {
     }
   });
 
-  it('offers how often it repeats, with nothing behind a Yes', async () => {
+  // One row saying the answer, where a rail of five chips took three lines —
+  // and nothing behind a Yes.
+  it('is one row stating the answer, with the choices behind it', async () => {
     const r = await arrange(snag({ repeatDays: null }));
 
-    expect(r.queryByText('Repeats')).not.toBeNull();
-    expect(button(r, 'Never')).toBeDefined();
-    expect(button(r, 'Every 6 months')).toBeDefined();
+    expect(repeatsRow(r).props.accessibilityLabel).toBe('Repeats: Never');
+    expect(button(r, 'Never')).toBeUndefined();
+    expect(button(r, 'Every 6 months')).toBeUndefined();
+    expect(choice(r, 'Every 6 months')).toBeUndefined();
     expect(button(r, 'Yes')).toBeUndefined();
-    expect(r.queryByText('How often does it come round?')).toBeNull();
+
+    await openRepeats(r);
+    expect(choice(r, 'Never').props.selected).toBe(true);
+    expect(choice(r, 'Every 6 months').props.selected).toBe(false);
     expect(r.queryByText("When's the next one due?")).toBeNull();
   });
 
-  it('sets a repeat in one tap, dating it a cycle out when it had no date', async () => {
+  it('sets a repeat with one pick, dating it a cycle out, and closes', async () => {
     mock_updateSnag.mockResolvedValue(snag({ repeatDays: 180, dueAt: ahead(180) }));
     const r = await arrange(snag({ repeatDays: null, dueAt: null }));
 
-    await press(button(r, 'Every 6 months'));
+    await openRepeats(r);
+    await press(choice(r, 'Every 6 months'));
     const [, update] = mock_updateSnag.mock.calls[0];
     expect(update.repeatDays).toBe(180);
     const days = (new Date(update.dueAt).getTime() - Date.now()) / DAY;
     expect(Math.round(days)).toBe(180);
+    expect(choice(r, 'Every 6 months')).toBeUndefined();
+    expect(repeatsRow(r).props.accessibilityLabel).toBe('Repeats: Every 6 months');
   });
 
   it('leaves a date already set alone when a repeat is chosen', async () => {
@@ -595,26 +621,30 @@ describe('repeats, and no due date', () => {
     mock_updateSnag.mockResolvedValue(snag({ repeatDays: 30, dueAt: due }));
     const r = await arrange(snag({ repeatDays: null, dueAt: due }));
 
-    await press(button(r, 'Monthly'));
+    await openRepeats(r);
+    await press(choice(r, 'Monthly'));
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: 30, dueAt: due });
   });
 
-  it('writes nothing when the cycle already lit is pressed again', async () => {
+  it('writes nothing when the cycle already lit is picked again, and closes', async () => {
     mock_updateSnag.mockClear();
     const r = await arrange(snag({ repeatDays: 180, dueAt: ahead(30) }));
 
-    await press(button(r, 'Every 6 months'));
+    await openRepeats(r);
+    await press(choice(r, 'Every 6 months'));
     expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(choice(r, 'Every 6 months')).toBeUndefined();
   });
 
   // A repeat with no date never comes round, and with no date box the lit
-  // chip is the only way such a row can be given one.
-  it('dates a repeat that has no date when its cycle is pressed again', async () => {
+  // choice is the only way such a row can be given one.
+  it('dates a repeat that has no date when its cycle is picked again', async () => {
     mock_updateSnag.mockResolvedValue(snag({ repeatDays: 180, dueAt: ahead(180) }));
     const r = await arrange(snag({ repeatDays: 180, dueAt: null }));
-    expect(texts(r).join(' ')).toContain('No date yet');
+    expect(texts(r)).toContain('No date yet');
 
-    await press(button(r, 'Every 6 months'));
+    await openRepeats(r);
+    await press(choice(r, 'Every 6 months'));
     const [, update] = mock_updateSnag.mock.calls[0];
     expect(update.repeatDays).toBe(180);
     expect(Math.round((new Date(update.dueAt).getTime() - Date.now()) / DAY)).toBe(180);
@@ -626,7 +656,8 @@ describe('repeats, and no due date', () => {
     mock_updateSnag.mockResolvedValue(snag({ repeatDays: null, dueAt: null }));
     const r = await arrange(snag({ repeatDays: 180, dueAt: ahead(30) }));
 
-    await press(button(r, 'Never'));
+    await openRepeats(r);
+    await press(choice(r, 'Never'));
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: null, dueAt: null });
   });
 
@@ -634,7 +665,8 @@ describe('repeats, and no due date', () => {
     mock_updateSnag.mockClear();
     const r = await arrange(snag({ repeatDays: null, dueAt: null }));
 
-    await press(button(r, 'Never'));
+    await openRepeats(r);
+    await press(choice(r, 'Never'));
     expect(mock_updateSnag).not.toHaveBeenCalled();
   });
 
@@ -642,19 +674,37 @@ describe('repeats, and no due date', () => {
   // days; a row that could not show it would read as Never.
   it('shows a cycle the presets do not carry', async () => {
     const r = await arrange(snag({ repeatDays: 730, dueAt: ahead(30) }));
-    expect(button(r, 'Every 2 years').props.active).toBe(true);
-    expect(button(r, 'Never').props.active).toBe(false);
+    expect(repeatsRow(r).props.accessibilityLabel).toBe('Repeats: Every 2 years');
+
+    await openRepeats(r);
+    expect(choice(r, 'Every 2 years').props.selected).toBe(true);
+    expect(choice(r, 'Never').props.selected).toBe(false);
   });
 
-  // Nothing else on the page shows the day any more, so the sentence does —
-  // the local day, day first, never just the month.
-  it('says the day it is next due, and what happens after', async () => {
+  // Nothing else on the page shows the day any more, so the row does — the
+  // local day, day first, never just the month. What happens after is the
+  // sheet's to say, because a row carries facts rather than commentary.
+  it('states the day it is next due on the row, and what happens after in the sheet', async () => {
     const r = await arrange(snag({ repeatDays: 180, dueAt: '2026-11-08T00:00:00.000' }));
-    const said = texts(r).join(' ');
+    expect(texts(r)).toContain('Next due 08/11/2026');
+    expect(texts(r).join(' ')).not.toContain('Due soon');
 
-    expect(said).toContain('Next due 08/11/2026');
+    await openRepeats(r);
+    const said = texts(r).join(' ');
     expect(said).toContain('every 6 months');
     expect(said).toContain('Due soon');
+  });
+
+  // A refusal is a fact about the press, so it is said where the press was,
+  // with the sheet still open.
+  it('keeps the sheet open and says why when the write is refused', async () => {
+    mock_updateSnag.mockRejectedValueOnce(new Error('Could not save that'));
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
+
+    await openRepeats(r);
+    await press(choice(r, 'Yearly'));
+    expect(choice(r, 'Yearly')).toBeDefined();
+    expect(texts(r)).toContain('Could not save that');
   });
 });
 

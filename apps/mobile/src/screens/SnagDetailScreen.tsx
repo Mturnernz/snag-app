@@ -21,7 +21,8 @@ import AskSnagHQSheet from '../components/AskSnagHQSheet';
 import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
 import LinkAssetsSheet from '../components/LinkAssetsSheet';
-import { SectionTitle } from '../components/Grouped';
+import { Group, Row, SectionTitle } from '../components/Grouped';
+import RepeatSheet from '../components/RepeatSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -105,29 +106,45 @@ function unsavedHint(count: number): string {
 }
 
 /**
- * The arrangement, in words — and the day, because nowhere else on the page
- * says it.
- *
- * There was a due-date box above this and the sentence deliberately left the
- * day out, so the same date was not on screen twice. The box is gone (a
- * one-off job does not get a date any more), so the one place the next day
- * can be read is here. `dayKey` is the one place an instant becomes a local
- * calendar day, and `formatDayFirst` writes it the way people here do.
+ * The *Repeats* row's value: the chip label the job's cycle had, or *Never*.
+ */
+function repeatLabel(snag: Snag): string {
+  if (!snag.repeatDays) return 'Never';
+  return repeatChoices(snag.repeatDays)
+    .find((choice) => choice.days === snag.repeatDays)?.label ?? `Every ${describeCycle(snag.repeatDays)}`;
+}
+
+/**
+ * The row's own line under it — a fact, never commentary, as every V2 row's
+ * is: the day it next comes round, because nothing else on the page says it
+ * now the due-date box is gone. `dayKey` is the one place an instant becomes a
+ * local calendar day, and `formatDayFirst` writes it the way people here do.
  *
  * A repeat with no date never comes up, and choosing a cycle always dates one,
- * so this only happens to a row from before — the sentence says how to fix it
- * rather than claiming the job will come round.
+ * so *No date yet* only happens to a row from before; the sheet's line says how
+ * to fix it.
  */
-function describeRepeat(snag: Snag): string {
-  if (!snag.repeatDays) return '';
+function repeatFact(snag: Snag): string | null {
+  if (!snag.repeatDays) return null;
+  return snag.dueAt ? `Next due ${formatDayFirst(dayKey(snag.dueAt))}` : 'No date yet';
+}
+
+/**
+ * The line in the sheet, under the choices: what marking it done does and
+ * where it turns up. *Snag doesn't send reminders* is still said, because a
+ * repeat is exactly what somebody expects to be reminded about.
+ */
+function repeatHint(snag: Snag): string {
+  if (!snag.repeatDays) {
+    return 'A job that repeats comes up under Due soon on the list when it’s next due — Snag '
+      + 'doesn’t send reminders.';
+  }
   const every = describeCycle(snag.repeatDays);
   if (!snag.dueAt) {
-    const label = repeatChoices(snag.repeatDays)
-      .find((choice) => choice.days === snag.repeatDays)?.label ?? `Every ${every}`;
-    return `No date yet, so it won't come up. Tap ${label} again and it's due in ${every}.`;
+    return `It has no date yet, so it won't come up. Tap ${repeatLabel(snag)} and it's due in ${every}.`;
   }
-  return `Next due ${formatDayFirst(dayKey(snag.dueAt))}. Marking it done brings it back `
-    + `every ${every}. It comes up under Due soon on the list — Snag doesn't send reminders.`;
+  return `Marking it done brings it back every ${every}. It comes up under Due soon on the list — `
+    + 'Snag doesn’t send reminders.';
 }
 
 export default function SnagDetailScreen() {
@@ -169,6 +186,8 @@ export default function SnagDetailScreen() {
   const [celebrating, setCelebrating] = useState(false);
   /** Editing what the job says — its words and its room, together. */
   const [editing, setEditing] = useState(false);
+  /** Whether the Repeats sheet is up. */
+  const [repeating, setRepeating] = useState(false);
   /** The place's record, read when the picker opens rather than on page load. */
   const [things, setThings] = useState<Thing[]>([]);
   const [thingsLoading, setThingsLoading] = useState(false);
@@ -416,6 +435,36 @@ export default function SnagDetailScreen() {
    * re-rendered: reading the state both would see the same word and add it
    * twice.
    */
+  /**
+   * A choice in the Repeats sheet, onto the row — the rules the chips had,
+   * unchanged. A cycle dates an undated job a cycle out and leaves a set date
+   * alone; the lit cycle on a repeat with no date dates it; *Never* clears the
+   * date with the repeat. A press that would change nothing writes nothing.
+   *
+   * Not through `patch`, which says a failure in an alert: this throws, so the
+   * sheet stays open and says it under the choices, where the press was.
+   */
+  async function pickRepeat(days: number | null) {
+    if (!snag) return;
+    let update: Parameters<typeof updateSnag>[1];
+    if (days === null) {
+      if (!snag.repeatDays && !snag.dueAt) return;
+      update = { repeatDays: null, dueAt: null };
+    } else {
+      if (snag.repeatDays === days && snag.dueAt) return;
+      update = {
+        repeatDays: days,
+        dueAt: snag.dueAt ?? new Date(Date.now() + days * DAY_MS).toISOString(),
+      };
+    }
+    setBusy(true);
+    try {
+      setSnag(await updateSnag(snag.id, update));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addPart() {
     const item = partRef.current.trim();
     if (!snag || !item || busy) return;
@@ -1097,49 +1146,34 @@ export default function SnagDetailScreen() {
             that comes round — the filter, the gutters — still has a date, and
             that date is the repeat's to set.
 
-            So the chips write when pressed, as ever. A cycle dates an undated
-            job a cycle out and leaves a date already set alone (a heat pump's
-            service arrives from the thing page already dated). **Never clears
-            the date as well as the repeat**: with no box to clear it from, a
-            date a stopped repeat left behind would sit under *Due soon* and go
-            overdue for ever. Pressing the lit cycle on a repeat with no date
-            dates it — the only way such a row, from before, can come round.
+            **It is one row that opens a sheet** — *Repeats … Never ›* — by the
+            owner's decision, where it was a rail of five chips taking three
+            lines. The row states the answer and the day it next comes round;
+            `RepeatSheet` holds the choices. A press there writes and closes,
+            so there is no *Done* to forget, and closing without a press writes
+            nothing: the trap the old modal behind a *Yes* set does not come
+            back.
+
+            What a press writes is unchanged. A cycle dates an undated job a
+            cycle out and leaves a date already set alone (a heat pump's service
+            arrives from the thing page already dated). **Never clears the date
+            as well as the repeat**: with no box to clear it from, a date a
+            stopped repeat left behind would sit under *Due soon* and go overdue
+            for ever. Pressing the lit cycle on a repeat with no date dates it —
+            the only way such a row, from before, can come round.
 
             A repeat is one of the four things that start a job, which is right:
             deciding it comes round is deciding to do it. */}
-        <View style={styles.block}>
-          <SectionTitle title="Repeats" />
-          <Card elevation="md" style={styles.card}>
-            <View style={styles.optionRow}>
-              <Option
-                label="Never"
-                active={!snag.repeatDays}
-                onPress={() => {
-                  if (snag.repeatDays || snag.dueAt) patch({ repeatDays: null, dueAt: null });
-                }}
-                disabled={busy}
-              />
-              {repeatChoices(snag.repeatDays).map(({ days, label }) => (
-                <Option
-                  key={days}
-                  label={label}
-                  active={snag.repeatDays === days}
-                  onPress={() => {
-                    if (snag.repeatDays === days && snag.dueAt) return;
-                    patch({
-                      repeatDays: days,
-                      dueAt: snag.dueAt ?? new Date(Date.now() + days * DAY_MS).toISOString(),
-                    });
-                  }}
-                  disabled={busy}
-                />
-              ))}
-            </View>
-            {snag.repeatDays ? (
-              <Text style={styles.sectionHint}>{describeRepeat(snag)}</Text>
-            ) : null}
-          </Card>
-        </View>
+        <Group style={styles.repeatGroup}>
+          <Row
+            title="Repeats"
+            value={repeatLabel(snag)}
+            tone={snag.repeatDays ? 'default' : 'muted'}
+            subtitle={repeatFact(snag)}
+            onPress={() => setRepeating(true)}
+            accessibilityLabel={`Repeats: ${repeatLabel(snag)}`}
+          />
+        </Group>
       </ScrollView>
 
       {/* ── Mark done ──
@@ -1180,6 +1214,15 @@ export default function SnagDetailScreen() {
         photos={snag.photoPaths.map((path) => photoUrls[path]).filter(Boolean)}
         startIndex={viewing ?? 0}
         onClose={() => setViewing(null)}
+      />
+
+      <RepeatSheet
+        visible={repeating}
+        choices={[{ days: null, label: 'Never' }, ...repeatChoices(snag.repeatDays)]}
+        current={snag.repeatDays}
+        hint={repeatHint(snag)}
+        onPick={pickRepeat}
+        onClose={() => setRepeating(false)}
       />
 
       <AskSnagHQSheet
@@ -1234,22 +1277,6 @@ export default function SnagDetailScreen() {
         onCancel={() => setConfirmDelete(false)}
       />
     </KeyboardAvoidingView>
-  );
-}
-
-function Option({
-  label, active, onPress, disabled,
-}: { label: string; active: boolean; onPress: () => void; disabled?: boolean }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[styles.option, active && styles.optionActive]}
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-    >
-      <Text style={[styles.optionLabel, active && styles.optionLabelActive]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -1455,21 +1482,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.separator,
     marginVertical: Spacing.xs,
   },
-  sectionHint: { fontSize: Typography.sm, color: Colors.textMuted },
-  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  // The same chip as everywhere else: a sunken well when off, solid fern when
-  // on, no border either way. It sat on the ground colour with a border, which
-  // inside a white card is a box drawn around a box.
-  option: {
-    minHeight: MIN_TOUCH_TARGET - Spacing.md,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.button,
-    backgroundColor: Colors.sunken,
-  },
-  optionActive: { backgroundColor: Colors.primary },
-  optionLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
-  optionLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
+  // The Repeats row: a V2 group of one, the page's last thing. 28 under the
+  // Ask SnagHQ button, as between every other section.
+  repeatGroup: { marginTop: Spacing.xl },
   // The shopping list. Rows read like a list you'd scan in an aisle; the field
   // below is how you add to it, and is the only text input on this screen
   // besides a note.

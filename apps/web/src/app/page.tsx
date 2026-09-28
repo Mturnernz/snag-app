@@ -5,7 +5,8 @@ import styles from './page.module.css';
  * The only thing at the root of this host.
  *
  * Everything else here retired with the B2B product; what's left is password
- * recovery, which has to be a plain web page rather than a screen in the app.
+ * recovery, which has to be a plain web page rather than a screen in the app,
+ * and the privacy statement the app's sign-up screen links to.
  * Someone landing here has almost certainly followed an old link, so the page's
  * whole job is to point at the app.
  */
@@ -19,6 +20,9 @@ export default function Home() {
       </a>
       <Link className={styles.link} href="/forgot-password">
         Forgotten your password?
+      </Link>
+      <Link className={styles.link} href="/privacy">
+        Privacy
       </Link>
     </main>
   );

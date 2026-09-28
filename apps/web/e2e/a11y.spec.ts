@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-// Accessibility. axe-core against the three routes this host still serves.
+// Accessibility. axe-core against the four routes this host still serves.
 //
 // Small surface, but it's the account-recovery path: someone reaches it locked
 // out, usually on a phone, usually from an email client's in-app browser. If
@@ -23,7 +23,7 @@ function describe(violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violat
     .join('\n');
 }
 
-const ROUTES = ['/', '/forgot-password', '/reset-password'] as const;
+const ROUTES = ['/', '/forgot-password', '/reset-password', '/privacy'] as const;
 
 test.describe('accessibility', () => {
   for (const path of ROUTES) {

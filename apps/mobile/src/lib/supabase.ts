@@ -121,8 +121,36 @@ export async function updatePassword(password: string) {
   return supabase.auth.updateUser({ password });
 }
 
-export async function signUpWithEmail(email: string, password: string) {
-  return supabase.auth.signUp({ email, password });
+/**
+ * Creates the account. With email confirmation on — which it is, and which the
+ * invitation mechanism depends on (see SNAG_INFRA_NOTES.md) — this answers with
+ * a user and **no session**, and no error: nothing has signed in yet, so no
+ * auth event follows and AuthScreen has to say what happens next itself.
+ *
+ * `redirectTo` is where the email's link lands; `confirmRedirectUrl` carries a
+ * join code through it.
+ */
+export async function signUpWithEmail(email: string, password: string, redirectTo: string) {
+  return supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
+}
+
+/** Sends the confirmation email again — a new link and a new code. */
+export async function resendSignUpEmail(email: string, redirectTo: string) {
+  return supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: redirectTo } });
+}
+
+/**
+ * Confirms an address with the code from its email, and signs in.
+ *
+ * The code is what makes confirming work wherever the email is read. The link
+ * signs in whichever browser the mail app opens — an in-app browser, another
+ * device, or a scanner that prefetched it and spent it first — while the code
+ * is typed into the tab that asked, which still has its join code in the
+ * address bar. `type: 'email'` is the one Supabase verifies a sign-up code
+ * with. A session comes back and App.tsx's auth listener takes over.
+ */
+export async function verifySignUpCode(email: string, code: string) {
+  return supabase.auth.verifyOtp({ email, token: code, type: 'email' });
 }
 
 /** The stored-session key supabase-js derives from the project ref. */

@@ -12,7 +12,7 @@
 // then the row in `home.product_lookups`.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { GEMINI_ENDPOINT, isBusy } from '../read-label/gemini.ts';
+import { GEMINI_ENDPOINT, isBusy, quotaRefusal } from '../read-label/gemini.ts';
 import {
   hasFacts, htmlText, lookupFromGemini, lookupRequest, pdfStreams, pdfStrings, urlsToOpen,
   verifyLookup, type Page, type ProductFacts,
@@ -21,7 +21,7 @@ import {
 export type LookupResult =
   | { status: 'found'; facts: ProductFacts }
   | { status: 'nothing' }
-  | { status: 'failed'; reason: 'busy' | 'error' | 'quota' };
+  | { status: 'failed'; reason: 'busy' | 'error' | 'quota' | 'limit' };
 
 // A search and a few page reads take far longer than reading one plate, so the
 // early attempts get more room than read-label gives them — but still leave a
@@ -51,6 +51,7 @@ export async function lookUp(
   const deadline = Date.now() + budgetMs - PAGES_MS;
   const body = JSON.stringify(lookupRequest(make, model, name));
   let busy = false;
+  let limited = false;
   let json: unknown = null;
   let answered = false;
 
@@ -77,15 +78,24 @@ export async function lookUp(
       break;
     }
     const detail = await attempt.text().catch(() => '');
-    console.error(`lookup-product: ${modelName} ${attempt.status}:`, detail.slice(0, 500));
+    const quota = quotaRefusal(attempt.status, detail);
+    console.error(
+      `lookup-product: ${modelName} ${attempt.status}:`,
+      quota ? `quota — ${quota.detail}` : detail.slice(0, 500),
+    );
     if (isBusy(attempt.status)) {
-      busy = true;
+      // A per-minute limit is busy by another name; a used-up day, or an
+      // allowance the plan does not include, is not — and saying "busy" there
+      // invites a Try again that cannot work. Another model is still asked,
+      // since Google keeps most allowances per model.
+      if (quota && !quota.perMinute) limited = true;
+      else busy = true;
       if (!last) await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSE_MS));
       continue;
     }
     return { status: 'failed', reason: 'error' };
   }
-  if (!answered) return { status: 'failed', reason: busy ? 'busy' : 'error' };
+  if (!answered) return { status: 'failed', reason: busy ? 'busy' : limited ? 'limit' : 'error' };
 
   const outcome = lookupFromGemini(json);
   if (!outcome.ok) {

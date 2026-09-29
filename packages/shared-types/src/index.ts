@@ -105,6 +105,15 @@ export interface Profile {
    * See `excludeProjectSnags`.
    */
   projectsEnabled: boolean;
+  /**
+   * The first-run steps this person has already been shown, by id.
+   *
+   * Only "has this person been asked" is stored; whether the question is
+   * answered is read from the data it writes. When a later change adds a step,
+   * somebody who set up before it sees that step and nothing else. See
+   * `apps/mobile/src/setup/steps.ts` and `20260929060443`.
+   */
+  setupSeen: string[];
 }
 
 /**

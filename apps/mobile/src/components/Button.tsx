@@ -161,5 +161,9 @@ const styles = StyleSheet.create({
   label: {
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
+    // A label long enough to wrap stays centred on its button rather than
+    // hanging off the left edge of it.
+    textAlign: 'center',
+    flexShrink: 1,
   },
 });

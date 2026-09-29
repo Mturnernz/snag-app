@@ -142,6 +142,8 @@ The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
 
 Don't write to `public`. Don't "tidy" it. Don't copy patterns out of its migrations without
 reading why they were there — a lot of them answer regulatory questions a house doesn't have.
+**One exception, by the owner's decision:** *Delete my account* blanks the leaver's own name and
+email in `public.profiles` and `public.invites` — see *A profile outlives its login*.
 
 **Nothing in `public` answers a caller any more, bar four functions storage needs.** Until
 `20260928090000` every retired SECURITY DEFINER function was executable by `authenticated`. That
@@ -4325,6 +4327,23 @@ the personal thing, and the name is what goes. `snags_with_details.reporter_name
 `upsert_profile` clears `deleted_at` on the way past. Signing up again gets a new `auth.users` id
 and therefore a new profile, so that can't actually be reached — it is there so a row that ever does
 come back doesn't read as gone everywhere it is named.
+
+**The archive had the same cascade, and it was missed for two weeks.** `public.profiles.id` also
+cascaded from `auth.users`, so any login that had been a pilot account (seven of nine on
+29 September 2026) could not delete itself: `audit_log_actor_id_fkey` refused it, or
+`invites_invited_by_fkey` did. Where nothing refused, the cascade would have gone through and deleted
+that person's rows from the frozen archive. `20260929100000` cuts that cascade as well. **Nothing in
+`public` may refer to `auth.users`.**
+
+**And the archive loses the name too.** `20260929100000` first left the pilot profile exactly as it
+was, as the pilot organisations' record. The owner decided otherwise the same day: there is no longer
+a requirement to keep those records for the pilot organisations, and deleting an account deletes
+the sign-in and the name. So `20260929110000` gives the archive the tombstone `home` has. The
+`public.profiles` row stays, because the archive's own NO ACTION keys point at it, but its name reads
+*Someone who left* and its email is blanked. An invite the retired product sent to that address
+keeps its row and loses the address. Free text the pilots typed is not searched for names, because
+nothing ties it to the person. `archive_locked.sql` replays the delete for a made-up pilot account
+and asserts the login gone, the name and address gone, and every archive row still there.
 
 ### A code you can hold up — and a link you can send
 

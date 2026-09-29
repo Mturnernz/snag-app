@@ -181,10 +181,19 @@ Closed in two halves:
   `supabase/tests/anonymous_sessions.sql` replays it. This holds however the switch below is set.
   **Applied 25 September 2026**, and probed on the live project as one of the existing anonymous
   users: `upsert_profile` refused, nothing written.
-- **Auth → Providers → Anonymous sign-ins: off.** The setting existed for the retired product's QR
-  public reporting (`?report=<token>`), which has no client. It was left on as "a deliberate call"
-  on the premise above; with the premise gone there is nothing on the other side of the call.
-  Turning it off also silences the advisories across both schemas.
+- **Auth → Providers → Anonymous sign-ins: off**, done 29 September 2026. The setting existed for
+  the retired product's QR public reporting (`?report=<token>`), which has no client. It was left
+  on as "a deliberate call" on the premise above; with the premise gone there was nothing on the
+  other side of the call. The 66 `auth_allow_anonymous_sign_ins` advisories went with it.
+
+**The advisor now lists 76 `home` functions as executable by `anon`**, where a week earlier it
+listed three `public` ones — it has started looking at `home`. The EXECUTE is real (Postgres grants
+it to `PUBLIC` by default, and nothing revoked it) but unreachable: `anon` has no `usage` on the
+schema, so a signed-out call answers `42501 permission denied for schema home` before any function
+runs, checked 29 September 2026 against `rpc/create_household`. One gate rather than two. Closing
+the second is a revoke-only sweep — `revoke execute on all functions in schema home from public,
+anon` followed by the by-name grants to `authenticated` restated — which *Grant by name* in
+`CLAUDE.md` allows, since a sweep that only revokes needs neither list.
 
 ### Storage buckets
 
@@ -353,9 +362,26 @@ curl -s "https://wpkdpukpllxuyqqlxkxf.supabase.co/auth/v1/settings" \
 ```
 
 `mailer_autoconfirm` must be `false` (confirmation on) and `anonymous` must be `false`. On
-25 September 2026 it read `false` and `true` — confirmation on, anonymous sign-ins still on — and
-it still read that on 28 September. The
-template, the redirect allow-list and the password minimum are not in that answer.
+25 September 2026 it read `false` and `true`, and still did on 28 September; **on 29 September
+both read `false`** — anonymous sign-ins are off. The template and the password minimum are not in
+that answer.
+
+**The redirect allow-list can be probed too**, without sending anything or creating anybody. Start
+an OAuth sign-in with the address in question and read back where Auth decided to send it:
+
+```bash
+curl -s -o /dev/null "https://wpkdpukpllxuyqqlxkxf.supabase.co/auth/v1/authorize?provider=google&redirect_to=<url-encoded address>" \
+  -H "apikey: <publishable key>"
+```
+
+```sql
+select referrer, created_at from auth.flow_state order by created_at desc limit 2;
+```
+
+An address on the list comes back as asked; one that is not comes back as the **Site URL, which
+is `https://app.snaghq.co.nz`**. Checked 29 September 2026: `https://app.snaghq.co.nz/join/<uuid>`
+came back as asked and `https://not-on-the-list.example.com/` came back as the Site URL. The
+unfinished flow rows expire on their own.
 
 - **Confirm email: on** (Auth → Providers → Email). **This is load-bearing, not a preference.** An
   invitation waits on an *address* (`home.invite_to_household`, matched through `home.my_email()`),
@@ -393,7 +419,8 @@ template, the redirect allow-list and the password minimum are not in that answe
 - **Leaked password protection: on** (Auth → Providers → Email → *Prevent use of leaked
   passwords*; Pro plan). The advisor flags it as off. The app words the refusal
   (`weak_password` with reason `pwned`) as "has turned up in a data breach".
-- **Anonymous sign-ins: off.** See *Anonymous sign-ins reached `home`* above.
+- **Anonymous sign-ins: off** (verified 29 September 2026). See *Anonymous sign-ins reached `home`*
+  above.
 - **Resend click tracking: off** for the domain Auth's SMTP sends from. Tracking rewrites every
   link, and a rewritten confirmation or recovery link is one Auth no longer recognises. Checked
   25 September 2026: open and click tracking are both off on `snaghq.co.nz` and

@@ -166,6 +166,14 @@ outside a small anon allow-list, and handed ten internal functions — including
 data-deletion job — to any signed-in caller. **A sweep that grants needs both lists; a sweep that
 only revokes needs neither.** The home schema's grants are written out one by one.
 
+**And every new function needs `revoke execute ... from public, anon` beside its grant.** Postgres
+gives EXECUTE to `PUBLIC` on every function it creates, and `anon` inherits it — so a grant to
+`authenticated` alone leaves the function open to the anon key too, one `grant usage on schema home
+to anon` away from answering it. Eighty functions sat like that until `20260929014049`.
+`functionGrants.test.ts` replays every migration, keyed by signature (a new argument list is a new
+function and arrives with `PUBLIC` on it; `create or replace` over an existing one keeps its
+grants), and fails on any function the migrations leave executable by `PUBLIC`.
+
 ### A view without `security_invoker` has no RLS at all
 
 **This is the most dangerous line in the schema and it is invisible.** A view is

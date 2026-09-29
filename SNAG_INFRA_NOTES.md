@@ -186,14 +186,16 @@ Closed in two halves:
   on as "a deliberate call" on the premise above; with the premise gone there was nothing on the
   other side of the call. The 66 `auth_allow_anonymous_sign_ins` advisories went with it.
 
-**The advisor now lists 76 `home` functions as executable by `anon`**, where a week earlier it
-listed three `public` ones — it has started looking at `home`. The EXECUTE is real (Postgres grants
-it to `PUBLIC` by default, and nothing revoked it) but unreachable: `anon` has no `usage` on the
-schema, so a signed-out call answers `42501 permission denied for schema home` before any function
-runs, checked 29 September 2026 against `rpc/create_household`. One gate rather than two. Closing
-the second is a revoke-only sweep — `revoke execute on all functions in schema home from public,
-anon` followed by the by-name grants to `authenticated` restated — which *Grant by name* in
-`CLAUDE.md` allows, since a sweep that only revokes needs neither list.
+**No `home` function is executable by `anon` or `PUBLIC`**, since `20260929014049`. The advisor
+had listed 80 (`anon_security_definer_function_executable`): Postgres grants EXECUTE to `PUBLIC` on
+every new function, and the migrations written before `20260921*` never revoked it. It was
+unreachable — `anon` has no `usage` on the schema, so a signed-out call answers `42501 permission
+denied for schema home` before any function runs — but that was one gate where there should be two.
+Dry-run on the live project first, then applied 29 September 2026: `anon` 80 → 0, `authenticated`
+123 → 123, `service_role` 83 → 4 (it keeps the three `inbound-bill` calls plus
+`review_is_unread`), and a signed-out `rpc/create_household` still answers `42501`.
+`functionGrants.test.ts` replays the migrations and fails the build on the next function that
+arrives without its `revoke ... from public, anon`.
 
 ### Storage buckets
 

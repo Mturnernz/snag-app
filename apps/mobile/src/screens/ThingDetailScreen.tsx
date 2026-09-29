@@ -20,8 +20,8 @@ import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import {
   consumableOnList, describeCycle, documentFileName, documentName, formatLooseDate,
-  parseLooseDate, serviceJobFor, swatchColour, thingHeadline, dayKey, formatDayFirst,
-  labelOffers, labelOffersUpdate, partLine, type LabelOffer, type LabelReadingToCheck,
+  joinPaintAreas, paintAreas, parseLooseDate, serviceJobFor, swatchColour, thingHeadline, dayKey,
+  formatDayFirst, labelOffers, labelOffersUpdate, partLine, type LabelOffer, type LabelReadingToCheck,
   type ProductFacts, type ProductLookup,
 } from '@snag/supabase-queries';
 import {
@@ -32,7 +32,9 @@ import {
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import ComposeBar from '../components/ComposeBar';
 import LabelReadingCard from '../components/LabelReadingCard';
+import PaintAreaSheet from '../components/PaintAreaSheet';
 import ProductFactsCard from '../components/ProductFactsCard';
+import { TILE_SCRIM, tileInk } from '../lib/tileInk';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { copyToClipboard } from '../lib/clipboard';
@@ -56,6 +58,13 @@ type Route = RouteProp<RootStackParamList, 'ThingDetail'>;
  * never tells you what it could hold. So: every field the kind can answer is on
  * screen, empty or not, and one Save button commits the typed ones together and
  * says so.
+ *
+ * **Every field is named, but not every field is a box.** The ones nearly every
+ * record leaves empty — the dates, a paint's sheen, tint and what's left — are
+ * small pills at the foot of the card (`OFFERED_FIELDS`), which still say what
+ * the record could hold without a box each saying it at full height. On a
+ * paint, *Where it went* is a row of pills above the photos and the swatch is a
+ * tile among them.
  *
  * **Taps are not in the form.** The kind chips, the room, the parts list,
  * photos and documents each still write on press. Those are single decisions
@@ -92,6 +101,29 @@ const DATE_FIELDS: { key: 'installedAt' | 'warrantyUntil'; label: string }[] = [
  * it prints one, typed otherwise — a fact about this unit, never looked up.
  */
 const MADE_FIELDS: { key: string; label: string }[] = [{ key: 'manufactured', label: 'Year made' }];
+
+/**
+ * Fields nearly every record leaves empty, offered as a pill rather than a box.
+ *
+ * Counted on the live record in September 2026: across 17 appliances and 13
+ * paints, the three dates and a paint's sheen, tint and what's left were filled
+ * on one record in thirteen at most, and a box each was most of the card's
+ * height. The pill still names the field, so the page still says everything it
+ * can hold; a tap opens the box where it always sat, and one left empty goes
+ * back to being a pill. A field holding a value is always a box.
+ */
+const OFFERED_FIELDS = new Set(['manufactured', 'installedAt', 'warrantyUntil', 'sheen', 'tint', 'leftOver']);
+
+const isDateKey = (key: string): key is 'installedAt' | 'warrantyUntil' =>
+  key === 'installedAt' || key === 'warrantyUntil';
+
+/**
+ * The dates a kind is asked. A paint is not asked when it went in: one paint in
+ * thirteen had the date, and a tin is recorded for its colour and where it
+ * went. The column is left alone, so a date already there is kept.
+ */
+const dateFieldsFor = (kind: ThingKind) =>
+  kind === 'finish' ? DATE_FIELDS.filter((field) => field.key !== 'installedAt') : DATE_FIELDS;
 
 /** How often a lookup still under way is asked about again, while the page is open. */
 const LOOKUP_POLL_MS = 8_000;
@@ -223,6 +255,14 @@ export default function ThingDetailScreen() {
     setDraftState(value);
   }, []);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** Offered fields somebody has opened from their pill on this visit. */
+  const [opened, setOpened] = useState<Set<string>>(() => new Set());
+  /** The one just opened, which takes the cursor as its box appears. */
+  const [justOpened, setJustOpened] = useState<string | null>(null);
+  /** The swatch's hex, open as a box under the photos. */
+  const [hexEditing, setHexEditing] = useState(false);
+  /** Where it went: the place being changed, or null for another one. */
+  const [areaSheet, setAreaSheet] = useState<{ index: number | null } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -522,6 +562,40 @@ export default function ThingDetailScreen() {
   }
   saveRef.current = save;
   const commit = () => { void save(); };
+
+  function openOffer(key: string) {
+    setOpened((prev) => new Set(prev).add(key));
+    setJustOpened(key);
+  }
+
+  /** An offered field left with nothing in it goes back to being a pill. */
+  function leaveOffer(key: string) {
+    if (!OFFERED_FIELDS.has(key)) return;
+    const d = draftRef.current;
+    const typed = isDateKey(key) ? d?.[key] : d?.spec[key];
+    if ((typed ?? '').trim() !== '') return;
+    setOpened((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+    // Or a label reading that fills it later would bring its box back
+    // taking the cursor from wherever somebody was typing.
+    setJustOpened((current) => (current === key ? null : current));
+  }
+
+  /**
+   * Where a paint went, written the moment a place is chosen: a tap writes
+   * when it is pressed. `notes` is also in the draft, so the draft takes the
+   * new line too, or leaving the page would write the old one back.
+   */
+  async function writeAreas(next: string[], toast: string) {
+    setAreaSheet(null);
+    await patch({ notes: joinPaintAreas(next) }, toast);
+    const fresh = thingRef.current;
+    if (fresh) setDraft((d) => (d ? { ...d, notes: fresh.notes ?? '' } : d));
+  }
 
   /**
    * Photos and documents write the moment they land, never via Save.
@@ -866,12 +940,47 @@ export default function ThingDetailScreen() {
   }
 
   const words = THING_KIND_FIELD_LABELS[thing.kind];
-  const specFields = thing.kind === 'finish'
-    ? FINISH_SPEC_FIELDS
+  const isPaint = thing.kind === 'finish';
+  // A paint's hex is not a box in the card: it is the swatch tile among the
+  // photos and a line of text under them.
+  const specFields = isPaint
+    ? FINISH_SPEC_FIELDS.filter((field) => field.key !== 'hex')
     : KINDS_WITH_SERIAL.includes(thing.kind) ? MADE_FIELDS : [];
-  // Every field the kind can answer is on screen, empty or not. It used to show
-  // only what was filled in, with the rest behind an "Add a detail" row — which
-  // reads as tidy and is why nobody could tell what the record could hold.
+  const dateFields = dateFieldsFor(thing.kind);
+  // Every field the kind can answer is named on screen, empty or not. It used
+  // to show only what was filled in, with the rest behind an "Add a detail" row
+  // — which reads as tidy and is why nobody could tell what the record could
+  // hold. The rarely used ones are named by a pill instead of a box.
+  const shown = (key: string) => {
+    if (!OFFERED_FIELDS.has(key) || opened.has(key)) return true;
+    const saved = isDateKey(key) ? thing[key] : thing.spec[key];
+    const typed = isDateKey(key) ? draft?.[key] : draft?.spec[key];
+    return (saved ?? '').trim() !== '' || (typed ?? '').trim() !== '';
+  };
+  const offered = [...specFields, ...dateFields].filter((field) => !shown(field.key));
+
+  // Read off the draft, so the tile and the line under it answer while the hex
+  // is being typed.
+  const hexTyped = (draft?.spec.hex ?? thing.spec.hex ?? '').trim();
+  const swatch = isPaint ? swatchColour({ hex: hexTyped }) : null;
+  const areas = isPaint ? paintAreas(thing.notes) : [];
+  const editingArea = areaSheet && areaSheet.index !== null ? areas[areaSheet.index] ?? null : null;
+  const swatchInk = swatch ? tileInk(swatch) : null;
+  // The paint's own colour, drawn from the hex rather than stored: second in
+  // the strip after the first photo, or first when there is none. No ×, since
+  // it is not a photo — it goes when the hex does.
+  const swatchTile = swatch && swatchInk ? (
+    <View
+      key="swatch"
+      style={[styles.photo, styles.photoWrap, styles.swatchTile, { backgroundColor: swatch }]}
+      accessibilityRole="image"
+      accessibilityLabel={`Swatch ${swatch}`}
+    >
+      <View style={[styles.swatchTag, swatchInk.scrim && styles.swatchTagPanel]}>
+        <Text style={[styles.swatchTagLabel, { color: swatchInk.ink }]}>Swatch</Text>
+      </View>
+    </View>
+  ) : null;
 
   return (
     <View style={styles.flex}>
@@ -885,6 +994,48 @@ export default function ThingDetailScreen() {
         contentContainerStyle={[styles.content, keyboard > 0 && { paddingBottom: keyboard + Spacing.lg }]}
         keyboardShouldPersistTaps="handled"
       >
+        {/* ── Where it went ──
+            A paint's answer to "which one is this": two paints in one room are
+            told apart by where each went, so it sits above the photos rather
+            than at the foot of the card. One row, scrolling sideways rather
+            than wrapping; each pill opens the sheet to change it, and the +
+            adds another. */}
+        {isPaint ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            style={styles.areas}
+            contentContainerStyle={styles.areasRow}
+          >
+            {areas.map((area, index) => (
+              <Pressable
+                key={`${area}-${index}`}
+                onPress={() => setAreaSheet({ index })}
+                style={styles.areaTap}
+                accessibilityRole="button"
+                accessibilityLabel={`Where it went: ${area}. Change`}
+              >
+                <View style={styles.area}>
+                  <Text style={styles.areaLabel}>{area}</Text>
+                  <Icon name="pencil" size={12} color={Colors.primary} />
+                </View>
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => setAreaSheet({ index: null })}
+              style={styles.areaTap}
+              accessibilityRole="button"
+              accessibilityLabel={areas.length > 0 ? 'Add another place it went' : 'Add where it went'}
+            >
+              <View style={[styles.areaAdd, areas.length === 0 && styles.areaAddWide]}>
+                <Icon name="add" size={16} color={Colors.primary} />
+                {areas.length === 0 ? <Text style={styles.areaAddLabel}>Where it went</Text> : null}
+              </View>
+            </Pressable>
+          </ScrollView>
+        ) : null}
+
         {/* ── Where it came from ──
             The payoff for recording a renovation at all, and the reason the
             record is worth keeping: three years on, nobody asks what the
@@ -924,33 +1075,78 @@ export default function ThingDetailScreen() {
           </View>
         ) : null}
 
-        {thing.photoPaths.length > 0 ? (
+        {thing.photoPaths.length > 0 || swatchTile ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
             {thing.photoPaths.map((path, i) => (
-              <View key={path} style={styles.photoWrap}>
-                {/* Opening and removing are siblings, never nested: a
-                    Pressable inside a Pressable is a coin toss about which
-                    one gets the tap. The × is drawn after, so it wins its
-                    own 28px and nothing else. */}
-                <Pressable
-                  onPress={() => setViewing(i)}
-                  disabled={!photoUrls[path]}
-                  accessibilityRole="imagebutton"
-                  accessibilityLabel="Open this photo"
-                >
-                  <Image source={{ uri: photoUrls[path] }} style={styles.photo} resizeMode="cover" />
-                </Pressable>
-                <Pressable
-                  onPress={() => removePhoto(path)}
-                  style={styles.photoRemove}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove this photo"
-                >
-                  <Icon name="close" size="sm" color={Colors.white} />
-                </Pressable>
-              </View>
+              <React.Fragment key={path}>
+                {i === 1 ? swatchTile : null}
+                <View style={styles.photoWrap}>
+                  {/* Opening and removing are siblings, never nested: a
+                      Pressable inside a Pressable is a coin toss about which
+                      one gets the tap. The × is drawn after, so it wins its
+                      own 28px and nothing else. */}
+                  <Pressable
+                    onPress={() => setViewing(i)}
+                    disabled={!photoUrls[path]}
+                    accessibilityRole="imagebutton"
+                    accessibilityLabel="Open this photo"
+                  >
+                    <Image source={{ uri: photoUrls[path] }} style={styles.photo} resizeMode="cover" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => removePhoto(path)}
+                    style={styles.photoRemove}
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove this photo"
+                  >
+                    <Icon name="close" size="sm" color={Colors.white} />
+                  </Pressable>
+                </View>
+              </React.Fragment>
             ))}
+            {thing.photoPaths.length < 2 ? swatchTile : null}
           </ScrollView>
+        ) : null}
+
+        {/* The hex, as a line of small text under the photos: the least exact
+            thing on a paint's record, so the quietest. A tap opens it as a box,
+            and leaving the box writes it like any other. */}
+        {isPaint ? (
+          hexEditing ? (
+            <TextInput
+              style={styles.hexInput}
+              value={draft?.spec.hex ?? ''}
+              onChangeText={(v) => editSpec('hex', v)}
+              onBlur={() => { setHexEditing(false); commit(); }}
+              autoFocus
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={9}
+              returnKeyType="done"
+              accessibilityLabel="Swatch (hex)"
+            />
+          ) : (
+            <Pressable
+              onPress={() => setHexEditing(true)}
+              style={styles.hexLine}
+              accessibilityRole="button"
+              accessibilityLabel={hexTyped ? 'Change the swatch' : 'Add a swatch'}
+            >
+              {swatch ? (
+                <Text style={styles.hexText}>{swatch}</Text>
+              ) : hexTyped ? (
+                <>
+                  <Text style={styles.hexText}>{hexTyped}</Text>
+                  <Text style={styles.swatchMiss}>Six hex digits draw a swatch</Text>
+                </>
+              ) : (
+                <>
+                  <Icon name="add" size={14} color={Colors.textMuted} />
+                  <Text style={styles.hexAdd}>Swatch</Text>
+                </>
+              )}
+            </Pressable>
+          )
         ) : null}
 
         {labelCheck ? (
@@ -1006,24 +1202,17 @@ export default function ThingDetailScreen() {
             />
           ) : null}
 
-          {specFields.map((field) => (
+          {specFields.filter((field) => shown(field.key)).map((field) => (
             <Field
               key={field.key}
               label={field.label}
               value={draft?.spec[field.key] ?? ''}
-              mono={field.key === 'tint' || field.key === 'hex'}
+              mono={field.key === 'tint'}
               onCopy={field.key === 'tint' ? copy : undefined}
               savedValue={thing.spec[field.key] ?? null}
               onChange={(v) => editSpec(field.key, v)}
-              onBlur={commit}
-              // Read off the draft, so it answers while somebody types. A box
-              // holding something that is not a colour says so rather than
-              // drawing nothing and leaving them to wonder.
-              swatch={
-                field.key !== 'hex' || !(draft?.spec.hex ?? '').trim()
-                  ? undefined
-                  : swatchColour(draft!.spec) ?? false
-              }
+              onBlur={() => { commit(); leaveOffer(field.key); }}
+              autoFocus={justOpened === field.key}
             />
           ))}
 
@@ -1033,24 +1222,51 @@ export default function ThingDetailScreen() {
               would have had to invent — so the typed half is not a fallback.
               Still inside the one-Save form: the calendar fills the box, it
               does not write. */}
-          {DATE_FIELDS.map((field) => (
+          {dateFields.filter((field) => shown(field.key)).map((field) => (
             <DateField
               key={field.key}
               label={field.label}
               value={draft?.[field.key] ?? ''}
               onChangeValue={(v) => edit(field.key, v)}
               onBlur={commit}
+              onLeaveEmpty={() => leaveOffer(field.key)}
+              autoFocus={justOpened === field.key}
               pickerTitle={field.label}
             />
           ))}
 
-          <Field
-            label={words.notes}
-            value={draft?.notes ?? ''}
-            multiline={thing.kind !== 'finish'}
-            onChange={(v) => edit('notes', v)}
-            onBlur={commit}
-          />
+          {/* A paint's note is *Where it went*, and that is the row of pills
+              above the photos. */}
+          {isPaint ? null : (
+            <Field
+              label={words.notes}
+              value={draft?.notes ?? ''}
+              multiline
+              onChange={(v) => edit('notes', v)}
+              onBlur={commit}
+            />
+          )}
+
+          {/* The rarely used fields, named but not given a box each. A tap
+              opens the box where it would have sat. */}
+          {offered.length > 0 ? (
+            <View style={styles.offers}>
+              {offered.map((field) => (
+                <Pressable
+                  key={field.key}
+                  onPress={() => openOffer(field.key)}
+                  style={styles.offerTap}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add ${field.label.toLowerCase()}`}
+                >
+                  <View style={styles.offer}>
+                    <Icon name="add" size={14} color={Colors.primary} />
+                    <Text style={styles.offerLabel}>{field.label}</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
         {/* ── photos and paperwork ───────────────────────────────────────
             **One place to attach something to this record**, rather than a
@@ -1462,6 +1678,28 @@ export default function ThingDetailScreen() {
         </View>
       </Modal>
 
+      {isPaint ? (
+        <PaintAreaSheet
+          visible={!!areaSheet}
+          editing={editingArea}
+          areas={areas}
+          onChoose={(area) => {
+            if (editingArea !== null && areaSheet?.index != null) {
+              const index = areaSheet.index;
+              writeAreas(areas.map((a, i) => (i === index ? area : a)), 'Saved');
+            } else {
+              writeAreas([...areas, area], `${area} added`);
+            }
+          }}
+          onRemove={() => {
+            if (editingArea === null || areaSheet?.index == null) return;
+            const index = areaSheet.index;
+            writeAreas(areas.filter((_, i) => i !== index), `${editingArea} removed`);
+          }}
+          onClose={() => setAreaSheet(null)}
+        />
+      ) : null}
+
       <ConfirmDialog
         visible={confirmDelete}
         title="Remove this?"
@@ -1492,7 +1730,7 @@ export default function ThingDetailScreen() {
  * what this page needed anyway once every field started showing.
  */
 function Field({
-  label, value, mono, multiline, onChange, onBlur, onCopy, savedValue, swatch,
+  label, value, mono, multiline, onChange, onBlur, onCopy, savedValue, autoFocus,
 }: {
   label: string;
   value: string;
@@ -1504,21 +1742,13 @@ function Field({
   /** The stored value, for the copy button — never the half-typed draft. */
   savedValue?: string | null;
   onCopy?: (label: string, value: string) => void;
-  /** A colour to draw beside the label; `false` when the box holds something that is not one. */
-  swatch?: string | false;
+  /** Take the cursor as it appears: a box somebody has just opened from its pill. */
+  autoFocus?: boolean;
 }) {
   return (
     <View style={styles.field}>
       <View style={styles.fieldHead}>
         <Text style={styles.fieldLabel}>{label}</Text>
-        {swatch ? (
-          <View
-            style={[styles.swatch, { backgroundColor: swatch }]}
-            accessibilityLabel={`Swatch ${swatch}`}
-          />
-        ) : swatch === false ? (
-          <Text style={styles.swatchMiss}>Six hex digits draw a swatch</Text>
-        ) : null}
         {onCopy && savedValue ? (
           <Pressable
             onPress={() => onCopy(label, savedValue)}
@@ -1544,6 +1774,7 @@ function Field({
         multiline={multiline}
         maxLength={multiline ? 1000 : 80}
         returnKeyType="done"
+        autoFocus={autoFocus}
         accessibilityLabel={label}
       />
     </View>
@@ -1554,14 +1785,95 @@ const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
   // A paint's own colour — data, like a photograph of the tin, not a hue the
   // app is spending. The hairline is because most paint is a white.
-  swatch: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+  swatchTile: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
+    padding: Spacing.sm + 2,
+  },
+  // The word on the tile is measured against the colour, as a room tile's are
+  // (`tileInk`): ink or white, or ink on a pale panel where neither reads.
+  swatchTag: { borderRadius: Radius.chip, paddingHorizontal: Spacing.xs, paddingVertical: 2 },
+  swatchTagPanel: { backgroundColor: TILE_SCRIM },
+  swatchTagLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   swatchMiss: { fontSize: Typography.xs, color: Colors.textMuted },
+  hexLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    alignSelf: 'flex-start',
+    minHeight: MIN_TOUCH_TARGET,
+    marginTop: -Spacing.lg,
+    marginBottom: -Spacing.sm,
+  },
+  hexText: { fontFamily: Fonts.mono, fontSize: Typography.xs, color: Colors.textMuted },
+  hexAdd: { fontSize: Typography.xs, color: Colors.textMuted },
+  hexInput: {
+    alignSelf: 'flex-start',
+    width: 160,
+    minWidth: 0,
+    minHeight: 36,
+    marginTop: -Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.input,
+    backgroundColor: Colors.sunken,
+    fontFamily: Fonts.mono,
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
+  },
+  // Where it went: one row that scrolls sideways, running to the screen edge
+  // like the photo strip under it.
+  areas: { flexGrow: 0, marginTop: -Spacing.sm, marginRight: -Spacing.lg },
+  areasRow: { alignItems: 'center', gap: Spacing.xs + 2, paddingRight: Spacing.lg },
+  areaTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  area: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 28,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.sm + 2,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.primaryLight,
+  },
+  areaLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
+  areaAdd: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.sunken,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  areaAddWide: {
+    width: 'auto',
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    paddingLeft: Spacing.sm + 1,
+    paddingRight: Spacing.md,
+  },
+  areaAddLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
+  // The offered fields: the app's sunken well, smaller than a chip, inside the
+  // usual 48px target.
+  offers: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.sm, marginTop: -Spacing.xs },
+  offerTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  offer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    height: 30,
+    paddingLeft: Spacing.sm + 1,
+    paddingRight: Spacing.md,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.sunken,
+  },
+  offerLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   fromRow: {
     flexDirection: 'row',
     alignItems: 'center',

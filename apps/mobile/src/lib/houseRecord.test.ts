@@ -1,7 +1,8 @@
 import {
   assetPickerOrder,
   catalogueSuggestions, describeCycle, describeHouseRoom, documentFileName, documentName,
-  formatLooseDate, ghostsForRoom, houseRooms, matchSuggestions, parseLooseDate, searchThings,
+  formatLooseDate, ghostsForRoom, houseRooms, joinPaintAreas, matchSuggestions, paintAreas,
+  parseLooseDate, searchThings,
   thingDetailLine, thingHeadline, thingKindGroups, thingSearchText, thingsInArea, wallColour,
   TILE_BULLET_LIMIT,
 } from '@snag/supabase-queries';
@@ -571,6 +572,31 @@ describe('what a room tile says', () => {
   });
 });
 
+describe('where a paint went', () => {
+  it('reads the one line as a list, however it was written', () => {
+    expect(paintAreas('Main wall · Ceiling')).toEqual(['Main wall', 'Ceiling']);
+    expect(paintAreas('Main wall, ceiling; doors\nskirting')).toEqual(['Main wall', 'ceiling', 'doors', 'skirting']);
+    expect(paintAreas('Main wall and ceiling')).toEqual(['Main wall and ceiling']);
+  });
+
+  it('has nothing to say about an empty line', () => {
+    expect(paintAreas(null)).toEqual([]);
+    expect(paintAreas('  ')).toEqual([]);
+    expect(paintAreas(' · , ')).toEqual([]);
+  });
+
+  it('writes the list back as one line, and nothing as nothing', () => {
+    expect(joinPaintAreas(['Main wall', ' Ceiling '])).toBe('Main wall · Ceiling');
+    expect(joinPaintAreas(['', ' '])).toBeNull();
+    expect(joinPaintAreas([])).toBeNull();
+  });
+
+  it('round-trips', () => {
+    const areas = ['Main wall', 'Ceiling', 'Architraves'];
+    expect(paintAreas(joinPaintAreas(areas))).toEqual(areas);
+  });
+});
+
 describe('the colour of a room', () => {
   const paint = (id: string, notes: string | null, hex?: string) =>
     thing({ id, name: `Paint ${id}`, kind: 'finish', room: 'Bedroom', notes, spec: hex ? { hex } : {} });
@@ -590,6 +616,14 @@ describe('the colour of a room', () => {
     expect(wallColour([paint('a', 'Ceiling', '#FFFFFF'), paint('b', 'Joinery', '#F4F3EF')])).toBeNull();
     expect(wallColour([paint('a', 'Window frames', '#F4F3EF')])).toBeNull();
     expect(wallColour([paint('a', null, '#F4F3EF')])).toBeNull();
+  });
+
+  it('reads each place a paint went on its own', () => {
+    // The walls and a feature wall is still the walls; it was the word
+    // "feature" anywhere in the line that used to rule it out.
+    expect(wallColour([paint('a', 'Walls · Feature wall', '#E4E2DC')])).toBe('#E4E2DC');
+    expect(wallColour([paint('a', 'Ceiling · Main wall', '#E4E2DC')])).toBe('#E4E2DC');
+    expect(wallColour([paint('a', 'Feature wall · Ceiling', '#405341')])).toBeNull();
   });
 
   it('draws nothing rather than a guess', () => {

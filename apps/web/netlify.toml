@@ -8,5 +8,10 @@
 #   NEXT_PUBLIC_SUPABASE_URL
 #   NEXT_PUBLIC_SUPABASE_ANON_KEY
 
+[build]
+  # A production build is skipped when nothing this site builds from changed —
+  # see the script. Previews always build.
+  ignore = "bash ../../scripts/netlify-ignore.sh apps/web"
+
 [build.environment]
   NODE_VERSION = "22"

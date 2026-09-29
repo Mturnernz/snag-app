@@ -1428,6 +1428,28 @@ export function swatchColour(spec: ThingSpec): string | null {
 }
 
 /**
+ * Where a paint went, as the separate places it went.
+ *
+ * `notes` is the field that tells two paints in a room apart, and it has
+ * always been one line of text. The paint page shows it as pills — the main
+ * wall, the ceiling, the architraves — so the line is read as a list: split on
+ * commas, middle dots, semicolons and line breaks, which covers how
+ * `joinPaintAreas` writes it and how somebody types a list into the
+ * walkthrough's box. It stays one text column rather than gaining one of its
+ * own, so the House tab's tile colour, the search, the card line and both
+ * extracts go on reading it exactly as they did.
+ */
+export function paintAreas(notes: string | null): string[] {
+  return (notes ?? '').split(/[,;·\n]/).map((area) => area.trim()).filter(Boolean);
+}
+
+/** The pills back into the one line `notes` holds, or null when there are none. */
+export function joinPaintAreas(areas: string[]): string | null {
+  const kept = areas.map((area) => area.trim()).filter(Boolean);
+  return kept.length > 0 ? kept.join(' · ') : null;
+}
+
+/**
  * The colour of a room's main wall, from the paint recorded there — or null.
  *
  * What the House tab paints a room's tile in. It reads the one field that tells
@@ -1437,16 +1459,21 @@ export function swatchColour(spec: ThingSpec): string | null {
  * is what the room looks like, so none of them colours the tile — a bedroom
  * painted white with one forest-green wall is a white room.
  *
+ * Each place a paint went is read on its own (`paintAreas`), so a paint on the
+ * walls *and* a feature wall still counts as the walls.
+ *
  * The colour itself is `swatchColour`'s, so the same rule holds: a hex that
  * does not parse draws nothing rather than a guess, and a tile left white is
  * honest where a tile in the wrong colour is the one thing believed at a glance.
  */
 export function wallColour(things: Thing[]): string | null {
   const rank = (notes: string | null): number | null => {
-    const where = notes ?? '';
-    if (/\bmain\s+walls?\b/i.test(where)) return 0;
-    if (/\bwalls?\b/i.test(where) && !/feature/i.test(where)) return 1;
-    return null;
+    let best: number | null = null;
+    for (const where of paintAreas(notes)) {
+      if (/\bmain\s+walls?\b/i.test(where)) return 0;
+      if (/\bwalls?\b/i.test(where) && !/feature/i.test(where)) best = 1;
+    }
+    return best;
   };
   let best: { rank: number; headline: string; hex: string } | null = null;
   for (const thing of things) {
@@ -2701,6 +2728,43 @@ export function describeCycle(days: number): string {
   if (days % 30 === 0) return days === 30 ? 'month' : `${days / 30} months`;
   if (days % 7 === 0) return days === 7 ? 'week' : `${days / 7} weeks`;
   return days === 1 ? 'day' : `${days} days`;
+}
+
+/** A unit a repeat is typed in. */
+export type CycleUnit = 'day' | 'week' | 'month' | 'year';
+
+/**
+ * The four units the *Repeats* sheet offers, smallest first, and the days each
+ * stands for — exactly the four `describeCycle` says a cycle back in, with the
+ * same values, so what is typed and what is read back are one vocabulary.
+ */
+export const CYCLE_UNITS: { unit: CycleUnit; days: number }[] = [
+  { unit: 'day', days: 1 },
+  { unit: 'week', days: 7 },
+  { unit: 'month', days: 30 },
+  { unit: 'year', days: 365 },
+];
+
+/** The longest repeat `create_snag` and `update_snag` take: ten years. */
+export const MAX_CYCLE_DAYS = 3650;
+
+/** *Every 6 months* as the day count `repeat_days` stores. */
+export function cycleDays(n: number, unit: CycleUnit): number {
+  return n * CYCLE_UNITS.find((u) => u.unit === unit)!.days;
+}
+
+/**
+ * A stored day count as the number and unit the sheet shows, by
+ * `describeCycle`'s own precedence — years, then months, then weeks, then days
+ * — so the sheet and the row can never say one cycle two ways. It means 30
+ * weeks comes back as 7 months: the same 210 days, said the way the rest of the
+ * app says it.
+ */
+export function cycleParts(days: number): { n: number; unit: CycleUnit } {
+  for (const { unit, days: size } of [...CYCLE_UNITS].reverse()) {
+    if (days % size === 0) return { n: days / size, unit };
+  }
+  return { n: days, unit: 'day' };
 }
 
 /**

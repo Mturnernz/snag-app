@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TextInput, Modal, Pressable, StyleSheet } from 'react-native';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
@@ -181,6 +181,16 @@ interface Props {
   placeholder?: string;
   /** What the calendar calls itself: "When did it go in?" */
   pickerTitle?: string;
+  /** Focus the box as it appears — for a field somebody has just asked for. */
+  autoFocus?: boolean;
+  /**
+   * The box was left with nothing in it: on blur, or when the calendar is
+   * closed or cleared without a day. **Not** when focus has only moved to the
+   * calendar beside it — on the web that button takes focus as it is pressed,
+   * and a caller that put a pill back on this would unmount the calendar
+   * before it could open.
+   */
+  onLeaveEmpty?: () => void;
 }
 
 /**
@@ -201,13 +211,34 @@ interface Props {
  * answer.
  */
 export default function DateField({
-  label, value, onChangeValue, onBlur, placeholder, pickerTitle,
+  label, value, onChangeValue, onBlur, placeholder, pickerTitle, autoFocus, onLeaveEmpty,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  // A ref beside the state: on a phone the box can blur as the calendar opens,
+  // in the same gesture, before React has re-rendered with `open` set.
+  const openRef = useRef(false);
+  const setOpen = (next: boolean) => {
+    openRef.current = next;
+    setOpenState(next);
+  };
+  const calendarRef = useRef<View>(null);
   // `undefined` means "typed something I can't read" — which is not the same as
   // an empty box, and must not open the calendar on a wrong month.
   const parsed = parseLooseDate(value);
   const selected = typeof parsed === 'string' ? parsed : null;
+
+  const handleBlur = (e?: unknown) => {
+    onBlur?.();
+    if (!onLeaveEmpty || value.trim() !== '' || openRef.current) return;
+    // On the web, pressing the calendar moves focus to it before the press
+    // lands. That is not leaving the field. (`relatedTarget` is the DOM's;
+    // a phone keeps the box focused through the tap, so never gets here.)
+    const event = e as { nativeEvent?: { relatedTarget?: unknown }; relatedTarget?: unknown } | undefined;
+    const next = event?.nativeEvent?.relatedTarget ?? event?.relatedTarget;
+    const calendar = calendarRef.current as unknown as { contains?: (node: unknown) => boolean } | null;
+    if (next && calendar && (next === calendar || calendar.contains?.(next))) return;
+    onLeaveEmpty();
+  };
 
   return (
     <View style={styles.wrap}>
@@ -217,12 +248,14 @@ export default function DateField({
           style={styles.input}
           value={value}
           onChangeText={onChangeValue}
-          onBlur={onBlur}
+          onBlur={handleBlur}
           placeholder={placeholder}
           placeholderTextColor={Colors.textMuted}
+          autoFocus={autoFocus}
           accessibilityLabel={label ?? 'Date'}
         />
         <Pressable
+          ref={calendarRef}
           onPress={() => setOpen(true)}
           style={styles.calendarTap}
           accessibilityRole="button"
@@ -245,8 +278,12 @@ export default function DateField({
           onChangeValue('');
           setOpen(false);
           onBlur?.();
+          onLeaveEmpty?.();
         }}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          setOpen(false);
+          if (value.trim() === '') onLeaveEmpty?.();
+        }}
       />
     </View>
   );

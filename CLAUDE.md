@@ -52,6 +52,8 @@ snag/
 │   └── supabase-queries/          # @snag/supabase-queries — every read and write, each taking a client
 │                                   #   (…/staff is the portal's own entry point; the app never imports it)
 ├── supabase/migrations/           # 20260911* is the home schema; everything before it is the archive
+├── tools/paint-library/           # builds a NZ paint-colour CSV to match Nix readings against.
+│                                   #   Its output is never committed: the makers' terms forbid redistribution.
 ├── SNAG_HOME_PIVOT_REVIEW.md      # why the pivot was done this way
 └── SNAG_INFRA_NOTES.md            # the config that isn't in git
 ```
@@ -91,9 +93,9 @@ answer and is *not* the same failure as `PGRST106`.
 ### "Everything has disappeared" has a second cause, and it is us
 
 `PGRST106` above is the platform-side one. The other is a **client asking for a column the database
-has not got yet**, and it has already happened once: a merge to `main` deploys `apps/mobile` to
-Netlify, so pushing code whose migration has not been applied puts exactly that client in front of
-people. `getMyProperties` names its columns — `select('id, household_id, name, suburb, town, …')` —
+has not got yet**, and it has already happened once: a merge to `main` then deployed `apps/mobile`
+straight to Netlify, so pushing code whose migration had not been applied put exactly that client in
+front of people. `getMyProperties` names its columns — `select('id, household_id, name, suburb, town, …')` —
 so PostgREST rejected the whole request rather than returning a row with two nulls, `useHousehold`
 came up with no properties, and the **House tab rendered empty**, because `getThings` needs an
 active property. Eighteen things sat untouched in `home.things` the whole time.
@@ -105,10 +107,11 @@ Two things to take from it:
   absent column came back as `undefined` and `mapSnag` defaulted it. Naming columns is still right
   — it is the same argument as granting by name — but it means a missing column is a **400 on the
   whole request**, not a gap in one field, so the screen that loses it loses everything.
-- **Apply the migration before the merge that deploys the code needing it**, never after. There is
-  no staging project and `main` is what `app.snaghq.co.nz` serves, so the window between the two is
-  a window in which the live app is broken for everybody. Order: apply, check the API answers,
-  then merge.
+- **Apply the migration before the merge**, and never deploy past one that has not been applied.
+  There is no staging database: `main--snagv1.netlify.app`, the preview every merge builds, reads
+  the live one exactly as `app.snaghq.co.nz` does. The live app is the `production` branch, and it
+  moves only when *Deploy to production* runs, which lists the migrations each deploy carries (see
+  *Deploys cost credits; previews don't*). Order: apply, check the API answers, merge, deploy.
 
 Checking it is one query rather than a judgement call — the columns the client names, against the
 schema it is reading:
@@ -238,10 +241,10 @@ been edited in place, and where anything below still disagrees, **this section w
   under *Paperwork lives beside the photos*.
 - **The list**: *Due soon*, the tick on each card with *Undo*, and no *Show me* button — under *The
   list is the app's home*.
-- **The job page**: *Mark done* in the footer, leaving saves, one *When* card, and one-tap
-  **suggested items** from the job's room on the *Linked items* card (one `getThings` read, only
-  when the job has a room, never fatal; tapping writes through `set_snag_things` like the picker).
-  The edit sheet's button is **Done** and never dead.
+- **The job page**: *Mark done* in the footer, leaving saves, and one-tap **suggested items** from
+  the job's room under *Linked items* (one `getThings` read, only when the job has a room, never
+  fatal; tapping writes through `set_snag_things` like the picker). The edit sheet's button is
+  **Done** and never dead. (Its *When* card has since gone — see *The job page review* below.)
 - **Things**: the thing page saves each box as it is left; one service job per thing; the
   walkthrough's cycle files it; *Report a problem* through the capture bar — under *The house
   record*.
@@ -253,6 +256,99 @@ when it is left, and leaving the page writes whatever is still in a box.** Butto
 kept only where something is being *created* (the add-a-thing walkthrough, the capture bar) or in
 a sheet editing two fields together (the edit sheet, whose button is *Done*). A screen that asks
 *Leave without saving?* has broken this.
+
+## The job page review (September 2026)
+
+A design review of `SnagDetailScreen` sent two rounds of suggestions. The owner decided the
+contested ones; the rest were judged against this file. Where anything below disagrees about the
+job page, **this section wins** — the passages under *Capture and triage* are edited to match.
+
+What changed, top to bottom:
+
+- **Photos.** The camera and the library are two 48pt buttons on a `photoOverlay` scrim in the
+  first photo's corner — **siblings** of the photo's own `Pressable`, laid over it, never inside
+  it. A job with no photo gets them as two pills. The photo-sized tiles at the end of the strip
+  are gone: they read as empty photo slots and pushed *Choose photos* off the screen.
+- **Under the headline**: status (a label, still never a control), the due badge **only when there
+  is a date** (a repeat's; not a control either), and the room as a sunken pill with a ▾ that
+  opens `EditSnagSheet`. `StatusBadge` sits in the same 48pt centred box as the others — its own
+  `alignSelf: 'flex-start'` had it riding higher than its neighbours. *Added by* shows only when
+  somebody else filed it; *last done* stays for a repeat.
+- **Section titles sit above their cards** (V2 `SectionTitle`), not inside them.
+- **The order is the owner's, from the preview**: the facts, then **Notes** and **Ask SnagHQ**,
+  then *Also said about…*, then **Items and shopping**, the assessment card, and **Repeats** —
+  *Mark done* in the footer. The conversation comes first because it is why the page is opened.
+- **Items and shopping is one card with two halves**, each keeping its heading and split by a rule,
+  because they are two facts that behave differently: linking never starts the job, adding to the
+  list does. **Add to shopping list** comes first (it read *Anything to pick up?*) and **Linked
+  items** last, both by the owner's decision. The shopping half is a checklist whose last row is
+  the box — it adds on Return, on blur and on leaving the page, with no *Add* button. `addPart`
+  reads `partRef`, because Return and the blur after it land in one gesture and reading state
+  would add the word twice. *Linked items* has its picker opener in the heading row and the room's
+  own things as pills **on a line of their own** under *In the bathroom:*.
+- **Notes rest as one line** and open to four on focus, with *Add note* appearing then; the box
+  stays open while it holds words. A note is **never sent on blur**: it is a message, and
+  `add_comment` starts the job.
+- **Ask SnagHQ is one full-width outline `Button` directly under Notes** (outline because *Mark
+  done* is the one filled button); once asked, `SupportCard` takes that slot. `AdviceCard` stays
+  directly under the items card, next to the list its parts go into.
+- **A one-off job has no due date.** The date box, *This weekend* / *Next week* and the *No date*
+  chip are gone, by the owner's decision. `commitPending` has only the shopping box left to
+  commit. Checked when it shipped: no open one-off job had a date, so nothing was stranded.
+- **Repeats is the last thing on the page: one row, *Repeats … Never ›*, that opens a sheet**
+  (`RepeatSheet`). It was a rail of five chips taking three lines; the owner chose the row. The
+  row's subtitle is the fact — *Next due 08/11/2026*, since nothing else on the page states the
+  day, or *No date yet*. **The sheet is *Never*, or *Every [n] [days · weeks · months · years]***
+  — a number box and the unit as a `Segmented` — by the owner's decision, where it was a list of
+  five presets. **No line of prose under it**, also the owner's call; the row's date is the one
+  fact it needed. It follows the saving rule: *Never* writes and closes, the *Every* mark and the
+  unit write when pressed, and the number writes when it is left — on Return, on blur, on *Done*
+  and on any way out of the sheet — and **only when it says something new**, so tabbing through
+  the box never starts a repeat and opening the sheet and closing it writes nothing. A number that
+  cannot be a repeat (*Type how many*, *Ten years is the longest*) holds the sheet open. It is
+  stored as days (`cycleDays`: a week is 7, a month 30, a year 365) and read back through
+  `cycleParts`, which follows `describeCycle`'s precedence, so the sheet and the row cannot say one
+  repeat two ways — 30 weeks comes back as 7 months, the same 210 days. What a write does is
+  unchanged: a cycle dates an undated job a cycle out and leaves a set date alone; pressing *Every*
+  on an undated repeat dates it; **Never clears the date as well as the repeat**, because with no
+  box to clear it from, a stopped repeat's date would sit under *Due soon* and go overdue for ever.
+  A refused write keeps the sheet open with the reason under the choices.
+
+Proposed and turned down, so it is not proposed again:
+
+- **A status ▾** — status is derived, and *Mark done* is the one state change made by hand.
+- **A *Due* pill under the headline opening a sheet holding the date and the repeat** — dates are
+  gone, and the repeat has its own row at the foot rather than a second door at the top.
+- **Ask SnagHQ as an AI prompt card, or as an icon in the header** — SnagHQ is a person reading the
+  job, not a model, and suggested prompts on every job would advertise a service. The owner chose
+  one button under Notes.
+- **An edge-to-edge photo with a floating camera FAB, and a "1/3 photos — Tap to add" badge** — one
+  FAB cannot offer camera *and* library, the photo's own tap opens the viewer, and there is no
+  three-photo cap.
+- **Collapsing the page into two big cards** — it mixes unrelated controls; moving the titles out
+  of the cards did the lightening.
+- **1px `#E2DDD5` borders on the boxes** — about 1.3:1, short of the 3:1 non-text contrast it aimed
+  at, and the placeholders already pass (muted on sunken, 5.31:1). The real inconsistency was the
+  Notes box being the only bordered one; it is a sunken well now.
+- **Moving *SNAG-0094* and *Added by* into an overflow menu** — the app has no overflow menu, and
+  the reference stays the header's title.
+
+**Still open:** a half-typed note is not counted by the footer's *All changes saved*, and leaving
+drops it. Posting it would send a message nobody finished, so it needs a decision, not a fix.
+
+`SnagDetailScreen.test.tsx` pins it: no date box and no quick dates, repeat or not; a cycle dating
+an undated job and leaving a set date alone; *Every* dating an undated repeat; *Never* clearing
+both and closing; the row naming the answer and the day; the number writing when left and never
+per keystroke, once on Return-then-blur, and on *Done*; the unit writing when pressed; nothing
+written when the box says what it said or a sheet opened on *Never* is closed; weeks staying
+weeks; the refusals in words and a refused write keeping the sheet open; no prose in the sheet;
+the page order (Notes, Ask SnagHQ, then the items card with the shopping list first); the meta
+row stating a date only when there is one and offering no way to set one; the items card's two
+headings, the room's pills on their own row, and the checklist box adding once on Return-then-blur
+with no *Add* button; the photo buttons over the first
+photo and never inside its door, and the pills with no photo; *Added by* only for somebody else;
+the room pill's ▾; the note box resting at one line, opening on focus and never sending on blur;
+and the outline *Ask SnagHQ* button under Notes and above the items card.
 
 ## Capture and triage are different moments
 
@@ -352,7 +448,7 @@ Five things about capture are load-bearing, and two of them are things it stoppe
   `update_snag` still validates an assignee against `property_members` if one is ever passed.
 
 **Triage** (`SnagDetailScreen`, presented as a modal over the list) is everything else — what it
-needs from the shop, when it is due, and whether it comes round again. Each control writes
+needs from the shop and whether it comes round again. Each control writes
 immediately rather than collecting into a form with a Save button, because triage is a series of
 small independent decisions and a Save button turns sorting twelve items into forty taps. It is a
 **sheet rather than a push** for the same reason — though note react-native-web renders a modal
@@ -360,12 +456,11 @@ presentation as a full screen, so that particular benefit is native-only.
 
 **Leaving saves, and the footer is *Mark done*.** There was a Save button here that closed rather
 than collected, and it mostly read *Close* beside a back arrow that already did the same. What it
-really did was commit the two boxes that can hold typed text — the date, whose `onBlur` is not
-guaranteed on native, and the item typed into the shopping box, which waits on its own `+`. The
-page now does that itself: `commitPending` runs on `beforeRemove` (every way off the page — the
-header's back, Android's, a swipe) and before *Mark done*, as **one** `update_snag`, and a date no
-calendar has holds the page open with the words still in the box. The hint in the bar still counts
-the boxes, honestly — *"1 unsaved change — kept when you leave"*.
+really did was commit the boxes that can hold typed text — now only the item typed into the
+shopping list's last row (the date box is gone), whose blur is not guaranteed on native. The page
+does that itself: `commitPending` runs on `beforeRemove` (every way off the page — the header's
+back, Android's, a swipe) and before *Mark done*. The hint in the bar still counts the box,
+honestly — *"1 unsaved change — kept when you leave"*.
 
 So the `StickyActionBar` holds **Mark done** (solid fern) or **Reopen** (outline). Finishing is the
 most common thing done to a job that already exists, and at the foot of the scroll it was past
@@ -376,32 +471,37 @@ ceremony spent where it is not needed is how it stops working where it is.
 
 **There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
 two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
-be a category. The order down the screen is now: photo strip, headline, the meta row,
-**Linked items**, **Anything to pick up?**, what came back from an assessment, **Notes**, the
-item's own history, and the **When** card (the date, then *Repeats*) — with *Mark done* in the
+be a category. The order down the screen is now: photo strip, headline, the meta row, **Notes**,
+**Ask SnagHQ**, the item's own history, **Items and shopping** (*Add to shopping list*, then
+*Linked items*), what came back from an assessment, and **Repeats** — with *Mark done* in the
 footer.
 
-**The order is the order of inspecting and fixing something**: what the job is about, then what to
-do about it, then when, then the one state change a person still makes by hand. The asset card
-earned the top slot by shrinking — as a nine-row inventory it belonged below the work, as a
-two-line summary of what this job concerns it is the first thing worth knowing. The assessment
-card stays directly above the shopping list, because the parts it offers with a `+` land in that
-list and a card whose suggestions are two cards away is one nobody connects to anything.
+**That order is the owner's, and it reverses one argued here.** It was the order of inspecting and
+fixing something — what the job is about, then what to do about it, then the conversation — with
+the linked items on top as a two-line summary of what the job concerns. The owner moved the
+conversation above the items card and, inside it, the shopping list above the linked items, from
+the preview (*The job page review*). What survives of the old argument is the pairing: the
+assessment card still sits directly under the items card, whose first half is the shopping list,
+because the parts it offers with a `+` land in that list and a card whose suggestions are two
+cards away is one nobody connects to anything.
 
 **Notes sit near the top, above every control.** This product has no notifications and never
 will, so a note is the only way one person tells the other anything — "ordered the part, arriving
 Tuesday" is usually the entire reason the screen was opened. Two cards of controls standing
 between the photo and it made the one piece of news on the page the last thing anybody read.
-**The box is four lines**, because a single-line slot says "a few words" to somebody whose actual
-message is which part was ordered, from where, arriving when, and what it cost. Note that
-`numberOfLines` is an Android-only hint on a multiline `TextInput` and does nothing on the build
-people install, so the height is stated outright.
+**The box is four lines once it is used**, because a single-line slot says "a few words" to
+somebody whose actual message is which part was ordered, from where, arriving when, and what it
+cost. At rest it is one line — a four-line box and a button on every job was a card of mostly
+empty space on a page that is mostly read — and it opens to four the moment it takes the cursor,
+staying open while it holds words. Note that `numberOfLines` is an Android-only hint on a
+multiline `TextInput` and does nothing on the build people install, so the height is stated
+outright.
 
 **It is an ordinary box with its own control underneath, not a chat row.** A 48px fern square
 holding an up-arrow, vertically centred against a four-line box, is a *messaging* affordance, and
 this is not a messaging app — so the box goes full width and the control sits under it reading
-**Add note**. That is the same correction the shopping list's `+` already took: a word rather than
-a glyph, on the control that commits what somebody has just written.
+**Add note**, appearing when the box opens. A word rather than a glyph, on the control that commits
+what somebody has just written — and it is never committed on blur, because a note is a message.
 
 **Its placeholder names the box rather than showing a message.** It read "Ordered the part,
 arriving Tuesday", which is an example — and this file's rule about example values is that they
@@ -409,44 +509,40 @@ read as something already entered, which on the one box holding what the other p
 worst place in the app for it. *"Add a note, or what you did"* says what an example never could:
 that the box takes both halves of its job, the news and the record of the repair.
 
-**Anything to pick up sits directly above the notes**, and that placement is the argument for it
-having survived: the trip to the shop is the single most common reason a small job sits for weeks,
-so it is the part of triage that actually moves work, and it sits with the two cards saying what
-the job *is* rather than below the conversation about it.
+**Add to shopping list leads the items card**, and that is the argument for it having survived:
+the trip to the shop is the single most common reason a small job sits for weeks, so it is the part
+of triage that actually moves work. It sat above the notes until the owner put the conversation
+first; it now opens the card that follows them, ahead of the linked items.
 
-**The three facts at the top are a way in, never a second way to write.** Status, when it's due
-and which room it's in are what somebody wants off the top of this page — and two of the three had
-their one control the better part of a screen further down. So the meta row states all three and
-the two a person actually sets are doors: the due chip scrolls to the date field, the room chip
-opens the same `EditSnagSheet` the pencil does. **One writer per fact**, which is the whole
-constraint — a chip that set the date itself would be the duplicate date control this page has
-already been through once, and the room has exactly one sheet precisely so two cannot disagree.
+**The facts at the top are stated; only the room is a way in.** Status, which room it's in and —
+for a repeat — when it is next due are what somebody wants off the top of this page. The room is a
+sunken pill with a ▾ that opens the same `EditSnagSheet` the pencil does. **One writer per fact**,
+which is the whole constraint: the room has exactly one sheet precisely so two cannot disagree.
 
-Two rules inside it. **Status is stated, not offered**: it is derived — a job starts when somebody
-dates it or decides what to buy — and the one state change made by hand is *Mark done*, at the
+Three rules inside it. **Status is stated, not offered**: it is derived — a job starts when somebody
+sets a repeat or decides what to buy — and the one state change made by hand is *Mark done*, at the
 foot, so a tappable status chip up here would be that button arriving at the top by another door.
-And **both chips speak when the fact is missing**, reading *No date* and *No room* rather than
-rendering nothing: a snag with neither is named elsewhere in this file as the weakest thing this
-app can hold, and a row of two badges says that quietly where a row of three says it out loud.
-The visible pill stays a badge and the `Pressable` around it carries `MIN_TOUCH_TARGET`, the same
-split every chip row in this app makes.
+**The due badge appears only when there is a date, and is not a control** — nothing on the page
+gives a one-off job a date, so a *No date* chip would be a door to nowhere. And **the room speaks
+when it is missing**, reading *No room*: a snag with no room is named elsewhere in this file as the
+weakest thing this app can hold. Each visible badge or pill sits inside a 48pt box
+(`MIN_TOUCH_TARGET`), the same split every chip row in this app makes.
 
 **A job can hold more than one photograph.** One was all it could ever have, because the only
 camera that reached a snag was the compose bar's and that files a *new* one — so the crack noticed
-afterwards became a second job about the same thing. The + is at the end of the strip rather than
-under it, and it inherits every upload rule the thing page paid for, now extracted into
-`lib/addPhotos.ts` rather than copied a third time: one write at the end, one upload after
-another, what arrived is kept, and the cap said out loud. Adding one deliberately does not start
-the job — photographing something is not deciding to do it.
+afterwards became a second job about the same thing. The camera and the library sit on a scrim in
+the first photo's corner (two pills when there is no photo), and they inherit every upload rule the
+thing page paid for, now extracted into `lib/addPhotos.ts` rather than copied a third time: one
+write at the end, one upload after another, what arrived is kept, and the cap said out loud.
+Adding one deliberately does not start the job — photographing something is not deciding to do it.
 
-**A due date is its own field, and it is not only for repeats.** `due_at` used to be reachable
-only from inside the repeat card, so a one-off job could never be given a date at all — which made
-the Schedule tab's *Due* marks and the overdue badge features only repeating jobs had. Precisely
-backwards: a filter that comes round every six months looks after itself, and the gutters before
-the weekend away are what somebody needs reminding of. It is a `DateField` like every other date
-in the app, committed on blur rather than on every keystroke — `8/1` on the way to `8/11/2019`
-parses to the eighth of January, and a field that wrote as it was typed would file the job under
-it.
+**A one-off job has no due date.** It had one — a `DateField` with *This weekend* and *Next week*,
+added because `due_at` was once reachable only through a repeat — and it came off by the owner's
+decision in *The job page review*. The date that remains is a repeat's: the *Repeats* row at the
+foot of the page sets it a cycle out, and *Never* clears it with the repeat. The Schedule tab's
+*Due* marks, *Due soon* and the overdue badge still read `due_at`, so they keep working for
+repeats; a one-off simply never has one. `DateField` is untouched and still takes every other date
+in the app.
 
 **Nobody moves a job to "doing" by hand.** There was a *Start it* button and it went unpressed:
 people commented on things and assigned them to each other while the list went on claiming
@@ -461,8 +557,9 @@ from the other end. Finishing is the one state change still made by hand, becaus
 knows.
 
 Two of the four are now unreachable from the UI: nothing sets an assignee, and priority is gone
-entirely. So in practice a job starts when somebody puts a date on it or decides what to buy —
-which is, if anything, a truer reading of "deciding to do the work" than the four ever were.
+entirely, and a due date is set only by choosing a repeat. So in practice a job starts when
+somebody sets it repeating or decides what to buy — which is, if anything, a truer reading of
+"deciding to do the work" than the four ever were.
 
 **There is no "how long will it take".** Effort was the only question in the app whose answer
 nobody could check, asked before the job was understood, and it existed mainly to feed a screen
@@ -725,7 +822,8 @@ snag**, when they were really the inventory answering a question nobody had aske
 a screen of vertical rent on a page people open constantly. **A list of what is *selected* belongs
 on the page; a list of what *could be* belongs behind a control.**
 
-So the card shows only what is linked, with a counter, and the record moved into
+So the *Linked items* half of the page's *Items and shopping* card shows only what is linked, with
+a counter, and the record moved into
 `LinkAssetsSheet`. And it is **many now rather than one**: a leak under the sink is about the
 mixer *and* the waste trap, and a kitchen job is very often about two appliances side by side.
 `home.snag_things` holds that (`20260920100000`), with `snags.thing_id`'s rows backfilled into it.
@@ -783,30 +881,42 @@ RLS does the filtering rather than the query pretending to: the comments policy 
 property, so this returns exactly what this person could have read by opening those jobs one at a
 time.
 
-**The date and the repeat are one *When* card, and setting up a repeat is one tap.** It was a
-due-date card, then a *Schedule a recurring job* card holding only Yes and No, then a modal behind
-the Yes asking how often and — again — *"When's the next one due?"* with its own date presets. Two
-sets of controls writing one `due_at` had people asking which date was real, and *Yes* opened the
-modal without writing anything, so dismissing it left *No* lit. Now: the `DateField` with **This
-weekend** and **Next week** a tap away, then a **Repeats** row — *Never* and the `REPEAT_PRESETS`
-as chips that write when pressed, plus the job's own cycle when it is not a preset (a heat pump's
-730 days from the thing page must not read as *Never*). Choosing a cycle dates an undated job a
-cycle out; a date already set is left alone. One sentence under it says what marking it done does
-and that it comes up under **Due soon** on the list — *Snag doesn't send reminders* is still said,
-because a repeat is exactly what somebody expects to be reminded about.
+**A repeat is set from one row at the foot of the page.** It was a due-date card, then a
+*Schedule a recurring job* card holding only Yes and No, then a modal behind the Yes asking how
+often and — again — *"When's the next one due?"* with its own date presets; then one *When* card
+with a date box above a rail of chips; then the rail alone. It is now **one row — *Repeats …
+Never ›*** — by the owner's decision, because the rail took three lines to hold one answer.
 
-**The box shows the day it is due.** It was `formatLooseDate`, which is built for date columns and
-reads a timestamp's day as nothing, so a job due on the 8th showed back as *Nov 2026*. `dueText`
-is `formatDayFirst(dayKey(due_at))` — the local day, round-tripping with what was typed.
+The row opens `RepeatSheet`: ***Never*, or *Every [n] [days · weeks · months · years]***, by the
+owner's decision — it was *Never* and the four `REPEAT_PRESETS`, and a filter changed every eight
+weeks had no answer in it. The row says a preset in its own word (*Monthly*, *Yearly*) and
+anything else as `describeCycle` does (*Every 8 weeks*, *Every 2 years* for a heat pump's 730 days
+from the thing page), and the sheet opens on the same reading through `cycleParts`. Taps write
+when pressed — *Never* then closes — and the number writes when it is left and only when it says
+something new, so opening the sheet and closing it writes nothing. That is the difference from the
+modal this page removed, which opened on *Yes* without writing anything and so left *No* lit when
+dismissed — here the row always says what the row holds. Choosing a cycle dates an undated job a
+cycle out; a date already set is left alone; pressing *Every* on a repeat with no date dates it;
+*Never* clears the date with the repeat.
+
+**There is no line of prose in the sheet**, by the owner's decision. It said what marking it done
+does, that it comes up under **Due soon**, and that *Snag doesn't send reminders*; the row's
+*Next due* date is the one fact that stayed.
+
+**The row shows the day it is due.** `formatLooseDate` is built for date columns and reads a
+timestamp's day as nothing, so a job due on the 8th would show as *Nov 2026*. The row's subtitle
+uses `formatDayFirst(dayKey(due_at))` — the local day, day first — and it is the only place on the
+page the day is written.
 
 `SnagDetailScreen.test.tsx` pins the edit sheet writing both fields in one call, the refusal on a
 photo-less job with no words, the linked-assets list offering this room only and writing nothing,
 its absence when the room is empty, the page surviving a failed record read, the history card and
-its exclusion, the due date's day-first parse and its refusal of `31/02/2026`, the When card —
-one-tap repeat, a date left alone, a cycle the presets lack, the quick dates, the day shown back —
-and leaving: no Save or Close, nothing written when nothing is typed, one write for both boxes on
-`beforeRemove`, staying put on a failure or a date no calendar has, the boxes committed before
-*Mark done*, and a calendar pick committing at once.
+its exclusion, the repeats (the row and its sheet, the number written when left and the unit when
+pressed, nothing written by a box left unchanged, a date left alone, an undated repeat dated by
+*Every*, *Never* clearing both, a cycle the presets lack, weeks staying weeks, the day stated, the
+refusals, a refused write kept open) — and leaving: no Save or Close,
+nothing written when nothing is typed, one write for the shopping box on `beforeRemove`, staying
+put on a failure, and the box committed before *Mark done*.
 
 ### Finishing says so, and a repeat cannot finish
 
@@ -1004,7 +1114,8 @@ answer across every room.
   pickers and the room pages keep the seeded order. A room with nothing recorded and nothing to
   suggest still gets no tile, as `Elsewhere` and `Under the house` never did.
 - **A tile is painted in its main wall colour** (`wallColour`): the paint whose *Where it went*
-  says *main wall*, then one saying *walls*. A feature wall, a ceiling and the joinery never
+  says *main wall*, then one saying *walls*, each place a paint went read on its own, so the walls
+  and a feature wall is still the walls. A feature wall, a ceiling and the joinery never
   colour it — a white bedroom with one forest-green wall is a white room — and a hex
   `swatchColour` will not parse leaves the tile white rather than guessing. This is the swatch
   rule at full size, not an exception to the palette: the colour is the record's data. A room
@@ -1072,6 +1183,14 @@ Alabaster on the windows. Three rules follow, and they are the whole feature:
   paints in one room apart, which is why it is the single field on the spec sheet exempt from
   "empty fields don't render". No other kind shows its note on a card — an appliance's note is not
   what distinguishes it from the appliance beside it.
+- **On the paint's own page, where it went is a row of pills, not a box.** One colour goes on the
+  walls *and* the ceiling, so it is one pill per place, in a single row between the header and the
+  photos that scrolls sideways rather than wrapping. Each pill carries a pencil and opens
+  `PaintAreaSheet` (the suggestions in `PAINT_AREA_SUGGESTIONS`, or a place typed in); a tap on a
+  place writes it at once, and the + adds another. **It is still one text column**: the places are
+  `notes` joined by ` · ` (`joinPaintAreas`) and read back by `paintAreas`, which also splits on
+  commas, semicolons and line breaks, so a list typed into the walkthrough's box arrives as pills.
+  The card line, the search, both extracts and `wallColour` read it exactly as they did.
 
 In the walkthrough, choosing Paint asks **which colour** rather than offering a name, the photo is
 of the **tin lid** rather than a rating plate, and the last step asks **where it went** instead of
@@ -1461,6 +1580,20 @@ later, in an aisle, needing one exact string. So:
   **every field the kind can answer is on screen, empty or not.** A paint still gets no Serial
   box: "every field" means every field the kind can answer.
 
+  **On screen is not the same as a box (September 2026).** Counted on the live record — 17
+  appliances, 13 paints — the three dates were empty on every appliance, and a paint's sheen, tint,
+  what's left and warranty on twelve in thirteen or more; a box each was most of the card's height.
+  Those fields (`OFFERED_FIELDS`: year made, installed, warranty until, sheen, tint formula, what's
+  left) are **small sunken pills at the foot of the card** — the chip's language, smaller — which
+  still name everything the record can hold, so the reversal above is kept. A tap opens the box
+  where it always sat, with the cursor in it; one left empty goes back to a pill; **one holding a
+  value is always a box**. `DateField`'s `onLeaveEmpty` is what says a date was left empty, and it
+  deliberately stays quiet when the focus has only moved to its own calendar: on the web that
+  button takes focus as it is pressed, and putting the pill back then would unmount the calendar
+  before it opened. Serial (24%) and a paint's product (23%) were just over the line and stay boxes;
+  notes, servicing and paperwork were left as they are, by the owner's choice. **A paint is not
+  asked when it went in** — one in thirteen had the date — and the column is left alone.
+
   **It writes each box when the box is left, and says *Saved*.** It had one Save button for a
   while, and a back gesture over typed words asked *Leave without saving?* — a question with a
   wrong answer that loses the words, on the one page in the app where every other kind of edit
@@ -1537,10 +1670,16 @@ later, in an aisle, needing one exact string. So:
   page or supplied with the label reading as the maker's **published** value for the colour the
   tin names (below) — never a colour judged from a photograph. `swatchColour` draws it only when it parses as three or six hex
   digits, and draws **nothing** otherwise rather than a guess, because a swatch is the one part of a
-  paint record somebody believes at a glance without reading the code beside it; a box holding
-  something else says *Six hex digits draw a swatch*. It carries a hairline edge because most paint
+  paint record somebody believes at a glance without reading the code beside it; a hex that does
+  not parse says *Six hex digits draw a swatch*. It carries a hairline edge because most paint
   is a white. It is always approximate — no screen shows paint true — so it sits **beside** the
   colour code and never replaces it: the code and the tint formula are what the counter matches.
+
+  **On a paint's page the swatch is a tile in the photo strip**, second after the first photo or
+  first when there is none, with the hex as a line of small mono text under the photos that a tap
+  opens as a box. The tile is **drawn from the hex, never stored** — it follows the hex, cannot go
+  stale, and has no ×, because it is not a photo. Its one word is measured against the colour with
+  `tileInk`, as a room tile's are.
 
 ### Five kinds, two built
 
@@ -1674,12 +1813,17 @@ with no room fall under **Whole house**. Photos reuse `home-photos` and the exis
 name for half of what it holds; the property name goes in the screen header instead, through the
 same picker capture has.
 
-`ThingDetailScreen.test.tsx` pins the reversal: every applicable field rendering as a box on an
-empty thing, no Serial on a paint, Save off until something is typed, one write carrying only what
-changed, and an emptied box clearing the column rather than leaving it alone. It also pins what
-was taken away — no example values, no kind rail, one room pill, no section prose, no *On the
-list* — and that scheduling a service is one `createSnag` carrying its own date and repeat rather
-than a create followed by an update.
+`ThingDetailScreen.test.tsx` pins the reversal: every applicable field named on an empty thing,
+the rarely used ones as pills that open in place, focused, go back when left empty and stay boxes
+once they hold something; no Serial and no Installed on a paint, Save off until something is typed,
+one write carrying only what changed, and an emptied box clearing the column rather than leaving it
+alone. It pins where a paint went — a pill per place however the line was written, one write per
+tap, never a place twice, the draft kept in step so leaving writes nothing — and the swatch tile's
+place in the strip and the hex under it. It also pins what was taken away — no example values, no
+kind rail, one room pill, no section prose, no *On the list* — and that scheduling a service is one
+`createSnag` carrying its own date and repeat rather than a create followed by an update.
+`PaintAreaSheet.test.tsx` pins the sheet, and `DateField.test.tsx` pins `onLeaveEmpty` staying
+quiet while the calendar is open.
 `houseRecord.test.ts` also pins the document key round-trip — the filename surviving, hyphens not
 being mistaken for the prefix, and two uploads never colliding (`upsert: false` makes a collision a
 failure, not an overwrite).
@@ -3723,10 +3867,21 @@ day counts, and that each preset's label matches what `describeCycle` says about
 The weeks and days branches stay, because `create_snag` accepts any interval from 1 to 3650 and an
 extract should say what the row actually holds rather than round it into a lie.
 
-Setting one up is **one tap on the *Repeats* row**, under the due date on the same card: *Never*
-first and lit by default, then the presets. It was a yes/no card with the cycle and a second set of
-date controls in a modal behind the Yes — see *the When card* under triage. A repeat with no date
-on it would never surface, so choosing an interval sets one; an existing date is never clobbered.
+**That rule binds the two preset lists, and only them.** The job page's *Repeats* sheet takes any
+whole number of days, weeks, months or years, by the owner's decision, so the weeks and days
+branches are now reachable from the UI — *every 8 weeks* is an answer somebody chose, not a
+rounding. What keeps it one vocabulary is that the sheet types and reads back through the same
+arithmetic: `CYCLE_UNITS`, `cycleDays` and `cycleParts` sit beside `describeCycle` in
+`packages/supabase-queries`, with the same four units at the same values (7, 30, 365) and
+`cycleParts` following `describeCycle`'s precedence. `cycles.test.ts` pins that for every number
+and unit the sheet can send, up to ten years (`MAX_CYCLE_DAYS`), the sheet's reading and the row's
+words are one sentence.
+
+Setting one up is **the *Repeats* row**, the job page's last thing, and the sheet it opens: *Never*,
+or *Every [n] [unit]*. It was a yes/no card with the cycle and a second set of date controls in a
+modal behind the Yes, later a rail of chips under a due-date box, then a sheet of presets — see *A
+repeat is set from one row* under triage. A repeat with no date on it would never surface, so
+choosing an interval sets one; an existing date is never clobbered; *Never* clears both.
 
 ## A date is typed or tapped, and never only tapped
 
@@ -3787,11 +3942,9 @@ placeholder goes in only when it says something an example never could — *"No
 date — that's fine"*.
 
 It reaches every date in the app: the project sheet's three, a quote's date, the
-thing page's *Installed* and *Warranty until*, the service regime's first date,
-and the snag's due date — which had **no way to name a day at all** before this,
-only *Today*, *In a week* and *A full cycle away*. A *Pick a date…* option sits
-beside them, lit whenever the date set is not one those three would have
-produced.
+thing page's *Installed* and *Warranty until* and the service regime's first date.
+It reached the snag's due date too, until that box came off the job page — a
+job's only date now is the one a repeat sets (see *The job page review*).
 
 `DateField.test.tsx` pins the day-first read, the refused two-digit year, the
 refused 31 February, the month-only answer surviving, the round trip between the
@@ -4439,9 +4592,8 @@ Two badges carry the triage vocabulary, and their colour budget is deliberate:
 
 ### One chip, every rail
 
-The "Show me" sheet on `SnagListScreen`, the repeat modal's rails on `SnagDetailScreen`, the
-project-mode pair on `ProfileScreen` and the room rows in `RoomPicker` all say the same thing the
-same way: **a sunken well when off, solid fern when on, no border either way.** Two rules follow from that:
+The chip rails that remain — the project-mode pair on `ProfileScreen`, the room rows in
+`RoomPicker`, the export sheet's choices — all say the same thing the same way: **a sunken well when off, solid fern when on, no border either way.** Two rules follow from that:
 
 - **Never put an inactive control on `surface` with a border.** On a plaster ground a white
   bordered box is a *card*, so a row of filters styled that way reads as a row of things to read
@@ -4676,9 +4828,12 @@ this product now sends mail. **Don't make the portal say "emailed" from anything
 
 ### On the job page
 
-One quiet row, *Ask SnagHQ about this*, until somebody asks — most jobs never need it, and a card
-on every job would be the page advertising a service. Then `SupportCard`, directly above the
-advice card because that is where the answer lands. It states every state in words (waiting,
+One button, *Ask SnagHQ about this* — full width, outlined, directly under the notes — until
+somebody asks. Never a card of suggested questions: most jobs never need it, and a panel of prompts
+on every job would be the page advertising a service. Outlined because *Mark done* is the page's
+one filled button. Once asked, `SupportCard` takes the button's slot, so the question and its
+thread sit with the conversation. (It sat above the advice card until *The job page review*; the
+advice card stays by the shopping list its parts go into.) It states every state in words (waiting,
 seen, replied and *shared until*, closed), takes follow-ups (which put it back in SnagHQ's court
 and move `waiting_since`, the queue's sort key), and **Close it** ends access after a
 `ConfirmDialog` saying that is what it does. Asking, replying and closing never touch the job, and
@@ -4710,6 +4865,32 @@ under *The staff portal*.
 printed and put on walls**. That's why it stays in `linking.ts`'s prefix list — the Netlify
 redirect gets someone to the app, but the prefix list decides whether the path then resolves to
 the right screen rather than the default tab.
+
+## Deploys cost credits; previews don't
+
+A production deploy is 15 Netlify credits, and a Deploy Preview or a branch deploy costs none. Every
+merge used to be a production deploy on all three sites, whatever it touched. So **merging to
+`main` publishes nothing now.** Each site's production branch is `production`, and the one thing
+that moves it is *Deploy to production* (`.github/workflows/deploy.yml`, run by hand from Actions).
+It takes `main` or a commit on it, refuses one CI has not passed, fast-forwards `production`, and
+writes which sites will rebuild and which migrations are included. A change is looked at first in
+its PR's Deploy Preview and then on `main--snagv1.netlify.app`, both free. Several merges go out in
+one deploy.
+
+`scripts/netlify-ignore.sh` is every site's `ignore` step: a production build is skipped when nothing
+the site builds from has changed. `packages/` counts for the app and the portal and not for `www`,
+which imports none of it. **Anything uncertain builds, and previews always build**, because the
+failure to avoid is not a wasted 15 credits. It is a change that reached `production` and silently
+never went live. Two consequences:
+
+- **A site that gains a dependency on a new directory needs it added to the script's `case`**.
+  Without it, that site stops rebuilding when the directory changes, and nothing says so.
+- **Rolling back is Netlify's *Publish deploy* on an earlier deploy**, which is free. The workflow
+  only ever fast-forwards.
+
+`netlifyIgnore.test.ts` replays the script against a scratch repository and pins each
+`netlify.toml`'s path to it. The dashboard half (the production branch, and branch deploys for
+`main`) is not in git and is in `SNAG_INFRA_NOTES.md` under *Deploys*.
 
 ## Why apps/web still exists
 
@@ -4936,8 +5117,9 @@ npm run test:mobile  # jest
 ### Add a column or table
 1. New timestamped file in `supabase/migrations/` — never edit a past one
 2. Apply via the Supabase MCP (`apply_migration`) or the SQL Editor — **before** merging the code
-   that reads it. `main` is what `app.snaghq.co.nz` serves, and a client naming a column the
-   database has not got gets a 400 on the whole request, which reads on screen as an empty tab.
+   that reads it. The preview of `main` reads the live database and `production` follows `main` at
+   the next deploy, and a client naming a column the database has not got gets a 400 on the whole
+   request, which reads on screen as an empty tab.
    See *"Everything has disappeared" has a second cause* above.
 3. Add the type to `packages/shared-types/src/index.ts`
 4. Grant explicitly, by name

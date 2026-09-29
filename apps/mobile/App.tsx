@@ -6,21 +6,24 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 
-import { supabase, getMyProfile, getMyHousehold } from './src/lib/supabase';
+import { supabase, getMyProfile, getMyHousehold, getMembers } from './src/lib/supabase';
 import { SchemaNotExposedError } from '@snag/supabase-queries';
 import { createAuthEventQueue, planAuthEvent } from './src/lib/authEvents';
 import { resetWebPathIfStale } from './src/lib/webLocation';
 import { clearJoinToken, readJoinToken } from './src/lib/joinLink';
 import { chooseGate } from './src/lib/gates';
+import { nameFromIdentity } from './src/lib/googleSignIn';
+import { pendingSteps } from './src/setup/steps';
 import { Colors } from './src/constants/theme';
 import { Household, Profile } from './src/types';
 import RootNavigator from './src/navigation';
 import { linking } from './src/navigation/linking';
-import AuthScreen from './src/screens/AuthScreen';
-import SetupScreen from './src/screens/SetupScreen';
+import WelcomeFlow from './src/setup/WelcomeFlow';
+import SetupFlow from './src/setup/SetupFlow';
 import JoinScreen from './src/screens/JoinScreen';
 import { ToastProvider } from './src/hooks/useToast';
 import { HouseholdProvider } from './src/hooks/useHousehold';
+import { FirstCaptureProvider } from './src/hooks/useFirstCapture';
 import AppErrorBoundary from './src/components/AppErrorBoundary';
 import { initMonitoring } from './src/lib/monitoring';
 
@@ -65,6 +68,17 @@ function AppGates() {
   const [loading, setLoading] = useState(true);
   // A configuration failure, not a data one — see loadAccount.
   const [fatal, setFatal] = useState<string | null>(null);
+  // People in the household, for the one setup step that depends on it (only
+  // somebody alone is asked to bring somebody in). Read only while that step
+  // could still be asked — see loadAccount.
+  const [memberCount, setMemberCount] = useState(0);
+  // Setup finished in this session. The steps it showed are recorded as seen
+  // as they are left, but that write is never awaited, so the gate must not
+  // wait on it either: a write that failed would otherwise put the whole run
+  // back on screen. They are asked again on the next launch instead.
+  const [setupDone, setSetupDone] = useState(false);
+  // The photograph from setup's *Snap your first job*, for the list to file.
+  const [firstPhoto, setFirstPhoto] = useState<string | null>(null);
 
   // Anything touching Supabase from the auth callback goes through here.
   const queueAuthWork = useRef(createAuthEventQueue()).current;
@@ -86,8 +100,17 @@ function AppGates() {
         getMyProfile(),
         getMyHousehold(),
       ]);
+      // Only somebody who has not been shown the invite step needs a head
+      // count, so a year-old account does not pay a read on every launch for
+      // a question it answered long ago. A failed count reads as "not alone":
+      // asking the second person to invite the first is the worse mistake.
+      let count = 0;
+      if (nextHousehold && !nextProfile?.setupSeen.includes('invite')) {
+        count = await getMembers(nextHousehold.id).then((m) => m.length).catch(() => 2);
+      }
       setProfile(nextProfile);
       setHousehold(nextHousehold);
+      setMemberCount(count);
       setFatal(null);
     } catch (err) {
       console.error('Failed to load account:', err);
@@ -128,6 +151,9 @@ function AppGates() {
         setSession(null);
         setProfile(null);
         setHousehold(null);
+        setMemberCount(0);
+        setSetupDone(false);
+        setFirstPhoto(null);
         setLoading(false);
         return;
       }
@@ -151,6 +177,14 @@ function AppGates() {
   // used to live in the ladder below, where nothing could see it — which is how
   // the join branch shipped behind the Setup branch and behind a profile that a
   // brand-new scanner does not have.
+  // A setup step nobody has shown this person yet — including one added after
+  // they set up, which is how a new question reaches existing accounts. The
+  // same function the flow walks, so the gate and the flow cannot disagree
+  // about whether there is anything to ask.
+  const hasPendingSteps =
+    !setupDone &&
+    pendingSteps({ profile, household, memberCount }, new Set(profile?.setupSeen ?? [])).length > 0;
+
   const gate = chooseGate({
     loading,
     fatal: !!fatal,
@@ -158,6 +192,7 @@ function AppGates() {
     hasJoinToken: !!joinToken,
     hasProfile: !!profile,
     hasHousehold: !!household,
+    hasPendingSteps,
   });
 
   if (gate === 'loading') {
@@ -185,8 +220,11 @@ function AppGates() {
       <SafeAreaProvider>
         <StatusBar style="dark" />
         {/* A scanner arrives here first, with no account: the code opens the
-            screen on Create account and rides through the confirmation link. */}
-        <AuthScreen joinToken={joinToken} />
+            email path on Create account and rides through the confirmation
+            link, and through Google's round trip too. */}
+        <ToastProvider>
+          <WelcomeFlow joinToken={joinToken} />
+        </ToastProvider>
       </SafeAreaProvider>
     );
   }
@@ -224,17 +262,32 @@ function AppGates() {
     );
   }
 
-  // Signed in, but not yet in a household — either a brand new account, or the
-  // second person waiting to be invited by the first.
-  // `gate === 'app'` already means both of these are present — this narrows it
-  // for the compiler, which cannot read chooseGate, and it is the same condition
-  // rather than a second opinion about it.
+  // Signed in, but not yet in a household — a brand new account, or the second
+  // person waiting to be invited by the first — or somebody with a setup step
+  // they have not been shown. One flow for all three, kept mounted across the
+  // account re-reads its own writes cause, so making the house half way
+  // through carries on to the rooms rather than starting again.
+  // `gate === 'app'` already means profile and household are present — this
+  // narrows it for the compiler, which cannot read chooseGate, and it is the
+  // same condition rather than a second opinion about it.
   if (gate === 'setup' || !profile || !household) {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" />
         <ToastProvider>
-          <SetupScreen profile={profile} onReady={loadAccount} onJoinToken={setJoinToken} />
+          <SetupFlow
+            profile={profile}
+            household={household}
+            memberCount={memberCount}
+            suggestedName={nameFromIdentity(session?.user.user_metadata)}
+            onReady={loadAccount}
+            onJoinToken={setJoinToken}
+            onFinish={(photo) => {
+              setFirstPhoto(photo);
+              setSetupDone(true);
+              loadAccount();
+            }}
+          />
         </ToastProvider>
       </SafeAreaProvider>
     );
@@ -245,9 +298,11 @@ function AppGates() {
       <StatusBar style="dark" />
       <HouseholdProvider household={household} profile={profile} onReload={loadAccount}>
         <ToastProvider>
-          <NavigationContainer linking={linking}>
-            <RootNavigator />
-          </NavigationContainer>
+          <FirstCaptureProvider uri={firstPhoto}>
+            <NavigationContainer linking={linking}>
+              <RootNavigator />
+            </NavigationContainer>
+          </FirstCaptureProvider>
         </ToastProvider>
       </HouseholdProvider>
     </SafeAreaProvider>

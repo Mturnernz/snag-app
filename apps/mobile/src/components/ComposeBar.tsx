@@ -45,6 +45,29 @@ interface Props {
 }
 
 /**
+ * The tail of the shutter: upload the photograph, then file it as a snag.
+ *
+ * Exported because first-run setup's *Snap your first job* takes its photo on
+ * the setup screen — a browser only opens the camera from inside a tap, so it
+ * cannot be opened on the list after the navigator mounts — and then hands it
+ * to the list, which files it through here. One path from shutter to snag,
+ * so a first photo lands exactly like every photo after it: the capture sheet
+ * opens and asks what is wrong and where.
+ */
+export async function fileCapturedPhoto(
+  uri: string,
+  pathPrefix: string,
+  description: string | null,
+  onAdd: Props['onAdd'],
+  beforeAdd?: () => void
+): Promise<void> {
+  const { path, error } = await compressAndUpload(uri, photoFileName(pathPrefix));
+  if (error || !path) throw error ?? new Error('The photo did not upload');
+  beforeAdd?.();
+  await onAdd({ photoPaths: [path], description });
+}
+
+/**
  * Adding something, from the bottom of the list you were already looking at.
  *
  * This replaced a whole tab. Capture was never a destination — it was a form
@@ -108,13 +131,10 @@ export default function ComposeBar({ pathPrefix, onAdd, stacked, words, embedded
 
     setBusy(true);
     try {
-      const { path, error } = await compressAndUpload(uri, photoFileName(pathPrefix));
-      if (error || !path) throw error ?? new Error('The photo did not upload');
       // Any words already in the bar belong to the photo that was just taken —
       // someone typing and then reaching for the camera meant one snag.
       const description = draft.trim() || null;
-      setDraft('');
-      await onAdd({ photoPaths: [path], description });
+      await fileCapturedPhoto(uri, pathPrefix, description, onAdd, () => setDraft(''));
     } catch (err: unknown) {
       showAlert("Couldn't add that photo", failureReason(err) ?? 'Please try again.');
     } finally {

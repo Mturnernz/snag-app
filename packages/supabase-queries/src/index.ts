@@ -234,7 +234,7 @@ export async function getMyProfile(client: SupabaseClient): Promise<Profile | nu
 
   const { data, error } = await client
     .from('profiles')
-    .select('id, display_name, created_at, deleted_at, projects_enabled')
+    .select('id, display_name, created_at, deleted_at, projects_enabled, setup_seen')
     .eq('id', auth.user.id)
     .maybeSingle();
 
@@ -263,6 +263,7 @@ function mapProfile(row: Row): Profile {
     createdAt: row.created_at,
     deletedAt: row.deleted_at ?? null,
     projectsEnabled: row.projects_enabled ?? true,
+    setupSeen: Array.isArray(row.setup_seen) ? row.setup_seen : [],
   };
 }
 
@@ -283,6 +284,21 @@ export async function setProjectsEnabled(
 ): Promise<Profile> {
   const { data, error } = await client.rpc('set_projects_enabled', { p_enabled: enabled });
   return mapProfile(unwrap<Row>(data, error, "Couldn't change that"));
+}
+
+/**
+ * Records first-run steps as shown — answered, or put off with *Set up later*.
+ *
+ * Appends; never replaces. Two phones marking the same step cannot undo each
+ * other, and the server keeps each id once. Returns the profile so the caller
+ * re-reads what the database holds rather than what it asked for.
+ */
+export async function markSetupSeen(
+  client: SupabaseClient,
+  steps: string[]
+): Promise<Profile> {
+  const { data, error } = await client.rpc('mark_setup_seen', { p_steps: steps });
+  return mapProfile(unwrap<Row>(data, error, "Couldn't save that"));
 }
 
 export async function upsertProfile(

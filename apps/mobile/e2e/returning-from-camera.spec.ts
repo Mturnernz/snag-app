@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { reachPassword } from './welcome';
 
 // Coming back to the tab must not look like signing in.
 //
@@ -29,9 +30,7 @@ const PASSWORD = process.env.E2E_PASSWORD;
 test.skip(!EMAIL || !PASSWORD, 'Set E2E_EMAIL and E2E_PASSWORD to run the authenticated specs.');
 
 async function signIn(page: Page) {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Sign in', { exact: true })).toBeVisible({ timeout: 120_000 });
-  await page.getByLabel('Email', { exact: true }).fill(EMAIL!);
+  await reachPassword(page, EMAIL!);
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD!);
   await page.getByText('Sign in', { exact: true }).click();
   await expect(page.getByPlaceholder('Capture a new job')).toBeVisible({ timeout: 90_000 });

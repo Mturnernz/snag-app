@@ -20,6 +20,7 @@ describe('the order of the gates', () => {
     ['signed out is the auth screen', { signedIn: false }, 'auth'],
     ['no profile is setup', { hasProfile: false, hasHousehold: false }, 'setup'],
     ['no household is setup', { hasHousehold: false }, 'setup'],
+    ['a step not yet shown is setup', { hasPendingSteps: true }, 'setup'],
     ['everything in place is the app', {}, 'app'],
   ])('%s', (_name, over, expected) => {
     expect(gate(over as Partial<GateState>)).toBe(expected);
@@ -54,5 +55,22 @@ describe('holding a join code', () => {
 
   it('never beats an unexposed schema, which makes it unanswerable anyway', () => {
     expect(gate({ hasJoinToken: true, fatal: true })).toBe('fatal');
+  });
+});
+
+// A setup step added later reaches people who set up before it existed — but
+// never ahead of a code somebody is holding, which is a question about a whole
+// household rather than one about their screen.
+describe('a step not yet shown', () => {
+  it('sends somebody fully set up back through setup', () => {
+    expect(gate({ hasPendingSteps: true })).toBe('setup');
+  });
+
+  it('never beats a join code', () => {
+    expect(gate({ hasPendingSteps: true, hasJoinToken: true })).toBe('join');
+  });
+
+  it('never beats sign-in', () => {
+    expect(gate({ hasPendingSteps: true, signedIn: false })).toBe('auth');
   });
 });

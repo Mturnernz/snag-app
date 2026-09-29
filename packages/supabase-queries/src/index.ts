@@ -568,6 +568,21 @@ export async function deleteMyAccount(client: SupabaseClient): Promise<void> {
 }
 
 /**
+ * Everything Snag holds that this account can see, as one JSON document —
+ * *Download my data* on the You tab, and the answer to a Privacy Act request.
+ *
+ * `home.export_my_data` is SECURITY INVOKER over the tables themselves, so
+ * the row policies decide what is in it and there is nothing here to filter.
+ * Join-link and bill-address tokens are left out server-side; files are listed
+ * by storage path, never signed, because the file is made to be kept.
+ */
+export async function getMyData(client: SupabaseClient): Promise<Record<string, unknown>> {
+  const { data, error } = await client.rpc('export_my_data');
+  if (error) throw asError(error, "Couldn't gather your data");
+  return (data ?? {}) as Record<string, unknown>;
+}
+
+/**
  * The properties this person is linked to, in creation order.
  *
  * RLS already scopes this to their own links, so there is no household filter:
@@ -1973,7 +1988,12 @@ export interface ProductLookup {
   make: string;
   model: string;
   status: 'pending' | 'found' | 'nothing' | 'failed';
-  reason: 'busy' | 'quota' | 'error' | null;
+  /**
+   * Why a failed one failed. `quota` is the household's own fifty a day;
+   * `limit` is Google refusing the search on the key's allowance — not busy,
+   * so a minute's wait will not fix it.
+   */
+  reason: 'busy' | 'quota' | 'limit' | 'error' | null;
   facts: ProductFacts | null;
   finishedAt: string | null;
 }
@@ -2027,7 +2047,7 @@ export function parseProductFacts(raw: unknown): ProductFacts | null {
 }
 
 const LOOKUP_STATUSES: ProductLookup['status'][] = ['pending', 'found', 'nothing', 'failed'];
-const LOOKUP_REASONS: NonNullable<ProductLookup['reason']>[] = ['busy', 'quota', 'error'];
+const LOOKUP_REASONS: NonNullable<ProductLookup['reason']>[] = ['busy', 'quota', 'limit', 'error'];
 
 export function parseProductLookup(raw: unknown): ProductLookup | null {
   if (!raw || typeof raw !== 'object') return null;

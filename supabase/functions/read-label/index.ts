@@ -47,7 +47,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { encodeBase64 } from 'jsr:@std/encoding/base64';
-import { GEMINI_ENDPOINT, geminiRequest, isBusy, modelsToTry, readingFromGemini } from './gemini.ts';
+import { GEMINI_ENDPOINT, geminiRequest, isBusy, modelsToTry, quotaRefusal, readingFromGemini } from './gemini.ts';
 import { lookUpAndKeep } from '../lookup-product/run.ts';
 
 const BUCKET = 'home-photos';
@@ -130,7 +130,8 @@ async function askModels(models: string[], body: string, apiKey: string): Promis
     if (attempt.ok) return { kind: 'reply', json: await attempt.json().catch(() => null) };
 
     const detail = await attempt.text().catch(() => '');
-    console.error(`read-label: ${model} ${attempt.status}:`, detail.slice(0, 500));
+    const quota = quotaRefusal(attempt.status, detail);
+    console.error(`read-label: ${model} ${attempt.status}:`, quota ? `quota — ${quota.detail}` : detail.slice(0, 500));
     if (isBusy(attempt.status)) {
       busy = true;
       if (!last) await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSE_MS));

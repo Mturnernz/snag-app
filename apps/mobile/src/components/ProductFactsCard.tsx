@@ -45,6 +45,7 @@ interface Props {
 const FAILED_WORDS: Record<NonNullable<ProductLookup['reason']>, string> = {
   busy: 'The search was busy when this was looked up.',
   quota: "That day's reads were used up when this was looked up.",
+  limit: "Google wouldn't run the search — SnagHQ's allowance for web searches is used up.",
   error: "Couldn't finish looking this up.",
 };
 

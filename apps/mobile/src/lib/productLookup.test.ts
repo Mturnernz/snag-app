@@ -319,6 +319,7 @@ describe('what the thing’s page is offered', () => {
     expect(lookup?.status).toBe('nothing');
     expect(lookup?.facts).toBeNull();
     expect(parseProductLookup({ id: 'l', status: 'failed', reason: 'weird' })?.reason).toBe('error');
+    expect(parseProductLookup({ id: 'l', status: 'failed', reason: 'limit' })?.reason).toBe('limit');
     expect(parseProductLookup({ id: 'l', status: 'invented' })).toBeNull();
   });
 });

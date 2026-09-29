@@ -809,6 +809,15 @@ describe('what the maker says', () => {
     expect(texts(result)).toContain('Manual');
   });
 
+  it('says Google refused the search rather than calling it busy', async () => {
+    mock_getProductLookup.mockResolvedValue(found({ status: 'failed', reason: 'limit', facts: null }));
+    const result = await open(HEAT_PUMP);
+    expect(texts(result)).toContain(
+      "Google wouldn't run the search — SnagHQ's allowance for web searches is used up.",
+    );
+    expect(texts(result)).not.toContain('The search was busy when this was looked up.');
+  });
+
   it('shows a lookup still under way as one, and draws the record if it cannot be read', async () => {
     mock_getProductLookup.mockResolvedValue(found({ status: 'pending', facts: null }));
     let result = await open(HEAT_PUMP);

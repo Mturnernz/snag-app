@@ -157,24 +157,34 @@ in the backing store, which is a worse orphan than the one you started with. Use
 (Storage → `home-photos` → the household's folder) or the Storage API with a session that passes
 `home.can_use_photo_folder`. The anon key cannot: the delete policy needs a household member.
 
-### The advisor's anonymous-sign-in warning on `home` is noise — but its cause isn't
+### Anonymous sign-ins reached `home` — the old note here was wrong
 
-Supabase's security advisor flags all ten `home` tables under `auth_allow_anonymous_sign_ins`.
-Checked on 14 September 2026: **not exploitable, and two gates deep.**
+Supabase's security advisor flags the `home` tables under `auth_allow_anonymous_sign_ins`. On
+14 September 2026 this section called that noise, "two gates deep", and the second gate was the
+mistake: it said an anonymous caller "is stopped at the schema", because `usage on schema home`
+went to `authenticated` only. **Supabase runs an anonymous user as the `authenticated` role** — the
+only difference is an `is_anonymous` claim in the JWT — so every grant this schema makes to
+`authenticated` was theirs too.
 
-- Every `home` read policy qualifies on `home.is_member(...)` or `home.is_property_member(...)`,
-  which need a membership row. An anonymous user has neither a profile nor a membership, so the
-  policies return zero rows rather than leaking any.
-- It never gets that far anyway: `usage on schema home` went to `authenticated` only, never `anon`,
-  so an anonymous caller is stopped at the schema with `42501` — the same answer the check above
-  relies on.
+The first gate held and still does: every read policy asks for a membership, and no anonymous user
+had one. But nothing stopped one *making* one. `upsert_profile`, `create_household` and
+`accept_invitation_by_token` asked only whether somebody was signed in, so anybody with the anon key
+(it is in the web bundle) could `signInAnonymously()`, name themselves, create a household and use
+the whole app with no address and no confirmation email — including `read-label`, whose fifty daily
+reads are per household on the operator's Gemini key. Checked on 25 September 2026: the three
+anonymous users date from 27 July and none has a profile, so it was never used.
 
-The lint fires because the policies are declared `to public` and the *project* still has anonymous
-sign-ins enabled. That setting is a leftover: it existed for the retired product's QR public
-reporting (`?report=<token>`), which no longer has a client. **Turning it off at Auth → Providers
-→ Anonymous sign-ins would silence 46 advisories across both schemas and remove a sign-in route
-nothing uses** — but it would also disable that flow in the frozen archive, so it is a deliberate
-call rather than a tidy-up. Not done.
+Closed in two halves:
+
+- **`20260925074528_an_anonymous_session_is_not_an_account`** — triggers on `home.profiles` and
+  `home.household_members` refuse an anonymous user, whatever function is doing the inserting.
+  `supabase/tests/anonymous_sessions.sql` replays it. This holds however the switch below is set.
+  **Applied 25 September 2026**, and probed on the live project as one of the existing anonymous
+  users: `upsert_profile` refused, nothing written.
+- **Auth → Providers → Anonymous sign-ins: off.** The setting existed for the retired product's QR
+  public reporting (`?report=<token>`), which has no client. It was left on as "a deliberate call"
+  on the premise above; with the premise gone there is nothing on the other side of the call.
+  Turning it off also silences the advisories across both schemas.
 
 ### Storage buckets
 
@@ -221,6 +231,18 @@ lookup is kept per make and model per household and never repeated unless it fai
 spends one of the household's fifty daily reads (`claim_label_read`), so the ceiling that caps
 label reads caps this too.
 
+**When the card says *Google wouldn't run the search*.** That is `reason = 'limit'`: Google
+answered 429 on every model with a quota that is not per-minute. It is an allowance on the Google
+project the `GEMINI_API_KEY` belongs to — usually search grounding not included on its tier, or its
+daily allowance used — and nothing in the app or the database can change it. The function log says
+which one: search `lookup-product:` for the line reading `429: quota — <metric> (<quota id>) limit
+<n> …`. Then open the key's project in Google AI Studio (Usage and rate limits, and Billing): a
+limit of 0 means the project's tier does not include it and needs billing turned on or a higher
+tier; a daily limit resets at midnight Pacific time. The first live lookups (27 Sep 2026) all hit
+this while plain label reads on the same key worked, so grounding is the allowance to check first.
+A 429 on plain label reads too points at the key being on the free tier, which the `read-label`
+section already says not to use.
+
 ### Edge functions — the five below belong to the retired product, and are to be deleted
 
 `notify-snag` (v20), `export-investigation`, `export-governance-report`, `worksheet`,
@@ -238,14 +260,72 @@ Deleting them is a dashboard job: **Edge Functions → the function → Settings
 Supabase MCP server can deploy and read functions but cannot delete one, so this cannot be done
 from a session here.
 
-Their function secrets, which are not recoverable from anywhere else:
-`RESEND_API_KEY`, `SNAG_FROM_ADDRESS` (`noreply@snaghq.co.nz`), `SNAG_PORTAL_URL`. `RESEND_API_KEY`
-is used by nothing else — Auth's SMTP password is a *separate* Resend key — so it goes when the
-functions do.
+**`notify-snag` is a tombstone until then** (version 24, 28 September 2026). It was redeployed as
+a function that returns `410 Gone` and reads no secret, with JWT verification now **on**. A
+signed-out `curl -X POST …/functions/v1/notify-snag` answers `401`, and one with the anon key
+answers `410`. Nothing calls it any more: `overdue-actions-digest`, the cron job that did, is
+unscheduled. See *The archive stops answering* below. The other four are JWT-on and untouched,
+and still to be deleted.
 
-### Auth — shared by both schemas, unchanged by the pivot
+Their function secrets, checked in the dashboard on 28 September 2026: `RESEND_API_KEY`,
+`SNAG_PORTAL_URL` and `SNAG_INTERNAL_SECRET`. (`SNAG_FROM_ADDRESS`, which this note used to list,
+no longer exists.) **All three go when `notify-snag` does.** The functions the home app keeps
+(`read-label`, `lookup-product`, `inbound-bill`, `reread-bill`) read only `GEMINI_API_KEY`,
+`GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `RESEND_INBOUND_API_KEY`, `RESEND_WEBHOOK_SECRET` and the
+platform's `SUPABASE_*`. `RESEND_API_KEY` is a different key from Auth's SMTP password and from the
+staff portal's key, which lives on Netlify. `SNAG_INTERNAL_SECRET` is the header `notify-snag`
+compared against the database's Vault secret `snag_internal_secret`. That Vault secret stays with
+the archive: the retired `dispatch_*` functions read it, and deleting it changes nothing.
 
-Because `auth.users` sits outside both schemas, none of this needed touching:
+**Nothing will call a deleted `notify-snag` in a way that matters.** Its callers were the digest
+cron job, now unscheduled, and four `public.dispatch_*` functions fired by two triggers on the frozen
+`public.snags` table. Nothing in the app writes that table. If anything ever did, the `pg_net` call is
+fire-and-forget and the dispatch functions swallow errors, so it would get a 404 and nothing else.
+
+### The archive stops answering — its cron job and its functions
+
+Two parts of the retired product were still live on 28 September 2026, and
+`20260928090000_the_archive_stops_speaking` closed both:
+
+- **A daily email.** `overdue-actions-digest` (pg_cron, 18:00 UTC) posted to `notify-snag`
+  whenever one of the pilot orgs had an overdue corrective action. One did, so *"1 overdue
+  corrective action"* went to three people every day from the pivot to 27 September. The job is
+  unscheduled. **`retention-minimisation` is left scheduled.** It blanks resolved niggles more
+  than three years old, which was promised to the pilot orgs, and it cannot match a row until
+  2029. It runs as `postgres`, so the revoke below does not touch it.
+- **116 functions any signed-in caller could run.** Every `public` SECURITY DEFINER function was
+  executable by `authenticated`, and three by `anon`. Every household account is `authenticated`,
+  so any of them could call `create_organisation_and_owner` and write into the archive. The
+  migration revokes EXECUTE on every `public` function from `public`, `anon` and
+  `authenticated`.
+
+**Four are granted back to `authenticated`, and they must stay granted:** `current_org_id()`,
+`"current_role"()`, `can_view_site(uuid)` and `is_org_active(uuid)`. The retired product's
+`storage.objects` policies call the first two. One of those policies reads `public.snags`, whose
+own policies call the other two. `storage.objects` is shared by both products, and a policy's
+functions are checked for EXECUTE as the caller when the query is planned. So revoking any of the
+four raises `42501` on **every** home photo read and upload.
+
+The list was found by rehearsing the migration inside a rolled-back transaction as a household
+member, not by reading. A text search of `pg_policies` misses `"current_role"` (the name is quoted)
+and `can_view_site` (no storage policy names it). **Check it the same way before touching a
+`public` grant again:**
+
+```bash
+# The closure from pg_depend, and every assertion. Reads the catalogue and rolls back.
+psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/archive_locked.sql
+```
+
+It passed against the live project on 28 September 2026. As a member, storage read 151 photos and
+53 documents, an insert and an update passed, and `public.accept_rca` was refused. Over HTTP,
+`/rest/v1/rpc/get_org_by_join_code` with the anon key answers `42501`, and a signed-out `home` read
+still answers `42501`. The advisor's `authenticated_security_definer_function_executable` goes
+from 116 findings to 4, and those four are deliberate.
+
+### Auth — shared by both schemas
+
+Because `auth.users` sits outside both schemas, the pivot needed none of this touching. Signing up
+has since grown settings of its own, which are the second list below.
 
 - **SMTP** is custom, pointed at Resend. Username is literally `resend` (lowercase); the password
   is a Resend **API key**, not an account password. A wrong one shows as
@@ -259,6 +339,65 @@ Because `auth.users` sits outside both schemas, none of this needed touching:
 - Don't test recovery with the dashboard's **Send password recovery** button: it sends no
   `redirectTo`, so it falls back to the Site URL and can sign someone in without asking for a new
   password.
+
+#### Signing up — the settings the app depends on
+
+Set in the dashboard, and each one is silent when it is wrong. Recorded 25 September 2026.
+
+**Two of them can be read without the dashboard**, from Auth's public settings endpoint — the
+publishable key is in the web bundle anyway:
+
+```bash
+curl -s "https://wpkdpukpllxuyqqlxkxf.supabase.co/auth/v1/settings" \
+  -H "apikey: <publishable key>" | jq '{mailer_autoconfirm, anonymous: .external.anonymous_users}'
+```
+
+`mailer_autoconfirm` must be `false` (confirmation on) and `anonymous` must be `false`. On
+25 September 2026 it read `false` and `true` — confirmation on, anonymous sign-ins still on — and
+it still read that on 28 September. The
+template, the redirect allow-list and the password minimum are not in that answer.
+
+- **Confirm email: on** (Auth → Providers → Email). **This is load-bearing, not a preference.** An
+  invitation waits on an *address* (`home.invite_to_household`, matched through `home.my_email()`),
+  so the only thing proving the person signing up owns that address is the confirmation email. With
+  it off, anybody could sign up with an invitee's address and accept their invitation. It cannot be
+  guarded in SQL: with confirmation off, Auth stamps `email_confirmed_at` at sign-up, so an
+  unconfirmed address looks confirmed. Check it from the data rather than the dashboard — every
+  email-and-password account made in the last month should have been *sent* a confirmation:
+
+  ```sql
+  select count(*) as signed_up_unconfirmed_path
+  from auth.users
+  where created_at > now() - interval '30 days'
+    and not is_anonymous
+    and raw_app_meta_data->>'provider' = 'email'
+    and confirmation_sent_at is null;
+  ```
+
+  Anything but `0` means confirmation was off when those accounts were made (or they were created
+  by hand in the dashboard).
+- **Email template → Confirm signup** is `supabase/templates/confirm-signup.html`, pasted in, with
+  the subject `Your Snag code is {{ .Token }}`. It must carry `{{ .Token }}`: the app's *Check your
+  email* screen asks for the code, and without it that screen asks for something the email does not
+  contain. **Paste it before merging the sign-up change.** The code is what works across devices —
+  typed into the tab that asked, which keeps a household's `/join/<token>` in its address bar — and
+  what survives a mail scanner prefetching and spending the link.
+- **Redirect allow-list** must also contain `https://app.snaghq.co.nz/**` (and
+  `http://localhost:8081/**` for local work). `signUpWithEmail` sends `emailRedirectTo` as the app's
+  own origin plus `/join/<token>` when there is one; an address not on the list is swapped for the
+  Site URL without a word, and a scanner who taps the link lands on *Set up your house* instead of
+  the join question.
+- **Minimum password length: 8** (Auth → Providers → Email). The app says eight and so does
+  `/reset-password`; this is what enforces it. Existing shorter passwords still sign in — Auth
+  checks the minimum only when a password is set.
+- **Leaked password protection: on** (Auth → Providers → Email → *Prevent use of leaked
+  passwords*; Pro plan). The advisor flags it as off. The app words the refusal
+  (`weak_password` with reason `pwned`) as "has turned up in a data breach".
+- **Anonymous sign-ins: off.** See *Anonymous sign-ins reached `home`* above.
+- **Resend click tracking: off** for the domain Auth's SMTP sends from. Tracking rewrites every
+  link, and a rewritten confirmation or recovery link is one Auth no longer recognises. Checked
+  25 September 2026: open and click tracking are both off on `snaghq.co.nz` and
+  `bills.snaghq.co.nz`.
 
 ### The staff portal — Google sign-in, a staff list, and one email
 
@@ -342,7 +481,7 @@ where u.email = '<E2E_EMAIL>';
 
 | Host | Serves |
 |---|---|
-| `www.snaghq.co.nz` | `apps/web` — the password-reset landing page (`/staff/*` redirects to the portal) |
+| `www.snaghq.co.nz` | `apps/web` — the front page, `/privacy`, `/terms` and password recovery (`/staff/*` redirects to the portal) |
 | `staff.snaghq.co.nz` | `apps/staff` — the SnagHQ staff portal |
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the actual app |
 | `snagv1.netlify.app` | redirect to `app.snaghq.co.nz`; must keep resolving (printed QR codes, old notification links) |
@@ -355,7 +494,8 @@ One account, four entirely separate paths into it, which fail independently:
 
 - **HTTP API** — used by `notify-snag` (retired product only), and by the staff portal's reply
   email (a Next server action on the staff site; see *The staff portal* above).
-- **SMTP** — used by Supabase Auth for password recovery. This is the one the home app depends on.
+- **SMTP** — used by Supabase Auth for password recovery and the sign-up code. This is the one the
+  home app depends on.
 - **Receiving** — `bills.snaghq.co.nz`, a receive-only domain (sending disabled), for bills
   forwarded to a project. Resend posts `email.received` to the `inbound-bill` edge function.
 
@@ -422,7 +562,50 @@ layout those paths assume.
 | `snagv1` | `016c74e6-9a37-4b0f-8d23-94a5339bb850` | app.snaghq.co.nz |
 | `snag-app-website` | `7fc0b551-9069-4b2c-b66f-c77dd9d4a808` | www.snaghq.co.nz |
 
-Pushing to `main` does **not** trigger a build — deploys are API-driven.
+**Merging to `main` does deploy `snagv1`.** This note used to say otherwise. Checked on
+28 September 2026: the production deploy of `619814e` (the merge of #53) started two seconds
+after the merge commit, from `main`, with `manual_deploy: false`. Netlify reports
+`deploy_source: "api"` for it anyway, which is presumably where the old note came from. So the
+rule in CLAUDE.md stands: **apply a migration before merging the code that needs it**, because
+the merge is the deploy.
+
+## Error reporting (Sentry)
+
+The web build reports errors to Sentry once `EXPO_PUBLIC_SENTRY_DSN` is set on the `snagv1` site
+(a plain variable: a DSN is public by design and ships in the bundle). Until then nothing
+initialises and nothing is fetched. What it sends, and what is scrubbed first, is in
+`apps/mobile/src/lib/monitoring.web.ts` and `monitoringScrub.ts`.
+
+To switch it on:
+
+1. Create a **Browser / React** project in Sentry. In the project's settings, leave **Session
+   Replay** off and **data scrubbing** on (the app scrubs too; this is the second lock).
+2. Set `EXPO_PUBLIC_SENTRY_DSN` on `snagv1`, production context. Optionally set
+   `EXPO_PUBLIC_SENTRY_ENVIRONMENT` (defaults to `production`). Read it back, since "upserted" is
+   not evidence (see *The staff portal*).
+3. Check the DSN's ingest host is covered by `connect-src` in `apps/mobile/netlify.toml`
+   (`*.ingest.sentry.io`, `*.ingest.us.sentry.io`, `*.ingest.de.sentry.io`). A blocked report
+   fails silently.
+4. Redeploy. Expo inlines the variable at build time, so an existing deploy never sees it.
+
+The SDK is a separate 1.2 MB chunk loaded with `import()` only once a DSN exists. The main bundle
+moved by 2 KB. A static import had added 1.2 MB for every visitor.
+
+## Migration versions, file against live
+
+Migrations applied through the Supabase MCP get the timestamp of the moment they were applied,
+not the one in the file name, so the two can differ. What matters is that each file name is
+unique in `supabase/migrations/` (the CLI refuses a duplicate) and that every file has been
+applied:
+
+| File | Live version |
+|---|---|
+| `20260925074528_an_anonymous_session_is_not_an_account` | `20260925074528` (renamed to match; it had duplicated `20260926100000`) |
+| `20260926100000_the_project_page_is_read_part_by_part` | `20260925075301` |
+| `20260927100000_a_model_is_looked_up_once` | `20260927182857` |
+| `20260927110000_a_lookup_google_refused` | `20260927191658` |
+| `20260928090000_the_archive_stops_speaking` | `20260928014324` |
+| `20260928100000_what_snag_keeps_about_you` | `20260928015049` |
 
 ## Preservation
 

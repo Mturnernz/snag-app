@@ -45,7 +45,7 @@ snag/
 │   │       ├── screens/           # SnagList (home), SnagDetail, House, HouseRoom, ThingDetail,
 │   │       │                       #   Household, LocationTags, Profile, Auth, Setup
 │   │       └── components/
-│   ├── web/                       # Next.js — /, /forgot-password, /reset-password. That's it.
+│   ├── web/                       # Next.js — the front page, /privacy, /terms, /forgot-password, /reset-password
 │   └── staff/                     # Next.js — the SnagHQ staff portal, staff.snaghq.co.nz
 ├── packages/
 │   ├── shared-types/              # @snag/shared-types — enums, row types, labels, nav params
@@ -138,6 +138,20 @@ The Snagv1 project (`wpkdpukpllxuyqqlxkxf`) holds both:
 
 Don't write to `public`. Don't "tidy" it. Don't copy patterns out of its migrations without
 reading why they were there — a lot of them answer regulatory questions a house doesn't have.
+
+**Nothing in `public` answers a caller any more, bar four functions storage needs.** Until
+`20260928090000` every retired SECURITY DEFINER function was executable by `authenticated`. That
+includes every household account, so any of them could call `create_organisation_and_owner` and
+write into the archive. The retired digest cron was still emailing pilot users every day as well.
+Both are closed.
+
+`current_org_id`, `"current_role"`, `can_view_site` and `is_org_active` stay granted to
+`authenticated`. The retired `storage.objects` policies reach them, directly or through
+`public.snags`'s own policies, and storage is one table for both products. Revoke any of them and
+every home photo read raises `42501` — *An RLS policy's functions need EXECUTE*, one schema over.
+**The list is computed from `pg_depend`, never read off `pg_policies`**: a text search missed two
+of the four. `supabase/tests/archive_locked.sql` asserts the closure. Run it before touching any
+`public` grant.
 
 ### Writes go through RPCs
 
@@ -1393,6 +1407,14 @@ Four rules around it:
 - **It spends the household's daily reads**: one `claim_label_read` per search that actually runs,
   so the fifty-a-day ceiling covers it. Google bills grounded searches separately from tokens; see
   `SNAG_INFRA_NOTES.md`.
+- **Google refusing the search is not "busy".** The first live lookups all came back 429 *You
+  exceeded your current quota* on every model, seconds after a plain label read on the same key
+  and model had answered: an allowance on the key's Google project, not demand. `quotaRefusal`
+  (`read-label/gemini.ts`) reads the `QuotaFailure` detail, and the function logs which quota it
+  was, its limit and the retry delay. A per-minute limit is still `busy`; a used-up day, a limit
+  of 0, or anything not named per-minute is `limit` (`20260927110000`), and the card says *Google
+  wouldn't run the search* rather than inviting a Try again that cannot work. The fix for `limit`
+  is on the Google project, not in the app — see `SNAG_INFRA_NOTES.md`.
 
 `productLookup.test.ts` pins every rule above against the GS60's real pages and wording — the
 retailer refused, a redirect off the maker's site refused, another model's page refused, the range
@@ -1401,8 +1423,11 @@ read out of prose, and the page text readers — plus `productOffers` and the de
 `ThingDetailScreen.test.tsx` pins the card: the read keyed by make and model, *Look it up*, each
 row opening its page, *Add* writing words and number together and never offering it twice, the
 interval opening *Schedule service* and writing nothing, *nothing* said and not retried, *Try
-again* only on a failure, the pending state, the page surviving a failed read, and the *Year made*
-box on an appliance and not a paint.
+again* only on a failure, the pending state, the page surviving a failed read, the *Year made*
+box on an appliance and not a paint, and a refused search worded as Google's refusal rather than
+as busy. `readLabelGemini.test.ts` pins `quotaRefusal`: per-minute as a wait, a day or a limit of
+0 as not, any one daily allowance outweighing a per-minute one, and a bare 429 as the rate limit
+it always meant.
 
 ### Writing is rare and accidental; reading is under pressure, somewhere else
 
@@ -3830,6 +3855,70 @@ Remove and add instead.
 **A second place is never a tag.** If someone asks for a "Bach" tag, the answer is
 `create_property`.
 
+## Signing up
+
+`AuthScreen` is email and a password, and **email confirmation is on** — which is load-bearing
+rather than a preference: an invitation waits on an *address*, and the confirmation email is the
+only thing proving the person signing up owns it. See *Signing up — the settings the app depends
+on* in `SNAG_INFRA_NOTES.md` for the dashboard half, and the query that checks it.
+
+**Confirmation answers with no session and no error, so the screen has to say what happens next.**
+It used to assume the auth listener would take over; nothing had signed in, no event came, and the
+spinner stopped over the form somebody had just filled in. Pressing *Create account* again hit a
+rate limit, and switching to *Sign in* got "Email not confirmed" in a browser alert with no way to
+ask for the email again. So there is a third stage, **Check your email**, and a sign-in refused for
+an unconfirmed address lands on it too.
+
+- **It takes the code as well as the link, and the code is the one that matters.** The link signs
+  in whichever browser the mail app opens — an in-app browser, another device, or a scanner that
+  prefetched it and spent it first. The code is typed into the tab that asked, which still has a
+  household's `/join/<token>` in its address bar. The template has to carry `{{ .Token }}`
+  (`supabase/templates/confirm-signup.html`), or the screen asks for something the email lacks.
+- **The link carries the join code anyway** (`confirmRedirectUrl`). Without `emailRedirectTo`, Auth
+  sends it to the Site URL, and a scanner who taps it lands on *Set up your house* — the Alyssa bug
+  by the email's door. Every value it can return has to be on the redirect allow-list.
+- **It never says whether an address has an account.** Auth answers sign-up for an existing address
+  exactly as it answers a new one, so *Check your email* offers *Sign in* to everybody; the reset
+  link's confirmation is worded "if … has an account"; a refused sign-in never says which half was
+  wrong.
+- **A join code opens the screen on *Create account***, with a line saying why they are here.
+  Somebody who has just scanned a QR has no account; signing up is their journey.
+
+**The button is never dead.** It used to disable until the password reached six characters, with
+nothing on screen saying so. Now it is live, and pressing it early says what the form still wants
+(`formProblem`). **New passwords need eight**, matching `/reset-password` — the two disagreed, so a
+password chosen at sign-up could not be chosen again at reset. **Sign-in checks no length**:
+accounts made under the old rule still get in, and Auth enforces its own minimum only when a
+password is set.
+
+**Every error is words on the screen, never a `window.alert`** — `describeAuthError` maps Auth's
+codes (a rate limit becomes how many seconds to wait; a breached password says so). Anything it
+does not recognise is shown as Auth said it: hiding an unfamiliar reason leaves nobody able to
+report what happened.
+
+**Labels stay put, and the browser is told what each box holds.** Visible labels, not placeholders
+that vanish while typing. `autoComplete` (`email`, `current-password`, `new-password`,
+`one-time-code`) beside `textContentType`, because `textContentType` is iOS-native only and the web
+build — the one people install — handed password managers nothing. Enter moves to the password and
+submits from it. The eye beside the password is a real 48pt sibling of the box, never `hitSlop`.
+
+**The privacy statement is linked where the details are collected** — *Create account*, not a
+settings page — because that is what principle 3 of the Privacy Act 2020 asks. It is `/privacy` on
+`www`, and the You tab links to it too. **Its list of services is a list of real dependencies**:
+adding a processor without adding it there makes the page untrue.
+
+**An anonymous session is not an account.** Anonymous sign-ins run as the `authenticated` role, so
+every function granted to `authenticated` answered one, and the three that make a membership
+asked only whether *somebody* was signed in. `20260925074528` puts triggers on `home.profiles` and
+`home.household_members` that refuse an anonymous user whatever function is inserting; the
+provider is also meant to be off. See *Anonymous sign-ins reached `home`* in `SNAG_INFRA_NOTES.md`.
+
+`AuthScreen.test.tsx` pins the three stages, the code and its refusals, the join code reaching
+`emailRedirectTo` and the resend, *Sign in* offered from *Check your email*, the live button, the
+old-password sign-in, the autofill hints, the labels, and the privacy line appearing on *Create
+account* only. `authForm.test.ts` pins the form rules and every error wording;
+`joinLink.test.ts` the redirect; `supabase/tests/anonymous_sessions.sql` the guard.
+
 ## Adding someone to a household
 
 **An invitation waits on an address, not on an account.** `home.invite_to_household` takes any
@@ -3873,8 +3962,11 @@ It is answered in two places, and both are needed:
 
 - **`SetupScreen`** — someone who has just signed up. The invitation beats *both* branches of that
   screen, because somebody staring at "Set up your house" must not have to guess the answer is
-  behind the second button. It is looked for only once a profile exists, since `accept_invitation`
-  needs one.
+  behind the second button. **It is looked for before a profile exists**, and the invitation asks
+  for the name `accept_invitation` needs, as `JoinScreen` does. It used to wait for a profile, on
+  the belief that asking first would find nothing — but `my_invitations` matches on the signed-in
+  address, never a profile, and waiting put an invitee in front of *Create it*: the Alyssa bug,
+  fixed for a scanned code and still open for an invitation by address.
 - **`HouseholdScreen`** — someone who already has a household. Without this an invitation to an
   existing user would be invisible: they never see Setup, and there is deliberately no household
   switcher. An invitation nothing can show is the silent failure the whole mechanism exists to end.
@@ -3940,6 +4032,27 @@ exactly as `remove_member` would, nulling your assignments and handing on any pr
 alone on. Files first, then the account, then `signOut`: the storage delete policy asks
 `home.is_member(<household id>)`, so an account that has deleted itself cannot clear up after
 itself. Same rule as deleting a household, written up under *Taking someone, or something, away*.
+
+### A copy of what is kept
+
+**Download my data** sits on the You tab, above Delete, and is Privacy Act principle 6 as one press.
+It replaces an email to somebody running queries by hand. `home.export_my_data()` is **SECURITY
+INVOKER** over the tables themselves, a named list of 31, so the row policies decide what is in the
+file: exactly what this person could open in the app. There is no filter in the function for a
+policy to disagree with.
+
+Three things are left out, each deliberately:
+
+- **The two tokens.** `invitations.token` is a live way into the household and
+  `projects.inbox_token` is the bill address. An export is a file that gets forwarded.
+- **The tables with no read policy** (`label_reads`, `staff`, `support_access_log`).
+- **Signed URLs.** Files are listed by storage path, so a forwarded file grants nothing.
+
+One `execute` per table, for `project_page`'s reason. A table added to `home` is not exported until
+it is added to that list. One JSON file, not a zip, because a zip is a dependency.
+`supabase/tests/export_my_data.sql` pins two households each seeing only their own, the tokens
+stripped, and a signed-out caller refused in words. `ProfileScreen.test.tsx` pins the one read, the
+file name and the refusal as a sentence.
 
 ### A profile outlives its login
 
@@ -4412,6 +4525,28 @@ grey mid-press reads as the action having failed.
   session, so `signOut` is bounded and falls back to dropping the stored session directly. Local
   scope, not global: signing out of a device means that device.
 
+## Error reporting, and what a report may carry
+
+The web build reports errors to Sentry, **inert until `EXPO_PUBLIC_SENTRY_DSN` is set**
+(`SNAG_INFRA_NOTES.md`, *Error reporting*). `lib/monitoring.web.ts` is the real one, and Metro picks
+it for the web export. `lib/monitoring.ts` is a no-op that native builds and jest resolve.
+
+- **The SDK is loaded with `import()`, and must stay that way.** Metro does not tree-shake, and a
+  static `import * as Sentry` took the main bundle from 3.60 MB to 4.81 MB for every visitor. Lazily
+  it is its own chunk, fetched only once a DSN exists.
+- **The privacy statement's sentence is `lib/monitoringScrub.ts`**: *links, email addresses and
+  anything you typed removed first, and nothing recording your screen*. It masks the join token in
+  `/join/<token>`. It drops every query string and fragment, which is where a storage signature and
+  a recovery session live. It masks emails, drops the user, body, cookies and headers, and drops
+  console breadcrumbs whole. Every `dataCollection` category is off, and there is no tracing or
+  replay. Changing what a report carries is changing that sentence on `/privacy`.
+  `monitoringScrub.test.ts` pins each secret.
+- **`enhanceFetchErrorMessages: 'report-only'`.** The app words a failed request from its own
+  message, and the SDK must not rewrite it.
+- **`AppErrorBoundary` wraps the root.** A render that throws says *Something went wrong* with a
+  Reload, rather than leaving a blank plaster page nobody can tell from a slow connection.
+- `connect-src` names Sentry's regional ingest hosts, pinned by `csp.test.ts`.
+
 ## The staff portal: SnagHQ answers a job it was asked about
 
 A household taps **Ask SnagHQ about this** on a job and types a question. A SnagHQ employee picks it
@@ -4550,7 +4685,7 @@ under *The staff portal*.
 | Host | What it serves |
 |---|---|
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the app people install |
-| `www.snaghq.co.nz` | `apps/web` — the root page and password recovery, nothing else |
+| `www.snaghq.co.nz` | `apps/web` — the front page, the privacy statement, the terms and password recovery |
 | `staff.snaghq.co.nz` | `apps/staff` — the SnagHQ staff portal |
 | `snagv1.netlify.app` | redirect to `app.snaghq.co.nz` |
 
@@ -4561,7 +4696,16 @@ the right screen rather than the default tab.
 
 ## Why apps/web still exists
 
-One reason: **password recovery has to land on a plain web page.**
+One reason: **password recovery has to land on a plain web page.** (The privacy statement,
+`/privacy`, and the terms, `/terms`, live here for the same reason — the sign-up screen links to
+both, and they have to open in any browser for somebody who has no account yet. See *Signing up*.)
+
+**It is also the front door.** `/` says what Snag is in the app's own words, gives the install
+steps (there is no store listing), and links privacy, terms, help and recovery. Every sentence on it
+is a rule in this file: capture asks after it files, suggestions are offers, nothing sends a
+notification. A claim there that the app cannot keep is the fastest way to lose somebody on their
+first day. `/terms` is a **draft** until its `DRAFT` flag is switched off, in the same change that
+fills in the entity, NZBN and address placeholders.
 
 `@supabase/ssr` forces PKCE, and a PKCE recovery link only works in the browser that asked for it
 — auth-js wants the `code` *and* a stored verifier, and with the verifier missing it doesn't
@@ -4694,6 +4838,25 @@ Four things about the change:
 navigation-bar plugin — two builds of one app disagreeing about whether Android's controls are on
 screen is drift nothing else would catch, since each is configured in a different file, in a
 different vocabulary, and neither build renders the other.
+
+### Asking once to be installed
+
+Snag is installed from the browser, so a tab has to be told there is anything to install, and a tab
+is the thing that gets closed and lost. `InstallCard` sits at the top of the list's header. It is
+**asked once**: its × is remembered per device, guarded like the list's folds. It shows only on the
+web build, in a phone's browser, when the display mode says the app is not installed
+(`installState.ts`: `fullscreen`, `standalone`, `minimal-ui` or iOS's `navigator.standalone`).
+
+- **An iPhone** gets Safari's share-sheet steps.
+- **Android** gets Chrome's menu steps, or a one-tap **Install** when `beforeinstallprompt` was
+  caught. It is caught at module load in `useInstallPrompt`, because Chrome fires it once, early,
+  and only to a listener already there.
+- **The You tab** keeps a permanent row with no ×, for somebody who closed the card.
+
+It is quiet: a white group, no hue, because it is neither a state nor something to act on now. It
+never says the installed app "stays signed in". On iOS a home-screen app has storage of its own and
+asks you to sign in once, and a card that promises otherwise is a card that lies on the first day.
+`installState.test.ts` and `InstallCard.test.tsx` pin it.
 
 ## Corners and edges, on an iPhone and on Android
 

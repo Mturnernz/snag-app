@@ -109,16 +109,13 @@ export default function ResetPasswordForm() {
     return (
       <>
         <h1 style={{ fontSize: 'var(--text-2xl)', marginBottom: 'var(--space-sm)' }}>Password updated</h1>
-        {/* Both destinations, because this page cannot know which one the
-            person came from — and a worker sent to the portal would only be
-            bounced to /unauthorized. */}
+        {/* One way on. Snag is the only thing this account signs in to, and
+            it lives on another origin, so this is a plain link rather than a
+            route of this site. */}
         <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2xl)' }}>
-          Use it wherever you work: the supervisor portal, or the SNAG app.
+          Your new password works now. Sign in with it in Snag.
         </p>
-        <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
-          <Link href="/dashboard"><Button variant="primary">Open the portal</Button></Link>
-          <a href={APP_URL}><Button variant="secondary">Open the app</Button></a>
-        </div>
+        <Button as="a" href={APP_URL} variant="primary">Open Snag</Button>
       </>
     );
   }
@@ -127,7 +124,7 @@ export default function ResetPasswordForm() {
     <>
       <h1 style={{ fontSize: 'var(--text-2xl)', marginBottom: 'var(--space-sm)' }}>Set a new password</h1>
       <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2xl)' }}>
-        This changes the password for the portal and the SNAG app together.
+        This sets a new password for your Snag account.
       </p>
 
       <form onSubmit={handleSubmit}>

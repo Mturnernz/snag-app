@@ -1,10 +1,8 @@
 import localFont from 'next/font/local';
 
-// Self-hosted IBM Plex.
-// artifact (a technical, legible face pair that fits a compliance/H&S
-// product; deliberately shared across SNAG's internal and external
-// surfaces rather than picked twice). next/font/local subsets and
-// self-hosts these with zero layout shift and no external request.
+// Self-hosted IBM Plex, the same pair the staff portal uses rather than one
+// picked twice. next/font/local subsets and self-hosts these with zero layout
+// shift and no external request.
 export const plexSans = localFont({
   src: [
     { path: '../fonts/IBMPlexSans-Regular.woff2', weight: '400', style: 'normal' },

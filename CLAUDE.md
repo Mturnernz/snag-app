@@ -4478,6 +4478,11 @@ grey mid-press reads as the action having failed.
   deadlines never fire because it never reaches `fetch`. A hidden tab becoming visible is enough
   to trigger it. Set state in the callback; put anything touching Supabase through
   `queueAuthWork` (`src/lib/authEvents.ts`).
+- **A `Pressable` that acts as a button says so** — `accessibilityRole="button"` and a label. On
+  react-native-web one without a role is a plain `<div>`: a screen reader does not call it a button
+  and Tab never reaches it. The shared `Button` was exactly that until September 2026, so every
+  primary action in the app, *Create account* included, was invisible to both. It now states its
+  role, its label (the words give way to a spinner while loading) and its disabled and busy state.
 - **Never call `Alert.alert` directly — use `showAlert` from `src/lib/alert.ts`.**
   react-native-web's `Alert` is `static alert() {}`, so on the web build (which is what people
   actually install) a direct call does nothing: the dialog never appears and any action behind a

@@ -9,18 +9,20 @@ import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import SnagCard from '../components/SnagCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
-import ComposeBar from '../components/ComposeBar';
+import ComposeBar, { fileCapturedPhoto } from '../components/ComposeBar';
 import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import AmendSnagSheet from '../components/AmendSnagSheet';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
+import { useFirstCapture } from '../hooks/useFirstCapture';
 import {
   createSnag, getFileUrls, getSnags, getThings, markListSeen, setPartBought, setSnagStatus,
   updateSnag,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { failureReason } from '../lib/deadline';
 import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
@@ -516,6 +518,22 @@ export default function SnagListScreen() {
     setJustAdded(snag);
     await load();
   }
+
+  // The photograph from first-run setup's *Snap your first job*, filed the way
+  // the shutter files one — so it arrives with the capture sheet asking what is
+  // wrong and where, like every photo after it. Waits for a place to file it
+  // against; `take` empties the hand-off so it can only be filed once.
+  const firstCapture = useFirstCapture();
+  useEffect(() => {
+    if (!activeProperty) return;
+    const uri = firstCapture.take();
+    if (!uri) return;
+    fileCapturedPhoto(uri, household.id, null, handleAdd).catch((err: unknown) => {
+      showAlert("Couldn't add that photo", failureReason(err) ?? 'Please try again.');
+    });
+    // handleAdd is re-made every render; the hand-off is taken exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProperty, firstCapture, household.id]);
 
   /**
    * The prompt after a photo.

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { reachPassword } from './welcome';
 
 // A stalled request must not wedge the app.
 //
@@ -26,9 +27,7 @@ const PASSWORD = process.env.E2E_PASSWORD;
 test.skip(!EMAIL || !PASSWORD, 'Set E2E_EMAIL and E2E_PASSWORD to run the authenticated specs.');
 
 async function signIn(page: Page) {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Sign in', { exact: true })).toBeVisible({ timeout: 120_000 });
-  await page.getByLabel('Email', { exact: true }).fill(EMAIL!);
+  await reachPassword(page, EMAIL!);
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD!);
   // The bar renders before the place it files under has loaded, and a send in
   // that gap is refused as "No place yet". The rooms are read only once a place

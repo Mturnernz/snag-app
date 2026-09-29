@@ -45,9 +45,15 @@ interface Props {
    * the join question rather than on *Set up your house*.
    */
   joinToken?: string | null;
+  /**
+   * Back to the choice before this one. First-run setup (`setup/WelcomeFlow`)
+   * offers Google and email side by side, and this screen is the email half —
+   * so it needs a way back to the other.
+   */
+  onBack?: () => void;
 }
 
-export default function AuthScreen({ joinToken = null }: Props) {
+export default function AuthScreen({ joinToken = null, onBack }: Props) {
   const insets = useEdgeInsets();
   const [stage, setStage] = useState<Stage>(joinToken ? 'signUp' : 'signIn');
   const [email, setEmail] = useState('');
@@ -184,16 +190,34 @@ export default function AuthScreen({ joinToken = null }: Props) {
     </Text>
   ) : null;
 
+  // Outside the ScrollView, so it stays put, and in the top corner where every
+  // setup screen keeps its back — a real 48pt target, never hitSlop.
+  const backBar = onBack ? (
+    <View style={[styles.backBar, { paddingTop: insets.top + Spacing.sm }]}>
+      <Pressable
+        onPress={onBack}
+        style={styles.back}
+        disabled={busy}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+      >
+        <Icon name="chevron-back" size="lg" color={Colors.textPrimary} />
+      </Pressable>
+    </View>
+  ) : null;
+  const contentTop = onBack ? Spacing.xl : insets.top + Spacing.xxxl;
+
   if (stage === 'checkEmail') {
     return (
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        {backBar}
         <ScrollView
           contentContainerStyle={[
             styles.content,
-            { paddingTop: insets.top + Spacing.xxxl, paddingBottom: insets.bottom + Spacing.xl },
+            { paddingTop: contentTop, paddingBottom: insets.bottom + Spacing.xl },
           ]}
           keyboardShouldPersistTaps="handled"
         >
@@ -260,10 +284,11 @@ export default function AuthScreen({ joinToken = null }: Props) {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      {backBar}
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + Spacing.xxxl, paddingBottom: insets.bottom + Spacing.xl },
+          { paddingTop: contentTop, paddingBottom: insets.bottom + Spacing.xl },
         ]}
         keyboardShouldPersistTaps="handled"
       >
@@ -405,6 +430,13 @@ export default function AuthScreen({ joinToken = null }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
+  backBar: { paddingHorizontal: Spacing.sm, backgroundColor: Colors.background },
+  back: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   content: { padding: Spacing.xl, gap: Spacing.sm },
   brand: { alignItems: 'center', gap: Spacing.xs, marginBottom: Spacing.xl },
   title: {

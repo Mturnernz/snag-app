@@ -1,19 +1,14 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
+  View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
 import ScreenHeader from '../components/ScreenHeader';
-import Card from '../components/Card';
-import Button from '../components/Button';
 import Icon from '../components/Icon';
+import RoomsEditor from '../components/RoomsEditor';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
-import { useToast } from '../hooks/useToast';
-import { createLocation, deleteLocation, getLocations } from '../lib/supabase';
-import { showAlert } from '../lib/alert';
-import { Location } from '../types';
 
 /**
  * The tags capture offers, per place.
@@ -39,35 +34,14 @@ import { Location } from '../types';
 export default function LocationTagsScreen() {
   const navigation = useNavigation();
   const { properties, activeProperty, locations: activeLocations, reloadLocations } = useHousehold();
-  const { showToast } = useToast();
 
   // Which place's tags are on screen. Starts on the one capture is pointed at,
   // which is the one someone just came from wanting a thirteenth tag.
   const [propertyId, setPropertyId] = useState<string | null>(activeProperty?.id ?? null);
-  const [tags, setTags] = useState<Location[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [name, setName] = useState('');
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!propertyId && activeProperty) setPropertyId(activeProperty.id);
   }, [propertyId, activeProperty]);
-
-  const load = useCallback(async () => {
-    if (!propertyId) return;
-    setLoading(true);
-    try {
-      setTags(await getLocations(propertyId));
-    } catch (err: any) {
-      showAlert("Couldn't load the tags", err?.message ?? 'Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [propertyId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   // The list's amend-row chips read from the context, and so does the room
   // grouping, so anything changed here has to be pushed back into it — but only
@@ -76,50 +50,7 @@ export default function LocationTagsScreen() {
     if (propertyId === activeProperty?.id) await reloadLocations();
   }
 
-  async function handleAdd() {
-    const next = name.trim();
-    if (!next || !propertyId) return;
-    setBusy(true);
-    try {
-      await createLocation(propertyId, next);
-      setName('');
-      await load();
-      await syncListChips();
-      showToast(`${next} added`);
-    } catch (err: any) {
-      showAlert("Couldn't add that tag", err?.message ?? 'Please try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function confirmRemove(tag: Location) {
-    showAlert(
-      `Remove ${tag.name}?`,
-      'Jobs already filed there keep the tag — it just stops being offered when you add something new.',
-      [
-        { text: 'Keep it', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => remove(tag) },
-      ]
-    );
-  }
-
-  async function remove(tag: Location) {
-    setBusy(true);
-    try {
-      await deleteLocation(tag.id);
-      await load();
-      await syncListChips();
-      showToast(`${tag.name} removed`);
-    } catch (err: any) {
-      showAlert("Couldn't remove that tag", err?.message ?? 'Please try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const place = properties.find((p) => p.id === propertyId) ?? null;
-  const canAdd = name.trim().length > 0 && !!propertyId && !busy;
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -160,49 +91,9 @@ export default function LocationTagsScreen() {
           list short enough to scan.
         </Text>
 
-        <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Add a tag</Text>
-          <View style={styles.addRow}>
-            <TextInput
-              style={styles.input}
-              value={name}
-              onChangeText={setName}
-              placeholder="Boatshed"
-              placeholderTextColor={Colors.textMuted}
-              maxLength={40}
-              autoCapitalize="sentences"
-              returnKeyType="done"
-              onSubmitEditing={() => canAdd && handleAdd()}
-            />
-            <Button label="Add" onPress={handleAdd} disabled={!canAdd} loading={busy} />
-          </View>
-        </Card>
-
-        {loading ? (
-          <Text style={styles.empty}>Loading…</Text>
-        ) : tags.length === 0 ? (
-          <Text style={styles.empty}>
-            No tags here yet. Add one above, or leave it — a snag doesn’t need one.
-          </Text>
-        ) : (
-          <Card elevation="md" style={styles.list}>
-            {tags.map((tag, index) => (
-              <View key={tag.id} style={[styles.row, index > 0 && styles.rowDivided]}>
-                <Icon name="pricetag-outline" size="md" color={Colors.textMuted} />
-                <Text style={styles.rowLabel}>{tag.name}</Text>
-                <Pressable
-                  onPress={() => confirmRemove(tag)}
-                  disabled={busy}
-                  style={styles.remove}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove ${tag.name}`}
-                >
-                  <Icon name="close" size="md" color={Colors.textMuted} />
-                </Pressable>
-              </View>
-            ))}
-          </Card>
-        )}
+        {/* The same editor first-run setup's rooms step shows, so the two
+            cannot disagree about what adding or removing a room does. */}
+        <RoomsEditor propertyId={propertyId} onChanged={syncListChips} />
 
         <View style={styles.noteRow}>
           <Icon name="information-circle-outline" size="sm" color={Colors.textMuted} />
@@ -241,35 +132,6 @@ const styles = StyleSheet.create({
   placeLabel: { fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textSecondary },
   placeLabelActive: { color: Colors.white, fontWeight: Typography.semibold },
   intro: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 20 },
-  section: { gap: Spacing.sm },
-  sectionTitle: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
-  },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  input: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.input,
-    paddingHorizontal: Spacing.md,
-    fontSize: Typography.base,
-    color: Colors.textPrimary,
-    minHeight: MIN_TOUCH_TARGET,
-  },
-  list: { paddingVertical: 0 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, minHeight: MIN_TOUCH_TARGET },
-  rowDivided: { borderTopWidth: 1, borderTopColor: Colors.border },
-  rowLabel: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
-  remove: {
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  empty: { fontSize: Typography.sm, color: Colors.textMuted, textAlign: 'center' },
   noteRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   note: { flex: 1, fontSize: Typography.sm, color: Colors.textMuted },
 });

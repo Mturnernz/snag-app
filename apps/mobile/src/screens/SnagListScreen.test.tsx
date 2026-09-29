@@ -3,6 +3,7 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import SnagListScreen from './SnagListScreen';
 import { readCollapsed, writeCollapsed } from '../lib/collapsed';
+import { FirstCaptureProvider } from '../hooks/useFirstCapture';
 
 // The list is the app's home now, and two pieces of logic carry the concept:
 // what counts as "new", and grouping by room. With no notifications anywhere in
@@ -15,12 +16,14 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: jest.fn(), addListener: () => () => {} }),
 }));
+const mock_fileCapturedPhoto = jest.fn().mockResolvedValue(undefined);
 jest.mock('../components/ComposeBar', () => {
   const React = require('react');
   const { Text } = require('react-native');
   return {
     __esModule: true,
     default: () => React.createElement(Text, null, 'compose bar'),
+    fileCapturedPhoto: (...a: unknown[]) => mock_fileCapturedPhoto(...a),
   };
 });
 
@@ -721,5 +724,42 @@ describe('folding a room away', () => {
     await settle();
     expect(texts(again)).toContain('Garage · 1');
     expect(texts(again)).not.toContain('Shelf brackets');
+  });
+});
+
+// The photograph from setup's *Snap your first job*. It is taken on the setup
+// screen — a browser opens the camera only inside a tap — and filed here,
+// through the shutter's own path, so it arrives with the capture sheet asking
+// what is wrong and where.
+describe('the first photo from setup', () => {
+  it('is filed once, through the same path the camera button uses', async () => {
+    // The provider lives above the navigator; the list mounts and unmounts
+    // beneath it as tabs are left and come back to.
+    let show: (on: boolean) => void = () => {};
+    function Tabs() {
+      const [on, setOn] = React.useState(true);
+      show = setOn;
+      return on ? <SnagListScreen /> : null;
+    }
+    render(
+      <FirstCaptureProvider uri="file://first.jpg">
+        <Tabs />
+      </FirstCaptureProvider>
+    );
+    await settle();
+    expect(mock_fileCapturedPhoto).toHaveBeenCalledTimes(1);
+    expect(mock_fileCapturedPhoto.mock.calls[0].slice(0, 3)).toEqual(['file://first.jpg', 'h', null]);
+
+    // Coming back to the list must not file it again.
+    await TestRenderer.act(async () => show(false));
+    await TestRenderer.act(async () => show(true));
+    await settle();
+    expect(mock_fileCapturedPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  it('files nothing when there was no photo', async () => {
+    render(<SnagListScreen />);
+    await settle();
+    expect(mock_fileCapturedPhoto).not.toHaveBeenCalled();
   });
 });

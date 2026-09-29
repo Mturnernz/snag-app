@@ -232,6 +232,7 @@ export const setSnagThings = (snagId: string, thingIds: string[]) =>
 
 export const setProjectsEnabled = (enabled: boolean) =>
   queries.setProjectsEnabled(supabase, enabled);
+export const markSetupSeen = (steps: string[]) => queries.markSetupSeen(supabase, steps);
 
 export const getMyHousehold = () => queries.getMyHousehold(supabase);
 

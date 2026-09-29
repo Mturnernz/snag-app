@@ -4,6 +4,9 @@
 [build]
   command = "npx expo export --platform web"
   publish = "dist"
+  # A production build is skipped when nothing this site builds from changed,
+  # packages/ included — see the script. Previews always build.
+  ignore = "bash ../../scripts/netlify-ignore.sh apps/mobile"
 
 [build.environment]
   NODE_VERSION = "22"
@@ -54,13 +57,17 @@
 #     4xx anywhere, and the thumbnails still render (img-src already had blob:).
 #     img-src and connect-src both need it, for two different reasons; adding
 #     one is not a hint that the other is covered.
+#   * Sentry's ingest hosts in connect-src, one per region a DSN can name
+#     (sentry.io, us, de), so an error report is not blocked in the same
+#     silence. Nothing is sent until EXPO_PUBLIC_SENTRY_DSN is set; see
+#     src/lib/monitoring.web.ts.
 #
 # frame-ancestors 'none' still applies: nothing should embed the app, and a
 # framed copy is how a QR-code landing page gets turned into a phishing shell.
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co; font-src 'self' data:; connect-src 'self' blob: https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co; font-src 'self' data:; connect-src 'self' blob: https://*.supabase.co wss://*.supabase.co https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"

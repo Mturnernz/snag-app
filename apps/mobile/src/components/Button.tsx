@@ -111,12 +111,18 @@ export default function Button({
     onPress();
   }
 
+  // A Pressable with no role is a plain <div> on the web build — not announced
+  // as a button, and not in the keyboard's tab order. The label is stated
+  // because the words are replaced by a spinner while loading.
   return (
     <AnimatedPressable
       onPress={handlePress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       disabled={isDisabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: isDisabled, busy: loading }}
       style={[
         animatedStyle,
         styles.base,
@@ -155,5 +161,9 @@ const styles = StyleSheet.create({
   label: {
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
+    // A label long enough to wrap stays centred on its button rather than
+    // hanging off the left edge of it.
+    textAlign: 'center',
+    flexShrink: 1,
   },
 });

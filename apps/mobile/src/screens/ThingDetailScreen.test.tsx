@@ -11,6 +11,9 @@ import ThingDetailScreen from './ThingDetailScreen';
 // could hold, and every edit saved in total silence because the rows called
 // `patch` without the toast it takes. Now every field the kind can answer is on
 // screen, empty or not, and one Save button commits the typed ones together.
+//
+// "On screen" is not "a box" for the fields nearly nobody fills in: those are
+// named by a pill at the foot of the card, and a tap opens the box.
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -162,7 +165,7 @@ const textOf = (node: any): string =>
 const texts = (r: RenderResult) => r.getAllByType('Text').map(textOf);
 
 describe('ThingDetailScreen', () => {
-  it('shows every field as a box, even on a thing with nothing filled in', async () => {
+  it('names every field on a thing with nothing filled in, the rarely used ones as pills', async () => {
     // The whole reversal. An empty record used to render as almost nothing,
     // which is why nobody could tell what it was for.
     const result = await open();
@@ -171,6 +174,10 @@ describe('ThingDetailScreen', () => {
     for (const label of ['Name', 'Make', 'Model', 'Serial', 'Notes']) {
       expect(found[label]).toBeTruthy();
       expect(found[label].props.value).toBe('');
+    }
+    for (const label of ['Year made', 'Installed', 'Warranty until']) {
+      expect(found[label]).toBeUndefined();
+      expect(pressable(result, `Add ${label.toLowerCase()}`)).toBeTruthy();
     }
   });
 
@@ -348,12 +355,12 @@ describe('ThingDetailScreen', () => {
     // Only the record's own fields. The "what it takes" box is an add control
     // with no label of its own, so its prompt is the only thing saying what it
     // is for — a different job from a box sitting under the word SERIAL.
-    const result = await open();
+    const result = await open({ installedAt: '2019-11-01', warrantyUntil: '2027-01-01' });
     const found = boxes(result);
     for (const label of ['Name', 'Make', 'Model', 'Serial', 'Installed', 'Warranty until', 'Notes']) {
-      expect(found[label]?.props.placeholder).toBeUndefined();
+      expect(found[label]).toBeTruthy();
+      expect(found[label].props.placeholder).toBeUndefined();
     }
-    expect(found['Serial']).toBeTruthy();
   });
 
   it('will not turn a saved dishwasher into a tin of paint', async () => {
@@ -611,6 +618,49 @@ describe('a paint swatch', () => {
   it('has no swatch box at all on an appliance', async () => {
     const r = await open({ kind: 'appliance' });
     expect(boxes(r)['Swatch (hex)']).toBeUndefined();
+    expect(pressable(r, 'Change the swatch')).toBeUndefined();
+    expect(pressable(r, 'Add a swatch')).toBeUndefined();
+  });
+
+  // The strip in the order it is drawn: each photo, and the swatch tile.
+  const strip = (r: RenderResult) => r.root.findAll(
+    (n) => typeof n.type === 'string' && typeof n.props.accessibilityLabel === 'string'
+      && (n.props.accessibilityLabel === 'Open this photo' || n.props.accessibilityLabel.startsWith('Swatch #')),
+    { deep: true },
+  ).map((n) => n.props.accessibilityLabel);
+
+  it('sits second in the strip, after the first photo, or first when there is none', async () => {
+    let r = await open({ kind: 'finish', name: 'Wan White', spec: { hex: 'eae8df' }, photoPaths: ['h1/a.jpg', 'h1/b.jpg'] });
+    expect(strip(r)).toEqual(['Open this photo', 'Swatch #EAE8DF', 'Open this photo']);
+
+    r = await open({ kind: 'finish', name: 'Wan White', spec: { hex: 'eae8df' }, photoPaths: ['h1/a.jpg'] });
+    expect(strip(r)).toEqual(['Open this photo', 'Swatch #EAE8DF']);
+
+    r = await open({ kind: 'finish', name: 'Wan White', spec: { hex: 'eae8df' } });
+    expect(strip(r)).toEqual(['Swatch #EAE8DF']);
+  });
+
+  it('shows the hex as text under the photos, and writes a change when its box is left', async () => {
+    const r = await open({ kind: 'finish', name: 'Wan White', spec: { hex: 'eae8df' } });
+    expect(texts(r)).toContain('#EAE8DF');
+    expect(boxes(r)['Swatch (hex)']).toBeUndefined();
+
+    await TestRenderer.act(async () => { pressable(r, 'Change the swatch').props.onPress(); });
+    await TestRenderer.act(async () => { boxes(r)['Swatch (hex)'].props.onChangeText('#405341'); });
+    // The tile answers while it is typed.
+    expect(strip(r)).toEqual(['Swatch #405341']);
+
+    mock_updateThing.mockResolvedValue(thing({ kind: 'finish', name: 'Wan White', spec: { hex: '#405341' } }));
+    await TestRenderer.act(async () => { await boxes(r)['Swatch (hex)'].props.onBlur(); });
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { spec: { hex: '#405341' } });
+    expect(boxes(r)['Swatch (hex)']).toBeUndefined();
+  });
+
+  it('offers a swatch on a paint that has none', async () => {
+    const r = await open({ kind: 'finish', name: 'Wan White' });
+    expect(strip(r)).toEqual([]);
+    expect(texts(r)).toContain('Swatch');
+    expect(pressable(r, 'Add a swatch')).toBeTruthy();
   });
 });
 
@@ -809,6 +859,15 @@ describe('what the maker says', () => {
     expect(texts(result)).toContain('Manual');
   });
 
+  it('says Google refused the search rather than calling it busy', async () => {
+    mock_getProductLookup.mockResolvedValue(found({ status: 'failed', reason: 'limit', facts: null }));
+    const result = await open(HEAT_PUMP);
+    expect(texts(result)).toContain(
+      "Google wouldn't run the search — SnagHQ's allowance for web searches is used up.",
+    );
+    expect(texts(result)).not.toContain('The search was busy when this was looked up.');
+  });
+
   it('shows a lookup still under way as one, and draws the record if it cannot be read', async () => {
     mock_getProductLookup.mockResolvedValue(found({ status: 'pending', facts: null }));
     let result = await open(HEAT_PUMP);
@@ -828,5 +887,154 @@ describe('what the maker says', () => {
     expect(boxes(result)['Year made'].props.value).toBe('2016');
     const paint = await open({ kind: 'finish', name: 'Wan White' });
     expect(boxes(paint)['Year made']).toBeUndefined();
+    expect(pressable(paint, 'Add year made')).toBeUndefined();
+  });
+});
+
+// Counted on the live record: the dates and a paint's sheen, tint and what's
+// left were empty on nearly every one. Named by a pill rather than a box each,
+// and opened in place by a tap.
+describe('the fields almost nobody fills in', () => {
+  it('gives one holding a value its box, and the rest a pill', async () => {
+    const result = await open({ name: 'Dishwasher', warrantyUntil: '2027-01-01' });
+    expect(boxes(result)['Warranty until']).toBeTruthy();
+    expect(pressable(result, 'Add warranty until')).toBeUndefined();
+    expect(pressable(result, 'Add year made')).toBeTruthy();
+    expect(pressable(result, 'Add installed')).toBeTruthy();
+  });
+
+  it('opens the box where it sat, with the cursor in it', async () => {
+    const result = await open({ name: 'Dishwasher' });
+    await TestRenderer.act(async () => { pressable(result, 'Add year made').props.onPress(); });
+    expect(boxes(result)['Year made']).toBeTruthy();
+    expect(boxes(result)['Year made'].props.autoFocus).toBe(true);
+    expect(pressable(result, 'Add year made')).toBeUndefined();
+    // Opening one is not writing anything.
+    expect(mock_updateThing).not.toHaveBeenCalled();
+  });
+
+  it('puts the pill back when the box is left empty, and writes nothing', async () => {
+    const result = await open({ name: 'Dishwasher' });
+    await TestRenderer.act(async () => { pressable(result, 'Add year made').props.onPress(); });
+    await TestRenderer.act(async () => { await boxes(result)['Year made'].props.onBlur(); });
+    expect(boxes(result)['Year made']).toBeUndefined();
+    expect(pressable(result, 'Add year made')).toBeTruthy();
+    expect(mock_updateThing).not.toHaveBeenCalled();
+  });
+
+  it('writes what is typed into one when it is left, and keeps it a box', async () => {
+    const result = await open({ name: 'Dishwasher' });
+    await TestRenderer.act(async () => { pressable(result, 'Add year made').props.onPress(); });
+    await TestRenderer.act(async () => { boxes(result)['Year made'].props.onChangeText('2016'); });
+    mock_updateThing.mockResolvedValue(thing({ name: 'Dishwasher', spec: { manufactured: '2016' } }));
+    await TestRenderer.act(async () => { await boxes(result)['Year made'].props.onBlur(); });
+
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { spec: { manufactured: '2016' } });
+    expect(boxes(result)['Year made'].props.value).toBe('2016');
+  });
+
+  it('does the same for a date, which also has a calendar beside it', async () => {
+    const result = await open({ name: 'Dishwasher' });
+    await TestRenderer.act(async () => { pressable(result, 'Add installed').props.onPress(); });
+    expect(boxes(result)['Installed'].props.autoFocus).toBe(true);
+    await TestRenderer.act(async () => { await boxes(result)['Installed'].props.onBlur(); });
+    expect(boxes(result)['Installed']).toBeUndefined();
+    expect(pressable(result, 'Add installed')).toBeTruthy();
+  });
+
+  it('asks a paint its own rarely used fields, and never when it went in', async () => {
+    const result = await open({ kind: 'finish', name: 'Wan White', spec: { product: 'Zylone Sheen' } });
+    for (const label of ['sheen', 'tint formula', "what's left", 'warranty until']) {
+      expect(pressable(result, `Add ${label}`)).toBeTruthy();
+    }
+    expect(boxes(result)['Product'].props.value).toBe('Zylone Sheen');
+    expect(boxes(result)['Installed']).toBeUndefined();
+    expect(pressable(result, 'Add installed')).toBeUndefined();
+    // Where it went and the swatch have places of their own above the card.
+    expect(boxes(result)['Where it went']).toBeUndefined();
+    expect(boxes(result)['Swatch (hex)']).toBeUndefined();
+  });
+});
+
+// Two paints in one room are told apart by where each went, and one paint can
+// go several places: the walls, the ceiling, the architraves. A pill each,
+// above the photos, written the moment a place is chosen.
+describe('where a paint went', () => {
+  const paint = (notes: string | null) => ({ kind: 'finish', name: 'Wan White', notes });
+  const chip = (r: RenderResult, label: string) => r.root.findAll(
+    (n) => n.props.accessibilityLabel === label && typeof n.props.onPress === 'function' && n.props.accessibilityRole === 'button',
+    { deep: true },
+  )[0];
+
+  it('shows each place as a pill, however the line was written', async () => {
+    let result = await open(paint('Main wall · Ceiling'));
+    expect(pressable(result, 'Where it went: Main wall. Change')).toBeTruthy();
+    expect(pressable(result, 'Where it went: Ceiling. Change')).toBeTruthy();
+    expect(pressable(result, 'Add another place it went')).toBeTruthy();
+
+    result = await open(paint('Main wall, ceiling'));
+    expect(pressable(result, 'Where it went: ceiling. Change')).toBeTruthy();
+  });
+
+  it('adds another in one write, joined into the one line', async () => {
+    const result = await open(paint('Main wall · Ceiling'));
+    await TestRenderer.act(async () => { pressable(result, 'Add another place it went').props.onPress(); });
+    mock_updateThing.mockResolvedValue(thing(paint('Main wall · Ceiling · Architraves')));
+    await TestRenderer.act(async () => { await chip(result, 'Architraves').props.onPress(); });
+
+    expect(mock_updateThing).toHaveBeenCalledTimes(1);
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { notes: 'Main wall · Ceiling · Architraves' });
+    expect(mock_showToast).toHaveBeenCalledWith('Architraves added');
+    expect(pressable(result, 'Where it went: Architraves. Change')).toBeTruthy();
+  });
+
+  it('never offers a place it already went', async () => {
+    const result = await open(paint('Main wall · Ceiling'));
+    await TestRenderer.act(async () => { pressable(result, 'Add another place it went').props.onPress(); });
+    expect(chip(result, 'Ceiling').props.disabled).toBe(true);
+    expect(chip(result, 'Architraves').props.disabled).toBe(false);
+  });
+
+  it('changes one in place, and removes one', async () => {
+    const result = await open(paint('Main wall · Ceiling'));
+    await TestRenderer.act(async () => { pressable(result, 'Where it went: Ceiling. Change').props.onPress(); });
+    mock_updateThing.mockResolvedValue(thing(paint('Main wall · Skirting')));
+    await TestRenderer.act(async () => { await chip(result, 'Skirting').props.onPress(); });
+    expect(mock_updateThing).toHaveBeenLastCalledWith('t1', { notes: 'Main wall · Skirting' });
+
+    await TestRenderer.act(async () => { pressable(result, 'Where it went: Skirting. Change').props.onPress(); });
+    mock_updateThing.mockResolvedValue(thing(paint('Main wall')));
+    await TestRenderer.act(async () => { await pressable(result, 'Remove Skirting').props.onPress(); });
+    expect(mock_updateThing).toHaveBeenLastCalledWith('t1', { notes: 'Main wall' });
+    expect(mock_showToast).toHaveBeenCalledWith('Skirting removed');
+  });
+
+  it('asks for one by name when it has none, and clears the line when the last goes', async () => {
+    let result = await open(paint(null));
+    expect(pressable(result, 'Add where it went')).toBeTruthy();
+
+    result = await open(paint('Ceiling'));
+    await TestRenderer.act(async () => { pressable(result, 'Where it went: Ceiling. Change').props.onPress(); });
+    mock_updateThing.mockResolvedValue(thing(paint(null)));
+    await TestRenderer.act(async () => { await pressable(result, 'Remove Ceiling').props.onPress(); });
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { notes: null });
+  });
+
+  it('keeps the draft in step, so leaving the page does not write the old line back', async () => {
+    const result = await open(paint('Main wall'));
+    await TestRenderer.act(async () => { pressable(result, 'Add another place it went').props.onPress(); });
+    mock_updateThing.mockResolvedValue(thing(paint('Main wall · Ceiling')));
+    await TestRenderer.act(async () => { await chip(result, 'Ceiling').props.onPress(); });
+
+    const e = { preventDefault: jest.fn(), data: { action: { type: 'GO_BACK' } } };
+    await TestRenderer.act(async () => { mock_listeners.beforeRemove(e); });
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(mock_updateThing).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not on an appliance', async () => {
+    const result = await open({ name: 'Dishwasher', notes: 'Main wall' });
+    expect(pressable(result, 'Where it went: Main wall. Change')).toBeUndefined();
+    expect(boxes(result)['Notes'].props.value).toBe('Main wall');
   });
 });

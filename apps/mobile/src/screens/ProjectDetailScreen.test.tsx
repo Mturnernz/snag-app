@@ -3,6 +3,7 @@ import TestRenderer from 'react-test-renderer';
 import { render, flattenStyle } from '../test/render';
 import { Colors } from '../constants/theme';
 import ProjectDetailScreen, { describeWhatGoes, elementHoldsSomething } from './ProjectDetailScreen';
+import FilePaperworkSheet from '../components/FilePaperworkSheet';
 import { bill, downstairs, element, item, page, project, quote } from '../test/projectFixtures';
 import { dayKey } from '@snag/supabase-queries';
 
@@ -401,7 +402,12 @@ describe('one email, several papers', () => {
     await TestRenderer.act(async () => { cert.props.onApprove(); });
     expect(mock_approveInvoiceReview).not.toHaveBeenCalled();
     r.getByText('Where does it go?');
-    await press(r, 'File it');
+    // The card behind the sheet has a "File it" of its own; this is the sheet's.
+    const sheet = r.root.findAll((n: any) => n.type === FilePaperworkSheet, { deep: true })[0];
+    const fileIt = sheet.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'File it' && n.props?.onPress,
+    )[0];
+    await TestRenderer.act(async () => { fileIt.props.onPress(); });
     expect(mock_filePaperwork).toHaveBeenCalledWith('rv3', { quoteId: null, elementId: null });
     expect(mock_showToast).toHaveBeenCalledWith('Filed with the job’s paperwork');
   });

@@ -24,6 +24,13 @@ import JoinScreen from './src/screens/JoinScreen';
 import { ToastProvider } from './src/hooks/useToast';
 import { HouseholdProvider } from './src/hooks/useHousehold';
 import { FirstCaptureProvider } from './src/hooks/useFirstCapture';
+import AppErrorBoundary from './src/components/AppErrorBoundary';
+import { initMonitoring } from './src/lib/monitoring';
+
+// Before the first render, so an error during it is reported. A no-op off the
+// web build, and on it until EXPO_PUBLIC_SENTRY_DSN is set. See
+// src/lib/monitoring.web.ts.
+initMonitoring();
 
 /**
  * Three gates, not six.
@@ -42,7 +49,19 @@ import { FirstCaptureProvider } from './src/hooks/useFirstCapture';
  * through. `/join/<token>` is deliberately unmapped in linking.ts for the same
  * reason. See src/lib/joinLink.ts.
  */
+/**
+ * The root, inside the one boundary that keeps a render error from becoming a
+ * blank page. See src/components/AppErrorBoundary.tsx.
+ */
 export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AppGates />
+    </AppErrorBoundary>
+  );
+}
+
+function AppGates() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
@@ -200,8 +219,11 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <StatusBar style="dark" />
+        {/* A scanner arrives here first, with no account: the code opens the
+            email path on Create account and rides through the confirmation
+            link, and through Google's round trip too. */}
         <ToastProvider>
-          <WelcomeFlow />
+          <WelcomeFlow joinToken={joinToken} />
         </ToastProvider>
       </SafeAreaProvider>
     );

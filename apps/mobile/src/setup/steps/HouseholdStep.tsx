@@ -45,10 +45,11 @@ export default function HouseholdStep({
   const [pasted, setPasted] = useState('');
   const pastedToken = parseJoinToken(pasted);
 
-  // A name is saved by the step before, and accept_invitation needs one — so
-  // by now there is always a profile to look invitations up with.
+  // Looked for straight away, profile or not: `my_invitations` matches on the
+  // signed-in address, never on a profile. (The name step before this one
+  // already names a waiting invitation, so nobody reaches *Start a new house*
+  // without having been told somebody asked them in.)
   const loadInvitations = useCallback(async () => {
-    if (!ctx.profile) return;
     setChecking(true);
     try {
       setInvitations(await getMyInvitations());
@@ -57,7 +58,7 @@ export default function HouseholdStep({
     } finally {
       setChecking(false);
     }
-  }, [ctx.profile]);
+  }, []);
 
   useEffect(() => {
     loadInvitations();
@@ -159,7 +160,7 @@ export default function HouseholdStep({
         onBack={() => setPage('choose')}
         icon="hourglass-outline"
         title="You're ready"
-        body="Ask whoever set up your house to invite you — with a link, or the email address you signed up with. Snag doesn't email you, so their invitation will simply be here when you next look."
+        body="Ask whoever set up your house to invite you — with a link, or the email address you signed up with. Snag doesn't email invitations, so theirs will simply be here when you next look."
         primary={{ label: 'Check again', onPress: loadInvitations, loading: checking }}
         secondary={{ label: 'Start a new house instead', onPress: () => setPage('name') }}
       >

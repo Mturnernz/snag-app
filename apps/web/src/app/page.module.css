@@ -1,43 +1,268 @@
-.main {
+/* The front door. One column, read top to bottom on a phone, which is where
+   most people will meet it. Tokens only (globals.css), so the palette cannot
+   drift from the app's. */
+
+.page {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  max-width: 72ch;
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+}
+
+.top {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-md);
-  padding: var(--space-2xl) var(--space-lg);
-  text-align: center;
+  justify-content: space-between;
+  padding: var(--space-xl) 0;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+}
+
+.mark {
+  border-radius: var(--radius-button);
+}
+
+.signIn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 var(--space-md);
+  color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.signIn:hover {
+  text-decoration: underline;
+}
+
+.hero {
+  padding: var(--space-3xl) 0 var(--space-4xl);
 }
 
 .title {
   font-size: var(--text-3xl);
-  font-weight: 700;
+  line-height: 1.15;
   letter-spacing: -0.02em;
-  margin: 0;
+  margin: 0 0 var(--space-lg);
+  color: var(--color-text-primary);
+}
+
+@media (min-width: 640px) {
+  .title {
+    font-size: var(--text-4xl);
+  }
+}
+
+.lede {
+  font-size: var(--text-lg);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-2xl);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+.primary,
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 var(--space-xl);
+  border-radius: var(--radius-button);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.primary {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.primary:hover {
+  background: var(--color-primary-hover);
+}
+
+.secondary {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.primary:focus-visible,
+.secondary:focus-visible,
+.signIn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.section {
+  padding: var(--space-3xl) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.heading {
+  font-size: var(--text-xl);
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-lg);
+  color: var(--color-text-primary);
 }
 
 .body {
   color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-md);
+}
+
+.cards {
+  list-style: none;
   margin: 0;
-  max-width: 32ch;
+  padding: 0;
+  display: grid;
+  gap: var(--space-md);
 }
 
-.action {
-  margin-top: var(--space-md);
-  padding: var(--space-md) var(--space-xl);
-  border-radius: var(--radius-button);
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-  font-weight: 600;
-  text-decoration: none;
+@media (min-width: 640px) {
+  .cards {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
-.link {
+.card {
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg) var(--space-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.card h3,
+.step h3 {
+  font-size: var(--text-base);
+  margin: 0 0 var(--space-xs);
+  color: var(--color-text-primary);
+}
+
+.card p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  font-size: var(--text-sm);
+}
+
+.steps {
+  display: grid;
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
+}
+
+@media (min-width: 640px) {
+  .steps {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.step {
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg) var(--space-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.step ol {
+  margin: 0;
+  padding-left: var(--space-xl);
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.facts {
+  margin: 0;
+  padding-left: var(--space-xl);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.facts li + li {
+  margin-top: var(--space-sm);
+}
+
+.facts strong,
+.faq strong {
+  color: var(--color-text-primary);
+}
+
+.faq details {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.faq summary {
+  cursor: pointer;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.faq summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-chip);
+}
+
+.faq p {
+  margin: 0 0 var(--space-lg);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.section a,
+.faq a {
+  color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.closing {
+  padding: var(--space-3xl) 0 var(--space-4xl);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  justify-content: center;
+}
+
+.footer {
+  margin-top: auto;
+  padding: var(--space-2xl) 0 var(--space-3xl);
+  border-top: 1px solid var(--color-border);
+}
+
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-xl);
+}
+
+.footerLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   text-decoration: none;
 }
 
-.link:hover {
+.footerLinks a:hover {
   text-decoration: underline;
 }

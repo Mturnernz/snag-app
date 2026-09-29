@@ -1,0 +1,50 @@
+.main {
+  max-width: 68ch;
+  margin: 0 auto;
+  padding: var(--space-4xl) var(--space-lg) var(--space-5xl);
+}
+
+.brand {
+  display: block;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  margin-bottom: var(--space-2xl);
+}
+
+.title {
+  font-size: var(--text-2xl);
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-sm);
+}
+
+.updated {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-2xl);
+}
+
+.main h2 {
+  font-size: var(--text-lg);
+  margin: var(--space-3xl) 0 var(--space-sm);
+}
+
+.main p,
+.main li {
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.main ul {
+  padding-left: var(--space-xl);
+}
+
+.main li + li {
+  margin-top: var(--space-xs);
+}
+
+.main a {
+  color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+}

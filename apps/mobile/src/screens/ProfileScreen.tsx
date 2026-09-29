@@ -9,15 +9,19 @@ import Button from '../components/Button';
 import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
+import InstallCard from '../components/InstallCard';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  deleteMyAccount, deleteStoredFiles, getAllProjects, getMyOrphanFilePaths, getSnags, signOut,
-  setProjectsEnabled, upsertProfile,
+  deleteMyAccount, deleteStoredFiles, getAllProjects, getMyData, getMyOrphanFilePaths, getSnags,
+  signOut, setProjectsEnabled, upsertProfile,
 } from '../lib/supabase';
-import { looseEnds, type LooseEnd } from '@snag/supabase-queries';
+import { exportDateStamp, looseEnds, type LooseEnd } from '@snag/supabase-queries';
+import { saveFile } from '../lib/download';
 import { showAlert } from '../lib/alert';
+import { openUrl } from '../lib/openUrl';
+import { PORTAL_URL } from '../lib/appUrl';
 import { RootStackParamList } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -42,6 +46,7 @@ export default function ProfileScreen() {
   const [ends, setEnds] = useState<LooseEnd[]>([]);
   const [endsOpen, setEndsOpen] = useState(false);
   const [savingProjects, setSavingProjects] = useState(false);
+  const [gathering, setGathering] = useState(false);
 
   /**
    * Turning the Projects tab on or off.
@@ -107,6 +112,30 @@ export default function ProfileScreen() {
       showAlert("Couldn't save that", err?.message ?? 'Please try again.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Everything Snag holds that this account can see, as one JSON file.
+   *
+   * One read, one file. The server decides what is in it (RLS, as the
+   * caller), so nothing here filters. It is a single JSON document rather
+   * than a zip, because a zip would be a dependency for a button pressed once
+   * a year. A refusal is a sentence rather than a thrown screen, because this
+   * is also the screen people sign out from.
+   */
+  async function handleDownloadData() {
+    if (gathering) return;
+    setGathering(true);
+    try {
+      const data = await getMyData();
+      const fileName = `snag-data-${exportDateStamp()}.json`;
+      const saved = await saveFile(fileName, JSON.stringify(data, null, 2), 'application/json');
+      showToast(saved.path ? `Saved to ${saved.path}` : 'Your data is downloading');
+    } catch (err: any) {
+      showAlert("Couldn't gather your data", err?.message ?? 'Please try again.');
+    } finally {
+      setGathering(false);
     }
   }
 
@@ -309,6 +338,11 @@ export default function ProfileScreen() {
         </View>
       </Card>
 
+      {/* The list's card asks once; this stays for as long as Snag is open
+          in a browser tab, for somebody who closed the card and wants it
+          back. Absent everywhere else. */}
+      <InstallCard variant="row" />
+
       <Button
         label="Sign out"
         variant="outline"
@@ -318,6 +352,16 @@ export default function ProfileScreen() {
         }}
         fullWidth
         style={styles.signOut}
+      />
+
+      {/* A copy of what is kept, which the Privacy Act says a person may ask
+          for. Quiet, beside the account's other rare doors. */}
+      <Button
+        label="Download my data"
+        variant="ghost"
+        onPress={handleDownloadData}
+        loading={gathering}
+        fullWidth
       />
 
       {/* Signing out is the everyday door and deleting is the other one, so it
@@ -334,6 +378,26 @@ export default function ProfileScreen() {
         Any household you're the only one in goes with you, and so does everything in it. Ones you
         share stay, and so does what you filed in them.
       </Text>
+
+      {/* The statement Create account links to, reachable again once signed
+          in — the right to see and correct what is kept is not only for the
+          moment of signing up. */}
+      <View style={styles.legalLinks}>
+        <Pressable
+          onPress={() => openUrl(`${PORTAL_URL}/privacy`)}
+          style={styles.privacyLink}
+          accessibilityRole="link"
+        >
+          <Text style={styles.privacyText}>Privacy statement</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => openUrl(`${PORTAL_URL}/terms`)}
+          style={styles.privacyLink}
+          accessibilityRole="link"
+        >
+          <Text style={styles.privacyText}>Terms</Text>
+        </Pressable>
+      </View>
 
       <ConfirmDialog
         visible={confirmDelete}
@@ -437,6 +501,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
+  legalLinks: { flexDirection: 'row', justifyContent: 'center', gap: Spacing.xl },
+  privacyLink: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.sm,
+  },
+  privacyText: { fontSize: Typography.sm, color: Colors.textMuted },
   deleteHint: {
     fontSize: Typography.sm,
     color: Colors.textMuted,

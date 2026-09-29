@@ -1,5 +1,6 @@
 import {
-  DEFAULT_MODEL, FALLBACK_MODEL, LAST_RESORT_MODEL, geminiRequest, isBusy, modelsToTry, readingFromGemini, SCHEMA, SYSTEM,
+  DEFAULT_MODEL, FALLBACK_MODEL, LAST_RESORT_MODEL, geminiRequest, isBusy, modelsToTry, quotaRefusal, readingFromGemini,
+  SCHEMA, SYSTEM,
 } from '../../../../supabase/functions/read-label/gemini';
 import { parseLabelReading } from '@snag/supabase-queries';
 
@@ -112,5 +113,68 @@ describe('asking a second model when the first is busy', () => {
 
   it.each([400, 401, 403, 404])('does not retry %i, which every model would refuse alike', (status) => {
     expect(isBusy(status)).toBe(false);
+  });
+});
+
+describe('a 429 says which allowance ran out', () => {
+  // Google words every 429 "You exceeded your current quota"; only the
+  // QuotaFailure detail says whether it is a minute's wait or not.
+  const refusal = (violations: Record<string, unknown>[], retry?: string) => JSON.stringify({
+    error: {
+      code: 429,
+      message: 'You exceeded your current quota, please check your plan and billing details.',
+      status: 'RESOURCE_EXHAUSTED',
+      details: [
+        { '@type': 'type.googleapis.com/google.rpc.Help', links: [] },
+        { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations },
+        ...(retry ? [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: retry }] : []),
+      ],
+    },
+  });
+
+  it('reads a per-minute limit as a wait, and names it', () => {
+    const quota = quotaRefusal(429, refusal([{
+      quotaMetric: 'generativelanguage.googleapis.com/generate_content_requests',
+      quotaId: 'GenerateRequestsPerMinutePerProjectPerModel',
+      quotaDimensions: { model: 'gemini-3.8-flash', location: 'global' },
+      quotaValue: '10',
+    }], '23s'));
+    expect(quota?.perMinute).toBe(true);
+    expect(quota?.detail).toBe(
+      'generativelanguage.googleapis.com/generate_content_requests (GenerateRequestsPerMinutePerProjectPerModel) ' +
+        'limit 10 model=gemini-3.8-flash location=global, retry in 23s',
+    );
+  });
+
+  it('reads a used-up day as not a wait', () => {
+    const quota = quotaRefusal(429, refusal([{
+      quotaMetric: 'generativelanguage.googleapis.com/search_grounding_requests',
+      quotaId: 'SearchGroundingRequestsPerDayPerProject',
+      quotaValue: '500',
+    }]));
+    expect(quota?.perMinute).toBe(false);
+    expect(quota?.detail).toMatch(/PerDay.*limit 500/);
+  });
+
+  it('reads an allowance of nothing as not a wait, even per minute', () => {
+    expect(quotaRefusal(429, refusal([{
+      quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', quotaValue: '0',
+    }]))?.perMinute).toBe(false);
+  });
+
+  it('is not a wait if any one of the allowances named is not', () => {
+    expect(quotaRefusal(429, refusal([
+      { quotaId: 'RequestsPerMinute', quotaValue: '10' },
+      { quotaId: 'RequestsPerDay', quotaValue: '250' },
+    ]))?.perMinute).toBe(false);
+  });
+
+  it('treats a 429 that names nothing as the rate limit it always meant', () => {
+    expect(quotaRefusal(429, refusal([]))).toEqual({ perMinute: true, detail: 'no quota named' });
+    expect(quotaRefusal(429, 'Too Many Requests')).toEqual({ perMinute: true, detail: 'no detail given' });
+  });
+
+  it('says nothing about anything but a 429', () => {
+    expect(quotaRefusal(503, refusal([{ quotaId: 'RequestsPerDay' }]))).toBeNull();
   });
 });

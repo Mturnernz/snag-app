@@ -19,7 +19,7 @@
  * - **A new step says `since` and `whatsNew`.** `since` above the baseline is
  *   what makes a step appear for people who set up before it existed, and
  *   `whatsNew` is the one line the catch-up run opens with. The baseline list in
- *   `20260928090000` is the steps with `since: 1` and must never grow.
+ *   `20260929060443` is the steps with `since: 1` and must never grow.
  *
  * The screens live in `SetupFlow.tsx`, keyed by these ids in a `Record`, so a
  * step with no screen is a compile error rather than a blank page.

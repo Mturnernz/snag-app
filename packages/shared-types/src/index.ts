@@ -111,7 +111,7 @@ export interface Profile {
    * Only "has this person been asked" is stored; whether the question is
    * answered is read from the data it writes. When a later change adds a step,
    * somebody who set up before it sees that step and nothing else. See
-   * `apps/mobile/src/setup/steps.ts` and `20260928090000`.
+   * `apps/mobile/src/setup/steps.ts` and `20260929060443`.
    */
   setupSeen: string[];
 }
@@ -515,6 +515,17 @@ export const FINISH_SPEC_FIELDS: { key: string; label: string; placeholder: stri
   // colour no screen shows true. It draws the swatch (`swatchColour`) and is
   // never what anybody takes to the counter — the code and the tint are.
   { key: 'hex', label: 'Swatch (hex)', placeholder: '' },
+];
+
+/**
+ * The places a paint goes, offered as one-tap answers to *Where it went*.
+ *
+ * "Main wall" and "Walls" come first because they are what `wallColour` reads
+ * to paint a room's tile on the House tab — a suggestion that answers in other
+ * words would leave the tile white.
+ */
+export const PAINT_AREA_SUGGESTIONS: string[] = [
+  'Main wall', 'Walls', 'Feature wall', 'Ceiling', 'Architraves', 'Skirting', 'Doors', 'Window frames',
 ];
 
 /**

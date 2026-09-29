@@ -116,6 +116,50 @@ describe('the field', () => {
   });
 });
 
+// A field opened from a pill goes back to being a pill when it is left empty,
+// so the field has to say when that happened — and must not say it when the
+// calendar beside it is what took the focus.
+describe('left empty', () => {
+  const box = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Installed' && !!n.props?.onChangeText,
+    { deep: true },
+  )[0];
+
+  it('says so when the box is left with nothing in it, and not when it holds a date', () => {
+    const onLeaveEmpty = jest.fn();
+    const onBlur = jest.fn();
+    let r = render(<DateField label="Installed" value="" onChangeValue={jest.fn()} onBlur={onBlur} onLeaveEmpty={onLeaveEmpty} />);
+    TestRenderer.act(() => box(r).props.onBlur());
+    expect(onBlur).toHaveBeenCalledTimes(1);
+    expect(onLeaveEmpty).toHaveBeenCalledTimes(1);
+
+    onLeaveEmpty.mockClear();
+    r = render(<DateField label="Installed" value="Nov 2019" onChangeValue={jest.fn()} onLeaveEmpty={onLeaveEmpty} />);
+    TestRenderer.act(() => box(r).props.onBlur());
+    expect(onLeaveEmpty).not.toHaveBeenCalled();
+  });
+
+  it('is not left while its calendar is open, and is once the calendar closes without a day', () => {
+    const onLeaveEmpty = jest.fn();
+    const r = render(<DateField label="Installed" value="" onChangeValue={jest.fn()} onLeaveEmpty={onLeaveEmpty} />);
+    TestRenderer.act(() => byLabel(r, 'Pick installed from a calendar').props.onPress());
+    TestRenderer.act(() => box(r).props.onBlur());
+    expect(onLeaveEmpty).not.toHaveBeenCalled();
+
+    const close = r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && typeof n.props?.onRequestClose === 'function',
+      { deep: true },
+    )[0];
+    TestRenderer.act(() => close.props.onRequestClose());
+    expect(onLeaveEmpty).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes the cursor when asked to', () => {
+    const r = render(<DateField label="Installed" value="" onChangeValue={jest.fn()} autoFocus />);
+    expect(box(r).props.autoFocus).toBe(true);
+  });
+});
+
 describe('the calendar', () => {
   it('opens on the month of the date already set, not on today', () => {
     // Somebody correcting a date lands beside it rather than in today, paging

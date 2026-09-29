@@ -297,9 +297,25 @@ describe('an invitation waiting at sign-up', () => {
     expect(title(r, 'Here are your rooms')).toBe(true);
   });
 
-  it('is not looked for before there is a name to accept with', async () => {
-    await start();
-    expect(mock.getMyInvitations).not.toHaveBeenCalled();
+  // It used to wait for a profile, on the belief that asking first would find
+  // nothing. It wouldn't: my_invitations matches on the signed-in address. And
+  // waiting is how an invitee met *Create it* and made a household of their own.
+  it('is looked for before there is a name, and named on the very first question', async () => {
+    mock.getMyInvitations.mockResolvedValue([INVITATION]);
+    const r = await start();
+    expect(title(r, 'What should we call you?')).toBe(true);
+    expect(title(r, "Mike has invited you to 32 Le Roy. First, the name they'll see.")).toBe(true);
+    await type(r, 'Your name', 'Alyssa');
+    await press(r, 'Continue');
+    expect(title(r, '32 Le Roy wants to add you')).toBe(true);
+    expect(title(r, 'Start a new house')).toBe(false);
+  });
+
+  it('never leaves the name step with a dead button', async () => {
+    const r = await start();
+    await press(r, 'Continue');
+    expect(title(r, 'Tell us what to call you.')).toBe(true);
+    expect(mock.upsertProfile).not.toHaveBeenCalled();
   });
 });
 
@@ -327,13 +343,15 @@ describe('waiting to be invited', () => {
     expect(onJoinToken).not.toHaveBeenCalled();
   });
 
-  it('says nothing will arrive by email, because nothing will', async () => {
+  // Snag emails a sign-up code now, so the claim is narrowed to what is true:
+  // an invitation itself never arrives by email.
+  it('says the invitation will not arrive by email, because it will not', async () => {
     const r = await waiting();
     const said = r.root
       .findAll((n: any) => typeof n.type === 'string' && n.type === 'Text')
       .map((n: any) => JSON.stringify(n.children))
       .join(' ');
-    expect(said).toMatch(/doesn't email you/i);
+    expect(said).toMatch(/doesn't email invitations/i);
   });
 
   // "Check again" re-reads the invitations rather than the account: there is

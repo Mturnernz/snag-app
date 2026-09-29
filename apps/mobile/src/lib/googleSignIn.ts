@@ -10,6 +10,22 @@ export const NATIVE_AUTH_REDIRECT = 'snag://auth-callback';
 export type GoogleOutcome = 'redirecting' | 'signed-in' | 'cancelled';
 
 /**
+ * Whether *Continue with Google* is offered at all.
+ *
+ * Off until the Google side is set up for households — the consent screen
+ * opened past the snaghq.co.nz Workspace and the app on Auth's redirect
+ * allow-list (`SNAG_INFRA_NOTES.md`, *Households sign in with Google too*).
+ * Before that, a household pressing it is refused by Google on a page the app
+ * cannot word, which is a button that is worse than no button. Set
+ * `EXPO_PUBLIC_GOOGLE_SIGN_IN=on` in the build's environment to show it. Read
+ * on each call rather than once, so a test can turn it on and off; Expo
+ * inlines the value at build time either way.
+ */
+export function googleSignInEnabled(): boolean {
+  return process.env.EXPO_PUBLIC_GOOGLE_SIGN_IN === 'on';
+}
+
+/**
  * Where a web sign-in comes back to: this origin, keeping the one path worth
  * keeping.
  *

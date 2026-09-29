@@ -25,6 +25,7 @@ import { showAlert } from '../lib/alert';
 import { failureReason } from '../lib/deadline';
 import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import FoldAllPill from '../components/FoldAllPill';
+import InstallCard from '../components/InstallCard';
 import {
   assessmentBrief, dueState, exportDateStamp, isDoneForNow, shoppingCount, shoppingList,
   snagExportPhotos, snagExportTable, snagHeadline,
@@ -732,7 +733,12 @@ export default function SnagListScreen() {
       <SectionList
         sections={shownSections}
         ListHeaderComponent={
-          shopping.length > 0 ? (
+          <>
+          {/* Asked once, in a browser tab only. The web build is installed
+              from the browser, and a tab is the thing that gets closed and
+              lost. */}
+          <InstallCard />
+          {shopping.length > 0 ? (
             <View style={styles.shopping}>
               <View style={styles.shoppingHead}>
                 <Icon name="cart-outline" size="md" color={Colors.primary} />
@@ -801,7 +807,8 @@ export default function SnagListScreen() {
                 );
               })}
             </View>
-          ) : null
+          ) : null}
+          </>
         }
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.listContent, sections.length === 0 && styles.listEmpty]}

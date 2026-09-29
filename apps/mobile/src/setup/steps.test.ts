@@ -46,7 +46,7 @@ describe('what keeps a new step in sync', () => {
   it('the migration marked existing accounts with exactly the baseline steps', () => {
     const sql = readFileSync(
       join(__dirname, '..', '..', '..', '..', 'supabase', 'migrations',
-        '20260928090000_setup_is_a_list_of_steps.sql'),
+        '20260929060443_setup_is_a_list_of_steps.sql'),
       'utf8'
     );
     const backfill = sql.match(/set setup_seen = array\[([^\]]*)\]/);

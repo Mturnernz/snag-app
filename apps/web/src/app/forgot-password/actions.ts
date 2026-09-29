@@ -14,7 +14,7 @@ import { SITE_URL } from '@/lib/seo';
  * not recognised as a callback at all. Nothing happens and nothing is said.
  *
  * Requesting a reset on a laptop and opening the mail on a phone is the normal
- * case, not the edge case — and the SNAG app's own "Forgot password?" hands off
+ * case, not the edge case — and the Snag app's own "Forgot password?" hands off
  * to this page from a completely different origin, so the verifier could never
  * be there. A plain client on the implicit flow sends no code challenge, which
  * makes the link a fragment-token one that any browser can complete.

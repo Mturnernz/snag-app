@@ -27,7 +27,11 @@ const mock_getAllProjects = jest.fn().mockResolvedValue([]);
 const mock_getSnags = jest.fn().mockResolvedValue([]);
 
 const mock_setProjectsEnabled = jest.fn().mockResolvedValue(undefined);
+const mock_getMyData = jest.fn();
+const mock_saveFile = jest.fn().mockResolvedValue({ path: null });
+jest.mock('../lib/download', () => ({ saveFile: (...a: unknown[]) => mock_saveFile(...a) }));
 jest.mock('../lib/supabase', () => ({
+  getMyData: (...a: unknown[]) => mock_getMyData(...a),
   deleteMyAccount: (...a: unknown[]) => mock_deleteMyAccount(...a),
   getMyOrphanFilePaths: (...a: unknown[]) => mock_getMyOrphanFilePaths(...a),
   deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
@@ -38,7 +42,10 @@ jest.mock('../lib/supabase', () => ({
   getSnags: (...a: unknown[]) => mock_getSnags(...a),
 }));
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
-jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
+const mock_showAlert = jest.fn();
+jest.mock('../lib/alert', () => ({ showAlert: (...a: unknown[]) => mock_showAlert(...a) }));
+const mock_openUrl = jest.fn();
+jest.mock('../lib/openUrl', () => ({ openUrl: (...a: unknown[]) => mock_openUrl(...a) }));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
 
 function arrange() {
@@ -89,6 +96,8 @@ beforeEach(() => {
   mock_signOut.mockResolvedValue({ forced: false });
   mock_getAllProjects.mockResolvedValue([]);
   mock_getSnags.mockResolvedValue([]);
+  mock_getMyData.mockResolvedValue({ exported_at: '2026-09-28T01:00:00Z', snags: [{ id: 's1' }] });
+  mock_saveFile.mockResolvedValue({ path: null });
 });
 
 describe('deleting your account', () => {
@@ -163,6 +172,49 @@ describe('deleting your account', () => {
  * *A global completeness meter is the shaming number that gets an app closed
  * and not reopened.* These pin the four ways this section would become one.
  */
+// Seeing and correcting what is kept is not only for the moment of signing
+// up, so the statement Create account links to is reachable from here too.
+describe('privacy', () => {
+  it('opens the privacy statement', async () => {
+    const r = await renderProfile();
+    await TestRenderer.act(async () => pressableAround(r, 'Privacy statement').props.onPress());
+    expect(mock_openUrl).toHaveBeenCalledWith('https://www.snaghq.co.nz/privacy');
+  });
+
+  it('opens the terms beside it', async () => {
+    const r = await renderProfile();
+    await TestRenderer.act(async () => pressableAround(r, 'Terms').props.onPress());
+    expect(mock_openUrl).toHaveBeenCalledWith('https://www.snaghq.co.nz/terms');
+  });
+});
+
+// A copy of what is kept is the Privacy Act's own ask, so it is one press
+// here rather than an email to somebody who runs queries by hand.
+describe('downloading your data', () => {
+  it('reads it once and hands over one JSON file named for the day', async () => {
+    const r = await renderProfile();
+    await press(pressableAround(r, 'Download my data'));
+
+    expect(mock_getMyData).toHaveBeenCalledTimes(1);
+    expect(mock_saveFile).toHaveBeenCalledTimes(1);
+    const [fileName, contents, mime] = mock_saveFile.mock.calls[0];
+    expect(fileName).toMatch(/^snag-data-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(mime).toBe('application/json');
+    expect(JSON.parse(contents)).toEqual({ exported_at: '2026-09-28T01:00:00Z', snags: [{ id: 's1' }] });
+  });
+
+  it('says why in words when the read is refused, and saves nothing', async () => {
+    mock_getMyData.mockRejectedValueOnce(new Error('Sign in to download your data'));
+    const r = await renderProfile();
+    await press(pressableAround(r, 'Download my data'));
+
+    expect(mock_saveFile).not.toHaveBeenCalled();
+    expect(mock_showAlert).toHaveBeenCalledWith("Couldn't gather your data", 'Sign in to download your data');
+    // Still on screen, still signing out: a failed copy is not a broken page.
+    expect(r.getByText('Sign out')).toBeTruthy();
+  });
+});
+
 describe('worth finishing', () => {
   const project = (over: Record<string, unknown> = {}) => ({
     id: 'p1', householdId: 'h', propertyId: 'prop', name: 'Downstairs laundry',

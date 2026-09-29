@@ -68,7 +68,10 @@ begin
 end;
 $$;
 
--- By name, never by sweep.
+-- By name, never by sweep — and closed to everybody else, as every home
+-- function is since `20260929014049`: Postgres grants EXECUTE to PUBLIC on
+-- every function it creates, and `anon` inherits it.
+revoke execute on function home.mark_setup_seen(text[]) from public, anon;
 grant execute on function home.mark_setup_seen(text[]) to authenticated;
 
 notify pgrst, 'reload schema';

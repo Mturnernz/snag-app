@@ -41,6 +41,19 @@ describe('the web build’s deployed CSP', () => {
     expect(directive('connect-src')).toContain('blob:');
   });
 
+  // Error reports go to whichever regional ingest host the DSN names. Blocked,
+  // a report fails in the same silence every other blocked request does, and
+  // monitoring looks switched on while nothing ever arrives.
+  it('allows Sentry’s ingest hosts, in every region a DSN can name', () => {
+    expect(directive('connect-src')).toEqual(
+      expect.arrayContaining([
+        'https://*.ingest.sentry.io',
+        'https://*.ingest.us.sentry.io',
+        'https://*.ingest.de.sentry.io',
+      ]),
+    );
+  });
+
   it('allows the Supabase origin the client talks to, over both protocols', () => {
     expect(directive('connect-src')).toEqual(
       expect.arrayContaining(['https://*.supabase.co', 'wss://*.supabase.co']),

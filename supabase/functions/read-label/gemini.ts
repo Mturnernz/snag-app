@@ -37,6 +37,62 @@ export function isBusy(status: number): boolean {
   return status === 503 || status === 500 || status === 429;
 }
 
+/** What a 429 says about which allowance ran out, as far as Google says. */
+export interface QuotaRefusal {
+  /**
+   * Resets within the minute, which is the "busy" a person can wait out.
+   * False for a daily allowance, one this plan does not have at all (a limit
+   * of 0), or one Google did not name — none of which trying again in a
+   * minute will fix.
+   */
+  perMinute: boolean;
+  /** One line for the function's log: which quota, its limit, when to retry. */
+  detail: string;
+}
+
+/**
+ * Reads the quota a 429 names. Google words every one of them "You exceeded
+ * your current quota" — a per-minute rate limit, a used-up day and a feature
+ * the plan does not include alike — and only the `QuotaFailure` detail says
+ * which. That matters because the first two are a wait and the third is a
+ * setting on the key's Google project, and on 27 September 2026 every product
+ * lookup came back 429 on all three models, seconds after a plain label read
+ * on the same key and model had answered.
+ */
+export function quotaRefusal(status: number, body: string): QuotaRefusal | null {
+  if (status !== 429) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { perMinute: true, detail: 'no detail given' };
+  }
+  const details = (parsed as { error?: { details?: unknown } })?.error?.details;
+  const list = Array.isArray(details) ? (details as Record<string, unknown>[]) : [];
+  const violations = list
+    .filter((d) => typeof d?.['@type'] === 'string' && (d['@type'] as string).endsWith('QuotaFailure'))
+    .flatMap((d) => (Array.isArray(d.violations) ? (d.violations as Record<string, unknown>[]) : []));
+  const retry = list.find((d) => typeof d?.['@type'] === 'string' && (d['@type'] as string).endsWith('RetryInfo'))
+    ?.retryDelay;
+
+  const said = violations.map((v) => {
+    const dims = v.quotaDimensions && typeof v.quotaDimensions === 'object'
+      ? Object.entries(v.quotaDimensions as Record<string, unknown>).map(([k, x]) => `${k}=${x}`).join(' ')
+      : '';
+    return [v.quotaMetric, v.quotaId && `(${v.quotaId})`, v.quotaValue != null && `limit ${v.quotaValue}`, dims]
+      .filter(Boolean).join(' ');
+  });
+  const detail = [said.join('; ') || 'no quota named', typeof retry === 'string' && `retry in ${retry}`]
+    .filter(Boolean).join(', ');
+
+  // Nothing named is read as a rate limit, which is what a bare 429 has
+  // always meant here: waiting is the harmless guess.
+  if (!violations.length) return { perMinute: true, detail };
+  const perMinute = violations.every((v) =>
+    /PerMinute/i.test(String(v.quotaId ?? '')) && String(v.quotaValue ?? '') !== '0');
+  return { perMinute, detail };
+}
+
 const nullableText = { type: ['string', 'null'] };
 
 // Every key present, nothing extra. A null is how "not on the label" is said,

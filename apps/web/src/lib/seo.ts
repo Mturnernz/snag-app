@@ -1,15 +1,13 @@
-// The canonical origin for everything apps/web serves — marketing and portal
-// alike. One Next app, one Netlify site, one domain: the two route groups share
-// a session, a Supabase client and middleware.ts, so splitting them across a
-// subdomain would break the /login?next= round trip that /go/snag/[id] depends
-// on to get a supervisor back to the snag they were mailed about.
+// The canonical origin for everything apps/web serves: the front page, the
+// privacy statement, the terms and password recovery. The app itself is
+// app.snaghq.co.nz and the staff portal staff.snaghq.co.nz, each its own site.
 //
 // Hardcoded rather than read from an env var: this is what every canonical and
 // OpenGraph URL is resolved against, and a preview deploy that self-canonicalises
 // is worse than one pointing at production.
 //
-// Aspirational until DNS moves — see PRODUCTION_READINESS.md D1. Nothing here
-// depends on it resolving; a wrong canonical costs SEO, not uptime.
+// Nothing here depends on it resolving; a wrong canonical costs SEO, not
+// uptime.
 export const SITE_URL = 'https://www.snaghq.co.nz';
 
 /**

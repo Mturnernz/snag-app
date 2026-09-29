@@ -2,9 +2,10 @@
 --
 --   psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/archive_locked.sql
 --
--- Safe against the live project as well as a local stack: it only reads
--- catalogues, and the one write (an object row, to prove uploads still pass
--- the policies) is inside a transaction that is rolled back.
+-- Safe against the live project as well as a local stack: it reads
+-- catalogues, and its writes (an object row, to prove uploads still pass the
+-- policies, and a made-up pilot account that deletes itself) are inside a
+-- transaction that is rolled back.
 --
 -- See 20260928090000_the_archive_stops_speaking.sql. The shape of the check
 -- matters more than the four names: the functions `public` may still hand to
@@ -74,6 +75,17 @@ begin
   if exists (select 1 from cron.job where jobname = 'overdue-actions-digest') then
     raise exception 'the retired digest is still scheduled';
   end if;
+
+  -- Nothing in `public` refers to a login, so deleting one can neither
+  -- cascade into the archive nor be refused by it (20260929100000).
+  select string_agg(c.conrelid::regclass::text || ' ' || c.conname, ', ') into v_extra
+  from pg_constraint c
+  where c.contype = 'f'
+    and c.connamespace = 'public'::regnamespace
+    and c.confrelid = 'auth.users'::regclass;
+  if v_extra is not null then
+    raise exception 'the archive still refers to auth.users: %', v_extra;
+  end if;
 end
 $$;
 
@@ -129,5 +141,63 @@ end
 $$;
 
 reset role;
+
+-- ------------------------------------------------ a pilot can leave
+
+-- Somebody who used the retired product and then this one: their login is a
+-- pilot profile, and the archive's audit log names that profile. *Delete my
+-- account* has to remove the login and leave every archive row where it was.
+-- The pilot is made up here rather than borrowed, so this runs on an empty
+-- local stack as well, and all of it is rolled back.
+
+create temp table pilot on commit drop as
+select gen_random_uuid() as id, gen_random_uuid() as org_id;
+grant select on pilot to authenticated;
+
+insert into auth.users (id, email)
+select id, id || '@archive-locked.invalid' from pilot;
+insert into public.organisations (id, name)
+select org_id, 'archive-locked probe' from pilot;
+insert into public.profiles (id, org_id, name, email)
+select id, org_id, 'Pilot probe', id || '@archive-locked.invalid' from pilot;
+insert into public.audit_log (org_id, entity, entity_id, action, actor_id)
+select org_id, 'organisation', org_id, 'created', id from pilot;
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object('sub', id, 'role', 'authenticated')::text,
+  true
+) from pilot;
+
+set local role authenticated;
+
+select home.upsert_profile('Pilot probe');
+select home.create_household('Probe house');
+select home.delete_my_account();
+
+reset role;
+
+do $$
+declare
+  v_pilot uuid := (select id from pilot);
+begin
+  if exists (select 1 from auth.users where id = v_pilot) then
+    raise exception 'the pilot login survived delete_my_account';
+  end if;
+  if not exists (
+    select 1 from public.profiles where id = v_pilot and name = 'Pilot probe'
+  ) then
+    raise exception 'deleting a login changed the archive''s profile';
+  end if;
+  if not exists (select 1 from public.audit_log where actor_id = v_pilot) then
+    raise exception 'deleting a login changed the archive''s audit log';
+  end if;
+  if not exists (
+    select 1 from home.profiles where id = v_pilot and deleted_at is not null
+  ) then
+    raise exception 'the home profile was not left as a tombstone';
+  end if;
+end
+$$;
 
 rollback;

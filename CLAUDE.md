@@ -4241,6 +4241,15 @@ the personal thing, and the name is what goes. `snags_with_details.reporter_name
 and therefore a new profile, so that can't actually be reached — it is there so a row that ever does
 come back doesn't read as gone everywhere it is named.
 
+**The archive had the same cascade, and it was missed for two weeks.** `public.profiles.id` also
+cascaded from `auth.users`, so any login that had been a pilot account (seven of nine on
+29 September 2026) could not delete itself: `audit_log_actor_id_fkey` refused it, or
+`invites_invited_by_fkey` did. Where nothing refused, the cascade would have gone through and deleted
+that person's rows from the frozen archive. `20260929100000` cuts that cascade as well. The pilot
+profile stays exactly as it was, with an id that no login will carry again. **Nothing in `public`
+may refer to `auth.users`.** `archive_locked.sql` asserts that, and replays the delete for a made-up
+pilot account.
+
 ### A code you can hold up — and a link you can send
 
 **The link is the first thing *Add someone* offers**, as **Share an invite link** through the

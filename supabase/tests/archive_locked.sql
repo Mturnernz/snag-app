@@ -146,7 +146,8 @@ reset role;
 
 -- Somebody who used the retired product and then this one: their login is a
 -- pilot profile, and the archive's audit log names that profile. *Delete my
--- account* has to remove the login and leave every archive row where it was.
+-- account* has to remove the login and the name and address in both schemas,
+-- while every archive row stays where it was (20260929100000, 20260929110000).
 -- The pilot is made up here rather than borrowed, so this runs on an empty
 -- local stack as well, and all of it is rolled back.
 
@@ -162,6 +163,11 @@ insert into public.profiles (id, org_id, name, email)
 select id, org_id, 'Pilot probe', id || '@archive-locked.invalid' from pilot;
 insert into public.audit_log (org_id, entity, entity_id, action, actor_id)
 select org_id, 'organisation', org_id, 'created', id from pilot;
+-- One invite to the pilot's own address, and one to somebody else's.
+insert into public.invites (org_id, email, invited_by)
+select org_id, id || '@archive-locked.invalid', id from pilot;
+insert into public.invites (org_id, email, invited_by)
+select org_id, 'somebody-else@archive-locked.invalid', id from pilot;
 
 select set_config(
   'request.jwt.claims',
@@ -185,9 +191,25 @@ begin
     raise exception 'the pilot login survived delete_my_account';
   end if;
   if not exists (
-    select 1 from public.profiles where id = v_pilot and name = 'Pilot probe'
+    select 1 from public.profiles
+    where id = v_pilot and name = 'Someone who left' and email = ''
   ) then
-    raise exception 'deleting a login changed the archive''s profile';
+    raise exception 'the archive''s profile kept its name or address, or went';
+  end if;
+  if exists (
+    select 1 from public.invites
+    where email = v_pilot || '@archive-locked.invalid'
+  ) then
+    raise exception 'an archive invite still holds the pilot''s address';
+  end if;
+  if (select count(*) from public.invites where invited_by = v_pilot) <> 2 then
+    raise exception 'deleting a login removed archive invites';
+  end if;
+  if not exists (
+    select 1 from public.invites
+    where email = 'somebody-else@archive-locked.invalid'
+  ) then
+    raise exception 'deleting a login blanked somebody else''s invite';
   end if;
   if not exists (select 1 from public.audit_log where actor_id = v_pilot) then
     raise exception 'deleting a login changed the archive''s audit log';

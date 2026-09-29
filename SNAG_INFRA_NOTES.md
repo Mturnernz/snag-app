@@ -490,10 +490,27 @@ staff list*; and `select home.is_staff()` run as a staff token is `true`.
 
 First-run setup (`apps/mobile/src/setup/`; *First run is a list of steps* in `CLAUDE.md`) can offer
 **Continue with Google** before email, on the web build and the native one. It reuses the staff
-portal's Google provider — Supabase has one per project — and **it is off until
+portal's Google provider — Supabase has one per project — and **it is off unless
 `EXPO_PUBLIC_GOOGLE_SIGN_IN=on` is set** in the build's environment (Netlify, for the web build).
-Off, the welcome screen goes straight to *What's your email?*. Turn it on only after the rest of
-this list, **in this order**:
+Off, the welcome screen goes straight to *What's your email?*.
+
+**It is on, since 29 September 2026.** Every step below was done that day, in this order, and the
+list stays as the record of what it depends on — undo any one of them and Google sign-in fails for
+households with nothing in the app able to say why:
+
+- The consent screen (Google Auth Platform → Audience) is **External** and **In production**.
+  Branding had to be filled in first — Google refuses External/production without an app name,
+  support email, home page and privacy link: *Snag*, `https://www.snaghq.co.nz`,
+  `https://www.snaghq.co.nz/privacy`, authorised domains `snaghq.co.nz` and
+  `wpkdpukpllxuyqqlxkxf.supabase.co`. **No logo**: a logo sends the app to brand verification.
+  No terms link while `/terms` is a draft.
+- The allow-list carries `https://app.snaghq.co.nz/**`, `snag://auth-callback` and
+  `https://main--snagv1.netlify.app/**` (so the free branch deploy of `main` can be tried first).
+- `EXPO_PUBLIC_GOOGLE_SIGN_IN=on` is set on `snagv1`, all deploy contexts, builds scope. It is read
+  at build time, so changing it needs a rebuild — and turning Google off again is setting it to
+  anything else and deploying, not touching Google.
+
+The steps, **in this order**:
 
 1. **`20260929060443_setup_is_a_list_of_steps.sql` is applied** (29 September 2026, with
    `mark_setup_seen` revoked from `public, anon`). It adds `profiles.setup_seen`, which

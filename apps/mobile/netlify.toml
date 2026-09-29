@@ -11,6 +11,21 @@
 [build.environment]
   NODE_VERSION = "22"
 
+# The old address sends people to the current one, with the path kept.
+#
+# snagv1.netlify.app served the app itself, so somebody scanning a QR printed
+# before the domain moved got a second copy of Snag on a different origin: its
+# own sign-in, its own install, and a session that app.snaghq.co.nz could not
+# see. A 301 makes the old address a doorway rather than a second front door.
+# It names the exact host, so the branch deploy (main--snagv1.netlify.app) and
+# every Deploy Preview are untouched. It has to come before the catch-all
+# below: Netlify takes the first rule that matches.
+[[redirects]]
+  from = "https://snagv1.netlify.app/*"
+  to = "https://app.snaghq.co.nz/:splat"
+  status = 301
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

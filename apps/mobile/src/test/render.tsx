@@ -31,11 +31,26 @@ const textContent = (node: ReactTestInstance): string =>
     .map((c) => (typeof c === 'string' ? c : textContent(c as ReactTestInstance)))
     .join('');
 
+/** Every tree `render` has mounted and nobody has unmounted yet. */
+const mounted = new Set<TestRenderer.ReactTestRenderer>();
+
+/**
+ * Unmounts everything `render` mounted. Opt-in, per spec file, as
+ * `afterEach(cleanup)`: a screen that sets a timer (the list refreshes itself
+ * every two minutes) would otherwise keep firing after its test has finished,
+ * and after Jest has torn the environment down.
+ */
+export function cleanup(): void {
+  for (const renderer of mounted) TestRenderer.act(() => renderer.unmount());
+  mounted.clear();
+}
+
 export function render(element: React.ReactElement): RenderResult {
   let renderer!: TestRenderer.ReactTestRenderer;
   TestRenderer.act(() => {
     renderer = TestRenderer.create(element);
   });
+  mounted.add(renderer);
 
   const hostsOfType = (type: string) =>
     renderer.root.findAll((n) => typeof n.type === 'string' && n.type === type, {
@@ -50,7 +65,10 @@ export function render(element: React.ReactElement): RenderResult {
       return renderer.root;
     },
     toJSON: () => renderer.toJSON(),
-    unmount: () => TestRenderer.act(() => renderer.unmount()),
+    unmount: () => {
+      mounted.delete(renderer);
+      TestRenderer.act(() => renderer.unmount());
+    },
     getAllByText,
     getByText: (text: string) => {
       const found = getAllByText(text);

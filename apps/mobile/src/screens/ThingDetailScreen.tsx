@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, Image, TextInput, Pressable, Modal, ActivityIndicator, StyleSheet,
+  View, Text, ScrollView, TextInput, Pressable, Modal, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import SignedImage from '../components/SignedImage';
 import Icon from '../components/Icon';
 import ScreenHeader from '../components/ScreenHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -16,6 +17,7 @@ import { openUrl } from '../lib/openUrl';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
+import { useOnReturn } from '../hooks/useOnReturn';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import {
@@ -37,6 +39,8 @@ import ProductFactsCard from '../components/ProductFactsCard';
 import { TILE_SCRIM, tileInk } from '../lib/tileInk';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
+import { RETURN_RELOAD_MS } from '../lib/foreground';
+import { labelReadingEnabled } from '../lib/labelReading';
 import { copyToClipboard } from '../lib/clipboard';
 import {
   FINISH_SPEC_FIELDS, RootStackParamList, SERVICE_CYCLES, Snag, Thing, ThingKind,
@@ -214,6 +218,13 @@ export default function ThingDetailScreen() {
     setThingState(next);
   }, []);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  // Back in the app after a while, the photos' links may have expired while the
+  // page sat open. Sign them again — only the links, never the page: reloading
+  // the thing could land on top of something half typed in a box.
+  useOnReturn(() => {
+    const paths = thing?.photoPaths ?? [];
+    if (paths.length > 0) getFileUrls(paths).then(setPhotoUrls).catch(() => {});
+  }, RETURN_RELOAD_MS);
   // Which photo is open full screen, or null. A rating plate is the whole
   // reason this tab exists and is unreadable in a 220px tile.
   const [viewing, setViewing] = useState<number | null>(null);
@@ -281,10 +292,17 @@ export default function ThingDetailScreen() {
         setServiceJob(serviceJobFor(open, found.id));
       }
       // Never fatal either: a reading nobody can fetch leaves the record as it is.
-      try {
-        const waiting = await getLabelReadingsToCheck(found.propertyId);
-        setLabelCheck(waiting.filter((one) => one.thingId === found.id).pop() ?? null);
-      } catch {
+      // Not asked at all while label reading is off (lib/labelReading.ts): a
+      // card offering a reading, with a *Try again* that would read again, is
+      // the feature coming back by another door.
+      if (labelReadingEnabled()) {
+        try {
+          const waiting = await getLabelReadingsToCheck(found.propertyId);
+          setLabelCheck(waiting.filter((one) => one.thingId === found.id).pop() ?? null);
+        } catch {
+          setLabelCheck(null);
+        }
+      } else {
         setLabelCheck(null);
       }
     } catch (err: any) {
@@ -299,7 +317,10 @@ export default function ThingDetailScreen() {
   // The lookup is keyed by the make and model, so it is read again whenever
   // either is changed — a corrected model number is a different model. Never
   // fatal: a page that cannot see what the maker says still shows the record.
-  const lookupKinds = !!thing && (KINDS_WITH_CONSUMABLES.includes(thing.kind) || KINDS_WITH_SERVICING.includes(thing.kind));
+  // Off with label reading (lib/labelReading.ts): the lookup is the same model
+  // on the same key, and *Look it up* would be a button that cannot work.
+  const lookupKinds = labelReadingEnabled() && !!thing
+    && (KINDS_WITH_CONSUMABLES.includes(thing.kind) || KINDS_WITH_SERVICING.includes(thing.kind));
   const refreshLookup = useCallback(async () => {
     const current = thingRef.current;
     if (!current) return;
@@ -1091,7 +1112,7 @@ export default function ThingDetailScreen() {
                     accessibilityRole="imagebutton"
                     accessibilityLabel="Open this photo"
                   >
-                    <Image source={{ uri: photoUrls[path] }} style={styles.photo} resizeMode="cover" />
+                    <SignedImage uri={photoUrls[path]} style={styles.photo} resizeMode="cover" />
                   </Pressable>
                   <Pressable
                     onPress={() => removePhoto(path)}

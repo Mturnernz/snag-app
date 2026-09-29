@@ -17,6 +17,7 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useFirstCapture } from '../hooks/useFirstCapture';
+import { useOnReturn } from '../hooks/useOnReturn';
 import {
   createSnag, getFileUrls, getSnags, getThings, markListSeen, setPartBought, setSnagStatus,
   updateSnag,
@@ -24,6 +25,7 @@ import {
 import { showAlert } from '../lib/alert';
 import { failureReason } from '../lib/deadline';
 import { readCollapsed, writeCollapsed } from '../lib/collapsed';
+import { isForeground, NEW_VISIT_MS, RETURN_RELOAD_MS } from '../lib/foreground';
 import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
 import {
@@ -79,6 +81,17 @@ const NO_ROOM = 'Everywhere else';
 const DONE_WINDOW_DAYS = 7;
 /** How long the last capture's room is offered to the next one. */
 const ROOM_MEMORY_MS = 10 * 60_000;
+/**
+ * How often the list reads itself again while it is on screen.
+ *
+ * Pull-to-refresh does nothing on the web build — react-native-web's
+ * `RefreshControl` is a plain `View` — so somebody looking at the list had no
+ * way to see a job the other person added a minute ago short of switching tabs.
+ * Every two minutes, only while this tab is showing and the app is in front,
+ * costs two small reads; the photos' links are reused rather than re-signed
+ * (`lib/signedUrls.ts`), so nothing is downloaded again.
+ */
+const LIST_REFRESH_MS = 2 * 60_000;
 
 /** "since Tuesday" for this week, a date once it stops being this week. */
 function describeSince(iso: string | null): string | null {
@@ -149,7 +162,15 @@ export default function SnagListScreen() {
    */
   const excludeProjectSnags = !profile.projectsEnabled;
 
+  /**
+   * Only the newest read is drawn. The list now reads itself from several
+   * places — a tab switch, coming back to the app, the two-minute refresh, and
+   * after every write — and two reads in flight can land in either order. The
+   * older one landing last would put back a job that was just finished.
+   */
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const [open, finished] = await Promise.all([
         getSnags({ propertyId, excludeProjectSnags, status: ['open', 'doing'] }, 'newest'),
@@ -157,17 +178,20 @@ export default function SnagListScreen() {
         // only the last week of them is ever rendered.
         getSnags({ propertyId, excludeProjectSnags, status: ['done'] }, 'newest'),
       ]);
-      setSnags(open);
-      setDone(finished);
-
       // One request for every visible cover photo rather than one per card.
       const covers = [...open, ...finished].map((s) => s.photoPaths[0]).filter(Boolean) as string[];
-      setPhotoUrls(await getFileUrls(covers));
+      const urls = await getFileUrls(covers);
+      if (seq !== loadSeq.current) return;
+      setSnags(open);
+      setDone(finished);
+      setPhotoUrls(urls);
     } catch (err) {
       console.error('Failed to load snags:', err);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [propertyId, excludeProjectSnags]);
 
@@ -178,6 +202,36 @@ export default function SnagListScreen() {
 
   // Coming back from a snag, where something may have been closed.
   useEffect(() => navigation.addListener('focus', load), [navigation, load]);
+
+  /**
+   * Coming back to the app after a while.
+   *
+   * An installed web app is not closed when somebody leaves it; it comes back
+   * hours later exactly as it was, so without this the list opened after lunch
+   * was the list from breakfast — the other person's jobs missing, and its
+   * photos' links expired. Only while this tab is the one showing: the others
+   * read themselves when they are switched to.
+   *
+   * Away long enough to be a new visit, "New" is worked out again, the way it
+   * is when the app is opened — otherwise an app left running for days goes on
+   * flagging what was new on Monday.
+   */
+  useOnReturn((awayMs) => {
+    if (navigation.isFocused?.() ?? true) load();
+    if (awayMs >= NEW_VISIT_MS) markListSeen().then(setSeenBefore).catch(() => {});
+  }, RETURN_RELOAD_MS);
+
+  // The list reads itself again every two minutes while it is what somebody is
+  // looking at — see LIST_REFRESH_MS. Not while a sheet is up over it: the
+  // sheet is what they are doing, and a list shifting underneath is noise.
+  const sheetUp = justAdded !== null || showExport || placesOpen;
+  useEffect(() => {
+    if (sheetUp) return undefined;
+    const timer = setInterval(() => {
+      if (isForeground() && (navigation.isFocused?.() ?? true)) load();
+    }, LIST_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [sheetUp, navigation, load]);
 
   // Stamp "seen" once, on the first visit of this mount. Doing it on every
   // focus would clear the New rule the moment somebody opened a snag and came

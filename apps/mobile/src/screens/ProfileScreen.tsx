@@ -15,7 +15,7 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
   deleteMyAccount, deleteStoredFiles, getAllProjects, getMyData, getMyOrphanFilePaths, getSnags,
-  signOut, setProjectsEnabled, upsertProfile,
+  signOut, upsertProfile,
 } from '../lib/supabase';
 import { exportDateStamp, looseEnds, type LooseEnd } from '@snag/supabase-queries';
 import { saveFile } from '../lib/download';
@@ -45,33 +45,7 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [ends, setEnds] = useState<LooseEnd[]>([]);
   const [endsOpen, setEndsOpen] = useState(false);
-  const [savingProjects, setSavingProjects] = useState(false);
   const [gathering, setGathering] = useState(false);
-
-  /**
-   * Turning the Projects tab on or off.
-   *
-   * Pressing the half that is already lit writes nothing — it is a no-op
-   * rather than a write that touches the row to say what the row already says,
-   * the same rule capture's priority pills held to.
-   *
-   * `reloadAccount` rather than local state, because the answer decides whether
-   * a *tab* exists: the navigator reads it from the profile in context, so the
-   * one that came back from the write has to be the one everything reads.
-   */
-  async function setProjects(enabled: boolean) {
-    if (enabled === profile.projectsEnabled || savingProjects) return;
-    setSavingProjects(true);
-    try {
-      await setProjectsEnabled(enabled);
-      await reloadAccount();
-      showToast(enabled ? 'Projects are back' : 'Projects put away');
-    } catch (err: any) {
-      showAlert("Couldn't change that", err?.message ?? 'Please try again.');
-    } finally {
-      setSavingProjects(false);
-    }
-  }
 
   /**
    * What the app knows is half-finished and can name the next move for.
@@ -285,58 +259,11 @@ export default function ProfileScreen() {
         </Card>
       </Pressable>
 
-      {/* ── Projects on or off ──
-          **A setting about this person's screen, not about the house.** It is
-          the only one in the app that is: everything else the schema remembers
-          is per household or per property, because there is one house and two
-          people disagreeing about whether it has a dryer is not a state worth
-          modelling. This is not that — a renovation is a third noun, not every
-          household has one, and a tab that answers nothing about your house is
-          a fifth of the only navigation this app has.
-
-          Two named halves rather than one switch that toggles, the same
-          argument the GST pill and capture's priority step already make: a lone
-          control leaves the other answer as the unlabelled absence of a press,
-          and here that unlabelled answer removes a tab.
-
-          The hint says what *else* goes, because the tab is the visible half
-          and the punch list is the surprising one — jobs filed against a
-          renovation leave the list too, since with no project page to open they
-          are rows naming something unreachable. */}
-      <Card elevation="md" style={styles.section}>
-        <Text style={styles.sectionTitle}>Projects</Text>
-        <Text style={styles.linkHint}>
-          Renovations, quotes and what they cost. Turning this off hides the tab and the jobs
-          filed against a renovation. Nothing is deleted, and this is yours alone — it doesn't
-          change what anyone else sees.
-        </Text>
-        <View style={styles.modeRow}>
-          <Pressable
-            onPress={() => setProjects(true)}
-            disabled={savingProjects}
-            style={[styles.mode, profile.projectsEnabled && styles.modeOn]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: profile.projectsEnabled }}
-            accessibilityLabel="Show projects"
-          >
-            <Text style={[styles.modeLabel, profile.projectsEnabled && styles.modeLabelOn]}>
-              Show projects
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setProjects(false)}
-            disabled={savingProjects}
-            style={[styles.mode, !profile.projectsEnabled && styles.modeOn]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: !profile.projectsEnabled }}
-            accessibilityLabel="Hide projects"
-          >
-            <Text style={[styles.modeLabel, !profile.projectsEnabled && styles.modeLabelOn]}>
-              Hide them
-            </Text>
-          </Pressable>
-        </View>
-      </Card>
+      {/* No Projects switch here for v1. The tab is off by default, and on only
+          for the accounts it was turned on for in SQL
+          (20260929214206_projects_are_off_for_v1). A switch that offered it to
+          everybody would be offering a renovation tab the launch does not
+          include. `profiles.projects_enabled` still decides the tab. */}
 
       {/* The list's card asks once; this stays for as long as Snag is open
           in a browser tab, for somebody who closed the card and wants it
@@ -454,21 +381,6 @@ const styles = StyleSheet.create({
   // either way. Never `primaryLight` — that is the tint behind fern *text*, and
   // using it for one rail and solid fern for another made two controls doing
   // the same job look like two different controls.
-  modeRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
-  mode: {
-    minHeight: MIN_TOUCH_TARGET,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.chip,
-    backgroundColor: Colors.sunken,
-  },
-  modeOn: { backgroundColor: Colors.primary },
-  modeLabel: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.medium,
-    color: Colors.textSecondary,
-  },
-  modeLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   signOut: { marginTop: Spacing.md },
   // No card, no elevation, no hue. Everything else on this screen is a white
   // card on the plaster ground; this is deliberately quieter than all of it.

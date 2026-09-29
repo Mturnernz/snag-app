@@ -3,6 +3,15 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import HouseRoomScreen from './HouseRoomScreen';
 
+// Label reading is off for v1 (lib/labelReading.ts). These specs pin how it
+// behaves when it is on, so it comes back as it went; the off state has its own.
+const LABEL_FLAG = process.env.EXPO_PUBLIC_LABEL_READING;
+beforeAll(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'on'; });
+afterAll(() => {
+  if (LABEL_FLAG === undefined) delete process.env.EXPO_PUBLIC_LABEL_READING;
+  else process.env.EXPO_PUBLIC_LABEL_READING = LABEL_FLAG;
+});
+
 // One room of the house record. What these pin is the reading of a room — its
 // things grouped by kind only when there is more than one kind to tell apart —
 // and the rule the whole tab rests on, one screen further in: what is not

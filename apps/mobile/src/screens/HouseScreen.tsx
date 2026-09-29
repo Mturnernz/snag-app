@@ -21,9 +21,11 @@ import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '.
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useAddThing } from '../hooks/useAddThing';
+import { useOnReturn } from '../hooks/useOnReturn';
 import { getAbsentThings, getFileUrls, getThings } from '../lib/supabase';
 import { labelsToCheck } from '../lib/labelChecks';
 import { showAlert } from '../lib/alert';
+import { RETURN_RELOAD_MS } from '../lib/foreground';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { roomIcon } from '../lib/roomIcon';
 import { TILE_SCRIM, tileInk } from '../lib/tileInk';
@@ -137,6 +139,11 @@ export default function HouseScreen() {
 
   // Coming back from a room, where anything may have been added or dismissed.
   useEffect(() => navigation.addListener('focus', load), [navigation, load]);
+  // Back in the app after a while: read again, as a tab switch does. See
+  // lib/foreground.ts — an installed web app comes back hours later as it was.
+  useOnReturn(() => {
+    if (navigation.isFocused?.() ?? true) load();
+  }, RETURN_RELOAD_MS);
 
   const adding = useAddThing(load);
 

@@ -5,6 +5,15 @@ import { render } from '../test/render';
 import { Colors } from '../constants/theme';
 import HouseScreen from './HouseScreen';
 
+// Label reading is off for v1 (lib/labelReading.ts). These specs pin how it
+// behaves when it is on, so it comes back as it went; the off state has its own.
+const LABEL_FLAG = process.env.EXPO_PUBLIC_LABEL_READING;
+beforeAll(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'on'; });
+afterAll(() => {
+  if (LABEL_FLAG === undefined) delete process.env.EXPO_PUBLIC_LABEL_READING;
+  else process.env.EXPO_PUBLIC_LABEL_READING = LABEL_FLAG;
+});
+
 // The House tab is a grid of rooms, each opening a page of its own. It still
 // arrives furnished, and the rule the whole design rests on is still that a
 // ghost is never a row. These pin the places that distinction can silently
@@ -464,5 +473,24 @@ describe('taking the house record out', () => {
     expect(table.rows).toHaveLength(1);
     expect(table.rows[0]).toContain('Dryer');
     expect(table.name).toBe('Home house');
+  });
+});
+
+/** Label reading as v1 ships it: off (lib/labelReading.ts). */
+function withLabelReadingOff() {
+  beforeEach(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'off'; });
+  afterEach(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'on'; });
+}
+
+describe('with label reading off, as v1 ships', () => {
+  withLabelReadingOff();
+
+  it('counts no labels to check, even with readings waiting', async () => {
+    mock_getThings.mockResolvedValue([thing({ id: '1', name: 'Washing machine', room: 'Laundry' })]);
+    mock_getLabelReadingsToCheck.mockResolvedValue([{ id: 'r1', thingId: '1', status: 'read' }]);
+    const result = render(<HouseScreen />);
+    await settle();
+    expect(texts(result).some((t) => /label/i.test(t))).toBe(false);
+    expect(mock_getLabelReadingsToCheck).not.toHaveBeenCalled();
   });
 });

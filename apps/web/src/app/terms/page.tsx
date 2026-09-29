@@ -11,11 +11,10 @@ export const metadata: Metadata = {
 /**
  * The terms of use.
  *
- * **A draft, and it says so on the page until it is not one.** The bracketed
- * placeholders are the legal entity, its NZBN and its address, which only the
- * operator can supply, and the whole page wants a lawyer's read before it is
- * relied on. `DRAFT` below renders a line saying so. Set it to false, and
- * fill the placeholders, in the same change.
+ * **In force from 30 September 2026.** They name SnagHQ as the provider and,
+ * by the owner's decision, carry no NZBN and no postal address; the way to
+ * reach SnagHQ is help@snaghq.co.nz, at the foot. (Until then the page said
+ * *Draft, not yet in force* over bracketed placeholders for both.)
  *
  * It lives beside /privacy for the same reason: it has to open in any browser
  * for somebody who has no account yet.
@@ -25,12 +24,6 @@ export const metadata: Metadata = {
  * arithmetic on what you typed. Each is a rule in CLAUDE.md. A change to one
  * of those rules is a change to this page.
  */
-const DRAFT = true;
-
-const ENTITY = '[LEGAL ENTITY]';
-const NZBN = '[NZBN]';
-const ADDRESS = '[ADDRESS]';
-
 export default function TermsPage() {
   return (
     <main className={styles.main}>
@@ -40,14 +33,12 @@ export default function TermsPage() {
 
       <h1 className={styles.title}>Terms</h1>
       <p className={styles.updated}>
-        Last updated 28 September 2026
-        {DRAFT ? ' · Draft, not yet in force' : ''}
+        Last updated 30 September 2026
       </p>
 
       <p>
-        Snag is a shared list for looking after a house. It is provided by {ENTITY} (NZBN {NZBN},{' '}
-        {ADDRESS}), which trades as SnagHQ. These terms are the agreement between you and SnagHQ
-        when you use it. How Snag handles your information is in the{' '}
+        Snag is a shared list for looking after a house. It is provided by SnagHQ, in New
+        Zealand. These terms are the agreement between you and SnagHQ when you use it. How Snag handles your information is in the{' '}
         <Link href="/privacy">privacy statement</Link>.
       </p>
 

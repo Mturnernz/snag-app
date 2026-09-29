@@ -5,6 +5,7 @@ import {
   type ViewStyle, type NativeTouchEvent,
 } from 'react-native';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
+import { useSignedUri } from '../hooks/useSignedUri';
 
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -200,7 +201,10 @@ export default function PhotoViewer({ visible, photos, startIndex = 0, onClose }
     setIndex((current) => Math.min(photos.length - 1, Math.max(0, current + by)));
   }, [photos.length]);
 
-  const uri = photos[index];
+  // A viewer opened long after the strip was signed can be holding a link that
+  // has expired; the same one retry the strip's tiles get.
+  const signed = useSignedUri(photos[index]);
+  const uri = signed.uri;
   if (!visible || !uri) return null;
 
   return (
@@ -209,6 +213,7 @@ export default function PhotoViewer({ visible, photos, startIndex = 0, onClose }
         <View style={[styles.stage, webTouch]} {...pan.panHandlers}>
           <Animated.Image
             source={{ uri }}
+            onError={signed.onError}
             resizeMode="contain"
             accessibilityLabel="The photo, full screen"
             style={[

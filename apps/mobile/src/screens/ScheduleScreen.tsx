@@ -14,7 +14,9 @@ import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
+import { useOnReturn } from '../hooks/useOnReturn';
 import { getAllProjects, getSnags } from '../lib/supabase';
+import { RETURN_RELOAD_MS } from '../lib/foreground';
 import { Project, RootStackParamList, Snag } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -218,6 +220,11 @@ export default function ScheduleScreen() {
 
   // Coming back from a snag, where a date may have been set or cleared.
   useEffect(() => navigation.addListener('focus', load), [navigation, load]);
+  // Back in the app after a while: read again, as a tab switch does. See
+  // lib/foreground.ts — an installed web app comes back hours later as it was.
+  useOnReturn(() => {
+    if (navigation.isFocused?.() ?? true) load();
+  }, RETURN_RELOAD_MS);
 
   const days = useMemo(
     () => monthGrid(cursor.getFullYear(), cursor.getMonth()),

@@ -15,9 +15,11 @@ import { Group, SectionTitle, groupedStyles } from '../components/Grouped';
 import { Colors, Spacing, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useAddThing } from '../hooks/useAddThing';
+import { useOnReturn } from '../hooks/useOnReturn';
 import { getAbsentThings, getFileUrls, getThings, markThingAbsent } from '../lib/supabase';
 import { labelsToCheck } from '../lib/labelChecks';
 import { showAlert } from '../lib/alert';
+import { RETURN_RELOAD_MS } from '../lib/foreground';
 import type { AbsentThing, RootStackParamList, Thing, ThingSuggestion } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HouseRoom'>;
@@ -102,6 +104,11 @@ export default function HouseRoomScreen({ route }: Props) {
 
   // Coming back from a spec sheet, where the thing may have moved room.
   useEffect(() => navigation.addListener('focus', load), [navigation, load]);
+  // Back in the app after a while: read again, as a tab switch does. See
+  // lib/foreground.ts — an installed web app comes back hours later as it was.
+  useOnReturn(() => {
+    if (navigation.isFocused?.() ?? true) load();
+  }, RETURN_RELOAD_MS);
 
   const adding = useAddThing(load);
 

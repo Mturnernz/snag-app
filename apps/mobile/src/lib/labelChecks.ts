@@ -1,4 +1,5 @@
 import { getLabelReadingsToCheck } from './supabase';
+import { labelReadingEnabled } from './labelReading';
 
 /**
  * The things at this place with a label reading waiting on their page — one
@@ -11,6 +12,9 @@ import { getLabelReadingsToCheck } from './supabase';
  * which is also what it usually is, and the record must still draw.
  */
 export async function labelsToCheck(propertyId: string): Promise<string[]> {
+  // With label reading off (lib/labelReading.ts) the thing's page shows no
+  // reading, so a pill counting readings would open pages that show nothing.
+  if (!labelReadingEnabled()) return [];
   try {
     const waiting = await getLabelReadingsToCheck(propertyId);
     return waiting.filter((one) => one.status !== 'pending').map((one) => one.thingId);

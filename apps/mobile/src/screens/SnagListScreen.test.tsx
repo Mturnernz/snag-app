@@ -1,6 +1,6 @@
 import React from 'react';
 import TestRenderer from 'react-test-renderer';
-import { render } from '../test/render';
+import { cleanup, render } from '../test/render';
 import SnagListScreen from './SnagListScreen';
 import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import { FirstCaptureProvider } from '../hooks/useFirstCapture';
@@ -51,6 +51,19 @@ jest.mock('../lib/supabase', () => ({
   updateSnag: (...a: unknown[]) => mock_updateSnag(...a),
   setPartBought: (...a: unknown[]) => mock_setPartBought(...a),
 }));
+// Coming back to the app is an event the test fires by hand: the listeners the
+// screen registers are kept here, and `returnAfter` calls them.
+const mock_returnListeners: ((awayMs: number) => void)[] = [];
+jest.mock('../lib/foreground', () => ({
+  ...jest.requireActual('../lib/foreground'),
+  subscribeForeground: (fn: (awayMs: number) => void) => {
+    mock_returnListeners.push(fn);
+    return () => {
+      const at = mock_returnListeners.indexOf(fn);
+      if (at >= 0) mock_returnListeners.splice(at, 1);
+    };
+  },
+}));
 const mock_showToast = jest.fn();
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: mock_showToast }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
@@ -95,6 +108,8 @@ const texts = (r: ReturnType<typeof render>) =>
       (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : walk(c))).join('');
     return walk(n);
   });
+
+afterEach(cleanup);
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -761,5 +776,56 @@ describe('the first photo from setup', () => {
     render(<SnagListScreen />);
     await settle();
     expect(mock_fileCapturedPhoto).not.toHaveBeenCalled();
+  });
+});
+
+describe('coming back to the app', () => {
+  // An installed web app is not closed when somebody leaves it. It used to come
+  // back hours later showing the list as it was — the other person's jobs
+  // missing and its photos' links expired — because nothing reloaded it.
+  const returnAfter = (awayMs: number) => TestRenderer.act(async () => {
+    [...mock_returnListeners].forEach((fn) => fn(awayMs));
+  });
+
+  it('reads the list again after a while away', async () => {
+    render(<SnagListScreen />);
+    await settle();
+    const before = mock_getSnags.mock.calls.length;
+    await returnAfter(5 * 60_000);
+    expect(mock_getSnags.mock.calls.length).toBe(before + 2);
+  });
+
+  it('does not reload under somebody back from a quick trip to the camera', async () => {
+    render(<SnagListScreen />);
+    await settle();
+    const before = mock_getSnags.mock.calls.length;
+    await returnAfter(20_000);
+    expect(mock_getSnags.mock.calls.length).toBe(before);
+  });
+
+  it('works out "New" again after half an hour away, as if the app had been opened', async () => {
+    mock_getSnags.mockImplementation((filter: any) =>
+      Promise.resolve(
+        filter.status?.includes('done')
+          ? []
+          : [snag({ id: 'theirs', description: 'Gutters', reporterId: THEM, createdAt: ago(1) })]
+      )
+    );
+    const result = render(<SnagListScreen />);
+    await settle();
+    expect(texts(result)).toContain('New');
+
+    // Looked at this morning; the stamp now is after their job was added.
+    mock_markListSeen.mockResolvedValue(ago(0.5));
+    await returnAfter(2 * 60 * 60_000);
+    expect(mock_markListSeen).toHaveBeenCalledTimes(2);
+    expect(texts(result)).not.toContain('New');
+  });
+
+  it('keeps "New" as it was after a short absence', async () => {
+    render(<SnagListScreen />);
+    await settle();
+    await returnAfter(5 * 60_000);
+    expect(mock_markListSeen).toHaveBeenCalledTimes(1);
   });
 });

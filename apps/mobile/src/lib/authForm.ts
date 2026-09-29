@@ -44,9 +44,11 @@ export function formProblem(mode: AuthMode, email: string, password: string): st
 }
 
 /**
- * The code from a confirmation email, or null. Supabase sends six digits by
- * default and can be set to send up to ten; a code pasted from a mail app
- * arrives with spaces in it.
+ * The code from a confirmation email, or null. Its length is a project setting
+ * — six by default, **eight on this project** (seen in a live email, 29
+ * September 2026) and up to ten — so the screen never states a number: a
+ * sentence saying "6 digits" over an 8-digit email is the app contradicting the
+ * paper in somebody's hand. A code pasted from a mail app arrives with spaces.
  */
 export function parseEmailCode(text: string): string | null {
   const digits = text.replace(/\s+/g, '');
@@ -111,8 +113,10 @@ export function describeAuthError(error: AuthErrorLike | null | undefined): stri
         return 'That password has turned up in a data breach somewhere else. Choose another.';
       }
       return `Choose a longer password — at least ${MIN_PASSWORD_LENGTH} characters.`;
+    // Auth answers a mistyped code with the same `otp_expired` as a stale one
+    // (checked live), so the words cover both rather than blaming the clock.
     case 'otp_expired':
-      return 'That code has expired or was already used. Send a new one.';
+      return "That code doesn't match, or it has expired. Check it, or send a new one.";
     case 'over_email_send_rate_limit':
     case 'over_request_rate_limit': {
       const wait = secondsToWait(message);

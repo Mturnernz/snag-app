@@ -124,7 +124,7 @@ export default function AuthScreen({ joinToken = null }: Props) {
     if (busy) return;
     const token = parseEmailCode(code);
     if (!token) {
-      setNotice({ tone: 'error', text: 'Type the code from the email — it is 6 digits.' });
+      setNotice({ tone: 'error', text: 'Type the code from the email — just the digits.' });
       return;
     }
     await run(async () => {

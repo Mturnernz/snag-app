@@ -246,17 +246,21 @@ describe('checking your email', () => {
     await type(r, 'Code from the email', '12');
     await press(pressableAround(r, 'Confirm'));
     expect(mock_verify).not.toHaveBeenCalled();
-    expect(said(r)).toMatch(/6 digits/);
+    expect(said(r)).toMatch(/Type the code from the email/);
+    // The length is a project setting — eight here — so no number is claimed.
+    expect(said(r)).not.toMatch(/\d digits/);
   });
 
-  it('words a spent code and keeps the screen', async () => {
+  // Auth answers a mistyped code with `otp_expired` too, so the words cannot
+  // blame the clock alone.
+  it('words a refused code as mistyped or expired, and keeps the screen', async () => {
     mock_verify.mockResolvedValue({
       data: {}, error: { code: 'otp_expired', message: 'Token has expired or is invalid', status: 403 },
     });
     const r = await atCheckEmail();
     await type(r, 'Code from the email', '123456');
     await press(pressableAround(r, 'Confirm'));
-    expect(said(r)).toMatch(/expired or was already used/);
+    expect(said(r)).toMatch(/doesn't match, or it has expired/);
     expect(r.queryByText('Check your email')).not.toBeNull();
   });
 

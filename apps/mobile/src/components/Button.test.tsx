@@ -25,6 +25,17 @@ const surfaceOf = (result: ReturnType<typeof render>, label: string) => {
 const labelStyle = (result: ReturnType<typeof render>, label: string) =>
   flattenStyle(result.getByText(label).props.style);
 
+/** The host element a screen reader would call a button with this name. */
+const buttonNamed = (result: ReturnType<typeof render>, name: string) => {
+  const found = result.root.findAll(
+    (n) => typeof n.type === 'string'
+      && n.props.accessibilityRole === 'button'
+      && n.props.accessibilityLabel === name
+  );
+  expect(found).toHaveLength(1);
+  return found[0];
+};
+
 describe('Button', () => {
   it('fills with the brand when it can be pressed', () => {
     const result = render(<Button label="Add to the list" onPress={jest.fn()} />);
@@ -46,6 +57,22 @@ describe('Button', () => {
     const result = render(<Button label="Saving" onPress={jest.fn()} loading />);
     const filled = result.getAllByType('View').map((n) => flattenStyle(n.props.style));
     expect(filled.some((s) => s.backgroundColor === Colors.primary)).toBe(true);
+  });
+
+  // On the web build a Pressable with no role is a <div>: a screen reader does
+  // not call it a button and Tab never reaches it. Every primary action in the
+  // app — Create account among them — is one of these.
+  it('is a button to assistive technology, named by its label', () => {
+    const result = render(<Button label="Create account" onPress={jest.fn()} />);
+    expect(buttonNamed(result, 'Create account').props.accessibilityState)
+      .toEqual({ disabled: false, busy: false });
+  });
+
+  it('keeps its name while the spinner replaces the words', () => {
+    const result = render(<Button label="Create account" onPress={jest.fn()} loading />);
+    expect(result.queryByText('Create account')).toBeNull();
+    expect(buttonNamed(result, 'Create account').props.accessibilityState)
+      .toEqual({ disabled: true, busy: true });
   });
 
   it('leaves outline buttons alone — there is no fill to neutralise', () => {

@@ -52,6 +52,11 @@ describe('parseEmailCode', () => {
     expect(parseEmailCode(' 123456\n')).toBe('123456');
   });
 
+  // What this project actually sends, seen in a live email.
+  it('reads the eight digits this project sends', () => {
+    expect(parseEmailCode('8999 3830')).toBe('89993830');
+  });
+
   it('allows the longer codes Auth can be set to send', () => {
     expect(parseEmailCode('1234567890')).toBe('1234567890');
   });
@@ -99,9 +104,10 @@ describe('describeAuthError', () => {
       .toMatch(/at least 8 characters/);
   });
 
-  it('says a spent code is spent, and how to get another', () => {
-    expect(describeAuthError({ code: 'otp_expired', message: 'Token has expired or is invalid' }))
-      .toMatch(/Send a new one/);
+  it('words a refused code as mistyped or expired, and how to get another', () => {
+    const said = describeAuthError({ code: 'otp_expired', message: 'Token has expired or is invalid' });
+    expect(said).toMatch(/doesn't match, or it has expired/);
+    expect(said).toMatch(/send a new one/);
   });
 
   it('words no answer at all as the connection', () => {

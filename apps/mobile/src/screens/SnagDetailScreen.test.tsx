@@ -788,9 +788,11 @@ describe('the meta row', () => {
         && /status|mark.*(done|open)|start/i.test(n.props.accessibilityLabel),
       { deep: true },
     );
-    // `Mark done` is a Button with a label, not an accessibilityLabel, and it
-    // lives at the foot; nothing up here offers to change the status.
-    expect(pressables).toEqual([]);
+    // `Mark done` at the foot is the one control that changes the status, and
+    // it is found here because a Button now names itself to a screen reader.
+    // Compared as labels: a failure printing whole instances runs out of heap.
+    const labels = [...new Set(pressables.map((n: any) => n.props.accessibilityLabel))];
+    expect(labels).toEqual(['Mark done']);
     expect(mock_setSnagStatus).not.toHaveBeenCalled();
   });
 });

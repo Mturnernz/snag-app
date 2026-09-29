@@ -166,6 +166,14 @@ outside a small anon allow-list, and handed ten internal functions — including
 data-deletion job — to any signed-in caller. **A sweep that grants needs both lists; a sweep that
 only revokes needs neither.** The home schema's grants are written out one by one.
 
+**And every new function needs `revoke execute ... from public, anon` beside its grant.** Postgres
+gives EXECUTE to `PUBLIC` on every function it creates, and `anon` inherits it — so a grant to
+`authenticated` alone leaves the function open to the anon key too, one `grant usage on schema home
+to anon` away from answering it. Eighty functions sat like that until `20260929014049`.
+`functionGrants.test.ts` replays every migration, keyed by signature (a new argument list is a new
+function and arrives with `PUBLIC` on it; `create or replace` over an existing one keeps its
+grants), and fails on any function the migrations leave executable by `PUBLIC`.
+
 ### A view without `security_invoker` has no RLS at all
 
 **This is the most dangerous line in the schema and it is invisible.** A view is
@@ -3874,6 +3882,10 @@ an unconfirmed address lands on it too.
   prefetched it and spent it first. The code is typed into the tab that asked, which still has a
   household's `/join/<token>` in its address bar. The template has to carry `{{ .Token }}`
   (`supabase/templates/confirm-signup.html`), or the screen asks for something the email lacks.
+  **The code is eight digits on this project, and the screen never says a number**: its length is
+  a setting, and "6 digits" over an 8-digit email was the first thing the live check caught. Auth
+  answers a mistyped code with the same `otp_expired` as a stale one, so the refusal says *doesn't
+  match, or it has expired* rather than blaming the clock.
 - **The link carries the join code anyway** (`confirmRedirectUrl`). Without `emailRedirectTo`, Auth
   sends it to the Site URL, and a scanner who taps it lands on *Set up your house* — the Alyssa bug
   by the email's door. Every value it can return has to be on the redirect allow-list.
@@ -4466,6 +4478,11 @@ grey mid-press reads as the action having failed.
   deadlines never fire because it never reaches `fetch`. A hidden tab becoming visible is enough
   to trigger it. Set state in the callback; put anything touching Supabase through
   `queueAuthWork` (`src/lib/authEvents.ts`).
+- **A `Pressable` that acts as a button says so** — `accessibilityRole="button"` and a label. On
+  react-native-web one without a role is a plain `<div>`: a screen reader does not call it a button
+  and Tab never reaches it. The shared `Button` was exactly that until September 2026, so every
+  primary action in the app, *Create account* included, was invisible to both. It now states its
+  role, its label (the words give way to a spinner while loading) and its disabled and busy state.
 - **Never call `Alert.alert` directly — use `showAlert` from `src/lib/alert.ts`.**
   react-native-web's `Alert` is `static alert() {}`, so on the web build (which is what people
   actually install) a direct call does nothing: the dialog never appears and any action behind a

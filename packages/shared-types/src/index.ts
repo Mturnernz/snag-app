@@ -509,6 +509,17 @@ export const FINISH_SPEC_FIELDS: { key: string; label: string; placeholder: stri
 ];
 
 /**
+ * The places a paint goes, offered as one-tap answers to *Where it went*.
+ *
+ * "Main wall" and "Walls" come first because they are what `wallColour` reads
+ * to paint a room's tile on the House tab — a suggestion that answers in other
+ * words would leave the tile white.
+ */
+export const PAINT_AREA_SUGGESTIONS: string[] = [
+  'Main wall', 'Walls', 'Feature wall', 'Ceiling', 'Architraves', 'Skirting', 'Doors', 'Window frames',
+];
+
+/**
  * Something in the house, as opposed to something wrong with it.
  *
  * A thing needs a photo, a name or a model number and nothing else — the same

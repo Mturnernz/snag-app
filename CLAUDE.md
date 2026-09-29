@@ -3874,6 +3874,10 @@ an unconfirmed address lands on it too.
   prefetched it and spent it first. The code is typed into the tab that asked, which still has a
   household's `/join/<token>` in its address bar. The template has to carry `{{ .Token }}`
   (`supabase/templates/confirm-signup.html`), or the screen asks for something the email lacks.
+  **The code is eight digits on this project, and the screen never says a number**: its length is
+  a setting, and "6 digits" over an 8-digit email was the first thing the live check caught. Auth
+  answers a mistyped code with the same `otp_expired` as a stale one, so the refusal says *doesn't
+  match, or it has expired* rather than blaming the clock.
 - **The link carries the join code anyway** (`confirmRedirectUrl`). Without `emailRedirectTo`, Auth
   sends it to the Site URL, and a scanner who taps it lands on *Set up your house* — the Alyssa bug
   by the email's door. Every value it can return has to be on the redirect allow-list.

@@ -702,6 +702,7 @@ applied:
 | `20260927110000_a_lookup_google_refused` | `20260927191658` |
 | `20260928090000_the_archive_stops_speaking` | `20260928014324` |
 | `20260928100000_what_snag_keeps_about_you` | `20260928015049` |
+| `20260929090000_setup_is_a_list_of_steps` | `20260929060443` |
 
 ## Preservation
 

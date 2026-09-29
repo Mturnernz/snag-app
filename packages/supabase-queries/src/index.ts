@@ -2730,6 +2730,43 @@ export function describeCycle(days: number): string {
   return days === 1 ? 'day' : `${days} days`;
 }
 
+/** A unit a repeat is typed in. */
+export type CycleUnit = 'day' | 'week' | 'month' | 'year';
+
+/**
+ * The four units the *Repeats* sheet offers, smallest first, and the days each
+ * stands for — exactly the four `describeCycle` says a cycle back in, with the
+ * same values, so what is typed and what is read back are one vocabulary.
+ */
+export const CYCLE_UNITS: { unit: CycleUnit; days: number }[] = [
+  { unit: 'day', days: 1 },
+  { unit: 'week', days: 7 },
+  { unit: 'month', days: 30 },
+  { unit: 'year', days: 365 },
+];
+
+/** The longest repeat `create_snag` and `update_snag` take: ten years. */
+export const MAX_CYCLE_DAYS = 3650;
+
+/** *Every 6 months* as the day count `repeat_days` stores. */
+export function cycleDays(n: number, unit: CycleUnit): number {
+  return n * CYCLE_UNITS.find((u) => u.unit === unit)!.days;
+}
+
+/**
+ * A stored day count as the number and unit the sheet shows, by
+ * `describeCycle`'s own precedence — years, then months, then weeks, then days
+ * — so the sheet and the row can never say one cycle two ways. It means 30
+ * weeks comes back as 7 months: the same 210 days, said the way the rest of the
+ * app says it.
+ */
+export function cycleParts(days: number): { n: number; unit: CycleUnit } {
+  for (const { unit, days: size } of [...CYCLE_UNITS].reverse()) {
+    if (days % size === 0) return { n: days / size, unit };
+  }
+  return { n: days, unit: 'day' };
+}
+
 /**
  * A date off a rating plate, in the words that are printed on it.
  *

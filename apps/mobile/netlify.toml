@@ -4,6 +4,9 @@
 [build]
   command = "npx expo export --platform web"
   publish = "dist"
+  # A production build is skipped when nothing this site builds from changed,
+  # packages/ included — see the script. Previews always build.
+  ignore = "bash ../../scripts/netlify-ignore.sh apps/mobile"
 
 [build.environment]
   NODE_VERSION = "22"

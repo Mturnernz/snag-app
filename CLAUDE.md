@@ -250,33 +250,44 @@ What changed, top to bottom:
   `alignSelf: 'flex-start'` had it riding higher than its neighbours. *Added by* shows only when
   somebody else filed it; *last done* stays for a repeat.
 - **Section titles sit above their cards** (V2 `SectionTitle`), not inside them.
+- **The order is the owner's, from the preview**: the facts, then **Notes** and **Ask SnagHQ**,
+  then *Also said about…*, then **Items and shopping**, the assessment card, and **Repeats** —
+  *Mark done* in the footer. The conversation comes first because it is why the page is opened.
 - **Items and shopping is one card with two halves**, each keeping its heading and split by a rule,
   because they are two facts that behave differently: linking never starts the job, adding to the
-  list does. *Linked items* has its picker opener in the heading row and the room's own things as
-  pills **on a line of their own** under *In the bathroom:*. *Anything to pick up?* is a checklist
-  whose last row is the box — it adds on Return, on blur and on leaving the page, with no *Add*
-  button. `addPart` reads `partRef`, because Return and the blur after it land in one gesture and
-  reading state would add the word twice.
+  list does. **Add to shopping list** comes first (it read *Anything to pick up?*) and **Linked
+  items** last, both by the owner's decision. The shopping half is a checklist whose last row is
+  the box — it adds on Return, on blur and on leaving the page, with no *Add* button. `addPart`
+  reads `partRef`, because Return and the blur after it land in one gesture and reading state
+  would add the word twice. *Linked items* has its picker opener in the heading row and the room's
+  own things as pills **on a line of their own** under *In the bathroom:*.
 - **Notes rest as one line** and open to four on focus, with *Add note* appearing then; the box
   stays open while it holds words. A note is **never sent on blur**: it is a message, and
   `add_comment` starts the job.
 - **Ask SnagHQ is one full-width outline `Button` directly under Notes** (outline because *Mark
   done* is the one filled button); once asked, `SupportCard` takes that slot. `AdviceCard` stays
-  under the items card, next to the list its parts go into.
+  directly under the items card, next to the list its parts go into.
 - **A one-off job has no due date.** The date box, *This weekend* / *Next week* and the *No date*
   chip are gone, by the owner's decision. `commitPending` has only the shopping box left to
   commit. Checked when it shipped: no open one-off job had a date, so nothing was stranded.
 - **Repeats is the last thing on the page: one row, *Repeats … Never ›*, that opens a sheet**
   (`RepeatSheet`). It was a rail of five chips taking three lines; the owner chose the row. The
   row's subtitle is the fact — *Next due 08/11/2026*, since nothing else on the page states the
-  day, or *No date yet* — and the sheet holds the choices as `RadioRow`s with one line under them
-  saying what marking it done does. **A press writes and closes**, so there is no *Done* to forget,
-  and closing without a press writes nothing: the modal behind a *Yes* that was removed from this
-  page once failed on exactly those two, and neither comes back. What a press writes is unchanged:
-  a cycle dates an undated job a cycle out and leaves a set date alone; picking the lit cycle on
-  an undated repeat dates it; **Never clears the date as well as the repeat**, because with no box
-  to clear it from, a stopped repeat's date would sit under *Due soon* and go overdue for ever. A
-  refused write keeps the sheet open with the reason under the choices.
+  day, or *No date yet*. **The sheet is *Never*, or *Every [n] [days · weeks · months · years]***
+  — a number box and the unit as a `Segmented` — by the owner's decision, where it was a list of
+  five presets. **No line of prose under it**, also the owner's call; the row's date is the one
+  fact it needed. It follows the saving rule: *Never* writes and closes, the *Every* mark and the
+  unit write when pressed, and the number writes when it is left — on Return, on blur, on *Done*
+  and on any way out of the sheet — and **only when it says something new**, so tabbing through
+  the box never starts a repeat and opening the sheet and closing it writes nothing. A number that
+  cannot be a repeat (*Type how many*, *Ten years is the longest*) holds the sheet open. It is
+  stored as days (`cycleDays`: a week is 7, a month 30, a year 365) and read back through
+  `cycleParts`, which follows `describeCycle`'s precedence, so the sheet and the row cannot say one
+  repeat two ways — 30 weeks comes back as 7 months, the same 210 days. What a write does is
+  unchanged: a cycle dates an undated job a cycle out and leaves a set date alone; pressing *Every*
+  on an undated repeat dates it; **Never clears the date as well as the repeat**, because with no
+  box to clear it from, a stopped repeat's date would sit under *Due soon* and go overdue for ever.
+  A refused write keeps the sheet open with the reason under the choices.
 
 Proposed and turned down, so it is not proposed again:
 
@@ -301,14 +312,18 @@ Proposed and turned down, so it is not proposed again:
 drops it. Posting it would send a message nobody finished, so it needs a decision, not a fix.
 
 `SnagDetailScreen.test.tsx` pins it: no date box and no quick dates, repeat or not; a cycle dating
-an undated job and leaving a set date alone; the lit cycle dating an undated repeat; *Never*
-clearing both; the row naming the answer and the day, the sheet shut until the row is pressed and
-closing on a pick, and a refusal keeping it open; the meta row stating a date only when there is one and offering no
-way to set one; the items card's two headings, the room's pills on their own row, and the
-checklist box adding once on Return-then-blur with no *Add* button; the photo buttons over the first
+an undated job and leaving a set date alone; *Every* dating an undated repeat; *Never* clearing
+both and closing; the row naming the answer and the day; the number writing when left and never
+per keystroke, once on Return-then-blur, and on *Done*; the unit writing when pressed; nothing
+written when the box says what it said or a sheet opened on *Never* is closed; weeks staying
+weeks; the refusals in words and a refused write keeping the sheet open; no prose in the sheet;
+the page order (Notes, Ask SnagHQ, then the items card with the shopping list first); the meta
+row stating a date only when there is one and offering no way to set one; the items card's two
+headings, the room's pills on their own row, and the checklist box adding once on Return-then-blur
+with no *Add* button; the photo buttons over the first
 photo and never inside its door, and the pills with no photo; *Added by* only for somebody else;
 the room pill's ▾; the note box resting at one line, opening on focus and never sending on blur;
-and the outline *Ask SnagHQ* button between Notes and Repeats.
+and the outline *Ask SnagHQ* button under Notes and above the items card.
 
 ## Capture and triage are different moments
 
@@ -431,18 +446,19 @@ ceremony spent where it is not needed is how it stops working where it is.
 
 **There is no *Sort it out* card any more.** It held urgency, the shopping list and the assignee;
 two of those are gone, and a card holding one thing is not a card — it is a heading pretending to
-be a category. The order down the screen is now: photo strip, headline, the meta row,
-**Items and shopping** (*Linked items*, then *Anything to pick up?*), what came back from an
-assessment, **Notes**, **Ask SnagHQ**, the item's own history, and **Repeats** — with *Mark done*
-in the footer.
+be a category. The order down the screen is now: photo strip, headline, the meta row, **Notes**,
+**Ask SnagHQ**, the item's own history, **Items and shopping** (*Add to shopping list*, then
+*Linked items*), what came back from an assessment, and **Repeats** — with *Mark done* in the
+footer.
 
-**The order is the order of inspecting and fixing something**: what the job is about, then what to
-do about it, then the conversation, then whether it comes round, then the one state change a person
-still makes by hand. The linked items earned the top slot by shrinking — as a nine-row inventory
-they belonged below the work, as a two-line summary of what this job concerns they are the first
-thing worth knowing. The assessment card sits directly under the shopping list, because the parts
-it offers with a `+` land in that list and a card whose suggestions are two cards away is one
-nobody connects to anything.
+**That order is the owner's, and it reverses one argued here.** It was the order of inspecting and
+fixing something — what the job is about, then what to do about it, then the conversation — with
+the linked items on top as a two-line summary of what the job concerns. The owner moved the
+conversation above the items card and, inside it, the shopping list above the linked items, from
+the preview (*The job page review*). What survives of the old argument is the pairing: the
+assessment card still sits directly under the items card, whose first half is the shopping list,
+because the parts it offers with a `+` land in that list and a card whose suggestions are two
+cards away is one nobody connects to anything.
 
 **Notes sit near the top, above every control.** This product has no notifications and never
 will, so a note is the only way one person tells the other anything — "ordered the part, arriving
@@ -468,10 +484,10 @@ read as something already entered, which on the one box holding what the other p
 worst place in the app for it. *"Add a note, or what you did"* says what an example never could:
 that the box takes both halves of its job, the news and the record of the repair.
 
-**Anything to pick up sits above the notes**, and that placement is the argument for it having
-survived: the trip to the shop is the single most common reason a small job sits for weeks, so it
-is the part of triage that actually moves work, and it sits with what the job *is* rather than
-below the conversation about it.
+**Add to shopping list leads the items card**, and that is the argument for it having survived:
+the trip to the shop is the single most common reason a small job sits for weeks, so it is the part
+of triage that actually moves work. It sat above the notes until the owner put the conversation
+first; it now opens the card that follows them, ahead of the linked items.
 
 **The facts at the top are stated; only the room is a way in.** Status, which room it's in and —
 for a repeat — when it is next due are what somebody wants off the top of this page. The room is a
@@ -498,7 +514,7 @@ Adding one deliberately does not start the job — photographing something is no
 **A one-off job has no due date.** It had one — a `DateField` with *This weekend* and *Next week*,
 added because `due_at` was once reachable only through a repeat — and it came off by the owner's
 decision in *The job page review*. The date that remains is a repeat's: the *Repeats* row at the
-foot of the page set it a cycle out, and *Never* clears it with the repeat. The Schedule tab's
+foot of the page sets it a cycle out, and *Never* clears it with the repeat. The Schedule tab's
 *Due* marks, *Due soon* and the overdue badge still read `due_at`, so they keep working for
 repeats; a one-off simply never has one. `DateField` is untouched and still takes every other date
 in the app.
@@ -846,16 +862,21 @@ often and — again — *"When's the next one due?"* with its own date presets; 
 with a date box above a rail of chips; then the rail alone. It is now **one row — *Repeats …
 Never ›*** — by the owner's decision, because the rail took three lines to hold one answer.
 
-The row opens `RepeatSheet`: *Never* and the `REPEAT_PRESETS` as `RadioRow`s, plus the job's own
-cycle when it is not a preset (a heat pump's 730 days from the thing page must not read as
-*Never*, on the row or in the sheet). **A press writes and closes**; closing without one writes
-nothing. That is the difference from the modal this page removed, which opened on *Yes* without
-writing anything and so left *No* lit when dismissed — here the row always says what the row
-holds. Choosing a cycle dates an undated job a cycle out; a date already set is left alone;
-picking the lit cycle on a repeat with no date dates it; *Never* clears the date with the repeat.
-The sheet's one line says what marking it done does and that it comes up under **Due soon** on
-the list — *Snag doesn't send reminders* is still said, because a repeat is exactly what somebody
-expects to be reminded about.
+The row opens `RepeatSheet`: ***Never*, or *Every [n] [days · weeks · months · years]***, by the
+owner's decision — it was *Never* and the four `REPEAT_PRESETS`, and a filter changed every eight
+weeks had no answer in it. The row says a preset in its own word (*Monthly*, *Yearly*) and
+anything else as `describeCycle` does (*Every 8 weeks*, *Every 2 years* for a heat pump's 730 days
+from the thing page), and the sheet opens on the same reading through `cycleParts`. Taps write
+when pressed — *Never* then closes — and the number writes when it is left and only when it says
+something new, so opening the sheet and closing it writes nothing. That is the difference from the
+modal this page removed, which opened on *Yes* without writing anything and so left *No* lit when
+dismissed — here the row always says what the row holds. Choosing a cycle dates an undated job a
+cycle out; a date already set is left alone; pressing *Every* on a repeat with no date dates it;
+*Never* clears the date with the repeat.
+
+**There is no line of prose in the sheet**, by the owner's decision. It said what marking it done
+does, that it comes up under **Due soon**, and that *Snag doesn't send reminders*; the row's
+*Next due* date is the one fact that stayed.
 
 **The row shows the day it is due.** `formatLooseDate` is built for date columns and reads a
 timestamp's day as nothing, so a job due on the 8th would show as *Nov 2026*. The row's subtitle
@@ -865,9 +886,10 @@ page the day is written.
 `SnagDetailScreen.test.tsx` pins the edit sheet writing both fields in one call, the refusal on a
 photo-less job with no words, the linked-assets list offering this room only and writing nothing,
 its absence when the room is empty, the page surviving a failed record read, the history card and
-its exclusion, the repeats (the row and its sheet, a pick writing and closing, a date left alone,
-an undated repeat dated by its lit choice, *Never* clearing both, a cycle the presets lack, the day
-stated, a refusal kept open) — and leaving: no Save or Close,
+its exclusion, the repeats (the row and its sheet, the number written when left and the unit when
+pressed, nothing written by a box left unchanged, a date left alone, an undated repeat dated by
+*Every*, *Never* clearing both, a cycle the presets lack, weeks staying weeks, the day stated, the
+refusals, a refused write kept open) — and leaving: no Save or Close,
 nothing written when nothing is typed, one write for the shopping box on `beforeRemove`, staying
 put on a failure, and the box committed before *Mark done*.
 
@@ -3775,10 +3797,20 @@ day counts, and that each preset's label matches what `describeCycle` says about
 The weeks and days branches stay, because `create_snag` accepts any interval from 1 to 3650 and an
 extract should say what the row actually holds rather than round it into a lie.
 
-Setting one up is **the *Repeats* row**, the job page's last thing, and a pick in the sheet it
-opens: *Never* first and lit by default, then the presets. It was a yes/no card with the cycle and
-a second set of date controls in a modal behind the Yes, later a rail of chips under a due-date box
-— see *A repeat is set from one row* under triage. A repeat with no date on it would never surface, so
+**That rule binds the two preset lists, and only them.** The job page's *Repeats* sheet takes any
+whole number of days, weeks, months or years, by the owner's decision, so the weeks and days
+branches are now reachable from the UI — *every 8 weeks* is an answer somebody chose, not a
+rounding. What keeps it one vocabulary is that the sheet types and reads back through the same
+arithmetic: `CYCLE_UNITS`, `cycleDays` and `cycleParts` sit beside `describeCycle` in
+`packages/supabase-queries`, with the same four units at the same values (7, 30, 365) and
+`cycleParts` following `describeCycle`'s precedence. `cycles.test.ts` pins that for every number
+and unit the sheet can send, up to ten years (`MAX_CYCLE_DAYS`), the sheet's reading and the row's
+words are one sentence.
+
+Setting one up is **the *Repeats* row**, the job page's last thing, and the sheet it opens: *Never*,
+or *Every [n] [unit]*. It was a yes/no card with the cycle and a second set of date controls in a
+modal behind the Yes, later a rail of chips under a due-date box, then a sheet of presets — see *A
+repeat is set from one row* under triage. A repeat with no date on it would never surface, so
 choosing an interval sets one; an existing date is never clobbered; *Never* clears both.
 
 ## A date is typed or tapped, and never only tapped

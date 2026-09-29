@@ -1,5 +1,7 @@
 import { REPEAT_PRESETS, SERVICE_CYCLES } from '../types';
-import { describeCycle } from '@snag/supabase-queries';
+import {
+  CYCLE_UNITS, MAX_CYCLE_DAYS, describeCycle, cycleDays, cycleParts,
+} from '@snag/supabase-queries';
 
 // One vocabulary, two selections from it — snag repeats and thing services —
 // and the invariant that binds them: **every interval either list offers has to
@@ -15,6 +17,12 @@ import { describeCycle } from '@snag/supabase-queries';
 //
 // Asserting the numbers would only restate the fix. These assert the property,
 // so the next interval added to either list cannot reintroduce it.
+//
+// The *lists* are what that property binds. The job page's Repeats sheet now
+// takes any whole number of days, weeks, months or years, by the owner's
+// decision, so `describeCycle`'s weeks and days are reachable from the UI — and
+// the sheet reads a repeat back through `cycleParts`, the same precedence, so
+// the number in the sheet and the words on the row cannot say it two ways.
 
 const everyOffered = [
   ...REPEAT_PRESETS.map((p) => ({ from: 'REPEAT_PRESETS', days: p.days })),
@@ -71,5 +79,44 @@ describe('a preset says what it does', () => {
       : said === 'year' ? 'Yearly'
       : `Every ${said}`;
     expect(label).toBe(expected);
+  });
+});
+
+describe('the number and unit a repeat is typed in', () => {
+  // Every value the sheet can send: each unit, every count up to ten years.
+  const typeable = CYCLE_UNITS.flatMap(({ unit, days: size }) =>
+    Array.from({ length: Math.floor(MAX_CYCLE_DAYS / size) }, (_, i) => ({ unit, n: i + 1 })));
+
+  it('is stored as days — a week is 7, a month 30, a year 365', () => {
+    expect(cycleDays(3, 'day')).toBe(3);
+    expect(cycleDays(2, 'week')).toBe(14);
+    expect(cycleDays(6, 'month')).toBe(180);
+    expect(cycleDays(2, 'year')).toBe(730);
+  });
+
+  // The sheet shows `cycleParts`, the row shows `describeCycle`: for anything
+  // somebody could have typed, the two must be one sentence.
+  it('reads back in exactly the words the row uses', () => {
+    for (const { unit, n } of typeable) {
+      const days = cycleDays(n, unit);
+      const back = cycleParts(days);
+      expect(cycleDays(back.n, back.unit)).toBe(days);
+      const said = back.n === 1 ? back.unit : `${back.n} ${back.unit}s`;
+      expect(said).toBe(describeCycle(days));
+    }
+  });
+
+  it('keeps what was typed whenever the rest of the app would say it that way', () => {
+    expect(cycleParts(56)).toEqual({ n: 8, unit: 'week' });
+    expect(cycleParts(730)).toEqual({ n: 2, unit: 'year' });
+    expect(cycleParts(10)).toEqual({ n: 10, unit: 'day' });
+    // 30 weeks is 210 days, which the app says as 7 months — the same days,
+    // and the sheet follows the row rather than inventing a second reading.
+    expect(cycleParts(cycleDays(30, 'week'))).toEqual({ n: 7, unit: 'month' });
+  });
+
+  it.each(REPEAT_PRESETS)('opens $label on its own number and unit', ({ days }) => {
+    const { unit } = cycleParts(days);
+    expect(['month', 'year']).toContain(unit);
   });
 });

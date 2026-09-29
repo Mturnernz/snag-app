@@ -411,7 +411,7 @@ describe('what the page no longer asks', () => {
 
   it('keeps the shopping list, as its own half of the items card', async () => {
     const r = await arrange(snag({ parts: ['Hinge'], bought: [] }));
-    expect(r.queryByText('Anything to pick up?')).not.toBeNull();
+    expect(r.queryByText('Add to shopping list')).not.toBeNull();
     expect(r.queryByText('Hinge')).not.toBeNull();
   });
 });
@@ -430,12 +430,14 @@ describe('items and shopping', () => {
       { deep: true },
     )[0];
 
-  it('is one card with a heading for each half', async () => {
+  // The shopping first and the linked items last, by the owner's decision.
+  it('is one card with a heading for each half, the shopping list first', async () => {
     const r = await arrange();
     const order = r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
     expect(order.indexOf('Items and shopping')).toBeGreaterThan(-1);
-    expect(order.indexOf('Linked items')).toBeGreaterThan(order.indexOf('Items and shopping'));
-    expect(order.indexOf('Anything to pick up?')).toBeGreaterThan(order.indexOf('Linked items'));
+    expect(order.indexOf('Add to shopping list')).toBeGreaterThan(order.indexOf('Items and shopping'));
+    expect(order.indexOf('Linked items')).toBeGreaterThan(order.indexOf('Add to shopping list'));
+    expect(order).not.toContain('Anything to pick up?');
   });
 
   // The room's things sit on a line of their own under the words that say
@@ -550,8 +552,9 @@ describe('the top of the page', () => {
 // A one-off job has no due date any more: the date box and its two quick dates
 // came off the page by the owner's decision (September 2026). What still has a
 // date is a job that comes round, and the Repeats row — the page's last thing —
-// is what sets it: one row stating the answer, opening a sheet of choices where
-// a press writes and closes.
+// is what sets it: one row stating the answer, opening a sheet that is *Never*
+// or *Every [n] [days · weeks · months · years]*. Taps write when pressed, the
+// number when it is left, and there is no line of prose under it.
 
 describe('repeats, and no due date', () => {
   const texts = (r: ReturnType<typeof render>) =>
@@ -565,13 +568,33 @@ describe('repeats, and no due date', () => {
     { deep: true },
   )[0];
 
-  /** A choice in the sheet, by its words. Absent while the sheet is shut. */
-  const choice = (r: ReturnType<typeof render>, title: string) => r.root.findAll(
-    (n: any) => typeof n.type !== 'string' && n.props?.title === title
-      && typeof n.props?.selected === 'boolean',
+  /** A radio in the sheet — Never, Every, or a unit — by its words. Absent while the sheet is shut. */
+  const radio = (r: ReturnType<typeof render>, label: string) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityRole === 'radio'
+      && n.props?.accessibilityLabel === label && !!n.props?.onPress,
+    { deep: true },
+  )[0];
+  const lit = (node: any) => node.props.accessibilityState.selected;
+
+  /** The number box, looked up fresh each time because every keystroke re-renders it. */
+  const box = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && !!n.props?.onChangeText
+      && n.props?.accessibilityLabel === 'How many',
+    { deep: true },
   )[0];
 
   const openRepeats = async (r: ReturnType<typeof render>) => { await press(repeatsRow(r)); };
+  const typeIn = async (r: ReturnType<typeof render>, text: string) => {
+    await TestRenderer.act(async () => { box(r).props.onChangeText(text); });
+  };
+  const leave = async (r: ReturnType<typeof render>) => {
+    await TestRenderer.act(async () => { await box(r).props.onBlur(); });
+  };
+  const done = async (r: ReturnType<typeof render>) => {
+    const all = r.root.findAll((n: any) => typeof n.type !== 'string'
+      && n.props?.accessibilityLabel === 'Done' && !!n.props?.onPress, { deep: true });
+    await press(all[all.length - 1]);
+  };
 
   it('has no date box and no quick dates, repeating or not', async () => {
     for (const row of [snag({ repeatDays: null, dueAt: null }), snag({ repeatDays: 180, dueAt: ahead(30) })]) {
@@ -585,35 +608,71 @@ describe('repeats, and no due date', () => {
     }
   });
 
-  // One row saying the answer, where a rail of five chips took three lines —
-  // and nothing behind a Yes.
-  it('is one row stating the answer, with the choices behind it', async () => {
+  // One row saying the answer, and nothing behind a Yes: the sheet is Never,
+  // or every so many of a unit — never a list of presets.
+  it('is one row stating the answer, with Never or every so many behind it', async () => {
     const r = await arrange(snag({ repeatDays: null }));
 
     expect(repeatsRow(r).props.accessibilityLabel).toBe('Repeats: Never');
-    expect(button(r, 'Never')).toBeUndefined();
-    expect(button(r, 'Every 6 months')).toBeUndefined();
-    expect(choice(r, 'Every 6 months')).toBeUndefined();
+    expect(box(r)).toBeUndefined();
     expect(button(r, 'Yes')).toBeUndefined();
 
     await openRepeats(r);
-    expect(choice(r, 'Never').props.selected).toBe(true);
-    expect(choice(r, 'Every 6 months').props.selected).toBe(false);
+    expect(lit(radio(r, 'Never'))).toBe(true);
+    expect(lit(radio(r, 'Every'))).toBe(false);
+    expect(box(r).props.value).toBe('1');
+    expect(lit(radio(r, 'month'))).toBe(true);
+    expect(radio(r, 'Every 6 months')).toBeUndefined();
     expect(r.queryByText("When's the next one due?")).toBeNull();
   });
 
-  it('sets a repeat with one pick, dating it a cycle out, and closes', async () => {
+  it('sets a repeat when the box is left, not per keystroke, dating it a cycle out', async () => {
+    mock_updateSnag.mockClear();
     mock_updateSnag.mockResolvedValue(snag({ repeatDays: 180, dueAt: ahead(180) }));
     const r = await arrange(snag({ repeatDays: null, dueAt: null }));
 
     await openRepeats(r);
-    await press(choice(r, 'Every 6 months'));
+    await typeIn(r, '6');
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(lit(radio(r, 'Every'))).toBe(true);
+
+    await leave(r);
+    expect(mock_updateSnag).toHaveBeenCalledTimes(1);
     const [, update] = mock_updateSnag.mock.calls[0];
     expect(update.repeatDays).toBe(180);
-    const days = (new Date(update.dueAt).getTime() - Date.now()) / DAY;
-    expect(Math.round(days)).toBe(180);
-    expect(choice(r, 'Every 6 months')).toBeUndefined();
+    expect(Math.round((new Date(update.dueAt).getTime() - Date.now()) / DAY)).toBe(180);
+    // The sheet stays open, because the unit may be next.
+    expect(box(r)).toBeDefined();
     expect(repeatsRow(r).props.accessibilityLabel).toBe('Repeats: Every 6 months');
+  });
+
+  // Return and the blur after it land in one gesture.
+  it('writes once when Return and the blur land together', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ repeatDays: 60, dueAt: ahead(60) }));
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
+
+    await openRepeats(r);
+    await typeIn(r, '2');
+    await TestRenderer.act(async () => {
+      await box(r).props.onSubmitEditing();
+      await box(r).props.onBlur();
+    });
+    expect(mock_updateSnag).toHaveBeenCalledTimes(1);
+    expect(mock_updateSnag.mock.calls[0][1].repeatDays).toBe(60);
+  });
+
+  it('writes the unit as soon as it is picked, and leaves a set date alone', async () => {
+    const due = ahead(30);
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ repeatDays: 42, dueAt: due }));
+    const r = await arrange(snag({ repeatDays: 180, dueAt: due }));
+
+    await openRepeats(r);
+    expect(box(r).props.value).toBe('6');
+    expect(lit(radio(r, 'months'))).toBe(true);
+    await press(radio(r, 'weeks'));
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: 42, dueAt: due });
   });
 
   it('leaves a date already set alone when a repeat is chosen', async () => {
@@ -622,29 +681,44 @@ describe('repeats, and no due date', () => {
     const r = await arrange(snag({ repeatDays: null, dueAt: due }));
 
     await openRepeats(r);
-    await press(choice(r, 'Monthly'));
+    await press(radio(r, 'Every'));
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: 30, dueAt: due });
   });
 
-  it('writes nothing when the cycle already lit is picked again, and closes', async () => {
+  // Tabbing through the box must not start a repeat, and a number that says
+  // what is already there is not a change.
+  it('writes nothing when the box is left saying what it said', async () => {
     mock_updateSnag.mockClear();
     const r = await arrange(snag({ repeatDays: 180, dueAt: ahead(30) }));
 
     await openRepeats(r);
-    await press(choice(r, 'Every 6 months'));
+    await leave(r);
+    await typeIn(r, '6');
+    await leave(r);
+    await done(r);
     expect(mock_updateSnag).not.toHaveBeenCalled();
-    expect(choice(r, 'Every 6 months')).toBeUndefined();
+    expect(box(r)).toBeUndefined();
   });
 
-  // A repeat with no date never comes round, and with no date box the lit
-  // choice is the only way such a row can be given one.
-  it('dates a repeat that has no date when its cycle is picked again', async () => {
+  it('writes nothing when a sheet opened on Never is closed untouched', async () => {
+    mock_updateSnag.mockClear();
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
+
+    await openRepeats(r);
+    await leave(r);
+    await done(r);
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+  });
+
+  // A repeat with no date never comes round, and with no date box pressing
+  // Every is the only way such a row can be given one.
+  it('dates a repeat that has no date when Every is pressed', async () => {
     mock_updateSnag.mockResolvedValue(snag({ repeatDays: 180, dueAt: ahead(180) }));
     const r = await arrange(snag({ repeatDays: 180, dueAt: null }));
     expect(texts(r)).toContain('No date yet');
 
     await openRepeats(r);
-    await press(choice(r, 'Every 6 months'));
+    await press(radio(r, 'Every'));
     const [, update] = mock_updateSnag.mock.calls[0];
     expect(update.repeatDays).toBe(180);
     expect(Math.round((new Date(update.dueAt).getTime() - Date.now()) / DAY)).toBe(180);
@@ -652,13 +726,14 @@ describe('repeats, and no due date', () => {
 
   // With no box to clear it from, a date a stopped repeat left behind would
   // sit under Due soon and go overdue for ever.
-  it('clears the date as well as the repeat on Never', async () => {
+  it('clears the date as well as the repeat on Never, and closes', async () => {
     mock_updateSnag.mockResolvedValue(snag({ repeatDays: null, dueAt: null }));
     const r = await arrange(snag({ repeatDays: 180, dueAt: ahead(30) }));
 
     await openRepeats(r);
-    await press(choice(r, 'Never'));
+    await press(radio(r, 'Never'));
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { repeatDays: null, dueAt: null });
+    expect(box(r)).toBeUndefined();
   });
 
   it('writes nothing on Never when there is neither a repeat nor a date', async () => {
@@ -666,33 +741,75 @@ describe('repeats, and no due date', () => {
     const r = await arrange(snag({ repeatDays: null, dueAt: null }));
 
     await openRepeats(r);
-    await press(choice(r, 'Never'));
+    await press(radio(r, 'Never'));
     expect(mock_updateSnag).not.toHaveBeenCalled();
   });
 
   // A heat pump serviced every two years arrives from the thing page with 730
-  // days; a row that could not show it would read as Never.
-  it('shows a cycle the presets do not carry', async () => {
+  // days; the sheet says it the way the row does.
+  it('opens on the cycle the job carries, said the way the row says it', async () => {
     const r = await arrange(snag({ repeatDays: 730, dueAt: ahead(30) }));
     expect(repeatsRow(r).props.accessibilityLabel).toBe('Repeats: Every 2 years');
 
     await openRepeats(r);
-    expect(choice(r, 'Every 2 years').props.selected).toBe(true);
-    expect(choice(r, 'Never').props.selected).toBe(false);
+    expect(lit(radio(r, 'Every'))).toBe(true);
+    expect(lit(radio(r, 'Never'))).toBe(false);
+    expect(box(r).props.value).toBe('2');
+    expect(lit(radio(r, 'years'))).toBe(true);
+  });
+
+  it('keeps weeks as weeks', async () => {
+    const r = await arrange(snag({ repeatDays: 56, dueAt: ahead(30) }));
+    expect(repeatsRow(r).props.accessibilityLabel).toBe('Repeats: Every 8 weeks');
+
+    await openRepeats(r);
+    expect(box(r).props.value).toBe('8');
+    expect(lit(radio(r, 'weeks'))).toBe(true);
   });
 
   // Nothing else on the page shows the day any more, so the row does — the
-  // local day, day first, never just the month. What happens after is the
-  // sheet's to say, because a row carries facts rather than commentary.
-  it('states the day it is next due on the row, and what happens after in the sheet', async () => {
+  // local day, day first, never just the month. And the sheet carries no line
+  // of prose, by the owner's decision.
+  it('states the day it is next due on the row, and nothing under the choices', async () => {
     const r = await arrange(snag({ repeatDays: 180, dueAt: '2026-11-08T00:00:00.000' }));
     expect(texts(r)).toContain('Next due 08/11/2026');
-    expect(texts(r).join(' ')).not.toContain('Due soon');
 
     await openRepeats(r);
     const said = texts(r).join(' ');
-    expect(said).toContain('every 6 months');
-    expect(said).toContain('Due soon');
+    expect(said).not.toContain('Due soon');
+    expect(said).not.toContain('reminders');
+  });
+
+  // Leaving writes what is still in a box — the sheet's Done included, since a
+  // press does not reliably blur a box on native.
+  it('writes a number still in the box when the sheet is closed', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ repeatDays: 90, dueAt: ahead(90) }));
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
+
+    await openRepeats(r);
+    await typeIn(r, '3');
+    await done(r);
+    expect(mock_updateSnag).toHaveBeenCalledTimes(1);
+    expect(mock_updateSnag.mock.calls[0][1].repeatDays).toBe(90);
+    expect(box(r)).toBeUndefined();
+  });
+
+  it('refuses a number that cannot be a repeat, in words, and stays open', async () => {
+    mock_updateSnag.mockClear();
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
+
+    await openRepeats(r);
+    await typeIn(r, '');
+    await leave(r);
+    expect(texts(r)).toContain('Type how many');
+    await done(r);
+    expect(box(r)).toBeDefined();
+
+    await typeIn(r, '11');
+    await press(radio(r, 'years'));
+    expect(texts(r)).toContain('Ten years is the longest');
+    expect(mock_updateSnag).not.toHaveBeenCalled();
   });
 
   // A refusal is a fact about the press, so it is said where the press was,
@@ -702,8 +819,8 @@ describe('repeats, and no due date', () => {
     const r = await arrange(snag({ repeatDays: null, dueAt: null }));
 
     await openRepeats(r);
-    await press(choice(r, 'Yearly'));
-    expect(choice(r, 'Yearly')).toBeDefined();
+    await press(radio(r, 'Every'));
+    expect(box(r)).toBeDefined();
     expect(texts(r)).toContain('Could not save that');
   });
 });
@@ -807,11 +924,11 @@ describe('leaving the page', () => {
 
 // ------------------------------------------------------------- what reads first
 //
-// What the job is about, then what to pick up, then the conversation — the
-// notes, and asking SnagHQ directly under them — then whether it comes round,
-// then the one state change a person makes by hand.
+// The conversation first — the notes, and asking SnagHQ directly under them —
+// then what to get and what it is about, then whether it comes round, then the
+// one state change a person makes by hand. The owner's order, from the preview.
 describe('the order down the page', () => {
-  it('reads what it is about, then what to get, then the talk, then the repeat', async () => {
+  it('reads the talk, then what to get, then what it is about, then the repeat', async () => {
     const r = await arrange(snag({ room: 'Bathroom', repeatDays: null }));
 
     // Flattened, in case a heading renders as an array of children and
@@ -819,8 +936,8 @@ describe('the order down the page', () => {
     const flat = (node: any): string =>
       (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : flat(c))).join('');
 
-    const wanted = ['Linked items', 'Anything to pick up?', 'Notes', 'Ask SnagHQ about this',
-      'Repeats'];
+    const wanted = ['Notes', 'Ask SnagHQ about this', 'Items and shopping', 'Add to shopping list',
+      'Linked items', 'Repeats'];
     const seen = r.getAllByType('Text')
       .map((n: any) => flat(n).trim())
       .filter((t: string) => wanted.includes(t));
@@ -977,6 +1094,7 @@ describe('asking SnagHQ', () => {
     const order = r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
     expect(order.indexOf('Notes')).toBeGreaterThan(-1);
     expect(order.indexOf('Ask SnagHQ about this')).toBeGreaterThan(order.indexOf('Notes'));
+    expect(order.indexOf('Ask SnagHQ about this')).toBeLessThan(order.indexOf('Items and shopping'));
     expect(order.indexOf('Ask SnagHQ about this')).toBeLessThan(order.indexOf('Repeats'));
   });
 

@@ -60,20 +60,6 @@ type Route = RouteProp<RootStackParamList, 'SnagDetail'>;
 const DAY_MS = 86_400_000;
 
 /**
- * The repeat chips: the presets, plus whatever the job already carries when it
- * is not one of them — a heat pump serviced every two years arrives from the
- * thing page with 730 days, and a row that could not show it would read as
- * *Never*.
- */
-function repeatChoices(current: number | null): { days: number; label: string }[] {
-  const presets = REPEAT_PRESETS.map(({ days, label }) => ({ days, label }));
-  if (current && !presets.some((p) => p.days === current)) {
-    presets.push({ days: current, label: `Every ${describeCycle(current)}` });
-  }
-  return presets;
-}
-
-/**
  * `thingHeadline`'s rule, against the trimmed row the view hands over.
  *
  * `LinkedThing` is deliberately not a `Thing` — the card needs a name, a model
@@ -106,12 +92,14 @@ function unsavedHint(count: number): string {
 }
 
 /**
- * The *Repeats* row's value: the chip label the job's cycle had, or *Never*.
+ * The *Repeats* row's value: a preset's own word when the cycle is one
+ * (*Monthly*, *Yearly*), otherwise `describeCycle`'s — *Every 8 weeks* — or
+ * *Never*.
  */
 function repeatLabel(snag: Snag): string {
   if (!snag.repeatDays) return 'Never';
-  return repeatChoices(snag.repeatDays)
-    .find((choice) => choice.days === snag.repeatDays)?.label ?? `Every ${describeCycle(snag.repeatDays)}`;
+  return REPEAT_PRESETS.find((preset) => preset.days === snag.repeatDays)?.label
+    ?? `Every ${describeCycle(snag.repeatDays)}`;
 }
 
 /**
@@ -121,30 +109,12 @@ function repeatLabel(snag: Snag): string {
  * local calendar day, and `formatDayFirst` writes it the way people here do.
  *
  * A repeat with no date never comes up, and choosing a cycle always dates one,
- * so *No date yet* only happens to a row from before; the sheet's line says how
- * to fix it.
+ * so *No date yet* only happens to a row from before; pressing *Every* in the
+ * sheet dates it.
  */
 function repeatFact(snag: Snag): string | null {
   if (!snag.repeatDays) return null;
   return snag.dueAt ? `Next due ${formatDayFirst(dayKey(snag.dueAt))}` : 'No date yet';
-}
-
-/**
- * The line in the sheet, under the choices: what marking it done does and
- * where it turns up. *Snag doesn't send reminders* is still said, because a
- * repeat is exactly what somebody expects to be reminded about.
- */
-function repeatHint(snag: Snag): string {
-  if (!snag.repeatDays) {
-    return 'A job that repeats comes up under Due soon on the list when it’s next due — Snag '
-      + 'doesn’t send reminders.';
-  }
-  const every = describeCycle(snag.repeatDays);
-  if (!snag.dueAt) {
-    return `It has no date yet, so it won't come up. Tap ${repeatLabel(snag)} and it's due in ${every}.`;
-  }
-  return `Marking it done brings it back every ${every}. It comes up under Due soon on the list — `
-    + 'Snag doesn’t send reminders.';
 }
 
 export default function SnagDetailScreen() {
@@ -793,209 +763,12 @@ export default function SnagDetailScreen() {
           <Text style={styles.reportedBy}>{byline(snag, profile.id)}</Text>
         ) : null}
 
-        {/* ── Items and shopping ──
-            One card, two halves: what the job is about, and what to get for
-            it. They were two cards, each with its own heading and its own
-            bulky add control, on a page that is mostly read. They stay two
-            *facts* — each half keeps its own heading, split by a rule — because
-            they behave differently: linking an item never starts the job
-            (`set_snag_things` touches neither `status` nor `updated_at`), and
-            adding something to pick up does (`v_started`), and puts it on the
-            trip sheet.
-
-            **Linked items is what the job is about, not what the room holds.**
-            A list of what is *selected* belongs on the page; a list of what
-            *could be* belongs behind a control (`LinkAssetsSheet`). It holds
-            many rather than one: a leak under the sink is about the mixer *and*
-            the waste trap. The room's own things are offered as pills on a line
-            of their own under the words saying where they came from — inline
-            after the words they wrapped half under them.
-
-            **Anything to pick up** is a checklist: a row per item, ticked when
-            bought, and one more row at the foot to add to it. That row is a box
-            with a + rather than a box and an *Add* button: it adds on Return,
-            when it is left, and when the page is — the saving rule everywhere
-            outside Projects. Ticking is not adding: `set_part_bought` touches
-            neither the status nor `updated_at`, and is a separate function
-            precisely so it cannot. The trip to the shop is the single most
-            common reason a small job sits for weeks, which is why this is the
-            part of the page that moves work. */}
-        <View style={styles.block}>
-          <SectionTitle title="Items and shopping" />
-          <Card elevation="md" style={styles.card}>
-            <View style={styles.halfHead}>
-              <Text style={styles.halfTitle}>
-                {linked.length > 0 ? `Linked items (${linked.length})` : 'Linked items'}
-              </Text>
-              <Pressable
-                onPress={openAssets}
-                disabled={busy}
-                style={styles.assetAdd}
-                accessibilityRole="button"
-                accessibilityLabel={linked.length > 0 ? 'Add item' : 'Link an item from the house'}
-              >
-                <Icon name="add" size="sm" color={Colors.primary} />
-                <Text style={styles.assetAddLabel}>
-                  {linked.length > 0 ? 'Add item' : 'Link an item'}
-                </Text>
-              </Pressable>
-            </View>
-
-            {linked.map((item) => (
-              <View key={item.id} style={styles.assetRow}>
-                <Pressable
-                  onPress={() => navigation.navigate('ThingDetail', { thingId: item.id })}
-                  style={styles.assetOpen}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open ${linkedHeadline(item)}`}
-                >
-                  <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
-                  <View style={styles.assetBody}>
-                    <Text style={styles.assetName} numberOfLines={1}>
-                      {linkedHeadline(item)}
-                    </Text>
-                    {item.make || item.model ? (
-                      <Text style={styles.assetSpec} numberOfLines={1}>
-                        {[item.make, item.model].filter(Boolean).join(' ')}
-                      </Text>
-                    ) : null}
-                  </View>
-                  {item.room ? <Text style={styles.assetRoom}>{item.room}</Text> : null}
-                  <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
-                </Pressable>
-                {/* A sibling of the door rather than a child of it — a
-                    Pressable inside a Pressable is a coin toss about which one
-                    gets the tap, the rule the photo already pays. */}
-                <Pressable
-                  onPress={() => unlink(item.id)}
-                  disabled={busy}
-                  style={styles.assetClear}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Unlink ${linkedHeadline(item)}`}
-                >
-                  <Icon name="close" size="sm" color={Colors.textMuted} />
-                </Pressable>
-              </View>
-            ))}
-
-            {/* Offers, so they look like offers: the sunken chip, a +, and the
-                words above saying where they came from. Tapping one links it —
-                the same `set_snag_things` the picker writes through. */}
-            {suggested.length > 0 ? (
-              <View>
-                <Text style={styles.suggestLabel}>{`In the ${roomOf!.toLowerCase()}:`}</Text>
-                <View style={styles.suggestRow}>
-                  {suggested.map((thing) => (
-                    <Pressable
-                      key={thing.id}
-                      onPress={() => saveAssets([...linked.map((one) => one.id), thing.id])}
-                      disabled={busy}
-                      style={styles.suggestTap}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Link ${thingHeadline(thing)}`}
-                    >
-                      <View style={styles.suggestChip}>
-                        <Icon name="add" size="sm" color={Colors.primary} />
-                        <Text style={styles.suggestText} numberOfLines={1}>{thingHeadline(thing)}</Text>
-                      </View>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-
-            <View style={styles.halfRule} />
-
-            <Text style={styles.halfTitle}>Anything to pick up?</Text>
-            {snag.parts.map((item, index) => {
-              const got = snag.bought.includes(item);
-              return (
-                <View key={`${item}-${index}`} style={styles.partRow}>
-                  {/* Ticking is its own write and deliberately not a `patch`:
-                      changing the list starts the job, and buying something
-                      off it is not starting anything. It is also where a
-                      mis-tap in an aisle gets undone, which is why the row
-                      stays on the trip sheet rather than vanishing. */}
-                  <Pressable
-                    onPress={() => tick(item, !got)}
-                    disabled={busy}
-                    style={styles.partTick}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: got }}
-                    accessibilityLabel={got ? `${item}, got it` : `${item}, tick off`}
-                  >
-                    <Icon
-                      name={got ? 'checkmark-circle' : 'ellipse-outline'}
-                      size="sm"
-                      color={got ? Colors.primary : Colors.textMuted}
-                    />
-                  </Pressable>
-                  <Text style={[styles.partText, got && styles.partTextGot]}>{item}</Text>
-                  <Pressable
-                    onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
-                    disabled={busy}
-                    style={styles.partRemove}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${item}`}
-                  >
-                    <Icon name="close" size="sm" color={Colors.textMuted} />
-                  </Pressable>
-                </View>
-              );
-            })}
-            {/* The last row of the checklist is how it grows. The words in it
-                say what it does, because there is no button beside it to. */}
-            <View style={styles.partAddRow}>
-              <View style={styles.partTick}>
-                <Icon name="add" size="sm" color={Colors.primary} />
-              </View>
-              <TextInput
-                style={styles.partInput}
-                value={partDraft}
-                onChangeText={setPartDraft}
-                placeholder="Add something to pick up"
-                placeholderTextColor={Colors.textMuted}
-                maxLength={60}
-                returnKeyType="done"
-                onSubmitEditing={addPart}
-                onBlur={addPart}
-                blurOnSubmit={false}
-                accessibilityLabel="Something to pick up"
-              />
-            </View>
-          </Card>
-        </View>
-
-        {/* ── What came back ──
-            Directly under the shopping list, because a suggested part is an
-            offer with a + beside it — accepting one is what puts it on that
-            list, and that tap is what starts the job. A card whose suggestions
-            land two cards away is one nobody connects to anything. */}
-        {advice ? (
-          <AdviceCard
-            advice={advice}
-            parts={snag.parts}
-            busy={busy}
-            onAccept={(item) => patch({ parts: [...snag.parts, item] })}
-            onRemove={async () => {
-              setBusy(true);
-              try {
-                await deleteSnagAdvice(snag.id);
-                setAdvice(null);
-              } catch (err: any) {
-                showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
-              } finally {
-                setBusy(false);
-              }
-            }}
-          />
-        ) : null}
-
         {/* ── Notes ──
-            Above triage, not below it. What the other person wrote is the
-            reason this screen was opened — "ordered the part, arriving
-            Tuesday" is the whole answer, and a rail of controls standing
-            between the photo and it made the news the last thing read. */}
+            The first thing under the facts, above every control. What the
+            other person wrote is the reason this screen was opened — "ordered
+            the part, arriving Tuesday" is the whole answer — so the notes and
+            Ask SnagHQ sit above *Items and shopping*, by the owner's decision
+            after the September 2026 design review. */}
         <View style={styles.block}>
           <SectionTitle title={comments.length > 0 ? `Notes (${comments.length})` : 'Notes'} />
           <Card elevation="md" style={styles.card}>
@@ -1137,6 +910,206 @@ export default function SnagDetailScreen() {
           </View>
         ) : null}
 
+        {/* ── Items and shopping ──
+            One card, two halves: what the job is about, and what to get for
+            it. They were two cards, each with its own heading and its own
+            bulky add control, on a page that is mostly read. They stay two
+            *facts* — each half keeps its own heading, split by a rule — because
+            they behave differently: linking an item never starts the job
+            (`set_snag_things` touches neither `status` nor `updated_at`), and
+            adding something to pick up does (`v_started`), and puts it on the
+            trip sheet. The shopping half comes first and the linked items last,
+            by the owner's decision.
+
+            **Add to shopping list** is a checklist: a row per item, ticked when
+            bought, and one more row at the foot to add to it. That row is a box
+            with a + rather than a box and an *Add* button: it adds on Return,
+            when it is left, and when the page is — the saving rule everywhere
+            outside Projects. Ticking is not adding: `set_part_bought` touches
+            neither the status nor `updated_at`, and is a separate function
+            precisely so it cannot. The trip to the shop is the single most
+            common reason a small job sits for weeks, which is why this is the
+            part of the page that moves work.
+
+            **Linked items is what the job is about, not what the room holds.**
+            A list of what is *selected* belongs on the page; a list of what
+            *could be* belongs behind a control (`LinkAssetsSheet`). It holds
+            many rather than one: a leak under the sink is about the mixer *and*
+            the waste trap. The room's own things are offered as pills on a line
+            of their own under the words saying where they came from — inline
+            after the words they wrapped half under them. */}
+        <View style={styles.block}>
+          <SectionTitle title="Items and shopping" />
+          <Card elevation="md" style={styles.card}>
+            <Text style={styles.halfTitle}>Add to shopping list</Text>
+            {snag.parts.map((item, index) => {
+              const got = snag.bought.includes(item);
+              return (
+                <View key={`${item}-${index}`} style={styles.partRow}>
+                  {/* Ticking is its own write and deliberately not a `patch`:
+                      changing the list starts the job, and buying something
+                      off it is not starting anything. It is also where a
+                      mis-tap in an aisle gets undone, which is why the row
+                      stays on the trip sheet rather than vanishing. */}
+                  <Pressable
+                    onPress={() => tick(item, !got)}
+                    disabled={busy}
+                    style={styles.partTick}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: got }}
+                    accessibilityLabel={got ? `${item}, got it` : `${item}, tick off`}
+                  >
+                    <Icon
+                      name={got ? 'checkmark-circle' : 'ellipse-outline'}
+                      size="sm"
+                      color={got ? Colors.primary : Colors.textMuted}
+                    />
+                  </Pressable>
+                  <Text style={[styles.partText, got && styles.partTextGot]}>{item}</Text>
+                  <Pressable
+                    onPress={() => patch({ parts: snag.parts.filter((_, i) => i !== index) })}
+                    disabled={busy}
+                    style={styles.partRemove}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${item}`}
+                  >
+                    <Icon name="close" size="sm" color={Colors.textMuted} />
+                  </Pressable>
+                </View>
+              );
+            })}
+            {/* The last row of the checklist is how it grows. The words in it
+                say what it does, because there is no button beside it to. */}
+            <View style={styles.partAddRow}>
+              <View style={styles.partTick}>
+                <Icon name="add" size="sm" color={Colors.primary} />
+              </View>
+              <TextInput
+                style={styles.partInput}
+                value={partDraft}
+                onChangeText={setPartDraft}
+                placeholder="Add something to pick up"
+                placeholderTextColor={Colors.textMuted}
+                maxLength={60}
+                returnKeyType="done"
+                onSubmitEditing={addPart}
+                onBlur={addPart}
+                blurOnSubmit={false}
+                accessibilityLabel="Something to pick up"
+              />
+            </View>
+
+            <View style={styles.halfRule} />
+
+            <View style={styles.halfHead}>
+              <Text style={styles.halfTitle}>
+                {linked.length > 0 ? `Linked items (${linked.length})` : 'Linked items'}
+              </Text>
+              <Pressable
+                onPress={openAssets}
+                disabled={busy}
+                style={styles.assetAdd}
+                accessibilityRole="button"
+                accessibilityLabel={linked.length > 0 ? 'Add item' : 'Link an item from the house'}
+              >
+                <Icon name="add" size="sm" color={Colors.primary} />
+                <Text style={styles.assetAddLabel}>
+                  {linked.length > 0 ? 'Add item' : 'Link an item'}
+                </Text>
+              </Pressable>
+            </View>
+
+            {linked.map((item) => (
+              <View key={item.id} style={styles.assetRow}>
+                <Pressable
+                  onPress={() => navigation.navigate('ThingDetail', { thingId: item.id })}
+                  style={styles.assetOpen}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${linkedHeadline(item)}`}
+                >
+                  <Icon name="cube-outline" size="sm" color={Colors.textMuted} />
+                  <View style={styles.assetBody}>
+                    <Text style={styles.assetName} numberOfLines={1}>
+                      {linkedHeadline(item)}
+                    </Text>
+                    {item.make || item.model ? (
+                      <Text style={styles.assetSpec} numberOfLines={1}>
+                        {[item.make, item.model].filter(Boolean).join(' ')}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {item.room ? <Text style={styles.assetRoom}>{item.room}</Text> : null}
+                  <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
+                </Pressable>
+                {/* A sibling of the door rather than a child of it — a
+                    Pressable inside a Pressable is a coin toss about which one
+                    gets the tap, the rule the photo already pays. */}
+                <Pressable
+                  onPress={() => unlink(item.id)}
+                  disabled={busy}
+                  style={styles.assetClear}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Unlink ${linkedHeadline(item)}`}
+                >
+                  <Icon name="close" size="sm" color={Colors.textMuted} />
+                </Pressable>
+              </View>
+            ))}
+
+            {/* Offers, so they look like offers: the sunken chip, a +, and the
+                words above saying where they came from. Tapping one links it —
+                the same `set_snag_things` the picker writes through. */}
+            {suggested.length > 0 ? (
+              <View>
+                <Text style={styles.suggestLabel}>{`In the ${roomOf!.toLowerCase()}:`}</Text>
+                <View style={styles.suggestRow}>
+                  {suggested.map((thing) => (
+                    <Pressable
+                      key={thing.id}
+                      onPress={() => saveAssets([...linked.map((one) => one.id), thing.id])}
+                      disabled={busy}
+                      style={styles.suggestTap}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Link ${thingHeadline(thing)}`}
+                    >
+                      <View style={styles.suggestChip}>
+                        <Icon name="add" size="sm" color={Colors.primary} />
+                        <Text style={styles.suggestText} numberOfLines={1}>{thingHeadline(thing)}</Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+          </Card>
+        </View>
+
+        {/* ── What came back ──
+            Directly under the items card, whose first half is the shopping
+            list, because a suggested part is an offer with a + beside it —
+            accepting one is what puts it on that list, and that tap is what
+            starts the job. A card whose suggestions land two cards away is one
+            nobody connects to anything. */}
+        {advice ? (
+          <AdviceCard
+            advice={advice}
+            parts={snag.parts}
+            busy={busy}
+            onAccept={(item) => patch({ parts: [...snag.parts, item] })}
+            onRemove={async () => {
+              setBusy(true);
+              try {
+                await deleteSnagAdvice(snag.id);
+                setAdvice(null);
+              } catch (err: any) {
+                showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        ) : null}
+
         {/* ── Repeats ──
             The last section, and the only date control left on the page.
 
@@ -1149,18 +1122,18 @@ export default function SnagDetailScreen() {
             **It is one row that opens a sheet** — *Repeats … Never ›* — by the
             owner's decision, where it was a rail of five chips taking three
             lines. The row states the answer and the day it next comes round;
-            `RepeatSheet` holds the choices. A press there writes and closes,
-            so there is no *Done* to forget, and closing without a press writes
-            nothing: the trap the old modal behind a *Yes* set does not come
-            back.
+            `RepeatSheet` holds the choice — *Never*, or *Every n days, weeks,
+            months or years*. Taps write when pressed and the number when it is
+            left, and opening the sheet and closing it again writes nothing:
+            the trap the old modal behind a *Yes* set does not come back.
 
-            What a press writes is unchanged. A cycle dates an undated job a
+            What a write does is unchanged. A cycle dates an undated job a
             cycle out and leaves a date already set alone (a heat pump's service
             arrives from the thing page already dated). **Never clears the date
             as well as the repeat**: with no box to clear it from, a date a
             stopped repeat left behind would sit under *Due soon* and go overdue
-            for ever. Pressing the lit cycle on a repeat with no date dates it —
-            the only way such a row, from before, can come round.
+            for ever. Pressing *Every* on a repeat with no date dates it — the
+            only way such a row, from before, can come round.
 
             A repeat is one of the four things that start a job, which is right:
             deciding it comes round is deciding to do it. */}
@@ -1218,9 +1191,7 @@ export default function SnagDetailScreen() {
 
       <RepeatSheet
         visible={repeating}
-        choices={[{ days: null, label: 'Never' }, ...repeatChoices(snag.repeatDays)]}
         current={snag.repeatDays}
-        hint={repeatHint(snag)}
         onPick={pickRepeat}
         onClose={() => setRepeating(false)}
       />
@@ -1483,7 +1454,7 @@ const styles = StyleSheet.create({
     marginVertical: Spacing.xs,
   },
   // The Repeats row: a V2 group of one, the page's last thing. 28 under the
-  // Ask SnagHQ button, as between every other section.
+  // items card, as between every other section.
   repeatGroup: { marginTop: Spacing.xl },
   // The shopping list. Rows read like a list you'd scan in an aisle; the field
   // below is how you add to it, and is the only text input on this screen

@@ -1,8 +1,8 @@
 /* Design tokens. Light values mirror apps/mobile/src/constants/theme.ts
    exactly (same brand across both clients) — see that file's header comment
-   before changing any light value here without changing it there too. Dark
-   values are a deliberate design (mobile is light-only, so there was no
-   dark system to inherit), not a mechanical inversion.
+   before changing any light value here without changing it there too.
+   Light only, like the app: the dark set was the retired product's blue
+   palette, so a phone in dark mode showed a site that wasn't Snag's colours.
 
    The light set is the warm household palette: plaster ground, fern accent,
    warm ink. The status and category hues further down still belong to the
@@ -114,8 +114,7 @@
      2.07:1, and on a health-and-safety product the badge saying "in progress"
      is not decoration. These are the darkest-hue-preserving shades that clear
      WCAG AA, kept separate so the base colours stay usable as button
-     backgrounds, icons and dots. Dark theme already passed, so there the two
-     are the same value. */
+     backgrounds, icons and dots. */
   --color-status-flagged-fg: #1D4ED8;
   --color-status-in-progress-fg: #B45309;
   --color-status-resolved-fg: #047857;
@@ -126,112 +125,6 @@
   --color-serious-fg: #9E3522;
 
   color-scheme: light;
-}
-
-/* ---------- Dark ---------- */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --color-background: #0A0E16;
-    --color-surface: #121826;
-    --color-surface-raised: #19212F;
-    --color-border: #262E3D;
-    --color-border-strong: #333D4F;
-
-    --color-primary: #5B8DEF;
-    --color-primary-hover: #7CA5F2;
-    --color-primary-light: #16233D;
-    --color-on-primary: #08101F;
-
-    --color-text-primary: #F3F4F6;
-    --color-text-secondary: #A0AAB8;
-    --color-text-muted: #828C9E;
-
-    --color-status-flagged: #60A5FA;
-    --color-status-flagged-bg: #14233D;
-    --color-status-in-progress: #FBBF24;
-    --color-status-in-progress-bg: #2E2410;
-    --color-status-resolved: #34D399;
-    --color-status-resolved-bg: #0F2A20;
-    --color-status-rca-pending: #F87171;
-    --color-status-rca-pending-bg: #3B1319;
-
-    --color-success: #4ADE80;
-    --color-success-bg: #10291B;
-    --color-success-border: #1E4430;
-
-    --color-serious: #F87171;
-    --color-serious-bg: #3B1319;
-    --color-danger: #F87171;
-    --color-danger-bg: #351417;
-
-  --color-status-flagged-fg: #60A5FA;
-  --color-status-in-progress-fg: #FBBF24;
-  --color-status-resolved-fg: #34D399;
-  --color-status-rca-pending-fg: #F87171;
-  --color-success-fg: #4ADE80;
-  --color-danger-fg: #F87171;
-  --color-primary-fg: #5B8DEF;
-  --color-serious-fg: #F87171;
-
-    --color-category-niggle: #9CA6B8;
-    --color-category-niggle-bg: #1B212C;
-    --color-category-broken-equipment: #F0B429;
-    --color-category-broken-equipment-bg: #2E2410;
-    --color-category-health-safety: #F87171;
-    --color-category-health-safety-bg: #3B1319;
-    --color-category-other: #A78BFA;
-    --color-category-other-bg: #241B3D;
-
-    color-scheme: dark;
-  }
-}
-
-:root[data-theme='dark'] {
-  --color-background: #0A0E16;
-  --color-surface: #121826;
-  --color-surface-raised: #19212F;
-  --color-border: #262E3D;
-  --color-border-strong: #333D4F;
-  --color-primary: #5B8DEF;
-  --color-primary-hover: #7CA5F2;
-  --color-primary-light: #16233D;
-  --color-on-primary: #08101F;
-  --color-text-primary: #F3F4F6;
-  --color-text-secondary: #A0AAB8;
-  --color-text-muted: #828C9E;
-  --color-status-flagged: #60A5FA;
-  --color-status-flagged-bg: #14233D;
-  --color-status-in-progress: #FBBF24;
-  --color-status-in-progress-bg: #2E2410;
-  --color-status-resolved: #34D399;
-  --color-status-resolved-bg: #0F2A20;
-  --color-status-rca-pending: #F87171;
-  --color-status-rca-pending-bg: #3B1319;
-  --color-success: #4ADE80;
-  --color-success-bg: #10291B;
-  --color-success-border: #1E4430;
-  --color-serious: #F87171;
-  --color-serious-bg: #3B1319;
-  --color-danger: #F87171;
-  --color-danger-bg: #351417;
-
-  --color-status-flagged-fg: #60A5FA;
-  --color-status-in-progress-fg: #FBBF24;
-  --color-status-resolved-fg: #34D399;
-  --color-status-rca-pending-fg: #F87171;
-  --color-success-fg: #4ADE80;
-  --color-danger-fg: #F87171;
-  --color-primary-fg: #5B8DEF;
-  --color-serious-fg: #F87171;
-  --color-category-niggle: #9CA6B8;
-  --color-category-niggle-bg: #1B212C;
-  --color-category-broken-equipment: #F0B429;
-  --color-category-broken-equipment-bg: #2E2410;
-  --color-category-health-safety: #F87171;
-  --color-category-health-safety-bg: #3B1319;
-  --color-category-other: #A78BFA;
-  --color-category-other-bg: #241B3D;
-  color-scheme: dark;
 }
 
 * {

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import SignedImage from './SignedImage';
 import Icon from './Icon';
 import StatusBadge from './StatusBadge';
 import DueBadge from './DueBadge';
@@ -56,7 +57,7 @@ export default function SnagCard({ snag, photoUrl, onPress, onDone, finishing }:
     >
       <View style={styles.thumb}>
         {photoUrl ? (
-          <Image source={{ uri: photoUrl }} style={styles.image} resizeMode="cover" />
+          <SignedImage uri={photoUrl} style={styles.image} resizeMode="cover" />
         ) : (
           <View style={styles.noPhoto}>
             <Icon name="image-outline" size="lg" color={Colors.textMuted} />

@@ -123,6 +123,11 @@ where table_schema = 'home' and table_name = 'things_with_details';
 
 ### Finding files nothing points at
 
+**Deleting a user from the dashboard** now leaves the same way *Delete my account* does
+(`20260929214235`, a trigger on `auth.users`), except for one thing SQL cannot do: a household only
+they were in is deleted, and its files stay in the bucket under its id. Clear that folder from
+Storage → `home-photos` afterwards, or delete through the app, which clears files first.
+
 Uploads and the rows that reference them are two writes, so a failure between them leaves a file
 in the bucket that no screen can reach. That is not hypothetical: until `planAuthEvent` landed,
 coming back from the camera destroyed the sheet holding the path, and five photographs were
@@ -255,6 +260,14 @@ A 429 on plain label reads too points at the key being on the free tier, which t
 section already says not to use.
 
 ### Edge functions — the five below belong to the retired product, and are to be deleted
+
+**30 September 2026: all five are tombstones.** `export-investigation` (v17),
+`export-governance-report` (v14), `worksheet` (v15) and `worksheet-import` (v10) were redeployed the
+way `notify-snag` was: JWT on, a body that answers `410 Gone`, no secret read and no data touched.
+Signed out they answer `401`, with the anon key `410`. `notify-snag` itself is gone from the list.
+**Still to do by hand:** delete the four from the dashboard, and delete the secrets `RESEND_API_KEY`,
+`SNAG_PORTAL_URL` and `SNAG_INTERNAL_SECRET` (Edge Functions → Secrets). Checked the same day: no
+function the app keeps reads any of the three.
 
 `notify-snag` (v20), `export-investigation`, `export-governance-report`, `worksheet`,
 `worksheet-import`. None is called by the home app; `notify-snag` is deliberately not adapted
@@ -530,6 +543,17 @@ it had neither, and the three authenticated specs failed on every run from then 
 
 It now has a profile (*E2E test*) and its own household (*E2E test house*, one property, the
 seeded rooms), made through `upsert_profile` and `create_household` exactly as signing up would.
+
+**Recreated 30 September 2026.** The login was deleted from the dashboard with five others on
+29 September, and every signed-in spec failed at sign-in from then on. It was made again with the
+same address (`mturnernz+qa.admin@gmail.com`, so `E2E_EMAIL` is unchanged) through Auth's own
+sign-up, confirmed in SQL, then given its profile and house through the RPCs and
+`mark_setup_seen(['name','household','rooms','invite'])` — without that last call an account made
+after `20260929060443` stops on the setup steps and never reaches the list. Its password was then
+set back to the one the `E2E_PASSWORD` secret already holds, so the secret did not change. **The
+account's password and that secret must agree**: when they don't, every signed-in spec stops on
+*Welcome back* with *That email and password don't match*, which the Playwright report's page
+snapshot shows.
 Don't add it to a real household, and don't delete that one: the specs need a list to land on.
 Being in a household before `20260929060443` also means the migration marked it as having seen
 setup; an account made after it would be walked through the setup steps and never reach the list. If
@@ -669,6 +693,23 @@ directories assume), but it is a production deploy like any other, 15 credits:
 npx -y @netlify/mcp@latest --site-id <id> --proxy-path <token from the Netlify MCP>
 ```
 
+## Launch switches, 30 September 2026
+
+Build-time variables on the `snagv1` site that decide what v1 offers. As of 30 September 2026
+`EXPO_PUBLIC_GOOGLE_SIGN_IN` is `on` and `EXPO_PUBLIC_LABEL_READING` is not set, which is off.
+
+| Variable | Unset / anything else | `on` |
+|---|---|---|
+| `EXPO_PUBLIC_LABEL_READING` | The walkthrough takes the plate photo and asks for the details by hand; no *Read from the label*, no *What the maker says*, no *labels to check* | The label is read and the model looked up (`read-label`, `lookup-product`) |
+| `EXPO_PUBLIC_GOOGLE_SIGN_IN` | Email only | *Continue with Google* first |
+
+Label reading is off because the Gemini key's **prepaid credits ran out** on 29 September 2026 (every
+call answered `402 RESOURCE_EXHAUSTED`). Before turning it on: add credit and auto-reload in Google AI
+Studio, set a budget alert, read one real plate, then set the variable and redeploy.
+
+The Projects tab is not a build switch: it is `profiles.projects_enabled`, false by default and true
+only for the two accounts named in `20260929214206`.
+
 ## Error reporting (Sentry)
 
 The web build reports errors to Sentry once `EXPO_PUBLIC_SENTRY_DSN` is set on the `snagv1` site
@@ -707,6 +748,9 @@ applied:
 | `20260928090000_the_archive_stops_speaking` | `20260928014324` |
 | `20260928100000_what_snag_keeps_about_you` | `20260928015049` |
 | `20260929060443_setup_is_a_list_of_steps` | `20260929060443` (renamed to match; it had duplicated `20260928090000`) |
+| `20260929214206_projects_are_off_for_v1` | `20260929214206` (named for the live version) |
+| `20260929214235_a_login_deleted_anywhere_leaves_the_same_way` | `20260929214235` (named for the live version) |
+| `20260929214244_three_helpers_pin_their_search_path` | `20260929214244` (named for the live version) |
 
 ## Preservation
 

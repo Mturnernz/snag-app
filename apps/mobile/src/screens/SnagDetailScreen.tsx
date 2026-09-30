@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, Image, TextInput, Pressable, StyleSheet,
+  View, Text, ScrollView, TextInput, Pressable, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import SignedImage from '../components/SignedImage';
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -26,6 +27,7 @@ import RepeatSheet from '../components/RepeatSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
+import { useOnReturn } from '../hooks/useOnReturn';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
@@ -34,6 +36,8 @@ import {
   getSupportRequestForSnag, createSupportRequest, addSupportMessage, closeSupportRequest,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { RETURN_RELOAD_MS } from '../lib/foreground';
+import { readNoteDraft, writeNoteDraft } from '../lib/noteDrafts';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import LinkedText from '../components/LinkedText';
 import {
@@ -136,10 +140,36 @@ export default function SnagDetailScreen() {
   const [support, setSupport] = useState<SupportRequest | null>(null);
   const [asking, setAsking] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  // Back in the app after a while, the photos' links may have expired while the
+  // page sat open. Sign them again — only the links, never the page: reloading
+  // the snag could land on top of something half typed in a box.
+  useOnReturn(() => {
+    const paths = snag?.photoPaths ?? [];
+    if (paths.length > 0) getFileUrls(paths).then(setPhotoUrls).catch(() => {});
+  }, RETURN_RELOAD_MS);
   // Which photo is open full screen, or null. An index rather than a URL, so
   // the viewer's own next/previous walk the same strip.
   const [viewing, setViewing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
+  /**
+   * A note half-typed here is kept on this device and put back when the job is
+   * opened again (`lib/noteDrafts.ts`) — never sent: a note is a message, and
+   * `add_comment` starts the job. A kept draft never lands over words typed
+   * since the page opened.
+   */
+  const noteTouched = useRef(false);
+  useEffect(() => {
+    let live = true;
+    readNoteDraft(params.snagId).then((kept) => {
+      if (live && kept && !noteTouched.current) setDraft(kept);
+    });
+    return () => { live = false; };
+  }, [params.snagId]);
+  const changeNote = useCallback((text: string) => {
+    noteTouched.current = true;
+    setDraft(text);
+    void writeNoteDraft(params.snagId, text);
+  }, [params.snagId]);
   /** Whether the note box has the cursor. It opens to four lines while it
    *  does, or while it holds words. */
   const [noteFocused, setNoteFocused] = useState(false);
@@ -296,6 +326,13 @@ export default function SnagDetailScreen() {
    * lie. (The due-date box was the other, and it is gone.)
    */
   const unsaved = partDraft.trim() ? 1 : 0;
+  /**
+   * A note typed and not added. Not an unsaved change — leaving never sends it
+   * — but not "All changes saved" either, which would be the footer saying
+   * something untrue about the box directly above it. It is kept on this
+   * device (`lib/noteDrafts.ts`), and the footer says so.
+   */
+  const noteWaiting = draft.trim().length > 0;
 
   /**
    * Whatever is sitting in the box, onto the row. **Leaving saves.**
@@ -477,6 +514,7 @@ export default function SnagDetailScreen() {
     try {
       await addComment(snag.id, draft.trim());
       setDraft('');
+      void writeNoteDraft(snag.id, '');
       setComments(await getComments(snag.id));
     } catch (err: any) {
       showAlert("Couldn't add that", err?.message ?? 'Please try again.');
@@ -633,11 +671,7 @@ export default function SnagDetailScreen() {
                   accessibilityRole="imagebutton"
                   accessibilityLabel="Open this photo"
                 >
-                  <Image
-                    source={{ uri: photoUrls[path] }}
-                    style={styles.photo}
-                    resizeMode="cover"
-                  />
+                  <SignedImage uri={photoUrls[path]} style={styles.photo} resizeMode="cover" />
                 </Pressable>
                 {i === 0 ? (
                   <View style={[styles.photoActions, busy && styles.photoAddOff]}>
@@ -807,7 +841,7 @@ export default function SnagDetailScreen() {
               <TextInput
                 style={[styles.commentInput, !noteOpen && styles.commentInputShut]}
                 value={draft}
-                onChangeText={setDraft}
+                onChangeText={changeNote}
                 onFocus={() => setNoteFocused(true)}
                 onBlur={() => setNoteFocused(false)}
                 placeholder="Add a note, or what you did"
@@ -1159,8 +1193,14 @@ export default function SnagDetailScreen() {
           something that will be kept on the way out. */}
       <View style={{ marginBottom: keyboard }}>
         <StickyActionBar
-          hint={unsaved > 0 ? `${unsavedHint(unsaved)} — kept when you leave` : 'All changes saved'}
-          hintTone={unsaved > 0 ? 'warn' : 'muted'}
+          hint={
+            unsaved > 0
+              ? `${unsavedHint(unsaved)} — kept when you leave`
+              : noteWaiting
+                ? 'Note not added yet — kept on this device'
+                : 'All changes saved'
+          }
+          hintTone={unsaved > 0 || noteWaiting ? 'warn' : 'muted'}
         >
           {snag.status !== 'done' ? (
             <Button

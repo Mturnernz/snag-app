@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, Image, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { openUrl } from '../lib/openUrl';
@@ -9,6 +9,7 @@ import { FILE_TAG_LABELS, type FileTag, type FileTags } from '@snag/shared-types
 import { getFileUrl, getFileUrls, uploadFile } from '../lib/supabase';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import { showAlert } from '../lib/alert';
+import SignedImage from './SignedImage';
 import Icon from './Icon';
 import PhotoViewer from './PhotoViewer';
 import FileTagChips from './FileTagChips';
@@ -199,7 +200,7 @@ export default function Attachments({
                 accessibilityLabel={`Open photo ${index + 1}`}
               >
                 {urls[path] ? (
-                  <Image source={{ uri: urls[path] }} style={styles.tile} />
+                  <SignedImage uri={urls[path]} style={styles.tile} />
                 ) : (
                   <View style={[styles.tile, styles.tileEmpty]} />
                 )}

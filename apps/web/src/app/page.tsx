@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: 'Snag — the list of things that need doing around the house',
   description:
     'Photograph what needs doing and it goes on one list your household shares, grouped by room. ' +
-    'The house record, renovations and a calendar sit beside it. No ads, no trackers, no notifications.',
+    'The house record and a calendar sit beside it. No ads, no trackers, no notifications.',
   robots: { index: true, follow: true },
   ...canonical('/'),
   openGraph: {
@@ -89,23 +89,22 @@ export default function Home() {
               <h3>House</h3>
               <p>
                 What&apos;s in the house: the heat pump&apos;s model number, the paint on the
-                hallway wall, the dishwasher&apos;s manual. Photograph a rating plate and Snag
-                reads it for you to check.
-              </p>
-            </li>
-            <li className={styles.card}>
-              <h3>Projects</h3>
-              <p>
-                A renovation&apos;s quotes, bills and payments in one place, and whether
-                you&apos;re still on budget. Forward a bill to the project&apos;s own address and
-                it&apos;s waiting for you to file.
+                hallway wall, the dishwasher&apos;s manual. A photo of the rating plate and the
+                manual sit with each one, for the day you&apos;re in the shop.
               </p>
             </li>
             <li className={styles.card}>
               <h3>Schedule</h3>
               <p>
-                Every date on one calendar: what&apos;s due, what comes round again, and when the
-                builder starts.
+                Every date on one calendar: what&apos;s due, what comes round again, and what was
+                done when.
+              </p>
+            </li>
+            <li className={styles.card}>
+              <h3>You</h3>
+              <p>
+                Who&apos;s in the house and which rooms it has, a link to bring someone in, and a
+                copy of everything Snag keeps whenever you want one.
               </p>
             </li>
           </ul>
@@ -179,8 +178,9 @@ export default function Home() {
             </li>
             <li>
               <strong>Suggestions are offers.</strong>{' '}
-              A label Snag reads, or a manual it finds, is
-              shown for you to check. Nothing is saved until you accept it.
+              The House tab suggests what a room probably has
+              — an oven, a dryer — greyed out until you record the real one. Nothing is added
+              until you add it.
             </li>
           </ul>
         </section>

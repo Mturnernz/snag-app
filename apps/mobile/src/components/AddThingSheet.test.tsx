@@ -3,6 +3,15 @@ import TestRenderer from 'react-test-renderer';
 import { render, type RenderResult } from '../test/render';
 import AddThingSheet from './AddThingSheet';
 
+// Label reading is off for v1 (lib/labelReading.ts). These specs pin how it
+// behaves when it is on, so it comes back as it went; the off state has its own.
+const LABEL_FLAG = process.env.EXPO_PUBLIC_LABEL_READING;
+beforeAll(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'on'; });
+afterAll(() => {
+  if (LABEL_FLAG === undefined) delete process.env.EXPO_PUBLIC_LABEL_READING;
+  else process.env.EXPO_PUBLIC_LABEL_READING = LABEL_FLAG;
+});
+
 // The photo comes first and nobody waits on it. What these pin is the half that
 // decides whether that can be trusted: the sheet moves on the moment there is a
 // picture, the reading fills only the boxes still empty and says which, *Add
@@ -291,4 +300,28 @@ it('sends no spec for an appliance whose plate printed no year', async () => {
   expect(boxes(r)['Year made']).toBeUndefined();
   await tap(r, 'Add it to the house');
   expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ make: 'Smeg', spec: undefined }));
+});
+
+/** Label reading as v1 ships it: off (lib/labelReading.ts). */
+function withLabelReadingOff() {
+  beforeEach(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'off'; });
+  afterEach(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'on'; });
+}
+
+describe('with label reading off, as v1 ships', () => {
+  withLabelReadingOff();
+
+  it('takes the photo and never sends it to be read', async () => {
+    const r = await open(null);
+    await shoot(r);
+    expect(mock_upload).toHaveBeenCalledWith('file://plate.jpg', 'h1/plate.jpg');
+    expect(texts(r)).toContain('Which room?');
+    expect(mock_readLabel).not.toHaveBeenCalled();
+  });
+
+  it('does not promise the plate will be read', async () => {
+    const r = await open(null);
+    expect(texts(r)).toContain('The plate carries the make, model and serial, so it is the photo worth keeping.');
+    expect(texts(r).some((t) => /read while you carry on/.test(t))).toBe(false);
+  });
 });

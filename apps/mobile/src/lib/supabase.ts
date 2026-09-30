@@ -7,6 +7,9 @@ import type { ProjectFigure, ProjectQuoteStatus } from '@snag/shared-types';
 import { PORTAL_URL } from './appUrl';
 import { readForUpload } from './uploadBody';
 import { deadlineFor, withDeadline } from './deadline';
+import {
+  clearSignedUrls, forgetUrl, freshUrl, rememberUrl, SIGNED_URL_SECONDS,
+} from './signedUrls';
 import type { SnagStatus } from '../types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -183,6 +186,9 @@ const SIGN_OUT_TIMEOUT_MS = 10_000;
  * device.
  */
 export async function signOut(): Promise<{ error: any; forced?: boolean }> {
+  // A signed link is a bearer token for one file. The next person to sign in on
+  // this device has no business being handed the last one's.
+  clearSignedUrls();
   try {
     const { error } = await withDeadline(
       supabase.auth.signOut({ scope: 'local' }), SIGN_OUT_TIMEOUT_MS, 'Signing out',
@@ -713,14 +719,36 @@ export async function deleteStoredFiles(paths: string[]): Promise<void> {
   if (error) console.error('deleteStoredFiles error:', error);
 }
 
-/** A short-lived link to anything in the bucket — a photo, or a manual. */
+/**
+ * A short-lived link to anything in the bucket — a photo, or a manual.
+ *
+ * Remembered while it has a quarter of an hour of life left, and signed again
+ * after that (`lib/signedUrls.ts`), so a link handed out here is never one that
+ * is about to expire.
+ */
 export async function getFileUrl(path: string): Promise<string | null> {
+  const known = freshUrl(path);
+  if (known) return known;
+  const signedAt = Date.now();
   const { data, error } = await supabase.storage
     .from(HOUSEHOLD_FILES_BUCKET)
-    .createSignedUrl(path, 60 * 60);
+    .createSignedUrl(path, SIGNED_URL_SECONDS);
   if (error) console.error('getFileUrl error:', path, error);
   if (error || !data) return null;
+  rememberUrl(path, data.signedUrl, signedAt);
   return data.signedUrl;
+}
+
+/**
+ * A new link for a path whose last one failed to load.
+ *
+ * The remembered link is dropped first, because an image that would not load
+ * from it is the evidence that it is no good — expired, or revoked by a key
+ * rotation — whatever the clock says.
+ */
+export async function refreshFileUrl(path: string): Promise<string | null> {
+  forgetUrl(path);
+  return getFileUrl(path);
 }
 
 /**
@@ -732,17 +760,32 @@ export async function getFileUrl(path: string): Promise<string | null> {
  * This matters more here than it did in the workplace app. A household list is
  * mostly photos — twelve thumbnails is a Saturday you can act on, twelve lines
  * of text is a list you skim and close.
+ *
+ * Only the paths without a fresh remembered link are signed, so reloading a
+ * screen whose photos were signed ten minutes ago costs no request at all and
+ * hands the browser the same URLs, which it already has cached.
  */
 export async function getFileUrls(paths: string[]): Promise<Record<string, string>> {
-  const unique = [...new Set(paths)];
+  const unique = [...new Set(paths)].filter(Boolean);
   if (unique.length === 0) return {};
+  const map: Record<string, string> = {};
+  const stale: string[] = [];
+  for (const path of unique) {
+    const known = freshUrl(path);
+    if (known) map[path] = known;
+    else stale.push(path);
+  }
+  if (stale.length === 0) return map;
+  const signedAt = Date.now();
   const { data, error } = await supabase.storage
     .from(HOUSEHOLD_FILES_BUCKET)
-    .createSignedUrls(unique, 60 * 60);
+    .createSignedUrls(stale, SIGNED_URL_SECONDS);
   if (error) console.error('getFileUrls error:', error);
-  const map: Record<string, string> = {};
   for (const row of data ?? []) {
-    if (row.signedUrl && !row.error) map[row.path ?? ''] = row.signedUrl;
+    if (row.signedUrl && !row.error && row.path) {
+      map[row.path] = row.signedUrl;
+      rememberUrl(row.path, row.signedUrl, signedAt);
+    }
   }
   return map;
 }

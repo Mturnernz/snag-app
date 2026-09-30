@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 
+import SignedImage from './SignedImage';
 import Icon from './Icon';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Thing, ThingKind, ThingSuggestion } from '../types';
@@ -60,7 +61,7 @@ export default function ThingCard({ thing, photoUrl, onPress, labelToCheck }: Pr
       accessibilityLabel={thingHeadline(thing)}
     >
       {photoUrl ? (
-        <Image source={{ uri: photoUrl }} style={styles.thumb} resizeMode="cover" />
+        <SignedImage uri={photoUrl} style={styles.thumb} resizeMode="cover" />
       ) : (
         <View style={[styles.thumb, styles.thumbEmpty]}>
           <Icon name={KIND_ICONS[thing.kind]} size="md" color={Colors.textMuted} />

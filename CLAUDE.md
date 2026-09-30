@@ -336,8 +336,12 @@ Proposed and turned down, so it is not proposed again:
 - **Moving *SNAG-0094* and *Added by* into an overflow menu** — the app has no overflow menu, and
   the reference stays the header's title.
 
-**Still open:** a half-typed note is not counted by the footer's *All changes saved*, and leaving
-drops it. Posting it would send a message nobody finished, so it needs a decision, not a fix.
+**A half-typed note is kept on the device** (`lib/noteDrafts.ts`), by the owner's decision at
+launch. It was the one question this review left open: leaving dropped it, and posting it would
+send a message nobody finished and start the job. Now it is saved per job, per device, as it is
+typed, put back in the box when the job is opened again, forgotten once *Add note* sends it (and
+after thirty days), and never sent on leaving. The footer names it — *Note not added yet — kept on
+this device* — rather than claiming *All changes saved* over the box above it.
 
 `SnagDetailScreen.test.tsx` pins it: no date box and no quick dates, repeat or not; a cycle dating
 an undated job and leaving a set date alone; *Every* dating an undated repeat; *Never* clearing
@@ -691,6 +695,16 @@ need an email per snag; see `notify-snag` in the archive). So this screen is the
 which one person finds out what the other did, and the first thing it says is what arrived since
 they last looked.
 
+- **The list stays current without being asked** (launch, September 2026). An installed web app is
+  not closed when somebody leaves it: it comes back hours later exactly as it was, and
+  pull-to-refresh is a no-op on the web build (react-native-web's `RefreshControl` is a plain
+  `View`). So the list came back missing the other person's jobs and with its photos' links expired
+  — six blank tiles in the logs the day before launch. Now: coming back after a minute away reloads
+  whichever of List, House, a room page or Schedule is showing (`useOnReturn`, `lib/foreground.ts`);
+  after half an hour away "New" is stamped again, as on opening the app; and the list reads itself
+  every two minutes while it is on screen and no sheet is up. Its loads are ordered (`loadSeq`), so
+  an older read landing late cannot put back a job just finished. `SnagListScreen.test.tsx` pins the
+  reload, the quick-camera-trip case, and the new-visit stamp.
 - **"New" is what somebody *else* added since your last visit.** Your own entries are never news
   to you. The stamp is `profiles.last_seen_list_at`, written by `home.mark_list_seen`, which
   returns the *previous* value so the section can't empty itself out while it's being read. It is
@@ -1317,6 +1331,15 @@ thirty-field form, a house has four hundred things in it, and the record ends up
 8% record is worse than none — you check it once, find nothing, and never check again.
 
 ### The photographed label is read, and nothing it says is saved unseen
+
+**Off for v1** (`lib/labelReading.ts`). The day before launch the Gemini key's prepaid credits ran
+out: every read answered `402`, which the app worded as a generic failure with a *Try again* that
+could not work and spent a daily read each press. So unless the build sets
+`EXPO_PUBLIC_LABEL_READING=on`, nothing calls `read-label` or `lookup-product`: the walkthrough keeps
+the plate photo and asks for the details by hand, the thing page shows neither *Read from the label*
+nor *What the maker says*, and the House tab counts no labels to check. To bring it back: credit and
+auto-reload on the key, one real plate read, then the variable and a redeploy. The specs below run
+with it on; each suite also pins the off state.
 
 The walkthrough has always photographed the rating plate "because it carries the make, model and
 serial at once" — and then asked somebody to type all three off the photo they had just taken.
@@ -3267,6 +3290,12 @@ bathroom. No second bucket: `home-photos` under `<household_id>/docs/`, through
 
 ### Projects can be put away, per person
 
+**v1 ships without the Projects tab** (`20260929214206`): `projects_enabled` defaults to false and is
+true only for the two accounts that use it (`mturnernz@gmail.com`, `alyssa.weake@gmail.com`), and the
+You tab's *Show projects / Hide them* switch is gone, so nobody else is offered it. Turning it on for
+somebody is one `update` by hand, written out in that migration. Everything below still describes
+what the flag does.
+
 `profiles.projects_enabled` (`20260920090000`), written by `home.set_projects_enabled`. A
 renovation is a third noun and not every household has one, so somebody with no project in
 progress was paying a tab — a fifth of the only navigation this app has — for a feature answering
@@ -3304,8 +3333,8 @@ here that unlabelled answer removes a tab. Pressing the half that is already lit
 The write goes through `reloadAccount()` rather than local state, because the answer decides
 whether a *tab* exists and the navigator reads it off the profile in context.
 
-`ProfileScreen.test.tsx` pins the two halves, the no-op press, the re-read after the write, the
-hint naming what else goes, and both reads being skipped once it is off.
+`ProfileScreen.test.tsx` pins that the You tab offers no switch for v1, and both reads being
+skipped once it is off.
 `ScheduleScreen.test.tsx` pins the filter reaching `getSnags` and `getAllProjects` not being
 called.
 
@@ -4345,6 +4374,18 @@ keeps its row and loses the address. Free text the pilots typed is not searched 
 nothing ties it to the person. `archive_locked.sql` replays the delete for a made-up pilot account
 and asserts the login gone, the name and address gone, and every archive row still there.
 
+**A login deleted anywhere leaves the same way** (`20260929214235`). On 29 September 2026 six logins
+were deleted from the Supabase dashboard, which skipped everything above: three profiles kept their
+names and stayed members of households nobody could open, and the archive kept every name and
+address. A trigger on `auth.users` (`home.forget_deleted_login` → `home.forget_login`) now does what
+`delete_my_account` does, whoever deletes the row: out of shared households (assignments nulled, a
+place only they were on handed to the longest-standing member), solo households deleted, invitations
+to the address dropped, the name tombstoned in both schemas. `delete_my_account` still does it first,
+and the trigger then finds nothing to do. **The one gap is files**: SQL cannot delete from storage, so
+a solo household deleted from the dashboard leaves its photos in the bucket under its id — clear them
+there. Deleting through the app never does. `supabase/tests/login_deleted.sql` replays both doors
+and the shared-household case.
+
 ### A code you can hold up — and a link you can send
 
 **The link is the first thing *Add someone* offers**, as **Share an invite link** through the
@@ -4789,6 +4830,12 @@ grey mid-press reads as the action having failed.
   listing per directive: `img-src` for a picked photo's preview, `connect-src` for reading its
   bytes, and `'self'` covers neither. `src/lib/csp.test.ts` pins the schemes the upload path
   depends on.
+- **A photo from the bucket is a `SignedImage`, never a bare `<Image>`.** Signed links last an
+  hour. `getFileUrls` remembers them and hands one out only while it has fifteen minutes left
+  (`lib/signedUrls.ts`), so a reload reuses the link and the browser's cache instead of downloading
+  every thumbnail again, and never hands out one about to die. `SignedImage` (and `PhotoViewer`,
+  through `useSignedUri`) signs the path again once if a link fails anyway, then draws a quiet
+  placeholder. A bare `<Image>` on a signed URL goes blank for ever when it expires.
 - **Every request has a deadline** (`fetchWithTimeout` in `lib/supabase.ts`). supabase-js sets
   none, and it resolves an access token before every request — so one stalled `/auth/v1/token`
   refresh leaves `getSession()` pending forever and no later call is ever issued at all. Nothing
@@ -4963,7 +5010,7 @@ under *The staff portal*.
 | `app.snaghq.co.nz` | `apps/mobile`'s Expo web export — the app people install |
 | `www.snaghq.co.nz` | `apps/web` — the front page, the privacy statement, the terms and password recovery |
 | `staff.snaghq.co.nz` | `apps/staff` — the SnagHQ staff portal |
-| `snagv1.netlify.app` | redirect to `app.snaghq.co.nz` |
+| `snagv1.netlify.app` | 301 to `app.snaghq.co.nz`, path kept (`apps/mobile/netlify.toml`) |
 
 `snagv1.netlify.app` has to keep resolving, and not only for tidiness: **QR codes encoding it were
 printed and put on walls**. That's why it stays in `linking.ts`'s prefix list — the Netlify
@@ -5006,8 +5053,9 @@ both, and they have to open in any browser for somebody who has no account yet. 
 steps (there is no store listing), and links privacy, terms, help and recovery. Every sentence on it
 is a rule in this file: capture asks after it files, suggestions are offers, nothing sends a
 notification. A claim there that the app cannot keep is the fastest way to lose somebody on their
-first day. `/terms` is a **draft** until its `DRAFT` flag is switched off, in the same change that
-fills in the entity, NZBN and address placeholders.
+first day. `/terms` names SnagHQ as the provider and, by the owner's decision, carries no NZBN or
+postal address; it is in force from 30 September 2026. The front page describes the four tabs v1
+has — List, House, Schedule, You — and promises nothing about renovations or label reading.
 
 `@supabase/ssr` forces PKCE, and a PKCE recovery link only works in the browser that asked for it
 — auth-js wants the `code` *and* a stored verifier, and with the verifier missing it doesn't

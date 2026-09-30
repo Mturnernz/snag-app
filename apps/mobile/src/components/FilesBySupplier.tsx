@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, Image, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 
+import SignedImage from './SignedImage';
 import Icon from './Icon';
 import PhotoViewer from './PhotoViewer';
 import FileTagChips from './FileTagChips';
@@ -175,7 +176,7 @@ export default function FilesBySupplier({ groups, tags, onTag, onRemove }: Props
                       accessibilityLabel={`Open photo ${index + 1} from ${group.name}, ${describeFileHome(photo)}`}
                     >
                       {urls[photo.path] ? (
-                        <Image source={{ uri: urls[photo.path] }} style={styles.tile} />
+                        <SignedImage uri={urls[photo.path]} style={styles.tile} />
                       ) : (
                         <View style={[styles.tile, styles.tileEmpty]} />
                       )}

@@ -1073,6 +1073,48 @@ describe('the notes box', () => {
     );
     expect(arrows).toEqual([]);
   });
+
+  // The question the job page review left open: a half-typed note used to be
+  // dropped on leaving. It is kept on this device instead — never sent, since a
+  // note is a message and `add_comment` starts the job.
+  describe('a note not yet added', () => {
+    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    beforeEach(async () => { await AsyncStorage.clear(); });
+
+    const type = async (r: ReturnType<typeof render>, text: string) => {
+      await TestRenderer.act(async () => { noteBox(r).props.onFocus(); });
+      await TestRenderer.act(async () => { noteBox(r).props.onChangeText(text); });
+      await TestRenderer.act(async () => { noteBox(r).props.onBlur(); });
+    };
+
+    it('is kept on the device and put back when the job is opened again', async () => {
+      const first = await arrange();
+      await type(first, 'Ordered the seal from');
+      first.unmount();
+
+      const again = await arrange();
+      expect(noteBox(again).props.value).toBe('Ordered the seal from');
+      expect(mock_addComment).not.toHaveBeenCalled();
+    });
+
+    it('is forgotten once it is added', async () => {
+      const first = await arrange();
+      await type(first, 'Ordered the seal');
+      await TestRenderer.act(async () => { await byLabel(first, 'Add note').props.onPress(); });
+      expect(mock_addComment).toHaveBeenCalledWith(snag().id, 'Ordered the seal');
+      first.unmount();
+
+      const again = await arrange();
+      expect(noteBox(again).props.value).toBe('');
+    });
+
+    it('is named in the footer rather than claimed as saved', async () => {
+      const r = await arrange();
+      await type(r, 'Ordered the seal');
+      expect(r.queryByText('Note not added yet — kept on this device')).not.toBeNull();
+      expect(r.queryByText('All changes saved')).toBeNull();
+    });
+  });
 });
 
 describe('asking SnagHQ', () => {

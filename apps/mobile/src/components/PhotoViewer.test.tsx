@@ -18,6 +18,11 @@ import PhotoViewer from './PhotoViewer';
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 44, bottom: 34, left: 0, right: 0 }),
 }));
+// A link that fails is signed again (`useSignedUri`); nothing here fails one.
+jest.mock('../lib/supabase', () => ({
+  HOUSEHOLD_FILES_BUCKET: 'home-photos',
+  refreshFileUrl: jest.fn().mockResolvedValue(null),
+}));
 
 const onClose = jest.fn();
 

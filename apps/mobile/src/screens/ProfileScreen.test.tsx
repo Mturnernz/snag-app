@@ -293,50 +293,22 @@ describe('worth finishing', () => {
 
 // ---------------------------------------------------------------- projects off
 //
-// The one setting in this app that belongs to a person rather than to the
-// house. Everything else the schema remembers is per household or per property,
-// because there is one house and two people disagreeing about whether it has a
-// dryer is not a state worth modelling. A renovation is not that: not every
-// household has one, and a tab that answers nothing is a fifth of the only
-// navigation this app has.
+// v1 ships without the renovations tab. It is off for everybody but the two
+// accounts it was turned on for in SQL, and the You tab offers no way to turn
+// it on: a switch here would be offering everybody a tab the launch does not
+// include. `profiles.projects_enabled` still decides whether the tab exists.
 
-describe('putting projects away', () => {
-  const byLabel = (r: ReturnType<typeof render>, label: string) =>
-    r.root.findAll(
-      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
-        && !!n.props?.onPress,
-      { deep: true }
-    )[0];
-
-  it('offers two named halves, with the one already true lit', async () => {
+describe('projects in v1', () => {
+  it('offers no switch to show or hide them', async () => {
     const r = await renderProfile();
-    expect(byLabel(r, 'Show projects').props.accessibilityState.selected).toBe(true);
-    expect(byLabel(r, 'Hide projects').props.accessibilityState.selected).toBe(false);
-  });
-
-  it('writes nothing when the answer already on screen is pressed again', async () => {
-    mock_setProjectsEnabled.mockClear();
-    const r = await renderProfile();
-    await TestRenderer.act(async () => { await byLabel(r, 'Show projects').props.onPress(); });
-    expect(mock_setProjectsEnabled).not.toHaveBeenCalled();
-  });
-
-  it('turns them off, and re-reads the account so the tab can go', async () => {
-    mock_setProjectsEnabled.mockClear();
-    const r = await renderProfile();
-    await TestRenderer.act(async () => { await byLabel(r, 'Hide projects').props.onPress(); });
-
-    expect(mock_setProjectsEnabled).toHaveBeenCalledWith(false);
-    // The navigator reads the answer off the profile in context, so the one
-    // that came back from the write has to be the one everything reads.
-    expect((global as any).__household.reloadAccount).toHaveBeenCalled();
-  });
-
-  it('says the jobs go too, because that is the surprising half', async () => {
-    const r = await renderProfile();
+    const labels = r.root
+      .findAll((n: any) => typeof n.props?.accessibilityLabel === 'string', { deep: true })
+      .map((n: any) => n.props.accessibilityLabel);
+    expect(labels).not.toContain('Show projects');
+    expect(labels).not.toContain('Hide projects');
     const said = r.getAllByType('Text').map((n: any) => String(n.props.children ?? ''));
-    expect(said.some((t: string) => t.includes('jobs filed against a renovation'))).toBe(true);
-    expect(said.some((t: string) => t.includes('Nothing is deleted'))).toBe(true);
+    expect(said).not.toContain('Projects');
+    expect(mock_setProjectsEnabled).not.toHaveBeenCalled();
   });
 
   it('asks for neither the renovations nor their jobs once they are off', async () => {

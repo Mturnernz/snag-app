@@ -10,6 +10,7 @@ import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '..
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, pickPhotos, takePhoto } from '../lib/photoUpload';
 import { failureReason } from '../lib/deadline';
+import { labelReadingEnabled } from '../lib/labelReading';
 import { readLabel, resolveLabelReading, uploadFile } from '../lib/supabase';
 import {
   applyLabelReading, catalogueSuggestions, describeCycle, documentFileName, documentName,
@@ -358,7 +359,9 @@ export default function AddThingSheet({
         if (mine !== openCount.current || shot !== photoCount.current) return null;
         setPhotoPath(path);
         setUpload('done');
-        read(path, shot);
+        // Off for v1 (lib/labelReading.ts): the photo is the record, and the
+        // make and model are typed on the last step.
+        if (labelReadingEnabled()) read(path, shot);
         return path;
       } catch (err: unknown) {
         console.error('Plate photo failed:', failureReason(err));
@@ -649,9 +652,13 @@ export default function AddThingSheet({
                 </Pressable>
               </View>
               <Text style={styles.hint}>
-                {painting
-                  ? 'The lid carries the colour code and the tint formula. It is read while you carry on.'
-                  : 'The plate carries the make, model and serial. It is read while you carry on — no need to wait.'}
+                {labelReadingEnabled()
+                  ? painting
+                    ? 'The lid carries the colour code and the tint formula. It is read while you carry on.'
+                    : 'The plate carries the make, model and serial. It is read while you carry on — no need to wait.'
+                  : painting
+                    ? 'The lid carries the colour code and the tint formula, so it is the photo worth keeping.'
+                    : 'The plate carries the make, model and serial, so it is the photo worth keeping.'}
               </Text>
             </ScrollView>
           </>

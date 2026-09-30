@@ -3,6 +3,15 @@ import TestRenderer from 'react-test-renderer';
 import { render, type RenderResult } from '../test/render';
 import ThingDetailScreen from './ThingDetailScreen';
 
+// Label reading is off for v1 (lib/labelReading.ts). These specs pin how it
+// behaves when it is on, so it comes back as it went; the off state has its own.
+const LABEL_FLAG = process.env.EXPO_PUBLIC_LABEL_READING;
+beforeAll(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'on'; });
+afterAll(() => {
+  if (LABEL_FLAG === undefined) delete process.env.EXPO_PUBLIC_LABEL_READING;
+  else process.env.EXPO_PUBLIC_LABEL_READING = LABEL_FLAG;
+});
+
 // This page reversed two of its own rules, so these pin the new ones.
 //
 // It used to render only the fields somebody had already filled in — the rest
@@ -1036,5 +1045,33 @@ describe('where a paint went', () => {
     const result = await open({ name: 'Dishwasher', notes: 'Main wall' });
     expect(pressable(result, 'Where it went: Main wall. Change')).toBeUndefined();
     expect(boxes(result)['Notes'].props.value).toBe('Main wall');
+  });
+});
+
+/** Label reading as v1 ships it: off (lib/labelReading.ts). */
+function withLabelReadingOff() {
+  beforeEach(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'off'; });
+  afterEach(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'on'; });
+}
+
+describe('with label reading off, as v1 ships', () => {
+  withLabelReadingOff();
+  const HEAT_PUMP = { name: 'Heat pump', make: 'Mitsubishi Electric', model: 'MSZ-GS60VFD', room: 'Living room' };
+
+  it('offers nothing from the maker, and does not ask', async () => {
+    const result = await open(HEAT_PUMP);
+    expect(texts(result).some((t) => t.startsWith('What Mitsubishi Electric says'))).toBe(false);
+    expect(mock_getProductLookup).not.toHaveBeenCalled();
+  });
+
+  it('shows no label reading, and does not ask for one', async () => {
+    mock_getLabelReadingsToCheck.mockResolvedValue([
+      { id: 'r1', thingId: 't1', photoPath: 'h1/plate.jpg', status: 'failed', reason: 'error', reading: null },
+    ]);
+    const result = await open(HEAT_PUMP);
+    expect(mock_getLabelReadingsToCheck).not.toHaveBeenCalled();
+    expect(texts(result).some((t) => /Read from the label/.test(t))).toBe(false);
+    // The record itself is all there, to be typed into.
+    expect(texts(result)).toEqual(expect.arrayContaining(['Make', 'Model', 'Serial']));
   });
 });

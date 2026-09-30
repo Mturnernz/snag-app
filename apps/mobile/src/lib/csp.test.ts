@@ -100,12 +100,34 @@ describe('the SPA rewrite a join code depends on', () => {
   // index.html and no /join directory. Without a catch-all rewrite Netlify
   // answers 404 before the app loads at all — so the QR would be dead on
   // arrival with everything here green and nothing in the app able to say why.
+  /** Every [[redirects]] block, in order, as Netlify reads them. */
+  const redirects = () => TOML.split('[[redirects]]').slice(1).map((block) => ({
+    from: block.match(/from\s*=\s*"([^"]+)"/)?.[1],
+    to: block.match(/to\s*=\s*"([^"]+)"/)?.[1],
+    status: block.match(/status\s*=\s*(\d+)/)?.[1],
+    force: /force\s*=\s*true/.test(block.split(/\n\s*\n/)[0]),
+  }));
+
   it('serves index.html for a path the export never wrote a file for', () => {
-    const redirect = TOML.match(/\[\[redirects\]\][\s\S]*?from\s*=\s*"([^"]+)"[\s\S]*?to\s*=\s*"([^"]+)"[\s\S]*?status\s*=\s*(\d+)/);
-    expect(redirect).not.toBeNull();
-    expect(redirect![1]).toBe('/*');
-    expect(redirect![2]).toBe('/index.html');
-    expect(redirect![3]).toBe('200');
+    const rewrite = redirects().find((one) => one.from === '/*');
+    expect(rewrite).toEqual({ from: '/*', to: '/index.html', status: '200', force: false });
+  });
+
+  // QR codes encoding snagv1.netlify.app were printed and put on walls. The old
+  // host sends people to the current one with the path kept, so a printed
+  // /join/<token> still lands on the join question — and it comes before the
+  // catch-all, because Netlify takes the first rule that matches.
+  it('sends the old address to the current one, path and all', () => {
+    const all = redirects();
+    const old = all.findIndex((one) => one.from === 'https://snagv1.netlify.app/*');
+    expect(old).toBeGreaterThanOrEqual(0);
+    expect(all[old]).toEqual({
+      from: 'https://snagv1.netlify.app/*',
+      to: 'https://app.snaghq.co.nz/:splat',
+      status: '301',
+      force: true,
+    });
+    expect(old).toBeLessThan(all.findIndex((one) => one.from === '/*'));
   });
 
   // A QR landing page inside an iframe is the classic phishing shell: the code

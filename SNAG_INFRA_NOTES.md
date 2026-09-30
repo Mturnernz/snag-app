@@ -546,11 +546,14 @@ seeded rooms), made through `upsert_profile` and `create_household` exactly as s
 
 **Recreated 30 September 2026.** The login was deleted from the dashboard with five others on
 29 September, and every signed-in spec failed at sign-in from then on. It was made again with the
-same address (`mturnernz+qa.admin@gmail.com`, so `E2E_EMAIL` is unchanged) and a new password,
-through Auth's own sign-up, confirmed in SQL, then given its profile and house through the RPCs and
+same address (`mturnernz+qa.admin@gmail.com`, so `E2E_EMAIL` is unchanged) through Auth's own
+sign-up, confirmed in SQL, then given its profile and house through the RPCs and
 `mark_setup_seen(['name','household','rooms','invite'])` — without that last call an account made
-after `20260929060443` stops on the setup steps and never reaches the list. **The `E2E_PASSWORD`
-repository secret has to be set to the new password** before CI can pass.
+after `20260929060443` stops on the setup steps and never reaches the list. Its password was then
+set back to the one the `E2E_PASSWORD` secret already holds, so the secret did not change. **The
+account's password and that secret must agree**: when they don't, every signed-in spec stops on
+*Welcome back* with *That email and password don't match*, which the Playwright report's page
+snapshot shows.
 Don't add it to a real household, and don't delete that one: the specs need a list to land on.
 Being in a household before `20260929060443` also means the migration marked it as having seen
 setup; an account made after it would be walked through the setup steps and never reach the list. If

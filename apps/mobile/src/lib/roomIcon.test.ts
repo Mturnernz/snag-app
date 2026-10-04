@@ -44,6 +44,8 @@ describe('the icon beside a room', () => {
     expect(roomIcon('Study')).toBe('book-outline');
     expect(roomIcon('Playroom')).toBe('game-controller-outline');
     expect(roomIcon('Workshop')).toBe('hammer-outline');
+    expect(roomIcon('Sleepout')).toBe('bed-outline');
+    expect(roomIcon('Conservatory')).toBe('flower-outline');
   });
 
   it('reads the noun, not the qualifier', () => {

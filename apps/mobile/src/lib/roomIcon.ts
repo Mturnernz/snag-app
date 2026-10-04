@@ -19,7 +19,7 @@ const RULES: [RegExp, IconName][] = [
   [/\b(shed|workshop)\b/i, 'hammer-outline'],
   [/\b(kitchen|kitchenette|dining|pantry|scullery)\b/i, 'restaurant-outline'],
   [/\b(bath|bathroom|ensuite|en-suite|toilet|wc|powder|shower)\b/i, 'water-outline'],
-  [/\b(bed|bedroom|nursery|baby|boy|girl|kids?|guest|master)\b/i, 'bed-outline'],
+  [/\b(bed|bedroom|nursery|baby|boy|girl|kids?|guest|master|sleepout)\b/i, 'bed-outline'],
   [/\b(living|lounge|family|movie|media|tv|sitting)\b/i, 'tv-outline'],
   [/\b(laundry|utility)\b/i, 'shirt-outline'],
   [/\b(hall|hallway|entry|entrance|foyer|stairs?|landing)\b/i, 'footsteps-outline'],
@@ -30,6 +30,7 @@ const RULES: [RegExp, IconName][] = [
   [/\b(roof|attic|loft|ceiling space)\b/i, 'home-outline'],
   [/\b(study|office|library)\b/i, 'book-outline'],
   [/\b(play|playroom|rumpus|games?)\b/i, 'game-controller-outline'],
+  [/\b(conservatory|sunroom)\b/i, 'flower-outline'],
 ];
 
 /** Null is Whole house — the place itself rather than a room in it. */

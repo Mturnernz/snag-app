@@ -374,7 +374,8 @@ this section wins**; the passages themselves keep their history.
   there is a photo. The scrim over the first photo is gone.
 - **A new place is seeded with three rooms** — Kitchen, Laundry, Master bedroom
   (`20261004110000`); existing places keep theirs. The setup rooms step is a grid of cards with a
-  dashed *Add another room* card. `RoomsEditor` (Location tags) is unchanged.
+  dashed *Add another room* card, which opens `AddRoomSheet` — see *Adding a room, from the tab
+  that shows the house*. `RoomsEditor` (Location tags) is unchanged.
 - **House tab: no count on a tile**, and a **Recorded · All rooms** `Segmented` on the count row
   (remembered per device, `lib/houseView.ts`). Recorded hides rooms with nothing real in them;
   while nothing at all is recorded every room shows and no choice is offered, so day one is still
@@ -1249,6 +1250,30 @@ against the active property and then `reloadLocations()` — so a conservatory, 
 room joins the tags the List tab groups by and capture offers, not just this screen. Rooms are a
 property's vocabulary, not one tab's; two screens keeping separate ideas of what rooms exist is
 how the House tab and the list stop describing the same house.
+
+**Add a room offers the rooms this house hasn't got, as cards, most common first** (`AddRoomSheet`).
+A new place starts with three rooms, so nearly everybody adds the rest, and nearly everybody's rest
+is the same dozen — typing *Bathroom* and *Bedroom 2* into a box one at a time was the chore the
+three-room seed was meant to remove. `COMMON_ROOMS` (`shared-types`) is the list, **ranked by how
+many NZ houses have the room**: the bathroom, the lounge and the second bedroom before the ensuite,
+the ensuite long before the conservatory and the movie room. `roomsToOffer` takes out what the place
+already has, comparing past case, punctuation and a trailing "room" (*En-suite*, *Laundry room*)
+and through `also` (a *Lounge* is the Living room) — but never by substring, because a *Bedroom* is
+not *Bedroom 2*. Names follow the seeded vocabulary (*Outside*, *Under the house*) so a room added
+from a card is as furnished as a seeded one.
+
+- **A card is dashed with a fern +**, the *Add another room* card's language: a room this house
+  does not have must not read as one it does.
+- **A tap writes; the card leaves; the sheet stays** for the next room. *Done* closes it, and
+  leaving adds a name still in the box at the foot, holding the sheet open over a refused one.
+- **One sheet, two doors** — the House tab's *Add a room* row and setup's dashed card — each
+  handing in its own `create_location` write, so the two cannot offer or add rooms differently.
+  The *Add a room…* chips inside other flows (the walkthrough, a project's rooms, a bill's rooms)
+  still take a typed name only.
+
+`commonRooms.test.ts` pins the ranking and the comparison as properties (no two rooms read as one;
+every seeded name is on the list); `AddRoomSheet.test.tsx` pins the order, the tap, the refusal and
+the box on the way out; `HouseScreen.test.tsx` and `SetupFlow.test.tsx` pin each door.
 
 The chip is on the room step because **the moment somebody notices the conservatory is missing is the
 moment they are trying to record something in it** — sending them to Profile → Location tags and

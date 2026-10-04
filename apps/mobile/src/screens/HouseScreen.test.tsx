@@ -4,6 +4,7 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import { Colors } from '../constants/theme';
 import HouseScreen from './HouseScreen';
+import { COMMON_ROOMS } from '../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Label reading is off for v1 (lib/labelReading.ts). These specs pin how it
@@ -408,6 +409,29 @@ describe('HouseScreen', () => {
     await TestRenderer.act(async () => pressable(result, 'Add the room').props.onPress());
 
     expect(mock_createLocation).toHaveBeenCalledWith('p', 'Conservatory');
+    expect(mock_reloadLocations).toHaveBeenCalled();
+  });
+
+  it("offers the rooms this place hasn't got as cards, most common first", async () => {
+    // The place has the Laundry and the Deck; the sheet leads with what nearly
+    // every house has and this one hasn't, and a tap is the whole act.
+    const result = render(<HouseScreen />);
+    await settle();
+    await TestRenderer.act(async () => pressable(result, 'Add a room').props.onPress());
+
+    const rooms = new Set(COMMON_ROOMS.map((room) => `Add ${room.name}`));
+    const offered = result.root.findAll(
+      (n: any) => typeof n.type !== 'string' && !!n.props?.onPress
+        && rooms.has(n.props?.accessibilityLabel),
+      { deep: true },
+    ).map((n: any) => n.props.accessibilityLabel as string);
+    const names = offered.filter((label, i) => offered.indexOf(label) === i).map((l) => l.slice(4));
+    expect(names.slice(0, 3)).toEqual(['Kitchen', 'Bathroom', 'Master bedroom']);
+    expect(names).not.toContain('Laundry');
+    expect(names).not.toContain('Deck');
+
+    await TestRenderer.act(async () => pressable(result, 'Add Ensuite').props.onPress());
+    expect(mock_createLocation).toHaveBeenCalledWith('p', 'Ensuite');
     expect(mock_reloadLocations).toHaveBeenCalled();
   });
 

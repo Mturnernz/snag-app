@@ -256,8 +256,27 @@ describe('the second person', () => {
     expect(mock.deleteLocation).not.toHaveBeenCalled();
   });
 
-  // The rooms are cards, and the last one is a dashed card that names a room
-  // in place.
+  // The rooms are cards, and the last one is a dashed card that opens the rooms
+  // this house hasn't got, most common first, and a box for anything else.
+  it('adds a ready-made room from the dashed card in one tap', async () => {
+    world = { profile: profile(['name', 'household']), household: HOUSE, members: 1 };
+    const r = await start();
+    await press(r, 'Add another room');
+    mock.getLocations.mockResolvedValue([
+      { id: 'l1', name: 'Kitchen' },
+      { id: 'l2', name: 'Garage' },
+      { id: 'l3', name: 'Bathroom' },
+    ]);
+    await TestRenderer.act(async () => {
+      await r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Add Bathroom'
+        && typeof n.props.onPress === 'function')[0].props.onPress();
+    });
+    await settle();
+    expect(mock.createLocation).toHaveBeenCalledWith('p', 'Bathroom');
+    // On the grid now, and no longer offered.
+    expect(r.getAllByText('Bathroom')).toHaveLength(1);
+  });
+
   it('adds another room from the dashed card', async () => {
     world = { profile: profile(['name', 'household']), household: HOUSE, members: 1 };
     const r = await start();

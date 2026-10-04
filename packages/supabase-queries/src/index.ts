@@ -79,6 +79,7 @@ import type {
   FileTags,
 } from '@snag/shared-types';
 import {
+  COMMON_ROOMS,
   FILE_TAGS,
   ROOM_SUGGESTIONS,
   STATUS_LABELS,
@@ -2579,6 +2580,35 @@ export function matchRooms(locations: Location[], query: string): Location[] {
   const wanted = query.trim().toLowerCase();
   if (!wanted) return locations;
   return locations.filter((one) => one.name.toLowerCase().includes(wanted));
+}
+
+/**
+ * A room's name as the comparison reads it: any case, no spaces or
+ * punctuation, and no trailing "room" — so *En-suite* is the Ensuite, *Laundry
+ * room* is the Laundry, and *Bedroom 2* is not the Bedroom.
+ *
+ * Stricter than `matchRooms`' substring on purpose. That one answers somebody
+ * typing; this one decides whether a room is already *there*, and "Bedroom" is
+ * inside "Bedroom 2" without being it.
+ */
+function roomKey(name: string): string {
+  const key = name.toLowerCase().replace(/[\s\-'’_.]/g, '');
+  return key.endsWith('room') && key.length > 'room'.length ? key.slice(0, -'room'.length) : key;
+}
+
+/**
+ * The ready-made rooms *Add a room* offers this place: `COMMON_ROOMS`, most
+ * common first, less every one it already has under that name or another.
+ *
+ * `existing` is the place's own tags. A room taken off the list and later
+ * missed is offered again, which is right — adding it back is the way back,
+ * and every job filed there kept its room all along (`snags.room` is TEXT).
+ */
+export function roomsToOffer(existing: string[]): string[] {
+  const have = new Set(existing.map(roomKey));
+  return COMMON_ROOMS
+    .filter((room) => ![room.name, ...(room.also ?? [])].some((name) => have.has(roomKey(name))))
+    .map((room) => room.name);
 }
 
 export function ghostsForRoom(

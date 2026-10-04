@@ -743,6 +743,70 @@ export const ROOM_SUGGESTIONS: Record<string, ThingSuggestion[]> = {
 };
 
 /**
+ * The rooms *Add a room* offers as cards, **most common first**.
+ *
+ * A new place is seeded with three rooms (Kitchen, Laundry, Master bedroom),
+ * so nearly everybody adds the rest — and nearly everybody's rest is the same
+ * dozen. Typing "Bathroom" and "Bedroom 2" into a box, one at a time, is the
+ * setup chore the three-room seed was meant to remove. So the sheet offers
+ * these, minus what the place already has (`roomsToOffer`), and a tap adds one.
+ *
+ * **The order is the point.** It is roughly how many New Zealand houses have
+ * the room: every house has a bathroom, most have an ensuite or a garage, few
+ * have a conservatory and fewer a movie room. A ranked list puts the likely
+ * answer under the thumb and lets the rest wait further down; an alphabetical
+ * one would put the Attic and the Carport first.
+ *
+ * Names follow the seeded vocabulary where it has one (*Outside*, *Under the
+ * house*), because `ROOM_SUGGESTIONS` is keyed by those exact names and a room
+ * added from a card should arrive as furnished as a seeded one. `also` is what
+ * the same room is often called instead: a house with a *Lounge* is not offered
+ * a *Living room*. Spelling, case, hyphens and a trailing "room" are already
+ * ignored by the comparison, so *En-suite* and *Laundry room* need no entry.
+ *
+ * A constant rather than a table, for `ROOM_SUGGESTIONS`' reason: it is an
+ * interface, not data.
+ */
+export interface CommonRoom {
+  name: string;
+  also?: string[];
+}
+
+export const COMMON_ROOMS: CommonRoom[] = [
+  { name: 'Kitchen' },
+  { name: 'Bathroom' },
+  { name: 'Master bedroom', also: ['Main bedroom', 'Bedroom 1'] },
+  { name: 'Living room', also: ['Lounge'] },
+  { name: 'Laundry' },
+  { name: 'Bedroom 2', also: ['Second bedroom'] },
+  { name: 'Hallway', also: ['Hall'] },
+  { name: 'Toilet', also: ['WC'] },
+  { name: 'Garage' },
+  { name: 'Bedroom 3', also: ['Third bedroom'] },
+  { name: 'Outside', also: ['Exterior', 'Outdoors'] },
+  { name: 'Ensuite' },
+  { name: 'Dining room' },
+  { name: 'Deck' },
+  { name: 'Roof' },
+  { name: 'Family room' },
+  { name: 'Study', also: ['Office', 'Home office'] },
+  { name: 'Bedroom 4', also: ['Fourth bedroom'] },
+  { name: 'Under the house' },
+  { name: 'Pantry' },
+  { name: 'Carport' },
+  { name: 'Garden shed', also: ['Shed'] },
+  { name: 'Sleepout' },
+  { name: 'Walk-in wardrobe' },
+  { name: 'Guest bedroom' },
+  { name: 'Rumpus room' },
+  { name: 'Scullery' },
+  { name: 'Nursery' },
+  { name: 'Conservatory', also: ['Sunroom'] },
+  { name: 'Workshop' },
+  { name: 'Movie room', also: ['Media room', 'Home theatre', 'Home theater'] },
+];
+
+/**
  * What this particular place hasn't got.
  *
  * The only thing the server remembers about suggestions, and it is the

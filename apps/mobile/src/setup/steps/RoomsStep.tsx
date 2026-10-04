@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 
 import SetupShell, { setupStyles } from '../SetupShell';
 import Icon from '../../components/Icon';
+import AddRoomSheet from '../../components/AddRoomSheet';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../../constants/theme';
 import { createLocation, deleteLocation, getLocations, getMyProperties } from '../../lib/supabase';
 import { showAlert } from '../../lib/alert';
@@ -21,7 +22,9 @@ const CHANGE_LATER = SETUP_STEPS.find((step) => step.id === 'rooms')?.changeLate
  * bedroom) since October 2026, where it had twelve. Twelve was a list to read
  * and prune before anything else could happen; three is a start somebody adds
  * to. So the step is the rooms as cards, two to a row, and a dashed card with
- * a fern + — *Add another room* — that opens a name box in place. A card's ×
+ * a fern + — *Add another room* — that opens `AddRoomSheet`: the rooms a house
+ * usually has and this one hasn't, most common first, a tap each, and a box for
+ * anything else. The House tab's *Add a room* opens the same sheet. A card's ×
  * takes a room away, written on the press like everything else here.
  *
  * It writes through `create_location` / `delete_location`, the functions
@@ -36,7 +39,6 @@ export default function RoomsStep({ ctx, progress, onBack, onNext }: StepProps) 
   const [propertyId, setPropertyId] = useState<string | null>(null);
   const [rooms, setRooms] = useState<Location[]>([]);
   const [adding, setAdding] = useState(false);
-  const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -61,22 +63,18 @@ export default function RoomsStep({ ctx, progress, onBack, onNext }: StepProps) 
 
   useEffect(() => { load(); }, [load]);
 
-  async function add() {
-    const next = name.trim();
-    if (!next || !propertyId || busy) return;
-    setBusy(true);
+  /** Resolves false on a refusal, so the sheet keeps the words that were refused. */
+  async function add(name: string): Promise<boolean> {
+    if (!propertyId) return false;
     try {
-      await createLocation(propertyId, next);
-      setName('');
-      setAdding(false);
-      await load();
+      await createLocation(propertyId, name);
     } catch (err: any) {
-      // The box stays open with the words in it: a refused name is still the
-      // answer somebody gave, and a duplicate is said in words by the server.
+      // A duplicate is said in words by the server.
       showAlert("Couldn't add that room", err?.message ?? 'Please try again.');
-    } finally {
-      setBusy(false);
+      return false;
     }
+    await load();
+    return true;
   }
 
   async function remove(room: Location) {
@@ -126,46 +124,18 @@ export default function RoomsStep({ ctx, progress, onBack, onNext }: StepProps) 
           <View key={pair.map((c) => (c === 'add' ? '+' : c.id)).join('|')} style={styles.row}>
             {pair.map((cell) => (cell === 'add' ? (
               <View key="add" style={[styles.card, styles.addCard]}>
-                {adding ? (
-                  <>
-                    <TextInput
-                      style={styles.input}
-                      value={name}
-                      onChangeText={setName}
-                      autoFocus
-                      maxLength={40}
-                      autoCapitalize="sentences"
-                      returnKeyType="done"
-                      onSubmitEditing={add}
-                      accessibilityLabel="Name the room"
-                    />
-                    <Pressable
-                      onPress={add}
-                      disabled={busy || !name.trim()}
-                      style={styles.addConfirm}
-                      accessibilityRole="button"
-                      accessibilityLabel="Add the room"
-                      accessibilityState={{ disabled: busy || !name.trim() }}
-                    >
-                      <Text style={[styles.addConfirmLabel, (busy || !name.trim()) && styles.off]}>
-                        Add
-                      </Text>
-                    </Pressable>
-                  </>
-                ) : (
-                  <Pressable
-                    onPress={() => setAdding(true)}
-                    disabled={!propertyId}
-                    style={styles.addOpen}
-                    accessibilityRole="button"
-                    accessibilityLabel="Add another room"
-                  >
-                    <View style={styles.plus}>
-                      <Icon name="add" size="md" color={Colors.white} />
-                    </View>
-                    <Text style={styles.addLabel}>Add another room</Text>
-                  </Pressable>
-                )}
+                <Pressable
+                  onPress={() => setAdding(true)}
+                  disabled={!propertyId}
+                  style={styles.addOpen}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add another room"
+                >
+                  <View style={styles.plus}>
+                    <Icon name="add" size="md" color={Colors.white} />
+                  </View>
+                  <Text style={styles.addLabel}>Add another room</Text>
+                </Pressable>
               </View>
             ) : (
               <View key={cell.id} style={styles.card}>
@@ -193,6 +163,12 @@ export default function RoomsStep({ ctx, progress, onBack, onNext }: StepProps) 
       {CHANGE_LATER ? (
         <Text style={setupStyles.hint}>You can change these any time from {CHANGE_LATER}.</Text>
       ) : null}
+      <AddRoomSheet
+        visible={adding}
+        existing={rooms.map((room) => room.name)}
+        onAdd={add}
+        onClose={() => setAdding(false)}
+      />
     </SetupShell>
   );
 }
@@ -246,15 +222,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
-  input: {
-    backgroundColor: Colors.sunken,
-    borderRadius: Radius.input,
-    paddingHorizontal: Spacing.sm,
-    minHeight: MIN_TOUCH_TARGET,
-    fontSize: Typography.base,
-    color: Colors.textPrimary,
-  },
-  addConfirm: { minHeight: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },
-  addConfirmLabel: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.primary },
-  off: { color: Colors.textMuted },
 });

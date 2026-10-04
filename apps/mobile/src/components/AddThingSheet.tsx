@@ -6,6 +6,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
+import { TextButton } from './Grouped';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, pickPhotos, takePhoto } from '../lib/photoUpload';
@@ -627,6 +628,17 @@ export default function AddThingSheet({
                   </Text>
                 </Pressable>
               )}
+              {/* For a thing with no plate to photograph, or somebody holding
+                  the details on paper: straight on, the photo passed over. */}
+              {!localUri ? (
+                <TextButton
+                  label="Enter details manually"
+                  onPress={() => {
+                    setSkipped((was) => (was.includes('photo') ? was : [...was, 'photo']));
+                    next();
+                  }}
+                />
+              ) : null}
               <View style={styles.photoActions}>
                 {localUri ? (
                   <Pressable

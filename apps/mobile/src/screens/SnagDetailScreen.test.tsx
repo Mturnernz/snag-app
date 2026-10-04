@@ -3,6 +3,15 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import SnagDetailScreen from './SnagDetailScreen';
 
+// Ask SnagHQ is off for v1 (lib/askSnagHQ.ts). The page is pinned with it on,
+// and the off state has its own block at the end.
+const ASK_FLAG = process.env.EXPO_PUBLIC_ASK_SNAGHQ;
+beforeAll(() => { process.env.EXPO_PUBLIC_ASK_SNAGHQ = 'on'; });
+afterAll(() => {
+  if (ASK_FLAG === undefined) delete process.env.EXPO_PUBLIC_ASK_SNAGHQ;
+  else process.env.EXPO_PUBLIC_ASK_SNAGHQ = ASK_FLAG;
+});
+
 // Finishing something is the one moment this app says well done, and the whole
 // risk is saying it about a job that is still on the list: a repeating snag
 // never reaches 'done' — `set_snag_status` rolls `due_at` forward and leaves it
@@ -269,6 +278,16 @@ describe('linked assets', () => {
     make: 'Mitsubishi', model: 'MSZ-AP50VGK', kind: 'appliance', ...over,
   });
 
+  it('says who services a linked item, and nothing when nobody said', async () => {
+    const said = (r: ReturnType<typeof render>) => r.getAllByType('Text')
+      .map((n: any) => [].concat(n.props.children ?? []).join(''));
+    const r = await arrange(snag({ linkedThings: [linked({ servicedBy: 'Aircon Experts' })] }));
+    expect(said(r)).toContain('Serviced by Aircon Experts');
+
+    const none = await arrange(snag({ linkedThings: [linked({ servicedBy: null })] }));
+    expect(said(none).some((t) => t.startsWith('Serviced by'))).toBe(false);
+  });
+
   it('offers to link, and reads nothing, when the job has no room', async () => {
     mock_getThings.mockClear();
     const r = await arrange(snag({ linkedThings: [], room: null }));
@@ -500,15 +519,11 @@ describe('the top of the page', () => {
     { deep: true },
   );
 
-  // Both ways in, on the first photo — siblings of the photo's own door,
-  // never inside it.
-  it('lays the camera and the library over the first photo, beside its door', async () => {
+  // Both ways in sit under the headline as pills, never on the photo.
+  it('offers the camera and the library as pills, never over the photo', async () => {
     const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
-    const camera = pressables(r, 'Take a photo');
-    const library = pressables(r, 'Choose photos');
-    expect(camera.length).toBeGreaterThan(0);
-    expect(library.length).toBeGreaterThan(0);
-
+    expect(r.queryByText('Take photo')).not.toBeNull();
+    expect(r.queryByText('Choose photos')).not.toBeNull();
     const doors = pressables(r, 'Open this photo');
     expect(doors.length).toBeGreaterThan(0);
     for (const door of doors) {
@@ -517,7 +532,7 @@ describe('the top of the page', () => {
     }
   });
 
-  it('offers both as pills when there is no photo to lay them on', async () => {
+  it('offers both as pills when there is no photo', async () => {
     const r = await arrange(snag({ photoPaths: [] }));
     expect(r.queryByText('Take photo')).not.toBeNull();
     expect(r.queryByText('Choose photos')).not.toBeNull();
@@ -1171,5 +1186,24 @@ describe('asking SnagHQ', () => {
     expect(mock_setSnagStatus).not.toHaveBeenCalled();
     expect(mock_showToast).toHaveBeenCalledWith('Sent to SnagHQ');
     expect(r.queryByText('Can I fix it?')).not.toBeNull();
+  });
+});
+
+describe('asking SnagHQ, switched off', () => {
+  beforeEach(() => { process.env.EXPO_PUBLIC_ASK_SNAGHQ = 'off'; });
+  afterEach(() => { process.env.EXPO_PUBLIC_ASK_SNAGHQ = 'on'; });
+
+  it('offers no button, shows no question and never reads one', async () => {
+    mock_getSupport.mockClear();
+    mock_getSupport.mockResolvedValue({
+      id: 'r1', snagId: 's1', status: 'waiting', question: 'Why does it run?',
+      createdAt: new Date().toISOString(), waitingSince: new Date().toISOString(),
+      firstSeenAt: null, lastStaffReplyAt: null, closedAt: null, closedBy: null, messages: [],
+    });
+    const r = await arrange();
+    expect(r.queryByText('Ask SnagHQ about this')).toBeNull();
+    expect(r.queryByText('Asked SnagHQ')).toBeNull();
+    expect(mock_getSupport).not.toHaveBeenCalled();
+    expect(r.queryByText('Notes')).not.toBeNull();
   });
 });

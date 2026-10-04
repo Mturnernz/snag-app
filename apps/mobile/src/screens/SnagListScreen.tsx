@@ -9,7 +9,9 @@ import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import SnagCard from '../components/SnagCard';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
-import ComposeBar, { fileCapturedPhoto } from '../components/ComposeBar';
+import { fileCapturedPhoto } from '../components/ComposeBar';
+import CaptureSheet from '../components/CaptureSheet';
+import Fab from '../components/Fab';
 import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import AmendSnagSheet from '../components/AmendSnagSheet';
@@ -24,6 +26,7 @@ import {
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { failureReason } from '../lib/deadline';
+import { takePhoto } from '../lib/photoUpload';
 import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import { isForeground, NEW_VISIT_MS, RETURN_RELOAD_MS } from '../lib/foreground';
 import FoldAllPill from '../components/FoldAllPill';
@@ -135,6 +138,8 @@ export default function SnagListScreen() {
   /** Where the "New" rule sits. Captured once per visit, not per render. */
   const [seenBefore, setSeenBefore] = useState<string | null>(null);
   const [justAdded, setJustAdded] = useState<Snag | null>(null);
+  /** The +'s sheet: Take photo, or Continue without picture. */
+  const [capturing, setCapturing] = useState(false);
   const [amending, setAmending] = useState(false);
   /**
    * The house record, for the amend sheet's "is it about one of these?" step.
@@ -224,7 +229,7 @@ export default function SnagListScreen() {
   // The list reads itself again every two minutes while it is what somebody is
   // looking at — see LIST_REFRESH_MS. Not while a sheet is up over it: the
   // sheet is what they are doing, and a list shifting underneath is noise.
-  const sheetUp = justAdded !== null || showExport || placesOpen;
+  const sheetUp = justAdded !== null || showExport || placesOpen || capturing;
   useEffect(() => {
     if (sheetUp) return undefined;
     const timer = setInterval(() => {
@@ -571,6 +576,44 @@ export default function SnagListScreen() {
     });
     setJustAdded(snag);
     await load();
+  }
+
+  /**
+   * *Take photo* on the +'s sheet. The camera opens from inside the press —
+   * a browser opens it only from a tap — and the photo is filed the way the
+   * shutter always filed one: saved first, then the capture sheet asks what
+   * is wrong and where.
+   */
+  async function captureFromCamera() {
+    if (!activeProperty) return;
+    const pending = takePhoto();
+    setCapturing(false);
+    const uri = await pending;
+    if (!uri) return;
+    try {
+      await fileCapturedPhoto(uri, household.id, null, handleAdd);
+    } catch (err: unknown) {
+      showAlert("Couldn't add that photo", failureReason(err) ?? 'Please try again.');
+    }
+  }
+
+  /**
+   * *Continue without picture*, then *Add job*. Created only now, from the
+   * words — nothing exists while the box is open — and then the job's own
+   * page opens, where the room and everything else are decided. A refusal
+   * says why and rethrows, so the sheet keeps the words.
+   */
+  async function captureWords(text: string) {
+    if (!activeProperty) return;
+    try {
+      const snag = await createSnag({ propertyId: activeProperty.id, description: text, photoPaths: [] });
+      setCapturing(false);
+      await load();
+      navigation.navigate('SnagDetail', { snagId: snag.id });
+    } catch (err: any) {
+      showAlert("Couldn't add that", err?.message ?? 'Please try again.');
+      throw err;
+    }
   }
 
   // The photograph from first-run setup's *Snap your first job*, filed the way
@@ -970,11 +1013,17 @@ export default function SnagListScreen() {
         />
       ) : null}
 
-      {/* The bar files, and only files. It used to double as the note field
-          for the snag just added, which is the thing nobody noticed: the
-          placeholder changed and the meaning of the field changed with it.
-          AmendSnagSheet asks for the note in words now. */}
-      <ComposeBar pathPrefix={household.id} onAdd={handleAdd} stacked />
+      {/* The + replaced the compose bar (October 2026): one way in, and the
+          list's foot back. It opens CaptureSheet — Take photo, or Continue
+          without picture. ComposeBar lives on for a thing's Report a problem. */}
+      <Fab onPress={() => setCapturing(true)} accessibilityLabel="Capture a new job" />
+      <CaptureSheet
+        visible={capturing}
+        disabled={!activeProperty}
+        onTakePhoto={captureFromCamera}
+        onAddWords={captureWords}
+        onClose={() => setCapturing(false)}
+      />
 
       <ExportSheet
         visible={showExport}
@@ -1078,7 +1127,8 @@ const styles = StyleSheet.create({
   },
   shopBadgeTextOn: { color: Colors.primary },
   since: { fontSize: Typography.sm, color: Colors.textMuted, paddingHorizontal: Spacing.lg },
-  listContent: { padding: Spacing.lg, gap: Spacing.md },
+  // Room at the foot for the + to float over without covering the export line.
+  listContent: { padding: Spacing.lg, paddingBottom: Spacing.xxxl * 3, gap: Spacing.md },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
   sinceRow: {
     flexDirection: 'row',

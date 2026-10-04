@@ -13,8 +13,14 @@ import { FirstCaptureProvider } from '../hooks/useFirstCapture';
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+const mock_navigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: jest.fn(), addListener: () => () => {} }),
+  useNavigation: () => ({ navigate: mock_navigate, addListener: () => () => {} }),
+}));
+const mock_takePhoto = jest.fn();
+jest.mock('../lib/photoUpload', () => ({
+  ...jest.requireActual('../lib/photoUpload'),
+  takePhoto: () => mock_takePhoto(),
 }));
 const mock_fileCapturedPhoto = jest.fn().mockResolvedValue(undefined);
 jest.mock('../components/ComposeBar', () => {
@@ -40,6 +46,7 @@ const mock_getSnags = jest.fn();
 const mock_markListSeen = jest.fn();
 const mock_setPartBought = jest.fn().mockResolvedValue(undefined);
 const mock_updateSnag = jest.fn();
+const mock_createSnag = jest.fn();
 const mock_setSnagStatus = jest.fn();
 jest.mock('../lib/supabase', () => ({
   setSnagStatus: (...a: unknown[]) => mock_setSnagStatus(...a),
@@ -47,7 +54,7 @@ jest.mock('../lib/supabase', () => ({
   markListSeen: () => mock_markListSeen(),
   getFileUrls: jest.fn().mockResolvedValue({}),
   getThings: jest.fn().mockResolvedValue([]),
-  createSnag: jest.fn(),
+  createSnag: (...a: unknown[]) => mock_createSnag(...a),
   updateSnag: (...a: unknown[]) => mock_updateSnag(...a),
   setPartBought: (...a: unknown[]) => mock_setPartBought(...a),
 }));
@@ -235,16 +242,15 @@ describe('taking the list out', () => {
     mock_writeExport.mockResolvedValue({ fileName: 'list.csv', path: null });
   });
 
-  it('offers the extract at the foot of the list, not on the compose bar', async () => {
+  it('offers the extract at the foot of the list, and no compose bar', async () => {
     arrange();
     mock_getSnags.mockResolvedValue([snag({ id: 'a', room: 'Kitchen' })]);
     const r = render(<SnagListScreen />);
     await settle();
 
     expect(r.queryByText('Export this list')).not.toBeNull();
-    // The compose bar is mocked to a single Text node; the export control is
-    // nowhere inside it. Nothing goes on the compose bar.
-    expect(r.queryByText('compose bar')).not.toBeNull();
+    // The + replaced the bar (October 2026).
+    expect(r.queryByText('compose bar')).toBeNull();
   });
 
   it('puts every snag in "Everything", done ones included and no lens applied', async () => {
@@ -827,5 +833,82 @@ describe('coming back to the app', () => {
     await settle();
     await returnAfter(5 * 60_000);
     expect(mock_markListSeen).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The + replaced the compose bar: one tap to a sheet offering the camera or
+// words. A photo is filed first and asked about after; words are filed only
+// when sent, and the job's page opens.
+describe('capturing from the +', () => {
+  const byLabel = (r: ReturnType<typeof render>, label: string) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+      && typeof n.props?.onPress === 'function',
+  )[0];
+  const press = async (r: ReturnType<typeof render>, label: string) => {
+    await TestRenderer.act(async () => { await byLabel(r, label).props.onPress(); });
+    await settle();
+  };
+  const box = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type === 'string' && n.props?.accessibilityLabel === "What's the job?"
+      && typeof n.props?.onChangeText === 'function',
+  )[0];
+
+  it('takes a photo and files it the way the shutter always did', async () => {
+    mock_takePhoto.mockResolvedValue('file://shot.jpg');
+    const r = render(<SnagListScreen />);
+    await settle();
+    await press(r, 'Capture a new job');
+    expect(r.queryByText('Continue without picture')).not.toBeNull();
+    await press(r, 'Take photo');
+    expect(mock_takePhoto).toHaveBeenCalledTimes(1);
+    expect(mock_fileCapturedPhoto.mock.calls[0].slice(0, 3)).toEqual(['file://shot.jpg', 'h', null]);
+  });
+
+  it('files nothing when the camera is closed without a photo', async () => {
+    mock_takePhoto.mockResolvedValue(null);
+    const r = render(<SnagListScreen />);
+    await settle();
+    await press(r, 'Capture a new job');
+    await press(r, 'Take photo');
+    expect(mock_fileCapturedPhoto).not.toHaveBeenCalled();
+    expect(mock_createSnag).not.toHaveBeenCalled();
+  });
+
+  it('without a picture, asks for the words and creates nothing until they are sent', async () => {
+    mock_createSnag.mockResolvedValue(snag({ id: 'new', description: 'Gutters' }));
+    const r = render(<SnagListScreen />);
+    await settle();
+    await press(r, 'Capture a new job');
+    await press(r, 'Continue without picture');
+    expect(r.queryByText("What's the job?")).not.toBeNull();
+    expect(box(r).props.autoFocus).toBe(true);
+    expect(mock_createSnag).not.toHaveBeenCalled();
+
+    await TestRenderer.act(async () => box(r).props.onChangeText('  Gutters  '));
+    await press(r, 'Add job');
+    expect(mock_createSnag).toHaveBeenCalledWith({ propertyId: 'p', description: 'Gutters', photoPaths: [] });
+    expect(mock_navigate).toHaveBeenCalledWith('SnagDetail', { snagId: 'new' });
+  });
+
+  it('keeps the words when the job cannot be made', async () => {
+    mock_createSnag.mockRejectedValue(new Error('offline'));
+    const r = render(<SnagListScreen />);
+    await settle();
+    await press(r, 'Capture a new job');
+    await press(r, 'Continue without picture');
+    await TestRenderer.act(async () => box(r).props.onChangeText('Gutters'));
+    await press(r, 'Add job');
+    expect(box(r).props.value).toBe('Gutters');
+    expect(mock_navigate).not.toHaveBeenCalled();
+  });
+
+  it('walked away from, files nothing', async () => {
+    const r = render(<SnagListScreen />);
+    await settle();
+    await press(r, 'Capture a new job');
+    await press(r, 'Continue without picture');
+    await TestRenderer.act(async () => box(r).props.onChangeText('Gutters'));
+    await press(r, 'Cancel');
+    expect(mock_createSnag).not.toHaveBeenCalled();
   });
 });

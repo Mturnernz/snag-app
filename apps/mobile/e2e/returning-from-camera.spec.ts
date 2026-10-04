@@ -33,7 +33,7 @@ async function signIn(page: Page) {
   await reachPassword(page, EMAIL!);
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD!);
   await page.getByText('Sign in', { exact: true }).click();
-  await expect(page.getByPlaceholder('Capture a new job')).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByLabel('Capture a new job')).toBeVisible({ timeout: 90_000 });
 }
 
 /**
@@ -71,9 +71,11 @@ test('the walkthrough survives the tab going away and coming back', async ({ pag
 
   await page.getByText('House', { exact: true }).first().click();
   // The House tab is a grid of rooms, and a room's + is on its own page. The
-  // tile's label carries the room's count ("Kitchen, 3 of 7"), which depends on
-  // what this account has recorded, so it is matched on the name alone.
-  await page.getByRole('button', { name: /^Kitchen, \d/ }).click();
+  // grid may be showing only the rooms with something recorded, so ask for
+  // all of them when that choice is offered.
+  const allRooms = page.getByRole('radio', { name: 'All rooms' });
+  if (await allRooms.count()) await allRooms.click();
+  await page.getByRole('button', { name: 'Open Kitchen' }).click();
   await page.getByLabel('Add something to Kitchen').click();
   // The walkthrough opens on the photo now, which is the step the original
   // report came from: the camera is what sends the tab away.
@@ -85,17 +87,19 @@ test('the walkthrough survives the tab going away and coming back', async ({ pag
   // unmount that took the whole sheet did not happen.
   await expect(page.getByText('Photograph the label')).toBeVisible();
   // The navigator must not have fallen back to its initial route.
-  await expect(page.getByPlaceholder('Capture a new job')).toBeHidden();
+  await expect(page.getByLabel('Capture a new job')).toBeHidden();
 });
 
 test('a typed snag is not lost when the tab comes back', async ({ page }) => {
   await signIn(page);
 
-  // The same unmount took everything else with it, and the compose bar is where
-  // it costs most — the whole point of the bar is that it holds what you typed.
-  await page.getByPlaceholder('Capture a new job').fill('Gutters need clearing');
+  // The same unmount took everything else with it, and the words of a job not
+  // yet sent are where it costs most.
+  await page.getByLabel('Capture a new job').click();
+  await page.getByText('Continue without picture', { exact: true }).click();
+  await page.getByLabel("What's the job?").fill('Gutters need clearing');
 
   await leaveAndComeBack(page);
 
-  await expect(page.getByPlaceholder('Capture a new job')).toHaveValue('Gutters need clearing');
+  await expect(page.getByLabel("What's the job?")).toHaveValue('Gutters need clearing');
 });

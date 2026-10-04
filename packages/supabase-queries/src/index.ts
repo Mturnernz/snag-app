@@ -30,6 +30,8 @@ import type {
   Comment,
   Household,
   HouseholdMember,
+  PlaceMember,
+  AccountDeletion,
   Invitation,
   InvitationByToken,
   InvitationToMe,
@@ -104,7 +106,15 @@ function mapSnag(row: Row): Snag {
     propertyId: row.property_id,
     room: row.room ?? null,
     photoPaths: row.photo_paths ?? [],
-    linkedThings: row.linked_things ?? [],
+    linkedThings: ((row.linked_things ?? []) as any[]).map((t) => ({
+      id: t.id,
+      name: t.name ?? null,
+      room: t.room ?? null,
+      make: t.make ?? null,
+      model: t.model ?? null,
+      kind: t.kind,
+      servicedBy: t.serviced_by ?? null,
+    })),
     description: row.description ?? null,
     status: row.status,
     parts: row.parts ?? [],
@@ -451,6 +461,18 @@ export async function cancelInvitation(
 // installed Snag yet. No camera permission, no scanner screen, no getUserMedia
 // to get past the deployed CSP.
 
+/**
+ * The places an invitation lets somebody into, in words: *Martin's Bay*,
+ * *the house and the bach*, *A, B and C*. Falls back to the household's name
+ * only for an invitation that names no place, which nothing writes any more.
+ */
+export function describePlaces(names: string[] | null | undefined, fallback: string): string {
+  const list = (names ?? []).filter((n) => n.trim().length > 0);
+  if (list.length === 0) return fallback;
+  if (list.length === 1) return list[0];
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+
 /** The URL a join QR encodes, and the one shown beside it to copy. */
 export function joinUrl(appUrl: string, token: string): string {
   return `${appUrl.replace(/\/+$/, '')}/join/${token}`;
@@ -507,6 +529,7 @@ export async function getInvitationByToken(
     invitedByName: row.invited_by_name,
     expiresAt: row.expires_at,
     alreadyAMember: !!row.already_a_member,
+    propertyNames: (row.property_names as string[] | null) ?? [],
   };
 }
 
@@ -535,6 +558,7 @@ export async function getMyInvitations(client: SupabaseClient): Promise<Invitati
     householdName: row.household_name,
     invitedByName: row.invited_by_name,
     createdAt: row.created_at,
+    propertyNames: (row.property_names as string[] | null) ?? [],
   }));
 }
 
@@ -555,6 +579,21 @@ export async function declineInvitation(
 }
 
 // ---------------------------------------------------------------- an ending
+
+/**
+ * What deleting this account would delete: the households it owns and is alone
+ * in, with their places. Every other household is left, and a place it owns
+ * and shares is handed on — so the confirmation can name what actually goes.
+ */
+export async function getMyAccountDeletions(client: SupabaseClient): Promise<AccountDeletion[]> {
+  const { data, error } = await client.rpc('my_account_deletes');
+  if (error) throw asError(error, "Couldn't work out what would be deleted");
+  return ((data as Row[]) ?? []).map((row) => ({
+    householdId: row.household_id,
+    householdName: row.household_name,
+    propertyNames: (row.property_names as string[] | null) ?? [],
+  }));
+}
 
 /**
  * Every storage key deleting this account would strand — the files of the
@@ -716,6 +755,54 @@ export async function getPropertyMemberIds(
   return (data ?? []).map((row: Row) => row.profile_id);
 }
 
+/**
+ * Who is on each of these places, owners first then by when they arrived.
+ * RLS answers only for places this person is on.
+ */
+export async function getPlaceMembers(
+  client: SupabaseClient,
+  propertyIds: string[]
+): Promise<PlaceMember[]> {
+  if (propertyIds.length === 0) return [];
+  const { data, error } = await client
+    .from('property_members')
+    .select('property_id, profile_id, role, created_at, profile:profiles!inner(display_name)')
+    .in('property_id', propertyIds)
+    .order('created_at');
+
+  if (error) throw asError(error, "Couldn't load who's on each place");
+  const rows: PlaceMember[] = (data ?? []).map((row: Row) => ({
+    propertyId: row.property_id,
+    profileId: row.profile_id,
+    displayName: row.profile?.display_name ?? 'Someone',
+    role: row.role,
+  }));
+  // Stable: owners first, then the order they arrived in.
+  return rows
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) =>
+      (a.m.role === 'owner' ? 0 : 1) - (b.m.role === 'owner' ? 0 : 1) || a.i - b.i)
+    .map(({ m }) => m);
+}
+
+/**
+ * Makes somebody already on a place an owner of it. A place can have more than
+ * one owner; `stepDown` hands it over outright. Only an owner can call it.
+ */
+export async function transferPropertyOwnership(
+  client: SupabaseClient,
+  propertyId: string,
+  profileId: string,
+  stepDown = false
+): Promise<void> {
+  const { error } = await client.rpc('transfer_property_ownership', {
+    p_property_id: propertyId,
+    p_profile_id: profileId,
+    p_step_down: stepDown,
+  });
+  if (error) throw asError(error, "Couldn't hand that place on");
+}
+
 export async function setPropertyMember(
   client: SupabaseClient,
   propertyId: string,
@@ -738,8 +825,9 @@ export async function setPropertyMember(
 
 /**
  * Removes somebody from a household — including yourself, which is what
- * leaving is. One call for both, because with two people in a house they are
- * the same act, and there are no roles here to make one of them a privilege.
+ * leaving is. Anybody can leave; only the household's owner can take somebody
+ * else out (20261004100000). A joiner used to be an owner and could remove
+ * the people who built the house; see CLAUDE.md, *Owners*.
  *
  * The profile row survives, so a snag filed by somebody who has since left
  * still says who filed it.
@@ -2603,15 +2691,13 @@ export function houseRooms(
 /**
  * How many things a room's tile lists before it fades out. Four lines is the
  * most a half-width tile carries before one busy room makes its whole row of
- * the grid twice as tall as every other; the count above says how many there
- * are, and the room's own page lists them all.
+ * the grid twice as tall as every other; the fade says there is more, and
+ * the room's own page lists them all.
  */
 export const TILE_BULLET_LIMIT = 4;
 
 /** What a room's tile says. */
 export interface HouseRoomDescription {
-  /** "2 of 8" while anything is still suggested, a bare total after. */
-  count: string;
   /** Up to `TILE_BULLET_LIMIT` lines: records by headline, or suggestions. */
   lines: string[];
   /** True when the lines are suggestions — nothing is recorded yet. */
@@ -2623,11 +2709,10 @@ export interface HouseRoomDescription {
 }
 
 /**
- * What a room's tile says: a count, a short list, and a colour.
+ * What a room's tile says: a short list, and a colour.
  *
- * The count is **"2 of 8" and never a percentage** — recorded against recorded
- * plus what is still suggested, so the denominator shrinks honestly as things
- * are dismissed. A room with nothing left to suggest is its bare total.
+ * **No count.** It said "2 of 8" until October 2026, and on a tile that read
+ * as a score rather than as anything the room needed to say.
  *
  * The lines are what is recorded, by headline, **in the order the room's page
  * lists them** — appliances, then paint and tiles, then the rest — so the tile
@@ -2641,15 +2726,11 @@ export interface HouseRoomDescription {
  * recorded is never painted. Whole house has no walls and never is either.
  */
 export function describeHouseRoom(room: HouseRoom): HouseRoomDescription {
-  const recorded = room.recorded.length;
-  const total = recorded + room.ghosts.length;
-  const count = room.ghosts.length > 0 ? `${recorded} of ${total}` : `${recorded}`;
-  const suggested = recorded === 0;
+  const suggested = room.recorded.length === 0;
   const all = suggested
     ? room.ghosts.map((g) => g.name)
     : thingKindGroups(room.recorded).flatMap((group) => group.things.map(thingHeadline));
   return {
-    count,
     lines: all.slice(0, TILE_BULLET_LIMIT),
     suggested,
     truncated: all.length > TILE_BULLET_LIMIT,

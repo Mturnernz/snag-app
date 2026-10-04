@@ -88,6 +88,16 @@ const press = async (r: ReturnType<typeof render>, label: string) => {
 };
 
 describe('a bill', () => {
+  // Today is pinned to September 2026: the dates in this test were written then,
+  // and a real clock walks past them. Only Date is faked; timers run as normal.
+  beforeEach(() => jest.useFakeTimers({
+    now: new Date(2026, 8, 20, 12),
+    doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask', 'requestAnimationFrame',
+      'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'performance', 'hrtime'],
+  }));
+  afterEach(() => jest.useRealTimers());
+
   it('says what it is and when it is due, on the first of the month too', () => {
     const { r } = open();
     r.getByText('$4,200');

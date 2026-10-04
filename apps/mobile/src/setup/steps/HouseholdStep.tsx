@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { describePlaces } from '@snag/supabase-queries';
 
 import SetupShell, { setupStyles } from '../SetupShell';
 import Button from '../../components/Button';
@@ -107,8 +108,8 @@ export default function HouseholdStep({
         progress={progress}
         onBack={onBack}
         icon="home-outline"
-        title={`${invitation.householdName} wants to add you`}
-        body={`${invitation.invitedByName} invited you. Everyone in a household can see and change everything in it, and you can leave whenever you like.`}
+        title={`Join ${describePlaces(invitation.propertyNames, invitation.householdName)}?`}
+        body={`${invitation.invitedByName} invited you to ${describePlaces(invitation.propertyNames, invitation.householdName)}. You'll see its jobs and its house record, and you can leave whenever you like.`}
         primary={{
           label: 'Join',
           onPress: () => handleAnswer(invitation.id, true),

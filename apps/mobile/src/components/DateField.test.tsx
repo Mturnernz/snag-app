@@ -98,6 +98,17 @@ describe('the field', () => {
     expect(box.props.placeholder).toBeUndefined();
   });
 
+  describe('on a September day', () => {
+  // Today is pinned to September 2026: the dates in this test were written then,
+  // and a real clock walks past them. Only Date is faked; timers run as normal.
+  beforeEach(() => jest.useFakeTimers({
+    now: new Date(2026, 8, 20, 12),
+    doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask', 'requestAnimationFrame',
+      'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'performance', 'hrtime'],
+  }));
+  afterEach(() => jest.useRealTimers());
+
   it('writes a tapped day back as dd/mm/yyyy', () => {
     const onChangeValue = jest.fn();
     const r = render(
@@ -113,6 +124,7 @@ describe('the field', () => {
     expect(cell).toBeDefined();
     TestRenderer.act(() => cell.props.onPress());
     expect(onChangeValue).toHaveBeenCalledWith('20/09/2026');
+  });
   });
 });
 

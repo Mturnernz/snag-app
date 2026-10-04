@@ -37,9 +37,9 @@ async function signIn(page: Page) {
     { timeout: 90_000 }
   );
   await page.getByText('Sign in', { exact: true }).click();
-  // The list is the initial route — there is no Add tab; capture is the bar at
-  // the foot of this screen.
-  await expect(page.getByPlaceholder('Capture a new job')).toBeVisible({ timeout: 90_000 });
+  // The list is the initial route — there is no Add tab; capture is the + on
+  // this screen.
+  await expect(page.getByLabel('Capture a new job')).toBeVisible({ timeout: 90_000 });
   await placeChosen;
 }
 
@@ -62,14 +62,16 @@ test('a save that never comes back still stops spinning and says so', async ({ p
     dialog.dismiss().catch(() => {});
   });
 
-  await page.getByPlaceholder('Capture a new job').fill('Stalled network probe');
-  await page.getByLabel('Add to the list').click();
+  await page.getByLabel('Capture a new job').click();
+  await page.getByText('Continue without picture', { exact: true }).click();
+  await page.getByLabel("What's the job?").fill('Stalled network probe');
+  await page.getByLabel('Add job').click();
 
   // The deadline is 20s for a data call; allow for it plus the dialog.
   await expect.poll(() => dialogs.join('\n'), { timeout: 40_000 }).toMatch(/couldn't add/i);
 
-  // And the bar is usable again rather than stuck mid-send, with the words put
-  // back so nobody has to retype them.
-  await expect(page.getByPlaceholder('Capture a new job')).toBeEnabled();
-  await expect(page.getByPlaceholder('Capture a new job')).toHaveValue('Stalled network probe');
+  // And the sheet is usable again rather than stuck mid-send, with the words
+  // still there so nobody has to retype them.
+  await expect(page.getByLabel("What's the job?")).toBeEnabled();
+  await expect(page.getByLabel("What's the job?")).toHaveValue('Stalled network probe');
 });

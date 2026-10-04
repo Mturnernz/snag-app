@@ -42,6 +42,7 @@ const LIVE = {
   invitedByName: 'Mike',
   expiresAt: '2026-09-16T00:00:00Z',
   alreadyAMember: false,
+  propertyNames: ["Martin's Bay"],
 };
 
 const settle = () => TestRenderer.act(async () => {});
@@ -73,11 +74,14 @@ beforeEach(() => {
 describe('a live code', () => {
   beforeEach(() => mock_getInvitationByToken.mockResolvedValue(LIVE));
 
-  it('names the house and who is offering it, and asks', async () => {
+  // The place, never the household alone: on 4 October 2026 somebody was let
+  // into "32 Le Roy" when what they had been asked to was Martin's Bay.
+  it('names the place and who is offering it, and asks', async () => {
     const r = render(<JoinScreen token={TOKEN} profile={PROFILE} onJoined={onJoined} onDismiss={onDismiss} />);
     await settle();
 
-    expect(r.queryByText('Join 32 Le Roy?')).not.toBeNull();
+    expect(r.queryByText("Join Martin's Bay?")).not.toBeNull();
+    expect(r.queryByText('Join 32 Le Roy?')).toBeNull();
     expect(r.queryByText('Join')).not.toBeNull();
     expect(r.queryByText('No thanks')).not.toBeNull();
   });
@@ -144,7 +148,7 @@ describe('a code for a house you are already in', () => {
     const r = render(<JoinScreen token={TOKEN} profile={PROFILE} onJoined={onJoined} onDismiss={onDismiss} />);
     await settle();
 
-    expect(r.queryByText("You're already in 32 Le Roy")).not.toBeNull();
+    expect(r.queryByText("You're already in Martin's Bay")).not.toBeNull();
     expect(r.queryByText('Join')).toBeNull();
   });
 });
@@ -167,7 +171,7 @@ describe('somebody who has only just signed up', () => {
     const r = render(<JoinScreen token={TOKEN} profile={null} onJoined={onJoined} onDismiss={onDismiss} />);
     await settle();
 
-    expect(r.queryByText('Join 32 Le Roy?')).not.toBeNull();
+    expect(r.queryByText("Join Martin's Bay?")).not.toBeNull();
     expect(r.queryByText('What should we call you?')).not.toBeNull();
   });
 

@@ -14,15 +14,16 @@ import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../consta
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import {
-  deleteMyAccount, deleteStoredFiles, getAllProjects, getMyData, getMyOrphanFilePaths, getSnags,
+  deleteMyAccount, deleteStoredFiles, getAllProjects, getMyAccountDeletions, getMyData,
+  getMyOrphanFilePaths, getSnags,
   signOut, upsertProfile,
 } from '../lib/supabase';
-import { exportDateStamp, looseEnds, type LooseEnd } from '@snag/supabase-queries';
+import { describePlaces, exportDateStamp, looseEnds, type LooseEnd } from '@snag/supabase-queries';
 import { saveFile } from '../lib/download';
 import { showAlert } from '../lib/alert';
 import { openUrl } from '../lib/openUrl';
 import { PORTAL_URL } from '../lib/appUrl';
-import { RootStackParamList } from '../types';
+import { AccountDeletion, RootStackParamList } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -73,6 +74,23 @@ export default function ProfileScreen() {
 
   useFocusEffect(useCallback(() => { loadEnds(); }, [loadEnds]));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** What deleting would actually delete, read when Delete is pressed. Null when it couldn't be read. */
+  const [deletes, setDeletes] = useState<AccountDeletion[] | null>(null);
+
+  /**
+   * Asks the server what would go before asking the person. A household goes
+   * only if this account owns it and nobody else is in it (20261004100000), and
+   * the confirmation names it rather than warning in general.
+   */
+  async function askDeleteAccount() {
+    try {
+      setDeletes(await getMyAccountDeletions());
+    } catch (err) {
+      console.error('Failed to read what deleting would delete:', err);
+      setDeletes(null);
+    }
+    setConfirmDelete(true);
+  }
 
   const dirty = name.trim() !== profile.displayName && name.trim().length > 0;
 
@@ -298,12 +316,12 @@ export default function ProfileScreen() {
       <Button
         label="Delete my account"
         variant="ghost"
-        onPress={() => setConfirmDelete(true)}
+        onPress={askDeleteAccount}
         fullWidth
       />
       <Text style={styles.deleteHint}>
-        Any household you're the only one in goes with you, and so does everything in it. Ones you
-        share stay, and so does what you filed in them.
+        A household goes with you only if you made it and nobody else is in it. Ones you share
+        stay, and a place you own that somebody else is on is handed to them.
       </Text>
 
       {/* The statement Create account links to, reachable again once signed
@@ -329,10 +347,7 @@ export default function ProfileScreen() {
       <ConfirmDialog
         visible={confirmDelete}
         title="Delete your account?"
-        message={
-          "You'll be signed out for good. Any household you're the only one in is deleted with " +
-          'every job, item and photo in it. This cannot be undone.'
-        }
+        message={describeAccountDeletion(deletes)}
         confirmLabel="Delete"
         confirmText={profile.displayName}
         destructive
@@ -341,6 +356,29 @@ export default function ProfileScreen() {
       />
     </ScrollView>
   );
+}
+
+/**
+ * The confirmation's words: what would actually be deleted, by name. Unread
+ * (null) says the rule rather than guessing at the answer.
+ */
+export function describeAccountDeletion(deletes: AccountDeletion[] | null): string {
+  const end = 'This cannot be undone.';
+  if (deletes === null) {
+    return "You'll be signed out for good. A household you made and nobody else is in is deleted " +
+      `with every job, item and photo in it; everything you share stays. ${end}`;
+  }
+  if (deletes.length === 0) {
+    return "You'll be signed out for good. Nothing is deleted with you: you leave each household, " +
+      `and a place you own that somebody else is on is handed to them. ${end}`;
+  }
+  const named = deletes.map((d) => {
+    const places = d.propertyNames.filter((n) => n !== d.householdName);
+    return places.length > 0 ? `${d.householdName} (${describePlaces(places, '')})` : d.householdName;
+  });
+  return `You'll be signed out for good, and ${describePlaces(named, '')} — nobody else is in ` +
+    `${deletes.length === 1 ? 'it' : 'them'} — ${deletes.length === 1 ? 'is' : 'are'} deleted with ` +
+    `every job, item and photo. Everything you share stays. ${end}`;
 }
 
 const styles = StyleSheet.create({

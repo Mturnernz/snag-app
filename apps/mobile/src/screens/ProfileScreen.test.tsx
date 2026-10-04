@@ -22,6 +22,7 @@ jest.mock('@react-navigation/native', () => ({
 const mock_deleteMyAccount = jest.fn().mockResolvedValue(undefined);
 const mock_getMyOrphanFilePaths = jest.fn().mockResolvedValue([]);
 const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
+const mock_getMyAccountDeletions = jest.fn().mockResolvedValue([]);
 const mock_signOut = jest.fn().mockResolvedValue({ forced: false });
 const mock_getAllProjects = jest.fn().mockResolvedValue([]);
 const mock_getSnags = jest.fn().mockResolvedValue([]);
@@ -35,6 +36,7 @@ jest.mock('../lib/supabase', () => ({
   deleteMyAccount: (...a: unknown[]) => mock_deleteMyAccount(...a),
   getMyOrphanFilePaths: (...a: unknown[]) => mock_getMyOrphanFilePaths(...a),
   deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
+  getMyAccountDeletions: (...a: unknown[]) => mock_getMyAccountDeletions(...a),
   signOut: (...a: unknown[]) => mock_signOut(...a),
   upsertProfile: jest.fn().mockResolvedValue(undefined),
   setProjectsEnabled: (...a: unknown[]) => mock_setProjectsEnabled(...a),
@@ -93,6 +95,7 @@ beforeEach(() => {
   mock_getMyOrphanFilePaths.mockResolvedValue([]);
   mock_deleteStoredFiles.mockResolvedValue(undefined);
   mock_deleteMyAccount.mockResolvedValue(undefined);
+  mock_getMyAccountDeletions.mockResolvedValue([]);
   mock_signOut.mockResolvedValue({ forced: false });
   mock_getAllProjects.mockResolvedValue([]);
   mock_getSnags.mockResolvedValue([]);
@@ -101,6 +104,35 @@ beforeEach(() => {
 });
 
 describe('deleting your account', () => {
+  // A joiner deleting their account on 4 October 2026 took a household with
+  // them. The confirmation now names what would actually go, read from the
+  // server, rather than warning in general.
+  it('names the household that would actually be deleted', async () => {
+    mock_getMyAccountDeletions.mockResolvedValue([
+      { householdId: 'h', householdName: '32 Le Roy', propertyNames: ['32 Le Roy', "Martin's Bay"] },
+    ]);
+    const r = render(<ProfileScreen />);
+    await settle();
+    await press(pressableAround(r, 'Delete my account'));
+
+    const dialog = r.root.findAll(
+      (n: any) => n.props?.confirmText === 'Mike' && typeof n.props?.onConfirm === 'function'
+    )[0];
+    expect(dialog.props.message).toMatch(/32 Le Roy \(Martin's Bay\)/);
+    expect(dialog.props.message).toMatch(/is deleted/);
+  });
+
+  it('says nothing is deleted when every household is shared', async () => {
+    const r = render(<ProfileScreen />);
+    await settle();
+    await press(pressableAround(r, 'Delete my account'));
+
+    const dialog = r.root.findAll(
+      (n: any) => n.props?.confirmText === 'Mike' && typeof n.props?.onConfirm === 'function'
+    )[0];
+    expect(dialog.props.message).toMatch(/Nothing is deleted with you/);
+  });
+
   it('will not go through until the name is typed', async () => {
     const r = render(<ProfileScreen />);
     await settle();

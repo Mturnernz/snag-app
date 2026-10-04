@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
+import { describePlaces } from '@snag/supabase-queries';
+
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Button from '../components/Button';
@@ -115,12 +117,16 @@ export default function JoinScreen({ token, profile, onJoined, onDismiss }: Prop
     );
   }
 
+  // The place, never the household alone: a joiner shown only "32 Le Roy" was
+  // let into a house thinking it was the bach.
+  const places = describePlaces(invitation.propertyNames, invitation.householdName);
+
   if (invitation.alreadyAMember) {
     return (
       <View style={[styles.centered, { paddingTop: insets.top }]}>
         <Icon name="checkmark-circle-outline" size="xxl" color={Colors.primary} />
-        <Text style={styles.title}>You're already in {invitation.householdName}</Text>
-        <Text style={styles.body}>Nothing to do — the code was for a house you're in.</Text>
+        <Text style={styles.title}>You're already in {places}</Text>
+        <Text style={styles.body}>Nothing to do — the code was for a place you're on.</Text>
         <Button label="Carry on" onPress={onDismiss} fullWidth />
       </View>
     );
@@ -136,10 +142,10 @@ export default function JoinScreen({ token, profile, onJoined, onDismiss }: Prop
         keyboardShouldPersistTaps="handled"
       >
         <Icon name="home-outline" size="xxl" color={Colors.primary} />
-        <Text style={styles.title}>Join {invitation.householdName}?</Text>
+        <Text style={styles.title}>Join {places}?</Text>
         <Text style={styles.body}>
-          {invitation.invitedByName} shared this code. Everyone in a household can see and change
-          everything in it, and you can leave whenever you like.
+          {invitation.invitedByName} invited you to {places}. You'll see its jobs and its house
+          record, and you can leave whenever you like.
         </Text>
 
         {needsName ? (

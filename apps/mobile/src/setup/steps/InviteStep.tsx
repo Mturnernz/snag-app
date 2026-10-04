@@ -51,7 +51,7 @@ export default function InviteStep({ ctx, progress, onBack, onNext }: StepProps)
       {household ? (
         <InviteLinkPanel
           householdId={household.id}
-          householdName={household.name}
+          placeName={household.name}
           link={link}
           onLink={setLink}
         />

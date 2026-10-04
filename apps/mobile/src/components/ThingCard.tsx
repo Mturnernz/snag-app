@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 
 import SignedImage from './SignedImage';
+import ServicedByPill, { servicedByOf } from './ServicedByPill';
 import Icon from './Icon';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Thing, ThingKind, ThingSuggestion } from '../types';
@@ -94,6 +95,8 @@ export default function ThingCard({ thing, photoUrl, onPress, labelToCheck }: Pr
         {thing.kind === 'finish' && thing.notes ? (
           <Text style={styles.note} numberOfLines={1}>{thing.notes}</Text>
         ) : null}
+
+        <ServicedByPill by={servicedByOf(thing.spec)} />
 
         <View style={styles.meta}>
           {thing.serviceDays ? (

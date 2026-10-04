@@ -357,11 +357,38 @@ photo and never inside its door, and the pills with no photo; *Added by* only fo
 the room pill's ▾; the note box resting at one line, opening on focus and never sending on blur;
 and the outline *Ask SnagHQ* button under Notes and above the items card.
 
+## The October 2026 pass
+
+Seven UI changes, several reversing rules written further down. **Where anything below disagrees,
+this section wins**; the passages themselves keep their history.
+
+- **Capture is a + on the list, not a bar.** `components/Fab.tsx` (shared with the House tab)
+  opens `CaptureSheet`: **Take photo** (the shutter's old path — `fileCapturedPhoto`, then
+  `AmendSnagSheet`) or **Continue without picture**, which asks *What's the job?* with the box
+  focused and **creates nothing until *Add job***, then opens the job. Abandoned, nothing is
+  filed. `ComposeBar` stays only for a thing's *Report a problem* (`embedded`). The rules below
+  about capture asking nothing before it files still hold for the photo; words are filed on send.
+- **Ask SnagHQ is off for v1** (`lib/askSnagHQ.ts`, `EXPO_PUBLIC_ASK_SNAGHQ=on` to bring it
+  back): no button, no `SupportCard`, no sheet and no support read on the job page.
+- **The job page's *Take photo* / *Choose photos* are pills under the headline**, whether or not
+  there is a photo. The scrim over the first photo is gone.
+- **A new place is seeded with three rooms** — Kitchen, Laundry, Master bedroom
+  (`20261004110000`); existing places keep theirs. The setup rooms step is a grid of cards with a
+  dashed *Add another room* card. `RoomsEditor` (Location tags) is unchanged.
+- **House tab: no count on a tile**, and a **Recorded · All rooms** `Segmented` on the count row
+  (remembered per device, `lib/houseView.ts`). Recorded hides rooms with nothing real in them;
+  while nothing at all is recorded every room shows and no choice is offered, so day one is still
+  furnished. Tiles' accessible names are *Open Kitchen*.
+- **The walkthrough's photo step offers *Enter details manually*** under the camera.
+- **Serviced by** (`spec.servicedBy`) shows as a pill on `ThingCard` and on a job's *Linked
+  items* (`linked_things.serviced_by`, `20261004110100`).
+
 ## Capture and triage are different moments
 
 This is the load-bearing product decision and the easiest one to erode.
 
-**Capture** is the bar at the foot of the list (`ComposeBar`): a photo, or a line of text, or
+**Capture** was the bar at the foot of the list (`ComposeBar`) and is now a + — see *The October
+2026 pass*: a photo, or a line of text, or
 both. One tap to the camera, or four seconds of typing. It is used standing in the bathroom
 holding a broken toilet seat, with about ten seconds of patience.
 
@@ -4013,15 +4040,44 @@ And `update_snag` requires an assignee to be linked to the *property*, not merel
 household: assigning the bach's gutters to someone who cannot see the bach is a job that silently
 never gets done.
 
-**`household_members.role`** still exists with nothing reading it. Everyone linked to a place can
-do everything at that place, and there are **no role checks in the UI at all**. Don't add one —
-the only permission here is which places someone is on.
+### A place has an owner (October 2026)
+
+**This reverses "no roles".** It used to say `household_members.role` was unread and there were to be
+no role checks anywhere. On 4 October 2026 that cost a household: a joiner was made `owner` by
+`accept_invitation` (every joiner was), removed the two people who had built it with
+`remove_member` (any member could remove anyone), and deleted their own account — which deleted the
+household, both places and every job, because they were by then its only member. They had only ever
+been shown the household's name, never the place they were being let into.
+
+`20261004100000` gives each **place** an owner (`property_members.role`), by the owner's decision:
+people are let into a place, and Mike can share Martin's Bay with Leonie and hand it to her without
+her ever seeing 32 Le Roy.
+
+- **Only a place's owner** adds somebody to it, takes somebody off it, invites or shares a link to
+  it, hands it on (`transfer_property_ownership`; a place may have several owners) and deletes it.
+  **Anybody can leave.** Nothing leaves a place with no owner: the last one hands it over first.
+- **The household's owner** is whoever made it. Only they take somebody out of the household or
+  delete it. A joiner is a `member` of the household and of the invited places, never an owner, and
+  joining again never rewrites a role.
+- **Somebody left on no place in a household has left the household** (`leave_household_as`, the one
+  body behind every way out — remove, unlink, delete my account, a dashboard delete).
+- **Deleting your account deletes only a household you own and are alone in**
+  (`my_account_deletes`, which the confirmation names). A place you own and share is handed on.
+- An invitation always **names its places** (null means the places you own, never every place), and
+  `invitation_by_token` / `my_invitations` return their names: the Join screen says *Mike invited you
+  to Martin's Bay*, never the household alone.
+
+So the UI has role checks now, and they are the first: on Household, the ×, *Make owner* and the
+share panel show only to a place's owner, and *Leave* to everyone. The server refuses the rest in
+words. `supabase/tests/membership_safety.sql` replays the afternoon. Moving a place into another
+household is not built.
 
 ## Locations are seeded, not administered and not derived
 
-`home.locations` holds the room tags, seeded **per property** by `seed_locations`: Kitchen,
+`home.locations` holds the room tags, seeded **per property** by `seed_locations`: since
+`20261004110000`, Kitchen, Laundry and Master bedroom for a new place (it was Kitchen,
 Bathroom, Bedroom, Living room, Laundry, Hallway, Garage, Outside, Deck, Roof, Under the house,
-Elsewhere. `getLocations(propertyId)` reads them in seeded order, and that order is what the list
+Elsewhere, and places made then keep those). `getLocations(propertyId)` reads them in seeded order, and that order is what the list
 groups by as well as what the capture sheet offers — so it is an interface, not just a seed.
 
 Nobody sets this up, and nobody has to earn it by logging something first. `Elsewhere` is the
@@ -4308,8 +4364,9 @@ missing meter, and Sign out surviving a failed read.
 and the other one should not look alike. Gated on typing your own name, the same gate deleting a
 place uses and for the same reason: it can take a household with it.
 
-Households you are the only member of go whole. Households you share do not — it leaves those
-exactly as `remove_member` would, nulling your assignments and handing on any property you were
+A household goes whole only if you **own it** and are its only member (see *A place has an owner*);
+the confirmation names it. Households you share do not — it leaves those exactly as `remove_member`
+would, nulling your assignments and handing on any property you were
 alone on. Files first, then the account, then `signOut`: the storage delete policy asks
 `home.is_member(<household id>)`, so an account that has deleted itself cannot clear up after
 itself. Same rule as deleting a household, written up under *Taking someone, or something, away*.
@@ -4405,7 +4462,8 @@ are friction, so an invitation can also be addressed to **whoever holds the link
 
 **It is one table and one accept path, not a second mechanism.** A row is addressed by `email` OR by
 `token`, never both and never neither (`invitations_addressed_one_way`), and a partial unique index
-keeps it to one live link per household — so pressing *Show a QR code* again kills the old one,
+keeps it to one live link per set of places (`invitations_one_link_per_places`, since `20261004100000`;
+it was per household) — so pressing *Show a QR code* again kills the old one,
 which is the thing somebody pressing it is usually trying to do. The Schedule tab's rule applies
 exactly: two ways to join a household and neither is trustworthy.
 
@@ -4630,9 +4688,8 @@ mistake is to leave or delete, not to pick.
 
 Three functions, and each refuses the one case that would strand a row nobody can reach:
 
-- **`remove_member`** takes somebody out, or takes you out; deliberately one function, because with
-  two people in a house those are the same act and there are no roles here to make one a privilege.
-  It refuses the last member (a household nobody is in is invisible to everyone, including whoever
+- **`remove_member`** takes somebody out, or takes you out. Anybody can leave; only the household's
+  owner can take somebody else out (`20261004100000` — see *A place has an owner*). It refuses the last member (a household nobody is in is invisible to everyone, including whoever
   would add somebody back). It **nulls their assignments**, because an assignee who cannot see the
   place is a job that silently never gets done — the same state `update_snag` already refuses to
   create. And a property they were the only person on is **inherited**, by the caller, or by the
@@ -4641,7 +4698,7 @@ Three functions, and each refuses the one case that would strand a row nobody ca
   still says who filed it.
 - **`delete_property`** refuses the household's last place, for the reason `create_household` makes
   one in the first breath: a household with no property cannot receive a snag.
-- **`delete_household`** refuses while anybody else is in it. At that point the list is theirs as
+- **`delete_household`** is the household owner's, and refuses while anybody else is in it. At that point the list is theirs as
   much as yours and the honest move is to take yourself out.
 
 **The client has to clear the storage keys, because SQL can't.** `storage.protect_delete()` raises

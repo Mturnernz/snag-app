@@ -6,7 +6,7 @@ import Button from './Button';
 import QrCode, { QrCaption } from './QrCode';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { useToast } from '../hooks/useToast';
-import { createInviteLink, revokeInviteLink } from '../lib/supabase';
+import { cancelInvitation, createInviteLink } from '../lib/supabase';
 import { APP_URL } from '../lib/appUrl';
 import { copyToClipboard } from '../lib/clipboard';
 import { shareLink } from '../lib/share';
@@ -15,13 +15,15 @@ import { Invitation } from '../types';
 
 interface Props {
   householdId: string;
-  householdName: string;
+  /** What the link lets them into, in words — the place, never the household alone. */
+  placeName: string;
   /**
-   * The places a newcomer starts on, when there is more than one to choose
-   * from. Undefined means every place — right while there is only one.
+   * The places the link lets them into. Undefined means every place the
+   * sharer owns — right while there is only one. Only an owner can share a
+   * place (20261004100000), and a joiner arrives as a member of it.
    */
   propertyIds?: string[];
-  /** The household's live join code, if there is one. Owned by the caller, which reads it. */
+  /** The live join code for these places, if there is one. Owned by the caller, which reads it. */
   link: Invitation | null;
   onLink: (link: Invitation | null) => void;
 }
@@ -40,7 +42,7 @@ interface Props {
  * phone's; the words go wherever the person chooses to put them.
  */
 export default function InviteLinkPanel({
-  householdId, householdName, propertyIds, link, onLink,
+  householdId, placeName, propertyIds, link, onLink,
 }: Props) {
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
@@ -57,7 +59,7 @@ export default function InviteLinkPanel({
       }
       const outcome = await shareLink(
         joinUrl(APP_URL, live.token!),
-        `Join ${householdName} on Snag — the link is good for a day.`,
+        `Join ${placeName} on Snag — the link is good for a day.`,
       );
       if (outcome === 'copied') showToast('Link copied — paste it into a message');
       if (outcome === 'failed') showToast('Copy the link from under the code');
@@ -82,7 +84,9 @@ export default function InviteLinkPanel({
   async function handleStopSharing() {
     setBusy(true);
     try {
-      await revokeInviteLink(householdId);
+      // This link only: the house's own link must keep working while the
+      // bach's is stopped.
+      if (link) await cancelInvitation(link.id);
       onLink(null);
       showToast('Code stopped');
     } catch (err: any) {

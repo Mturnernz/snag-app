@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Text, TextInput, StyleSheet } from 'react-native';
+import { describePlaces } from '@snag/supabase-queries';
 
 import SetupShell, { setupStyles } from '../SetupShell';
 import { Colors, Typography } from '../../constants/theme';
@@ -33,7 +34,10 @@ export default function NameStep({ ctx, progress, onBack, onNext, onReady, sugge
     getMyInvitations()
       .then((all) => {
         const first = all[0];
-        if (live && first) setInvitedTo({ house: first.householdName, by: first.invitedByName });
+        if (live && first) setInvitedTo({
+          house: describePlaces(first.propertyNames, first.householdName),
+          by: first.invitedByName,
+        });
       })
       .catch((err) => console.error('Failed to check for invitations:', err));
     return () => { live = false; };

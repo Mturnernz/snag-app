@@ -163,7 +163,14 @@ export interface InvitationByToken {
   householdName: string;
   invitedByName: string;
   expiresAt: string;
+  /** Already on every place it names. */
   alreadyAMember: boolean;
+  /**
+   * The places it lets them into. What the Join screen names — never the
+   * household alone, which is how somebody was let into a house thinking it
+   * was the bach.
+   */
+  propertyNames: string[];
 }
 
 /** An invitation seen from the other end, by the person it names. */
@@ -173,6 +180,8 @@ export interface InvitationToMe {
   householdName: string;
   invitedByName: string;
   createdAt: string;
+  /** The places it lets them into. */
+  propertyNames: string[];
 }
 
 export interface HouseholdMember {
@@ -180,6 +189,26 @@ export interface HouseholdMember {
   profileId: string;
   displayName: string;
   role: MemberRole;
+}
+
+/**
+ * Somebody on a place, and whether they own it (20261004100000).
+ *
+ * Only a place's owner can take somebody else off it, invite to it, hand it on
+ * or delete it. Anybody can leave. A place always has an owner.
+ */
+export interface PlaceMember {
+  propertyId: string;
+  profileId: string;
+  displayName: string;
+  role: MemberRole;
+}
+
+/** A household deleting this account would delete: one it owns and is alone in. */
+export interface AccountDeletion {
+  householdId: string;
+  householdName: string;
+  propertyNames: string[];
 }
 
 /**

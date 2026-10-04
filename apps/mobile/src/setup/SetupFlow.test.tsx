@@ -67,6 +67,7 @@ const INVITATION = {
   householdName: '32 Le Roy',
   invitedByName: 'Mike',
   createdAt: '2026-09-15T00:00:00Z',
+  propertyNames: ["Martin's Bay"],
 };
 
 /** What the server holds, as the mocks see it; `onReady` reads it back like loadAccount. */
@@ -273,7 +274,7 @@ describe('an invitation waiting at sign-up', () => {
     named();
     mock.getMyInvitations.mockResolvedValue([INVITATION]);
     const r = await start();
-    expect(title(r, '32 Le Roy wants to add you')).toBe(true);
+    expect(title(r, "Join Martin's Bay?")).toBe(true);
     expect(title(r, 'Start a new house')).toBe(false);
   });
 
@@ -304,10 +305,10 @@ describe('an invitation waiting at sign-up', () => {
     mock.getMyInvitations.mockResolvedValue([INVITATION]);
     const r = await start();
     expect(title(r, 'What should we call you?')).toBe(true);
-    expect(title(r, "Mike has invited you to 32 Le Roy. First, the name they'll see.")).toBe(true);
+    expect(title(r, "Mike has invited you to Martin's Bay. First, the name they'll see.")).toBe(true);
     await type(r, 'Your name', 'Alyssa');
     await press(r, 'Continue');
-    expect(title(r, '32 Le Roy wants to add you')).toBe(true);
+    expect(title(r, "Join Martin's Bay?")).toBe(true);
     expect(title(r, 'Start a new house')).toBe(false);
   });
 
@@ -367,7 +368,7 @@ describe('waiting to be invited', () => {
     const r = await waiting();
     mock.getMyInvitations.mockResolvedValue([INVITATION]);
     await press(r, 'Check again');
-    expect(title(r, '32 Le Roy wants to add you')).toBe(true);
+    expect(title(r, "Join Martin's Bay?")).toBe(true);
   });
 });
 

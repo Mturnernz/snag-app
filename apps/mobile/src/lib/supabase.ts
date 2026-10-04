@@ -277,6 +277,7 @@ export const declineInvitation = (invitationId: string) =>
   queries.declineInvitation(supabase, invitationId);
 
 export const getMyOrphanFilePaths = () => queries.getMyOrphanFilePaths(supabase);
+export const getMyAccountDeletions = () => queries.getMyAccountDeletions(supabase);
 
 export const deleteMyAccount = () => queries.deleteMyAccount(supabase);
 export const getMyData = () => queries.getMyData(supabase);
@@ -295,6 +296,10 @@ export const setPropertyLocation = (propertyId: string, suburb: string, town: st
 export const renameProperty = (propertyId: string, name: string) =>
   queries.renameProperty(supabase, propertyId, name);
 
+export const getPlaceMembers = (propertyIds: string[]) =>
+  queries.getPlaceMembers(supabase, propertyIds);
+export const transferPropertyOwnership = (propertyId: string, profileId: string, stepDown?: boolean) =>
+  queries.transferPropertyOwnership(supabase, propertyId, profileId, stepDown);
 export const getPropertyMemberIds = (propertyId: string) =>
   queries.getPropertyMemberIds(supabase, propertyId);
 

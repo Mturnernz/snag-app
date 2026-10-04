@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { describePlaces } from '@snag/supabase-queries';
 
 import ScreenHeader from '../components/ScreenHeader';
 import Card from '../components/Card';
@@ -11,16 +12,17 @@ import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
 import InviteLinkPanel from '../components/InviteLinkPanel';
+import { Pill, TextButton } from '../components/Grouped';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
-import { Invitation, InvitationToMe } from '../types';
+import { Invitation, InvitationToMe, PlaceMember } from '../types';
 import { useToast } from '../hooks/useToast';
 import {
   acceptInvitation, cancelInvitation, createProperty, declineInvitation,
   deleteHousehold, deleteProperty, deleteStoredFiles, getHouseholdFilePaths,
-  getHouseholdInvitations, getMyInvitations, getPropertyMemberIds, getSnags, getThings,
+  getHouseholdInvitations, getMyInvitations, getPlaceMembers, getSnags, getThings,
   inviteToHousehold, removeMember, renameProperty, setPropertyLocation,
-  setPropertyMember,
+  setPropertyMember, transferPropertyOwnership,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 
@@ -45,31 +47,36 @@ import { showAlert } from '../lib/alert';
  * that strands a row nobody can reach — the last member of a household, the
  * last place in one — and says which, so the way out is named rather than
  * guessed at.
+ *
+ * **Grouped by place, with an owner on each (20261004100000).** People are let
+ * into a place, not a household, and only a place's owner can add, remove,
+ * share or delete. On 4 October 2026 a joiner — then made an owner of the whole
+ * household — removed the two people who had built it and deleted their own
+ * account, which took the household with it. So the × and *Make owner* are the
+ * owner's, *Leave* is everybody's, and the server refuses the rest in words.
  */
 export default function HouseholdScreen() {
   const navigation = useNavigation();
   const {
-    household, members, profile, properties, activeProperty, refresh, reloadAccount,
+    household, members, profile, properties, refresh, reloadAccount,
   } = useHousehold();
   const { showToast } = useToast();
 
-  const [email, setEmail] = useState('');
-  const [adding, setAdding] = useState(false);
   const [newPlace, setNewPlace] = useState('');
   const [addingPlace, setAddingPlace] = useState(false);
-  /** property id -> the profile ids linked to it. */
-  const [links, setLinks] = useState<Record<string, string[]>>({});
+  /** Who is on each place, and who owns it. */
+  const [people, setPeople] = useState<PlaceMember[]>([]);
   const [busyLink, setBusyLink] = useState(false);
-
-  /** Which places a newly invited person lands on. Only asked once there's a choice. */
-  const [startOn, setStartOn] = useState<string[]>([]);
 
   /** Invitations this household is waiting on, and ones waiting on me. */
   const [waiting, setWaiting] = useState<Invitation[]>([]);
+  const [links, setLinks] = useState<Invitation[]>([]);
   const [mine, setMine] = useState<InvitationToMe[]>([]);
   const [busyInvite, setBusyInvite] = useState(false);
-  /** The household's one live join code, if it is being shared right now. */
-  const [link, setLink] = useState<Invitation | null>(null);
+
+  /** The place whose email box is open, and what is typed in it. Secondary to the link. */
+  const [emailFor, setEmailFor] = useState<{ placeId: string; value: string } | null>(null);
+  const [adding, setAdding] = useState(false);
 
   /** The place being renamed, and the text so far. Null when nothing is. */
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
@@ -83,8 +90,14 @@ export default function HouseholdScreen() {
   // one edit. Clearing the state doesn't help; the second closure never sees it.
   const renameBusy = useRef(false);
 
-  /** Who's about to be removed — them, or you leaving. */
-  const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
+  /** Somebody about to be taken off a place, or you leaving one. */
+  const [confirmRemove, setConfirmRemove] = useState<
+    { placeId: string; placeName: string; id: string; name: string } | null
+  >(null);
+  /** Somebody about to be made an owner of a place. */
+  const [confirmOwner, setConfirmOwner] = useState<
+    { placeId: string; placeName: string; id: string; name: string } | null
+  >(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmDeleteHouse, setConfirmDeleteHouse] = useState(false);
   /** The place about to go, with the count of what goes with it. */
@@ -93,24 +106,23 @@ export default function HouseholdScreen() {
   >(null);
 
   const alone = members.length <= 1;
+  const ownsHousehold = members.some((m) => m.profileId === profile.id && m.role === 'owner');
 
-  // Only meaningful once there is more than one place: with one, everybody in
-  // the household is on it and there is nothing to show.
-  const loadLinks = useCallback(async () => {
-    if (properties.length < 2) return;
+  const peopleOn = (placeId: string) => people.filter((m) => m.propertyId === placeId);
+  const ownsPlace = (placeId: string) =>
+    people.some((m) => m.propertyId === placeId && m.profileId === profile.id && m.role === 'owner');
+
+  const loadPeople = useCallback(async () => {
     try {
-      const pairs = await Promise.all(
-        properties.map(async (p) => [p.id, await getPropertyMemberIds(p.id)] as const)
-      );
-      setLinks(Object.fromEntries(pairs));
+      setPeople(await getPlaceMembers(properties.map((p) => p.id)));
     } catch (err) {
-      console.error('Failed to load property links:', err);
+      console.error('Failed to load who is on each place:', err);
     }
   }, [properties]);
 
   useEffect(() => {
-    loadLinks();
-  }, [loadLinks]);
+    loadPeople();
+  }, [loadPeople]);
 
   // Both directions of the same table: who this house is waiting on, and who is
   // waiting on me. The second is why an invitation to somebody who already has
@@ -123,9 +135,9 @@ export default function HouseholdScreen() {
         getMyInvitations(),
       ]);
       // One table, two ways of being addressed. A link is not a person waiting,
-      // so it never belongs in the Waiting rows under Who's here.
+      // so it never belongs in the Waiting rows.
       setWaiting(ours.filter((i) => !i.token));
-      setLink(ours.find((i) => !!i.token) ?? null);
+      setLinks(ours.filter((i) => !!i.token));
       setMine(toMe);
     } catch (err) {
       console.error('Failed to load invitations:', err);
@@ -136,16 +148,19 @@ export default function HouseholdScreen() {
     loadInvitations();
   }, [loadInvitations]);
 
-  // Default the new-member places to the one being looked at, so the common
-  // answer is already selected and the question costs nothing to skip.
-  useEffect(() => {
-    setStartOn((current) => {
-      const live = current.filter((id) => properties.some((p) => p.id === id));
-      if (live.length > 0) return live;
-      const fallback = activeProperty?.id ?? properties[0]?.id;
-      return fallback ? [fallback] : [];
+  /** The live link for exactly this place. An old one naming no place counts while there is one place. */
+  function linkFor(placeId: string): Invitation | null {
+    return links.find((i) =>
+      (i.propertyIds.length === 1 && i.propertyIds[0] === placeId)
+      || (i.propertyIds.length === 0 && properties.length === 1)) ?? null;
+  }
+
+  function setLinkFor(placeId: string, next: Invitation | null) {
+    setLinks((current) => {
+      const rest = current.filter((i) => i !== linkFor(placeId));
+      return next ? [...rest, next] : rest;
     });
-  }, [properties, activeProperty]);
+  }
 
   async function handleAddPlace() {
     const name = newPlace.trim();
@@ -210,34 +225,62 @@ export default function HouseholdScreen() {
     }
   }
 
-  async function handleToggleLink(propertyId: string, profileId: string, linked: boolean) {
+  /** Puts somebody already in the household on a place. Owners only; the server says so too. */
+  async function handleAddToPlace(placeId: string, profileId: string) {
     setBusyLink(true);
     try {
-      await setPropertyMember(propertyId, profileId, linked);
-      await loadLinks();
+      await setPropertyMember(placeId, profileId, true);
+      await loadPeople();
       await refresh();
     } catch (err: any) {
-      showAlert("Couldn't change that", err?.message ?? 'Please try again.');
+      showAlert("Couldn't add them", err?.message ?? 'Please try again.');
     } finally {
       setBusyLink(false);
     }
   }
 
-  async function handleInvite() {
-    const address = email.trim();
+  /**
+   * Takes somebody off a place, or you. Leaving the last place you are on in
+   * this household leaves the household too, so the account is re-read then.
+   */
+  async function handleRemoveFromPlace() {
+    if (!confirmRemove) return;
+    const { placeId, id } = confirmRemove;
+    setConfirmRemove(null);
+    try {
+      await setPropertyMember(placeId, id, false);
+      if (id === profile.id) {
+        await reloadAccount();
+        return;
+      }
+      await loadPeople();
+      await refresh();
+      showToast('Removed');
+    } catch (err: any) {
+      showAlert("Couldn't do that", err?.message ?? 'Please try again.');
+    }
+  }
+
+  async function handleMakeOwner() {
+    if (!confirmOwner) return;
+    const { placeId, id, name, placeName } = confirmOwner;
+    setConfirmOwner(null);
+    try {
+      await transferPropertyOwnership(placeId, id);
+      await loadPeople();
+      showToast(`${name} owns ${placeName} too`);
+    } catch (err: any) {
+      showAlert("Couldn't hand it on", err?.message ?? 'Please try again.');
+    }
+  }
+
+  async function handleInvite(placeId: string) {
+    const address = emailFor?.placeId === placeId ? emailFor.value.trim() : '';
     if (!address) return;
     setAdding(true);
     try {
-      // With one place everyone shares it, so the default (all properties) is
-      // right. With a bach it is not: someone invited to the household should
-      // not silently land on every place — nor on whichever one happened to be
-      // first, which is what this did before the chips above existed.
-      await inviteToHousehold(
-        household.id,
-        address,
-        properties.length > 1 ? startOn : undefined
-      );
-      setEmail('');
+      await inviteToHousehold(household.id, address, [placeId]);
+      setEmailFor(null);
       await loadInvitations();
       // Deliberately not "Invite sent". Nothing was sent. What is true is that
       // the invitation is now waiting, and that they still have to hear it from
@@ -277,17 +320,6 @@ export default function HouseholdScreen() {
       showAlert("Couldn't do that", err?.message ?? 'Please try again.');
     } finally {
       setBusyInvite(false);
-    }
-  }
-
-  async function handleRemoveMember(profileId: string) {
-    setConfirmRemove(null);
-    try {
-      await removeMember(household.id, profileId);
-      await refresh();
-      showToast('Removed');
-    } catch (err: any) {
-      showAlert("Couldn't remove them", err?.message ?? 'Please try again.');
     }
   }
 
@@ -356,93 +388,50 @@ export default function HouseholdScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Who's here</Text>
-          {members.map((member) => {
-            const isYou = member.profileId === profile.id;
-            return (
-              <View key={member.profileId} style={styles.memberRow}>
-                <Avatar name={member.displayName} size={36} />
-                <Text style={styles.memberName}>
-                  {member.displayName}
-                  {isYou ? ' (you)' : ''}
-                </Text>
-                {/* Nothing to remove when you're the only one here: the RPC
-                    refuses it, and the way out is the button at the foot. */}
-                {!isYou && !alone ? (
-                  <Pressable
-                    onPress={() => setConfirmRemove({ id: member.profileId, name: member.displayName })}
-                    style={styles.rowAction}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${member.displayName}`}
-                  >
-                    <Icon name="close" size="sm" color={Colors.textMuted} />
-                  </Pressable>
-                ) : null}
-              </View>
-            );
-          })}
-          {/* A waiting invitation is drawn lighter than a member and says so in
-              words, because the one thing it must never read as is somebody who
-              is already here. */}
-          {waiting.map((invitation) => (
-            <View key={invitation.id} style={styles.memberRow}>
-              <View style={styles.waitingMark}>
-                <Icon name="hourglass-outline" size="sm" color={Colors.textMuted} />
-              </View>
-              <View style={styles.waitingBody}>
-                <Text style={styles.waitingEmail} numberOfLines={1}>{invitation.email}</Text>
-                <Text style={styles.waitingHint}>Waiting — they need to sign up with this address</Text>
-              </View>
-              <Pressable
-                onPress={() => handleCancelInvite(invitation.id)}
-                style={styles.rowAction}
-                accessibilityRole="button"
-                accessibilityLabel={`Cancel the invitation to ${invitation.email}`}
-              >
-                <Icon name="close" size="sm" color={Colors.textMuted} />
-              </Pressable>
-            </View>
-          ))}
-        </Card>
-
         {/* An invitation addressed to me. It lives here rather than only on the
             Setup screen because somebody who already has a household never sees
             that screen, and an invitation nothing can show is the silent
             failure this whole mechanism exists to avoid. */}
-        {mine.map((invitation) => (
-          <Card key={invitation.id} elevation="md" style={styles.section}>
-            <Text style={styles.sectionTitle}>{invitation.householdName} wants to add you</Text>
-            <Text style={styles.sectionHint}>
-              {invitation.invitedByName} invited you. Joining replaces the household this app is
-              showing you; you can leave again at any time.
-            </Text>
-            <View style={styles.answerRow}>
-              <Button
-                label="No thanks"
-                variant="outline"
-                onPress={() => handleAnswerInvite(invitation.id, false)}
-                disabled={busyInvite}
-                style={styles.answerButton}
-              />
-              <Button
-                label="Join"
-                onPress={() => handleAnswerInvite(invitation.id, true)}
-                disabled={busyInvite}
-                style={styles.answerButton}
-              />
-            </View>
-          </Card>
-        ))}
+        {mine.map((invitation) => {
+          const where = describePlaces(invitation.propertyNames ?? [], invitation.householdName);
+          return (
+            <Card key={invitation.id} elevation="md" style={styles.section}>
+              <Text style={styles.sectionTitle}>Join {where}?</Text>
+              <Text style={styles.sectionHint}>
+                {invitation.invitedByName} invited you to {where}. Joining replaces the household
+                this app is showing you; you can leave again at any time.
+              </Text>
+              <View style={styles.answerRow}>
+                <Button
+                  label="No thanks"
+                  variant="outline"
+                  onPress={() => handleAnswerInvite(invitation.id, false)}
+                  disabled={busyInvite}
+                  style={styles.answerButton}
+                />
+                <Button
+                  label="Join"
+                  onPress={() => handleAnswerInvite(invitation.id, true)}
+                  disabled={busyInvite}
+                  style={styles.answerButton}
+                />
+              </View>
+            </Card>
+          );
+        })}
 
-        <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Places</Text>
-          <Text style={styles.sectionHint}>
-            A second place — a bach, a rental — keeps its own list, its own tags and its own
-            people.
-          </Text>
-          {properties.map((place) => (
-            <View key={place.id} style={styles.placeRow}>
+        {/* One card per place, because people are let into a place rather than
+            into the household: the bach's people are not the house's. Each
+            place has an owner, and only the owner can add, remove or share. */}
+        {properties.map((place) => {
+          const onPlace = peopleOn(place.id);
+          const owner = ownsPlace(place.id);
+          const waitingHere = waiting.filter((i) => i.propertyIds.includes(place.id)
+            || (i.propertyIds.length === 0 && properties.length === 1));
+          const notHere = members.filter((m) => !onPlace.some((p) => p.profileId === m.profileId));
+          const emailOpen = emailFor?.placeId === place.id;
+          return (
+            <Card key={place.id} elevation="md" style={styles.section}>
               <View style={styles.placeHeader}>
                 <Icon name="home-outline" size="md" color={Colors.primary} />
                 {renaming?.id === place.id ? (
@@ -464,12 +453,13 @@ export default function HouseholdScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={`Rename ${place.name}`}
                   >
-                    <Text style={styles.placeName}>{place.name}</Text>
+                    <Text style={styles.sectionTitle}>{place.name}</Text>
                   </Pressable>
                 )}
                 {/* The last place can't go: a household with none can't receive
-                    a snag, which is why create_household makes one. */}
-                {properties.length > 1 ? (
+                    a snag, which is why create_household makes one. And only
+                    its owner can delete it. */}
+                {owner && properties.length > 1 ? (
                   <Pressable
                     onPress={() => askDeletePlace(place.id, place.name)}
                     style={styles.rowAction}
@@ -480,11 +470,9 @@ export default function HouseholdScreen() {
                   </Pressable>
                 ) : null}
               </View>
+
               {/* Under the name, because it is a fact about the place rather
-                  than an action on it. Muted until it has been answered: an
-                  empty line asking a question is the only prompt on this
-                  screen, and it earns that by being what makes a briefed
-                  extract able to name anybody local. */}
+                  than an action on it. */}
               {locating?.id === place.id ? (
                 <View style={styles.whereRow}>
                   <TextInput
@@ -531,34 +519,162 @@ export default function HouseholdScreen() {
                   </Text>
                 </Pressable>
               )}
-              {properties.length > 1 ? (
-                <View style={styles.linkRow}>
-                  {members.map((member) => {
-                    const linked = (links[place.id] ?? []).includes(member.profileId);
-                    return (
+
+              {onPlace.map((person) => {
+                const isYou = person.profileId === profile.id;
+                return (
+                  <View key={person.profileId} style={styles.memberRow}>
+                    <Avatar name={person.displayName} size={36} />
+                    <View style={styles.memberBody}>
+                      <Text style={styles.memberName} numberOfLines={1}>
+                        {person.displayName}
+                        {isYou ? ' (you)' : ''}
+                      </Text>
+                      {person.role === 'owner' ? (
+                        <Text style={styles.ownerLabel}>Owner</Text>
+                      ) : null}
+                    </View>
+                    {/* Anybody can leave, unless nobody would be left. */}
+                    {isYou && onPlace.length > 1 ? (
+                      <TextButton
+                        label="Leave"
+                        accessibilityLabel={`Leave ${place.name}`}
+                        onPress={() => setConfirmRemove({
+                          placeId: place.id, placeName: place.name, id: person.profileId, name: person.displayName,
+                        })}
+                      />
+                    ) : null}
+                    {!isYou && owner && person.role !== 'owner' ? (
+                      <Pill
+                        label="Make owner"
+                        accessibilityLabel={`Make ${person.displayName} an owner of ${place.name}`}
+                        onPress={() => setConfirmOwner({
+                          placeId: place.id, placeName: place.name, id: person.profileId, name: person.displayName,
+                        })}
+                      />
+                    ) : null}
+                    {/* The × is the owner's alone. A member taking the owner
+                        off was the first step of 4 October 2026. */}
+                    {!isYou && owner ? (
                       <Pressable
-                        key={member.profileId}
-                        onPress={() => handleToggleLink(place.id, member.profileId, !linked)}
-                        disabled={busyLink}
-                        style={[styles.linkChip, linked && styles.linkChipOn]}
-                        accessibilityRole="switch"
-                        accessibilityState={{ checked: linked }}
+                        onPress={() => setConfirmRemove({
+                          placeId: place.id, placeName: place.name, id: person.profileId, name: person.displayName,
+                        })}
+                        style={styles.rowAction}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${person.displayName}`}
                       >
-                        <Icon
-                          name={linked ? 'checkmark-circle' : 'ellipse-outline'}
-                          size="sm"
-                          color={linked ? Colors.white : Colors.textMuted}
-                        />
-                        <Text style={[styles.linkLabel, linked && styles.linkLabelOn]}>
-                          {member.profileId === profile.id ? 'You' : member.displayName}
-                        </Text>
+                        <Icon name="close" size="sm" color={Colors.textMuted} />
                       </Pressable>
-                    );
-                  })}
+                    ) : null}
+                  </View>
+                );
+              })}
+
+              {/* A waiting invitation is drawn lighter than a member and says so
+                  in words, because the one thing it must never read as is
+                  somebody who is already here. */}
+              {waitingHere.map((invitation) => (
+                <View key={invitation.id} style={styles.memberRow}>
+                  <View style={styles.waitingMark}>
+                    <Icon name="hourglass-outline" size="sm" color={Colors.textMuted} />
+                  </View>
+                  <View style={styles.waitingBody}>
+                    <Text style={styles.waitingEmail} numberOfLines={1}>{invitation.email}</Text>
+                    <Text style={styles.waitingHint}>Waiting — they need to sign up with this address</Text>
+                  </View>
+                  {owner ? (
+                    <Pressable
+                      onPress={() => handleCancelInvite(invitation.id)}
+                      style={styles.rowAction}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Cancel the invitation to ${invitation.email}`}
+                    >
+                      <Icon name="close" size="sm" color={Colors.textMuted} />
+                    </Pressable>
+                  ) : null}
+                </View>
+              ))}
+
+              {owner && notHere.length > 0 ? (
+                <View style={styles.linkRow}>
+                  {notHere.map((m) => (
+                    <Pill
+                      key={m.profileId}
+                      label={`+ ${m.displayName}`}
+                      accessibilityLabel={`Add ${m.displayName} to ${place.name}`}
+                      disabled={busyLink}
+                      onPress={() => handleAddToPlace(place.id, m.profileId)}
+                    />
+                  ))}
                 </View>
               ) : null}
-            </View>
-          ))}
+
+              {owner ? (
+                <View style={styles.codeBlock}>
+                  <Text style={styles.subTitle}>Share {place.name}</Text>
+                  {/* The link first, into the phone's own share sheet, with the
+                      QR beside it. It lets them into this place only, as a
+                      member. The address invitation stays, second. */}
+                  <InviteLinkPanel
+                    householdId={household.id}
+                    placeName={place.name}
+                    propertyIds={[place.id]}
+                    link={linkFor(place.id)}
+                    onLink={(next) => setLinkFor(place.id, next)}
+                  />
+                  {emailOpen ? (
+                    <View style={styles.addRow}>
+                      <TextInput
+                        style={styles.input}
+                        value={emailFor?.value ?? ''}
+                        onChangeText={(value) => setEmailFor({ placeId: place.id, value })}
+                        placeholder="Their email address"
+                        placeholderTextColor={Colors.textMuted}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        keyboardType="email-address"
+                        inputMode="email"
+                        autoFocus
+                        accessibilityLabel="Their email address"
+                      />
+                      <Text style={styles.sectionHint}>
+                        Snag doesn't email them — the invitation waits until they sign up with it,
+                        so tell them yourself.
+                      </Text>
+                      <Button
+                        label="Invite them"
+                        variant="outline"
+                        onPress={() => handleInvite(place.id)}
+                        loading={adding}
+                        disabled={!emailFor?.value.trim() || adding}
+                        fullWidth
+                        icon="person-add-outline"
+                      />
+                    </View>
+                  ) : (
+                    <TextButton
+                      label="Or invite an email address"
+                      accessibilityLabel={`Invite an email address to ${place.name}`}
+                      onPress={() => setEmailFor({ placeId: place.id, value: '' })}
+                    />
+                  )}
+                </View>
+              ) : (
+                <Text style={styles.sectionHint}>
+                  The owner of {place.name} decides who is on it.
+                </Text>
+              )}
+            </Card>
+          );
+        })}
+
+        <Card elevation="md" style={styles.section}>
+          <Text style={styles.sectionTitle}>Add a place</Text>
+          <Text style={styles.sectionHint}>
+            A second place — a bach, a rental — keeps its own list, its own tags and its own
+            people. You own what you add.
+          </Text>
           <TextInput
             style={styles.input}
             value={newPlace}
@@ -579,102 +695,11 @@ export default function HouseholdScreen() {
           />
         </Card>
 
-        <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Add someone</Text>
-          <Text style={styles.sectionHint}>
-            Send them a link. It opens Snag and asks them to join, whatever address they sign up
-            with — good for a day.
-          </Text>
-          {/* Asked only once there's a choice to make. It used to send them to
-              whichever place happened to be first in the adder's list, and the
-              hint underneath asserted that as though somebody had decided it. */}
-          {properties.length > 1 ? (
-            <>
-              <Text style={styles.sectionHint}>Where do they start?</Text>
-              <View style={styles.linkRow}>
-                {properties.map((place) => {
-                  const on = startOn.includes(place.id);
-                  return (
-                    <Pressable
-                      key={place.id}
-                      onPress={() =>
-                        setStartOn((current) =>
-                          on ? current.filter((id) => id !== place.id) : [...current, place.id]
-                        )
-                      }
-                      style={[styles.linkChip, on && styles.linkChipOn]}
-                      accessibilityRole="switch"
-                      accessibilityState={{ checked: on }}
-                      accessibilityLabel={`Start on ${place.name}`}
-                    >
-                      <Icon
-                        name={on ? 'checkmark-circle' : 'ellipse-outline'}
-                        size="sm"
-                        color={on ? Colors.white : Colors.textMuted}
-                      />
-                      <Text style={[styles.linkLabel, on && styles.linkLabelOn]}>{place.name}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </>
-          ) : null}
-
-          {/* The link first, into the phone's own share sheet. It was framed
-              as the thing for somebody "standing right here", behind the
-              address form — but the address invitation sends nothing, so the
-              other person had to be told anyway, and had to sign up with
-              exactly that address. The same panel is first-run setup's
-              *Bring someone in* step. */}
-          <InviteLinkPanel
-            householdId={household.id}
-            householdName={household.name}
-            propertyIds={properties.length > 1 ? startOn : undefined}
-            link={link}
-            onLink={setLink}
-          />
-
-          {/* The address invitation stays, second: somebody who has not got
-              the other person's phone number can still name an address. It
-              sends nothing and says so. */}
-          <View style={styles.codeBlock}>
-            <Text style={styles.orLine}>or invite the address they'll sign up with</Text>
-            <View style={styles.addRow}>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Their email address"
-                placeholderTextColor={Colors.textMuted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                inputMode="email"
-                accessibilityLabel="Their email address"
-              />
-            </View>
-            <Text style={styles.sectionHint}>
-              Snag doesn't email them — the invitation waits until they sign up with it, so tell
-              them yourself.
-            </Text>
-            <Button
-              label="Invite them"
-              variant="outline"
-              onPress={handleInvite}
-              loading={adding}
-              disabled={!email.trim() || adding || (properties.length > 1 && startOn.length === 0)}
-              fullWidth
-              icon="person-add-outline"
-            />
-          </View>
-        </Card>
-
         <View style={styles.note}>
           <Icon name="information-circle-outline" size="sm" color={Colors.textMuted} />
           <Text style={styles.noteText}>
-            {properties.length > 1
-              ? 'Everyone linked to a place can see and change everything at that place. The only permission here is which places someone is on.'
-              : 'Everyone in a household can see and change everything. There are no permissions to manage.'}
+            Everyone on a place can see and change its jobs and its house record. Only its owner
+            can add or remove people, share it or delete it. Anybody can leave.
           </Text>
         </View>
 
@@ -682,17 +707,18 @@ export default function HouseholdScreen() {
           Leaving and deleting are the same door seen from two sides, and which
           one you get is decided by whether anybody else is here: remove_member
           refuses the last member of a household and delete_household refuses
-          one that still has somebody in it, so offering both at once would put
-          a button on screen that can only ever answer with an error.
+          one that still has somebody in it — or a caller who does not own it.
         */}
         {alone ? (
-          <Button
-            label="Delete this household"
-            variant="outline"
-            onPress={() => setConfirmDeleteHouse(true)}
-            fullWidth
-            style={styles.leave}
-          />
+          ownsHousehold ? (
+            <Button
+              label="Delete this household"
+              variant="outline"
+              onPress={() => setConfirmDeleteHouse(true)}
+              fullWidth
+              style={styles.leave}
+            />
+          ) : null
         ) : (
           <Button
             label="Leave this household"
@@ -706,18 +732,31 @@ export default function HouseholdScreen() {
 
       <ConfirmDialog
         visible={!!confirmRemove}
-        title={`Remove ${confirmRemove?.name ?? ''}?`}
-        message="They lose this household and everything at its places. Anything they filed stays, still in their name."
-        confirmLabel="Remove"
+        title={confirmRemove?.id === profile.id
+          ? `Leave ${confirmRemove?.placeName ?? ''}?`
+          : `Remove ${confirmRemove?.name ?? ''} from ${confirmRemove?.placeName ?? ''}?`}
+        message={confirmRemove?.id === profile.id
+          ? "You lose its jobs and its house record. Anything you filed stays, still in your name."
+          : 'They lose its jobs and its house record. Anything they filed stays, still in their name.'}
+        confirmLabel={confirmRemove?.id === profile.id ? 'Leave' : 'Remove'}
         destructive
-        onConfirm={() => confirmRemove && handleRemoveMember(confirmRemove.id)}
+        onConfirm={handleRemoveFromPlace}
         onCancel={() => setConfirmRemove(null)}
+      />
+
+      <ConfirmDialog
+        visible={!!confirmOwner}
+        title={`Make ${confirmOwner?.name ?? ''} an owner of ${confirmOwner?.placeName ?? ''}?`}
+        message="An owner can add and remove people — you included — share it, and delete it."
+        confirmLabel="Make owner"
+        onConfirm={handleMakeOwner}
+        onCancel={() => setConfirmOwner(null)}
       />
 
       <ConfirmDialog
         visible={confirmLeave}
         title={`Leave ${household.name}?`}
-        message="You lose the list, the house record and the places. Anything you filed stays, still in your name."
+        message="You lose the list, the house record and the places. A place you own that somebody else is on is handed to them. Anything you filed stays, still in your name."
         confirmLabel="Leave"
         destructive
         onConfirm={handleLeave}
@@ -773,7 +812,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
-  memberName: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
+  memberBody: { flex: 1, minWidth: 0 },
+  memberName: { fontSize: Typography.base, color: Colors.textPrimary },
+  // A label, not a hue: ownership is a fact about a person, not a state.
+  ownerLabel: { fontSize: Typography.xs, color: Colors.textMuted, fontWeight: Typography.semibold },
+  subTitle: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
   // Muted and small on purpose: removing somebody is rare, and a destructive
   // control drawn loudly is one that gets pressed by accident.
   rowAction: {

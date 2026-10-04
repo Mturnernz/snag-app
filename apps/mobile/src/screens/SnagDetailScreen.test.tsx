@@ -57,6 +57,7 @@ const mock_setSnagThings = jest.fn().mockResolvedValue(undefined);
 const mock_getThingNotes = jest.fn().mockResolvedValue([]);
 const mock_getSupport = jest.fn().mockResolvedValue(null);
 const mock_createSupport = jest.fn().mockResolvedValue(undefined);
+const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => ({
   getSnag: (...a: unknown[]) => mock_getSnag(...a),
   getComments: jest.fn().mockResolvedValue([]),
@@ -66,7 +67,7 @@ jest.mock('../lib/supabase', () => ({
   setPartBought: (...a: unknown[]) => mock_setPartBought(...a),
   deleteSnag: jest.fn(),
   getFileUrls: jest.fn().mockResolvedValue({}),
-  deleteStoredFiles: jest.fn(),
+  deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
   getSnagAdvice: jest.fn().mockResolvedValue(null),
   deleteSnagAdvice: jest.fn(),
   getThingNotes: (...a: unknown[]) => mock_getThingNotes(...a),
@@ -559,6 +560,111 @@ describe('the top of the page', () => {
     const door = byLabel(r, 'In the Kitchen — change it');
     expect(door.findAll((n: any) => n.props?.name === 'chevron-down', { deep: true }).length)
       .toBeGreaterThan(0);
+  });
+});
+
+// ─── taking a photo off ──────────────────────────────────────────────────────
+//
+// A blurry shot, or a photo filed on the wrong job, had no way off: the strip
+// only opened. The × asks first because the file goes with it, and it never
+// leaves a job with neither a photo nor words (`snags_has_something`).
+
+describe('removing a photo', () => {
+  const removers = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Remove this photo'
+      && !!n.props?.onPress,
+  );
+
+  it('puts a × on each photo, beside its door and never inside it', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    expect(removers(r)).toHaveLength(2);
+    const doors = r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Open this photo'
+        && !!n.props?.onPress,
+    );
+    for (const door of doors) {
+      expect(door.findAll((n: any) => n.props?.accessibilityLabel === 'Remove this photo', { deep: true }))
+        .toEqual([]);
+    }
+  });
+
+  it('asks, then writes the rest and clears the file after the row', async () => {
+    const row = snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] });
+    const r = await arrange(row);
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/b.jpg'] }));
+
+    await press(removers(r)[0]);
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(r.queryByText('Remove this photo?')).not.toBeNull();
+
+    await press(button(r, 'Remove'));
+
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/b.jpg'] });
+    expect(mock_deleteStoredFiles).toHaveBeenCalledWith(['h/a.jpg']);
+    expect(mock_updateSnag.mock.invocationCallOrder[0])
+      .toBeLessThan(mock_deleteStoredFiles.mock.invocationCallOrder[0]);
+    expect(mock_showToast).toHaveBeenCalledWith('Photo removed');
+    expect(removers(r)).toHaveLength(1);
+  });
+
+  it('writes nothing when kept', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    await press(removers(r)[1]);
+    await press(button(r, 'Keep it'));
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(mock_deleteStoredFiles).not.toHaveBeenCalled();
+  });
+
+  // The strip is what was there when the page opened; the other phone may
+  // have added one since, and a list filtered from the stale copy would drop it.
+  it('filters the paths as they are now, not as the page opened', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg'] }));
+    mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/new.jpg'] }));
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/new.jpg'] }));
+
+    await press(removers(r)[0]);
+    await press(button(r, 'Remove'));
+
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/new.jpg'] });
+  });
+
+  it('keeps the file when the row write is refused', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    mock_updateSnag.mockRejectedValueOnce(new Error('No'));
+
+    await press(removers(r)[0]);
+    await press(button(r, 'Remove'));
+
+    expect(mock_deleteStoredFiles).not.toHaveBeenCalled();
+    expect(mock_showToast).not.toHaveBeenCalled();
+  });
+
+  // The server would refuse it with a constraint name. The dialog offers the
+  // words that would let the photo go instead of a Remove that cannot work.
+  it('offers to say what is wrong when the photo is all the job has', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg'], description: null }));
+
+    await press(removers(r)[0]);
+    expect(r.queryByText('This photo is all the job has')).not.toBeNull();
+    expect(button(r, 'Remove')).toBeUndefined();
+
+    await press(button(r, "Say what's wrong"));
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(mock_deleteStoredFiles).not.toHaveBeenCalled();
+    // The edit sheet, where the words go.
+    expect(r.root.findAll((n: any) => typeof n.type !== 'string'
+      && n.props?.accessibilityLabel === "What's wrong?").length).toBeGreaterThan(0);
+  });
+
+  it('lets the only photo go once the job has words', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg'], description: 'Gutters' }));
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: [], description: 'Gutters' }));
+
+    await press(removers(r)[0]);
+    await press(button(r, 'Remove'));
+
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: [] });
+    expect(mock_deleteStoredFiles).toHaveBeenCalledWith(['h/a.jpg']);
   });
 });
 

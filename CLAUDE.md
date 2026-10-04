@@ -571,6 +571,15 @@ thing page paid for, now extracted into `lib/addPhotos.ts` rather than copied a 
 write at the end, one upload after another, what arrived is kept, and the cap said out loud.
 Adding one deliberately does not start the job — photographing something is not deciding to do it.
 
+**And one can be taken off** (October 2026), by a × in each photo's corner — a 48pt sibling of the
+photo's door, never inside it. It asks first (*Remove this photo?* · *Remove* · *Keep it*), because
+the file is deleted too: the row is written from the paths **as they are now**, re-read first so a
+photo the other phone added is not dropped, and `deleteStoredFiles` runs after the row, never
+before. Removing one does not start the job either. **A photo that is all the job has cannot go**
+(`snags_has_something`), so its dialog offers *Say what's wrong*, opening `EditSnagSheet`, instead
+of a Remove the server would refuse. `SnagDetailScreen.test.tsx` pins the ×'s place, the ask, the
+fresh read, the file kept on a refused write, and the only photo.
+
 **A one-off job has no due date.** It had one — a `DateField` with *This weekend* and *Next week*,
 added because `due_at` was once reachable only through a repeat — and it came off by the owner's
 decision in *The job page review*. The date that remains is a repeat's: the *Repeats* row at the

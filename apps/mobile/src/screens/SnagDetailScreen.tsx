@@ -184,6 +184,8 @@ export default function SnagDetailScreen() {
   }, []);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** The photo whose × was pressed, while its confirmation is up. */
+  const [removingPhoto, setRemovingPhoto] = useState<string | null>(null);
   /** Whether the congratulations dialog is up. Only a real finish sets it. */
   const [celebrating, setCelebrating] = useState(false);
   /** Editing what the job says — its words and its room, together. */
@@ -396,7 +398,53 @@ export default function SnagDetailScreen() {
     }
   }
 
-    /**
+  /**
+   * Whether this photo is all the job has: no other photo and no words.
+   * `snags_has_something` refuses to leave a job with neither, so removing it
+   * is not offered. The dialog offers to say what's wrong instead, which is
+   * what makes the photo removable.
+   */
+  function onlyThing(row: Snag, path: string): boolean {
+    return row.photoPaths.every((p) => p === path) && !row.description?.trim();
+  }
+
+  /**
+   * One photo off the job, and its file out of the bucket.
+   *
+   * The paths are read fresh first: the strip is whatever was there when the
+   * page opened, and writing back a list filtered from it would drop a photo
+   * the other phone added since. That photo would then be in nobody's row.
+   * The file goes after the row, never before, and its delete never fails the
+   * removal (see deleteStoredFiles). Removing a photo does not start the job,
+   * for the same reason adding one doesn't.
+   */
+  async function handleRemovePhoto(path: string) {
+    if (!snag) return;
+    setRemovingPhoto(null);
+    setBusy(true);
+    try {
+      const fresh = await getSnag(snag.id);
+      if (!fresh.photoPaths.includes(path)) {
+        setSnag(fresh);
+        return;
+      }
+      if (onlyThing(fresh, path)) {
+        // The words went from the other phone since the page opened.
+        setSnag(fresh);
+        setRemovingPhoto(path);
+        return;
+      }
+      setSnag(await updateSnag(snag.id, { photoPaths: fresh.photoPaths.filter((p) => p !== path) }));
+      await deleteStoredFiles([path]);
+      showToast('Photo removed');
+    } catch (err: any) {
+      showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
    * Off the list, or back onto it.
    *
    * Not through `patch`, because `update_snag` starts a job when its parts
@@ -657,7 +705,14 @@ export default function SnagDetailScreen() {
 
             Adding one deliberately does not start the job: `v_started` reads
             assignee, due date, repeat and parts, and photographing something is
-            not deciding to do it. */}
+            not deciding to do it.
+
+            **And one can be taken off**: a blurry shot, or the wrong job's
+            photo. The × is a sibling of the photo's own door, laid over its
+            corner, never inside it: a Pressable inside a Pressable is a coin
+            toss about which one gets the tap. Its tap area is the full 48pt
+            box, not a 28px glyph with `hitSlop`, which react-native-web
+            ignores. It asks first, because the file goes too. */}
         {snag.photoPaths.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
             {snag.photoPaths.map((path, i) => (
@@ -669,6 +724,17 @@ export default function SnagDetailScreen() {
                   accessibilityLabel="Open this photo"
                 >
                   <SignedImage uri={photoUrls[path]} style={styles.photo} resizeMode="cover" />
+                </Pressable>
+                <Pressable
+                  onPress={() => setRemovingPhoto(path)}
+                  disabled={busy}
+                  style={styles.photoRemove}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove this photo"
+                >
+                  <View style={styles.photoRemoveDot}>
+                    <Icon name="close" size="sm" color={Colors.white} />
+                  </View>
                 </Pressable>
               </View>
             ))}
@@ -1258,6 +1324,36 @@ export default function SnagDetailScreen() {
         }}
       />
 
+      {/* Two answers, and only one of them removes anything. A photo that is
+          all the job has cannot go (`snags_has_something`), so the dialog
+          offers the words that would let it go instead of a Remove the server
+          would refuse. */}
+      {removingPhoto && onlyThing(snag, removingPhoto) ? (
+        <ConfirmDialog
+          visible
+          title="This photo is all the job has"
+          message="Say what's wrong first, then the photo can go. Otherwise there'd be nothing to go on."
+          confirmLabel="Say what's wrong"
+          cancelLabel="Keep it"
+          onConfirm={() => {
+            setRemovingPhoto(null);
+            setEditing(true);
+          }}
+          onCancel={() => setRemovingPhoto(null)}
+        />
+      ) : (
+        <ConfirmDialog
+          visible={removingPhoto !== null}
+          title="Remove this photo?"
+          message="It'll be gone for good."
+          confirmLabel="Remove"
+          cancelLabel="Keep it"
+          destructive
+          onConfirm={() => { if (removingPhoto) void handleRemovePhoto(removingPhoto); }}
+          onCancel={() => setRemovingPhoto(null)}
+        />
+      )}
+
       <ConfirmDialog
         visible={confirmDelete}
         title="Delete this?"
@@ -1361,6 +1457,26 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   photoCell: { marginRight: Spacing.sm },
+  // The 48pt tap box in the photo's top-right corner, holding the visible
+  // 28px dot. White on the photo scrim, because a photo is not a ground a
+  // colour can be chosen against.
+  photoRemove: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoRemoveDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.photoOverlay,
+  },
   photoPills: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.sm },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   title: {

@@ -18,7 +18,9 @@ import StickyActionBar from '../components/StickyActionBar';
 import PhotoViewer from '../components/PhotoViewer';
 import AdviceCard from '../components/AdviceCard';
 import SupportCard from '../components/SupportCard';
+import ServicedByPill from '../components/ServicedByPill';
 import AskSnagHQSheet from '../components/AskSnagHQSheet';
+import { askSnagHQEnabled } from '../lib/askSnagHQ';
 import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
 import LinkAssetsSheet from '../components/LinkAssetsSheet';
@@ -206,7 +208,8 @@ export default function SnagDetailScreen() {
         getSnagAdvice(params.snagId).catch(() => null),
         // Never fatal either, for the same reason: most jobs were never asked
         // about, and a question nobody can fetch must not hide the job.
-        getSupportRequestForSnag(params.snagId).catch(() => null),
+        // And not read at all while the feature is off.
+        askSnagHQEnabled() ? getSupportRequestForSnag(params.snagId).catch(() => null) : null,
       ]);
       setSnag(next);
       setComments(nextComments);
@@ -646,17 +649,11 @@ export default function SnagDetailScreen() {
             job about the same thing. It inherits every upload rule the thing
             page paid for (see `lib/addPhotos.ts`).
 
-            **Both ways in sit on the first photo**, the camera first. One
-            control opened the library and trusted the phone to offer a camera
-            from there — Android Chrome does not once several files are
-            allowed, so photographing the crack you had just noticed meant
-            leaving the app. Then they were photo-sized tiles at the end of the
-            strip, which read as empty photo slots and took half the width of a
-            phone. Now they are two small buttons on a scrim in the photo's
-            corner — **siblings** of the photo's own Pressable, laid over it,
-            never inside it, because a Pressable inside a Pressable is a coin
-            toss about which one gets the tap. A job with no photo has nothing
-            to lay them on, so it gets them as two pills instead.
+            **Both ways in sit under the headline**, the camera first, as
+            two pills. One control trusted the phone to offer a camera from the
+            library — Android Chrome does not once several files are allowed.
+            They sat on a scrim in the first photo's corner for a while, which
+            covered the picture the page is opened to read.
 
             Adding one deliberately does not start the job: `v_started` reads
             assignee, due date, repeat and parts, and photographing something is
@@ -673,59 +670,10 @@ export default function SnagDetailScreen() {
                 >
                   <SignedImage uri={photoUrls[path]} style={styles.photo} resizeMode="cover" />
                 </Pressable>
-                {i === 0 ? (
-                  <View style={[styles.photoActions, busy && styles.photoAddOff]}>
-                    <Pressable
-                      onPress={() => handleAddPhotos('camera')}
-                      disabled={busy}
-                      style={styles.photoAction}
-                      accessibilityRole="button"
-                      accessibilityLabel="Take a photo"
-                    >
-                      <Icon name="camera-outline" size="md" color={Colors.white} />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleAddPhotos('library')}
-                      disabled={busy}
-                      style={styles.photoAction}
-                      accessibilityRole="button"
-                      accessibilityLabel="Choose photos"
-                    >
-                      <Icon name="images-outline" size="md" color={Colors.white} />
-                    </Pressable>
-                  </View>
-                ) : null}
               </View>
             ))}
           </ScrollView>
-        ) : (
-          <View style={styles.photoPills}>
-            <Pressable
-              onPress={() => handleAddPhotos('camera')}
-              disabled={busy}
-              style={styles.suggestTap}
-              accessibilityRole="button"
-              accessibilityLabel="Take a photo"
-            >
-              <View style={[styles.suggestChip, busy && styles.photoAddOff]}>
-                <Icon name="camera-outline" size="sm" color={Colors.primary} />
-                <Text style={styles.suggestText}>Take photo</Text>
-              </View>
-            </Pressable>
-            <Pressable
-              onPress={() => handleAddPhotos('library')}
-              disabled={busy}
-              style={styles.suggestTap}
-              accessibilityRole="button"
-              accessibilityLabel="Choose photos"
-            >
-              <View style={[styles.suggestChip, busy && styles.photoAddOff]}>
-                <Icon name="images-outline" size="sm" color={Colors.primary} />
-                <Text style={styles.suggestText}>Choose photos</Text>
-              </View>
-            </Pressable>
-          </View>
-        )}
+        ) : null}
 
         {/* The words and the room were answerable for ten seconds after the
             photo and never again. A pencil on the headline is the way back to
@@ -740,6 +688,36 @@ export default function SnagDetailScreen() {
             accessibilityLabel="Edit this job"
           >
             <Icon name="create-outline" size="sm" color={Colors.textMuted} />
+          </Pressable>
+        </View>
+
+        {/* Both ways to add a photo sit under the headline, as pills, whether
+            or not the job has one yet. They were on a scrim over the first
+            photo, which covered the picture the page is opened to read. */}
+        <View style={styles.photoPills}>
+          <Pressable
+            onPress={() => handleAddPhotos('camera')}
+            disabled={busy}
+            style={styles.suggestTap}
+            accessibilityRole="button"
+            accessibilityLabel="Take a photo"
+          >
+            <View style={[styles.suggestChip, busy && styles.photoAddOff]}>
+              <Icon name="camera-outline" size="sm" color={Colors.primary} />
+              <Text style={styles.suggestText}>Take photo</Text>
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={() => handleAddPhotos('library')}
+            disabled={busy}
+            style={styles.suggestTap}
+            accessibilityRole="button"
+            accessibilityLabel="Choose photos"
+          >
+            <View style={[styles.suggestChip, busy && styles.photoAddOff]}>
+              <Icon name="images-outline" size="sm" color={Colors.primary} />
+              <Text style={styles.suggestText}>Choose photos</Text>
+            </View>
           </Pressable>
         </View>
 
@@ -886,8 +864,8 @@ export default function SnagDetailScreen() {
             panel of prompts on every job would be the page advertising a
             service rather than showing the job. Outlined because *Mark done*
             is the one filled button here. Once a question exists, its thread
-            takes this slot. */}
-        {support ? (
+            takes this slot. Off for v1 — see `lib/askSnagHQ.ts`. */}
+        {!askSnagHQEnabled() ? null : support ? (
           <SupportCard
             request={support}
             busy={busy}
@@ -1071,6 +1049,8 @@ export default function SnagDetailScreen() {
                         {[item.make, item.model].filter(Boolean).join(' ')}
                       </Text>
                     ) : null}
+                    {/* Who looks after it — the name wanted when it plays up. */}
+                    <ServicedByPill by={item.servicedBy} />
                   </View>
                   {item.room ? <Text style={styles.assetRoom}>{item.room}</Text> : null}
                   <Icon name="chevron-forward" size="sm" color={Colors.textMuted} />
@@ -1237,7 +1217,7 @@ export default function SnagDetailScreen() {
       />
 
       <AskSnagHQSheet
-        visible={asking}
+        visible={asking && askSnagHQEnabled()}
         busy={busy}
         onSend={handleAsk}
         onCancel={() => setAsking(false)}
@@ -1381,25 +1361,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   photoCell: { marginRight: Spacing.sm },
-  // Two buttons on a scrim in the first photo's corner. The scrim is the
-  // palette's `photoOverlay` for the reason every chip laid over a photograph
-  // takes it: a photo is not a background anybody can pick a colour against.
-  // Each button is the full 48pt target; the pill is exactly the two of them.
-  photoActions: {
-    position: 'absolute',
-    right: Spacing.sm,
-    bottom: Spacing.sm,
-    flexDirection: 'row',
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.photoOverlay,
-    overflow: 'hidden',
-  },
-  photoAction: {
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   photoPills: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.sm },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   title: {

@@ -269,6 +269,11 @@ export interface LinkedThing {
   make: string | null;
   model: string | null;
   kind: ThingKind;
+  /**
+   * Who services it — the thing's `spec.servicedBy`, as *Schedule service*
+   * asks it. Absent or null when nobody said.
+   */
+  servicedBy?: string | null;
 }
 
 export interface Snag {
@@ -677,6 +682,13 @@ export const ROOM_SUGGESTIONS: Record<string, ThingSuggestion[]> = {
     { name: 'Paint', kind: 'finish' },
   ],
   Bedroom: [
+    { name: 'Heat pump head', kind: 'appliance' },
+    { name: 'Smoke alarm', kind: 'appliance' },
+    { name: 'Paint', kind: 'finish' },
+  ],
+  // One of the three rooms a new place is seeded with since October 2026
+  // (Kitchen, Laundry, Master bedroom). A bedroom's list, because it is one.
+  'Master bedroom': [
     { name: 'Heat pump head', kind: 'appliance' },
     { name: 'Smoke alarm', kind: 'appliance' },
     { name: 'Paint', kind: 'finish' },

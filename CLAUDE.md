@@ -357,11 +357,38 @@ photo and never inside its door, and the pills with no photo; *Added by* only fo
 the room pill's ▾; the note box resting at one line, opening on focus and never sending on blur;
 and the outline *Ask SnagHQ* button under Notes and above the items card.
 
+## The October 2026 pass
+
+Seven UI changes, several reversing rules written further down. **Where anything below disagrees,
+this section wins**; the passages themselves keep their history.
+
+- **Capture is a + on the list, not a bar.** `components/Fab.tsx` (shared with the House tab)
+  opens `CaptureSheet`: **Take photo** (the shutter's old path — `fileCapturedPhoto`, then
+  `AmendSnagSheet`) or **Continue without picture**, which asks *What's the job?* with the box
+  focused and **creates nothing until *Add job***, then opens the job. Abandoned, nothing is
+  filed. `ComposeBar` stays only for a thing's *Report a problem* (`embedded`). The rules below
+  about capture asking nothing before it files still hold for the photo; words are filed on send.
+- **Ask SnagHQ is off for v1** (`lib/askSnagHQ.ts`, `EXPO_PUBLIC_ASK_SNAGHQ=on` to bring it
+  back): no button, no `SupportCard`, no sheet and no support read on the job page.
+- **The job page's *Take photo* / *Choose photos* are pills under the headline**, whether or not
+  there is a photo. The scrim over the first photo is gone.
+- **A new place is seeded with three rooms** — Kitchen, Laundry, Master bedroom
+  (`20261004110000`); existing places keep theirs. The setup rooms step is a grid of cards with a
+  dashed *Add another room* card. `RoomsEditor` (Location tags) is unchanged.
+- **House tab: no count on a tile**, and a **Recorded · All rooms** `Segmented` on the count row
+  (remembered per device, `lib/houseView.ts`). Recorded hides rooms with nothing real in them;
+  while nothing at all is recorded every room shows and no choice is offered, so day one is still
+  furnished. Tiles' accessible names are *Open Kitchen*.
+- **The walkthrough's photo step offers *Enter details manually*** under the camera.
+- **Serviced by** (`spec.servicedBy`) shows as a pill on `ThingCard` and on a job's *Linked
+  items* (`linked_things.serviced_by`, `20261004110100`).
+
 ## Capture and triage are different moments
 
 This is the load-bearing product decision and the easiest one to erode.
 
-**Capture** is the bar at the foot of the list (`ComposeBar`): a photo, or a line of text, or
+**Capture** was the bar at the foot of the list (`ComposeBar`) and is now a + — see *The October
+2026 pass*: a photo, or a line of text, or
 both. One tap to the camera, or four seconds of typing. It is used standing in the bathroom
 holding a broken toilet seat, with about ten seconds of patience.
 
@@ -4047,9 +4074,10 @@ household is not built.
 
 ## Locations are seeded, not administered and not derived
 
-`home.locations` holds the room tags, seeded **per property** by `seed_locations`: Kitchen,
+`home.locations` holds the room tags, seeded **per property** by `seed_locations`: since
+`20261004110000`, Kitchen, Laundry and Master bedroom for a new place (it was Kitchen,
 Bathroom, Bedroom, Living room, Laundry, Hallway, Garage, Outside, Deck, Roof, Under the house,
-Elsewhere. `getLocations(propertyId)` reads them in seeded order, and that order is what the list
+Elsewhere, and places made then keep those). `getLocations(propertyId)` reads them in seeded order, and that order is what the list
 groups by as well as what the capture sheet offers — so it is an interface, not just a seed.
 
 Nobody sets this up, and nobody has to earn it by logging something first. `Elsewhere` is the

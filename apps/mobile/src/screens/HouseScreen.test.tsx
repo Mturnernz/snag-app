@@ -4,6 +4,7 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import { Colors } from '../constants/theme';
 import HouseScreen from './HouseScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Label reading is off for v1 (lib/labelReading.ts). These specs pin how it
 // behaves when it is on, so it comes back as it went; the off state has its own.
@@ -106,11 +107,11 @@ async function search(r: ReturnType<typeof render>, query: string) {
   await TestRenderer.act(async () => field.props.onChangeText(query));
 }
 
-/** The tile for a room, whatever its count says. */
+/** The tile for a room. */
 const tile = (r: ReturnType<typeof render>, room: string) =>
   r.root.findAll(
     (n: any) => typeof n.type !== 'string' && !!n.props?.onPress
-      && (n.props?.accessibilityLabel ?? '').startsWith(`${room}, `),
+      && n.props?.accessibilityLabel === `Open ${room}`,
     { deep: true },
   )[0];
 
@@ -137,19 +138,24 @@ const pressable = (r: ReturnType<typeof render>, label: string) =>
     { deep: true }
   )[0];
 
-/** Every room tile, in the order drawn — "Laundry, 0 of 4". */
+/** Every room tile, in the order drawn, by name. */
 const tiles = (r: ReturnType<typeof render>) => {
   const labels = r.root.findAll(
     (n: any) => typeof n.type !== 'string' && !!n.props?.onPress
-      && /^.+, \d+( of \d+)?$/.test(n.props?.accessibilityLabel ?? ''),
+      && /^Open .+$/.test(n.props?.accessibilityLabel ?? ''),
     { deep: true },
-  ).map((n: any) => n.props.accessibilityLabel as string);
+  ).map((n: any) => (n.props.accessibilityLabel as string).slice('Open '.length));
   // A Pressable renders through more than one composite; keep each label once.
   return labels.filter((label, i) => labels.indexOf(label) === i);
 };
 
+const showAllRooms = async (r: ReturnType<typeof render>) => {
+  await TestRenderer.act(async () => pressable(r, 'All rooms').props.onPress());
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
+  (AsyncStorage as any).__reset();
   arrange();
   mock_getThings.mockResolvedValue([]);
   mock_getAbsentThings.mockResolvedValue([]);
@@ -170,7 +176,9 @@ describe('HouseScreen', () => {
     expect(texts(result)).not.toContain('Nothing recorded yet');
     // Elsewhere is the location seed's escape hatch — suggesting its contents
     // would be nonsense, so it gets no tile at all.
-    expect(tiles(result)).toEqual(['Laundry, 0 of 4', 'Deck, 0 of 1']);
+    expect(tiles(result)).toEqual(['Laundry', 'Deck']);
+    // Nothing recorded, so there is nothing to choose between.
+    expect(texts(result)).not.toContain('All rooms');
   });
 
   it('says a suggestion is not recorded before it names one', async () => {
@@ -189,7 +197,7 @@ describe('HouseScreen', () => {
     expect(tileBackground(result, 'Laundry')).toBe(Colors.surface);
   });
 
-  it('counts what is recorded against what the room still offers', async () => {
+  it('shows the recorded rooms, with no count on a tile, and all of them when asked', async () => {
     mock_getThings.mockResolvedValue([
       thing({ id: '1', name: 'Washing machine', room: 'Laundry' }),
       thing({ id: '2', name: 'Dryer', room: 'Laundry' }),
@@ -197,7 +205,8 @@ describe('HouseScreen', () => {
     const result = render(<HouseScreen />);
     await settle();
 
-    expect(tiles(result)).toContain('Laundry, 2 of 4');
+    expect(tiles(result)).toEqual(['Laundry']);
+    expect(texts(result).some((t) => /\d+ of \d+/.test(t))).toBe(false);
     const all = texts(result);
     // Once anything is recorded the tile names the records, and only those —
     // a bullet each, and not one of what the room still suggests.
@@ -207,6 +216,14 @@ describe('HouseScreen', () => {
     // The header counts records, never ghosts — the first place the two would
     // blur is a number that includes both.
     expect(all).toContain('2 recorded');
+
+    await showAllRooms(result);
+    expect(tiles(result)).toEqual(['Laundry', 'Deck']);
+    // Remembered on this device for the next visit.
+    expect(await AsyncStorage.getItem('snag.house.view')).toBe('all');
+    const again = render(<HouseScreen />);
+    await settle();
+    expect(tiles(again)).toEqual(['Laundry', 'Deck']);
   });
 
   it('leads with the room holding the most', async () => {
@@ -221,7 +238,7 @@ describe('HouseScreen', () => {
     const result = render(<HouseScreen />);
     await settle();
 
-    expect(tiles(result).map((label) => label.split(',')[0])).toEqual(['Deck', 'Laundry']);
+    expect(tiles(result)).toEqual(['Deck', 'Laundry']);
   });
 
   it("paints a tile in its main wall's colour, and never a feature wall's", async () => {
@@ -288,7 +305,7 @@ describe('HouseScreen', () => {
     await settle();
 
     const all = tiles(result);
-    expect(all[all.length - 1]).toBe('Whole house, 1');
+    expect(all[all.length - 1]).toBe('Whole house');
   });
 
   it('opens a room on its own page', async () => {
@@ -296,12 +313,13 @@ describe('HouseScreen', () => {
     const result = render(<HouseScreen />);
     await settle();
 
-    await TestRenderer.act(async () => pressable(result, 'Laundry, 0 of 4').props.onPress());
+    await showAllRooms(result);
+    await TestRenderer.act(async () => pressable(result, 'Open Laundry').props.onPress());
     expect(mock_navigate).toHaveBeenCalledWith('HouseRoom', { room: 'Laundry' });
 
     // Whole house is the page for things with no room, so it goes as null
     // rather than as a room called "Whole house".
-    await TestRenderer.act(async () => pressable(result, 'Whole house, 1').props.onPress());
+    await TestRenderer.act(async () => pressable(result, 'Open Whole house').props.onPress());
     expect(mock_navigate).toHaveBeenCalledWith('HouseRoom', { room: null });
   });
 
@@ -401,7 +419,7 @@ describe('HouseScreen', () => {
     const result = render(<HouseScreen />);
     await settle();
 
-    expect(tiles(result)).toContain('Conservatory, 0 of 1');
+    expect(tiles(result)).toContain('Conservatory');
   });
 
   it('leaves out what this house has not got', async () => {
@@ -409,7 +427,9 @@ describe('HouseScreen', () => {
     const result = render(<HouseScreen />);
     await settle();
 
-    expect(tiles(result)).toContain('Laundry, 0 of 3');
+    expect(tiles(result)).toContain('Laundry');
+    expect(texts(result)).toContain('Washing machine');
+    expect(texts(result)).not.toContain('Dryer');
   });
 
   it('groups by room, and offers no other layout and nothing to fold', async () => {

@@ -123,6 +123,13 @@ it('lets the photo be skipped, and a photo from the library does the same as the
   expect(texts(r)).toContain('Which room?');
 });
 
+it('offers to enter the details by hand under the camera, passing over the photo', async () => {
+  const r = await open(null);
+  await tap(r, 'Enter details manually');
+  expect(texts(r)).toContain('Which room?');
+  expect(mock_upload).not.toHaveBeenCalled();
+});
+
 it('skips what a ghost has already answered, and still says the kind it knows', async () => {
   mock_readLabel.mockResolvedValue(answer(PLATE));
   const r = await openGhost();

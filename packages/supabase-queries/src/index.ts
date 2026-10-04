@@ -106,7 +106,15 @@ function mapSnag(row: Row): Snag {
     propertyId: row.property_id,
     room: row.room ?? null,
     photoPaths: row.photo_paths ?? [],
-    linkedThings: row.linked_things ?? [],
+    linkedThings: ((row.linked_things ?? []) as any[]).map((t) => ({
+      id: t.id,
+      name: t.name ?? null,
+      room: t.room ?? null,
+      make: t.make ?? null,
+      model: t.model ?? null,
+      kind: t.kind,
+      servicedBy: t.serviced_by ?? null,
+    })),
     description: row.description ?? null,
     status: row.status,
     parts: row.parts ?? [],
@@ -2683,15 +2691,13 @@ export function houseRooms(
 /**
  * How many things a room's tile lists before it fades out. Four lines is the
  * most a half-width tile carries before one busy room makes its whole row of
- * the grid twice as tall as every other; the count above says how many there
- * are, and the room's own page lists them all.
+ * the grid twice as tall as every other; the fade says there is more, and
+ * the room's own page lists them all.
  */
 export const TILE_BULLET_LIMIT = 4;
 
 /** What a room's tile says. */
 export interface HouseRoomDescription {
-  /** "2 of 8" while anything is still suggested, a bare total after. */
-  count: string;
   /** Up to `TILE_BULLET_LIMIT` lines: records by headline, or suggestions. */
   lines: string[];
   /** True when the lines are suggestions — nothing is recorded yet. */
@@ -2703,11 +2709,10 @@ export interface HouseRoomDescription {
 }
 
 /**
- * What a room's tile says: a count, a short list, and a colour.
+ * What a room's tile says: a short list, and a colour.
  *
- * The count is **"2 of 8" and never a percentage** — recorded against recorded
- * plus what is still suggested, so the denominator shrinks honestly as things
- * are dismissed. A room with nothing left to suggest is its bare total.
+ * **No count.** It said "2 of 8" until October 2026, and on a tile that read
+ * as a score rather than as anything the room needed to say.
  *
  * The lines are what is recorded, by headline, **in the order the room's page
  * lists them** — appliances, then paint and tiles, then the rest — so the tile
@@ -2721,15 +2726,11 @@ export interface HouseRoomDescription {
  * recorded is never painted. Whole house has no walls and never is either.
  */
 export function describeHouseRoom(room: HouseRoom): HouseRoomDescription {
-  const recorded = room.recorded.length;
-  const total = recorded + room.ghosts.length;
-  const count = room.ghosts.length > 0 ? `${recorded} of ${total}` : `${recorded}`;
-  const suggested = recorded === 0;
+  const suggested = room.recorded.length === 0;
   const all = suggested
     ? room.ghosts.map((g) => g.name)
     : thingKindGroups(room.recorded).flatMap((group) => group.things.map(thingHeadline));
   return {
-    count,
     lines: all.slice(0, TILE_BULLET_LIMIT),
     suggested,
     truncated: all.length > TILE_BULLET_LIMIT,

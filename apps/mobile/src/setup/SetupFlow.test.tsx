@@ -256,6 +256,25 @@ describe('the second person', () => {
     expect(mock.deleteLocation).not.toHaveBeenCalled();
   });
 
+  // The rooms are cards, and the last one is a dashed card that names a room
+  // in place.
+  it('adds another room from the dashed card', async () => {
+    world = { profile: profile(['name', 'household']), household: HOUSE, members: 1 };
+    const r = await start();
+    expect(title(r, 'Kitchen')).toBe(true);
+    await press(r, 'Add another room');
+    await type(r, 'Name the room', 'Sleepout');
+    mock.getLocations.mockResolvedValue([
+      { id: 'l1', name: 'Kitchen' },
+      { id: 'l2', name: 'Garage' },
+      { id: 'l3', name: 'Sleepout' },
+    ]);
+    await press(r, 'Add');
+    expect(mock.createLocation).toHaveBeenCalledWith('p', 'Sleepout');
+    expect(title(r, 'Sleepout')).toBe(true);
+    expect(title(r, 'Add another room')).toBe(true);
+  });
+
   it('a first owner removes a room in one tap: nothing has been filed there yet', async () => {
     world = { profile: profile(['name', 'household']), household: HOUSE, members: 1 };
     const r = await start();

@@ -507,14 +507,10 @@ describe('the rooms the House tab shows', () => {
 describe('what a room tile says', () => {
   const at = (id: string, name: string, room: string) => thing({ id, name, room });
 
-  it('counts recorded against what is still suggested, never as a percentage', () => {
+  // A tile carries no count since October 2026: "2 of 8" read as a score.
+  it('says no count at all', () => {
     const [laundry] = houseRooms(['Laundry'], [at('a', 'Dryer', 'Laundry')], []);
-    expect(describeHouseRoom(laundry).count).toBe('1 of 4');
-  });
-
-  it('is a bare total once nothing is left to suggest', () => {
-    const [deck] = houseRooms(['Deck'], [thing({ id: 'a', name: 'Stain', room: 'Deck', kind: 'finish' })], []);
-    expect(describeHouseRoom(deck).count).toBe('1');
+    expect(describeHouseRoom(laundry)).not.toHaveProperty('count');
   });
 
   it('names what is recorded, and only that, once anything is', () => {
@@ -538,8 +534,6 @@ describe('what a room tile says', () => {
     expect(TILE_BULLET_LIMIT).toBe(4);
     expect(tile.lines).toEqual(names.slice(0, 4));
     expect(tile.truncated).toBe(true);
-    // The count is what says how many there are.
-    expect(tile.count).toMatch(/^5( of \d+)?$/);
   });
 
   it('is not cut off at exactly four', () => {

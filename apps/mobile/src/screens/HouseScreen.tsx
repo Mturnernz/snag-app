@@ -16,8 +16,9 @@ import Icon from '../components/Icon';
 import AddThingSheet from '../components/AddThingSheet';
 import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
-import { AddRow, Group, Pill, SectionTitle, groupedStyles } from '../components/Grouped';
-import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { AddRow, Group, Pill, SectionTitle, Segmented, groupedStyles } from '../components/Grouped';
+import Fab from '../components/Fab';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useAddThing } from '../hooks/useAddThing';
@@ -28,6 +29,7 @@ import { showAlert } from '../lib/alert';
 import { RETURN_RELOAD_MS } from '../lib/foreground';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { roomIcon } from '../lib/roomIcon';
+import { readHouseView, writeHouseView, type HouseView } from '../lib/houseView';
 import { TILE_SCRIM, tileInk } from '../lib/tileInk';
 import { AbsentThing, RootStackParamList, Thing } from '../types';
 
@@ -59,9 +61,12 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  *
  * Consequences worth keeping:
  *
- * - **Progress is per room, never a percentage.** "Kitchen · 2 of 8" is a unit
- *   of work somebody can finish on a Saturday. A global completeness meter is
+ * - **No completeness number anywhere** — not a percentage, and since October
+ *   2026 not a per-room "2 of 8" on the tile either. A completeness meter is
  *   the shaming number that gets an app closed and not reopened.
+ * - **Recorded · All rooms.** The grid shows rooms holding something real by
+ *   default; *All rooms* brings back the furnished ones. With nothing recorded
+ *   it shows them all, so day one is still furnished.
  * - **The record is grouped by room and only by room.** Rooms are how somebody
  *   standing in a house thinks, and how the List tab groups; one layout means
  *   the two tabs cannot drift. Inside a room things are grouped by kind, but
@@ -100,6 +105,17 @@ export default function HouseScreen() {
    * nobody can fetch is a count of nought, which is also what it usually is.
    */
   const [labelChecks, setLabelChecks] = useState<string[]>([]);
+  /** Recorded rooms only, or every room — remembered per device. */
+  const [view, setView] = useState<HouseView>('recorded');
+  useEffect(() => {
+    let live = true;
+    readHouseView().then((saved) => { if (live) setView(saved); });
+    return () => { live = false; };
+  }, []);
+  function chooseView(next: HouseView) {
+    setView(next);
+    writeHouseView(next);
+  }
 
   const propertyId = activeProperty?.id ?? null;
 
@@ -184,9 +200,23 @@ export default function HouseScreen() {
     }
   }
 
-  const rooms = useMemo(
+  const allRooms = useMemo(
     () => houseRooms(locations.map((l) => l.name), things, absent),
     [locations, things, absent],
+  );
+
+  /**
+   * **Recorded** shows the rooms holding something real; **All rooms** adds
+   * the ones that only hold suggestions. While nothing at all is recorded the
+   * grid shows every room and offers no choice, so day one is still furnished:
+   * an empty tab on the day it ships is the failure the furniture exists for.
+   */
+  const anyRecorded = allRooms.some((room) => room.recorded.length > 0);
+  const rooms = useMemo(
+    () => (view === 'recorded' && anyRecorded
+      ? allRooms.filter((room) => room.recorded.length > 0)
+      : allRooms),
+    [allRooms, view, anyRecorded],
   );
 
   /**
@@ -276,6 +306,17 @@ export default function HouseScreen() {
       {!searching ? (
         <View style={styles.countRow}>
           <Text style={styles.count}>{recorded} recorded</Text>
+          {anyRecorded ? (
+            <Segmented
+              options={[
+                { value: 'recorded', label: 'Recorded' },
+                { value: 'all', label: 'All rooms' },
+              ]}
+              value={view}
+              onChange={chooseView}
+              accessibilityLabel="Which rooms to show"
+            />
+          ) : null}
           {/* Absent at nought, like the shopping pill: a control with nothing
               behind it is a choice that isn't one. It opens the first thing
               with a reading waiting; each thing's row says so too. */}
@@ -360,14 +401,7 @@ export default function HouseScreen() {
         ) : null}
       </ScrollView>
 
-      <Pressable
-        onPress={() => adding.open(null)}
-        style={[styles.fab, { bottom: Spacing.lg }]}
-        accessibilityRole="button"
-        accessibilityLabel="Add something to the house"
-      >
-        <Icon name="add" size="xl" color={Colors.white} />
-      </Pressable>
+      <Fab onPress={() => adding.open(null)} accessibilityLabel="Add something to the house" />
 
       <AddThingSheet {...adding.sheet} />
 
@@ -453,14 +487,14 @@ export default function HouseScreen() {
 
 /**
  * How the list on a tile fades when the room holds more than it shows. The
- * fade is the "and more" — the count above says how many — so it only happens
+ * fade is the "and more" — so it only happens
  * when something is cut off: fading a complete list would hide its last line
  * and claim there was more behind it.
  */
 const TILE_FADE = [1, 0.85, 0.55, 0.25];
 
 /**
- * One room, as a tile: an icon, its name, the count, and a short list.
+ * One room, as a tile: an icon, its name and a short list.
  *
  * **Painted in the room's main wall colour** when a paint recorded there says
  * it went on the walls (`wallColour`), and white otherwise. That is the swatch
@@ -478,11 +512,11 @@ const TILE_FADE = [1, 0.85, 0.55, 0.25];
  * record is the one failure this tab is built against. Such a room is never
  * painted either: it has no paint to paint it with.
  *
- * The count is "2 of 8" while anything is still suggested and a bare total
- * after, and it goes muted on a white tile while nothing is recorded.
+ * **No count.** It said "2 of 8", which read as a score rather than as
+ * anything a tile needed to say; the list under the name shows what is there.
  */
 function RoomTile({ room, onPress }: { room: HouseRoom; onPress: () => void }) {
-  const { count, lines, suggested, truncated, wall } = describeHouseRoom(room);
+  const { lines, suggested, truncated, wall } = describeHouseRoom(room);
   const paint = wall ? tileInk(wall) : null;
   const ink = paint?.ink ?? Colors.textPrimary;
   // On a painted tile every line takes the measured colour: the muted and
@@ -502,7 +536,6 @@ function RoomTile({ room, onPress }: { room: HouseRoom; onPress: () => void }) {
           <Icon name={roomIcon(room.room)} size="md" color={paint ? ink : Colors.textSecondary} />
         </View>
       </View>
-      <Text style={[styles.tileCount, { color: suggested ? muted : ink }]}>{count}</Text>
       <View style={styles.tileList}>
         {suggested ? (
           <Text style={[styles.tileNote, { color: muted }]}>Not recorded yet</Text>
@@ -533,7 +566,7 @@ function RoomTile({ room, onPress }: { room: HouseRoom; onPress: () => void }) {
       onPress={onPress}
       style={[styles.tile, wall ? [styles.tilePainted, { backgroundColor: wall }] : null]}
       accessibilityRole="button"
-      accessibilityLabel={`${room.name}, ${count}`}
+      accessibilityLabel={`Open ${room.name}`}
     >
       {paint?.scrim ? <View style={styles.tileScrim}>{content}</View> : content}
     </Pressable>
@@ -571,8 +604,10 @@ const styles = StyleSheet.create({
   clear: { padding: Spacing.xs },
   countRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
   },
@@ -610,27 +645,12 @@ const styles = StyleSheet.create({
   },
   // Centred on the name's first line (22pt line, 20pt glyph).
   tileIcon: { paddingTop: 1 },
-  tileCount: {
-    fontSize: Typography.subhead, lineHeight: 20, color: Colors.textPrimary,
-    fontVariant: ['tabular-nums'],
-  },
   tileList: { gap: 3, paddingTop: 2 },
   tileNote: { fontSize: Typography.footnote, lineHeight: 18, color: Colors.textMuted },
   bulletRow: { flexDirection: 'row', alignItems: 'center', gap: 7, minWidth: 0 },
   bullet: { width: 5, height: 5, borderRadius: 2.5 },
   bulletHollow: { width: 6, height: 6, borderRadius: 3, borderWidth: 1.25 },
   bulletText: { flex: 1, minWidth: 0, fontSize: Typography.footnote, lineHeight: 18 },
-  fab: {
-    position: 'absolute',
-    right: Spacing.lg,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Shadow.lg,
-  },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
   sheet: {
     position: 'absolute',

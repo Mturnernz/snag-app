@@ -112,8 +112,7 @@ export default function CaptureSheet({ visible, disabled, onTakePhoto, onAddWord
         <Row
           title="Continue without picture"
           leading={<View style={styles.lead}><Icon name="create-outline" size="md" color={Colors.primary} /></View>}
-          onPress={disabled ? undefined : () => setWriting(true)}
-          dim={disabled}
+          onPress={() => setWriting(true)}
         />
       </Group>
       {disabled ? <Text style={styles.hint}>Add a place before adding something to the list.</Text> : null}

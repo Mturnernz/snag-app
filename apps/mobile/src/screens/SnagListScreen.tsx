@@ -604,7 +604,12 @@ export default function SnagListScreen() {
    * says why and rethrows, so the sheet keeps the words.
    */
   async function captureWords(text: string) {
-    if (!activeProperty) return;
+    // Typing never waits on the places loading; only filing needs one. The
+    // words stay in the box when there is nowhere to put them yet.
+    if (!activeProperty) {
+      showAlert('No place yet', 'Add a place before adding something to the list.');
+      throw new Error('No place yet');
+    }
     try {
       const snag = await createSnag({ propertyId: activeProperty.id, description: text, photoPaths: [] });
       setCapturing(false);

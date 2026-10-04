@@ -12,12 +12,13 @@ import ScreenHeader from '../components/ScreenHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DateField from '../components/DateField';
 import PhotoViewer from '../components/PhotoViewer';
+import PhotoRemoveButton from '../components/PhotoRemoveButton';
 import Button from '../components/Button';
 import { openUrl } from '../lib/openUrl';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
-import { useOnReturn } from '../hooks/useOnReturn';
+import { PHOTO_REFRESH_MS, useKeepCurrent } from '../hooks/useKeepCurrent';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import {
@@ -32,6 +33,7 @@ import {
   updateSnag, updateThing, uploadFile,
 } from '../lib/supabase';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
+import { deleteFileLater, keepFile, withoutPhoto, withPhotoBack } from '../lib/photoEdits';
 import ComposeBar from '../components/ComposeBar';
 import LabelReadingCard from '../components/LabelReadingCard';
 import PaintAreaSheet from '../components/PaintAreaSheet';
@@ -39,7 +41,6 @@ import ProductFactsCard from '../components/ProductFactsCard';
 import { TILE_SCRIM, tileInk } from '../lib/tileInk';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
-import { RETURN_RELOAD_MS } from '../lib/foreground';
 import { labelReadingEnabled } from '../lib/labelReading';
 import { copyToClipboard } from '../lib/clipboard';
 import {
@@ -218,13 +219,6 @@ export default function ThingDetailScreen() {
     setThingState(next);
   }, []);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
-  // Back in the app after a while, the photos' links may have expired while the
-  // page sat open. Sign them again — only the links, never the page: reloading
-  // the thing could land on top of something half typed in a box.
-  useOnReturn(() => {
-    const paths = thing?.photoPaths ?? [];
-    if (paths.length > 0) getFileUrls(paths).then(setPhotoUrls).catch(() => {});
-  }, RETURN_RELOAD_MS);
   // Which photo is open full screen, or null. A rating plate is the whole
   // reason this tab exists and is unreadable in a 220px tile.
   const [viewing, setViewing] = useState<number | null>(null);
@@ -313,6 +307,35 @@ export default function ThingDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * **The photos stay current while the page is open** — the job page's rule
+   * (`useKeepCurrent`): a photo added or taken off on the other phone reaches
+   * this one when the app comes back to the front and every half minute while
+   * the page is showing. Only the photos and their links, merged into the
+   * record on screen: the boxes are a draft over that record, and replacing the
+   * whole of it could write the other phone's words back over somebody's own.
+   * `photoSeq` keeps a read that started before this page's own photo write
+   * from landing after it.
+   */
+  const photoSeq = useRef(0);
+  const refreshPhotos = useCallback(async () => {
+    if (navigation.isFocused && !navigation.isFocused()) return;
+    const seq = ++photoSeq.current;
+    try {
+      const fresh = await getThing(thingId);
+      const current = thingRef.current;
+      if (seq !== photoSeq.current || !current) return;
+      setThing({ ...current, photoPaths: fresh.photoPaths });
+      // Merged rather than replaced, so a photo taken off a moment ago keeps
+      // its link for *Undo* to put back.
+      const urls = await getFileUrls(fresh.photoPaths);
+      if (seq === photoSeq.current) setPhotoUrls((prev) => ({ ...prev, ...urls }));
+    } catch {
+      // The strip stays as it was.
+    }
+  }, [thingId, navigation, setThing]);
+  useKeepCurrent(refreshPhotos, PHOTO_REFRESH_MS, busy || viewing !== null);
 
   // The lookup is keyed by the make and model, so it is read again whenever
   // either is changed — a corrected model number is a different model. Never
@@ -647,18 +670,71 @@ export default function ThingDetailScreen() {
     if (!thing || !household || busy) return;
     setBusy(true);
     try {
-      await addPhotos(household.id, (added) => patch(
-        { photoPaths: [...thing.photoPaths, ...added] },
-        added.length === 1 ? 'Photo added' : `${added.length} photos added`,
-      ), source);
+      await addPhotos(household.id, async (added) => {
+        // From the paths as they are now, not as the page last read them, so a
+        // photo the other phone added or took off meanwhile stays that way.
+        photoSeq.current += 1;
+        const fresh = await getThing(thing.id);
+        await patch(
+          { photoPaths: [...fresh.photoPaths, ...added] },
+          added.length === 1 ? 'Photo added' : `${added.length} photos added`,
+        );
+      }, source);
     } finally {
       setBusy(false);
     }
   }
 
+  /**
+   * One photo off, at once, with *Undo* on the toast. The job page does the
+   * same through the same helpers (`lib/photoEdits.ts`): the row is written
+   * now, from the paths as they are now, so it is gone for everyone; the file
+   * waits until Undo can no longer want it. It used to stay in the bucket for
+   * ever, with nothing pointing at it.
+   */
   async function removePhoto(path: string) {
-    if (!thing) return;
-    await patch({ photoPaths: thing.photoPaths.filter((p) => p !== path) }, 'Photo removed');
+    if (!thing || busy) return;
+    const id = thing.id;
+    setBusy(true);
+    try {
+      photoSeq.current += 1;
+      const fresh = await getThing(id);
+      const index = fresh.photoPaths.indexOf(path);
+      const current = thingRef.current;
+      if (index < 0) {
+        // Already taken off, on the other phone.
+        if (current) setThing({ ...current, photoPaths: fresh.photoPaths });
+        return;
+      }
+      const next = await updateThing(id, { photoPaths: withoutPhoto(fresh.photoPaths, path) });
+      setThing(next);
+      deleteFileLater(path);
+      showToast('Photo removed', {
+        label: 'Undo',
+        onPress: () => { void undoRemovePhoto(id, path, index); },
+      });
+    } catch (err: any) {
+      showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The photo back where it was — see the job page's `undoRemovePhoto`. */
+  async function undoRemovePhoto(id: string, path: string, index: number) {
+    keepFile(path);
+    photoSeq.current += 1;
+    setBusy(true);
+    try {
+      const fresh = await getThing(id);
+      setThing(await updateThing(id, { photoPaths: withPhotoBack(fresh.photoPaths, path, index) }));
+    } catch (err: any) {
+      // Not back on the row, so nothing points at the file: let it go after all.
+      deleteFileLater(path);
+      showAlert("Couldn't put that back", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function attachDocument() {
@@ -1105,7 +1181,7 @@ export default function ThingDetailScreen() {
                   {/* Opening and removing are siblings, never nested: a
                       Pressable inside a Pressable is a coin toss about which
                       one gets the tap. The × is drawn after, so it wins its
-                      own 28px and nothing else. */}
+                      own 48pt corner and nothing else. */}
                   <Pressable
                     onPress={() => setViewing(i)}
                     disabled={!photoUrls[path]}
@@ -1114,14 +1190,7 @@ export default function ThingDetailScreen() {
                   >
                     <SignedImage uri={photoUrls[path]} style={styles.photo} resizeMode="cover" />
                   </Pressable>
-                  <Pressable
-                    onPress={() => removePhoto(path)}
-                    style={styles.photoRemove}
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove this photo"
-                  >
-                    <Icon name="close" size="sm" color={Colors.white} />
-                  </Pressable>
+                  <PhotoRemoveButton onPress={() => removePhoto(path)} disabled={busy} />
                 </View>
               </React.Fragment>
             ))}
@@ -1939,17 +2008,6 @@ const styles = StyleSheet.create({
     height: 165,
     borderRadius: Radius.card,
     backgroundColor: Colors.border,
-  },
-  photoRemove: {
-    position: 'absolute',
-    top: Spacing.xs,
-    right: Spacing.xs,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(43, 39, 36, 0.62)',
   },
   attachRow: {
     flexDirection: 'row',

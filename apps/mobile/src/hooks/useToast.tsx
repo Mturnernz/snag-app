@@ -13,6 +13,9 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+/** How long a toast with something to press stays up. */
+export const TOAST_ACTION_MS = 5000;
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [message, setMessage] = useState('');
   const [visible, setVisible] = useState(false);
@@ -29,7 +32,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     hideTimer.current = setTimeout(() => {
       setVisible(false);
       setAction(null);
-    }, next ? 5000 : 2000);
+    }, next ? TOAST_ACTION_MS : 2000);
   }, []);
 
   const press = useCallback(() => {

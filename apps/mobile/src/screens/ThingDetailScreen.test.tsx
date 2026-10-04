@@ -112,6 +112,26 @@ jest.mock('../lib/photoUpload', () => ({
 }));
 const mock_openUrl = jest.fn();
 jest.mock('../lib/openUrl', () => ({ openUrl: (...a: unknown[]) => mock_openUrl(...a) }));
+// The file waits for Undo on a timer of its own, pinned in photoEdits.test.ts;
+// here it is enough that the page asks for it, and calls it off on Undo.
+const mock_deleteFileLater = jest.fn();
+const mock_keepFile = jest.fn();
+jest.mock('../lib/photoEdits', () => ({
+  ...jest.requireActual('../lib/photoEdits'),
+  deleteFileLater: (...a: unknown[]) => mock_deleteFileLater(...a),
+  keepFile: (...a: unknown[]) => mock_keepFile(...a),
+}));
+// When the page reads its photos again is pinned in useKeepCurrent.test.tsx;
+// here the read itself is called by hand.
+const mock_keepCurrent: { refresh?: () => Promise<void>; everyMs?: number; paused?: boolean } = {};
+jest.mock('../hooks/useKeepCurrent', () => ({
+  PHOTO_REFRESH_MS: 30_000,
+  useKeepCurrent: (refresh: () => Promise<void>, everyMs: number, paused: boolean) => {
+    mock_keepCurrent.refresh = refresh;
+    mock_keepCurrent.everyMs = everyMs;
+    mock_keepCurrent.paused = paused;
+  },
+}));
 const mock_showToast = jest.fn();
 jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: (...a: unknown[]) => mock_showToast(...a) }) }));
 const mock_showAlert = jest.fn();
@@ -1073,5 +1093,134 @@ describe('with label reading off, as v1 ships', () => {
     expect(texts(result).some((t) => /Read from the label/.test(t))).toBe(false);
     // The record itself is all there, to be typed into.
     expect(texts(result)).toEqual(expect.arrayContaining(['Make', 'Model', 'Serial']));
+  });
+});
+
+// ─── taking a photo off, and keeping the strip current ──────────────────────
+//
+// The × used to take a photo off at once and leave its file in the bucket for
+// ever, in a 28px tap area. It still takes it off at once — the job page now
+// does the same — with Undo on the toast, the file let go only once Undo can no
+// longer want it, and a 48pt corner to press.
+
+describe('removing a photo', () => {
+  const removers = (r: RenderResult) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Remove this photo'
+      && !!n.props?.onPress,
+  );
+  const undo = () => {
+    const call = mock_showToast.mock.calls[mock_showToast.mock.calls.length - 1];
+    expect(call[1]).toEqual({ label: 'Undo', onPress: expect.any(Function) });
+    return call[1].onPress as () => void;
+  };
+
+  it('puts a 48pt × beside each photo, never inside its door', async () => {
+    const r = await open({ photoPaths: ['h1/a.jpg', 'h1/b.jpg'] });
+    expect(removers(r)).toHaveLength(2);
+    const style = Object.assign({}, ...[removers(r)[0].props.style].flat());
+    expect(style.width).toBeGreaterThanOrEqual(48);
+    expect(style.height).toBeGreaterThanOrEqual(48);
+    const doors = r.root.findAll((n: any) => typeof n.type !== 'string'
+      && n.props?.accessibilityLabel === 'Open this photo' && !!n.props?.onPress);
+    for (const door of doors) {
+      expect(door.findAll((n: any) => n.props?.accessibilityLabel === 'Remove this photo', { deep: true }))
+        .toEqual([]);
+    }
+  });
+
+  it('removes at once, with Undo, and lets the file go only after the row', async () => {
+    const r = await open({ photoPaths: ['h1/a.jpg', 'h1/b.jpg'] });
+    mock_updateThing.mockResolvedValue(thing({ photoPaths: ['h1/b.jpg'] }));
+
+    await TestRenderer.act(async () => { await removers(r)[0].props.onPress(); });
+
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/b.jpg'] });
+    expect(mock_deleteFileLater).toHaveBeenCalledWith('h1/a.jpg');
+    expect(mock_updateThing.mock.invocationCallOrder[0])
+      .toBeLessThan(mock_deleteFileLater.mock.invocationCallOrder[0]);
+    expect(mock_showToast).toHaveBeenCalledWith('Photo removed', expect.objectContaining({ label: 'Undo' }));
+    expect(removers(r)).toHaveLength(1);
+  });
+
+  it('puts it back where it was on Undo, keeping the file first', async () => {
+    const r = await open({ photoPaths: ['h1/a.jpg', 'h1/b.jpg'] });
+    mock_updateThing.mockResolvedValue(thing({ photoPaths: ['h1/b.jpg'] }));
+    await TestRenderer.act(async () => { await removers(r)[0].props.onPress(); });
+
+    mock_getThing.mockResolvedValue(thing({ photoPaths: ['h1/b.jpg', 'h1/theirs.jpg'] }));
+    mock_updateThing.mockResolvedValue(thing({ photoPaths: ['h1/a.jpg', 'h1/b.jpg', 'h1/theirs.jpg'] }));
+    await TestRenderer.act(async () => { await undo()(); });
+
+    expect(mock_keepFile).toHaveBeenCalledWith('h1/a.jpg');
+    expect(mock_keepFile.mock.invocationCallOrder[0])
+      .toBeLessThan(mock_updateThing.mock.invocationCallOrder[1]);
+    // Among what is there now: the other phone's photo stays.
+    expect(mock_updateThing).toHaveBeenLastCalledWith('t1', {
+      photoPaths: ['h1/a.jpg', 'h1/b.jpg', 'h1/theirs.jpg'],
+    });
+    expect(removers(r)).toHaveLength(3);
+  });
+
+  it('filters the paths as they are now, not as the page last read them', async () => {
+    const r = await open({ photoPaths: ['h1/a.jpg'] });
+    mock_getThing.mockResolvedValue(thing({ photoPaths: ['h1/a.jpg', 'h1/new.jpg'] }));
+    mock_updateThing.mockResolvedValue(thing({ photoPaths: ['h1/new.jpg'] }));
+
+    await TestRenderer.act(async () => { await removers(r)[0].props.onPress(); });
+
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/new.jpg'] });
+  });
+
+  it('keeps the file, and offers no Undo, when the row write is refused', async () => {
+    const r = await open({ photoPaths: ['h1/a.jpg'] });
+    mock_updateThing.mockRejectedValueOnce(new Error('No'));
+
+    await TestRenderer.act(async () => { await removers(r)[0].props.onPress(); });
+
+    expect(mock_deleteFileLater).not.toHaveBeenCalled();
+    expect(mock_showToast).not.toHaveBeenCalled();
+    expect(mock_showAlert).toHaveBeenCalledWith("Couldn't remove that", 'No');
+  });
+});
+
+describe('photos added on this phone or the other one', () => {
+  const removers = (r: RenderResult) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Remove this photo'
+      && !!n.props?.onPress,
+  );
+
+  // One the other phone took off meanwhile stays off.
+  it('adds to the paths as they are now', async () => {
+    mock_takePhoto.mockResolvedValue('file:///shot.jpg');
+    mock_compressAndUpload.mockResolvedValueOnce({ path: 'h1/shot.jpg' });
+    const result = await open({ photoPaths: ['h1/plate.jpg', 'h1/gone.jpg'] });
+    mock_getThing.mockResolvedValue(thing({ photoPaths: ['h1/plate.jpg'] }));
+
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Take a photo').props.onPress();
+    });
+
+    expect(mock_updateThing).toHaveBeenCalledWith('t1', { photoPaths: ['h1/plate.jpg', 'h1/shot.jpg'] });
+  });
+
+  it('keeps itself current while the page is open', async () => {
+    await open({ photoPaths: ['h1/a.jpg'] });
+    expect(mock_keepCurrent.everyMs).toBe(30_000);
+    expect(mock_keepCurrent.paused).toBe(false);
+  });
+
+  it('shows what the other phone added or took off, and leaves a box being typed in alone', async () => {
+    const result = await open({ name: 'Heat pump', photoPaths: ['h1/a.jpg', 'h1/b.jpg'] });
+    await TestRenderer.act(async () => { boxes(result)['Model'].props.onChangeText('MSZ-AP50'); });
+
+    mock_getThing.mockResolvedValue(thing({
+      name: 'Somebody else changed this', photoPaths: ['h1/b.jpg', 'h1/theirs.jpg', 'h1/c.jpg'],
+    }));
+    await TestRenderer.act(async () => { await mock_keepCurrent.refresh!(); });
+
+    expect(removers(result)).toHaveLength(3);
+    expect(boxes(result)['Name'].props.value).toBe('Heat pump');
+    expect(boxes(result)['Model'].props.value).toBe('MSZ-AP50');
+    expect(mock_updateThing).not.toHaveBeenCalled();
   });
 });

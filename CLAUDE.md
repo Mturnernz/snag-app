@@ -571,14 +571,32 @@ thing page paid for, now extracted into `lib/addPhotos.ts` rather than copied a 
 write at the end, one upload after another, what arrived is kept, and the cap said out loud.
 Adding one deliberately does not start the job — photographing something is not deciding to do it.
 
-**And one can be taken off** (October 2026), by a × in each photo's corner — a 48pt sibling of the
-photo's door, never inside it. It asks first (*Remove this photo?* · *Remove* · *Keep it*), because
-the file is deleted too: the row is written from the paths **as they are now**, re-read first so a
-photo the other phone added is not dropped, and `deleteStoredFiles` runs after the row, never
-before. Removing one does not start the job either. **A photo that is all the job has cannot go**
-(`snags_has_something`), so its dialog offers *Say what's wrong*, opening `EditSnagSheet`, instead
-of a Remove the server would refuse. `SnagDetailScreen.test.tsx` pins the ×'s place, the ask, the
-fresh read, the file kept on a refused write, and the only photo.
+**And one can be taken off** (October 2026), the same way on a job and a thing: `PhotoRemoveButton`,
+a × in the photo's corner, a 48pt sibling of the photo's door (the thing page's was a 28px target).
+**It removes at once and the toast offers *Undo***, by the owner's decision — no question first.
+`lib/photoEdits.ts` is the rule: the row is written now, so the photo is gone for everyone; the
+file waits `PHOTO_UNDO_MS` (longer than the toast's `TOAST_ACTION_MS`, pinned) and is then deleted,
+where the thing page used to leave it in the bucket for ever; *Undo* calls the delete off before
+anything else and writes the path back at its old place. The timer lives in the module, so leaving
+the page does not cancel it; an app closed inside those seconds leaves the file behind, never loses
+a photo. Removing one does not start the job. **A photo that is all the job has cannot go**
+(`snags_has_something`): its × opens a dialog offering *Say what's wrong* (`EditSnagSheet`) instead.
+
+**Every photo write starts from the paths as they are now**, read just before it — adding, removing
+and *Undo*, on both pages. The strip on screen is whatever the page last read, and a list built
+from it would put back a photo the other phone took off, or drop one it added. **And both pages
+keep their photos current** (`useKeepCurrent`): on coming back to the app, and every
+`PHOTO_REFRESH_MS` (30s) while in front, they re-read the row and take **only** its photos — never
+the rest, which may be half typed — paused while a write is in flight or the viewer is open, ordered
+against the page's own writes by `photoSeq`. There is no live connection; reading again is how one
+phone's change reaches the other. A path with no link is signed as it arrives (a photo added on the
+job page used to sit as an empty frame until the job was reopened).
+
+`photoEdits.test.ts` pins the file outlasting Undo, Undo keeping it, and the strip helpers;
+`useKeepCurrent.test.tsx` the timer, the background, the return and the pause;
+`SnagDetailScreen.test.tsx` and `ThingDetailScreen.test.tsx` the ×'s place, the removal and its
+Undo, the fresh reads, the file kept on a refused write, the only photo, and a re-read that changes
+the photos and leaves every box alone.
 
 **A one-off job has no due date.** It had one — a `DateField` with *This weekend* and *Next week*,
 added because `due_at` was once reachable only through a repeat — and it came off by the owner's

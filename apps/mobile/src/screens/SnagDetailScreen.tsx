@@ -16,6 +16,7 @@ import DueBadge from '../components/DueBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
 import StickyActionBar from '../components/StickyActionBar';
 import PhotoViewer from '../components/PhotoViewer';
+import PhotoRemoveButton from '../components/PhotoRemoveButton';
 import AdviceCard from '../components/AdviceCard';
 import SupportCard from '../components/SupportCard';
 import ServicedByPill from '../components/ServicedByPill';
@@ -29,7 +30,7 @@ import RepeatSheet from '../components/RepeatSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
-import { useOnReturn } from '../hooks/useOnReturn';
+import { PHOTO_REFRESH_MS, useKeepCurrent } from '../hooks/useKeepCurrent';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
@@ -38,9 +39,9 @@ import {
   getSupportRequestForSnag, createSupportRequest, addSupportMessage, closeSupportRequest,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
-import { RETURN_RELOAD_MS } from '../lib/foreground';
 import { readNoteDraft, writeNoteDraft } from '../lib/noteDrafts';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
+import { deleteFileLater, keepFile, withoutPhoto, withPhotoBack } from '../lib/photoEdits';
 import LinkedText from '../components/LinkedText';
 import {
   dayKey, describeCycle, dueState, formatDayFirst, snagHeadline,
@@ -142,13 +143,20 @@ export default function SnagDetailScreen() {
   const [support, setSupport] = useState<SupportRequest | null>(null);
   const [asking, setAsking] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
-  // Back in the app after a while, the photos' links may have expired while the
-  // page sat open. Sign them again — only the links, never the page: reloading
-  // the snag could land on top of something half typed in a box.
-  useOnReturn(() => {
-    const paths = snag?.photoPaths ?? [];
-    if (paths.length > 0) getFileUrls(paths).then(setPhotoUrls).catch(() => {});
-  }, RETURN_RELOAD_MS);
+  // A path with no link yet — the page just opened, a photo was just added
+  // here, or the other phone added one — is signed as it arrives. It used to be
+  // signed only when the page loaded, so a photo added on this page sat as an
+  // empty frame until the job was opened again.
+  const photoKey = snag?.photoPaths.join('\n') ?? '';
+  useEffect(() => {
+    const paths = photoKey ? photoKey.split('\n') : [];
+    if (!paths.some((path) => !photoUrls[path])) return undefined;
+    let live = true;
+    getFileUrls(paths)
+      .then((urls) => { if (live) setPhotoUrls((prev) => ({ ...prev, ...urls })); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [photoKey]);
   // Which photo is open full screen, or null. An index rather than a URL, so
   // the viewer's own next/previous walk the same strip.
   const [viewing, setViewing] = useState<number | null>(null);
@@ -184,8 +192,8 @@ export default function SnagDetailScreen() {
   }, []);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  /** The photo whose × was pressed, while its confirmation is up. */
-  const [removingPhoto, setRemovingPhoto] = useState<string | null>(null);
+  /** A photo whose × was pressed when it is all the job has, while that is said. */
+  const [onlyPhoto, setOnlyPhoto] = useState<string | null>(null);
   /** Whether the congratulations dialog is up. Only a real finish sets it. */
   const [celebrating, setCelebrating] = useState(false);
   /** Editing what the job says — its words and its room, together. */
@@ -224,7 +232,6 @@ export default function SnagDetailScreen() {
       setThingNotes(next.thingId
         ? await getThingNotes(next.thingId, next.id).catch(() => [])
         : []);
-      setPhotoUrls(await getFileUrls(next.photoPaths));
     } catch (err: any) {
       showAlert("Couldn't load that", err?.message ?? 'It may have been deleted.');
       navigation.goBack();
@@ -234,6 +241,38 @@ export default function SnagDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * **The photos stay current while the page is open.** A photo added or taken
+   * off on the other phone reaches this one when the app comes back to the
+   * front and every half minute while the page is showing (`useKeepCurrent`).
+   * Only the photos and their links, never the rest of the page: a re-read of
+   * the whole job could land on top of something half typed in a box. Never
+   * while a write of this page's own is in flight or the viewer is open on an
+   * index, and never fatal.
+   *
+   * `photoSeq` orders it against this page's own photo writes: a read that
+   * started before a write and landed after it would put the old strip back.
+   */
+  const photoSeq = useRef(0);
+  const refreshPhotos = useCallback(async () => {
+    if (navigation.isFocused && !navigation.isFocused()) return;
+    const seq = ++photoSeq.current;
+    try {
+      const fresh = await getSnag(params.snagId);
+      if (seq !== photoSeq.current) return;
+      setSnag((s) => (s ? { ...s, photoPaths: fresh.photoPaths } : s));
+      // Signed again on the way past: a link kept since the page opened may
+      // have expired. getFileUrls hands back the ones it has while they last.
+      // Merged rather than replaced, so a photo taken off a moment ago keeps
+      // its link for *Undo* to put back.
+      const urls = await getFileUrls(fresh.photoPaths);
+      if (seq === photoSeq.current) setPhotoUrls((prev) => ({ ...prev, ...urls }));
+    } catch {
+      // The strip stays as it was.
+    }
+  }, [params.snagId, navigation]);
+  useKeepCurrent(refreshPhotos, PHOTO_REFRESH_MS, busy || viewing !== null);
 
   /**
    * What this job says it is about, straight off the row.
@@ -384,13 +423,23 @@ export default function SnagDetailScreen() {
     });
   }, [navigation]);
 
-  /** Another angle, or the plate you went back for. */
+  /**
+   * Another angle, or the plate you went back for.
+   *
+   * Every photo write starts from the paths **as they are now**, read just
+   * before it. The strip on screen is whatever was there when the page last
+   * read it, and a list built from it would put back a photo the other phone
+   * took off, or drop one it added — a change that reached everybody, undone
+   * by somebody who never saw it.
+   */
   async function handleAddPhotos(source: PhotoSource) {
     if (!snag || busy) return;
     setBusy(true);
     try {
       await addPhotos(snag.householdId, async (added) => {
-        setSnag(await updateSnag(snag.id, { photoPaths: [...snag.photoPaths, ...added] }));
+        photoSeq.current += 1;
+        const fresh = await getSnag(snag.id);
+        setSnag(await updateSnag(snag.id, { photoPaths: [...fresh.photoPaths, ...added] }));
         showToast(added.length === 1 ? 'Photo added' : `${added.length} photos added`);
       }, source);
     } finally {
@@ -409,36 +458,68 @@ export default function SnagDetailScreen() {
   }
 
   /**
-   * One photo off the job, and its file out of the bucket.
+   * One photo off the job, at once, with *Undo* on the toast — the thing
+   * page's ×, which asks nothing, with a way back from a mis-tap instead.
    *
-   * The paths are read fresh first: the strip is whatever was there when the
-   * page opened, and writing back a list filtered from it would drop a photo
-   * the other phone added since. That photo would then be in nobody's row.
-   * The file goes after the row, never before, and its delete never fails the
-   * removal (see deleteStoredFiles). Removing a photo does not start the job,
-   * for the same reason adding one doesn't.
+   * The row is written now, so it is gone for everyone. The file waits until
+   * Undo can no longer want it (`deleteFileLater`), and only once the row has
+   * been written: a file deleted under a row still pointing at it is a blank
+   * tile on both phones. Removing a photo does not start the job, for the same
+   * reason adding one doesn't.
    */
   async function handleRemovePhoto(path: string) {
-    if (!snag) return;
-    setRemovingPhoto(null);
+    if (!snag || busy) return;
+    if (onlyThing(snag, path)) {
+      setOnlyPhoto(path);
+      return;
+    }
+    const snagId = snag.id;
     setBusy(true);
     try {
-      const fresh = await getSnag(snag.id);
-      if (!fresh.photoPaths.includes(path)) {
+      photoSeq.current += 1;
+      const fresh = await getSnag(snagId);
+      const index = fresh.photoPaths.indexOf(path);
+      if (index < 0) {
+        // Already taken off, on the other phone.
         setSnag(fresh);
         return;
       }
       if (onlyThing(fresh, path)) {
-        // The words went from the other phone since the page opened.
+        // The words went, on the other phone, since the page last read them.
         setSnag(fresh);
-        setRemovingPhoto(path);
+        setOnlyPhoto(path);
         return;
       }
-      setSnag(await updateSnag(snag.id, { photoPaths: fresh.photoPaths.filter((p) => p !== path) }));
-      await deleteStoredFiles([path]);
-      showToast('Photo removed');
+      setSnag(await updateSnag(snagId, { photoPaths: withoutPhoto(fresh.photoPaths, path) }));
+      deleteFileLater(path);
+      showToast('Photo removed', {
+        label: 'Undo',
+        onPress: () => { void undoRemovePhoto(snagId, path, index); },
+      });
     } catch (err: any) {
       showAlert("Couldn't remove that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * The photo back where it was. The file is kept first, before anything can
+   * wait, so the timer cannot win. Written into the paths as they are now, so
+   * a photo the other phone added meanwhile stays. It may land after the page
+   * is gone — the toast outlives it — and the row is put right either way.
+   */
+  async function undoRemovePhoto(snagId: string, path: string, index: number) {
+    keepFile(path);
+    photoSeq.current += 1;
+    setBusy(true);
+    try {
+      const fresh = await getSnag(snagId);
+      setSnag(await updateSnag(snagId, { photoPaths: withPhotoBack(fresh.photoPaths, path, index) }));
+    } catch (err: any) {
+      // Not back on the row, so nothing points at the file: let it go after all.
+      deleteFileLater(path);
+      showAlert("Couldn't put that back", err?.message ?? 'Please try again.');
     } finally {
       setBusy(false);
     }
@@ -708,11 +789,8 @@ export default function SnagDetailScreen() {
             not deciding to do it.
 
             **And one can be taken off**: a blurry shot, or the wrong job's
-            photo. The × is a sibling of the photo's own door, laid over its
-            corner, never inside it: a Pressable inside a Pressable is a coin
-            toss about which one gets the tap. Its tap area is the full 48pt
-            box, not a 28px glyph with `hitSlop`, which react-native-web
-            ignores. It asks first, because the file goes too. */}
+            photo. `PhotoRemoveButton`, the thing page's ×: it removes at once
+            and the toast offers *Undo*. */}
         {snag.photoPaths.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
             {snag.photoPaths.map((path, i) => (
@@ -725,17 +803,7 @@ export default function SnagDetailScreen() {
                 >
                   <SignedImage uri={photoUrls[path]} style={styles.photo} resizeMode="cover" />
                 </Pressable>
-                <Pressable
-                  onPress={() => setRemovingPhoto(path)}
-                  disabled={busy}
-                  style={styles.photoRemove}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove this photo"
-                >
-                  <View style={styles.photoRemoveDot}>
-                    <Icon name="close" size="sm" color={Colors.white} />
-                  </View>
-                </Pressable>
+                <PhotoRemoveButton onPress={() => handleRemovePhoto(path)} disabled={busy} />
               </View>
             ))}
           </ScrollView>
@@ -1324,35 +1392,21 @@ export default function SnagDetailScreen() {
         }}
       />
 
-      {/* Two answers, and only one of them removes anything. A photo that is
-          all the job has cannot go (`snags_has_something`), so the dialog
-          offers the words that would let it go instead of a Remove the server
-          would refuse. */}
-      {removingPhoto && onlyThing(snag, removingPhoto) ? (
-        <ConfirmDialog
-          visible
-          title="This photo is all the job has"
-          message="Say what's wrong first, then the photo can go. Otherwise there'd be nothing to go on."
-          confirmLabel="Say what's wrong"
-          cancelLabel="Keep it"
-          onConfirm={() => {
-            setRemovingPhoto(null);
-            setEditing(true);
-          }}
-          onCancel={() => setRemovingPhoto(null)}
-        />
-      ) : (
-        <ConfirmDialog
-          visible={removingPhoto !== null}
-          title="Remove this photo?"
-          message="It'll be gone for good."
-          confirmLabel="Remove"
-          cancelLabel="Keep it"
-          destructive
-          onConfirm={() => { if (removingPhoto) void handleRemovePhoto(removingPhoto); }}
-          onCancel={() => setRemovingPhoto(null)}
-        />
-      )}
+      {/* The one time the × does not remove at once. A photo that is all the
+          job has cannot go (`snags_has_something`), so this offers the words
+          that would let it go instead of a removal the server would refuse. */}
+      <ConfirmDialog
+        visible={onlyPhoto !== null}
+        title="This photo is all the job has"
+        message="Say what's wrong first, then the photo can go. Otherwise there'd be nothing to go on."
+        confirmLabel="Say what's wrong"
+        cancelLabel="Keep it"
+        onConfirm={() => {
+          setOnlyPhoto(null);
+          setEditing(true);
+        }}
+        onCancel={() => setOnlyPhoto(null)}
+      />
 
       <ConfirmDialog
         visible={confirmDelete}
@@ -1457,26 +1511,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   photoCell: { marginRight: Spacing.sm },
-  // The 48pt tap box in the photo's top-right corner, holding the visible
-  // 28px dot. White on the photo scrim, because a photo is not a ground a
-  // colour can be chosen against.
-  photoRemove: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoRemoveDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.photoOverlay,
-  },
   photoPills: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.sm },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   title: {

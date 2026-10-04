@@ -58,6 +58,29 @@ const mock_getThingNotes = jest.fn().mockResolvedValue([]);
 const mock_getSupport = jest.fn().mockResolvedValue(null);
 const mock_createSupport = jest.fn().mockResolvedValue(undefined);
 const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
+const mock_getFileUrls = jest.fn().mockResolvedValue({});
+// The file waits for Undo on a timer of its own, pinned in photoEdits.test.ts;
+// here it is enough that the page asks for it, and calls it off on Undo.
+const mock_deleteFileLater = jest.fn();
+const mock_keepFile = jest.fn();
+jest.mock('../lib/photoEdits', () => ({
+  ...jest.requireActual('../lib/photoEdits'),
+  deleteFileLater: (...a: unknown[]) => mock_deleteFileLater(...a),
+  keepFile: (...a: unknown[]) => mock_keepFile(...a),
+}));
+const mock_addPhotos = jest.fn();
+jest.mock('../lib/addPhotos', () => ({ addPhotos: (...a: unknown[]) => mock_addPhotos(...a) }));
+// When the page reads its photos again is pinned in useKeepCurrent.test.tsx;
+// here the read itself is called by hand.
+const mock_keepCurrent: { refresh?: () => Promise<void>; everyMs?: number; paused?: boolean } = {};
+jest.mock('../hooks/useKeepCurrent', () => ({
+  PHOTO_REFRESH_MS: 30_000,
+  useKeepCurrent: (refresh: () => Promise<void>, everyMs: number, paused: boolean) => {
+    mock_keepCurrent.refresh = refresh;
+    mock_keepCurrent.everyMs = everyMs;
+    mock_keepCurrent.paused = paused;
+  },
+}));
 jest.mock('../lib/supabase', () => ({
   getSnag: (...a: unknown[]) => mock_getSnag(...a),
   getComments: jest.fn().mockResolvedValue([]),
@@ -66,7 +89,7 @@ jest.mock('../lib/supabase', () => ({
   setSnagStatus: (...a: unknown[]) => mock_setSnagStatus(...a),
   setPartBought: (...a: unknown[]) => mock_setPartBought(...a),
   deleteSnag: jest.fn(),
-  getFileUrls: jest.fn().mockResolvedValue({}),
+  getFileUrls: (...a: unknown[]) => mock_getFileUrls(...a),
   deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
   getSnagAdvice: jest.fn().mockResolvedValue(null),
   deleteSnagAdvice: jest.fn(),
@@ -563,17 +586,25 @@ describe('the top of the page', () => {
   });
 });
 
-// ─── taking a photo off ──────────────────────────────────────────────────────
+// ─── taking a photo off, and keeping the strip current ──────────────────────
 //
-// A blurry shot, or a photo filed on the wrong job, had no way off: the strip
-// only opened. The × asks first because the file goes with it, and it never
-// leaves a job with neither a photo nor words (`snags_has_something`).
+// A blurry shot, or a photo filed on the wrong job, had no way off. Now the ×
+// removes it at once, the thing page's way, and the toast offers Undo: the row
+// is written now so it is gone for everyone, and the file waits until Undo can
+// no longer want it. It never leaves a job with neither a photo nor words
+// (`snags_has_something`).
 
 describe('removing a photo', () => {
   const removers = (r: ReturnType<typeof render>) => r.root.findAll(
     (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Remove this photo'
       && !!n.props?.onPress,
   );
+  /** The Undo the last toast offered. */
+  const undo = () => {
+    const call = mock_showToast.mock.calls[mock_showToast.mock.calls.length - 1];
+    expect(call[1]).toEqual({ label: 'Undo', onPress: expect.any(Function) });
+    return call[1].onPress as () => void;
+  };
 
   it('puts a × on each photo, beside its door and never inside it', async () => {
     const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
@@ -588,69 +619,110 @@ describe('removing a photo', () => {
     }
   });
 
-  it('asks, then writes the rest and clears the file after the row', async () => {
-    const row = snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] });
-    const r = await arrange(row);
+  it('removes at once, with Undo, and lets the file go only after the row', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
     mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/b.jpg'] }));
 
     await press(removers(r)[0]);
-    expect(mock_updateSnag).not.toHaveBeenCalled();
-    expect(r.queryByText('Remove this photo?')).not.toBeNull();
 
-    await press(button(r, 'Remove'));
-
+    // No question first: a mis-tap is what Undo is for.
+    expect(r.queryByText('Remove this photo?')).toBeNull();
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/b.jpg'] });
-    expect(mock_deleteStoredFiles).toHaveBeenCalledWith(['h/a.jpg']);
+    expect(mock_deleteFileLater).toHaveBeenCalledWith('h/a.jpg');
     expect(mock_updateSnag.mock.invocationCallOrder[0])
-      .toBeLessThan(mock_deleteStoredFiles.mock.invocationCallOrder[0]);
-    expect(mock_showToast).toHaveBeenCalledWith('Photo removed');
+      .toBeLessThan(mock_deleteFileLater.mock.invocationCallOrder[0]);
+    // Never the file straight away: Undo needs it.
+    expect(mock_deleteStoredFiles).not.toHaveBeenCalled();
+    expect(mock_showToast).toHaveBeenCalledWith('Photo removed', expect.objectContaining({ label: 'Undo' }));
     expect(removers(r)).toHaveLength(1);
   });
 
-  it('writes nothing when kept', async () => {
-    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+  it('puts it back where it was on Undo, keeping the file first', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg', 'h/c.jpg'] }));
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/c.jpg'] }));
     await press(removers(r)[1]);
-    await press(button(r, 'Keep it'));
-    expect(mock_updateSnag).not.toHaveBeenCalled();
-    expect(mock_deleteStoredFiles).not.toHaveBeenCalled();
+
+    mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/c.jpg'] }));
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg', 'h/c.jpg'] }));
+    await TestRenderer.act(async () => { await undo()(); });
+
+    expect(mock_keepFile).toHaveBeenCalledWith('h/b.jpg');
+    expect(mock_keepFile.mock.invocationCallOrder[0])
+      .toBeLessThan(mock_updateSnag.mock.invocationCallOrder[1]);
+    expect(mock_updateSnag).toHaveBeenLastCalledWith('s1', { photoPaths: ['h/a.jpg', 'h/b.jpg', 'h/c.jpg'] });
+    expect(removers(r)).toHaveLength(3);
   });
 
-  // The strip is what was there when the page opened; the other phone may
-  // have added one since, and a list filtered from the stale copy would drop it.
-  it('filters the paths as they are now, not as the page opened', async () => {
-    const r = await arrange(snag({ photoPaths: ['h/a.jpg'] }));
+  // The other phone may have added one while the toast was up.
+  it('puts it back among what is there now, not what was there then', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/b.jpg'] }));
+    await press(removers(r)[0]);
+
+    mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/b.jpg', 'h/theirs.jpg'] }));
+    await TestRenderer.act(async () => { await undo()(); });
+
+    expect(mock_updateSnag).toHaveBeenLastCalledWith('s1', {
+      photoPaths: ['h/a.jpg', 'h/b.jpg', 'h/theirs.jpg'],
+    });
+  });
+
+  it('lets the file go after all when Undo cannot write', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    mock_updateSnag.mockResolvedValueOnce(snag({ photoPaths: ['h/b.jpg'] }));
+    await press(removers(r)[0]);
+
+    mock_updateSnag.mockRejectedValueOnce(new Error('No'));
+    await TestRenderer.act(async () => { await undo()(); });
+
+    expect(mock_keepFile).toHaveBeenCalledWith('h/a.jpg');
+    expect(mock_deleteFileLater).toHaveBeenCalledTimes(2);
+  });
+
+  // The strip is what was there when the page last read it, and a list
+  // filtered from that copy would drop a photo the other phone added since.
+  it('filters the paths as they are now, not as the page last read them', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg'], description: 'Gutters' }));
     mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/new.jpg'] }));
     mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/new.jpg'] }));
 
     await press(removers(r)[0]);
-    await press(button(r, 'Remove'));
 
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/new.jpg'] });
   });
 
-  it('keeps the file when the row write is refused', async () => {
+  it('writes nothing, and keeps the file, when the other phone already took it off', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/b.jpg'] }));
+
+    await press(removers(r)[0]);
+
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(mock_deleteFileLater).not.toHaveBeenCalled();
+    expect(removers(r)).toHaveLength(1);
+  });
+
+  it('keeps the file, and offers no Undo, when the row write is refused', async () => {
     const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
     mock_updateSnag.mockRejectedValueOnce(new Error('No'));
 
     await press(removers(r)[0]);
-    await press(button(r, 'Remove'));
 
-    expect(mock_deleteStoredFiles).not.toHaveBeenCalled();
+    expect(mock_deleteFileLater).not.toHaveBeenCalled();
     expect(mock_showToast).not.toHaveBeenCalled();
   });
 
   // The server would refuse it with a constraint name. The dialog offers the
-  // words that would let the photo go instead of a Remove that cannot work.
+  // words that would let the photo go instead of a removal that cannot work.
   it('offers to say what is wrong when the photo is all the job has', async () => {
     const r = await arrange(snag({ photoPaths: ['h/a.jpg'], description: null }));
 
     await press(removers(r)[0]);
     expect(r.queryByText('This photo is all the job has')).not.toBeNull();
-    expect(button(r, 'Remove')).toBeUndefined();
 
     await press(button(r, "Say what's wrong"));
     expect(mock_updateSnag).not.toHaveBeenCalled();
-    expect(mock_deleteStoredFiles).not.toHaveBeenCalled();
+    expect(mock_deleteFileLater).not.toHaveBeenCalled();
     // The edit sheet, where the words go.
     expect(r.root.findAll((n: any) => typeof n.type !== 'string'
       && n.props?.accessibilityLabel === "What's wrong?").length).toBeGreaterThan(0);
@@ -661,11 +733,86 @@ describe('removing a photo', () => {
     mock_updateSnag.mockResolvedValue(snag({ photoPaths: [], description: 'Gutters' }));
 
     await press(removers(r)[0]);
-    await press(button(r, 'Remove'));
 
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: [] });
-    expect(mock_deleteStoredFiles).toHaveBeenCalledWith(['h/a.jpg']);
+    expect(mock_deleteFileLater).toHaveBeenCalledWith('h/a.jpg');
   });
+});
+
+describe('photos added on this phone or the other one', () => {
+  // A photo added here is written into the paths as they are now, so one the
+  // other phone took off meanwhile stays off.
+  it('adds to the paths as they are now', async () => {
+    mock_addPhotos.mockImplementation(async (_prefix: string, save: (p: string[]) => Promise<void>) => {
+      await save(['h/mine.jpg']);
+    });
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/gone.jpg'] }));
+    mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg'] }));
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/mine.jpg'] }));
+
+    await press(byLabel(r, 'Choose photos'));
+
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/a.jpg', 'h/mine.jpg'] });
+  });
+
+  // It used to be signed only when the page loaded, so a photo added here sat
+  // as an empty frame until the job was opened again.
+  it('signs a photo the moment it is on the strip', async () => {
+    mock_addPhotos.mockImplementation(async (_prefix: string, save: (p: string[]) => Promise<void>) => {
+      await save(['h/mine.jpg']);
+    });
+    const r = await arrange(snag({ photoPaths: [] }));
+    mock_getFileUrls.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/mine.jpg'] }));
+
+    await press(byLabel(r, 'Choose photos'));
+
+    expect(mock_getFileUrls).toHaveBeenCalledWith(['h/mine.jpg']);
+  });
+
+  it('keeps itself current while the page is open', async () => {
+    await arrange(snag({ photoPaths: ['h/a.jpg'] }));
+    expect(mock_keepCurrent.everyMs).toBe(30_000);
+    expect(mock_keepCurrent.paused).toBe(false);
+  });
+
+  it('shows what the other phone added or took off, and nothing else', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    // A note half typed here must survive the re-read.
+    const note = r.root.findAll((n: any) => typeof n.type !== 'string'
+      && n.props?.accessibilityLabel === 'Add a note' && 'onChangeText' in n.props)[0];
+    await TestRenderer.act(async () => { note.props.onChangeText('Ordered the part'); });
+
+    mock_getSnag.mockResolvedValue(snag({
+      photoPaths: ['h/b.jpg', 'h/theirs.jpg'], description: 'Somebody else changed this',
+    }));
+    await TestRenderer.act(async () => { await mock_keepCurrent.refresh!(); });
+
+    expect(removers(r)).toHaveLength(2);
+    expect(mock_getFileUrls).toHaveBeenLastCalledWith(['h/b.jpg', 'h/theirs.jpg']);
+    // Only the photos: the rest of the page is left as it was.
+    expect(r.queryByText('Toilet cistern keeps running')).not.toBeNull();
+    const after = r.root.findAll((n: any) => typeof n.type !== 'string'
+      && n.props?.accessibilityLabel === 'Add a note' && 'onChangeText' in n.props)[0];
+    expect(after.props.value).toBe('Ordered the part');
+    // A typed note is kept on the device (lib/noteDrafts.ts); forget it, or
+    // the next test opens this job with it in the box.
+    await TestRenderer.act(async () => { after.props.onChangeText(''); });
+  });
+
+  it('pauses while a photo is open full screen', async () => {
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg'] }));
+    mock_getFileUrls.mockResolvedValue({ 'h/a.jpg': 'https://x/a.jpg' });
+    await TestRenderer.act(async () => { await mock_keepCurrent.refresh!(); });
+    await press(byLabel(r, 'Open this photo'));
+    expect(mock_keepCurrent.paused).toBe(true);
+    mock_getFileUrls.mockResolvedValue({});
+  });
+
+  const removers = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Remove this photo'
+      && !!n.props?.onPress,
+  );
 });
 
 // ---------------------------------------------------------------- repeats

@@ -4104,9 +4104,13 @@ folder, so a place-level answer could not close that.
 **The split itself** is `20261005120100`, guarded by the two ids so it is a no-op anywhere else. It
 moved the place, its rooms, jobs, things and everything keyed to them into household
 `e185356d…`, with Mike as owner and Leonie as member, and took Leonie out of 32 Le Roy. A
-stored path begins with its household's id, so the 11 files were copied to the new folder first by
-a one-off service-role function, the migration rewrote the paths, and the old copies were removed
-after. Nothing ever pointed at a missing file.
+stored path begins with its household's id, so the plan was to copy the bach's 11 files to the new
+folder first. They could not be: every one was already gone from storage, removed by the bulk
+delete of 4 October 2026 (07:02 UTC) with many other job and item photos of 32 Le Roy's, whose
+`storage.objects` rows came back when the database was restored and whose bytes did not. Storage
+lists those files and answers *not found* when they are read. The migration rewrote the paths
+anyway, so the bach's rows point at its own folder; the old rows were left in place. By the
+owner's decision nothing is being recovered.
 
 `useHousehold.test.tsx` pins the household and its people following the place, the remembered home
 winning, a later remembering moving the app, and a pick inside a two-place household staying put.

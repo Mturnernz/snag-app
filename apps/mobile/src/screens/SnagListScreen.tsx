@@ -18,6 +18,7 @@ import AmendSnagSheet from '../components/AmendSnagSheet';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
+import { useCreateRoom } from '../hooks/useCreateRoom';
 import { useFirstCapture } from '../hooks/useFirstCapture';
 import { useOnReturn } from '../hooks/useOnReturn';
 import {
@@ -114,6 +115,7 @@ export default function SnagListScreen() {
     household, profile, properties, activeProperty, locations,
   } = useHousehold();
   const { showToast } = useToast();
+  const createRoom = useCreateRoom();
 
   /**
    * Which sections are folded away, by key.
@@ -1009,6 +1011,7 @@ export default function SnagListScreen() {
           busy={amending}
           onSaveNote={(text) => amend({ description: text })}
           onSetRoom={(room) => amend({ room })}
+          onCreateRoom={createRoom}
           suggestedRoom={recentRoom}
           onOpenDetail={() => {
             const id = justAdded.id;

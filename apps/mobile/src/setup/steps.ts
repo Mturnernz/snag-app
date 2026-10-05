@@ -87,7 +87,7 @@ export const SETUP_STEPS: SetupStep[] = [
     answered: () => false,
     skippable: true,
     needsHousehold: true,
-    changeLater: 'the You tab, under Location tags',
+    changeLater: 'the House tab, under Add a room',
   },
   {
     id: 'invite',

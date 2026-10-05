@@ -15,7 +15,6 @@ import ProjectDetailScreen from '../screens/ProjectDetailScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SnagDetailScreen from '../screens/SnagDetailScreen';
 import HouseholdScreen from '../screens/HouseholdScreen';
-import LocationTagsScreen from '../screens/LocationTagsScreen';
 import PasteAdviceScreen from '../screens/PasteAdviceScreen';
 import ThingDetailScreen from '../screens/ThingDetailScreen';
 import HouseRoomScreen from '../screens/HouseRoomScreen';
@@ -148,7 +147,6 @@ export default function RootNavigator() {
           something anybody sends. */}
       <Stack.Screen name="HouseRoom" component={HouseRoomScreen} />
       <Stack.Screen name="Household" component={HouseholdScreen} />
-      <Stack.Screen name="LocationTags" component={LocationTagsScreen} />
       {/* A push, not a sheet: it is a paste and then a list of what that paste
           would change, and both want the whole height. */}
       <Stack.Screen name="PasteAdvice" component={PasteAdviceScreen} />

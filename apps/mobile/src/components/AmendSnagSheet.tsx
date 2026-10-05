@@ -77,6 +77,8 @@ interface Props {
   busy?: boolean;
   onSaveNote: (text: string) => Promise<void>;
   onSetRoom: (room: string | null) => Promise<void>;
+  /** Makes a room the picker's *Create a new room* row asks for. */
+  onCreateRoom?: (name: string) => Promise<boolean>;
   /**
    * The room the last snag was filed in, when that was a few minutes ago.
    *
@@ -99,7 +101,7 @@ interface Props {
 }
 
 export default function AmendSnagSheet({
-  snag, locations, busy, onSaveNote, onSetRoom, suggestedRoom, onOpenDetail, onClose,
+  snag, locations, busy, onSaveNote, onSetRoom, onCreateRoom, suggestedRoom, onOpenDetail, onClose,
 }: Props) {
   const [step, setStep] = useState<AmendStep>(() => firstStep(snag));
   /**
@@ -220,6 +222,7 @@ export default function AmendSnagSheet({
               onChange={(room) => { void chooseRoom(room); }}
               disabled={busy}
               startOpen
+              onCreate={onCreateRoom}
             />
           </>
         ) : null}

@@ -30,6 +30,7 @@ import RepeatSheet from '../components/RepeatSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
+import { useCreateRoom } from '../hooks/useCreateRoom';
 import { PHOTO_REFRESH_MS, useKeepCurrent } from '../hooks/useKeepCurrent';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
@@ -135,6 +136,7 @@ export default function SnagDetailScreen() {
     members, profile, locations, refresh: refreshHousehold, reloadLocations,
   } = useHousehold();
   const { showToast } = useToast();
+  const createRoom = useCreateRoom();
 
   const [snag, setSnag] = useState<Snag | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -1362,6 +1364,7 @@ export default function SnagDetailScreen() {
         snag={snag}
         locations={locations}
         busy={busy}
+        onCreateRoom={createRoom}
         onSave={async (update) => {
           setEditing(false);
           await patch(update);

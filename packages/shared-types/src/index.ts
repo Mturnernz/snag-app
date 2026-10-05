@@ -2203,8 +2203,6 @@ export type RootStackParamList = {
   Main: undefined;
   SnagDetail: { snagId: string };
   Household: undefined;
-  /** Profile → Location tags. Editing the pick-list capture offers. */
-  LocationTags: undefined;
   /** A thing's spec sheet. Presented as a sheet, like SnagDetail. */
   ThingDetail: { thingId: string };
   /**

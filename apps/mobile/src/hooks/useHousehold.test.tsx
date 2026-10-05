@@ -49,7 +49,7 @@ const settle = () => TestRenderer.act(async () => {});
 
 async function mount(households = [BACH, HOUSE]) {
   render(
-    <HouseholdProvider households={households} profile={PROFILE} onReload={jest.fn()}>
+    <HouseholdProvider households={households} profile={PROFILE} onReload={jest.fn()} onHomeAdded={jest.fn()}>
       <Probe />
     </HouseholdProvider>
   );

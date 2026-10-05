@@ -120,6 +120,7 @@ function arrange({
     reloadLocations: jest.fn().mockResolvedValue(undefined),
     refresh: jest.fn().mockResolvedValue(undefined),
     reloadAccount: jest.fn().mockResolvedValue(undefined),
+    setUpNewHome: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -511,7 +512,7 @@ describe('another home', () => {
     expect(mock_getPlaceMembers).toHaveBeenCalledWith(['p1']);
   });
 
-  it('adds another home as a household of its own, and opens on it', async () => {
+  it('adds another home as a household of its own, and sets it up as setup would', async () => {
     arrange();
     mock_createHousehold.mockResolvedValue({ id: 'h2', name: 'Martins Bay', createdAt: '' });
     const r = render(<HouseholdScreen />);
@@ -528,9 +529,31 @@ describe('another home', () => {
 
     expect(mock_createHousehold).toHaveBeenCalledWith('Martins Bay', 'Martins Bay');
     expect(mock_rememberHousehold).toHaveBeenCalledWith('h2');
+    // Its rooms, the invite and *You're all set* — App.tsx's setup run, handed
+    // the new home, which then opens on it because it was remembered first.
+    const { setUpNewHome } = (global as any).__household;
+    expect(setUpNewHome).toHaveBeenCalledWith('h2');
     const order = (fn: jest.Mock) => fn.mock.invocationCallOrder[0];
-    expect(order(mock_rememberHousehold))
-      .toBeLessThan(order((global as any).__household.reloadAccount));
+    expect(order(mock_rememberHousehold)).toBeLessThan(order(setUpNewHome));
+  });
+
+  it('says why when the home cannot be made, and starts no setup', async () => {
+    arrange();
+    mock_createHousehold.mockRejectedValue(new Error('Give the home a name'));
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    const box = input(r, (p) => p.placeholder === 'The bach');
+    await TestRenderer.act(async () => box.props.onChangeText('Martins Bay'));
+    const button = r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.label === 'Add another home' && !!n.props?.onPress,
+    )[0];
+    await press(button);
+
+    expect((global as any).__household.setUpNewHome).not.toHaveBeenCalled();
+    expect(mock_rememberHousehold).not.toHaveBeenCalled();
+    expect(jest.requireMock('../lib/alert').showAlert)
+      .toHaveBeenCalledWith("Couldn't add that home", 'Give the home a name');
   });
 });
 

@@ -95,3 +95,16 @@ describe('a setup run on screen', () => {
     expect(gate({ setupRunning: true, signedIn: false })).toBe('auth');
   });
 });
+
+// *Add another home* makes a house from inside the app. It gets the same run a
+// house made in setup gets — its rooms, the invite, *You're all set*.
+describe('a home just added', () => {
+  it('takes the screen for its own setup run', () => {
+    expect(gate({ homeAdded: true })).toBe('setup');
+  });
+
+  it('never beats a join code or sign-out', () => {
+    expect(gate({ homeAdded: true, hasJoinToken: true })).toBe('join');
+    expect(gate({ homeAdded: true, signedIn: false })).toBe('auth');
+  });
+});

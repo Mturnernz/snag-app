@@ -104,23 +104,27 @@ export const SETUP_STEPS: SetupStep[] = [
 ];
 
 /**
- * What counts as seen in one run, given whether it began with a house.
+ * What counts as seen in one run, given whether the run is for a new house.
  *
  * `setup_seen` is kept per person, but the rooms and the invite are about a
  * house. Somebody who set one up, deleted it and is now making another has
  * seen *a* rooms step and never this house's. Read straight off the profile,
  * the new house was named and nothing was left to ask, so the run ended on the
  * name with no rooms, no invite and no *You're all set* (miketsturner,
- * 5 October 2026). A run that begins with no house therefore asks every step
- * that needs one, for whichever house the run ends up in. A run that begins
- * with one, a catch-up or a first run picked up half way, keeps what was seen.
+ * 5 October 2026).
+ *
+ * So a run for a new house asks every step that needs one, whatever was seen
+ * for another. A run is for a new house when it begins with none (the house
+ * step makes it) or when it was started for a home just added in the app
+ * (*Add another home*). A run for the house already there, a catch-up or a
+ * first run picked up half way, keeps what was seen.
  */
 export function seenThisRun(
   seen: ReadonlySet<string>,
-  startedWithHousehold: boolean,
+  newHouse: boolean,
   steps: SetupStep[] = SETUP_STEPS
 ): Set<string> {
-  if (startedWithHousehold) return new Set(seen);
+  if (!newHouse) return new Set(seen);
   const houseSteps = new Set<string>(steps.filter((s) => s.needsHousehold).map((s) => s.id));
   return new Set([...seen].filter((id) => !houseSteps.has(id)));
 }

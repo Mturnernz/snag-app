@@ -103,13 +103,14 @@ const onFinish = jest.fn();
 const onJoinToken = jest.fn();
 const onStart = jest.fn();
 
-function Harness({ suggestedName }: { suggestedName?: string | null }) {
+function Harness({ suggestedName, newHouse }: { suggestedName?: string | null; newHouse?: boolean }) {
   const [account, setAccount] = useState({ ...world });
   return (
     <SetupFlow
       profile={account.profile}
       household={account.household}
       memberCount={account.members}
+      newHouse={newHouse}
       suggestedName={suggestedName}
       onReady={async () => setAccount({ ...world })}
       onStart={onStart}
@@ -119,8 +120,8 @@ function Harness({ suggestedName }: { suggestedName?: string | null }) {
   );
 }
 
-async function start(suggestedName?: string | null) {
-  const r = render(<Harness suggestedName={suggestedName} />);
+async function start(suggestedName?: string | null, newHouse?: boolean) {
+  const r = render(<Harness suggestedName={suggestedName} newHouse={newHouse} />);
   await settle();
   return r;
 }
@@ -242,6 +243,42 @@ describe('a new house for somebody who has set one up before', () => {
     await press(r, 'Create it');
     await press(r, 'Continue');
     expect(onStart).toHaveBeenCalledTimes(1);
+  });
+});
+
+// *Add another home* makes the house inside the app and hands it to the same
+// run: everything about the person is answered, and the house is new.
+describe('a home added from the Household screen', () => {
+  const BACH = { id: 'bach', name: 'Martins Bay', createdAt: '2026-10-05T00:00:00Z' } as Household;
+
+  beforeEach(() => {
+    world = { profile: profile(['name', 'household', 'rooms', 'invite'], 'Mike'), household: BACH, members: 1 };
+    mock.getMyProperties.mockResolvedValue([
+      { id: 'p', householdId: 'h', name: '32 Le Roy' },
+      { id: 'pb', householdId: 'bach', name: 'Martins Bay' },
+    ]);
+  });
+
+  it('opens on its rooms, then the invite, then the last screen', async () => {
+    const r = await start(null, true);
+    expect(title(r, 'Here are your rooms')).toBe(true);
+    // The rooms of the house just added, never the one the app was showing.
+    expect(mock.getLocations).toHaveBeenCalledWith('pb');
+    // Nothing earlier in this run to go back to: the house is made.
+    expect(r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Back')).toHaveLength(0);
+    await press(r, 'Continue');
+
+    expect(title(r, 'Bring someone in')).toBe(true);
+    await press(r, 'Set up later');
+    expect(title(r, "You're all set, Mike")).toBe(true);
+    expect(mock.createHousehold).not.toHaveBeenCalled();
+    expect(mock.upsertProfile).not.toHaveBeenCalled();
+  });
+
+  it('is asked nothing new when the run is not for a new house', async () => {
+    const r = await start(null, false);
+    expect(title(r, 'Here are your rooms')).toBe(false);
+    expect(title(r, "You're all set, Mike")).toBe(true);
   });
 });
 

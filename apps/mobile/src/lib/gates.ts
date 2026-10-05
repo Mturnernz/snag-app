@@ -42,6 +42,12 @@ export interface GateState {
    * person on whatever screen the address bar last held.
    */
   setupRunning?: boolean;
+  /**
+   * A home was just added with *Add another home* and is in the account. Its
+   * run of the house steps (rooms, invite, *You're all set*) takes the screen,
+   * as a new house made in setup does.
+   */
+  homeAdded?: boolean;
 }
 
 export function chooseGate(state: GateState): Gate {
@@ -56,6 +62,6 @@ export function chooseGate(state: GateState): Gate {
   // itself when there isn't one.
   if (state.hasJoinToken) return 'join';
   if (!state.hasProfile || !state.hasHousehold) return 'setup';
-  if (state.hasPendingSteps || state.setupRunning) return 'setup';
+  if (state.hasPendingSteps || state.setupRunning || state.homeAdded) return 'setup';
   return 'app';
 }

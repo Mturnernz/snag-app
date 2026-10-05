@@ -4077,7 +4077,8 @@ folder, so a place-level answer could not close that.
 
 - **One home per household.** `create_property` refuses in words (`20261005120000`). The Household
   screen's *Add another home* is `create_household(name, name)` — a new household the adder owns
-  and nobody else sees until invited. `rename_property` renames a household with one place along
+  and nobody else sees until invited — and then the setup run's house steps for it (*First run is
+  a list of steps*). `rename_property` renames a household with one place along
   with its place, so the headers and picker (the place) and the Household screen, You tab and
   exports (the household) cannot name one home two ways.
 - **One person, several households.** `getMyHouseholds` reads the caller's **own** membership rows,
@@ -4314,11 +4315,17 @@ whether it can be put off. `SetupFlow` only walks them; `App.tsx`'s gate asks th
   starting again, and `onFinish` is what lets the app in (a `setup_seen` write that failed is asked
   again next launch, never a run that loops). It was "whenever anything is pending" alone, and
   that let the app in on the household step's own write whenever nothing was left to ask.
-- **A run that begins with no house asks the house steps for the new one** (`seenThisRun`). The
-  rooms and the invite are about a house and `setup_seen` is per person: on 5 October 2026 an
-  account that had set up, deleted its house and made another was asked only the name, then
-  dropped on the Household screen it had deleted from, with no rooms, invite or *You're all set*.
-  A run that begins with a house (a catch-up, a first run picked up half way) keeps what was seen.
+- **A run for a new house asks the house steps for it** (`seenThisRun`). The rooms and the invite
+  are about a house and `setup_seen` is per person: on 5 October 2026 an account that had set up,
+  deleted its house and made another was asked only the name, then dropped on the Household screen
+  it had deleted from, with no rooms, invite or *You're all set*. A run is for a new house when it
+  begins with none, or when *Add another home* started it (`newHouse`); a run for the house already
+  there (a catch-up, a first run picked up half way) keeps what was seen.
+- **A home added in the app is set up the same way**, by the owner's decision. *Add another home*
+  makes the household, remembers it, and calls `setUpNewHome`: App.tsx re-reads the account and,
+  once the new household is in it, puts the app away for the setup run with that house — its
+  rooms, *Bring someone in*, *You're all set* — then opens the list on it. Nothing new is asked
+  about the person, and there is no Back to the Household screen: the house is made.
 - **Setup ends on the list.** `onFinish` puts the address bar back to `/` (`resetWebPathIfStale`)
   before the navigator mounts, or the web build reopens whatever path the run began from — past
   the list, which is what files the first photo.
@@ -4354,8 +4361,9 @@ only people who have set up. `setup/SetupFlow.test.tsx` pins the whole first run
 writes, the Google name, the invitation beating the question (carried over from the old Setup
 screen, with the waiting page, the pasted link and the no-email wording), the joiner's shorter run,
 *Set up later* becoming *Continue* once there is a link, the camera on the last screen, and a new
-house for somebody who has set one up before getting its rooms, invite and last screen.
-`gates.test.ts` pins a running setup keeping the screen.
+house for somebody who has set one up before getting its rooms, invite and last screen, and a home
+added from the Household screen opening on its own rooms. `gates.test.ts` pins a running setup
+keeping the screen and an added home taking it.
 `setup/WelcomeFlow.test.tsx` pins the greeting, the reduced-motion case, Google first, both email
 paths and recovery; `lib/googleSignIn.test.ts` the redirect target and the token parse;
 `gates.test.ts` the pending-step gate; `SnagListScreen.test.tsx` the first photo filed once.

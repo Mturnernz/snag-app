@@ -29,6 +29,12 @@ interface Props {
   profile: Profile | null;
   household: Household | null;
   memberCount: number;
+  /**
+   * `household` was made a moment ago with *Add another home*, so the run is
+   * for it: its rooms and the invite are asked whatever was seen for another
+   * house. A run that begins with no house is for a new one anyway.
+   */
+  newHouse?: boolean;
   /** A first name the sign-in already knows. */
   suggestedName?: string | null;
   /** Re-reads the account in App.tsx. */
@@ -64,7 +70,8 @@ type Screen = SetupStepId | 'intro' | 'all-set' | null;
  * once more next time, which is a smaller cost than a setup that stalls on it.
  */
 export default function SetupFlow({
-  profile, household, memberCount, suggestedName, onReady, onStart, onJoinToken, onFinish,
+  profile, household, memberCount, newHouse, suggestedName, onReady, onStart, onJoinToken,
+  onFinish,
 }: Props) {
   const ctx: SetupContext = useMemo(
     () => ({ profile, household, memberCount }),
@@ -72,10 +79,10 @@ export default function SetupFlow({
   );
   // Decided once, like the mode below: the household step making a house half
   // way through is exactly the case this is for. See seenThisRun.
-  const [startedWithHousehold] = useState(() => !!household);
+  const [forNewHouse] = useState(() => !household || !!newHouse);
   const seen = useMemo(
-    () => seenThisRun(new Set(profile?.setupSeen ?? []), startedWithHousehold),
-    [profile?.setupSeen, startedWithHousehold]
+    () => seenThisRun(new Set(profile?.setupSeen ?? []), forNewHouse),
+    [profile?.setupSeen, forNewHouse]
   );
 
   useEffect(() => {

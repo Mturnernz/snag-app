@@ -32,8 +32,10 @@ jest.mock('react-native-safe-area-context', () => ({
 const mock_listeners: Record<string, (e: any) => void> = {};
 const mock_dispatch = jest.fn();
 const mock_navigate = jest.fn();
+const mock_push = jest.fn();
 const mock_nav = {
   navigate: mock_navigate,
+  push: mock_push,
   goBack: jest.fn(),
   dispatch: mock_dispatch,
   addListener: (event: string, fn: (e: any) => void) => {
@@ -81,7 +83,11 @@ const mock_resolveLabelReading = jest.fn();
 const mock_readLabel = jest.fn();
 const mock_getProductLookup = jest.fn();
 const mock_lookUpProduct = jest.fn();
+const mock_getThings = jest.fn();
+const mock_setThingUses = jest.fn();
 jest.mock('../lib/supabase', () => ({
+  getThings: (...a: unknown[]) => mock_getThings(...a),
+  setThingUses: (...a: unknown[]) => mock_setThingUses(...a),
   getProductLookup: (...a: unknown[]) => mock_getProductLookup(...a),
   lookUpProduct: (...a: unknown[]) => mock_lookUpProduct(...a),
   getLabelReadingsToCheck: (...a: unknown[]) => mock_getLabelReadingsToCheck(...a),
@@ -1244,5 +1250,74 @@ describe('photos added on this phone or the other one', () => {
     expect(boxes(result)['Name'].props.value).toBe('Heat pump');
     expect(boxes(result)['Model'].props.value).toBe('MSZ-AP50');
     expect(mock_updateThing).not.toHaveBeenCalled();
+  });
+});
+
+// A consumable: what it goes with, each one a way to it, and the pack itself
+// onto the shopping list when it runs low. An appliance says what it uses.
+describe('a consumable', () => {
+  const tabs = {
+    kind: 'consumable', name: 'Dishwasher tablets', room: 'Kitchen', make: 'Finish', model: 'Quantum Ultimate',
+    spec: { size: '60 tablets' },
+    usedWith: [{ id: 'd1', name: 'Dishwasher', room: 'Kitchen', kind: 'appliance' }],
+  };
+
+  it('names its fields as a pack does, and asks no serial, dates or servicing', async () => {
+    const result = await open(tabs);
+    const all = texts(result);
+    expect(boxes(result).Brand.props.value).toBe('Finish');
+    expect(boxes(result).Product.props.value).toBe('Quantum Ultimate');
+    expect(boxes(result).Size.props.value).toBe('60 tablets');
+    expect(boxes(result).Serial).toBeUndefined();
+    expect(all).not.toContain('Servicing');
+    expect(all).not.toContain('What does it take?');
+    expect(pressable(result, 'Add installed')).toBeUndefined();
+  });
+
+  it('says what it is used with, and each one opens', async () => {
+    const result = await open(tabs);
+    expect(texts(result)).toContain('Used with');
+    await TestRenderer.act(async () => { pressable(result, 'Open Dishwasher').props.onPress(); });
+    expect(mock_push).toHaveBeenCalledWith('ThingDetail', { thingId: 'd1' });
+  });
+
+  it('changes what it is used with as a whole set, offering no other consumable', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: 'd1', name: 'Dishwasher', room: 'Kitchen' }),
+      thing({ id: 'd2', name: 'Dryer', room: 'Laundry' }),
+      thing({ id: 'c2', kind: 'consumable', name: 'Rinse aid', room: 'Kitchen' }),
+    ]);
+    mock_setThingUses.mockResolvedValue(undefined);
+    const result = await open(tabs);
+    await TestRenderer.act(async () => { await pressable(result, 'Change what it is used with').props.onPress(); });
+    // A search reaches the whole house past the room the sheet opens on.
+    await TestRenderer.act(async () => { boxes(result)['Search items'].props.onChangeText('r'); });
+    expect(pressable(result, 'Rinse aid')).toBeUndefined();
+    await TestRenderer.act(async () => { pressable(result, 'Dryer').props.onPress(); });
+    await TestRenderer.act(async () => { await pressable(result, 'Done').props.onPress(); });
+    expect(mock_setThingUses).toHaveBeenCalledWith('t1', ['d1', 'd2']);
+  });
+
+  it('goes on the shopping list by brand and product when it runs low, and only once', async () => {
+    mock_createSnag.mockResolvedValue({ id: 's9' });
+    mock_updateSnag.mockResolvedValue({});
+    const result = await open(tabs);
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Running low — add it to the shopping list').props.onPress();
+    });
+    expect(mock_createSnag).toHaveBeenCalledWith(expect.objectContaining({
+      thingId: 't1', description: 'Dishwasher tablets — Finish Quantum Ultimate',
+    }));
+    expect(mock_updateSnag).toHaveBeenCalledWith('s9', { parts: ['Finish Quantum Ultimate'] });
+  });
+
+  it('on an appliance, lists what it uses', async () => {
+    const result = await open({
+      name: 'Dishwasher', uses: [{ id: 'c1', name: 'Dishwasher tablets', room: 'Kitchen', make: 'Finish' }],
+    });
+    expect(texts(result)).toContain('Uses');
+    expect(texts(result)).toContain('Finish Dishwasher tablets');
+    await TestRenderer.act(async () => { pressable(result, 'Open Dishwasher tablets').props.onPress(); });
+    expect(mock_push).toHaveBeenCalledWith('ThingDetail', { thingId: 'c1' });
   });
 });

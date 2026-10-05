@@ -46,6 +46,7 @@ import type {
   SnagStatus,
   Thing,
   ThingKind,
+  ThingLink,
   ThingSpec,
   ThingSuggestion,
   AbsentThing,
@@ -176,7 +177,23 @@ function mapThing(row: Row): Thing {
     propertyName: row.property_name,
     snagCount: Number(row.snag_count ?? 0),
     openSnagCount: Number(row.open_snag_count ?? 0),
+    usedWith: thingLinks(row.used_with),
+    uses: thingLinks(row.uses),
   };
+}
+
+/** `used_with` / `uses` off `things_with_details`, read defensively: jsonb, so anything. */
+function thingLinks(raw: unknown): ThingLink[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((one): one is Record<string, unknown> => !!one && typeof one === 'object' && typeof (one as Row).id === 'string')
+    .map((one) => ({
+      id: one.id as string,
+      name: typeof one.name === 'string' ? one.name : null,
+      room: typeof one.room === 'string' ? one.room : null,
+      ...(typeof one.kind === 'string' ? { kind: one.kind as ThingKind } : {}),
+      ...(typeof one.make === 'string' ? { make: one.make } : {}),
+    }));
 }
 
 function mapInvitation(row: Row): Invitation {
@@ -1706,6 +1723,14 @@ export interface LabelReading {
   tint: string | null;
   hex: string | null;
   consumables: string[];
+  /** A pack's size as printed — "60 tablets", "1 L". Consumables only. */
+  size?: string | null;
+  /**
+   * What the pack says it is for — "dishwashers", "lawns and paths" — as
+   * printed, never inferred. Offered as the appliances it is used with
+   * (`thingsUsedFor`), never linked unseen.
+   */
+  usedFor?: string | null;
 }
 
 /**
@@ -1796,10 +1821,12 @@ export function parseLabelReading(raw: unknown): LabelReading | null {
     tint: labelText(r.tint, 120),
     hex: swatchColour({ hex: labelText(r.hex, 9) ?? '' }),
     consumables,
+    size: labelText(r.size, 40),
+    usedFor: labelText(r.usedFor, 60),
   };
 }
 
-const GUESSABLE_KINDS: ThingKind[] = ['appliance', 'finish', 'tile'];
+const GUESSABLE_KINDS: ThingKind[] = ['appliance', 'finish', 'tile', 'consumable'];
 
 /** `whatItIs` and `kindGuess`, read as defensively as the rest. Null when neither says anything. */
 export function parseLabelGuess(raw: unknown): LabelGuess | null {
@@ -1863,7 +1890,13 @@ export function applyLabelReading(
     filled.push(word);
   };
 
-  if (colourKind) {
+  if (kind === 'consumable') {
+    // A pack: the brand, the product it is, and its size. No serial, no year,
+    // and nothing it "takes" — it is the thing that gets taken.
+    put('make', reading.make, 'brand');
+    put('model', reading.product ?? reading.model, 'product');
+    putSpec('size', reading.size ?? null, 'size');
+  } else if (colourKind) {
     put('name', reading.colourName, 'colour');
     put('make', reading.make, kind === 'finish' ? 'brand' : 'range');
     put('model', reading.colourCode ?? reading.model, 'code');
@@ -2031,7 +2064,7 @@ export async function resolveLabelReading(
 
 /** One box the check card offers to fill or change, in the words the thing page uses. */
 export interface LabelOffer {
-  key: 'name' | 'make' | 'model' | 'serial' | 'manufactured' | 'product' | 'sheen' | 'tint' | 'hex';
+  key: 'name' | 'make' | 'model' | 'serial' | 'manufactured' | 'product' | 'sheen' | 'tint' | 'hex' | 'size';
   /** What the box is called, per kind: *Colour code* for a paint, *Model* otherwise. */
   label: string;
   value: string;
@@ -2079,7 +2112,11 @@ export function labelOffers(thing: Thing, reading: LabelReading): LabelOffers {
     else if (!sameWords(now, value)) differ.push({ key, label, value, current: now });
   };
 
-  if (colourKind) {
+  if (thing.kind === 'consumable') {
+    offer('make', words.make, reading.make, thing.make);
+    offer('model', words.model, reading.product ?? reading.model, thing.model);
+    offer('size', 'Size', reading.size ?? null, thing.spec.size ?? null);
+  } else if (colourKind) {
     if (!thing.name?.trim() && reading.colourName) offer('name', 'Colour', reading.colourName, null);
     offer('make', words.make, reading.make, thing.make);
     offer('model', words.model, reading.colourCode ?? reading.model, thing.model);
@@ -2100,7 +2137,7 @@ export function labelOffers(thing: Thing, reading: LabelReading): LabelOffers {
   }
 
   const onThing = (item: string) => thing.consumables.some((one) => sameWords(one, item));
-  const parts = colourKind
+  const parts = colourKind || thing.kind === 'consumable'
     ? []
     : reading.consumables
         .filter((one) => !onThing(one))
@@ -2380,6 +2417,12 @@ export interface ThingInput {
   model?: string | null;
   serial?: string | null;
   consumables?: string[];
+  /**
+   * A consumable's appliances. Not a column: written after the create through
+   * `set_thing_uses` by the caller, which says so if that second write fails.
+   * `createThing` ignores it.
+   */
+  usedWith?: string[];
   installedAt?: string | null;
   warrantyUntil?: string | null;
   serviceDays?: number | null;
@@ -2431,6 +2474,48 @@ export async function createThing(client: SupabaseClient, input: ThingInput): Pr
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_thing returns the base row, not the joined view.
   return getThing(client, row.id);
+}
+
+/**
+ * What a consumable is used with, as the whole set (`home.set_thing_uses`).
+ * Refused in words for anything but a consumable, a thing at another place,
+ * or another consumable.
+ */
+export async function setThingUses(
+  client: SupabaseClient,
+  consumableId: string,
+  thingIds: string[]
+): Promise<void> {
+  const { error } = await client.rpc('set_thing_uses', {
+    p_consumable_id: consumableId,
+    p_thing_ids: thingIds,
+  });
+  if (error) throw asError(error, "Couldn't link that");
+}
+
+/**
+ * The recorded things a pack says it is for — "dishwashers" is the Bosch
+ * dishwasher, "heat pumps" every heat pump head — as an offer on the
+ * walkthrough, never a link nobody ticked.
+ *
+ * Whole words, any case, a trailing *s* read past: the thing's name has to
+ * hold every word the pack named, or the pack every word of the thing's name.
+ * Never a consumable, which is used *with* something rather than being it.
+ */
+export function thingsUsedFor(usedFor: string | null | undefined, things: Thing[]): Thing[] {
+  const FILLER = new Set(['for', 'all', 'and', 'or', 'the', 'a', 'an', 'most', 'use', 'in', 'with', 'of', 'type', 'types', 'automatic']);
+  const stem = (word: string) => (word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word);
+  const wordsOf = (text: string) =>
+    text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !FILLER.has(w)).map(stem);
+  const said = new Set(wordsOf(usedFor ?? ''));
+  if (said.size === 0) return [];
+  return things.filter((thing) => {
+    if (thing.kind === 'consumable' || !thing.name) return false;
+    const name = wordsOf(thing.name);
+    if (!name.length) return false;
+    const nameSet = new Set(name);
+    return name.every((w) => said.has(w)) || [...said].every((w) => nameSet.has(w));
+  });
 }
 
 export interface ThingUpdate {
@@ -2928,7 +3013,7 @@ export function describeHouseRoom(room: HouseRoom): HouseRoomDescription {
   };
 }
 
-export type ThingKindGroupKey = 'appliances' | 'finishes' | 'other';
+export type ThingKindGroupKey = 'appliances' | 'finishes' | 'consumables' | 'other';
 
 export interface ThingKindGroup {
   key: ThingKindGroupKey;
@@ -2944,6 +3029,7 @@ export interface ThingKindGroup {
 const KIND_GROUPS: { key: ThingKindGroupKey; title: string; kinds: ThingKind[] }[] = [
   { key: 'appliances', title: 'Appliances', kinds: ['appliance'] },
   { key: 'finishes', title: 'Paint and finishes', kinds: ['finish', 'tile'] },
+  { key: 'consumables', title: 'Consumables', kinds: ['consumable'] },
   { key: 'other', title: 'Other', kinds: ['fitting', 'fabric', 'contact'] },
 ];
 

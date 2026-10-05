@@ -15,7 +15,8 @@ import { labelReadingEnabled } from '../lib/labelReading';
 import { readLabel, resolveLabelReading, uploadFile } from '../lib/supabase';
 import {
   applyLabelReading, catalogueSuggestions, describeCycle, documentFileName, documentName,
-  LabelReadError, matchSuggestions, sameNamedThing, suggestionsForRoom, suggestRoom, swatchColour, WHOLE_HOUSE,
+  LabelReadError, matchSuggestions, sameNamedThing, suggestionsForRoom, suggestRoom, swatchColour, thingsUsedFor,
+  WHOLE_HOUSE,
   type LabelGuess, type LabelReading, type ThingInput,
 } from '@snag/supabase-queries';
 import {
@@ -66,6 +67,9 @@ import {
 
 type Step = 'photo' | 'room' | 'what' | 'details';
 
+/** One empty list for every render, so what is drawn from it is not rebuilt each time. */
+const NO_THINGS: Thing[] = [];
+
 const STEPS: Step[] = ['photo', 'room', 'what', 'details'];
 
 /** Where reading the photographed label has got to. Never blocks a step. */
@@ -111,7 +115,7 @@ interface Props {
 
 export default function AddThingSheet({
   visible, locations, pathPrefix, start, onAddRoom, onCancel, onAdd, onLateReading,
-  recorded = [], onOpenThing,
+  recorded = NO_THINGS, onOpenThing,
 }: Props) {
   const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
@@ -169,6 +173,10 @@ export default function AddThingSheet({
   const [note, setNote] = useState('');
   const [docPath, setDocPath] = useState<string | null>(null);
   const [docLabel, setDocLabel] = useState<string | null>(null);
+  /** For a consumable: the recorded things it is used with, by id. */
+  const [usedWith, setUsedWith] = useState<string[]>([]);
+  /** Once somebody has ticked or unticked one, the pack's own answer never lands over it. */
+  const usedWithTouched = useRef(false);
   /** What they typed into the room step's search. Never a value, only a filter. */
   const [lookRoom, setLookRoom] = useState('');
   /** What they typed into *What is it?*'s search. Never a value, only a filter. */
@@ -183,6 +191,8 @@ export default function AddThingSheet({
     if (!visible) return;
     setRoom(start?.room ?? null);
     roomChosen.current = !!start && start.room !== undefined;
+    setUsedWith([]);
+    usedWithTouched.current = false;
     setRoomFromPhoto(null);
     setName(start?.name ?? '');
     setKind(start?.kind ?? 'appliance');
@@ -235,6 +245,12 @@ export default function AddThingSheet({
   const flow = STEPS.filter((one) => one === step || !skipped.includes(one));
   const index = flow.indexOf(step);
   const painting = kind === 'finish';
+  const consuming = kind === 'consumable';
+  /** What a consumable can be used with: everything recorded here that is not itself used up. */
+  const usable = useMemo(
+    () => recorded.filter((one) => one.kind !== 'consumable' && !!one.name),
+    [recorded],
+  );
 
   /**
    * Something this room already has under this name, said above *Add it*.
@@ -475,13 +491,30 @@ export default function AddThingSheet({
     setReading({ state: 'read', filled });
   }, [step, reading.state, kind]);
 
+  // What the pack says it is for, ticked for them — an offer, never over a tap.
+  useEffect(() => {
+    if (!consuming || usedWithTouched.current || !landed.current?.usedFor) return;
+    const offered = thingsUsedFor(landed.current.usedFor, usable).map((one) => one.id);
+    if (offered.length) setUsedWith(offered);
+  }, [consuming, reading.state, usable]);
+
+  function toggleUsedWith(id: string) {
+    usedWithTouched.current = true;
+    setUsedWith((now) => (now.includes(id) ? now.filter((one) => one !== id) : [...now, id]));
+  }
+
   // The photo's room, chosen for them only while nobody has answered *Which
   // room?* — never over a tap, and only a room this place has. It usually lands
   // while they are on that step, which is the point: the answer is lit, and
   // tapping another is all it takes to disagree.
   useEffect(() => {
     if (roomChosen.current || !guess) return;
-    const suggested = suggestRoom(guess, locations.map((one) => one.name));
+    const names = locations.map((one) => one.name);
+    // A pack for the dishwasher lives where the dishwasher is.
+    const beside = guess.kind === 'consumable'
+      ? thingsUsedFor(landed.current?.usedFor, usable).find((one) => one.room && names.includes(one.room))?.room
+      : null;
+    const suggested = beside ?? suggestRoom(guess, names);
     if (!suggested) return;
     setRoom(suggested);
     setRoomFromPhoto(suggested);
@@ -581,14 +614,21 @@ export default function AddThingSheet({
         model: model.trim() || null,
         // Both only ever arrive from the label. A paint has no serial, and
         // offering the row would invent one — the thing page's own rule.
-        serial: !painting && serial.trim() ? serial.trim() : null,
+        serial: !painting && !consuming && serial.trim() ? serial.trim() : null,
         // A paint's sheen, tint and swatch; for anything else only the year
         // it was made, which the plate gives and nothing else here asks.
-        spec: painting ? cleanSpec(spec) : cleanSpec({ manufactured: spec.manufactured ?? '' }),
+        spec: painting
+          ? cleanSpec(spec)
+          : consuming
+            ? cleanSpec({ size: spec.size ?? '' })
+            : cleanSpec({ manufactured: spec.manufactured ?? '' }),
         // A paint answers the last step with a surface; everything else answers
         // it with a part and a cycle. Neither carries the other's fields.
-        consumables: painting ? [] : takesList,
-        serviceDays: painting ? null : serviceDays,
+        // A pack is the thing that gets taken: it takes nothing and is never
+        // serviced, and what it goes with is the link below instead.
+        consumables: painting || consuming ? [] : takesList,
+        serviceDays: painting || consuming ? null : serviceDays,
+        usedWith: consuming ? usedWith : undefined,
         // `notes` is one column doing two jobs, and the kind decides which. For
         // a paint it is the surface — the only thing telling two colours in one
         // room apart — so it is asked in those words. For everything else it is
@@ -985,26 +1025,37 @@ export default function AddThingSheet({
                   style={styles.input}
                   value={make}
                   onChangeText={setMake}
-                  placeholder={painting ? 'Brand' : 'Make'}
+                  placeholder={painting || consuming ? 'Brand' : 'Make'}
                   placeholderTextColor={Colors.textMuted}
                   maxLength={80}
-                  accessibilityLabel={painting ? 'Brand' : 'Make'}
+                  accessibilityLabel={painting || consuming ? 'Brand' : 'Make'}
                 />
                 <TextInput
                   style={[styles.input, styles.inputMono]}
                   value={model}
                   onChangeText={setModel}
-                  placeholder={painting ? 'Colour code' : 'Model'}
+                  placeholder={painting ? 'Colour code' : consuming ? 'Product' : 'Model'}
                   placeholderTextColor={Colors.textMuted}
                   maxLength={80}
                   autoCorrect={false}
-                  autoCapitalize="characters"
-                  accessibilityLabel={painting ? 'Colour code' : 'Model'}
+                  autoCapitalize={consuming ? 'sentences' : 'characters'}
+                  accessibilityLabel={painting ? 'Colour code' : consuming ? 'Product' : 'Model'}
                 />
+                {consuming ? (
+                  <TextInput
+                    style={styles.input}
+                    value={spec.size ?? ''}
+                    onChangeText={(v) => setSpec((all) => ({ ...all, size: v }))}
+                    placeholder="Size"
+                    placeholderTextColor={Colors.textMuted}
+                    maxLength={40}
+                    accessibilityLabel="Size"
+                  />
+                ) : null}
                 {/* Not asked for — the walkthrough never has — but when the
                     plate carried one it is shown in a box, so it is checked
                     and can be corrected rather than saved unseen. */}
-                {!painting && (serial || (reading.state === 'read' && reading.filled.includes('serial'))) ? (
+                {!painting && !consuming && (serial || (reading.state === 'read' && reading.filled.includes('serial'))) ? (
                   <TextInput
                     style={[styles.input, styles.inputMono]}
                     value={serial}
@@ -1019,7 +1070,7 @@ export default function AddThingSheet({
                 ) : null}
                 {/* The same rule as the serial: only when the plate printed a
                     date of manufacture, and in a box so it is checked. */}
-                {!painting && ((spec.manufactured ?? '') || (reading.state === 'read' && reading.filled.includes('year made'))) ? (
+                {!painting && !consuming && ((spec.manufactured ?? '') || (reading.state === 'read' && reading.filled.includes('year made'))) ? (
                   <TextInput
                     style={[styles.input, styles.inputMono]}
                     value={spec.manufactured ?? ''}
@@ -1062,6 +1113,39 @@ export default function AddThingSheet({
                       placeholderTextColor={Colors.textMuted}
                       maxLength={200}
                       accessibilityLabel="Where did it go"
+                    />
+                  </View>
+                </>
+              ) : consuming ? (
+                // A pack goes with things rather than taking them: the dishwasher
+                // tablets with the dishwasher, one box of filters with three
+                // heat pump heads, the weed killer with nothing at all.
+                <>
+                  <Text style={styles.question2}>What's it used with?</Text>
+                  {usable.length ? (
+                    <View style={styles.chips}>
+                      {usable.map((one) => (
+                        <Chip
+                          key={one.id}
+                          label={one.room ? `${one.name} · ${one.room}` : one.name!}
+                          on={usedWith.includes(one.id)}
+                          onPress={() => toggleUsedWith(one.id)}
+                        />
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.hint}>Nothing recorded here yet to use it with.</Text>
+                  )}
+                  <View style={styles.fields}>
+                    <TextInput
+                      style={[styles.input, styles.inputMulti]}
+                      value={note}
+                      onChangeText={setNote}
+                      placeholder="Anything worth writing down — where it's kept, where it's cheapest"
+                      placeholderTextColor={Colors.textMuted}
+                      maxLength={1000}
+                      multiline
+                      accessibilityLabel="Notes"
                     />
                   </View>
                 </>

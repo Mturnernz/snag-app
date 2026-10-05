@@ -5,7 +5,7 @@ import {
   parseLooseDate, sameNamedThing, searchThings,
   thingDetailLine, thingHeadline, thingKindGroups, thingSearchText, thingsInArea, wallColour,
   TILE_BULLET_LIMIT,
-  roomForThing, suggestRoom,
+  roomForThing, suggestRoom, thingsUsedFor,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -732,5 +732,32 @@ describe('the room a photo suggests', () => {
     expect(suggestRoom({ name: 'Oven', kind: 'appliance', room: 'Garage' }, seeded)).toBe('Kitchen');
     expect(suggestRoom({ name: null, kind: null, room: 'Garage' }, seeded)).toBeNull();
     expect(suggestRoom(null, seeded)).toBeNull();
+  });
+});
+
+describe('what a pack says it is for', () => {
+  const dishwasher = thing({ id: 'd', name: 'Bosch dishwasher', room: 'Kitchen' });
+  const head1 = thing({ id: 'h1', name: 'Heat pump head', room: 'Lounge' });
+  const head2 = thing({ id: 'h2', name: 'Heat pump head', room: 'Master bedroom' });
+  const tabs = thing({ id: 't', name: 'Dishwasher tablets', kind: 'consumable' });
+  const all = [dishwasher, head1, head2, tabs];
+
+  it('finds the appliances the pack names, past a plural', () => {
+    expect(thingsUsedFor('dishwashers', all).map((t) => t.id)).toEqual(['d']);
+    expect(thingsUsedFor('For all heat pumps', all).map((t) => t.id)).toEqual(['h1', 'h2']);
+  });
+
+  it('never offers another consumable, nor anything when the pack says nothing', () => {
+    expect(thingsUsedFor('dishwasher tablets', [tabs])).toEqual([]);
+    expect(thingsUsedFor(null, all)).toEqual([]);
+    expect(thingsUsedFor('for all', all)).toEqual([]);
+  });
+
+  it('matches whole words, never inside one', () => {
+    expect(thingsUsedFor('lawns and paths', all)).toEqual([]);
+  });
+
+  it('gives consumables a heading of their own on a room’s page', () => {
+    expect(thingKindGroups([dishwasher, tabs]).map((g) => g.key)).toEqual(['appliances', 'consumables']);
   });
 });

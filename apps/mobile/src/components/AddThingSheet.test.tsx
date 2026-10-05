@@ -455,3 +455,78 @@ describe('with label reading off, as v1 ships', () => {
     expect(texts(r).some((t) => /read while you carry on/.test(t))).toBe(false);
   });
 });
+
+describe('a consumable', () => {
+  const dishwasher = { id: 'd', kind: 'appliance', name: 'Bosch dishwasher', room: 'Kitchen' } as any;
+  const mower = { id: 'm', kind: 'appliance', name: 'Lawnmower', room: 'Garage' } as any;
+  const tabsOnShelf = { id: 't', kind: 'consumable', name: 'Rinse aid', room: 'Kitchen' } as any;
+  const PACK = {
+    legible: true, make: 'Finish', model: null, serial: null, manufactured: null, colourName: null,
+    colourCode: null, product: 'Quantum Ultimate', sheen: null, tint: null, hex: null, consumables: [],
+    size: '60 tablets', usedFor: 'dishwashers',
+  };
+
+  async function openWith(recorded: any[]) {
+    let r!: RenderResult;
+    await TestRenderer.act(async () => {
+      r = render(
+        <AddThingSheet
+          visible
+          locations={['Garage', 'Kitchen'].map((name, i) => ({ id: `l${i}`, propertyId: 'p', name, sortOrder: i }) as any)}
+          pathPrefix="h1"
+          start={null}
+          recorded={recorded}
+          onAddRoom={jest.fn()}
+          onCancel={jest.fn()}
+          onAdd={onAdd}
+          onLateReading={onLateReading}
+        />
+      );
+    });
+    return r;
+  }
+
+  it('is put where the appliance it is for lives, ticked against it, and added with the link', async () => {
+    mock_readLabel.mockResolvedValue(answer(PACK, { name: 'Dishwasher tablets', kind: 'consumable', room: null }));
+    const r = await openWith([dishwasher, mower, tabsOnShelf]);
+    await shoot(r);
+    expect(press(r, 'Kitchen').props.accessibilityState).toEqual({ selected: true });
+    await tap(r, 'Next');
+    expect(press(r, 'From the photo: Dishwasher tablets').props.accessibilityState).toEqual({ selected: true });
+    await tap(r, 'Next');
+
+    expect(texts(r)).toContain("What's it used with?");
+    expect(press(r, 'Bosch dishwasher · Kitchen').props.accessibilityState).toEqual({ selected: true });
+    expect(press(r, 'Lawnmower · Garage').props.accessibilityState).toEqual({ selected: false });
+    // Another consumable is never something a consumable is used with.
+    expect(press(r, 'Rinse aid · Kitchen')).toBeUndefined();
+    expect(boxes(r).Size.props.value).toBe('60 tablets');
+    expect(boxes(r).Product.props.value).toBe('Quantum Ultimate');
+    // A pack takes nothing and is never serviced.
+    expect(texts(r)).not.toContain('Serviced how often?');
+
+    await tap(r, 'Add it to the house');
+    expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'consumable', room: 'Kitchen', name: 'Dishwasher tablets', make: 'Finish',
+      model: 'Quantum Ultimate', spec: { size: '60 tablets' }, consumables: [], serviceDays: null,
+      usedWith: ['d'],
+    }));
+  });
+
+  it('never ticks over somebody’s own answer', async () => {
+    let land!: (v: unknown) => void;
+    mock_readLabel.mockReturnValue(new Promise((resolve) => { land = resolve; }));
+    const r = await openWith([dishwasher, mower]);
+    await shoot(r);
+    await tap(r, 'Garage');
+    await tap(r, 'Next');
+    await tap(r, 'Something else…');
+    await TestRenderer.act(async () => { boxes(r)['What is it'].props.onChangeText('Weed killer'); });
+    await tap(r, 'Consumable');
+    await tap(r, 'Next');
+    await tap(r, 'Lawnmower · Garage');
+    await TestRenderer.act(async () => { land(answer(PACK, { name: 'Dishwasher tablets', kind: 'consumable', room: null })); });
+    expect(press(r, 'Bosch dishwasher · Kitchen').props.accessibilityState).toEqual({ selected: false });
+    expect(press(r, 'Lawnmower · Garage').props.accessibilityState).toEqual({ selected: true });
+  });
+});

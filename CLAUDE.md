@@ -1835,8 +1835,9 @@ later, in an aisle, needing one exact string. So:
 
 ### Five kinds, two built
 
-`home.thing_kind` is `appliance | finish | tile | fitting | fabric | contact`. `THING_KINDS` is
-the three that are offered: appliances, paint and tiles.
+`home.thing_kind` is `appliance | finish | tile | fitting | fabric | contact | consumable`.
+`THING_KINDS` is the four that are offered: appliances, paint, tiles and consumables (see *A
+consumable* below).
 
 **A tile takes paint's shape, not an appliance's**, and for paint's reason: a bathroom holds one
 tile on the floor and another on the walls, the colour is what somebody came to read, and the
@@ -1868,6 +1869,46 @@ Mis-filed, it is removed and added again — rarer than the mis-tap.
 `update_thing` still takes `p_kind` (and `20260912170000` exists because the first migration
 forgot it). Nothing in the UI passes it; leave it, because five kinds are in the enum and the
 three unbuilt ones will want it.
+
+### A consumable: what the house goes through (October 2026)
+
+`consumable` is a fourth built kind (`20261005130100`, alone in its migration for the enum's
+reason): dishwasher tablets, weed killer, a box of filters — **something bought and used up**,
+recorded for the brand and the exact product on the shelf. It is not `things.consumables`, which
+stays what it always was: the part codes an appliance *takes*. One is a line of text on the
+dishwasher; the other is a record of its own, with a photo of the box.
+
+- **What it is used with is a join table**, `home.thing_uses` (`20261005130200`), because one box of
+  heat pump filters fits three heads and the weed killer goes with nothing at all. The
+  `snag_things` shape exactly: cascade on both sides (a link to a deleted appliance is worth
+  nothing; the consumable stays), a read policy through the consumable's property, no write
+  policies, and **`set_thing_uses` replacing the whole set** in one call. It refuses, in words, a
+  thing that is not a consumable, anything at another place, and a consumable used with another
+  consumable. `things_with_details` carries both ends — `used_with` on a consumable, `uses` on an
+  appliance — restated **with `security_invoker`** and appended, so neither page needs a second read.
+- **The reader reads a pack.** `kindGuess` may say `consumable`; `product` is the name under the
+  brand (*Quantum Ultimate*), `size` the size as printed, and `usedFor` what the pack *says* it is
+  for (*dishwashers*) — transcription, never inferred. `lookup-product` is never started for one:
+  a pack has no manual or service interval.
+- **On the walkthrough** a consumable asks Brand, Product and Size, then **What's it used with?** —
+  every recorded thing here that is not itself a consumable, as chips. `thingsUsedFor` ticks the
+  ones the pack names (whole words, a plural read past) as an **offer, never over a tap**, and the
+  room step lights the room of the appliance it is for before falling back to `suggestRoom`. The
+  link is written by `useAddThing` after `create_thing`; a refusal is a toast saying so, never a
+  throw, because the record exists either way. No *Serviced how often?*, no *Anything you re-buy*.
+- **On its page**: Brand / Product / Size, *Where to buy* and *What's left* (offered pills), no
+  serial, no dates, no servicing, no maker lookup. **Used with** is a row of pills, each opening that
+  appliance, and *Change* opens `LinkAssetsSheet` — the job page's picker, reused — over everything
+  but consumables. **Running low** files it onto the shopping list through the cart's own path
+  (`addToShoppingList`, `consumableOnList` asked first) as *Finish Quantum Ultimate*
+  (`consumableItem`). An appliance with consumables shows **Uses**, each one opening.
+- **A room's page gives them their own heading**, *Consumables* (`thingKindGroups`). No ghosts:
+  `ROOM_SUGGESTIONS` stays appliance and finish only, for the ghost rule's reason.
+
+`supabase/tests/thing_uses.sql` replays the tablets, two heads and the weed killer, every refusal,
+another household reading nothing, and the cascade. `houseRecord.test.ts` pins `thingsUsedFor`;
+`label.test.ts` the pack's fields; `AddThingSheet.test.tsx` the room, the tick, the write and no
+tick over a choice; `ThingDetailScreen.test.tsx` the fields, the pills, the set and *Running low*.
 
 ### Four joins, all using mechanisms that already exist
 

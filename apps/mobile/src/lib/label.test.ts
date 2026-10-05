@@ -307,3 +307,40 @@ describe('parseLabelGuess', () => {
     expect(parseLabelGuess(null)).toBeNull();
   });
 });
+
+// A pack of something used up — dishwasher tablets, weed killer — read off its
+// box: the brand, the product and the size, and what the pack says it is for.
+describe('a consumable’s pack', () => {
+  const pack = (over: Record<string, unknown> = {}) => parseLabelReading({
+    legible: true, make: 'FINISH', model: null, serial: null, manufactured: null,
+    colourName: null, colourCode: null, product: 'Quantum Ultimate', sheen: null, tint: null, hex: null,
+    consumables: [], size: '60 tablets', usedFor: 'dishwashers', ...over,
+  })!;
+
+  it('reads the size and what it is for, as printed', () => {
+    expect(pack()).toMatchObject({ make: 'Finish', product: 'Quantum Ultimate', size: '60 tablets', usedFor: 'dishwashers' });
+  });
+
+  it('lays the brand, the product and the size into the boxes, and nothing a pack has not got', () => {
+    const { next, filled } = applyLabelReading(
+      { name: '', make: '', model: '', serial: '', takes: '', spec: {} },
+      { ...pack(), serial: '123', manufactured: '2020', consumables: ['X1'] },
+      'consumable'
+    );
+    expect(next).toMatchObject({ make: 'Finish', model: 'Quantum Ultimate', serial: '', takes: '' });
+    expect(next.spec).toEqual({ size: '60 tablets' });
+    expect(filled).toEqual(['brand', 'product', 'size']);
+  });
+
+  it('offers the size on the page, and no parts', () => {
+    const offers = labelOffers({
+      id: 't', householdId: 'h', propertyId: 'p', kind: 'consumable',
+      name: 'Dishwasher tablets', room: 'Kitchen', photoPaths: [], documentPaths: [],
+      make: 'Finish', model: null, serial: null, consumables: [],
+      installedAt: null, warrantyUntil: null, serviceDays: null, spec: {}, notes: null,
+      createdBy: 'me', createdAt: '', updatedAt: '', propertyName: 'Home', snagCount: 0, openSnagCount: 0,
+    }, { ...pack(), consumables: ['X1'] });
+    expect(offers.fill.map((one) => one.key)).toEqual(['model', 'size']);
+    expect(offers.parts).toEqual([]);
+  });
+});

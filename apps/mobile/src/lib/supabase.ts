@@ -391,6 +391,8 @@ export const updateThing = (thingId: string, update: queries.ThingUpdate) =>
 
 export const deleteThing = (thingId: string) => queries.deleteThing(supabase, thingId);
 
+export const setThingUses = (consumableId: string, thingIds: string[]) =>
+  queries.setThingUses(supabase, consumableId, thingIds);
 export const readLabel = (
   path: string,
   kind: Parameters<typeof queries.readLabel>[2],

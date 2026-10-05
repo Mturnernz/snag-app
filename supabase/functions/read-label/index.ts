@@ -205,7 +205,8 @@ function lookupFor(reading: unknown, kind: string): { make: string; model: strin
   const r = reading as any;
   if (!r || r.legible !== true) return null;
   const said = kind || (typeof r.kindGuess === 'string' ? r.kindGuess : '');
-  if (said === 'finish' || said === 'tile') return null;
+  // A paint, a tile or a pack has no manual or service interval to look up.
+  if (said === 'finish' || said === 'tile' || said === 'consumable') return null;
   const make = typeof r.make === 'string' ? r.make.trim() : '';
   const model = typeof r.model === 'string' ? r.model.trim() : '';
   if (!make || !model) return null;

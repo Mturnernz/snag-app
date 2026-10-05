@@ -6,8 +6,9 @@ import { COMMON_ROOMS } from '../types';
 
 // The sheet both *Add a room* doors open: the House tab's and setup's dashed
 // card. These pin what it offers and in what order, that a tap writes and the
-// sheet stays for the next one, and that leaving takes a name still in the
-// box — or stays open over one that was refused.
+// sheet stays for the next one, that leaving takes a name still in the box —
+// or stays open over one that was refused — and that a room the place already
+// has is a way into it rather than a refusal.
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -44,9 +45,18 @@ const press = async (r: ReturnType<typeof render>, label: string) => {
 
 const onAdd = jest.fn();
 const onClose = jest.fn();
+const onOpen = jest.fn();
 
-function open(existing: string[]) {
-  return render(<AddRoomSheet visible existing={existing} onAdd={onAdd} onClose={onClose} />);
+function open(existing: string[], opens = false) {
+  return render(
+    <AddRoomSheet
+      visible
+      existing={existing}
+      onAdd={onAdd}
+      onOpen={opens ? onOpen : undefined}
+      onClose={onClose}
+    />,
+  );
 }
 
 beforeEach(() => {
@@ -119,10 +129,90 @@ describe('AddRoomSheet', () => {
     const r = open(['Garage']);
     await settle();
 
-    await TestRenderer.act(async () => box(r).props.onChangeText('garage'));
+    await TestRenderer.act(async () => box(r).props.onChangeText('Boatshed'));
     await press(r, 'Done');
     expect(onClose).not.toHaveBeenCalled();
-    expect(box(r).props.value).toBe('garage');
+    expect(box(r).props.value).toBe('Boatshed');
+  });
+
+  describe('a room the place already has', () => {
+    // The Garage typed here had been on the House tab all along, below the
+    // fold, and the server's refusal came up as a browser alert calling it a
+    // tag. Now nothing is written and the sheet says where it is.
+
+    it('writes nothing and says the room is here, in its own spelling', async () => {
+      const r = open(['Kitchen', 'Garage'], true);
+      await settle();
+
+      await TestRenderer.act(async () => box(r).props.onChangeText('garage'));
+      expect(r.queryByText('Garage is already a room here')).not.toBeNull();
+      expect(pressable(r, 'Add the room')).toBeUndefined();
+
+      await TestRenderer.act(async () => { box(r).props.onSubmitEditing(); });
+      expect(onAdd).not.toHaveBeenCalled();
+    });
+
+    it('opens it from the House tab', async () => {
+      const r = open(['Kitchen', 'Garage'], true);
+      await settle();
+
+      await TestRenderer.act(async () => box(r).props.onChangeText('Garage room'));
+      await press(r, 'Open Garage');
+      expect(onOpen).toHaveBeenCalledWith('Garage');
+      expect(onAdd).not.toHaveBeenCalled();
+    });
+
+    it('opens it on Return too', async () => {
+      const r = open(['Garage'], true);
+      await settle();
+
+      await TestRenderer.act(async () => box(r).props.onChangeText('garage'));
+      await TestRenderer.act(async () => { box(r).props.onSubmitEditing(); });
+      expect(onOpen).toHaveBeenCalledWith('Garage');
+    });
+
+    it('closes on Done without writing, since there is nothing to add', async () => {
+      const r = open(['Garage'], true);
+      await settle();
+
+      await TestRenderer.act(async () => box(r).props.onChangeText('garage'));
+      await press(r, 'Done');
+      expect(onAdd).not.toHaveBeenCalled();
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it('offers no button where there is no room page to open', async () => {
+      // Setup's door: the line still says so, and a dead button under it
+      // would be a choice that isn't one.
+      const r = open(['Garage']);
+      await settle();
+
+      await TestRenderer.act(async () => box(r).props.onChangeText('garage'));
+      expect(r.queryByText('Garage is already a room here')).not.toBeNull();
+      expect(pressable(r, 'Open Garage')).toBeUndefined();
+      expect(pressable(r, 'Add the room')).toBeUndefined();
+    });
+
+    it('counts a room added from a card a moment ago', async () => {
+      const r = open([], true);
+      await settle();
+
+      await press(r, 'Add Ensuite');
+      await TestRenderer.act(async () => box(r).props.onChangeText('en-suite'));
+      expect(r.queryByText('Ensuite is already a room here')).not.toBeNull();
+    });
+
+    it('says nothing about a room that only contains the name', async () => {
+      const r = open(['Bedroom'], true);
+      await settle();
+
+      await TestRenderer.act(async () => box(r).props.onChangeText('Bedroom 2'));
+      const said = r.getAllByType('Text').map((n: any) => n.children.join(''));
+      expect(said.some((t: string) => t.includes('already a room here'))).toBe(false);
+      await press(r, 'Add the room');
+      expect(onAdd).toHaveBeenCalledWith('Bedroom 2');
+    });
   });
 
   it('says so when every room on the list is already here', async () => {

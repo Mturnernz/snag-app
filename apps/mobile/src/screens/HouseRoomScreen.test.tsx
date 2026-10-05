@@ -42,17 +42,19 @@ const mock_getAbsentThings = jest.fn();
 const mock_markThingAbsent = jest.fn();
 const mock_getFileUrls = jest.fn();
 const mock_getLabelReadingsToCheck = jest.fn();
+const mock_createThing = jest.fn();
 jest.mock('../lib/supabase', () => ({
   getLabelReadingsToCheck: (...a: unknown[]) => mock_getLabelReadingsToCheck(...a),
   getThings: (...a: unknown[]) => mock_getThings(...a),
   getAbsentThings: (...a: unknown[]) => mock_getAbsentThings(...a),
   markThingAbsent: (...a: unknown[]) => mock_markThingAbsent(...a),
   getFileUrls: (...a: unknown[]) => mock_getFileUrls(...a),
-  createThing: jest.fn(),
+  createThing: (...a: unknown[]) => mock_createThing(...a),
   createLocation: jest.fn(),
 }));
 jest.mock('../lib/serviceJob', () => ({ fileServiceJob: jest.fn() }));
-jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
+const mock_showToast = jest.fn();
+jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: mock_showToast }) }));
 const mock_showAlert = jest.fn();
 jest.mock('../lib/alert', () => ({ showAlert: (...a: unknown[]) => mock_showAlert(...a) }));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
@@ -248,6 +250,52 @@ describe('adding to a room', () => {
     await TestRenderer.act(async () => pressable(r, 'Add something to Laundry').props.onPress());
     expect(sheet().visible).toBe(true);
     expect(sheet().start).toEqual({ room: 'Laundry' });
+  });
+});
+
+describe('saying where a new thing went', () => {
+  // Recorded from the grid, a weed killer in the Garage said only "Added to the
+  // house" and looked lost. The toast names the room, and offers the way there
+  // unless that room is the page already showing it.
+
+  const add = async (room: string | null) => {
+    mock_createThing.mockResolvedValue(thing({ id: 'new', name: 'Weed Killer', room }));
+    await TestRenderer.act(async () => {
+      await sheet().onAdd({ kind: 'appliance', room, name: 'Weed Killer', photoPaths: [], documentPaths: [] });
+    });
+  };
+
+  it('names the room and offers nothing more when it is the room on screen', async () => {
+    await open('Laundry');
+    await add('Laundry');
+    expect(mock_showToast).toHaveBeenCalledWith('Added to Laundry', undefined);
+  });
+
+  it('offers Open when the walkthrough filed it in another room', async () => {
+    await open('Laundry');
+    await add('Garage');
+    const [said, action] = mock_showToast.mock.calls[0];
+    expect(said).toBe('Added to Garage');
+    expect(action.label).toBe('Open');
+    action.onPress();
+    expect(mock_navigate).toHaveBeenCalledWith('HouseRoom', { room: 'Garage' });
+  });
+
+  it('reads Whole house as the room it is', async () => {
+    await open(null);
+    await add(null);
+    expect(mock_showToast).toHaveBeenCalledWith('Added to Whole house', undefined);
+  });
+
+  it('hands the walkthrough everything recorded here, and a way to open one', async () => {
+    const recorded = [thing({ id: 'wk', name: 'Weed Killer', room: 'Laundry' })];
+    mock_getThings.mockResolvedValue(recorded);
+    await open('Laundry');
+    expect(sheet().recorded).toEqual(recorded);
+
+    TestRenderer.act(() => sheet().onOpenThing('wk'));
+    expect(mock_navigate).toHaveBeenCalledWith('ThingDetail', { thingId: 'wk' });
+    expect(mock_createThing).not.toHaveBeenCalled();
   });
 });
 

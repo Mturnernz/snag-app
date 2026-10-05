@@ -1,12 +1,14 @@
 import { useCallback, useState } from 'react';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import type { ThingInput } from '@snag/supabase-queries';
+import { WHOLE_HOUSE, type ThingInput } from '@snag/supabase-queries';
 import { useHousehold } from './useHousehold';
 import { useToast } from './useToast';
 import { createLocation, createThing } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { fileServiceJob } from '../lib/serviceJob';
-import type { ThingKind } from '../types';
+import type { RootStackParamList, ThingKind } from '../types';
 
 /** Where the walkthrough opens: a room already chosen, or a ghost already named. */
 export type AddThingStart = { room?: string | null; name?: string | null; kind?: ThingKind } | null;
@@ -21,8 +23,17 @@ export type AddThingStart = { room?: string | null; name?: string | null; kind?:
  *
  * `onAdded` re-reads whatever the calling screen shows. The sheet stays open on
  * a failure: everything typed is still in it, and the retry is the same button.
+ *
+ * **It says where the thing went, with a way there.** `showingRoom` is the room
+ * whose page is on screen (null for Whole house), or undefined on the grid. A
+ * weed killer recorded in the Garage from the grid used to say only *Added to
+ * the house* — and the Garage, holding one thing, was the ninth tile of
+ * thirteen, below the fold, so it read as lost and was recorded again. Now the
+ * toast names the room and offers *Open*, unless that room is the page already
+ * showing it.
  */
-export function useAddThing(onAdded: () => void | Promise<void>) {
+export function useAddThing(onAdded: () => void | Promise<void>, showingRoom?: string | null) {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { household, activeProperty, locations, reloadLocations } = useHousehold();
   const { showToast } = useToast();
   const [visible, setVisible] = useState(false);
@@ -62,7 +73,16 @@ export function useAddThing(onAdded: () => void | Promise<void>) {
     try {
       const created = await createThing({ ...input, propertyId: activeProperty.id });
       setVisible(false);
-      showToast((await fileServiceJob(created)) ?? 'Added to the house');
+      const room = created.room ?? null;
+      // A service job filed with it is the bigger news, so its words win; the
+      // way to the room is offered either way.
+      const said = (await fileServiceJob(created)) ?? `Added to ${room ?? WHOLE_HOUSE}`;
+      showToast(
+        said,
+        room === showingRoom
+          ? undefined
+          : { label: 'Open', onPress: () => navigation.navigate('HouseRoom', { room }) },
+      );
       await onAdded();
       return true;
     } catch (err: any) {
@@ -81,6 +101,15 @@ export function useAddThing(onAdded: () => void | Promise<void>) {
     onAdded();
   }
 
+  /**
+   * The walkthrough's *Open that one*: somebody about to record a second weed
+   * killer in the Garage would rather see the first. Nothing is written.
+   */
+  function openThing(thingId: string) {
+    setVisible(false);
+    navigation.navigate('ThingDetail', { thingId });
+  }
+
   return {
     open,
     addRoom,
@@ -94,6 +123,7 @@ export function useAddThing(onAdded: () => void | Promise<void>) {
       onCancel: () => setVisible(false),
       onAdd: add,
       onLateReading: lateReading,
+      onOpenThing: openThing,
     },
   };
 }

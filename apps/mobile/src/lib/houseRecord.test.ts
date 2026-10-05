@@ -2,7 +2,7 @@ import {
   assetPickerOrder,
   catalogueSuggestions, describeCycle, describeHouseRoom, documentFileName, documentName,
   formatLooseDate, ghostsForRoom, houseRooms, joinPaintAreas, matchSuggestions, paintAreas,
-  parseLooseDate, searchThings,
+  parseLooseDate, sameNamedThing, searchThings,
   thingDetailLine, thingHeadline, thingKindGroups, thingSearchText, thingsInArea, wallColour,
   TILE_BULLET_LIMIT,
 } from '@snag/supabase-queries';
@@ -653,5 +653,40 @@ describe("a room's things by kind", () => {
   it('keeps the kinds nobody can add yet together, and only when one exists', () => {
     const groups = thingKindGroups([thing({ id: 'a', kind: 'fitting' }), thing({ id: 'b', kind: 'contact' })]);
     expect(groups.map((g) => g.title)).toEqual(['Other']);
+  });
+});
+
+describe('a name the room already has', () => {
+  // The walkthrough warns with this above *Add it* — never a lock. The second
+  // weed killer in the Garage was recorded because the first looked lost.
+  const garage = [
+    thing({ id: 'wk', room: 'Garage', name: 'Weed Killer' }),
+    thing({ id: 'sa', room: 'Hallway', name: 'Smoke alarm' }),
+    thing({ id: 'hp', room: null, name: 'Hot water cylinder' }),
+  ];
+
+  it('finds the same name in the same room, past case and spacing', () => {
+    expect(sameNamedThing(garage, 'Garage', 'weed killer')?.id).toBe('wk');
+    expect(sameNamedThing(garage, 'Garage', '  Weed   KILLER ')?.id).toBe('wk');
+  });
+
+  it('says nothing about another room', () => {
+    expect(sameNamedThing(garage, 'Garden Shed', 'Weed Killer')).toBeNull();
+    expect(sameNamedThing(garage, 'Garage', 'Smoke alarm')).toBeNull();
+  });
+
+  it('never matches on part of a name', () => {
+    // A warning that fires on ordinary work is one people learn to read past.
+    expect(sameNamedThing(garage, 'Hallway', 'Smoke alarm 2')).toBeNull();
+    expect(sameNamedThing(garage, 'Garage', 'Weed')).toBeNull();
+  });
+
+  it('reads a null room as Whole house, as the row does', () => {
+    expect(sameNamedThing(garage, null, 'hot water cylinder')?.id).toBe('hp');
+    expect(sameNamedThing(garage, 'Garage', 'Hot water cylinder')).toBeNull();
+  });
+
+  it('has nothing to say about a thing with no name yet', () => {
+    expect(sameNamedThing([thing({ room: 'Garage', name: null })], 'Garage', '')).toBeNull();
   });
 });

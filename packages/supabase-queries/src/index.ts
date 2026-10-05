@@ -2636,6 +2636,48 @@ export function roomsToOffer(existing: string[]): string[] {
     .map((room) => room.name);
 }
 
+/**
+ * The place's own room that a typed name already is, or null.
+ *
+ * *Add a room* asks this before it writes, because the server's answer to a
+ * duplicate is a refusal, and a refusal is the wrong answer to somebody who
+ * typed "Garage" because they could not see the Garage. It is there; the sheet
+ * says so and opens it. The place's spelling comes back, so `garage` opens
+ * *Garage*.
+ *
+ * `roomKey`, so case, spacing, punctuation and a trailing "room" are read past
+ * — *En-suite* is the Ensuite. **Never `COMMON_ROOMS.also`**: the cards leave
+ * out a Living room when there is a Lounge because they are offering, but
+ * somebody who types *Lounge* beside a Living room has said there are two.
+ */
+export function roomAlreadyHere(existing: string[], typed: string): string | null {
+  if (!typed.trim()) return null;
+  const key = roomKey(typed.trim());
+  return existing.find((name) => roomKey(name) === key) ?? null;
+}
+
+/** A thing's name as the House tab compares it: any case, spacing collapsed. */
+function normalName(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Something already recorded in this room under this name, or null.
+ *
+ * The walkthrough warns with it before *Add it* — a warning and never a lock,
+ * because two smoke alarms in one hallway are real. **Exact name, same room**:
+ * a looser match would warn about every "Smoke alarm" beside "Smoke alarm 2",
+ * and a warning that fires on ordinary work is one people learn to read past.
+ * `room` null is Whole house, as on the row.
+ */
+export function sameNamedThing(things: Thing[], room: string | null, name: string): Thing | null {
+  const wanted = normalName(name);
+  if (!wanted) return null;
+  return things.find(
+    (thing) => (thing.room ?? null) === (room ?? null) && normalName(thing.name ?? '') === wanted
+  ) ?? null;
+}
+
 export function ghostsForRoom(
   room: string,
   things: Thing[],
@@ -2644,13 +2686,12 @@ export function ghostsForRoom(
   const suggestions = suggestionsForRoom(room);
   if (suggestions.length === 0) return [];
 
-  const normal = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
   const recorded = things
     .filter((thing) => thing.room === room)
-    .map((thing) => normal(thing.name ?? ''))
+    .map((thing) => normalName(thing.name ?? ''))
     .filter(Boolean);
   const dismissed = new Set(
-    absent.filter((a) => a.room === room).map((a) => normal(a.name))
+    absent.filter((a) => a.room === room).map((a) => normalName(a.name))
   );
 
   // A paint prompt is answered by *any* paint in the room, not by one called
@@ -2665,7 +2706,7 @@ export function ghostsForRoom(
   );
 
   return suggestions.filter((suggestion) => {
-    const wanted = normal(suggestion.name);
+    const wanted = normalName(suggestion.name);
     if (dismissed.has(wanted)) return false;
     if (suggestion.kind === 'finish') return !kindsRecorded.has('finish');
     return !recorded.some((name) => name === wanted || name.includes(wanted));

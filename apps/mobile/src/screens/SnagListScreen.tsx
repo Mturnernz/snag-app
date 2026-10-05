@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, SectionList, ScrollView, RefreshControl, Pressable, Modal, StyleSheet,
+  View, Text, SectionList, ScrollView, RefreshControl, Pressable, StyleSheet,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -31,9 +31,10 @@ import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import { isForeground, NEW_VISIT_MS, RETURN_RELOAD_MS } from '../lib/foreground';
 import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
+import HomePickerSheet from '../components/HomePickerSheet';
 import {
-  assessmentBrief, dueState, exportDateStamp, isDoneForNow, shoppingCount, shoppingList,
-  snagExportPhotos, snagExportTable, snagHeadline,
+  assessmentBrief, dueState, exportDateStamp, isDoneForNow, placeTitle, shoppingCount,
+  shoppingList, snagExportPhotos, snagExportTable, snagHeadline,
 } from '@snag/supabase-queries';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag, Thing } from '../types';
@@ -110,7 +111,7 @@ export default function SnagListScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
   const {
-    household, profile, properties, activeProperty, setActiveProperty, locations,
+    household, profile, properties, activeProperty, locations,
   } = useHousehold();
   const { showToast } = useToast();
 
@@ -735,7 +736,7 @@ export default function SnagListScreen() {
   }
 
   const since = describeSince(seenBefore);
-  const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
+  const placeName = placeTitle(activeProperty, properties);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -1043,32 +1044,7 @@ export default function SnagListScreen() {
         onCancel={() => setShowExport(false)}
       />
 
-      {/* ─────────────────────────────────────────────── which place */}
-      <Modal visible={placesOpen} transparent animationType="slide" onRequestClose={() => setPlacesOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setPlacesOpen(false)} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
-          <View style={styles.grab} />
-          <Text style={styles.sheetTitle}>Which place</Text>
-          {properties.map((candidate) => {
-            const on = activeProperty?.id === candidate.id;
-            return (
-              <Pressable
-                key={candidate.id}
-                onPress={() => {
-                  setActiveProperty(candidate.id);
-                  setPlacesOpen(false);
-                }}
-                style={styles.placeRow}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-              >
-                <Icon name={on ? 'home' : 'home-outline'} size="md" color={on ? Colors.primary : Colors.textSecondary} />
-                <Text style={[styles.placeLabel, on && styles.placeLabelOn]}>{candidate.name}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </Modal>
+      <HomePickerSheet visible={placesOpen} onClose={() => setPlacesOpen(false)} />
     </View>
   );
 }
@@ -1084,9 +1060,10 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  // V2: the iOS large title, the same on every tab.
+  // V2: the iOS large title, the same on every tab. It keeps its height while
+  // empty, before the places load, so the header does not jump when they do.
   title: {
-    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    fontSize: Typography.largeTitle, lineHeight: 41, minHeight: 41, fontWeight: Typography.bold,
     color: Colors.textPrimary, letterSpacing: -0.4,
   },
   // Both header buttons, from one style. They were a 48px square beside a
@@ -1204,21 +1181,4 @@ const styles = StyleSheet.create({
   shoppingFor: { fontSize: Typography.sm, color: Colors.textMuted },
   doneLine: { paddingVertical: Spacing.lg, alignItems: 'center' },
   doneText: { fontSize: Typography.sm, color: Colors.textMuted },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.card + 6,
-    borderTopRightRadius: Radius.card + 6,
-    padding: Spacing.lg,
-    gap: Spacing.md,
-  },
-  grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
-  sheetTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
-  placeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, minHeight: MIN_TOUCH_TARGET },
-  placeLabel: { fontSize: Typography.base, color: Colors.textSecondary },
-  placeLabelOn: { color: Colors.textPrimary, fontWeight: Typography.semibold },
 });

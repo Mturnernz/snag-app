@@ -46,6 +46,8 @@ const mock_getHouseholdFilePaths = jest.fn().mockResolvedValue([]);
 const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
 const mock_getSnags = jest.fn().mockResolvedValue([]);
 const mock_getThings = jest.fn().mockResolvedValue([]);
+const mock_createHousehold = jest.fn();
+const mock_rememberHousehold = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('../lib/supabase', () => ({
   inviteToHousehold: (...a: unknown[]) => mock_inviteToHousehold(...a),
@@ -64,7 +66,7 @@ jest.mock('../lib/supabase', () => ({
   deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
   getSnags: (...a: unknown[]) => mock_getSnags(...a),
   getThings: (...a: unknown[]) => mock_getThings(...a),
-  createProperty: jest.fn().mockResolvedValue(undefined),
+  createHousehold: (...a: unknown[]) => mock_createHousehold(...a),
   renameProperty: jest.fn().mockResolvedValue(undefined),
   setPropertyMember: (...a: unknown[]) => mock_setPropertyMember(...a),
 }));
@@ -72,6 +74,9 @@ jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() 
 const mock_shareLink = jest.fn();
 jest.mock('../lib/share', () => ({ shareLink: (...a: unknown[]) => mock_shareLink(...a) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
+jest.mock('../lib/currentHome', () => ({
+  rememberHousehold: (...a: unknown[]) => mock_rememberHousehold(...a),
+}));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
 
 const TOKEN = '8f1d3c2e-0000-4000-8000-000000000000';
@@ -465,7 +470,7 @@ describe('sharing a place', () => {
   });
 
   // An invitation to somebody who already has a household has nowhere else to
-  // appear: they never see the Setup screen, and there is no household switcher.
+  // appear: they never see the Setup screen again.
   it('lets you answer an invitation addressed to you, by the place it names', async () => {
     arrange();
     mock_getMyInvitations.mockResolvedValue([
@@ -484,6 +489,48 @@ describe('sharing a place', () => {
 
     await press(pressableAround(r, 'Join'));
     expect(mock_acceptInvitation).toHaveBeenCalledWith('i9');
+    // Another home beside this one, and the one to open on: remembered before
+    // the account is re-read, so the re-read lands there.
+    expect(mock_rememberHousehold).toHaveBeenCalledWith('other');
+    const order = (fn: jest.Mock) => fn.mock.invocationCallOrder[0];
+    expect(order(mock_rememberHousehold))
+      .toBeLessThan(order((global as any).__household.reloadAccount));
+  });
+});
+
+// A home is a household. The bach is a household of its own, so this screen
+// is one household's, and another home is another household.
+describe('another home', () => {
+  it("lists only this household's place, not the other homes", async () => {
+    arrange({ properties: [place('p1', '32 Le Roy'), { id: 'p2', householdId: 'bach', name: 'Martins Bay' }] });
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    expect(r.queryByText('32 Le Roy')).not.toBeNull();
+    expect(r.queryByText('Martins Bay')).toBeNull();
+    expect(mock_getPlaceMembers).toHaveBeenCalledWith(['p1']);
+  });
+
+  it('adds another home as a household of its own, and opens on it', async () => {
+    arrange();
+    mock_createHousehold.mockResolvedValue({ id: 'h2', name: 'Martins Bay', createdAt: '' });
+    const r = render(<HouseholdScreen />);
+    await settle();
+
+    // Never a second place in this household: nobody here would be kept out.
+    expect(r.queryByText('Add a place')).toBeNull();
+    const box = input(r, (p) => p.placeholder === 'The bach');
+    await TestRenderer.act(async () => box.props.onChangeText('Martins Bay'));
+    const button = r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.label === 'Add another home' && !!n.props?.onPress,
+    )[0];
+    await press(button);
+
+    expect(mock_createHousehold).toHaveBeenCalledWith('Martins Bay', 'Martins Bay');
+    expect(mock_rememberHousehold).toHaveBeenCalledWith('h2');
+    const order = (fn: jest.Mock) => fn.mock.invocationCallOrder[0];
+    expect(order(mock_rememberHousehold))
+      .toBeLessThan(order((global as any).__household.reloadAccount));
   });
 });
 

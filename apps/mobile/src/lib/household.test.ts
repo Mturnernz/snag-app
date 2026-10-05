@@ -1,15 +1,17 @@
-import { countMyHouseholds, getMyHousehold, joinUrl } from '@snag/supabase-queries';
+import { countMyHouseholds, getMyHouseholds, joinUrl, placeTitle } from '@snag/supabase-queries';
 
-// `getMyHousehold` answers the gate the whole app hangs off — App.tsx renders
-// Setup or the navigator on it — and it used to answer it wrong in a way
+// `getMyHouseholds` answers the gate the whole app hangs off — App.tsx renders
+// Setup or the navigator on it — and it has answered it wrong twice in ways
 // nothing on screen could explain.
 //
-// RLS returns every household you are a member of. The old read took the
-// OLDEST one created. So somebody who tapped "Create it" on the Setup screen
-// instead of "Someone else set ours up" made an empty household, was then
-// added to the real one, and stayed pinned to the empty one for ever: no
-// switcher, no error, no way out. Reading the membership rows newest-first
-// instead is the whole fix, and it is one `.order()` away from coming back.
+// The first read took the OLDEST household created. So somebody who tapped
+// "Create it" on the Setup screen instead of "Someone else set ours up" made an
+// empty household, was then added to the real one, and stayed pinned to the
+// empty one. Ordering the membership rows by when you joined is that fix.
+//
+// The second: RLS lets a member read every member's row, so "newest join
+// first" meant whoever joined last. Harmless with one household; with the
+// house and the bach, somebody else joining the bach reordered your list.
 
 type Row = Record<string, any>;
 
@@ -20,8 +22,13 @@ type Row = Record<string, any>;
  * `select` has to be both chainable AND awaitable, because a head+count read
  * awaits it directly while an ordered read keeps building on it.
  */
-function fakeClient(answer: { data?: Row | null; count?: number; error?: any }) {
-  const calls: { table?: string; order?: [string, any]; select?: [string, any] } = {};
+function fakeClient(answer: { rows?: Row[] | null; count?: number; error?: any; me?: string | null }) {
+  const calls: {
+    table?: string;
+    order?: [string, any];
+    select?: [string, any];
+    eq?: [string, any][];
+  } = { eq: [] };
 
   const builder: any = {
     select: (columns: string, options?: any) => {
@@ -33,16 +40,22 @@ function fakeClient(answer: { data?: Row | null; count?: number; error?: any }) 
       return builder;
     },
     limit: () => builder,
-    eq: () => builder,
-    maybeSingle: async () => ({ data: answer.data ?? null, error: answer.error ?? null }),
-    // Awaiting the builder itself is what a head+count read does.
+    eq: (column: string, value: any) => {
+      calls.eq!.push([column, value]);
+      return builder;
+    },
+    // Awaiting the builder itself is what a list read and a head+count read do.
     then: (resolve: (value: any) => unknown) =>
-      resolve({ data: null, count: answer.count ?? 0, error: answer.error ?? null }),
+      resolve({ data: answer.rows ?? null, count: answer.count ?? 0, error: answer.error ?? null }),
   };
 
+  const me = answer.me === undefined ? 'me' : answer.me;
   return {
     calls,
     client: {
+      auth: {
+        getSession: async () => ({ data: { session: me ? { user: { id: me } } : null } }),
+      },
       from: (table: string) => {
         calls.table = table;
         return builder;
@@ -51,39 +64,52 @@ function fakeClient(answer: { data?: Row | null; count?: number; error?: any }) 
   };
 }
 
-describe('getMyHousehold', () => {
-  it('reads the membership rows, newest join first', async () => {
+describe('getMyHouseholds', () => {
+  it('reads my own membership rows, newest join first', async () => {
     const { client, calls } = fakeClient({
-      data: {
-        created_at: '2026-09-10T00:00:00Z',
-        household: { id: 'h2', name: 'The real one', created_at: '2026-09-02T00:00:00Z' },
-      },
+      rows: [
+        {
+          created_at: '2026-10-05T00:00:00Z',
+          household: { id: 'bach', name: 'Martins Bay', created_at: '2026-09-30T00:00:00Z' },
+        },
+        {
+          created_at: '2026-09-12T00:00:00Z',
+          household: { id: 'house', name: '32 Le Roy', created_at: '2026-09-12T00:00:00Z' },
+        },
+      ],
     });
 
-    const found = await getMyHousehold(client);
+    const found = await getMyHouseholds(client);
 
     // The join, not the households table: ordering by households.created_at is
-    // exactly the bug — it asks when the house was made, not when you got in.
+    // exactly the first bug — it asks when the house was made, not when you got in.
     expect(calls.table).toBe('household_members');
     expect(calls.order).toEqual(['created_at', { ascending: false }]);
-    expect(found).toEqual({
-      id: 'h2',
-      name: 'The real one',
-      createdAt: '2026-09-02T00:00:00Z',
-    });
+    // Mine only — the second bug.
+    expect(calls.eq).toContainEqual(['profile_id', 'me']);
+    expect(found).toEqual([
+      { id: 'bach', name: 'Martins Bay', createdAt: '2026-09-30T00:00:00Z' },
+      { id: 'house', name: '32 Le Roy', createdAt: '2026-09-12T00:00:00Z' },
+    ]);
   });
 
-  it('is null for somebody who has signed up and not been added to anything', async () => {
-    const { client } = fakeClient({ data: null });
-    expect(await getMyHousehold(client)).toBeNull();
+  it('is empty for somebody who has signed up and not been added to anything', async () => {
+    const { client } = fakeClient({ rows: [] });
+    expect(await getMyHouseholds(client)).toEqual([]);
   });
 
-  it('is null rather than a half-built household when the join comes back empty', async () => {
-    // maybeSingle can hand back the membership row with no embedded household
-    // if the inner join is ever loosened. Returning `{ id: undefined }` from
-    // here would put App.tsx past its gate and into a navigator with no data.
-    const { client } = fakeClient({ data: { created_at: '2026-09-10T00:00:00Z' } });
-    expect(await getMyHousehold(client)).toBeNull();
+  it('is empty, asking nothing, with nobody signed in', async () => {
+    const { client, calls } = fakeClient({ me: null });
+    expect(await getMyHouseholds(client)).toEqual([]);
+    expect(calls.table).toBeUndefined();
+  });
+
+  it('drops a membership row with no household rather than half-building one', async () => {
+    // The inner join can hand back the membership row with no embedded
+    // household if it is ever loosened. Returning `{ id: undefined }` from here
+    // would put App.tsx past its gate and into a navigator with no data.
+    const { client } = fakeClient({ rows: [{ created_at: '2026-09-10T00:00:00Z' }] });
+    expect(await getMyHouseholds(client)).toEqual([]);
   });
 });
 
@@ -115,5 +141,25 @@ describe('joinUrl', () => {
   it('does not double the slash when the host carries one', () => {
     expect(joinUrl('https://app.snaghq.co.nz/', TOKEN))
       .toBe(`https://app.snaghq.co.nz/join/${TOKEN}`);
+  });
+});
+
+describe('placeTitle', () => {
+  const bay = { name: 'Martins Bay' };
+  const house = { name: '32 Le Roy' };
+
+  it('names the place being shown', () => {
+    expect(placeTitle(bay, [house, bay])).toBe('Martins Bay');
+  });
+
+  // The places are back before the server has said which one to start on.
+  it('names the first place while the active one is still being chosen', () => {
+    expect(placeTitle(null, [bay])).toBe('Martins Bay');
+  });
+
+  // Not the household's name: for somebody let into one place of two, that is
+  // a house they cannot see, and showing it for a moment is the bug briefly.
+  it('names nothing before the places have loaded', () => {
+    expect(placeTitle(null, [])).toBe('');
   });
 });

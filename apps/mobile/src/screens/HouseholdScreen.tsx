@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
@@ -18,13 +18,14 @@ import { useHousehold } from '../hooks/useHousehold';
 import { Invitation, InvitationToMe, PlaceMember } from '../types';
 import { useToast } from '../hooks/useToast';
 import {
-  acceptInvitation, cancelInvitation, createProperty, declineInvitation,
+  acceptInvitation, cancelInvitation, createHousehold, declineInvitation,
   deleteHousehold, deleteProperty, deleteStoredFiles, getHouseholdFilePaths,
   getHouseholdInvitations, getMyInvitations, getPlaceMembers, getSnags, getThings,
   inviteToHousehold, removeMember, renameProperty, setPropertyLocation,
   setPropertyMember, transferPropertyOwnership,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { rememberHousehold } from '../lib/currentHome';
 
 /**
  * The whole of household management: who's here, where the places are, adding
@@ -54,12 +55,24 @@ import { showAlert } from '../lib/alert';
  * household — removed the two people who had built it and deleted their own
  * account, which took the household with it. So the × and *Make owner* are the
  * owner's, *Leave* is everybody's, and the server refuses the rest in words.
+ *
+ * **A home is a household (5 October 2026).** This screen is the household the
+ * app is showing, which has one place; the bach is a household of its own,
+ * reached from the picker at the top of each tab. *Add another home* makes a
+ * new household rather than a second place in this one, so nobody here sees it
+ * unless they are invited to it.
  */
 export default function HouseholdScreen() {
   const navigation = useNavigation();
   const {
-    household, members, profile, properties, refresh, reloadAccount,
+    household, members, profile, properties: allHomes, refresh, reloadAccount,
   } = useHousehold();
+  // Every home this person is in is in `allHomes`; this screen is one
+  // household's, and the others' places are not its business.
+  const properties = useMemo(
+    () => allHomes.filter((p) => p.householdId === household.id),
+    [allHomes, household.id],
+  );
   const { showToast } = useToast();
 
   const [newPlace, setNewPlace] = useState('');
@@ -125,9 +138,8 @@ export default function HouseholdScreen() {
   }, [loadPeople]);
 
   // Both directions of the same table: who this house is waiting on, and who is
-  // waiting on me. The second is why an invitation to somebody who already has
-  // a household isn't invisible — with no switcher, that would be an invitation
-  // nothing could ever show them.
+  // waiting on me. The second is how somebody who already has a household is
+  // asked into another: setup never shows them anything again.
   const loadInvitations = useCallback(async () => {
     try {
       const [ours, toMe] = await Promise.all([
@@ -162,17 +174,24 @@ export default function HouseholdScreen() {
     });
   }
 
-  async function handleAddPlace() {
+  /**
+   * Another home is another household — the bach, a rental, a parent's place —
+   * owned by whoever adds it and seen by nobody else until they invite them.
+   * One name for both, as setup writes it. Remembered first, so the account
+   * re-read opens on it and this screen becomes its screen, ready to share.
+   */
+  async function handleAddHome() {
     const name = newPlace.trim();
     if (!name) return;
     setAddingPlace(true);
     try {
-      await createProperty(household.id, name);
+      const home = await createHousehold(name, name);
+      await rememberHousehold(home.id);
       setNewPlace('');
-      await refresh();
+      await reloadAccount();
       showToast(`${name} added`);
     } catch (err: any) {
-      showAlert("Couldn't add that place", err?.message ?? 'Please try again.');
+      showAlert("Couldn't add that home", err?.message ?? 'Please try again.');
     } finally {
       setAddingPlace(false);
     }
@@ -187,7 +206,10 @@ export default function HouseholdScreen() {
     renameBusy.current = true;
     try {
       await renameProperty(renaming.id, name);
+      // A home's household takes its place's name (20261005120000), and the
+      // household is read with the account, so both are read again.
       await refresh();
+      await reloadAccount();
       showToast('Renamed');
     } catch (err: any) {
       showAlert("Couldn't rename that place", err?.message ?? 'Please try again.');
@@ -308,8 +330,10 @@ export default function HouseholdScreen() {
     try {
       if (join) {
         await acceptInvitation(invitationId);
-        // App.tsx re-gates: getMyHousehold reads newest-join-first, so this is
-        // the household the app shows from here.
+        // Another home, alongside this one: open on it, since somebody who has
+        // just said yes is about to look at it.
+        const joined = mine.find((i) => i.id === invitationId);
+        if (joined) await rememberHousehold(joined.householdId);
         await reloadAccount();
       } else {
         await declineInvitation(invitationId);
@@ -398,8 +422,8 @@ export default function HouseholdScreen() {
             <Card key={invitation.id} elevation="md" style={styles.section}>
               <Text style={styles.sectionTitle}>Join {where}?</Text>
               <Text style={styles.sectionHint}>
-                {invitation.invitedByName} invited you to {where}. Joining replaces the household
-                this app is showing you; you can leave again at any time.
+                {invitation.invitedByName} invited you to {where}. It joins your other homes — switch
+                between them from the top of the List — and you can leave whenever you like.
               </Text>
               <View style={styles.answerRow}>
                 <Button
@@ -670,10 +694,10 @@ export default function HouseholdScreen() {
         })}
 
         <Card elevation="md" style={styles.section}>
-          <Text style={styles.sectionTitle}>Add a place</Text>
+          <Text style={styles.sectionTitle}>Add another home</Text>
           <Text style={styles.sectionHint}>
-            A second place — a bach, a rental — keeps its own list, its own tags and its own
-            people. You own what you add.
+            A bach, a rental, a parent's place — a separate household with its own list and its
+            own people. Only people you invite will see it.
           </Text>
           <TextInput
             style={styles.input}
@@ -685,9 +709,9 @@ export default function HouseholdScreen() {
             autoCapitalize="words"
           />
           <Button
-            label="Add a place"
+            label="Add another home"
             variant="outline"
-            onPress={handleAddPlace}
+            onPress={handleAddHome}
             loading={addingPlace}
             disabled={!newPlace.trim() || addingPlace}
             fullWidth

@@ -688,13 +688,13 @@ between days, there is no +, and every row is a door back to the snag. It also s
 anything: a calendar that could remind you would be the first thing in this product that speaks
 unasked.
 
-**It covers every place at once, and has no property picker.** The other tabs are about a place
-you are standing in, so they ask which one. A date is not about a place: answering "is anything
-landing that weekend" for the bach only, because the bach is what the House tab happened to be
-showing, is the wrong answer to the question. So it calls `getSnags({})` — no property filter at
-all — which returns exactly what `property_members` and the read policies let this person see, and
-names the property on each row when there is more than one. A one-property household never meets
-the concept, as everywhere else.
+**It follows the home being shown, with the same picker as the other tabs** (October 2026, by the
+owner's decision). It covered every place at once, on the argument that a date is not about a place
+and "is anything landing that weekend" should not be answered for the bach only. Once the bach
+became a household of its own (*A home is a household*), the owner chose the calendar of the home
+you are looking at. So it reads `getSnags({ propertyId })` and `getProjects(propertyId)` for the
+active place, the header is `placeTitle` with the shared `HomePickerSheet`, and no row names its
+house — there is only the one.
 
 Four kinds of mark, and **one of them is not real**:
 
@@ -729,12 +729,12 @@ four hues with one job each and a renovation is not a state; that is the same mo
 already makes for a projection. And `target_on` is **never called "Due"**: nothing is due then, it
 is a hope somebody typed, and "Due" is the one word this tab must not spend loosely. A met target
 is dropped rather than drawn, since the row saying it finished is two lines up. The read is
-`getAllProjects()` — no property filter, for the same reason `getSnags({})` has none — and it is
-**not fatal**: a calendar that cannot draw the renovations is still a calendar.
+`getProjects(propertyId)` — the home being shown, as the snags are — and it is **not fatal**: a
+calendar that cannot draw the renovations is still a calendar.
 
 `scheduleMarks`, `monthGrid`, `dayKey` and `marksOn` live in `packages/supabase-queries` with the
 other pure helpers and are pinned by `schedule.test.ts`; `ScheduleScreen.test.tsx` pins the hollow
-projection, the overdue hue, the unfiltered read and the paging rule. `looseEnds.test.ts` pins the
+projection, the overdue hue, the read of the home being shown with its picker, and the paging rule. `looseEnds.test.ts` pins the
 project marks — the two real dates, the target never reading as "Due", a met target dropped, and
 that a caller passing no projects gets exactly what it got before.
 
@@ -3403,7 +3403,7 @@ Three things follow from the answer:
 - **It is asked of Postgres, never filtered afterwards.** The header count, the shopping pill, the
   Schedule tab, the loose-end list and both extracts each read snags separately, and a subtraction
   applied in one of them is five screens disagreeing about how much there is to do. The Schedule
-  tab also skips `getAllProjects()` entirely, since the fifth kind of mark is a read of dates set
+  tab also skips its projects read entirely, since the fifth kind of mark is a read of dates set
   on a page that is no longer reachable.
 
 Two named halves on the You tab rather than a switch, the same argument the GST pill and capture's
@@ -4063,28 +4063,63 @@ two halves, the absent placeholder, the calendar opening on the month already
 set, the Monday-first week, and the tapped square giving back the local day it
 shows.
 
-## Properties: the house, and later the bach
+## A home is a household, and the bach is one too (October 2026)
 
-**A bach is a property, not a location tag.** This is the distinction to hold on to, because it
-is the one that was got wrong first: tags say *where in a place* something is; a property *is* the
-place, has its own people, and has its own tag list.
+**This reverses "a bach is a property".** It said a bach was a second place inside one household,
+with `property_members` deciding who saw which. On 5 October 2026, by the owner's decision, Martins
+Bay became a household of its own: **one home per household, and one person can be in several** —
+Leonie adding her own home would be a third. The place model was measured on the live data before
+it went. To be on Martins Bay, Leonie was a member of the household called 32 Le Roy. So she read
+"32 Le Roy" on every tab. And because storage access is per household folder
+(`can_use_photo_folder` asks `home.is_member` of the path's first segment), she could list, replace
+and delete every file in 32 Le Roy's folder, its other home's included. No row policy reaches a
+folder, so a place-level answer could not close that.
 
-`snags.property_id` has been not-null since the schema was stood up, so surfacing this was a
-migration rather than a rewrite. Three rules:
+- **One home per household.** `create_property` refuses in words (`20261005120000`). The Household
+  screen's *Add another home* is `create_household(name, name)` — a new household the adder owns
+  and nobody else sees until invited. `rename_property` renames a household with one place along
+  with its place, so the headers and picker (the place) and the Household screen, You tab and
+  exports (the household) cannot name one home two ways.
+- **One person, several households.** `getMyHouseholds` reads the caller's **own** membership rows,
+  newest join first. RLS returns every member's row in your households, so without the
+  `profile_id` filter "newest" was whoever joined last. App.tsx's gate is "in any household"; setup
+  only ever deals with the newest.
+- **The place picker is the household switcher.** `useHousehold` takes every household and every
+  place, and `household` and `members` are the active place's household's, so screens read them as
+  they always did. One sheet, `HomePickerSheet` (*Which home*), on the List, House, Projects and
+  Schedule headers. It renders only when there is more than one home.
+- **The home showing is remembered per device** (`lib/currentHome.ts`), for `collapsed.ts`'s reason:
+  Mike on the bach on his phone must not move the laptop off the house. With nothing remembered,
+  `getDefaultPropertyId` starts on the place they *last actually filed against*
+  (`home.last_reported_property`) — a server read, so it holds on a new device. The retired
+  product's equivalent took the first row of an RPC with no `ORDER BY` and sent every report to
+  whichever site Postgres returned first. Joining by link or invitation, and *Add another home*,
+  remember the new household **before** the account is re-read, so the app opens on it.
+- **The folder is the boundary.** Never put a home in a household with somebody who is not on it:
+  they can reach its files whatever the rows say. And a file goes in **its row's** household's
+  folder — `snag.householdId`, `thing.householdId`, `project.householdId` — never the home being
+  shown, because a link can open the bach's dishwasher while the app shows the house.
 
-- **`property_members` decides who sees what.** Household membership does not imply seeing every
-  property — a family can share a bach without seeing the snags in each other's houses, which is
-  the whole reason the case is interesting. Every read policy on `properties`, `locations`,
-  `snags` and `comments` goes through `home.is_property_member`, and so does every snag write.
-- **Locations belong to a property**, not a household. `seed_locations` runs per property, so a
-  new bach arrives with its own twelve tags that can then diverge.
-- **The picker renders only when there is more than one place.** A one-property household never
-  meets the concept. `getDefaultPropertyId` starts capture on the place they *last actually filed
-  against* (`home.last_reported_property`), not the one they last tapped — a server read, so it
-  holds on a new device. The retired product's equivalent took the first row of an RPC with no
-  `ORDER BY`, so a member of three sites sent every report to whichever row Postgres happened to
-  return first, forever, with nothing in the UI naming the site. It looked like a permissions
-  problem to whoever hit it.
+**The split itself** is `20261005120100`, guarded by the two ids so it is a no-op anywhere else. It
+moved the place, its rooms, jobs, things and everything keyed to them into household
+`e185356d…`, with Mike as owner and Leonie as member, and took Leonie out of 32 Le Roy. A
+stored path begins with its household's id, so the 11 files were copied to the new folder first by
+a one-off service-role function, the migration rewrote the paths, and the old copies were removed
+after. Nothing ever pointed at a missing file.
+
+`useHousehold.test.tsx` pins the household and its people following the place, the remembered home
+winning, a later remembering moving the app, and a pick inside a two-place household staying put.
+`household.test.ts` pins `getMyHouseholds` reading only the caller's rows newest first;
+`currentHome.test.ts` the guarded memory; `HouseholdScreen.test.tsx` *Add another home* and the
+screen listing only its household's place; `JoinScreen.test.tsx` and `HouseholdScreen.test.tsx` the
+joined home remembered before the re-read. The split was checked against a local Postgres holding
+the touched tables shaped like the live household, run twice to prove the second run does nothing.
+
+What the place model left behind still holds: **a tag is never a place** (tags say *where in a
+place*; a home has its own people and its own tags), **locations belong to a property** and
+`seed_locations` runs per property, and **`property_members` still decides who sees what** — every
+read policy on `properties`, `locations`, `snags` and `comments` goes through
+`home.is_property_member`. A household with one place makes that the same answer as the household.
 
 Two smaller rules that follow. `unlink_property_member` refuses to remove the last person — a
 property nobody is linked to is invisible to everyone, including whoever would link someone back.
@@ -4118,11 +4153,18 @@ her ever seeing 32 Le Roy.
 - An invitation always **names its places** (null means the places you own, never every place), and
   `invitation_by_token` / `my_invitations` return their names: the Join screen says *Mike invited you
   to Martin's Bay*, never the household alone.
+- **A tab's title names the place** (`placeTitle`), and is empty until the places load rather than
+  showing a household's name first. It fell back to the household's name for anybody on one place:
+  Leonie, let into Martins Bay alone, read *32 Le Roy* on every tab. That was the first sign of what
+  *A home is a household* above then fixed. 32 Le Roy's own place was still called *Home* from
+  before setup asked for one name, and was renamed on 5 October 2026; `rename_property` now keeps a
+  one-place household's name in step.
 
 So the UI has role checks now, and they are the first: on Household, the ×, *Make owner* and the
 share panel show only to a place's owner, and *Leave* to everyone. The server refuses the rest in
-words. `supabase/tests/membership_safety.sql` replays the afternoon. Moving a place into another
-household is not built.
+words. `supabase/tests/membership_safety.sql` replays the afternoon (its second place is made
+directly, since `create_property` refuses one now). Moving a place into another household is not
+built as a feature; it was done once, by migration, for Martins Bay.
 
 ## Locations are seeded, not administered and not derived
 
@@ -4727,16 +4769,18 @@ that the page numbers count its sheets.
 
 ## Taking someone, or something, away
 
-Adding had no opposite for eleven migrations, and the gap had a sharp edge. `getMyHousehold` reads
-the households RLS lets you see and takes **one** — so somebody who tapped *Create it* on the Setup
+Adding had no opposite for eleven migrations, and the gap had a sharp edge. `getMyHousehold` read
+the households RLS lets you see and took **one** — so somebody who tapped *Create it* on the Setup
 screen instead of *Someone else set ours up* owned an empty household, was then added to the real
 one, and stayed pinned to the empty one for ever. No switcher, no error, nothing on screen able to
 explain it. `20260914160000` is the other half.
 
 **The read is ordered by when you joined, newest first.** Not by when the household was made: that
-asks the wrong question, and it is the exact line the bug lived on. There is still deliberately no
-switcher — App.tsx is three gates and a fourth would be a different product — so the way out of a
-mistake is to leave or delete, not to pick.
+asks the wrong question, and it is the exact line the bug lived on. There was deliberately no
+switcher then. There is one now — a home is a household and a person can be in several (*A home is
+a household*) — and it is the place picker inside the app, not a fourth gate. `getMyHouseholds`
+reads all of them, still newest join first, and only the caller's own rows. The way out of a
+household made by mistake is still to leave or delete it.
 
 Three functions, and each refuses the one case that would strand a row nobody can reach:
 

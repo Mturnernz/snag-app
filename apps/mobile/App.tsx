@@ -6,7 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 
-import { supabase, getMyProfile, getMyHousehold, getMembers } from './src/lib/supabase';
+import { supabase, getMyProfile, getMyHouseholds, getMembers } from './src/lib/supabase';
 import { SchemaNotExposedError } from '@snag/supabase-queries';
 import { createAuthEventQueue, planAuthEvent } from './src/lib/authEvents';
 import { resetWebPathIfStale } from './src/lib/webLocation';
@@ -39,7 +39,9 @@ initMonitoring();
  * acting in, whether it was still active, whether you'd seen onboarding, and
  * whether you'd arrived by QR code as an anonymous reporter. A household has
  * none of those questions: you are signed in or you aren't, and you are in a
- * household or you aren't.
+ * household or you aren't. Which of your households is showing is not a gate
+ * either — a home is a household, and the place picker inside the app switches
+ * between them (`useHousehold`).
  *
  * A join code is **not** a fourth gate, though it reads like one. It is a
  * question asked of somebody who arrived holding one, and only while they are
@@ -64,7 +66,10 @@ export default function App() {
 function AppGates() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [household, setHousehold] = useState<Household | null>(null);
+  // Every household this person is in, the one they joined last first. Setup
+  // only ever deals with the first; the app switches between them by place.
+  const [households, setHouseholds] = useState<Household[]>([]);
+  const household = households[0] ?? null;
   const [loading, setLoading] = useState(true);
   // A configuration failure, not a data one — see loadAccount.
   const [fatal, setFatal] = useState<string | null>(null);
@@ -96,10 +101,11 @@ function AppGates() {
 
   async function loadAccount() {
     try {
-      const [nextProfile, nextHousehold] = await Promise.all([
+      const [nextProfile, nextHouseholds] = await Promise.all([
         getMyProfile(),
-        getMyHousehold(),
+        getMyHouseholds(),
       ]);
+      const nextHousehold = nextHouseholds[0] ?? null;
       // Only somebody who has not been shown the invite step needs a head
       // count, so a year-old account does not pay a read on every launch for
       // a question it answered long ago. A failed count reads as "not alone":
@@ -109,7 +115,7 @@ function AppGates() {
         count = await getMembers(nextHousehold.id).then((m) => m.length).catch(() => 2);
       }
       setProfile(nextProfile);
-      setHousehold(nextHousehold);
+      setHouseholds(nextHouseholds);
       setMemberCount(count);
       setFatal(null);
     } catch (err) {
@@ -150,7 +156,7 @@ function AppGates() {
       if (plan.clearAccount) {
         setSession(null);
         setProfile(null);
-        setHousehold(null);
+        setHouseholds([]);
         setMemberCount(0);
         setSetupDone(false);
         setFirstPhoto(null);
@@ -296,7 +302,7 @@ function AppGates() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <HouseholdProvider household={household} profile={profile} onReload={loadAccount}>
+      <HouseholdProvider households={households} profile={profile} onReload={loadAccount}>
         <ToastProvider>
           <FirstCaptureProvider uri={firstPhoto}>
             <NavigationContainer linking={linking}>

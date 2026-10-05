@@ -240,7 +240,7 @@ export const setProjectsEnabled = (enabled: boolean) =>
   queries.setProjectsEnabled(supabase, enabled);
 export const markSetupSeen = (steps: string[]) => queries.markSetupSeen(supabase, steps);
 
-export const getMyHousehold = () => queries.getMyHousehold(supabase);
+export const getMyHouseholds = () => queries.getMyHouseholds(supabase);
 
 export const createHousehold = (name: string, propertyName?: string) =>
   queries.createHousehold(supabase, name, propertyName);

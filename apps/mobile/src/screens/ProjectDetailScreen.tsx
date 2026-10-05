@@ -942,7 +942,7 @@ export default function ProjectDetailScreen({ route }: Props) {
           <View style={styles.docAdds}>
             <Attachments
               controlsOnly
-              householdId={household.id}
+              householdId={project.householdId}
               photoPaths={project.photoPaths}
               documentPaths={project.documentPaths}
               onChange={async (next, toast) => {
@@ -964,7 +964,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       <MoneySheet
         visible={money !== null}
         projectId={project.id}
-        householdId={household.id}
+        householdId={project.householdId}
         elements={elements}
         items={items}
         quotes={quotes}
@@ -1044,7 +1044,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       <PriceSheet
         visible={price !== null && buildUpFor === null && scheduleFor === null}
         quote={price}
-        householdId={household.id}
+        householdId={project.householdId}
         quotes={quotes}
         payments={page.payments}
         lines={page.lines}
@@ -1150,7 +1150,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         showElements
         existing={editingExpected}
         lines={editingExpected ? page.expectedCostLines.filter((l) => l.expectedCostId === editingExpected.id) : []}
-        householdId={household.id}
+        householdId={project.householdId}
         onClose={() => { setExpectedOpen(false); setEditingExpected(null); }}
         onSave={async (input) => {
           if (editingExpected) await updateExpectedCost(editingExpected.id, input);
@@ -1247,7 +1247,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       <AddThingSheet
         visible={thingFor !== null}
         locations={locations}
-        pathPrefix={household.id}
+        pathPrefix={project.householdId}
         start={thingStart}
         onAddRoom={async () => false}
         onCancel={() => setThingFor(null)}

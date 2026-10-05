@@ -11,6 +11,7 @@ import Icon from '../components/Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { acceptInvitationByToken, getInvitationByToken, upsertProfile } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { rememberHousehold } from '../lib/currentHome';
 import { InvitationByToken, Profile } from '../types';
 
 interface Props {
@@ -86,6 +87,9 @@ export default function JoinScreen({ token, profile, onJoined, onDismiss }: Prop
       // up a house they are not setting up.
       if (needsName) await upsertProfile(name.trim());
       await acceptInvitationByToken(token);
+      // Somebody already in another household — the house, when this is the
+      // bach — opens on the home they have just joined, not the one they had.
+      if (invitation) await rememberHousehold(invitation.householdId);
       // Clear the code first: onJoined re-gates the whole app, and a token left
       // in the address bar would ask the same question again on the next reload.
       onDismiss();

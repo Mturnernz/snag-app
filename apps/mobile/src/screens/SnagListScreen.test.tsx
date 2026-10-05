@@ -150,6 +150,23 @@ describe('SnagListScreen', () => {
     expect(all.some((t) => t.startsWith('3 to do') && t.includes('1 added'))).toBe(true);
   });
 
+  it("names the place, not the household, for somebody on one place of two", async () => {
+    // Leonie, let into Martins Bay alone, of a household called 32 Le Roy: the
+    // header read the house she cannot see.
+    const bay = { id: 'b', householdId: 'h', name: 'Martins Bay' };
+    (global as any).__household = {
+      ...(global as any).__household,
+      household: { id: 'h', name: '32 Le Roy', createdAt: ago(100) },
+      properties: [bay],
+      activeProperty: bay,
+    };
+    const result = render(<SnagListScreen />);
+    await settle();
+
+    expect(texts(result)).toContain('Martins Bay');
+    expect(texts(result)).not.toContain('32 Le Roy');
+  });
+
   it('calls nothing new on a first-ever visit', async () => {
     // A null stamp means we have never recorded a visit. Treating that as
     // "everything is new" greets a new member with the household's backlog.

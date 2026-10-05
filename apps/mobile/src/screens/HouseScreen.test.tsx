@@ -182,6 +182,21 @@ describe('HouseScreen', () => {
     expect(texts(result)).not.toContain('All rooms');
   });
 
+  it("names the place, not the household, for somebody on one place of two", async () => {
+    const bay = { id: 'b', householdId: 'h', name: 'Martins Bay' };
+    (global as any).__household = {
+      ...(global as any).__household,
+      household: { id: 'h', name: '32 Le Roy', createdAt: '2026-01-01T00:00:00Z' },
+      properties: [bay],
+      activeProperty: bay,
+    };
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(texts(result)).toContain('Martins Bay');
+    expect(texts(result)).not.toContain('32 Le Roy');
+  });
+
   it('says a suggestion is not recorded before it names one', async () => {
     // A tile for a room with nothing recorded names what it probably has —
     // which is exactly where a suggestion could be read as a record, so the

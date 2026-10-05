@@ -26,10 +26,10 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 const mock_getSnags = jest.fn();
-const mock_getAllProjects = jest.fn().mockResolvedValue([]);
+const mock_getProjects = jest.fn().mockResolvedValue([]);
 jest.mock('../lib/supabase', () => ({
   getSnags: (...a: unknown[]) => mock_getSnags(...a),
-  getAllProjects: (...a: unknown[]) => mock_getAllProjects(...a),
+  getProjects: (...a: unknown[]) => mock_getProjects(...a),
 }));
 jest.mock('../hooks/useHousehold', () => ({
   useHousehold: () => (global as any).__household,
@@ -102,22 +102,52 @@ afterEach(() => {
 });
 
 describe('ScheduleScreen', () => {
-  it('narrows by nothing at all — not the status, not the place', async () => {
+  it('names the home being shown, never the household, and offers the others', async () => {
+    // Somebody let into one place of two: the household's name is a house
+    // they cannot see.
+    const bay = { id: 'b', householdId: 'h', name: 'Martins Bay' };
+    (global as any).__household = {
+      ...(global as any).__household,
+      household: { id: 'h', name: '32 Le Roy', createdAt: '' },
+      properties: [bay],
+      activeProperty: bay,
+    };
+    const one = await open([]);
+    expect(texts(one)).toContain('Martins Bay');
+    expect(texts(one)).not.toContain('32 Le Roy');
+    one.unmount();
+
+    // Two homes: the one being shown, never "Everywhere", and the picker the
+    // other tabs have.
+    places(2);
+    const two = await open([]);
+    expect(texts(two)).toContain('Home');
+    expect(texts(two)).not.toContain('Everywhere');
+    const title = two.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityRole === 'button' && !!n.props?.onPress
+        && textOf(n).startsWith('Home'),
+      { deep: true },
+    )[0];
+    await TestRenderer.act(async () => title.props.onPress());
+    expect(texts(two)).toContain('Which home');
+    expect(texts(two)).toContain('The bach');
+  });
+
+  it('reads the home being shown, and every status', async () => {
     // A calendar of only the open ones is missing exactly the half somebody
-    // came to check. And a date does not belong to a house: reading one
-    // property would answer "is anything landing that weekend" for whichever
-    // place the House tab happened to be showing, which is not the question.
-    // An empty filter is every property `property_members` lets you read.
+    // came to check. It read every place once; a home is a household now, and
+    // by the owner's decision the calendar follows the one being shown.
     places(2);
     await open([]);
 
-    expect(mock_getSnags.mock.calls[0][0].propertyId).toBeUndefined();
+    expect(mock_getSnags.mock.calls[0][0].propertyId).toBe('p');
     expect(mock_getSnags.mock.calls[0][0].status).toBeUndefined();
     expect(mock_getSnags.mock.calls[0][1]).toBe('newest');
-    // The one thing it does narrow by, and only when somebody has asked for
+    // The one other thing it narrows by, and only when somebody has asked for
     // it: a mark whose row is a door back to a renovation nothing can open is
     // a mark that lies about what it leads to.
     expect(mock_getSnags.mock.calls[0][0].excludeProjectSnags).toBe(false);
+    expect(mock_getProjects).toHaveBeenCalledWith('p');
   });
 
   it('leaves the punch list and the renovations out when projects are off', async () => {
@@ -126,28 +156,16 @@ describe('ScheduleScreen', () => {
     await open([]);
 
     expect(mock_getSnags.mock.calls[0][0].excludeProjectSnags).toBe(true);
-    expect(mock_getAllProjects).not.toHaveBeenCalled();
+    expect(mock_getProjects).not.toHaveBeenCalled();
   });
 
-  it('says which house a row is at, but only when there is a choice', async () => {
+  it('names the room on a row, never the house — there is only the one', async () => {
     // Filed today, so it lists under Today without having to page anywhere.
-    const bachRow = () => snag({
-      id: 'b1', propertyName: 'The bach', room: 'Roof',
-      createdAt: '2026-09-13T21:00:00Z',
-    });
-
     places(2);
-    const both = await open([bachRow()]);
-    const meta = texts(both).filter((t) => t.includes(' · '));
-    expect(meta.some((t) => t.includes('The bach') && t.includes('Roof'))).toBe(true);
-
-    // One house, and naming it on every row is noise about a fact that cannot
-    // vary — "Roof" is unambiguous when there is only one roof.
-    places(1);
-    const alone = await open([snag({ id: 'b1', propertyName: 'Home', room: 'Roof', createdAt: '2026-09-13T21:00:00Z' })]);
-    const soloMeta = texts(alone).filter((t) => t.includes(' · '));
-    expect(soloMeta.some((t) => t.includes('Roof'))).toBe(true);
-    expect(soloMeta.some((t) => t.includes('Home'))).toBe(false);
+    const r = await open([snag({ id: 'b1', propertyName: 'Home', room: 'Roof', createdAt: '2026-09-13T21:00:00Z' })]);
+    const meta = texts(r).filter((t) => t.includes(' · '));
+    expect(meta.some((t) => t.includes('Roof'))).toBe(true);
+    expect(meta.some((t) => t.includes('Home'))).toBe(false);
   });
 
   it('draws a real due date filled and a projected one hollow', async () => {

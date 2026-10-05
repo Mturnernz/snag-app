@@ -207,7 +207,7 @@ const KINDS_WITH_SERIAL: ThingKind[] = ['appliance', 'fitting', 'fabric'];
 export default function ThingDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { thingId } = useRoute<Route>().params;
-  const { household, locations } = useHousehold();
+  const { locations } = useHousehold();
   const { showToast } = useToast();
   const keyboard = useKeyboardInset();
   const edge = useEdgeInsets();
@@ -667,10 +667,13 @@ export default function ThingDetailScreen() {
    * screen follows for a write that fails part way.
    */
   async function attachPhotos(source: PhotoSource) {
-    if (!thing || !household || busy) return;
+    if (!thing || busy) return;
     setBusy(true);
     try {
-      await addPhotos(household.id, async (added) => {
+      // The thing's own household's folder, not the home being shown: a link
+      // can open a thing at the bach while the app is showing the house, and a
+      // file in the wrong folder is one the bach's people cannot open.
+      await addPhotos(thing.householdId, async (added) => {
         // From the paths as they are now, not as the page last read them, so a
         // photo the other phone added or took off meanwhile stays that way.
         photoSeq.current += 1;
@@ -738,7 +741,7 @@ export default function ThingDetailScreen() {
   }
 
   async function attachDocument() {
-    if (!thing || !household || busy) return;
+    if (!thing || busy) return;
     const result = await DocumentPicker.getDocumentAsync({
       type: 'application/pdf',
       copyToCacheDirectory: true,
@@ -749,7 +752,7 @@ export default function ThingDetailScreen() {
 
     setBusy(true);
     try {
-      const name = documentFileName(household.id, asset.name ?? 'document.pdf');
+      const name = documentFileName(thing.householdId, asset.name ?? 'document.pdf');
       // The mime type goes in twice on purpose — see uploadFile. The bucket's
       // allow-list refuses anything it does not recognise, and a multipart body
       // carries the Blob's own type rather than the option.
@@ -1760,7 +1763,7 @@ export default function ThingDetailScreen() {
             {`What's wrong with the ${thingHeadline(thing).toLowerCase()}?`}
           </Text>
           <ComposeBar
-            pathPrefix={household?.id ?? null}
+            pathPrefix={thing?.householdId ?? null}
             onAdd={fileReport}
             words={{ placeholder: 'Describe it, or take a photo', sendLabel: 'Add to the list' }}
             embedded

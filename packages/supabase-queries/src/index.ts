@@ -321,38 +321,44 @@ export async function upsertProfile(
 }
 
 /**
- * Returns null for someone who has signed up but isn't in a household yet —
- * the only branch the onboarding flow needs.
+ * Every household this person is in, the one they joined most recently first.
+ * Empty for someone who has signed up and isn't in one yet — the only branch
+ * the onboarding flow needs.
  *
- * **Ordered by when you joined, newest first, and that is the whole fix for a
- * trap that had no way out.** RLS returns every household you are a member of,
- * and this used to take the oldest one created. So somebody who tapped "Create
- * it" on the Setup screen instead of "Someone else set ours up" made an empty
- * household, got added to the real one, and was then pinned to the empty one
- * for ever — no switcher, no error, nothing on screen to explain it. The house
- * you were most recently let into is the right answer in every real case, and
- * it un-pins that person the moment somebody adds them.
+ * **A home is a household, and one person can be in several** — the house, the
+ * bach, a parent's place. The app shows one at a time, through the place picker
+ * in each tab's header (`useHousehold`), and which one is remembered per device.
  *
- * It is still one household, deliberately. A switcher would make this a fourth
- * gate, and the whole shape of App.tsx is three. `deleteHousehold` is the way
- * out of the mistake; `countMyHouseholds` is how the Setup screen knows to
- * offer it.
+ * **Their own membership rows, ordered by when they joined.** RLS lets a member
+ * read every member's row in their households, so without the filter "newest
+ * first" is whoever joined last — somebody else's join reordering your list.
+ * And by the join, never by when the household was made: that ordering once
+ * pinned somebody to an empty household they had made by mistake, with the real
+ * one they were added to afterwards sitting behind it.
  */
-export async function getMyHousehold(client: SupabaseClient): Promise<Household | null> {
+export async function getMyHouseholds(client: SupabaseClient): Promise<Household[]> {
+  // The session is held locally, so this costs no request; RLS still decides
+  // what comes back.
+  const { data: auth } = await client.auth.getSession();
+  const me = auth.session?.user.id;
+  if (!me) return [];
+
   const { data, error } = await client
     .from('household_members')
     .select('created_at, household:households!inner(id, name, created_at)')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .eq('profile_id', me)
+    .order('created_at', { ascending: false });
 
-  if (error) throw asError(error, "Couldn't load your household");
-  const row = (data as Row | null)?.household;
-  if (!row) return null;
-  return { id: row.id, name: row.name, createdAt: row.created_at };
+  if (error) throw asError(error, "Couldn't load your households");
+  return ((data as Row[] | null) ?? [])
+    .map((row) => row.household as Row | null | undefined)
+    // A membership row with no household embedded would put App.tsx past its
+    // gate and into a navigator with no data.
+    .filter((row): row is Row => !!row?.id)
+    .map((row) => ({ id: row.id, name: row.name, createdAt: row.created_at }));
 }
 
-/** How many households this account is in. Only ever 0 or 1 unless something went wrong. */
+/** How many households this account is in. */
 export async function countMyHouseholds(client: SupabaseClient): Promise<number> {
   const { count, error } = await client
     .from('household_members')
@@ -472,6 +478,25 @@ export function describePlaces(names: string[] | null | undefined, fallback: str
   if (list.length === 0) return fallback;
   if (list.length === 1) return list[0];
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+
+/**
+ * What a tab's large title calls where you are: the place, never the household.
+ *
+ * It was the household's name whenever somebody was on one place, which was
+ * right while everybody was on every place and their names agreed. Since a place
+ * can be shared on its own (20261004100000), somebody let into Martins Bay alone
+ * is on one place of a household called 32 Le Roy — and read the name of a house
+ * they cannot see on every tab. `places` is only the places this person is on.
+ *
+ * Empty until the places have loaded, rather than the household's name: a name
+ * shown for a moment and then replaced is the same mistake, briefly.
+ */
+export function placeTitle(
+  active: { name: string } | null | undefined,
+  places: { name: string }[]
+): string {
+  return active?.name ?? places[0]?.name ?? '';
 }
 
 /** The URL a join QR encodes, and the one shown beside it to copy. */

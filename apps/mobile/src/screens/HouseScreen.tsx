@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, RefreshControl, Pressable, Modal, StyleSheet,
+  View, Text, ScrollView, TextInput, RefreshControl, Pressable, StyleSheet,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import {
-  describeHouseRoom, exportDateStamp, houseRooms, searchThings, thingExportPhotos,
+  describeHouseRoom, exportDateStamp, houseRooms, placeTitle, searchThings, thingExportPhotos,
   thingExportTable, type HouseRoom,
 } from '@snag/supabase-queries';
 import ThingCard from '../components/ThingCard';
@@ -19,6 +19,7 @@ import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import { AddRow, Group, Pill, SectionTitle, Segmented, groupedStyles } from '../components/Grouped';
 import Fab from '../components/Fab';
+import HomePickerSheet from '../components/HomePickerSheet';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -83,7 +84,7 @@ export default function HouseScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
   const {
-    household, properties, activeProperty, setActiveProperty, locations,
+    household, properties, activeProperty, locations,
   } = useHousehold();
   const { showToast } = useToast();
 
@@ -243,7 +244,7 @@ export default function HouseScreen() {
    */
   const roomNames = useMemo(() => locations.map((l) => l.name), [locations]);
 
-  const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
+  const placeName = placeTitle(activeProperty, properties);
   const empty = !loading && (searching ? visible.length === 0 : rooms.length === 0);
 
   return (
@@ -409,39 +410,7 @@ export default function HouseScreen() {
         onClose={() => setRoomOpen(false)}
       />
 
-      <Modal visible={placesOpen} transparent animationType="slide" onRequestClose={() => setPlacesOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setPlacesOpen(false)} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
-          <View style={styles.grab} />
-          <Text style={styles.sheetTitle}>Which place</Text>
-          {properties.map((property) => (
-            <Pressable
-              key={property.id}
-              onPress={() => {
-                setActiveProperty(property.id);
-                setPlacesOpen(false);
-              }}
-              style={styles.placeRow}
-              accessibilityRole="button"
-              accessibilityState={{ selected: property.id === activeProperty?.id }}
-            >
-              <Icon
-                name={property.id === activeProperty?.id ? 'radio-button-on' : 'radio-button-off'}
-                size="md"
-                color={property.id === activeProperty?.id ? Colors.primary : Colors.textMuted}
-              />
-              <Text
-                style={[
-                  styles.placeLabel,
-                  property.id === activeProperty?.id && styles.placeLabelOn,
-                ]}
-              >
-                {property.name}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </Modal>
+      <HomePickerSheet visible={placesOpen} onClose={() => setPlacesOpen(false)} />
     </View>
   );
 }
@@ -545,9 +514,10 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.sm,
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  // V2: the iOS large title, the same on every tab.
+  // V2: the iOS large title, the same on every tab. It keeps its height while
+  // empty, before the places load, so the header does not jump when they do.
   title: {
-    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    fontSize: Typography.largeTitle, lineHeight: 41, minHeight: 41, fontWeight: Typography.bold,
     color: Colors.textPrimary, letterSpacing: -0.4,
   },
   searchRow: {
@@ -612,21 +582,4 @@ const styles = StyleSheet.create({
   bullet: { width: 5, height: 5, borderRadius: 2.5 },
   bulletHollow: { width: 6, height: 6, borderRadius: 3, borderWidth: 1.25 },
   bulletText: { flex: 1, minWidth: 0, fontSize: Typography.footnote, lineHeight: 18 },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.card,
-    borderTopRightRadius: Radius.card,
-    padding: Spacing.lg,
-    gap: Spacing.md,
-  },
-  grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
-  sheetTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
-  placeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, minHeight: MIN_TOUCH_TARGET },
-  placeLabel: { fontSize: Typography.base, color: Colors.textSecondary },
-  placeLabelOn: { color: Colors.textPrimary, fontWeight: Typography.semibold },
 });

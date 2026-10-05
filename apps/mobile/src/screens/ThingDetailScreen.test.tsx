@@ -101,6 +101,7 @@ jest.mock('../lib/supabase', () => ({
 const mock_pickPhotos = jest.fn();
 const mock_takePhoto = jest.fn();
 const mock_compressAndUpload = jest.fn();
+const mock_photoFileName = jest.fn((_prefix: string) => 'h1/whatever.jpg');
 jest.mock('../lib/photoUpload', () => ({
   PHOTO_PICK_LIMIT: 5,
   pickPhotos: (...a: unknown[]) => mock_pickPhotos(...a),
@@ -108,7 +109,7 @@ jest.mock('../lib/photoUpload', () => ({
   // The storage key is whatever the upload says it wrote, so the name only has
   // to be a string here.
   compressAndUpload: (...a: unknown[]) => mock_compressAndUpload(...a),
-  photoFileName: () => 'h1/whatever.jpg',
+  photoFileName: (prefix: string) => mock_photoFileName(prefix),
 }));
 const mock_openUrl = jest.fn();
 jest.mock('../lib/openUrl', () => ({ openUrl: (...a: unknown[]) => mock_openUrl(...a) }));
@@ -325,6 +326,20 @@ describe('ThingDetailScreen', () => {
     expect(mock_updateThing).toHaveBeenCalledWith('t1', {
       photoPaths: ['h1/plate.jpg', 'h1/a.jpg', 'h1/b.jpg'],
     });
+  });
+
+  it("files into the thing's own household, not the home being shown", async () => {
+    // A link can open a thing at the bach while the app shows the house. The
+    // folder decides who can open the file, so it is the thing's household's.
+    mock_pickPhotos.mockResolvedValue({ uris: ['file:///a.jpg'], dropped: 0 });
+    mock_compressAndUpload.mockResolvedValueOnce({ path: 'bach/a.jpg' });
+    const result = await open({ householdId: 'bach' });
+
+    await TestRenderer.act(async () => {
+      await pressable(result, 'Choose photos').props.onPress();
+    });
+
+    expect(mock_photoFileName).toHaveBeenCalledWith('bach');
   });
 
   it('keeps the ones that arrived when another refuses', async () => {

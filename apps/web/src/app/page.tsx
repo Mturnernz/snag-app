@@ -193,15 +193,14 @@ export default function Home() {
             <details>
               <summary>Who can see our list?</summary>
               <p>
-                Only the people you add to your household, and only the places they&apos;re linked
-                to. You add them with a link or a QR code.
+                Only the people you invite to that home. You add them with a link or a QR code.
               </p>
             </details>
             <details>
               <summary>We have a bach as well. Can it have its own list?</summary>
               <p>
-                Yes. Add it as a second place. It gets its own rooms and its own people, and the
-                Schedule tab shows both.
+                Yes. Add it as another home. It is a household of its own, with its own rooms and
+                its own people, and you switch between your homes from the top of the list.
               </p>
             </details>
             <details>

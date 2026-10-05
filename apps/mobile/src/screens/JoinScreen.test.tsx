@@ -30,6 +30,10 @@ jest.mock('../lib/supabase', () => ({
   upsertProfile: (...a: unknown[]) => mock_upsertProfile(...a),
 }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
+const mock_rememberHousehold = jest.fn().mockResolvedValue(undefined);
+jest.mock('../lib/currentHome', () => ({
+  rememberHousehold: (...a: unknown[]) => mock_rememberHousehold(...a),
+}));
 
 const TOKEN = '8f1d3c2e-0000-4000-8000-000000000000';
 
@@ -93,6 +97,18 @@ describe('a live code', () => {
 
     expect(mock_acceptInvitationByToken).toHaveBeenCalledWith(TOKEN);
     expect(onJoined).toHaveBeenCalled();
+  });
+
+  // A home is a household, and somebody already in one — the house, when this
+  // is the bach — opens on the home they have just said yes to.
+  it('opens on the home just joined, remembered before the app re-reads', async () => {
+    const r = render(<JoinScreen token={TOKEN} profile={PROFILE} onJoined={onJoined} onDismiss={onDismiss} />);
+    await settle();
+    await press(pressableAround(r, 'Join'));
+
+    expect(mock_rememberHousehold).toHaveBeenCalledWith('h');
+    expect(mock_rememberHousehold.mock.invocationCallOrder[0])
+      .toBeLessThan(onJoined.mock.invocationCallOrder[0]);
   });
 
   // Order matters: onJoined re-gates the whole app, so the token has to be out

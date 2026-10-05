@@ -61,7 +61,15 @@ begin
   v_mike := pg_temp.make_login('Mike');
   select (home.create_household('32 Le Roy', '32 Le Roy')).id into v_house;
   select id into v_leroy from home.properties where household_id = v_house;
-  select (home.create_property(v_house, 'Martin''s Bay')).id into v_bay;
+  -- A household is one home since 20261005120000, and create_property says
+  -- so. Households made before then can hold two, which is the shape this
+  -- afternoon happened in, so the second is made directly, as it was then.
+  perform pg_temp.refused(format('select home.create_property(%L, %L)', v_house, 'Martin''s Bay'),
+    'a second place in a household');
+  insert into home.properties (household_id, name) values (v_house, 'Martin''s Bay')
+  returning id into v_bay;
+  insert into home.property_members (property_id, profile_id, role) values (v_bay, v_mike, 'owner');
+  perform home.seed_locations(v_bay);
 
   if pg_temp.role_on(v_leroy, v_mike) <> 'owner' or pg_temp.role_on(v_bay, v_mike) <> 'owner' then
     raise exception 'The creator does not own the places they made';

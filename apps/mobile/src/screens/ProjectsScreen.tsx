@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, SectionList, Pressable, Modal, RefreshControl, ActivityIndicator, StyleSheet,
+  View, Text, SectionList, Pressable, RefreshControl, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
@@ -10,6 +10,7 @@ import Icon from '../components/Icon';
 import AddProjectSheet from '../components/AddProjectSheet';
 import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
+import HomePickerSheet from '../components/HomePickerSheet';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -68,7 +69,7 @@ export default function ProjectsScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
   const {
-    household, properties, activeProperty, setActiveProperty, locations, reloadLocations,
+    household, properties, activeProperty, locations, reloadLocations,
   } = useHousehold();
   const { showToast } = useToast();
 
@@ -346,37 +347,7 @@ export default function ProjectsScreen() {
         onCreate={start}
       />
 
-      <Modal visible={placesOpen} transparent animationType="slide" onRequestClose={() => setPlacesOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setPlacesOpen(false)} accessibilityLabel="Close" />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
-          <View style={styles.grab} />
-          <Text style={styles.sheetTitle}>Which place</Text>
-          {properties.map((property) => (
-            <Pressable
-              key={property.id}
-              onPress={() => {
-                setActiveProperty(property.id);
-                setPlacesOpen(false);
-              }}
-              style={styles.placeRow}
-              accessibilityRole="button"
-              accessibilityState={{ selected: property.id === activeProperty?.id }}
-            >
-              <Text
-                style={[
-                  styles.placeLabel,
-                  property.id === activeProperty?.id && styles.placeLabelOn,
-                ]}
-              >
-                {property.name}
-              </Text>
-              {property.id === activeProperty?.id ? (
-                <Icon name="checkmark" size="md" color={Colors.primary} />
-              ) : null}
-            </Pressable>
-          ))}
-        </View>
-      </Modal>
+      <HomePickerSheet visible={placesOpen} onClose={() => setPlacesOpen(false)} />
     </View>
   );
 }
@@ -641,34 +612,4 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: Spacing.md,
   },
-
-
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.card,
-    borderTopRightRadius: Radius.card,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-  },
-  grab: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center' },
-  sheetTitle: {
-    fontSize: Typography.lg,
-    fontWeight: Typography.bold,
-    color: Colors.textPrimary,
-    marginTop: Spacing.md,
-    marginBottom: Spacing.sm,
-  },
-  placeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: MIN_TOUCH_TARGET,
-  },
-  placeLabel: { fontSize: Typography.base, color: Colors.textSecondary },
-  placeLabelOn: { color: Colors.primary, fontWeight: Typography.semibold },
 });

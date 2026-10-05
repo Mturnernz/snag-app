@@ -11,11 +11,12 @@ import {
   SCHEDULE_KIND_LABELS, type ScheduleKind, type ScheduleMark,
 } from '@snag/supabase-queries';
 import EmptyState from '../components/EmptyState';
+import HomePickerSheet from '../components/HomePickerSheet';
 import Icon from '../components/Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useOnReturn } from '../hooks/useOnReturn';
-import { getAllProjects, getSnags } from '../lib/supabase';
+import { getProjects, getSnags } from '../lib/supabase';
 import { RETURN_RELOAD_MS } from '../lib/foreground';
 import { Project, RootStackParamList, Snag } from '../types';
 
@@ -41,13 +42,10 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * notifications and there deliberately never will be. A calendar that could
  * remind you would be the first thing in this app that talks to you unasked.
  *
- * **Every place at once, and no picker.** The other two tabs are about a place
- * you are standing in, so they ask which one. This tab is about a date, and a
- * date does not belong to a house: "are we free that weekend" is the wrong
- * question to answer for the bach only because the bach is what the House tab
- * happened to be showing. So it reads every property the user is linked to —
- * `property_members` already decides what that is — and names the place on each
- * row when there is more than one.
+ * **The home being shown, with the same picker as the other tabs.** It read
+ * every place at once, on the argument that a date does not belong to a house.
+ * A home is a household now — the bach is its own — and by the owner's
+ * decision the calendar follows the home the List and House tabs are showing.
  *
  * Three things about the month:
  *
@@ -156,7 +154,8 @@ const MONTHS = [
 export default function ScheduleScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
-  const { properties, profile } = useHousehold();
+  const { properties, activeProperty, profile } = useHousehold();
+  const [placesOpen, setPlacesOpen] = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
@@ -176,24 +175,30 @@ export default function ScheduleScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   /**
-   * No property filter at all, and no status filter either.
+   * The home being shown, and no status filter.
    *
-   * `getSnags` with no `propertyId` returns every place the caller can read,
-   * which `property_members` and the read policies already decide — so this is
-   * exactly "the places this person is linked to" without the client having to
-   * assemble the list or loop. And every status, because a calendar of only the
-   * open ones is missing exactly the half somebody came here to check.
+   * It covered every place at once, on the argument that a date is not about a
+   * place. Once a bach became a household of its own, by the owner's decision
+   * the calendar follows the home the other tabs are showing, and the picker in
+   * its header moves it, as theirs do. Every status still, because a calendar of
+   * only the open ones is missing exactly the half somebody came here to check.
    *
    * One small read: a household's whole history is a few hundred rows — the
    * retired product had 57 across six organisations and two years — so this
-   * beats a query per month or a query per place.
+   * beats a query per month.
    */
+  const homeId = activeProperty?.id ?? null;
   const load = useCallback(async () => {
+    // The places are still loading; the next run has them.
+    if (!homeId) return;
     try {
       // Projects off takes the punch list with it, exactly as on the List tab:
       // a mark whose row is a door back to a renovation nothing can open is a
       // mark that lies about what it leads to.
-      setSnags(await getSnags({ excludeProjectSnags: !profile.projectsEnabled }, 'newest'));
+      setSnags(await getSnags(
+        { propertyId: homeId, excludeProjectSnags: !profile.projectsEnabled },
+        'newest',
+      ));
     } catch (err) {
       console.error('Failed to load the schedule:', err);
     }
@@ -205,13 +210,13 @@ export default function ScheduleScreen() {
       //
       // Skipped entirely with projects off — the fifth kind of mark is a read
       // of dates set on a page that is no longer reachable.
-      setProjects(profile.projectsEnabled ? await getAllProjects() : []);
+      setProjects(profile.projectsEnabled ? await getProjects(homeId) : []);
     } catch (err) {
       console.error('Failed to load the projects:', err);
     }
     setLoading(false);
     setRefreshing(false);
-  }, [profile.projectsEnabled]);
+  }, [homeId, profile.projectsEnabled]);
 
   useEffect(() => {
     setLoading(true);
@@ -271,18 +276,22 @@ export default function ScheduleScreen() {
     setSelected(null);
   }
 
-  // Named for what the screen covers. With a bach in the picture that is not
-  // any one place, and a picker here would offer to narrow to the one thing
-  // this tab exists not to narrow to.
-  const manyPlaces = properties.length > 1;
-  const placeName = manyPlaces ? 'Everywhere' : placeTitle(null, properties);
+  const placeName = placeTitle(activeProperty, properties);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <View style={styles.place}>
+        <Pressable
+          onPress={() => properties.length > 1 && setPlacesOpen(true)}
+          disabled={properties.length < 2}
+          style={styles.place}
+          accessibilityRole={properties.length > 1 ? 'button' : undefined}
+        >
           <Text style={styles.title}>{placeName}</Text>
-        </View>
+          {properties.length > 1 ? (
+            <Icon name="chevron-down" size="sm" color={Colors.textMuted} />
+          ) : null}
+        </Pressable>
 
         {/* Only offered when you are not already there — a button that does
             nothing is a button you have to test to find that out. */}
@@ -453,10 +462,6 @@ export default function ScheduleScreen() {
                       are three different claims and one word for all of them
                       would be the tab inventing a state. */}
                   {mark.note ?? SCHEDULE_KIND_LABELS[mark.kind]}
-                  {/* Which house, ahead of which room: with two places on one
-                      calendar, "Roof" alone is ambiguous in the way that
-                      actually matters. */}
-                  {manyPlaces ? ` · ${mark.snag?.propertyName ?? mark.project?.propertyName}` : ''}
                   {mark.snag?.room ? ` · ${mark.snag.room}` : ''}
                   {/* Said the way the snag says it — "every 6 months", never
                       "180 days". `describeCycle` is shared with triage so the
@@ -470,6 +475,7 @@ export default function ScheduleScreen() {
         )}
       </ScrollView>
 
+      <HomePickerSheet visible={placesOpen} onClose={() => setPlacesOpen(false)} />
     </View>
   );
 }

@@ -3804,6 +3804,89 @@ export interface BriefMeta {
   photoCount: number;
 }
 
+/**
+ * Jobs picked off the list to send to somebody for a quote — a friend who
+ * knows, or a tradesperson.
+ *
+ * **It carries the work and nothing about the household.** No names (who filed
+ * it, who it is assigned to), no status, and no place name: a place is very
+ * often called by its street address, and this file is forwarded by WhatsApp to
+ * somebody the household has never met. Where the work is goes in as the
+ * suburb and town, which is what a quote needs. A job's notes are the
+ * household's conversation, so they are in only when asked for (`notes`).
+ */
+export function snagQuoteTable(
+  snags: Snag[],
+  meta: { where: string | null; stamp: string; notes?: Record<string, string[]> }
+): ExportTable {
+  const withNotes = !!meta.notes;
+  const count = `${snags.length} ${snags.length === 1 ? 'job' : 'jobs'}`;
+  return {
+    name: 'Jobs to quote',
+    subtitle: [meta.where, count, meta.stamp].filter(Boolean).join(' · '),
+    columns: [
+      'Reference', 'What', 'Room', 'About', 'Parts', 'Photos',
+      ...(withNotes ? ['Notes'] : []),
+    ],
+    rows: snags.map((snag) => [
+      snag.reference,
+      snagHeadline(snag),
+      snag.room ?? '',
+      [snag.thingName, snag.thingMake, snag.thingModel].filter(Boolean).join(' '),
+      (snag.parts ?? []).join('; '),
+      String((snag.photoPaths ?? []).length || ''),
+      ...(withNotes ? [(meta.notes?.[snag.id] ?? []).join(' / ')] : []),
+    ]),
+  };
+}
+
+/**
+ * The page at the front of a PDF sent for a quote. Addressed to a person, in
+ * plain words, asking for the parts of a price a household actually decides
+ * on — and saying nothing the app cannot back: no promise of a reply, no
+ * names, no street.
+ */
+export function quoteBrief(meta: {
+  where: string | null;
+  stamp: string;
+  rowCount: number;
+  photoCount: number;
+}): { title: string; blocks: BriefBlock[] } {
+  const jobs = `${meta.rowCount} ${meta.rowCount === 1 ? 'job' : 'jobs'}`;
+  const at = meta.where ? ` in ${meta.where}` : '';
+  return {
+    title: meta.rowCount === 1 ? 'Could you quote for this job?' : 'Could you quote for these jobs?',
+    blocks: [
+      {
+        lines: [
+          `${jobs} around a house${at}, sent from the Snag app on ${meta.stamp}.`,
+          'Each job has a reference — SNAG-0042 and so on, in the first column. Please use it in '
+          + 'your quote, so each price can be matched to the right job.',
+        ],
+      },
+      {
+        heading: 'The photographs',
+        lines: [
+          meta.photoCount > 0
+            ? `${meta.photoCount} ${meta.photoCount === 1 ? 'photograph follows' : 'photographs follow'} `
+              + 'the table, each captioned with its job’s reference and room.'
+            : 'There are no photographs in this file.',
+          'If you need to see something in person before you can price it, say so.',
+        ],
+      },
+      {
+        heading: 'In the quote, if you can',
+        lines: [
+          '• A price for each job by its reference, and whether it is GST inclusive.',
+          '• The callout fee separately from labour and materials, so jobs can be booked into one visit.',
+          '• Anything that needs a consent, a certificate or another trade.',
+          '• When you could do it.',
+        ],
+      },
+    ],
+  };
+}
+
 /** The fence the answer has to come back in, and what the parser looks for. */
 export const ACTIONS_FENCE = 'snag-actions';
 

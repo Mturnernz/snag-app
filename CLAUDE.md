@@ -4811,6 +4811,38 @@ extract is refused;
 control is at the foot rather than on the compose bar; `HouseScreen.test.tsx` pins that not one
 ghost reaches the file.
 
+### Jobs can be chosen and sent for a quote (October 2026)
+
+**Hold a card down to choose it**, then tap others; *Select* on the count line does the same for a
+desktop, which has no long press. While choosing, a card's tap chooses rather than opens, its tick
+becomes a checkbox (still a sibling of the card's door), the count line reads *N selected · Cancel*,
+Android's back ends it, and the + gives way to a bar reading **Share N jobs**. The choice is by id,
+so the two-minute re-read never loses it.
+
+**`ShareJobsSheet` makes the PDF the moment it opens**, and that is load-bearing: a browser lets
+`navigator.share` run only inside a tap, and fetching twenty photographs outlasts one, so a PDF built
+on the press would reach the share sheet after the browser had stopped listening. *Share* then hands
+over a file already in hand (`shareFile`, `lib/share.ts`: `navigator.share({ files })` on a phone's
+browser, `expo-sharing` on native, a download where neither works). That one sheet **is** WhatsApp,
+Messenger and email, so there is no button per app. A desktop browser mostly cannot share a file
+(`canShareFiles`): it gets *Download PDF*, and *Email*, which downloads it and opens a new message
+saying to attach it — a `mailto:` cannot carry a file.
+
+**The file carries the work and nothing about the household** (`snagQuoteTable`, `quoteBrief`):
+reference, words, room, the linked appliance's make and model, parts, photos (round-robin, capped
+at `EXPORT_PHOTO_LIMIT`). No names, no status, and **no place name** — places are often called by
+their street address, and this goes by WhatsApp to somebody the household has never met — only the
+suburb and town. The brief asks for a price per reference, the callout apart, consents, and when.
+**The notes are asked as two named halves, out by default**: they are the household talking to
+itself. Asked for, they are read one job at a time, never in parallel, for the pool's reason.
+
+`native` exports were broken until this: since SDK 54 `expo-file-system`'s root exports stubs that
+throw for `documentDirectory` and `writeAsStringAsync`, so `saveFile` now requires
+`expo-file-system/legacy`. `SnagListScreen.test.tsx` pins the long press, the tap choosing, Cancel,
+the PDF holding only the chosen jobs with no notes, the notes read one by one when asked, and the
+download where a file cannot be shared; `advice.test.ts` pins that no name or street reaches the
+file and what the brief asks.
+
 ### The PDF can carry the question, and the answer comes back by hand
 
 The loop is deliberately **outside the app**: a briefed PDF goes out, somebody puts it in front of

@@ -24,6 +24,17 @@ interface Props {
   onDone?: () => void;
   /** While the finish is on its way, so a second tap cannot send a second. */
   finishing?: boolean;
+  /** A long press starts choosing jobs to share. */
+  onLongPress?: () => void;
+  /**
+   * Whether the list is choosing jobs. The card's tap then chooses rather than
+   * opens, and the tick on the right becomes a checkbox — still a sibling of
+   * the card's door, never inside it.
+   */
+  selecting?: boolean;
+  selected?: boolean;
+  /** Toggles this card while choosing. */
+  onSelect?: () => void;
 }
 
 /**
@@ -34,7 +45,9 @@ interface Props {
  * space and the metadata is a single wrapping row underneath rather than a
  * stack of labelled fields.
  */
-export default function SnagCard({ snag, photoUrl, onPress, onDone, finishing }: Props) {
+export default function SnagCard({
+  snag, photoUrl, onPress, onDone, finishing, onLongPress, selecting = false, selected = false, onSelect,
+}: Props) {
   const done = snag.status === 'done';
   // A repeating job that has been done and is waiting for its next turn gets
   // the same translucency, because it is the same fact: there is nothing to do
@@ -46,14 +59,19 @@ export default function SnagCard({ snag, photoUrl, onPress, onDone, finishing }:
   const toGet = unboughtParts(snag);
 
   return (
-    <View style={[styles.card, settled && styles.doneCard]}>
+    <View style={[styles.card, settled && !selecting && styles.doneCard, selected && styles.selectedCard]}>
     {/* The tick is a sibling of the door, never inside it: a Pressable inside
         a Pressable is a coin toss about which one gets the tap. */}
     <Pressable
-      onPress={onPress}
+      onPress={selecting ? onSelect : onPress}
+      onLongPress={selecting ? undefined : onLongPress}
+      delayLongPress={400}
       style={({ pressed }) => [styles.open, pressed && styles.pressed]}
-      accessibilityRole="button"
+      accessibilityRole={selecting ? 'checkbox' : 'button'}
+      accessibilityState={selecting ? { checked: selected } : undefined}
       accessibilityLabel={`${headline}${snag.room ? `, ${snag.room}` : ''}`}
+      accessibilityActions={onLongPress && !selecting ? [{ name: 'longpress', label: 'Choose jobs to share' }] : undefined}
+      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') onLongPress?.(); }}
     >
       <View style={styles.thumb}>
         {photoUrl ? (
@@ -119,7 +137,19 @@ export default function SnagCard({ snag, photoUrl, onPress, onDone, finishing }:
       </View>
     </Pressable>
 
-    {onDone && !settled ? (
+    {selecting ? (
+      <Pressable
+        onPress={onSelect}
+        style={({ pressed }) => [styles.tick, pressed && styles.pressed]}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: selected }}
+        accessibilityLabel={`${selected ? 'Unselect' : 'Select'}: ${headline}`}
+      >
+        <View style={[styles.tickRing, selected && styles.tickRingOn]}>
+          {selected ? <Icon name="checkmark" size="sm" color={Colors.white} /> : null}
+        </View>
+      </Pressable>
+    ) : onDone && !settled ? (
       <Pressable
         onPress={onDone}
         disabled={finishing}
@@ -173,6 +203,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tickRingBusy: { borderColor: Colors.border },
+  // Chosen to share: solid fern, an interaction rather than a state.
+  tickRingOn: { backgroundColor: Colors.primary },
+  selectedCard: { borderWidth: 2, borderColor: Colors.primary, padding: Spacing.md - 2 },
   doneCard: { opacity: 0.62 },
   thumb: {
     width: 84,

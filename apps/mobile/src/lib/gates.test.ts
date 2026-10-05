@@ -74,3 +74,37 @@ describe('a step not yet shown', () => {
     expect(gate({ hasPendingSteps: true, signedIn: false })).toBe('auth');
   });
 });
+
+// A run, once on screen, keeps it until it finishes. Making a house answers
+// the last required step; letting the app in on that write cut a run off at
+// the name and opened whatever screen the address bar last held.
+describe('a setup run on screen', () => {
+  it('keeps the screen once nothing is pending', () => {
+    expect(gate({ setupRunning: true, hasPendingSteps: false })).toBe('setup');
+  });
+
+  it('gives it up once it has finished', () => {
+    expect(gate({ setupRunning: false, hasPendingSteps: false })).toBe('app');
+  });
+
+  it('never beats a join code pasted half way through', () => {
+    expect(gate({ setupRunning: true, hasJoinToken: true })).toBe('join');
+  });
+
+  it('never beats sign-out', () => {
+    expect(gate({ setupRunning: true, signedIn: false })).toBe('auth');
+  });
+});
+
+// *Add another home* makes a house from inside the app. It gets the same run a
+// house made in setup gets — its rooms, the invite, *You're all set*.
+describe('a home just added', () => {
+  it('takes the screen for its own setup run', () => {
+    expect(gate({ homeAdded: true })).toBe('setup');
+  });
+
+  it('never beats a join code or sign-out', () => {
+    expect(gate({ homeAdded: true, hasJoinToken: true })).toBe('join');
+    expect(gate({ homeAdded: true, signedIn: false })).toBe('auth');
+  });
+});

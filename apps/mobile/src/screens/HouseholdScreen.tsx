@@ -65,7 +65,7 @@ import { rememberHousehold } from '../lib/currentHome';
 export default function HouseholdScreen() {
   const navigation = useNavigation();
   const {
-    household, members, profile, properties: allHomes, refresh, reloadAccount,
+    household, members, profile, properties: allHomes, refresh, reloadAccount, setUpNewHome,
   } = useHousehold();
   // Every home this person is in is in `allHomes`; this screen is one
   // household's, and the others' places are not its business.
@@ -177,8 +177,12 @@ export default function HouseholdScreen() {
   /**
    * Another home is another household — the bach, a rental, a parent's place —
    * owned by whoever adds it and seen by nobody else until they invite them.
-   * One name for both, as setup writes it. Remembered first, so the account
-   * re-read opens on it and this screen becomes its screen, ready to share.
+   * One name for both, as setup writes it.
+   *
+   * Then it is set up as a house made at first run is: its rooms, bringing
+   * somebody in, *You're all set*, and the list (`setUpNewHome`). It is
+   * remembered first, so the app opens on it at the end. This screen goes
+   * while that runs, so it says nothing about it.
    */
   async function handleAddHome() {
     const name = newPlace.trim();
@@ -188,8 +192,7 @@ export default function HouseholdScreen() {
       const home = await createHousehold(name, name);
       await rememberHousehold(home.id);
       setNewPlace('');
-      await reloadAccount();
-      showToast(`${name} added`);
+      await setUpNewHome(home.id);
     } catch (err: any) {
       showAlert("Couldn't add that home", err?.message ?? 'Please try again.');
     } finally {

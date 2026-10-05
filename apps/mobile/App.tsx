@@ -82,6 +82,17 @@ function AppGates() {
   // wait on it either: a write that failed would otherwise put the whole run
   // back on screen. They are asked again on the next launch instead.
   const [setupDone, setSetupDone] = useState(false);
+  // A setup run is on screen and has not finished. It keeps the screen until it
+  // calls onFinish: making a house can leave nothing pending, and letting the
+  // app in on that re-read is how a new house came out with no rooms step and
+  // landed on the Household screen. See gates.ts.
+  const [setupRunning, setSetupRunning] = useState(false);
+  // A home just made with *Add another home*, waiting for its own setup run —
+  // the rooms, the invite, *You're all set* — as a house made in setup gets.
+  // Only once the account re-read holds it, so the run is never handed the
+  // wrong house in between.
+  const [newHomeId, setNewHomeId] = useState<string | null>(null);
+  const newHome = newHomeId ? households.find((h) => h.id === newHomeId) ?? null : null;
   // The photograph from setup's *Snap your first job*, for the list to file.
   const [firstPhoto, setFirstPhoto] = useState<string | null>(null);
 
@@ -159,6 +170,8 @@ function AppGates() {
         setHouseholds([]);
         setMemberCount(0);
         setSetupDone(false);
+        setSetupRunning(false);
+        setNewHomeId(null);
         setFirstPhoto(null);
         setLoading(false);
         return;
@@ -199,6 +212,8 @@ function AppGates() {
     hasProfile: !!profile,
     hasHousehold: !!household,
     hasPendingSteps,
+    setupRunning,
+    homeAdded: !!newHome,
   });
 
   if (gate === 'loading') {
@@ -283,14 +298,24 @@ function AppGates() {
         <ToastProvider>
           <SetupFlow
             profile={profile}
-            household={household}
-            memberCount={memberCount}
+            household={newHome ?? household}
+            // A home made a moment ago has one person in it: whoever made it.
+            memberCount={newHome ? 1 : memberCount}
+            newHouse={!!newHome}
             suggestedName={nameFromIdentity(session?.user.user_metadata)}
             onReady={loadAccount}
+            onStart={() => setSetupRunning(true)}
             onJoinToken={setJoinToken}
             onFinish={(photo) => {
+              // Setup ends on the list. The address bar can still hold the
+              // screen the run began from (a household deleted from
+              // /household), and the navigator about to mount would open
+              // there — past the list, which is what files the first photo.
+              resetWebPathIfStale();
               setFirstPhoto(photo);
               setSetupDone(true);
+              setSetupRunning(false);
+              setNewHomeId(null);
               loadAccount();
             }}
           />
@@ -302,7 +327,15 @@ function AppGates() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <HouseholdProvider households={households} profile={profile} onReload={loadAccount}>
+      <HouseholdProvider
+        households={households}
+        profile={profile}
+        onReload={loadAccount}
+        onHomeAdded={async (id) => {
+          setNewHomeId(id);
+          await loadAccount();
+        }}
+      >
         <ToastProvider>
           <FirstCaptureProvider uri={firstPhoto}>
             <NavigationContainer linking={linking}>

@@ -47,6 +47,13 @@ interface HouseholdContextValue {
   refresh: () => Promise<void>;
   /** Re-reads the households themselves from App.tsx — after joining, leaving or adding one. */
   reloadAccount: () => Promise<void>;
+  /**
+   * Hands a home just made with *Add another home* to App.tsx, which re-reads
+   * the account and takes the new home through its setup steps — the rooms,
+   * the invite, *You're all set* — before opening the app on it. The app
+   * unmounts while it does.
+   */
+  setUpNewHome: (householdId: string) => Promise<void>;
 }
 
 const HouseholdContext = createContext<HouseholdContextValue | null>(null);
@@ -55,12 +62,15 @@ export function HouseholdProvider({
   households,
   profile,
   onReload,
+  onHomeAdded,
   children,
 }: {
   /** Never empty: App.tsx only renders the app for somebody in a household. */
   households: Household[];
   profile: Profile;
   onReload: () => Promise<void>;
+  /** See `setUpNewHome`. */
+  onHomeAdded: (householdId: string) => Promise<void>;
   children: React.ReactNode;
 }) {
   const [members, setMembers] = useState<HouseholdMember[]>([]);
@@ -182,10 +192,11 @@ export function HouseholdProvider({
       reloadLocations,
       refresh,
       reloadAccount: onReload,
+      setUpNewHome: onHomeAdded,
     }),
     [
       household, households, profile, members, properties, activeProperty, setActiveProperty,
-      locations, reloadLocations, refresh, onReload,
+      locations, reloadLocations, refresh, onReload, onHomeAdded,
     ]
   );
 

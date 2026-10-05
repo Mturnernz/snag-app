@@ -101,24 +101,27 @@ const type = async (r: ReturnType<typeof render>, label: string, text: string) =
 
 const onFinish = jest.fn();
 const onJoinToken = jest.fn();
+const onStart = jest.fn();
 
-function Harness({ suggestedName }: { suggestedName?: string | null }) {
+function Harness({ suggestedName, newHouse }: { suggestedName?: string | null; newHouse?: boolean }) {
   const [account, setAccount] = useState({ ...world });
   return (
     <SetupFlow
       profile={account.profile}
       household={account.household}
       memberCount={account.members}
+      newHouse={newHouse}
       suggestedName={suggestedName}
       onReady={async () => setAccount({ ...world })}
+      onStart={onStart}
       onJoinToken={onJoinToken}
       onFinish={onFinish}
     />
   );
 }
 
-async function start(suggestedName?: string | null) {
-  const r = render(<Harness suggestedName={suggestedName} />);
+async function start(suggestedName?: string | null, newHouse?: boolean) {
+  const r = render(<Harness suggestedName={suggestedName} newHouse={newHouse} />);
   await settle();
   return r;
 }
@@ -200,6 +203,82 @@ describe('a brand-new account, start to finish', () => {
     expect(title(r, 'Here are your rooms')).toBe(true);
     // Nothing earlier in this run to go back to.
     expect(r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Back')).toHaveLength(0);
+  });
+});
+
+// miketsturner, 5 October 2026: an account that had set up a house, deleted
+// it, and made another. setup_seen already held the rooms and the invite, so
+// the new house was named and the run had nothing left to ask — and App.tsx let
+// the app in on that write, onto the Household screen it was deleted from.
+describe('a new house for somebody who has set one up before', () => {
+  beforeEach(() => {
+    world = { profile: profile(['name', 'household', 'rooms', 'invite'], 'Mike'), household: null, members: 0 };
+  });
+
+  it('is taken through its rooms, the invite and the last screen', async () => {
+    const r = await start();
+    expect(title(r, 'Nice to meet you, Mike')).toBe(true);
+    await press(r, 'Start a new house');
+    await type(r, "Your place's name", 'Home');
+    await press(r, 'Create it');
+    expect(mock.createHousehold).toHaveBeenCalledWith('Home', 'Home');
+
+    expect(title(r, 'Here are your rooms')).toBe(true);
+    await press(r, 'Continue');
+    expect(title(r, 'Bring someone in')).toBe(true);
+    await press(r, 'Set up later');
+    expect(title(r, "You're all set, Mike")).toBe(true);
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  it('is never asked its name again', async () => {
+    const r = await start();
+    expect(title(r, 'What should we call you?')).toBe(false);
+  });
+
+  it('says the run has started once, however often the account is re-read', async () => {
+    const r = await start();
+    await press(r, 'Start a new house');
+    await type(r, "Your place's name", 'Home');
+    await press(r, 'Create it');
+    await press(r, 'Continue');
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+});
+
+// *Add another home* makes the house inside the app and hands it to the same
+// run: everything about the person is answered, and the house is new.
+describe('a home added from the Household screen', () => {
+  const BACH = { id: 'bach', name: 'Martins Bay', createdAt: '2026-10-05T00:00:00Z' } as Household;
+
+  beforeEach(() => {
+    world = { profile: profile(['name', 'household', 'rooms', 'invite'], 'Mike'), household: BACH, members: 1 };
+    mock.getMyProperties.mockResolvedValue([
+      { id: 'p', householdId: 'h', name: '32 Le Roy' },
+      { id: 'pb', householdId: 'bach', name: 'Martins Bay' },
+    ]);
+  });
+
+  it('opens on its rooms, then the invite, then the last screen', async () => {
+    const r = await start(null, true);
+    expect(title(r, 'Here are your rooms')).toBe(true);
+    // The rooms of the house just added, never the one the app was showing.
+    expect(mock.getLocations).toHaveBeenCalledWith('pb');
+    // Nothing earlier in this run to go back to: the house is made.
+    expect(r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Back')).toHaveLength(0);
+    await press(r, 'Continue');
+
+    expect(title(r, 'Bring someone in')).toBe(true);
+    await press(r, 'Set up later');
+    expect(title(r, "You're all set, Mike")).toBe(true);
+    expect(mock.createHousehold).not.toHaveBeenCalled();
+    expect(mock.upsertProfile).not.toHaveBeenCalled();
+  });
+
+  it('is asked nothing new when the run is not for a new house', async () => {
+    const r = await start(null, false);
+    expect(title(r, 'Here are your rooms')).toBe(false);
+    expect(title(r, "You're all set, Mike")).toBe(true);
   });
 });
 

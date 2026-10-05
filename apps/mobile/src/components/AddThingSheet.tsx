@@ -15,7 +15,7 @@ import { labelReadingEnabled } from '../lib/labelReading';
 import { readLabel, resolveLabelReading, uploadFile } from '../lib/supabase';
 import {
   applyLabelReading, catalogueSuggestions, describeCycle, documentFileName, documentName,
-  LabelReadError, matchSuggestions, sameNamedThing, suggestionsForRoom, swatchColour, WHOLE_HOUSE,
+  LabelReadError, matchSuggestions, sameNamedThing, suggestionsForRoom, suggestRoom, swatchColour, WHOLE_HOUSE,
   type LabelGuess, type LabelReading, type ThingInput,
 } from '@snag/supabase-queries';
 import {
@@ -146,6 +146,13 @@ export default function AddThingSheet({
   const kindSaid = useRef(false);
   /** The guess is pre-selected at most once, so choosing something else is never undone. */
   const guessOffered = useRef(false);
+  /**
+   * Whether anybody has answered *Which room?* — a tap, or the + pressed inside
+   * a room. Once they have, the photo's room is never laid over it.
+   */
+  const roomChosen = useRef(false);
+  /** The room the photo chose, while it is still the one selected. */
+  const [roomFromPhoto, setRoomFromPhoto] = useState<string | null>(null);
   const [localUri, setLocalUri] = useState<string | null>(null);
   const [upload, setUpload] = useState<Upload>('idle');
   const uploading = useRef<Promise<string | null> | null>(null);
@@ -175,6 +182,8 @@ export default function AddThingSheet({
   useEffect(() => {
     if (!visible) return;
     setRoom(start?.room ?? null);
+    roomChosen.current = !!start && start.room !== undefined;
+    setRoomFromPhoto(null);
     setName(start?.name ?? '');
     setKind(start?.kind ?? 'appliance');
     kindSaid.current = !!start?.kind;
@@ -322,13 +331,19 @@ export default function AddThingSheet({
    * sheet's. The box is cleared on success so the list comes back showing the
    * new room selected rather than a filter that now matches one thing.
    */
+  function pickRoom(next: string | null) {
+    roomChosen.current = true;
+    setRoomFromPhoto(null);
+    setRoom(next);
+  }
+
   async function addRoom() {
     const name = lookRoom.trim();
     if (!name || busy) return;
     setBusy(true);
     try {
       if (await onAddRoom(name)) {
-        setRoom(name);
+        pickRoom(name);
         setLookRoom('');
       }
     } finally {
@@ -411,7 +426,11 @@ export default function AddThingSheet({
     setReading({ state: 'reading' });
     const stale = () => mine !== openCount.current || shot !== photoCount.current;
     try {
-      const answer = await readLabel(path, kindSaid.current ? kindNow.current : null);
+      const answer = await readLabel(
+        path,
+        kindSaid.current ? kindNow.current : null,
+        locations.map((one) => one.name),
+      );
       const late = submitted.current.get(mine);
       if (late !== undefined && shot === photoCount.current) {
         submitted.current.delete(mine);
@@ -455,6 +474,18 @@ export default function AddThingSheet({
     setSpec(filledIn.spec);
     setReading({ state: 'read', filled });
   }, [step, reading.state, kind]);
+
+  // The photo's room, chosen for them only while nobody has answered *Which
+  // room?* — never over a tap, and only a room this place has. It usually lands
+  // while they are on that step, which is the point: the answer is lit, and
+  // tapping another is all it takes to disagree.
+  useEffect(() => {
+    if (roomChosen.current || !guess) return;
+    const suggested = suggestRoom(guess, locations.map((one) => one.name));
+    if (!suggested) return;
+    setRoom(suggested);
+    setRoomFromPhoto(suggested);
+  }, [guess]);
 
   // The photo's guess at what the thing is, chosen for them only when nothing
   // has been chosen yet and only once — never over a tap, and never a paint,
@@ -698,6 +729,11 @@ export default function AddThingSheet({
         {step === 'room' ? (
           <>
             <Text style={styles.question}>Which room?</Text>
+            {roomFromPhoto && room === roomFromPhoto ? (
+              <Text style={styles.hint}>
+                {roomFromPhoto}, from the photo — tap another room to change it.
+              </Text>
+            ) : null}
             <View style={styles.searchRow}>
               <Icon name="search" size="sm" color={Colors.textMuted} />
               <TextInput
@@ -745,14 +781,14 @@ export default function AddThingSheet({
                       key={location.id}
                       label={location.name}
                       on={room === location.name}
-                      onPress={() => setRoom(location.name)}
+                      onPress={() => pickRoom(location.name)}
                     />
                   ))}
                   {wholeHouseMatches ? (
                     <Chip
                       label="Whole house"
                       on={room === null && !!start}
-                      onPress={() => setRoom(null)}
+                      onPress={() => pickRoom(null)}
                     />
                   ) : null}
                 </View>

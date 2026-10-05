@@ -229,12 +229,21 @@ Deno.serve(async (req) => {
 
   let path: string;
   let kind: string;
+  let rooms: string[] = [];
   try {
     const body = await req.json();
     path = typeof body?.path === 'string' ? body.path : '';
     // Empty is "nobody has said yet": the walkthrough takes the photo before
     // it asks what the thing is, so the reader is asked to say.
     kind = typeof body?.kind === 'string' ? body.kind : '';
+    // The place's room names, for the room guess. Trimmed and capped: they are
+    // somebody's typing, and only ever offered back as a choice among them.
+    rooms = Array.isArray(body?.rooms)
+      ? (body.rooms as unknown[])
+        .filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
+        .map((r) => r.trim().slice(0, 40))
+        .slice(0, 40)
+      : [];
   } catch {
     return answer(400, { error: "Couldn't read the label" });
   }
@@ -324,7 +333,7 @@ Deno.serve(async (req) => {
     return answer(429, { error: USED_UP, readingId });
   }
 
-  const body = JSON.stringify(geminiRequest(kind, mimeType, encodeBase64(bytes)));
+  const body = JSON.stringify(geminiRequest(kind, mimeType, encodeBase64(bytes), rooms));
 
   // Everything from here runs under waitUntil, so a caller who pressed *Add
   // it*, closed the sheet or locked the phone does not cut it short. The

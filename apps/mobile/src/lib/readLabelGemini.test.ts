@@ -65,6 +65,18 @@ describe('the request', () => {
   });
 });
 
+describe('the rooms the reader chooses from', () => {
+  it('names the place’s rooms, quoted, and binds the guess to them', () => {
+    const text = geminiRequest('', 'image/jpeg', 'x', ['Kitchen', 'Master bedroom']).contents[0].parts[1].text;
+    expect(text).toContain('"Kitchen", "Master bedroom"');
+    expect(SYSTEM).toMatch(/roomGuess: .*copied exactly from the list/);
+  });
+
+  it('says there are none when none were given', () => {
+    expect(geminiRequest('', 'image/jpeg', 'x').contents[0].parts[1].text).toMatch(/roomGuess is null/);
+  });
+});
+
 describe('reading the reply', () => {
   it('reads a clean answer, which the app then accepts', () => {
     const outcome = readingFromGemini(reply(JSON.stringify(plate)));

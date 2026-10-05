@@ -1598,6 +1598,16 @@ longer needs somebody standing there while the model looks.
   is only ever an offer: pre-selected on *What is it?* when nothing has been chosen, never over a
   tap, never a paint (whose name is a colour). It is asked because the photo now comes before the
   kind is known; an empty `kind` asks the reader to say, and fill plate or paint fields to fit.
+- **And which room it lives in** (October 2026). The photo comes before *Which room?*, and the
+  reading usually lands while somebody is on that step, so it lights a room for them: the reader's
+  `roomGuess`, chosen from the place's own room names that `readLabel` now sends, or failing that
+  `roomForThing` — the catalogue read backwards (an oven is suggested only in the Kitchen, so an
+  oven goes there), then `ROOM_HINTS` for what the catalogue never lists (weed killer → Garage,
+  then Shed, then Outside). Both are `suggestRoom`. The same rules as the kind guess: **only while
+  nobody has answered**, never over a tap or a room the + already said, and only a room this place
+  has (`roomKey`), with one line saying it came from the photo. A thing the catalogue suggests in
+  several rooms (a smoke alarm) gets no guess, even when the place has only one of them — that is a
+  coin toss dressed as a fact. `houseRecord.test.ts` and `AddThingSheet.test.tsx` pin it.
 
 **Deploy order**, because the client and the function move together: apply `20260924120100`,
 deploy `read-label` (its reply only gains `readingId`, so the live client keeps working), read one

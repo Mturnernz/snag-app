@@ -1718,6 +1718,12 @@ export interface LabelReading {
 export interface LabelGuess {
   name: string | null;
   kind: ThingKind | null;
+  /**
+   * Which of the place's rooms the reader thinks it lives in, from the list
+   * the request named. Checked against the place's rooms again before it is
+   * offered (`suggestRoom`), because a reply is not a room until it is one.
+   */
+  room?: string | null;
 }
 
 /**
@@ -1801,8 +1807,9 @@ export function parseLabelGuess(raw: unknown): LabelGuess | null {
   const r = raw as Record<string, unknown>;
   const name = labelText(r.whatItIs, 40);
   const kind = GUESSABLE_KINDS.includes(r.kindGuess as ThingKind) ? (r.kindGuess as ThingKind) : null;
-  if (!name && !kind) return null;
-  return { name: name ? name.charAt(0).toUpperCase() + name.slice(1) : null, kind };
+  const room = labelText(r.roomGuess, 40);
+  if (!name && !kind && !room) return null;
+  return { name: name ? name.charAt(0).toUpperCase() + name.slice(1) : null, kind, room };
 }
 
 /** The walkthrough's boxes, as far as a label can answer them. */
@@ -1926,11 +1933,14 @@ export class LabelReadError extends Error {
 export async function readLabel(
   client: SupabaseClient,
   path: string,
-  kind: ThingKind | null
+  kind: ThingKind | null,
+  rooms: string[] = []
 ): Promise<LabelReadAnswer> {
-  const { data, error } = await client.functions.invoke('read-label', {
-    body: kind ? { path, kind } : { path },
-  });
+  const body: Record<string, unknown> = { path };
+  if (kind) body.kind = kind;
+  // The place's rooms, so the reader can say which one this lives in.
+  if (rooms.length) body.rooms = rooms;
+  const { data, error } = await client.functions.invoke('read-label', { body });
   if (error) {
     let words: string | null = null;
     let readingId: string | null = null;
@@ -2659,6 +2669,90 @@ export function roomAlreadyHere(existing: string[], typed: string): string | nul
 /** A thing's name as the House tab compares it: any case, spacing collapsed. */
 function normalName(text: string): string {
   return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Rooms a thing the catalogue never suggests is usually kept in, most likely
+ * first. The catalogue (`ROOM_SUGGESTIONS`) answers an oven or a dryer; this
+ * answers what it has no reason to list — the weed killer, the dishwasher
+ * tablets — and the appliances it lists in a room the seed does not name.
+ * Matched on whole words in the thing's name.
+ */
+const ROOM_HINTS: { words: string[]; rooms: string[] }[] = [
+  { words: ['weed'], rooms: ['Garage', 'Shed', 'Garden shed', 'Outside'] },
+  { words: ['spray'], rooms: ['Garage', 'Shed', 'Laundry'] },
+  { words: ['fertiliser'], rooms: ['Garage', 'Shed', 'Outside'] },
+  { words: ['dishwasher', 'tablets'], rooms: ['Kitchen'] },
+  { words: ['dishwasher', 'tabs'], rooms: ['Kitchen'] },
+  { words: ['detergent'], rooms: ['Laundry'] },
+  { words: ['washing', 'powder'], rooms: ['Laundry'] },
+  { words: ['microwave'], rooms: ['Kitchen'] },
+  { words: ['fridge'], rooms: ['Kitchen'] },
+  { words: ['freezer'], rooms: ['Garage', 'Kitchen'] },
+  { words: ['oven'], rooms: ['Kitchen'] },
+  { words: ['dryer'], rooms: ['Laundry'] },
+  { words: ['washing', 'machine'], rooms: ['Laundry'] },
+  { words: ['lawnmower'], rooms: ['Garage', 'Shed'] },
+  { words: ['mower'], rooms: ['Garage', 'Shed'] },
+  { words: ['cylinder'], rooms: ['Garage', 'Laundry', 'Hallway'] },
+];
+
+function words(name: string): string[] {
+  return name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * The room a thing named this way usually lives in, **from this place's own
+ * rooms only**, or null.
+ *
+ * The catalogue read backwards first — an oven is suggested in the Kitchen, so
+ * an oven goes in the Kitchen — but only where the answer is one room: a smoke
+ * alarm is suggested in three, and guessing between them would be a coin toss
+ * dressed as a fact. Paint is everywhere and never answers. Then the hints,
+ * which are ordered, so the first room the place has wins.
+ *
+ * An offer for the walkthrough's room step, never a write: the person sees it
+ * selected and can tap another before anything is kept.
+ */
+export function roomForThing(name: string | null | undefined, rooms: string[]): string | null {
+  if (!name || !rooms.length) return null;
+  const have = new Map(rooms.map((r) => [roomKey(r), r] as const));
+  const said = new Set(words(name));
+  const fits = (candidate: string) => words(candidate).every((w) => said.has(w));
+
+  // Ambiguity is the catalogue's, not the place's: a smoke alarm is suggested
+  // in three rooms, so a place holding only one of them is not told that is
+  // where it goes.
+  const fromCatalogue = Object.entries(ROOM_SUGGESTIONS)
+    .filter(([, suggestions]) => suggestions.some((s) => s.kind !== 'finish' && fits(s.name)))
+    .map(([room]) => room);
+  if (fromCatalogue.length > 1) return null;
+  if (fromCatalogue.length === 1) return have.get(roomKey(fromCatalogue[0])) ?? null;
+
+  for (const hint of ROOM_HINTS) {
+    if (!hint.words.every((w) => said.has(w))) continue;
+    for (const room of hint.rooms) {
+      const here = have.get(roomKey(room));
+      if (here) return here;
+    }
+  }
+  return null;
+}
+
+/**
+ * The room the photo suggests: the reader's own answer when it names one of
+ * this place's rooms (in the place's spelling), else `roomForThing` on what it
+ * says the thing is. A reply naming a room the place has not got is ignored —
+ * the room step offers rooms, it does not invent them.
+ */
+export function suggestRoom(guess: LabelGuess | null | undefined, rooms: string[]): string | null {
+  if (!guess) return null;
+  if (guess.room) {
+    const key = roomKey(guess.room);
+    const here = rooms.find((r) => roomKey(r) === key);
+    if (here) return here;
+  }
+  return roomForThing(guess.name, rooms);
 }
 
 /**

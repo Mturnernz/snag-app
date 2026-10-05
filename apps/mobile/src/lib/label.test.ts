@@ -299,8 +299,10 @@ describe('labelOffers', () => {
 describe('parseLabelGuess', () => {
   it('reads what the photo shows, with a capital, and only kinds the walkthrough offers', () => {
     expect(parseLabelGuess({ whatItIs: 'heat pump', kindGuess: 'appliance' }))
-      .toEqual({ name: 'Heat pump', kind: 'appliance' });
-    expect(parseLabelGuess({ whatItIs: 'Paint', kindGuess: 'contact' })).toEqual({ name: 'Paint', kind: null });
+      .toEqual({ name: 'Heat pump', kind: 'appliance', room: null });
+    expect(parseLabelGuess({ whatItIs: 'Paint', kindGuess: 'contact' })).toEqual({ name: 'Paint', kind: null, room: null });
+    expect(parseLabelGuess({ whatItIs: null, kindGuess: null, roomGuess: 'Kitchen' }))
+      .toEqual({ name: null, kind: null, room: 'Kitchen' });
     expect(parseLabelGuess({ whatItIs: '  ', kindGuess: null })).toBeNull();
     expect(parseLabelGuess(null)).toBeNull();
   });

@@ -16,6 +16,11 @@ interface Props {
   startOpen?: boolean;
   /** What the closed field says when nothing is chosen. */
   placeholder?: string;
+  /**
+   * Makes a room, resolving false when it was refused (having said why). When
+   * given, the list ends in *Create a new room*; the new room is chosen at once.
+   */
+  onCreate?: (name: string) => Promise<boolean>;
 }
 
 /**
@@ -51,18 +56,46 @@ interface Props {
  *   answers to one question.
  */
 export default function RoomPicker({
-  locations, value, onChange, disabled, startOpen, placeholder = 'Pick a room',
+  locations, value, onChange, disabled, startOpen, placeholder = 'Pick a room', onCreate,
 }: Props) {
   const [open, setOpen] = useState(!!startOpen);
   const [query, setQuery] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
   const field = useRef<TextInput>(null);
 
   const shown = useMemo(() => matchRooms(locations, query), [locations, query]);
+  const createOff = saving || !name.trim();
 
-  function choose(name: string) {
-    onChange(value === name ? null : name);
+  function choose(room: string) {
+    onChange(value === room ? null : room);
     setQuery('');
     setOpen(false);
+    setCreating(false);
+  }
+
+  async function create() {
+    const wanted = name.trim();
+    if (!onCreate || !wanted || saving) return;
+    // A room this place already has is chosen, not made twice.
+    const existing = locations.find((l) => l.name.toLowerCase() === wanted.toLowerCase());
+    if (existing) {
+      choose(existing.name);
+      return;
+    }
+    setSaving(true);
+    try {
+      if (await onCreate(wanted)) {
+        onChange(wanted);
+        setQuery('');
+        setOpen(false);
+        setCreating(false);
+        setName('');
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -145,10 +178,50 @@ export default function RoomPicker({
             })}
 
             {shown.length === 0 ? (
-              <Text style={styles.miss}>
-                No room called “{query.trim()}”. Rooms are added on the House tab, or under
-                Location tags on the You tab.
-              </Text>
+              <Text style={styles.miss}>No room called “{query.trim()}”.</Text>
+            ) : null}
+
+            {/* Last row, always: the room you are standing in may not be on
+                the list yet, and the answer should not be to leave. */}
+            {onCreate ? (
+              creating ? (
+                <View style={styles.createRow}>
+                  <TextInput
+                    style={styles.createInput}
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="Name the room"
+                    placeholderTextColor={Colors.textMuted}
+                    maxLength={40}
+                    autoFocus
+                    autoCapitalize="sentences"
+                    returnKeyType="done"
+                    onSubmitEditing={create}
+                    accessibilityLabel="Name the new room"
+                  />
+                  <Pressable
+                    onPress={create}
+                    disabled={createOff}
+                    style={[styles.createButton, createOff && styles.createButtonOff]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add the room"
+                    accessibilityState={{ disabled: createOff, busy: saving }}
+                  >
+                    <Text style={[styles.createLabel, createOff && styles.createLabelOff]}>Add</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable
+                  onPress={() => { setName(query.trim()); setCreating(true); }}
+                  disabled={disabled}
+                  style={styles.row}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create a new room"
+                >
+                  <Text style={styles.createRowLabel}>Create a new room</Text>
+                  <Icon name="add" size="sm" color={Colors.primary} />
+                </Pressable>
+              )
             ) : null}
           </ScrollView>
         </View>
@@ -203,6 +276,35 @@ const styles = StyleSheet.create({
   rowOn: { backgroundColor: Colors.primary },
   rowLabel: { fontSize: Typography.base, color: Colors.textPrimary },
   rowLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
+  createRowLabel: { fontSize: Typography.base, color: Colors.primary, fontWeight: Typography.semibold },
+  createRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  createInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.sunken,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  createButton: {
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: Radius.button,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Neutral when disabled, never faded.
+  createButtonOff: { backgroundColor: Colors.sunken },
+  createLabel: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.white },
+  createLabelOff: { color: Colors.textMuted },
   miss: {
     fontSize: Typography.sm,
     color: Colors.textMuted,

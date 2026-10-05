@@ -13,6 +13,8 @@ interface Props {
   busy?: boolean;
   onSave: (update: { description: string | null; room: string | null }) => void;
   onCancel: () => void;
+  /** Makes a room the picker's *Create a new room* row asks for. */
+  onCreateRoom?: (name: string) => Promise<boolean>;
 }
 
 /**
@@ -42,7 +44,7 @@ interface Props {
  * constraint name surface from Postgres.
  */
 export default function EditSnagSheet({
-  visible, snag, locations, busy = false, onSave, onCancel,
+  visible, snag, locations, busy = false, onSave, onCancel, onCreateRoom,
 }: Props) {
   const keyboard = useKeyboardInset();
   const [words, setWords] = useState(snag.description ?? '');
@@ -98,6 +100,7 @@ export default function EditSnagSheet({
             onChange={setRoom}
             disabled={busy}
             placeholder="Nowhere in particular"
+            onCreate={onCreateRoom}
           />
 
           <View style={styles.actions}>

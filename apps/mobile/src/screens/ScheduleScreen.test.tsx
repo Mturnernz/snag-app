@@ -102,6 +102,25 @@ afterEach(() => {
 });
 
 describe('ScheduleScreen', () => {
+  it('names the one place, never the household, and Everywhere for two', async () => {
+    // Somebody let into one place of two: the household's name is a house
+    // they cannot see.
+    const bay = { id: 'b', householdId: 'h', name: 'Martins Bay' };
+    (global as any).__household = {
+      ...(global as any).__household,
+      household: { id: 'h', name: '32 Le Roy', createdAt: '' },
+      properties: [bay],
+      activeProperty: bay,
+    };
+    const one = await open([]);
+    expect(texts(one)).toContain('Martins Bay');
+    expect(texts(one)).not.toContain('32 Le Roy');
+    one.unmount();
+
+    places(2);
+    expect(texts(await open([]))).toContain('Everywhere');
+  });
+
   it('narrows by nothing at all — not the status, not the place', async () => {
     // A calendar of only the open ones is missing exactly the half somebody
     // came to check. And a date does not belong to a house: reading one

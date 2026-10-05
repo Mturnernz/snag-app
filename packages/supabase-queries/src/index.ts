@@ -474,6 +474,25 @@ export function describePlaces(names: string[] | null | undefined, fallback: str
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
+/**
+ * What a tab's large title calls where you are: the place, never the household.
+ *
+ * It was the household's name whenever somebody was on one place, which was
+ * right while everybody was on every place and their names agreed. Since a place
+ * can be shared on its own (20261004100000), somebody let into Martins Bay alone
+ * is on one place of a household called 32 Le Roy — and read the name of a house
+ * they cannot see on every tab. `places` is only the places this person is on.
+ *
+ * Empty until the places have loaded, rather than the household's name: a name
+ * shown for a moment and then replaced is the same mistake, briefly.
+ */
+export function placeTitle(
+  active: { name: string } | null | undefined,
+  places: { name: string }[]
+): string {
+  return active?.name ?? places[0]?.name ?? '';
+}
+
 /** The URL a join QR encodes, and the one shown beside it to copy. */
 export function joinUrl(appUrl: string, token: string): string {
   return `${appUrl.replace(/\/+$/, '')}/join/${token}`;

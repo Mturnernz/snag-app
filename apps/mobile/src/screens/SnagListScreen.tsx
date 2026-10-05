@@ -32,8 +32,8 @@ import { isForeground, NEW_VISIT_MS, RETURN_RELOAD_MS } from '../lib/foreground'
 import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
 import {
-  assessmentBrief, dueState, exportDateStamp, isDoneForNow, shoppingCount, shoppingList,
-  snagExportPhotos, snagExportTable, snagHeadline,
+  assessmentBrief, dueState, exportDateStamp, isDoneForNow, placeTitle, shoppingCount,
+  shoppingList, snagExportPhotos, snagExportTable, snagHeadline,
 } from '@snag/supabase-queries';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag, Thing } from '../types';
@@ -735,7 +735,7 @@ export default function SnagListScreen() {
   }
 
   const since = describeSince(seenBefore);
-  const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
+  const placeName = placeTitle(activeProperty, properties);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -1084,9 +1084,10 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  // V2: the iOS large title, the same on every tab.
+  // V2: the iOS large title, the same on every tab. It keeps its height while
+  // empty, before the places load, so the header does not jump when they do.
   title: {
-    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    fontSize: Typography.largeTitle, lineHeight: 41, minHeight: 41, fontWeight: Typography.bold,
     color: Colors.textPrimary, letterSpacing: -0.4,
   },
   // Both header buttons, from one style. They were a 48px square beside a

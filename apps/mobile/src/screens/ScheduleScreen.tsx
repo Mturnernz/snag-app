@@ -7,7 +7,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import {
-  dayKey, describeCycle, marksOn, monthGrid, scheduleMarks, snagHeadline,
+  dayKey, describeCycle, marksOn, monthGrid, placeTitle, scheduleMarks, snagHeadline,
   SCHEDULE_KIND_LABELS, type ScheduleKind, type ScheduleMark,
 } from '@snag/supabase-queries';
 import EmptyState from '../components/EmptyState';
@@ -156,7 +156,7 @@ const MONTHS = [
 export default function ScheduleScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
-  const { household, properties, profile } = useHousehold();
+  const { properties, profile } = useHousehold();
 
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
@@ -275,7 +275,7 @@ export default function ScheduleScreen() {
   // any one place, and a picker here would offer to narrow to the one thing
   // this tab exists not to narrow to.
   const manyPlaces = properties.length > 1;
-  const placeName = manyPlaces ? 'Everywhere' : household.name;
+  const placeName = manyPlaces ? 'Everywhere' : placeTitle(null, properties);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -508,9 +508,10 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  // V2: the iOS large title, the same on every tab.
+  // V2: the iOS large title, the same on every tab. It keeps its height while
+  // empty, before the places load, so the header does not jump when they do.
   title: {
-    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    fontSize: Typography.largeTitle, lineHeight: 41, minHeight: 41, fontWeight: Typography.bold,
     color: Colors.textPrimary, letterSpacing: -0.4,
   },
   todayBtn: {

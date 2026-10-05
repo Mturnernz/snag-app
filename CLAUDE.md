@@ -4118,6 +4118,13 @@ her ever seeing 32 Le Roy.
 - An invitation always **names its places** (null means the places you own, never every place), and
   `invitation_by_token` / `my_invitations` return their names: the Join screen says *Mike invited you
   to Martin's Bay*, never the household alone.
+- **A tab's title names the place, never the household** (`placeTitle`). It fell back to the
+  household's name for anybody on one place, which was right only while everybody was on every
+  place: Leonie, let into Martins Bay alone, read *32 Le Roy* on every tab. It is empty until the
+  places load rather than showing the household's name first. The household's name stays where the
+  household is meant — the Household screen and the You tab's row. 32 Le Roy's own place was still
+  called *Home* from before setup asked for one name, and was renamed on 5 October 2026; no other
+  household had a place named differently from it.
 
 So the UI has role checks now, and they are the first: on Household, the ×, *Make owner* and the
 share panel show only to a place's owner, and *Leave* to everyone. The server refuses the rest in

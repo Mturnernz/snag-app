@@ -19,8 +19,8 @@ import {
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
 import {
-  budgetRemaining, describeRemaining, exportDateStamp, groupProjectsByStatus, projectExportTable,
-  showsBudgetRemaining, type RemainingTone,
+  budgetRemaining, describeRemaining, exportDateStamp, groupProjectsByStatus, placeTitle,
+  projectExportTable, showsBudgetRemaining, type RemainingTone,
 } from '@snag/supabase-queries';
 import { writeExport, type ExportFormat } from '../lib/exportFile';
 import { showAlert } from '../lib/alert';
@@ -213,7 +213,7 @@ export default function ProjectsScreen() {
     }
   }
 
-  const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
+  const placeName = placeTitle(activeProperty, properties);
   const counts = [
     projects.filter((p) => p.status === 'underway').length,
     projects.filter((p) => p.status === 'planned').length,
@@ -548,7 +548,7 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   title: {
-    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    fontSize: Typography.largeTitle, lineHeight: 41, minHeight: 41, fontWeight: Typography.bold,
     color: Colors.textPrimary, letterSpacing: -0.4,
   },
   sub: { fontSize: Typography.subhead, color: Colors.textMuted, marginTop: 2 },

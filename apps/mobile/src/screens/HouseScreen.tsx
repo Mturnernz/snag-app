@@ -7,7 +7,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import {
-  describeHouseRoom, exportDateStamp, houseRooms, searchThings, thingExportPhotos,
+  describeHouseRoom, exportDateStamp, houseRooms, placeTitle, searchThings, thingExportPhotos,
   thingExportTable, type HouseRoom,
 } from '@snag/supabase-queries';
 import ThingCard from '../components/ThingCard';
@@ -243,7 +243,7 @@ export default function HouseScreen() {
    */
   const roomNames = useMemo(() => locations.map((l) => l.name), [locations]);
 
-  const placeName = properties.length > 1 ? activeProperty?.name ?? household.name : household.name;
+  const placeName = placeTitle(activeProperty, properties);
   const empty = !loading && (searching ? visible.length === 0 : rooms.length === 0);
 
   return (
@@ -545,9 +545,10 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.sm,
   },
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  // V2: the iOS large title, the same on every tab.
+  // V2: the iOS large title, the same on every tab. It keeps its height while
+  // empty, before the places load, so the header does not jump when they do.
   title: {
-    fontSize: Typography.largeTitle, lineHeight: 41, fontWeight: Typography.bold,
+    fontSize: Typography.largeTitle, lineHeight: 41, minHeight: 41, fontWeight: Typography.bold,
     color: Colors.textPrimary, letterSpacing: -0.4,
   },
   searchRow: {

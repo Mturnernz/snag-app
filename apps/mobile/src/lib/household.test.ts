@@ -1,4 +1,4 @@
-import { countMyHouseholds, getMyHousehold, joinUrl } from '@snag/supabase-queries';
+import { countMyHouseholds, getMyHousehold, joinUrl, placeTitle } from '@snag/supabase-queries';
 
 // `getMyHousehold` answers the gate the whole app hangs off — App.tsx renders
 // Setup or the navigator on it — and it used to answer it wrong in a way
@@ -115,5 +115,25 @@ describe('joinUrl', () => {
   it('does not double the slash when the host carries one', () => {
     expect(joinUrl('https://app.snaghq.co.nz/', TOKEN))
       .toBe(`https://app.snaghq.co.nz/join/${TOKEN}`);
+  });
+});
+
+describe('placeTitle', () => {
+  const bay = { name: 'Martins Bay' };
+  const house = { name: '32 Le Roy' };
+
+  it('names the place being shown', () => {
+    expect(placeTitle(bay, [house, bay])).toBe('Martins Bay');
+  });
+
+  // The places are back before the server has said which one to start on.
+  it('names the first place while the active one is still being chosen', () => {
+    expect(placeTitle(null, [bay])).toBe('Martins Bay');
+  });
+
+  // Not the household's name: for somebody let into one place of two, that is
+  // a house they cannot see, and showing it for a moment is the bug briefly.
+  it('names nothing before the places have loaded', () => {
+    expect(placeTitle(null, [])).toBe('');
   });
 });

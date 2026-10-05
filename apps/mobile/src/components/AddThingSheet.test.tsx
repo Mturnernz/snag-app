@@ -310,6 +310,64 @@ it('sends no spec for an appliance whose plate printed no year', async () => {
 });
 
 /** Label reading as v1 ships it: off (lib/labelReading.ts). */
+describe('a name the room already has', () => {
+  // The second weed killer in the Garage was recorded because the first looked
+  // lost. The walkthrough says so above *Add it* and offers the one already
+  // there — a warning, never a lock, because two smoke alarms are real.
+  const onOpenThing = jest.fn();
+  const recordedThing = (room: string | null, name: string) => ({
+    id: 'already', householdId: 'h', propertyId: 'p', kind: 'appliance', name, room,
+  }) as any;
+
+  async function openOver(recorded: any[], room = 'Kitchen', name = 'Oven') {
+    let r!: RenderResult;
+    await TestRenderer.act(async () => {
+      r = render(
+        <AddThingSheet
+          visible
+          locations={[{ id: 'l1', propertyId: 'p', name: 'Kitchen', sortOrder: 0 } as any]}
+          pathPrefix="h1"
+          start={{ room, name, kind: 'appliance' }}
+          onAddRoom={jest.fn()}
+          onCancel={jest.fn()}
+          onAdd={onAdd}
+          recorded={recorded}
+          onOpenThing={onOpenThing}
+        />
+      );
+    });
+    // Room and name are answered, so passing the photo lands on the last step.
+    await tap(r, 'Skip for now');
+    expect(texts(r)).toContain('Anything else?');
+    return r;
+  }
+
+  it('says the room already has one, in its own spelling, and opens it without writing', async () => {
+    const r = await openOver([recordedThing('Kitchen', 'oven')]);
+    expect(texts(r)).toContain('Kitchen already has oven');
+
+    await tap(r, 'Open the oven already recorded');
+    expect(onOpenThing).toHaveBeenCalledWith('already');
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('still adds a second one when asked', async () => {
+    const r = await openOver([recordedThing('Kitchen', 'Oven')]);
+    await tap(r, 'Add it to the house');
+    expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ room: 'Kitchen', name: 'Oven' }));
+  });
+
+  it('says nothing about the same name in another room', async () => {
+    const r = await openOver([recordedThing('Laundry', 'Oven')]);
+    expect(texts(r).some((t) => /already has/.test(t))).toBe(false);
+  });
+
+  it('says nothing about a longer name', async () => {
+    const r = await openOver([recordedThing('Kitchen', 'Wall oven')]);
+    expect(texts(r).some((t) => /already has/.test(t))).toBe(false);
+  });
+});
+
 function withLabelReadingOff() {
   beforeEach(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'off'; });
   afterEach(() => { process.env.EXPO_PUBLIC_LABEL_READING = 'on'; });

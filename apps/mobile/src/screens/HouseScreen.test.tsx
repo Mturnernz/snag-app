@@ -34,7 +34,13 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../components/AddThingSheet', () => {
   const React = require('react');
   const { Text } = require('react-native');
-  return { __esModule: true, default: () => React.createElement(Text, null, 'add sheet') };
+  return {
+    __esModule: true,
+    default: (props: any) => {
+      (global as any).__addSheet = props;
+      return React.createElement(Text, null, 'add sheet');
+    },
+  };
 });
 
 const mock_writeExport = jest.fn().mockResolvedValue({ fileName: 'house.csv', path: null });
@@ -51,17 +57,19 @@ const mock_getThings = jest.fn();
 const mock_getAbsentThings = jest.fn();
 const mock_markThingAbsent = jest.fn();
 const mock_getLabelReadingsToCheck = jest.fn();
+const mock_createThing = jest.fn();
 jest.mock('../lib/supabase', () => ({
   getLabelReadingsToCheck: (...a: unknown[]) => mock_getLabelReadingsToCheck(...a),
   getThings: (...a: unknown[]) => mock_getThings(...a),
   getAbsentThings: (...a: unknown[]) => mock_getAbsentThings(...a),
   markThingAbsent: (...a: unknown[]) => mock_markThingAbsent(...a),
   getFileUrls: jest.fn().mockResolvedValue({}),
-  createThing: jest.fn(),
+  createThing: (...a: unknown[]) => mock_createThing(...a),
   createLocation: (...a: unknown[]) => mock_createLocation(...a),
 }));
 jest.mock('../lib/serviceJob', () => ({ fileServiceJob: jest.fn() }));
-jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
+const mock_showToast = jest.fn();
+jest.mock('../hooks/useToast', () => ({ useToast: () => ({ showToast: mock_showToast }) }));
 jest.mock('../lib/alert', () => ({ showAlert: jest.fn() }));
 jest.mock('../hooks/useHousehold', () => ({ useHousehold: () => (global as any).__household }));
 
@@ -425,6 +433,55 @@ describe('HouseScreen', () => {
 
     expect(mock_createLocation).toHaveBeenCalledWith('p', 'Conservatory');
     expect(mock_reloadLocations).toHaveBeenCalled();
+  });
+
+  it('opens a room the place already has, rather than refusing it', async () => {
+    // The Garage was there all along — hidden under *Recorded* while it held
+    // nothing, and the ninth tile of thirteen once it held a weed killer — so
+    // somebody typed it here, and the server's refusal came up as a browser
+    // alert calling it a tag. Now nothing is written and the room opens.
+    arrange(['Laundry', 'Garage', 'Deck']);
+    mock_getThings.mockResolvedValue([thing({ id: 'd', name: 'Dryer', room: 'Laundry' })]);
+    const result = render(<HouseScreen />);
+    await settle();
+    expect(tile(result, 'Garage')).toBeUndefined();
+
+    await TestRenderer.act(async () => pressable(result, 'Add a room').props.onPress());
+    const field = result.root.findAll(
+      (n: any) => typeof n.type === 'string' && n.props?.accessibilityLabel === 'Name the room',
+      { deep: true }
+    )[0];
+    await TestRenderer.act(async () => field.props.onChangeText('garage'));
+    expect(texts(result)).toContain('Garage is already a room here');
+
+    await TestRenderer.act(async () => pressable(result, 'Open Garage').props.onPress());
+    expect(mock_navigate).toHaveBeenCalledWith('HouseRoom', { room: 'Garage' });
+    expect(mock_createLocation).not.toHaveBeenCalled();
+  });
+
+  it('says which room a new thing went into, with a way there', async () => {
+    // From the grid there is no room on screen, so the toast always offers it.
+    render(<HouseScreen />);
+    await settle();
+    const sheet = (global as any).__addSheet;
+    mock_createThing.mockResolvedValue(thing({ id: 'new', name: 'Weed Killer', room: 'Garage' }));
+    await TestRenderer.act(async () => {
+      await sheet.onAdd({ kind: 'appliance', room: 'Garage', name: 'Weed Killer', photoPaths: [], documentPaths: [] });
+    });
+
+    const [said, action] = mock_showToast.mock.calls[0];
+    expect(said).toBe('Added to Garage');
+    expect(action.label).toBe('Open');
+    action.onPress();
+    expect(mock_navigate).toHaveBeenCalledWith('HouseRoom', { room: 'Garage' });
+  });
+
+  it('hands the walkthrough everything recorded at the place', async () => {
+    const recorded = [thing({ id: 'wk', name: 'Weed Killer', room: 'Garage' })];
+    mock_getThings.mockResolvedValue(recorded);
+    render(<HouseScreen />);
+    await settle();
+    expect((global as any).__addSheet.recorded).toEqual(recorded);
   });
 
   it("offers the rooms this place hasn't got as cards, most common first", async () => {

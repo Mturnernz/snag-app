@@ -392,7 +392,7 @@ export default function HouseScreen() {
 
       <Fab onPress={() => adding.open(null)} accessibilityLabel="Add something to the house" />
 
-      <AddThingSheet {...adding.sheet} />
+      <AddThingSheet {...adding.sheet} recorded={things} />
 
       <ExportSheet
         visible={showExport}
@@ -407,6 +407,12 @@ export default function HouseScreen() {
         visible={roomOpen}
         existing={roomNames}
         onAdd={adding.addRoom}
+        onOpen={(room) => {
+          // A room typed that is already here: open it, even when *Recorded*
+          // is hiding it because nothing is in it yet.
+          setRoomOpen(false);
+          navigation.navigate('HouseRoom', { room });
+        }}
         onClose={() => setRoomOpen(false)}
       />
 

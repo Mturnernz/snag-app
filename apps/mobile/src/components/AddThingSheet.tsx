@@ -6,7 +6,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
-import { TextButton } from './Grouped';
+import { Pill, TextButton } from './Grouped';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { compressAndUpload, photoFileName, pickPhotos, takePhoto } from '../lib/photoUpload';
@@ -15,11 +15,11 @@ import { labelReadingEnabled } from '../lib/labelReading';
 import { readLabel, resolveLabelReading, uploadFile } from '../lib/supabase';
 import {
   applyLabelReading, catalogueSuggestions, describeCycle, documentFileName, documentName,
-  LabelReadError, matchSuggestions, suggestionsForRoom, swatchColour,
+  LabelReadError, matchSuggestions, sameNamedThing, suggestionsForRoom, swatchColour, WHOLE_HOUSE,
   type LabelGuess, type LabelReading, type ThingInput,
 } from '@snag/supabase-queries';
 import {
-  Location, SERVICE_CYCLES, ThingKind, ThingSpec, THING_KINDS, THING_KIND_LABELS,
+  Location, SERVICE_CYCLES, Thing, ThingKind, ThingSpec, THING_KINDS, THING_KIND_LABELS,
 } from '../types';
 
 /**
@@ -103,10 +103,15 @@ interface Props {
    * label to be made out.
    */
   onLateReading?: (name: string, readable: boolean) => void;
+  /** Everything recorded at this place, to say so when the room already has one by this name. */
+  recorded?: Thing[];
+  /** *Open that one*: leaves the walkthrough, writing nothing, for the thing already recorded. */
+  onOpenThing?: (thingId: string) => void;
 }
 
 export default function AddThingSheet({
   visible, locations, pathPrefix, start, onAddRoom, onCancel, onAdd, onLateReading,
+  recorded = [], onOpenThing,
 }: Props) {
   const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
@@ -221,6 +226,19 @@ export default function AddThingSheet({
   const flow = STEPS.filter((one) => one === step || !skipped.includes(one));
   const index = flow.indexOf(step);
   const painting = kind === 'finish';
+
+  /**
+   * Something this room already has under this name, said above *Add it*.
+   *
+   * A warning and never a lock — two smoke alarms in one hallway are real —
+   * the duplicate-bill rule. It exists because a weed killer recorded in the
+   * Garage looked lost and was recorded again: the second one would have been
+   * this line, and *Open that one*.
+   */
+  const already = useMemo(
+    () => (step === 'details' ? sameNamedThing(recorded, room, name) : null),
+    [step, recorded, room, name],
+  );
 
   /**
    * What this room offers — the same list the ghosts are drawn from, so the two
@@ -1104,6 +1122,21 @@ export default function AddThingSheet({
           </>
         ) : null}
 
+        {already ? (
+          <View style={styles.already}>
+            <Text style={styles.alreadyText} accessibilityLiveRegion="polite">
+              {room ?? WHOLE_HOUSE} already has {already.name}
+            </Text>
+            {onOpenThing ? (
+              <Pill
+                label="Open that one"
+                accessibilityLabel={`Open the ${already.name} already recorded`}
+                onPress={() => onOpenThing(already.id)}
+              />
+            ) : null}
+          </View>
+        ) : null}
+
         {/* ── the one control that moves ──────────────────────────────── */}
         {step === 'details' ? (
           <Pressable
@@ -1387,6 +1420,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   footer: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  already: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: Spacing.sm },
+  alreadyText: { flexShrink: 1, fontSize: Typography.footnote, color: Colors.textSecondary },
   cta: {
     minHeight: MIN_TOUCH_TARGET,
     borderRadius: Radius.button,

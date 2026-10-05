@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 
-import { roomsToOffer } from '@snag/supabase-queries';
+import { roomAlreadyHere, roomsToOffer } from '@snag/supabase-queries';
 import Sheet from './Sheet';
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -13,6 +13,12 @@ interface Props {
   existing: string[];
   /** Writes the room. Resolves false when it was refused, having said why itself. */
   onAdd: (name: string) => Promise<boolean>;
+  /**
+   * Opens a room this place already has, when somebody types its name. The
+   * House tab's door passes it; setup's has no room page to open, so it leaves
+   * it out and the sheet only says the room is there.
+   */
+  onOpen?: (room: string) => void;
   onClose: () => void;
 }
 
@@ -35,8 +41,17 @@ interface Props {
  * **Leaving adds a name still in the box**, on *Done*, the backdrop or Android's
  * back, the same as every box in this app. A refused name holds the sheet open
  * with the words still there rather than closing over something it did not take.
+ *
+ * **A room this place already has is a way in, not a refusal.** Somebody typed
+ * "Garage" into this box because they could not see the Garage: it was the
+ * ninth tile of thirteen, below the fold, holding the weed killer they had just
+ * recorded. The server refused the duplicate in a browser alert calling it a
+ * tag. So the box is read against the rooms first (`roomAlreadyHere`), and a
+ * match writes nothing: a line says the room is here, and on the House tab the
+ * button becomes *Open*. Leaving with it in the box closes quietly, since there
+ * is nothing left to add.
  */
-export default function AddRoomSheet({ visible, existing, onAdd, onClose }: Props) {
+export default function AddRoomSheet({ visible, existing, onAdd, onOpen, onClose }: Props) {
   const [draft, setDraft] = useState('');
   /** Rooms written from here, kept out of the cards before the caller's re-read lands. */
   const [added, setAdded] = useState<string[]>([]);
@@ -50,6 +65,11 @@ export default function AddRoomSheet({ visible, existing, onAdd, onClose }: Prop
   }, [visible]);
 
   const offered = useMemo(() => roomsToOffer([...existing, ...added]), [existing, added]);
+  /** The room the box already names, if it names one this place has. */
+  const already = useMemo(
+    () => roomAlreadyHere([...existing, ...added], draft),
+    [existing, added, draft],
+  );
 
   const pairs = useMemo(() => {
     const out: string[][] = [];
@@ -72,6 +92,11 @@ export default function AddRoomSheet({ visible, existing, onAdd, onClose }: Prop
   async function addTyped(): Promise<boolean> {
     const name = draft.trim();
     if (!name) return true;
+    // Already here: nothing to add, and nothing to refuse.
+    if (already) {
+      setDraft('');
+      return true;
+    }
     const ok = await add(name);
     if (ok) setDraft('');
     return ok;
@@ -83,6 +108,14 @@ export default function AddRoomSheet({ visible, existing, onAdd, onClose }: Prop
     onClose();
   }
 
+  function submitTyped() {
+    if (already) {
+      if (onOpen) onOpen(already);
+      return;
+    }
+    addTyped();
+  }
+
   const typedOff = !!busy || !draft.trim();
 
   return (
@@ -92,29 +125,51 @@ export default function AddRoomSheet({ visible, existing, onAdd, onClose }: Prop
       closeLabel="Done"
       onClose={close}
       footer={
-        <View style={styles.other}>
-          <TextInput
-            style={styles.input}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Name another room"
-            placeholderTextColor={Colors.textMuted}
-            maxLength={40}
-            autoCapitalize="sentences"
-            returnKeyType="done"
-            onSubmitEditing={addTyped}
-            accessibilityLabel="Name the room"
-          />
-          <Pressable
-            onPress={addTyped}
-            disabled={typedOff}
-            style={[styles.addButton, typedOff && styles.addButtonOff]}
-            accessibilityRole="button"
-            accessibilityLabel="Add the room"
-            accessibilityState={{ disabled: typedOff, busy: !!busy && busy === draft.trim() }}
-          >
-            <Text style={[styles.addButtonLabel, typedOff && styles.addButtonLabelOff]}>Add</Text>
-          </Pressable>
+        <View style={styles.footer}>
+          {already ? (
+            <Text style={styles.already} accessibilityLiveRegion="polite">
+              {already} is already a room here
+            </Text>
+          ) : null}
+          <View style={styles.other}>
+            <TextInput
+              style={styles.input}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Name another room"
+              placeholderTextColor={Colors.textMuted}
+              maxLength={40}
+              autoCapitalize="sentences"
+              returnKeyType="done"
+              onSubmitEditing={submitTyped}
+              accessibilityLabel="Name the room"
+            />
+            {already ? (
+              // A dead button under the line would be a choice that isn't one,
+              // so without a room page to open there is no button at all.
+              onOpen ? (
+                <Pressable
+                  onPress={() => onOpen(already)}
+                  style={styles.addButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${already}`}
+                >
+                  <Text style={styles.addButtonLabel}>Open</Text>
+                </Pressable>
+              ) : null
+            ) : (
+              <Pressable
+                onPress={addTyped}
+                disabled={typedOff}
+                style={[styles.addButton, typedOff && styles.addButtonOff]}
+                accessibilityRole="button"
+                accessibilityLabel="Add the room"
+                accessibilityState={{ disabled: typedOff, busy: !!busy && busy === draft.trim() }}
+              >
+                <Text style={[styles.addButtonLabel, typedOff && styles.addButtonLabelOff]}>Add</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
       }
     >
@@ -184,6 +239,8 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: Typography.body, fontWeight: Typography.semibold, color: Colors.textPrimary },
   none: { fontSize: Typography.footnote, color: Colors.textMuted },
+  footer: { gap: Spacing.sm },
+  already: { fontSize: Typography.footnote, color: Colors.textSecondary },
   other: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   input: {
     flex: 1,

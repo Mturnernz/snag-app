@@ -1234,7 +1234,9 @@ answer across every room.
 `HouseRoomScreen.test.tsx` pins the kind headings appearing only at two kinds, a tile under *Paint
 and finishes*, the suggestions under their own heading after the records, a dismissal that is
 final and put back on a refusal, the + and a tapped ghost opening the walkthrough where they
-should, Whole house never furnished, and only this room's covers being signed.
+should, Whole house never furnished, and only this room's covers being signed. It also pins the
+toast after adding — *Added to …* with no *Open* for the room on screen, *Open* for another one,
+Whole house named as such — and the sheet being handed the record and a way to open one.
 
 ### Paint is the one suggestion that works differently
 
@@ -1297,10 +1299,23 @@ from a card is as furnished as a seeded one.
   handing in its own `create_location` write, so the two cannot offer or add rooms differently.
   The *Add a room…* chips inside other flows (the walkthrough, a project's rooms, a bill's rooms)
   still take a typed name only.
+- **A room this place already has is a way in, not a refusal** (October 2026). Somebody recorded a
+  weed killer in the Garage from the grid, could not find it — the Garage, holding one thing, was
+  the ninth tile of thirteen, below the fold — recorded it again, then typed *Garage* here. The
+  server refused the duplicate in a browser alert calling it a *tag*. So the box is read against
+  the rooms first (`roomAlreadyHere`: `roomKey`, so *garage*, *Garage room* and *En-suite* all
+  count, but never by substring and never through `also` — typing *Lounge* beside a Living room
+  says there are two). A match writes nothing: a line says *Garage is already a room here*, and on
+  the House tab the button becomes **Open**, which opens the room's page even while *Recorded* is
+  hiding it. Setup's door has no room page, so it gets the line and no button. Leaving with the
+  name in the box closes quietly — there is nothing left to add, and nothing was refused.
 
 `commonRooms.test.ts` pins the ranking and the comparison as properties (no two rooms read as one;
-every seeded name is on the list); `AddRoomSheet.test.tsx` pins the order, the tap, the refusal and
-the box on the way out; `HouseScreen.test.tsx` and `SetupFlow.test.tsx` pin each door.
+every seeded name is on the list) and `roomAlreadyHere`; `AddRoomSheet.test.tsx` pins the order,
+the tap, the refusal, the box on the way out, and a room already here — the line, nothing written,
+*Open* on Return and on the press, the quiet close, no button without `onOpen`;
+`HouseScreen.test.tsx` and `SetupFlow.test.tsx` pin each door, and the House tab's *Open* reaching
+a room *Recorded* is hiding.
 
 The chip is on the room step because **the moment somebody notices the conservatory is missing is the
 moment they are trying to record something in it** — sending them to Profile → Location tags and
@@ -1403,6 +1418,18 @@ weakest thing the record can hold. **Do not put the compose bar back on this tab
 - The photo step asks for nothing, so its button reads **"Skip for now"** until there is a photo
   and **"Next"** after. It used to be a Next and a Skip side by side, which was two controls with
   one outcome.
+- **It says where the thing went** (October 2026). The toast was *Added to the house*, and on a
+  grid sorted busiest room first a room holding one new thing is near the foot — the weed killer
+  above read as lost and was recorded twice. Now it says **Added to Garage** with **Open**, which
+  opens that room (`useAddThing(onAdded, showingRoom)`); on a room's own page *Open* is offered
+  only when the walkthrough filed it somewhere else. A service job's toast keeps its own words,
+  since that is the bigger news, and still offers *Open*.
+- **A name the room already has is said, never refused.** Above *Add it*, when the room already
+  holds something by exactly that name (`sameNamedThing`: any case or spacing, same room, never a
+  substring — "Smoke alarm 2" is not "Smoke alarm"), a line reads *Garage already has Weed Killer*
+  with **Open that one**, which leaves the walkthrough writing nothing. *Add it* stays live: two
+  smoke alarms are real, and this is `findDuplicateBill`'s rule — a warning, never a lock. Both
+  screens hand the sheet every thing at the place (`recorded`).
 
 The failure mode all of this is built against is specific, and it is the reason there are no
 required fields past the room: every house-inventory product ever shipped opens on an empty
@@ -1569,7 +1596,9 @@ deploy `read-label` (its reply only gains `readingId`, so the live client keeps 
 real plate and close the sheet before it lands to check the row appears, then merge.
 `AddThingSheet.test.tsx` pins the photo-first order, moving on before the read is back, *Add it*
 waiting on the upload and never the read, the late reading handed on rather than laid in, the
-failed-upload way out, *used* on a reading that was shown, and the guess never overriding a tap.
+failed-upload way out, *used* on a reading that was shown, the guess never overriding a tap, and
+a name the room already has said above *Add it* — *Open that one* writing nothing, *Add it* still
+adding, and silence for another room or a longer name.
 `ThingDetailScreen.test.tsx` pins the card's one write, the disagreement's own tap, *Not right*,
 the self-closing reading, *Try again*, and the page surviving a failed read of the readings;
 `HouseScreen.test.tsx` the pill and its absence at nought; `HouseRoomScreen.test.tsx` the row's
@@ -1938,8 +1967,11 @@ yet* words before any suggestion a tile names, the busiest room first, a tile pa
 wall and never a feature wall, white words on a dark wall, four bullets fading only when there are
 more, Whole house last and unfurnished, a tile opening
 its room (null for Whole house), a search answering flat with no ghosts and no tiles in it, a
-dismissed suggestion leaving the count, and the absence of any grouping or fold control.
-`houseRecord.test.ts` pins `houseRooms`, `describeHouseRoom`, `wallColour` and `thingKindGroups`;
+dismissed suggestion leaving the count, and the absence of any grouping or fold control. It
+pins the toast naming the room a new thing went into with *Open*, and the walkthrough being handed
+the record.
+`houseRecord.test.ts` pins `houseRooms`, `describeHouseRoom`, `wallColour`, `thingKindGroups` and
+`sameNamedThing` (same room, any case, never a substring, null as Whole house);
 `roomIcon.test.ts` the seeded twelve and the qualifier rule. `houseRecord.test.ts` pins the catalogue being deduplicated, reaching across
 rooms and carrying only describable kinds, the substring matcher (including "wash" finding the
 dishwasher, which is right rather than a near miss) and the miss that puts *Add it yourself* on

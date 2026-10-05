@@ -1,4 +1,4 @@
-import { roomsToOffer } from '@snag/supabase-queries';
+import { roomAlreadyHere, roomsToOffer } from '@snag/supabase-queries';
 import { COMMON_ROOMS, ROOM_SUGGESTIONS } from '../types';
 
 // *Add a room* offers the rooms a house usually has and this one hasn't, most
@@ -81,5 +81,38 @@ describe('the rooms Add a room offers', () => {
     for (const seeded of Object.keys(ROOM_SUGGESTIONS).filter((r) => r !== 'Elsewhere' && r !== 'Bedroom')) {
       expect(names).toContain(seeded);
     }
+  });
+});
+
+describe('a typed room the place already has', () => {
+  // *Add a room*'s box asks this before it writes. A match is a way into the
+  // room rather than a refusal: the Garage typed there had been on the House
+  // tab all along, below the fold.
+  const LE_ROY = [...SEEDED_BEFORE, 'Guest Bedroom', 'Master Bedroom', 'Ensuite'];
+
+  it("answers with the place's own spelling, past case, spacing and a trailing \"room\"", () => {
+    expect(roomAlreadyHere(LE_ROY, 'garage')).toBe('Garage');
+    expect(roomAlreadyHere(LE_ROY, '  GARAGE ')).toBe('Garage');
+    expect(roomAlreadyHere(LE_ROY, 'Garage room')).toBe('Garage');
+    expect(roomAlreadyHere(LE_ROY, 'En-suite')).toBe('Ensuite');
+    expect(roomAlreadyHere(LE_ROY, 'master bedroom')).toBe('Master Bedroom');
+  });
+
+  it('never matches a room that only contains the name', () => {
+    expect(roomAlreadyHere(['Bedroom'], 'Bedroom 2')).toBeNull();
+    expect(roomAlreadyHere(['Bedroom 2'], 'Bedroom')).toBeNull();
+    expect(roomAlreadyHere(['Garden Shed'], 'Shed')).toBeNull();
+  });
+
+  it("never reads another room's other name as that room", () => {
+    // The cards leave out a Living room when there is a Lounge, because they
+    // are offering. Somebody typing one beside the other has said there are two.
+    expect(roomAlreadyHere(['Living room'], 'Lounge')).toBeNull();
+    expect(roomAlreadyHere(['Hallway'], 'Hall')).toBeNull();
+  });
+
+  it('has nothing to say about an empty box', () => {
+    expect(roomAlreadyHere(LE_ROY, '')).toBeNull();
+    expect(roomAlreadyHere(LE_ROY, '   ')).toBeNull();
   });
 });

@@ -110,7 +110,7 @@ export default function HouseRoomScreen({ route }: Props) {
     if (navigation.isFocused?.() ?? true) load();
   }, RETURN_RELOAD_MS);
 
-  const adding = useAddThing(load);
+  const adding = useAddThing(load, room);
 
   const recorded = useMemo(() => thingsInArea(things, room), [things, room]);
   const groups = useMemo(() => thingKindGroups(recorded), [recorded]);
@@ -215,7 +215,7 @@ export default function HouseRoomScreen({ route }: Props) {
         ) : null}
       </ScrollView>
 
-      <AddThingSheet {...adding.sheet} />
+      <AddThingSheet {...adding.sheet} recorded={things} />
     </View>
   );
 }

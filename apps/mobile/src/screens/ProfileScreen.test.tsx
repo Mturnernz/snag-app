@@ -353,3 +353,12 @@ describe('projects in v1', () => {
     expect(mock_getSnags).toHaveBeenCalledWith({ excludeProjectSnags: true });
   });
 });
+
+describe('How Snag works', () => {
+  it('opens the tour again, with no Try it', async () => {
+    const r = await renderProfile();
+    await TestRenderer.act(async () => { pressableAround(r, 'How Snag works').props.onPress(); });
+    expect(r.queryByText('Set up your house')).not.toBeNull();
+    expect(r.queryByText('Add a room')).toBeNull();
+  });
+});

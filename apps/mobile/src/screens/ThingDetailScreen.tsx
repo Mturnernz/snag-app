@@ -30,7 +30,7 @@ import {
 import {
   createSnag, deleteStoredFiles, deleteThing, getFileUrl, getFileUrls, getLabelReadingsToCheck,
   getProductLookup, getSnags, getThing, lookUpProduct, readLabel, resolveLabelReading, setSnagStatus,
-  updateSnag, updateThing, uploadFile,
+  updateSnag, updateThing, uploadFile, getThings, setThingUses,
 } from '../lib/supabase';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import { deleteFileLater, keepFile, withoutPhoto, withPhotoBack } from '../lib/photoEdits';
@@ -38,13 +38,14 @@ import ComposeBar from '../components/ComposeBar';
 import LabelReadingCard from '../components/LabelReadingCard';
 import PaintAreaSheet from '../components/PaintAreaSheet';
 import ProductFactsCard from '../components/ProductFactsCard';
+import LinkAssetsSheet from '../components/LinkAssetsSheet';
 import { TILE_SCRIM, tileInk } from '../lib/tileInk';
 import { failureReason } from '../lib/deadline';
 import { showAlert } from '../lib/alert';
 import { labelReadingEnabled } from '../lib/labelReading';
 import { copyToClipboard } from '../lib/clipboard';
 import {
-  FINISH_SPEC_FIELDS, RootStackParamList, SERVICE_CYCLES, Snag, Thing, ThingKind,
+  CONSUMABLE_SPEC_FIELDS, FINISH_SPEC_FIELDS, RootStackParamList, SERVICE_CYCLES, Snag, Thing, ThingKind,
   THING_KIND_FIELD_LABELS,
 } from '../types';
 
@@ -128,7 +129,19 @@ const isDateKey = (key: string): key is 'installedAt' | 'warrantyUntil' =>
  * went. The column is left alone, so a date already there is kept.
  */
 const dateFieldsFor = (kind: ThingKind) =>
-  kind === 'finish' ? DATE_FIELDS.filter((field) => field.key !== 'installedAt') : DATE_FIELDS;
+  kind === 'consumable'
+    ? []
+    : kind === 'finish' ? DATE_FIELDS.filter((field) => field.key !== 'installedAt') : DATE_FIELDS;
+
+/**
+ * What goes on the shopping list for a consumable: the brand and the product
+ * as they are read off the shelf — *Finish Quantum Ultimate* — or its name
+ * when neither was recorded.
+ */
+export function consumableItem(thing: Thing): string {
+  const shelf = [thing.make, thing.model].filter((one) => one && one.trim()).join(' ').trim();
+  return shelf || thingHeadline(thing);
+}
 
 /** How often a lookup still under way is asked about again, while the page is open. */
 const LOOKUP_POLL_MS = 8_000;
@@ -224,6 +237,13 @@ export default function ThingDetailScreen() {
   const [viewing, setViewing] = useState<number | null>(null);
   /** Twelve chips stand down to one pill until somebody says otherwise. */
   const [roomOpen, setRoomOpen] = useState(false);
+  /**
+   * A consumable's *Used with* picker, and what it offers: everything recorded
+   * at this place that is not itself used up. Read when it opens, never fatal.
+   */
+  const [usesOpen, setUsesOpen] = useState(false);
+  const [usable, setUsable] = useState<Thing[]>([]);
+  const [usableLoading, setUsableLoading] = useState(false);
   const [service, setService] = useState<ServiceDraft | null>(null);
   /**
    * The repeating job on the list that services this thing, if any. The one
@@ -824,6 +844,38 @@ export default function ThingDetailScreen() {
    * being about this thing everywhere), then `update_snag` gives it its part. A
    * job that lands without the part is still a correct job, and says so.
    */
+  /** Opens *Used with*, reading what this place has recorded to offer. */
+  async function openUses() {
+    if (!thing) return;
+    setUsesOpen(true);
+    setUsableLoading(true);
+    try {
+      const all = await getThings(thing.propertyId);
+      setUsable(all.filter((one) => one.kind !== 'consumable' && one.id !== thing.id));
+    } catch {
+      setUsable([]);
+    } finally {
+      setUsableLoading(false);
+    }
+  }
+
+  /** The whole set, in one write, then the record read again so the pills say what was kept. */
+  async function saveUses(ids: string[]) {
+    if (!thing) return;
+    setBusy(true);
+    try {
+      await setThingUses(thing.id, ids);
+      setUsesOpen(false);
+      const fresh = await getThing(thing.id);
+      setThing(fresh);
+      showToast('Saved');
+    } catch (err: any) {
+      showAlert("Couldn't save that", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addToShoppingList(item: string) {
     if (!thing || busy) return;
     setBusy(true);
@@ -1045,7 +1097,9 @@ export default function ThingDetailScreen() {
   // photos and a line of text under them.
   const specFields = isPaint
     ? FINISH_SPEC_FIELDS.filter((field) => field.key !== 'hex')
-    : KINDS_WITH_SERIAL.includes(thing.kind) ? MADE_FIELDS : [];
+    : thing.kind === 'consumable'
+      ? CONSUMABLE_SPEC_FIELDS
+      : KINDS_WITH_SERIAL.includes(thing.kind) ? MADE_FIELDS : [];
   const dateFields = dateFieldsFor(thing.kind);
   // Every field the kind can answer is named on screen, empty or not. It used
   // to show only what was filled in, with the rest behind an "Add a detail" row
@@ -1489,6 +1543,79 @@ export default function ThingDetailScreen() {
           </View>
         )}
 
+        {/* ── what it goes with ──────────────────────────────────────────
+            A consumable says what it is used with, and each one opens; an
+            appliance says what it uses. One link, read from both ends
+            (`home.thing_uses`), so the two pages cannot disagree. */}
+        {thing.kind === 'consumable' ? (
+          <>
+            <Text style={styles.sectionLabel}>Used with</Text>
+            <View style={styles.chips}>
+              {(thing.usedWith ?? []).map((link) => (
+                <Pressable
+                  key={link.id}
+                  onPress={() => navigation.push('ThingDetail', { thingId: link.id })}
+                  style={styles.chipTap}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${link.name ?? 'it'}`}
+                >
+                  <View style={styles.chip}>
+                    <Text style={styles.chipLabel}>{link.name ?? 'Unnamed'}</Text>
+                  </View>
+                </Pressable>
+              ))}
+              {(thing.usedWith ?? []).length === 0 ? (
+                <View style={styles.chipTap}>
+                  <Text style={styles.serviceNow}>Nothing</Text>
+                </View>
+              ) : null}
+              <Pressable
+                onPress={openUses}
+                disabled={busy}
+                style={styles.change}
+                accessibilityRole="button"
+                accessibilityLabel="Change what it is used with"
+              >
+                <Text style={styles.changeLabel}>Change</Text>
+              </Pressable>
+            </View>
+            {/* The cart beside a part, for the pack itself: a small job about
+                this record, carrying it as the part, so the trip sheet picks it
+                up — and asked first, so a second tap is not a second row. */}
+            <Pressable
+              onPress={() => addToShoppingList(consumableItem(thing))}
+              disabled={busy}
+              style={styles.addDetail}
+              accessibilityRole="button"
+              accessibilityLabel="Running low — add it to the shopping list"
+            >
+              <Icon name="cart-outline" size="sm" color={Colors.primary} />
+              <Text style={styles.addDetailLabel}>Running low — add to the shopping list</Text>
+            </Pressable>
+          </>
+        ) : (thing.uses ?? []).length > 0 ? (
+          <>
+            <Text style={styles.sectionLabel}>Uses</Text>
+            <View style={styles.chips}>
+              {(thing.uses ?? []).map((link) => (
+                <Pressable
+                  key={link.id}
+                  onPress={() => navigation.push('ThingDetail', { thingId: link.id })}
+                  style={styles.chipTap}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${link.name ?? 'it'}`}
+                >
+                  <View style={styles.chip}>
+                    <Text style={styles.chipLabel}>
+                      {[link.make, link.name].filter(Boolean).join(' ') || 'Unnamed'}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        ) : null}
+
         {/* ── what the maker says ──────────────────────────────────────
             Beside what it takes and how it is serviced, because those are the
             two things it answers — and each of its offers writes into one of
@@ -1770,6 +1897,18 @@ export default function ThingDetailScreen() {
           />
         </View>
       </Modal>
+
+      <LinkAssetsSheet
+        visible={usesOpen}
+        things={usable}
+        loading={usableLoading}
+        linkedIds={(thing.usedWith ?? []).map((link) => link.id)}
+        room={thing.room}
+        locations={locations}
+        busy={busy}
+        onSave={saveUses}
+        onCancel={() => setUsesOpen(false)}
+      />
 
       {isPaint ? (
         <PaintAreaSheet

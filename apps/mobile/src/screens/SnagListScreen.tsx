@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, SectionList, ScrollView, RefreshControl, Pressable, StyleSheet,
+  View, Text, SectionList, ScrollView, RefreshControl, Pressable, StyleSheet, BackHandler,
+  Linking, Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -14,6 +15,9 @@ import CaptureSheet from '../components/CaptureSheet';
 import Fab from '../components/Fab';
 import ExportFooter from '../components/ExportFooter';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
+import ShareJobsSheet, { type ShareNotes } from '../components/ShareJobsSheet';
+import StickyActionBar from '../components/StickyActionBar';
+import Button from '../components/Button';
 import AmendSnagSheet from '../components/AmendSnagSheet';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
@@ -22,9 +26,11 @@ import { useCreateRoom } from '../hooks/useCreateRoom';
 import { useFirstCapture } from '../hooks/useFirstCapture';
 import { useOnReturn } from '../hooks/useOnReturn';
 import {
-  createSnag, getFileUrls, getSnags, getThings, markListSeen, setPartBought, setSnagStatus,
+  createSnag, getComments, getFileUrls, getSnags, getThings, markListSeen, setPartBought, setSnagStatus,
   updateSnag,
 } from '../lib/supabase';
+import { canShareFiles, shareFile } from '../lib/share';
+import { saveFile } from '../lib/download';
 import { showAlert } from '../lib/alert';
 import { failureReason } from '../lib/deadline';
 import { takePhoto } from '../lib/photoUpload';
@@ -34,10 +40,10 @@ import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
 import HomePickerSheet from '../components/HomePickerSheet';
 import {
-  assessmentBrief, dueState, exportDateStamp, isDoneForNow, placeTitle, shoppingCount,
-  shoppingList, snagExportPhotos, snagExportTable, snagHeadline,
+  assessmentBrief, dueState, exportDateStamp, exportFileName, isDoneForNow, placeTitle, quoteBrief,
+  shoppingCount, shoppingList, snagExportPhotos, snagExportTable, snagHeadline, snagQuoteTable,
 } from '@snag/supabase-queries';
-import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
+import { loadExportImages, renderPdf, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag, Thing } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -143,6 +149,21 @@ export default function SnagListScreen() {
   const [justAdded, setJustAdded] = useState<Snag | null>(null);
   /** The +'s sheet: Take photo, or Continue without picture. */
   const [capturing, setCapturing] = useState(false);
+  /**
+   * Jobs chosen to share, by id — null while nobody is choosing. A long press
+   * on a card starts it; a reload or Cancel ends it, because a choice made of
+   * jobs that are no longer on screen is not a choice anybody can see.
+   */
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const selecting = selected !== null;
+  const [sharing, setSharing] = useState(false);
+  const [shareNotes, setShareNotes] = useState<ShareNotes>('out');
+  const [shareState, setShareState] = useState<'preparing' | 'ready' | 'failed'>('preparing');
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [sharePdf, setSharePdf] = useState<{ bytes: Uint8Array; fileName: string; photoCount: number } | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  /** Bumped per build, so a slower build for the other notes answer cannot land last. */
+  const shareSeq = useRef(0);
   const [amending, setAmending] = useState(false);
   /**
    * The house record, for the amend sheet's "is it about one of these?" step.
@@ -232,7 +253,7 @@ export default function SnagListScreen() {
   // The list reads itself again every two minutes while it is what somebody is
   // looking at — see LIST_REFRESH_MS. Not while a sheet is up over it: the
   // sheet is what they are doing, and a list shifting underneath is noise.
-  const sheetUp = justAdded !== null || showExport || placesOpen || capturing;
+  const sheetUp = justAdded !== null || showExport || placesOpen || capturing || sharing;
   useEffect(() => {
     if (sheetUp) return undefined;
     const timer = setInterval(() => {
@@ -266,6 +287,150 @@ export default function SnagListScreen() {
       default: return snags;
     }
   }, [snags, lens]);
+
+  const chosen = useMemo(
+    () => (selected ? [...snags, ...done].filter((snag) => selected.has(snag.id)) : []),
+    [selected, snags, done],
+  );
+
+  function startChoosing(id: string) {
+    setSelected(new Set([id]));
+  }
+
+  function toggleChosen(id: string) {
+    setSelected((now) => {
+      if (!now) return now;
+      const next = new Set(now);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function stopChoosing() {
+    setSelected(null);
+  }
+
+  // Android's back ends choosing rather than leaving the list.
+  useEffect(() => {
+    if (!selecting) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      stopChoosing();
+      return true;
+    });
+    return () => sub.remove();
+  }, [selecting]);
+
+  /**
+   * The PDF for the chosen jobs, made as the sheet opens — see ShareJobsSheet
+   * for why it is not made on the press. Notes are read one job at a time,
+   * never in parallel: the pool is ten connections.
+   */
+  async function prepareShare(notes: ShareNotes) {
+    const mine = ++shareSeq.current;
+    setShareState('preparing');
+    setShareError(null);
+    setSharePdf(null);
+    try {
+      const rows = chosen;
+      const stamp = exportDateStamp();
+      const where = [activeProperty?.suburb, activeProperty?.town].filter(Boolean).join(', ') || null;
+      let noteMap: Record<string, string[]> | undefined;
+      if (notes === 'in') {
+        noteMap = {};
+        for (const row of rows) {
+          try {
+            noteMap[row.id] = (await getComments(row.id)).map((c) => c.body);
+          } catch {
+            noteMap[row.id] = [];
+          }
+        }
+      }
+      const table = snagQuoteTable(rows, { where, stamp, notes: noteMap });
+      const images = await loadExportImages(snagExportPhotos(rows), getFileUrls);
+      const brief = quoteBrief({ where, stamp, rowCount: rows.length, photoCount: images.length });
+      const bytes = renderPdf(table, images, brief);
+      if (mine !== shareSeq.current) return;
+      setSharePdf({ bytes, fileName: exportFileName(table.name, stamp, 'pdf'), photoCount: images.length });
+      setShareState('ready');
+    } catch (err: any) {
+      if (mine !== shareSeq.current) return;
+      setShareError(err?.message ? `Couldn't make the PDF: ${err.message}` : "Couldn't make the PDF.");
+      setShareState('failed');
+    }
+  }
+
+  function openShare() {
+    if (chosen.length === 0) return;
+    setShareNotes('out');
+    setSharing(true);
+    prepareShare('out');
+  }
+
+  function closeShare() {
+    shareSeq.current += 1;
+    setSharing(false);
+  }
+
+  /** Shared or saved, the choosing is over: the jobs have gone where they were going. */
+  function shareDone(words: string) {
+    closeShare();
+    stopChoosing();
+    showToast(words);
+  }
+
+  async function doShare() {
+    if (!sharePdf) return;
+    setShareBusy(true);
+    try {
+      const jobs = `${chosen.length} ${chosen.length === 1 ? 'job' : 'jobs'}`;
+      const outcome = await shareFile(sharePdf.bytes, sharePdf.fileName, 'application/pdf', `${jobs} to quote`);
+      if (outcome === 'shared') shareDone('Shared');
+      else if (outcome === 'saved') shareDone(`${sharePdf.fileName} downloaded`);
+      else if (outcome === 'failed') showAlert("Couldn't share that", 'Try Download PDF instead.');
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function doDownload() {
+    if (!sharePdf) return;
+    setShareBusy(true);
+    try {
+      const { path } = await saveFile(sharePdf.fileName, sharePdf.bytes, 'application/pdf');
+      shareDone(path ? `Saved to ${sharePdf.fileName}` : `${sharePdf.fileName} downloaded`);
+    } catch (err: any) {
+      showAlert("Couldn't save that", err?.message ?? 'Please try again.');
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  /**
+   * A browser cannot attach a file to a `mailto:` link, so this downloads the
+   * PDF and opens a new message, and the toast says to attach it — rather than
+   * an email that arrives with nothing in it.
+   */
+  async function doEmail() {
+    if (!sharePdf) return;
+    setShareBusy(true);
+    try {
+      await saveFile(sharePdf.fileName, sharePdf.bytes, 'application/pdf');
+      const subject = encodeURIComponent(chosen.length === 1 ? 'A job to quote' : 'Jobs to quote');
+      const body = encodeURIComponent(
+        'Hi — could you quote for the jobs in the attached PDF? Each one has a reference to quote against.',
+      );
+      const mailto = `mailto:?subject=${subject}&body=${body}`;
+      // A mail link hands over to the mail app rather than navigating away.
+      if (Platform.OS === 'web') window.location.href = mailto;
+      else await Linking.openURL(mailto);
+      shareDone(`${sharePdf.fileName} downloaded — attach it to the email`);
+    } catch (err: any) {
+      showAlert("Couldn't open an email", err?.message ?? 'Download the PDF and attach it yourself.');
+    } finally {
+      setShareBusy(false);
+    }
+  }
 
   /**
    * An extract of the list.
@@ -640,6 +805,18 @@ export default function SnagListScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProperty, firstCapture, household.id]);
 
+  // The tour's *Try it*. Logging a job is this screen's + and its sheet; the
+  // rooms and the walkthrough are the House tab's, which takes them there.
+  useEffect(() => {
+    if (!activeProperty) return;
+    if (firstCapture.takeAction(['logJob'])) {
+      setCapturing(true);
+      return;
+    }
+    const waiting = firstCapture.peekAction();
+    if (waiting === 'addRoom' || waiting === 'addThing') navigation.navigate('House' as never);
+  }, [activeProperty, firstCapture, navigation]);
+
   /**
    * The prompt after a photo.
    *
@@ -825,15 +1002,47 @@ export default function SnagListScreen() {
 
           It says what pressing it does and decides that from whether anything
           is still open, so the press on offer is never a no-op. */}
-      <View style={styles.sinceRow}>
-        <Text style={styles.since}>
-          {toDo} to do
-          {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
-        </Text>
-        {sections.length + shoppingRooms.length > 1 ? (
-          <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
-        ) : null}
-      </View>
+      {selecting ? (
+        // Choosing: the line says how many, and the way out. The cards' own
+        // ticks are what choose.
+        <View style={styles.sinceRow}>
+          <Text style={styles.since} accessibilityLiveRegion="polite">
+            {selected!.size} selected
+          </Text>
+          <Pressable
+            onPress={stopChoosing}
+            style={styles.selectTap}
+            accessibilityRole="button"
+            accessibilityLabel="Stop choosing jobs"
+          >
+            <Text style={styles.selectLabel}>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.sinceRow}>
+          <Text style={styles.since}>
+            {toDo} to do
+            {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
+          </Text>
+          <View style={styles.sinceControls}>
+            {/* A long press chooses on a phone; a desktop has no long press,
+                so the same thing is a word here. */}
+            {snags.length > 0 ? (
+              <Pressable
+                onPress={() => setSelected(new Set())}
+                style={styles.selectTap}
+                accessibilityRole="button"
+                accessibilityLabel="Choose jobs to share"
+              >
+                <Text style={styles.selectLabel}>Select</Text>
+              </Pressable>
+            ) : null}
+            {sections.length + shoppingRooms.length > 1 ? (
+              <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
+            ) : null}
+          </View>
+        </View>
+      )}
 
       <SectionList
         sections={shownSections}
@@ -949,6 +1158,10 @@ export default function SnagListScreen() {
             onPress={() => navigation.navigate('SnagDetail', { snagId: item.id })}
             onDone={() => finish(item)}
             finishing={finishing.has(item.id)}
+            onLongPress={() => startChoosing(item.id)}
+            selecting={selecting}
+            selected={!!selected?.has(item.id)}
+            onSelect={() => toggleChosen(item.id)}
           />
         )}
         ListFooterComponent={
@@ -1025,7 +1238,37 @@ export default function SnagListScreen() {
       {/* The + replaced the compose bar (October 2026): one way in, and the
           list's foot back. It opens CaptureSheet — Take photo, or Continue
           without picture. ComposeBar lives on for a thing's Report a problem. */}
-      <Fab onPress={() => setCapturing(true)} accessibilityLabel="Capture a new job" />
+      {selecting ? (
+        <StickyActionBar stacked hint={selected!.size === 0 ? 'Tap the jobs to share' : undefined}>
+          <Button
+            label={selected!.size === 1 ? 'Share 1 job' : `Share ${selected!.size} jobs`}
+            icon="share-outline"
+            onPress={openShare}
+            disabled={selected!.size === 0}
+            fullWidth
+          />
+        </StickyActionBar>
+      ) : (
+        <Fab onPress={() => setCapturing(true)} accessibilityLabel="Capture a new job" />
+      )}
+      <ShareJobsSheet
+        visible={sharing}
+        jobCount={chosen.length}
+        photoCount={sharePdf ? sharePdf.photoCount : null}
+        notes={shareNotes}
+        onNotes={(next) => {
+          setShareNotes(next);
+          prepareShare(next);
+        }}
+        state={shareState}
+        error={shareError}
+        canShare={canShareFiles()}
+        busy={shareBusy}
+        onShare={doShare}
+        onDownload={doDownload}
+        onEmail={doEmail}
+        onClose={closeShare}
+      />
       <CaptureSheet
         visible={capturing}
         disabled={!activeProperty}
@@ -1054,6 +1297,9 @@ export default function SnagListScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  sinceControls: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  selectTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.sm },
+  selectLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

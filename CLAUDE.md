@@ -1447,6 +1447,14 @@ nor *What the maker says*, and the House tab counts no labels to check. To bring
 auto-reload on the key, one real plate read, then the variable and a redeploy. The specs below run
 with it on; each suite also pins the off state.
 
+**A key with no credit is said, not retried** (`20261005130000`). `isOutOfCredit` (402) ends the
+round at once in both functions, because billing is per project and no other model will answer; a
+429 naming a daily allowance or a limit of 0 is `limit` too, after the other models have been asked.
+`limit` is a reason on `label_readings` as it already was on `product_lookups`: the sheet says
+*Label reading isn't available right now*, and the thing page's card says so **with no *Try
+again***, which could only spend another of the day's reads. `readLabelGemini.test.ts` and
+`ThingDetailScreen.test.tsx` pin it.
+
 The walkthrough has always photographed the rating plate "because it carries the make, model and
 serial at once" — and then asked somebody to type all three off the photo they had just taken.
 `supabase/functions/read-label` reads it, and the walkthrough lays the answer into the boxes.
@@ -1590,6 +1598,16 @@ longer needs somebody standing there while the model looks.
   is only ever an offer: pre-selected on *What is it?* when nothing has been chosen, never over a
   tap, never a paint (whose name is a colour). It is asked because the photo now comes before the
   kind is known; an empty `kind` asks the reader to say, and fill plate or paint fields to fit.
+- **And which room it lives in** (October 2026). The photo comes before *Which room?*, and the
+  reading usually lands while somebody is on that step, so it lights a room for them: the reader's
+  `roomGuess`, chosen from the place's own room names that `readLabel` now sends, or failing that
+  `roomForThing` — the catalogue read backwards (an oven is suggested only in the Kitchen, so an
+  oven goes there), then `ROOM_HINTS` for what the catalogue never lists (weed killer → Garage,
+  then Shed, then Outside). Both are `suggestRoom`. The same rules as the kind guess: **only while
+  nobody has answered**, never over a tap or a room the + already said, and only a room this place
+  has (`roomKey`), with one line saying it came from the photo. A thing the catalogue suggests in
+  several rooms (a smoke alarm) gets no guess, even when the place has only one of them — that is a
+  coin toss dressed as a fact. `houseRecord.test.ts` and `AddThingSheet.test.tsx` pin it.
 
 **Deploy order**, because the client and the function move together: apply `20260924120100`,
 deploy `read-label` (its reply only gains `readingId`, so the live client keeps working), read one
@@ -1817,8 +1835,9 @@ later, in an aisle, needing one exact string. So:
 
 ### Five kinds, two built
 
-`home.thing_kind` is `appliance | finish | tile | fitting | fabric | contact`. `THING_KINDS` is
-the three that are offered: appliances, paint and tiles.
+`home.thing_kind` is `appliance | finish | tile | fitting | fabric | contact | consumable`.
+`THING_KINDS` is the four that are offered: appliances, paint, tiles and consumables (see *A
+consumable* below).
 
 **A tile takes paint's shape, not an appliance's**, and for paint's reason: a bathroom holds one
 tile on the floor and another on the walls, the colour is what somebody came to read, and the
@@ -1850,6 +1869,46 @@ Mis-filed, it is removed and added again — rarer than the mis-tap.
 `update_thing` still takes `p_kind` (and `20260912170000` exists because the first migration
 forgot it). Nothing in the UI passes it; leave it, because five kinds are in the enum and the
 three unbuilt ones will want it.
+
+### A consumable: what the house goes through (October 2026)
+
+`consumable` is a fourth built kind (`20261005130100`, alone in its migration for the enum's
+reason): dishwasher tablets, weed killer, a box of filters — **something bought and used up**,
+recorded for the brand and the exact product on the shelf. It is not `things.consumables`, which
+stays what it always was: the part codes an appliance *takes*. One is a line of text on the
+dishwasher; the other is a record of its own, with a photo of the box.
+
+- **What it is used with is a join table**, `home.thing_uses` (`20261005130200`), because one box of
+  heat pump filters fits three heads and the weed killer goes with nothing at all. The
+  `snag_things` shape exactly: cascade on both sides (a link to a deleted appliance is worth
+  nothing; the consumable stays), a read policy through the consumable's property, no write
+  policies, and **`set_thing_uses` replacing the whole set** in one call. It refuses, in words, a
+  thing that is not a consumable, anything at another place, and a consumable used with another
+  consumable. `things_with_details` carries both ends — `used_with` on a consumable, `uses` on an
+  appliance — restated **with `security_invoker`** and appended, so neither page needs a second read.
+- **The reader reads a pack.** `kindGuess` may say `consumable`; `product` is the name under the
+  brand (*Quantum Ultimate*), `size` the size as printed, and `usedFor` what the pack *says* it is
+  for (*dishwashers*) — transcription, never inferred. `lookup-product` is never started for one:
+  a pack has no manual or service interval.
+- **On the walkthrough** a consumable asks Brand, Product and Size, then **What's it used with?** —
+  every recorded thing here that is not itself a consumable, as chips. `thingsUsedFor` ticks the
+  ones the pack names (whole words, a plural read past) as an **offer, never over a tap**, and the
+  room step lights the room of the appliance it is for before falling back to `suggestRoom`. The
+  link is written by `useAddThing` after `create_thing`; a refusal is a toast saying so, never a
+  throw, because the record exists either way. No *Serviced how often?*, no *Anything you re-buy*.
+- **On its page**: Brand / Product / Size, *Where to buy* and *What's left* (offered pills), no
+  serial, no dates, no servicing, no maker lookup. **Used with** is a row of pills, each opening that
+  appliance, and *Change* opens `LinkAssetsSheet` — the job page's picker, reused — over everything
+  but consumables. **Running low** files it onto the shopping list through the cart's own path
+  (`addToShoppingList`, `consumableOnList` asked first) as *Finish Quantum Ultimate*
+  (`consumableItem`). An appliance with consumables shows **Uses**, each one opening.
+- **A room's page gives them their own heading**, *Consumables* (`thingKindGroups`). No ghosts:
+  `ROOM_SUGGESTIONS` stays appliance and finish only, for the ghost rule's reason.
+
+`supabase/tests/thing_uses.sql` replays the tablets, two heads and the weed killer, every refusal,
+another household reading nothing, and the cascade. `houseRecord.test.ts` pins `thingsUsedFor`;
+`label.test.ts` the pack's fields; `AddThingSheet.test.tsx` the room, the tick, the write and no
+tick over a choice; `ThingDetailScreen.test.tsx` the fields, the pills, the set and *Running low*.
 
 ### Four joins, all using mechanisms that already exist
 
@@ -4373,6 +4432,22 @@ whether it can be put off. `SetupFlow` only walks them; `App.tsx`'s gate asks th
   over through `useFirstCapture`, and filed by the list through `fileCapturedPhoto`, the shutter's
   own path, capture sheet and all. Taken once: coming back to the list does not file it twice.
 
+**The tour is the first step added after the baseline** (`tour`, `since: 2`, October 2026): three
+swipeable cards — *Set up your house*, *Add an appliance*, *Log an issue* — on `TourStep`, paged by
+*Next* as well as a swipe, because a desktop has no swipe. Everybody who set up before it gets it
+once as a catch-up (*One new thing*); a new account sees it after *Bring someone in* and before
+*You're all set*. It is **not `needsHousehold`**, though it waits for a house: it is about the app,
+so *Add another home* does not show it again. Every card says only what the app does today — the
+appliance card claims the label is read only while label reading is on (`tourCards`).
+
+**Each card's *Try it* ends setup and opens the real thing**: the step is marked seen, `onFinish`
+carries a `FirstAction` (`addRoom`, `addThing`, `logJob`), and `FirstCaptureProvider` holds it the
+way it holds the first photo — taken once. The list takes `logJob` and opens its capture sheet, and
+sends the other two to the House tab, which opens *Add a room* or the walkthrough. The You tab keeps
+**How Snag works**, the same cards in a sheet with no *Try it* (every door is a tab away).
+`steps.test.ts` pins the catch-up and the second home; `SetupFlow.test.tsx` the run, paging and each
+*Try it*; `SnagListScreen.test.tsx`, `HouseScreen.test.tsx` and `ProfileScreen.test.tsx` the rest.
+
 **Google** (`lib/googleSignIn.ts`) is Supabase's redirect on the web build — the page leaves and
 comes back holding the session in the fragment, which `detectSessionInUrl` already reads — and the
 system auth browser plus `setSession` on native, via `snag://auth-callback`. The web redirect keeps
@@ -4751,6 +4826,38 @@ extract is refused;
 `SnagListScreen.test.tsx` pins that *Everything* ignores the lens and includes done, and that the
 control is at the foot rather than on the compose bar; `HouseScreen.test.tsx` pins that not one
 ghost reaches the file.
+
+### Jobs can be chosen and sent for a quote (October 2026)
+
+**Hold a card down to choose it**, then tap others; *Select* on the count line does the same for a
+desktop, which has no long press. While choosing, a card's tap chooses rather than opens, its tick
+becomes a checkbox (still a sibling of the card's door), the count line reads *N selected · Cancel*,
+Android's back ends it, and the + gives way to a bar reading **Share N jobs**. The choice is by id,
+so the two-minute re-read never loses it.
+
+**`ShareJobsSheet` makes the PDF the moment it opens**, and that is load-bearing: a browser lets
+`navigator.share` run only inside a tap, and fetching twenty photographs outlasts one, so a PDF built
+on the press would reach the share sheet after the browser had stopped listening. *Share* then hands
+over a file already in hand (`shareFile`, `lib/share.ts`: `navigator.share({ files })` on a phone's
+browser, `expo-sharing` on native, a download where neither works). That one sheet **is** WhatsApp,
+Messenger and email, so there is no button per app. A desktop browser mostly cannot share a file
+(`canShareFiles`): it gets *Download PDF*, and *Email*, which downloads it and opens a new message
+saying to attach it — a `mailto:` cannot carry a file.
+
+**The file carries the work and nothing about the household** (`snagQuoteTable`, `quoteBrief`):
+reference, words, room, the linked appliance's make and model, parts, photos (round-robin, capped
+at `EXPORT_PHOTO_LIMIT`). No names, no status, and **no place name** — places are often called by
+their street address, and this goes by WhatsApp to somebody the household has never met — only the
+suburb and town. The brief asks for a price per reference, the callout apart, consents, and when.
+**The notes are asked as two named halves, out by default**: they are the household talking to
+itself. Asked for, they are read one job at a time, never in parallel, for the pool's reason.
+
+`native` exports were broken until this: since SDK 54 `expo-file-system`'s root exports stubs that
+throw for `documentDirectory` and `writeAsStringAsync`, so `saveFile` now requires
+`expo-file-system/legacy`. `SnagListScreen.test.tsx` pins the long press, the tap choosing, Cancel,
+the PDF holding only the chosen jobs with no notes, the notes read one by one when asked, and the
+download where a file cannot be shared; `advice.test.ts` pins that no name or street reaches the
+file and what the brief asks.
 
 ### The PDF can carry the question, and the answer comes back by hand
 

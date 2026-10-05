@@ -46,6 +46,7 @@ import type {
   SnagStatus,
   Thing,
   ThingKind,
+  ThingLink,
   ThingSpec,
   ThingSuggestion,
   AbsentThing,
@@ -176,7 +177,23 @@ function mapThing(row: Row): Thing {
     propertyName: row.property_name,
     snagCount: Number(row.snag_count ?? 0),
     openSnagCount: Number(row.open_snag_count ?? 0),
+    usedWith: thingLinks(row.used_with),
+    uses: thingLinks(row.uses),
   };
+}
+
+/** `used_with` / `uses` off `things_with_details`, read defensively: jsonb, so anything. */
+function thingLinks(raw: unknown): ThingLink[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((one): one is Record<string, unknown> => !!one && typeof one === 'object' && typeof (one as Row).id === 'string')
+    .map((one) => ({
+      id: one.id as string,
+      name: typeof one.name === 'string' ? one.name : null,
+      room: typeof one.room === 'string' ? one.room : null,
+      ...(typeof one.kind === 'string' ? { kind: one.kind as ThingKind } : {}),
+      ...(typeof one.make === 'string' ? { make: one.make } : {}),
+    }));
 }
 
 function mapInvitation(row: Row): Invitation {
@@ -1706,6 +1723,14 @@ export interface LabelReading {
   tint: string | null;
   hex: string | null;
   consumables: string[];
+  /** A pack's size as printed — "60 tablets", "1 L". Consumables only. */
+  size?: string | null;
+  /**
+   * What the pack says it is for — "dishwashers", "lawns and paths" — as
+   * printed, never inferred. Offered as the appliances it is used with
+   * (`thingsUsedFor`), never linked unseen.
+   */
+  usedFor?: string | null;
 }
 
 /**
@@ -1718,6 +1743,12 @@ export interface LabelReading {
 export interface LabelGuess {
   name: string | null;
   kind: ThingKind | null;
+  /**
+   * Which of the place's rooms the reader thinks it lives in, from the list
+   * the request named. Checked against the place's rooms again before it is
+   * offered (`suggestRoom`), because a reply is not a room until it is one.
+   */
+  room?: string | null;
 }
 
 /**
@@ -1790,10 +1821,12 @@ export function parseLabelReading(raw: unknown): LabelReading | null {
     tint: labelText(r.tint, 120),
     hex: swatchColour({ hex: labelText(r.hex, 9) ?? '' }),
     consumables,
+    size: labelText(r.size, 40),
+    usedFor: labelText(r.usedFor, 60),
   };
 }
 
-const GUESSABLE_KINDS: ThingKind[] = ['appliance', 'finish', 'tile'];
+const GUESSABLE_KINDS: ThingKind[] = ['appliance', 'finish', 'tile', 'consumable'];
 
 /** `whatItIs` and `kindGuess`, read as defensively as the rest. Null when neither says anything. */
 export function parseLabelGuess(raw: unknown): LabelGuess | null {
@@ -1801,8 +1834,9 @@ export function parseLabelGuess(raw: unknown): LabelGuess | null {
   const r = raw as Record<string, unknown>;
   const name = labelText(r.whatItIs, 40);
   const kind = GUESSABLE_KINDS.includes(r.kindGuess as ThingKind) ? (r.kindGuess as ThingKind) : null;
-  if (!name && !kind) return null;
-  return { name: name ? name.charAt(0).toUpperCase() + name.slice(1) : null, kind };
+  const room = labelText(r.roomGuess, 40);
+  if (!name && !kind && !room) return null;
+  return { name: name ? name.charAt(0).toUpperCase() + name.slice(1) : null, kind, room };
 }
 
 /** The walkthrough's boxes, as far as a label can answer them. */
@@ -1856,7 +1890,13 @@ export function applyLabelReading(
     filled.push(word);
   };
 
-  if (colourKind) {
+  if (kind === 'consumable') {
+    // A pack: the brand, the product it is, and its size. No serial, no year,
+    // and nothing it "takes" — it is the thing that gets taken.
+    put('make', reading.make, 'brand');
+    put('model', reading.product ?? reading.model, 'product');
+    putSpec('size', reading.size ?? null, 'size');
+  } else if (colourKind) {
     put('name', reading.colourName, 'colour');
     put('make', reading.make, kind === 'finish' ? 'brand' : 'range');
     put('model', reading.colourCode ?? reading.model, 'code');
@@ -1926,11 +1966,14 @@ export class LabelReadError extends Error {
 export async function readLabel(
   client: SupabaseClient,
   path: string,
-  kind: ThingKind | null
+  kind: ThingKind | null,
+  rooms: string[] = []
 ): Promise<LabelReadAnswer> {
-  const { data, error } = await client.functions.invoke('read-label', {
-    body: kind ? { path, kind } : { path },
-  });
+  const body: Record<string, unknown> = { path };
+  if (kind) body.kind = kind;
+  // The place's rooms, so the reader can say which one this lives in.
+  if (rooms.length) body.rooms = rooms;
+  const { data, error } = await client.functions.invoke('read-label', { body });
   if (error) {
     let words: string | null = null;
     let readingId: string | null = null;
@@ -1954,7 +1997,7 @@ export async function readLabel(
 }
 
 /** Why a reading waiting on the thing's page came to nothing. */
-export type LabelReadingReason = 'illegible' | 'busy' | 'quota' | 'error';
+export type LabelReadingReason = 'illegible' | 'busy' | 'quota' | 'limit' | 'error';
 
 /**
  * A reading of a thing's photographed label that nobody has answered yet —
@@ -1972,7 +2015,7 @@ export interface LabelReadingToCheck {
   createdAt: string;
 }
 
-const READING_REASONS: LabelReadingReason[] = ['illegible', 'busy', 'quota', 'error'];
+const READING_REASONS: LabelReadingReason[] = ['illegible', 'busy', 'quota', 'limit', 'error'];
 
 /**
  * Every reading at this place waiting on somebody, with the thing it is about.
@@ -2021,7 +2064,7 @@ export async function resolveLabelReading(
 
 /** One box the check card offers to fill or change, in the words the thing page uses. */
 export interface LabelOffer {
-  key: 'name' | 'make' | 'model' | 'serial' | 'manufactured' | 'product' | 'sheen' | 'tint' | 'hex';
+  key: 'name' | 'make' | 'model' | 'serial' | 'manufactured' | 'product' | 'sheen' | 'tint' | 'hex' | 'size';
   /** What the box is called, per kind: *Colour code* for a paint, *Model* otherwise. */
   label: string;
   value: string;
@@ -2069,7 +2112,11 @@ export function labelOffers(thing: Thing, reading: LabelReading): LabelOffers {
     else if (!sameWords(now, value)) differ.push({ key, label, value, current: now });
   };
 
-  if (colourKind) {
+  if (thing.kind === 'consumable') {
+    offer('make', words.make, reading.make, thing.make);
+    offer('model', words.model, reading.product ?? reading.model, thing.model);
+    offer('size', 'Size', reading.size ?? null, thing.spec.size ?? null);
+  } else if (colourKind) {
     if (!thing.name?.trim() && reading.colourName) offer('name', 'Colour', reading.colourName, null);
     offer('make', words.make, reading.make, thing.make);
     offer('model', words.model, reading.colourCode ?? reading.model, thing.model);
@@ -2090,7 +2137,7 @@ export function labelOffers(thing: Thing, reading: LabelReading): LabelOffers {
   }
 
   const onThing = (item: string) => thing.consumables.some((one) => sameWords(one, item));
-  const parts = colourKind
+  const parts = colourKind || thing.kind === 'consumable'
     ? []
     : reading.consumables
         .filter((one) => !onThing(one))
@@ -2370,6 +2417,12 @@ export interface ThingInput {
   model?: string | null;
   serial?: string | null;
   consumables?: string[];
+  /**
+   * A consumable's appliances. Not a column: written after the create through
+   * `set_thing_uses` by the caller, which says so if that second write fails.
+   * `createThing` ignores it.
+   */
+  usedWith?: string[];
   installedAt?: string | null;
   warrantyUntil?: string | null;
   serviceDays?: number | null;
@@ -2421,6 +2474,48 @@ export async function createThing(client: SupabaseClient, input: ThingInput): Pr
   const row = unwrap<Row>(data, error, "Couldn't save that");
   // create_thing returns the base row, not the joined view.
   return getThing(client, row.id);
+}
+
+/**
+ * What a consumable is used with, as the whole set (`home.set_thing_uses`).
+ * Refused in words for anything but a consumable, a thing at another place,
+ * or another consumable.
+ */
+export async function setThingUses(
+  client: SupabaseClient,
+  consumableId: string,
+  thingIds: string[]
+): Promise<void> {
+  const { error } = await client.rpc('set_thing_uses', {
+    p_consumable_id: consumableId,
+    p_thing_ids: thingIds,
+  });
+  if (error) throw asError(error, "Couldn't link that");
+}
+
+/**
+ * The recorded things a pack says it is for — "dishwashers" is the Bosch
+ * dishwasher, "heat pumps" every heat pump head — as an offer on the
+ * walkthrough, never a link nobody ticked.
+ *
+ * Whole words, any case, a trailing *s* read past: the thing's name has to
+ * hold every word the pack named, or the pack every word of the thing's name.
+ * Never a consumable, which is used *with* something rather than being it.
+ */
+export function thingsUsedFor(usedFor: string | null | undefined, things: Thing[]): Thing[] {
+  const FILLER = new Set(['for', 'all', 'and', 'or', 'the', 'a', 'an', 'most', 'use', 'in', 'with', 'of', 'type', 'types', 'automatic']);
+  const stem = (word: string) => (word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word);
+  const wordsOf = (text: string) =>
+    text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !FILLER.has(w)).map(stem);
+  const said = new Set(wordsOf(usedFor ?? ''));
+  if (said.size === 0) return [];
+  return things.filter((thing) => {
+    if (thing.kind === 'consumable' || !thing.name) return false;
+    const name = wordsOf(thing.name);
+    if (!name.length) return false;
+    const nameSet = new Set(name);
+    return name.every((w) => said.has(w)) || [...said].every((w) => nameSet.has(w));
+  });
 }
 
 export interface ThingUpdate {
@@ -2662,6 +2757,90 @@ function normalName(text: string): string {
 }
 
 /**
+ * Rooms a thing the catalogue never suggests is usually kept in, most likely
+ * first. The catalogue (`ROOM_SUGGESTIONS`) answers an oven or a dryer; this
+ * answers what it has no reason to list — the weed killer, the dishwasher
+ * tablets — and the appliances it lists in a room the seed does not name.
+ * Matched on whole words in the thing's name.
+ */
+const ROOM_HINTS: { words: string[]; rooms: string[] }[] = [
+  { words: ['weed'], rooms: ['Garage', 'Shed', 'Garden shed', 'Outside'] },
+  { words: ['spray'], rooms: ['Garage', 'Shed', 'Laundry'] },
+  { words: ['fertiliser'], rooms: ['Garage', 'Shed', 'Outside'] },
+  { words: ['dishwasher', 'tablets'], rooms: ['Kitchen'] },
+  { words: ['dishwasher', 'tabs'], rooms: ['Kitchen'] },
+  { words: ['detergent'], rooms: ['Laundry'] },
+  { words: ['washing', 'powder'], rooms: ['Laundry'] },
+  { words: ['microwave'], rooms: ['Kitchen'] },
+  { words: ['fridge'], rooms: ['Kitchen'] },
+  { words: ['freezer'], rooms: ['Garage', 'Kitchen'] },
+  { words: ['oven'], rooms: ['Kitchen'] },
+  { words: ['dryer'], rooms: ['Laundry'] },
+  { words: ['washing', 'machine'], rooms: ['Laundry'] },
+  { words: ['lawnmower'], rooms: ['Garage', 'Shed'] },
+  { words: ['mower'], rooms: ['Garage', 'Shed'] },
+  { words: ['cylinder'], rooms: ['Garage', 'Laundry', 'Hallway'] },
+];
+
+function words(name: string): string[] {
+  return name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * The room a thing named this way usually lives in, **from this place's own
+ * rooms only**, or null.
+ *
+ * The catalogue read backwards first — an oven is suggested in the Kitchen, so
+ * an oven goes in the Kitchen — but only where the answer is one room: a smoke
+ * alarm is suggested in three, and guessing between them would be a coin toss
+ * dressed as a fact. Paint is everywhere and never answers. Then the hints,
+ * which are ordered, so the first room the place has wins.
+ *
+ * An offer for the walkthrough's room step, never a write: the person sees it
+ * selected and can tap another before anything is kept.
+ */
+export function roomForThing(name: string | null | undefined, rooms: string[]): string | null {
+  if (!name || !rooms.length) return null;
+  const have = new Map(rooms.map((r) => [roomKey(r), r] as const));
+  const said = new Set(words(name));
+  const fits = (candidate: string) => words(candidate).every((w) => said.has(w));
+
+  // Ambiguity is the catalogue's, not the place's: a smoke alarm is suggested
+  // in three rooms, so a place holding only one of them is not told that is
+  // where it goes.
+  const fromCatalogue = Object.entries(ROOM_SUGGESTIONS)
+    .filter(([, suggestions]) => suggestions.some((s) => s.kind !== 'finish' && fits(s.name)))
+    .map(([room]) => room);
+  if (fromCatalogue.length > 1) return null;
+  if (fromCatalogue.length === 1) return have.get(roomKey(fromCatalogue[0])) ?? null;
+
+  for (const hint of ROOM_HINTS) {
+    if (!hint.words.every((w) => said.has(w))) continue;
+    for (const room of hint.rooms) {
+      const here = have.get(roomKey(room));
+      if (here) return here;
+    }
+  }
+  return null;
+}
+
+/**
+ * The room the photo suggests: the reader's own answer when it names one of
+ * this place's rooms (in the place's spelling), else `roomForThing` on what it
+ * says the thing is. A reply naming a room the place has not got is ignored —
+ * the room step offers rooms, it does not invent them.
+ */
+export function suggestRoom(guess: LabelGuess | null | undefined, rooms: string[]): string | null {
+  if (!guess) return null;
+  if (guess.room) {
+    const key = roomKey(guess.room);
+    const here = rooms.find((r) => roomKey(r) === key);
+    if (here) return here;
+  }
+  return roomForThing(guess.name, rooms);
+}
+
+/**
  * Something already recorded in this room under this name, or null.
  *
  * The walkthrough warns with it before *Add it* — a warning and never a lock,
@@ -2834,7 +3013,7 @@ export function describeHouseRoom(room: HouseRoom): HouseRoomDescription {
   };
 }
 
-export type ThingKindGroupKey = 'appliances' | 'finishes' | 'other';
+export type ThingKindGroupKey = 'appliances' | 'finishes' | 'consumables' | 'other';
 
 export interface ThingKindGroup {
   key: ThingKindGroupKey;
@@ -2850,6 +3029,7 @@ export interface ThingKindGroup {
 const KIND_GROUPS: { key: ThingKindGroupKey; title: string; kinds: ThingKind[] }[] = [
   { key: 'appliances', title: 'Appliances', kinds: ['appliance'] },
   { key: 'finishes', title: 'Paint and finishes', kinds: ['finish', 'tile'] },
+  { key: 'consumables', title: 'Consumables', kinds: ['consumable'] },
   { key: 'other', title: 'Other', kinds: ['fitting', 'fabric', 'contact'] },
 ];
 
@@ -3622,6 +3802,89 @@ export interface BriefMeta {
   rowCount: number;
   /** How many photographs actually ride in this file, after the cap. */
   photoCount: number;
+}
+
+/**
+ * Jobs picked off the list to send to somebody for a quote — a friend who
+ * knows, or a tradesperson.
+ *
+ * **It carries the work and nothing about the household.** No names (who filed
+ * it, who it is assigned to), no status, and no place name: a place is very
+ * often called by its street address, and this file is forwarded by WhatsApp to
+ * somebody the household has never met. Where the work is goes in as the
+ * suburb and town, which is what a quote needs. A job's notes are the
+ * household's conversation, so they are in only when asked for (`notes`).
+ */
+export function snagQuoteTable(
+  snags: Snag[],
+  meta: { where: string | null; stamp: string; notes?: Record<string, string[]> }
+): ExportTable {
+  const withNotes = !!meta.notes;
+  const count = `${snags.length} ${snags.length === 1 ? 'job' : 'jobs'}`;
+  return {
+    name: 'Jobs to quote',
+    subtitle: [meta.where, count, meta.stamp].filter(Boolean).join(' · '),
+    columns: [
+      'Reference', 'What', 'Room', 'About', 'Parts', 'Photos',
+      ...(withNotes ? ['Notes'] : []),
+    ],
+    rows: snags.map((snag) => [
+      snag.reference,
+      snagHeadline(snag),
+      snag.room ?? '',
+      [snag.thingName, snag.thingMake, snag.thingModel].filter(Boolean).join(' '),
+      (snag.parts ?? []).join('; '),
+      String((snag.photoPaths ?? []).length || ''),
+      ...(withNotes ? [(meta.notes?.[snag.id] ?? []).join(' / ')] : []),
+    ]),
+  };
+}
+
+/**
+ * The page at the front of a PDF sent for a quote. Addressed to a person, in
+ * plain words, asking for the parts of a price a household actually decides
+ * on — and saying nothing the app cannot back: no promise of a reply, no
+ * names, no street.
+ */
+export function quoteBrief(meta: {
+  where: string | null;
+  stamp: string;
+  rowCount: number;
+  photoCount: number;
+}): { title: string; blocks: BriefBlock[] } {
+  const jobs = `${meta.rowCount} ${meta.rowCount === 1 ? 'job' : 'jobs'}`;
+  const at = meta.where ? ` in ${meta.where}` : '';
+  return {
+    title: meta.rowCount === 1 ? 'Could you quote for this job?' : 'Could you quote for these jobs?',
+    blocks: [
+      {
+        lines: [
+          `${jobs} around a house${at}, sent from the Snag app on ${meta.stamp}.`,
+          'Each job has a reference — SNAG-0042 and so on, in the first column. Please use it in '
+          + 'your quote, so each price can be matched to the right job.',
+        ],
+      },
+      {
+        heading: 'The photographs',
+        lines: [
+          meta.photoCount > 0
+            ? `${meta.photoCount} ${meta.photoCount === 1 ? 'photograph follows' : 'photographs follow'} `
+              + 'the table, each captioned with its job’s reference and room.'
+            : 'There are no photographs in this file.',
+          'If you need to see something in person before you can price it, say so.',
+        ],
+      },
+      {
+        heading: 'In the quote, if you can',
+        lines: [
+          '• A price for each job by its reference, and whether it is GST inclusive.',
+          '• The callout fee separately from labour and materials, so jobs can be booked into one visit.',
+          '• Anything that needs a consent, a certificate or another trade.',
+          '• When you could do it.',
+        ],
+      },
+    ],
+  };
 }
 
 /** The fence the answer has to come back in, and what the parser looks for. */

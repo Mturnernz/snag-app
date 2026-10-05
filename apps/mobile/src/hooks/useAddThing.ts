@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WHOLE_HOUSE, type ThingInput } from '@snag/supabase-queries';
 import { useHousehold } from './useHousehold';
 import { useToast } from './useToast';
-import { createLocation, createThing } from '../lib/supabase';
+import { createLocation, createThing, setThingUses } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
 import { fileServiceJob } from '../lib/serviceJob';
 import type { RootStackParamList, ThingKind } from '../types';
@@ -71,12 +71,25 @@ export function useAddThing(onAdded: () => void | Promise<void>, showingRoom?: s
       return false;
     }
     try {
-      const created = await createThing({ ...input, propertyId: activeProperty.id });
+      const { usedWith, ...fields } = input;
+      const created = await createThing({ ...fields, propertyId: activeProperty.id });
       setVisible(false);
       const room = created.room ?? null;
+      // What a consumable goes with is a second write. The thing exists either
+      // way, so a refusal is said rather than thrown — and said as what it is.
+      let unlinked = false;
+      if (usedWith?.length) {
+        try {
+          await setThingUses(created.id, usedWith);
+        } catch {
+          unlinked = true;
+        }
+      }
       // A service job filed with it is the bigger news, so its words win; the
       // way to the room is offered either way.
-      const said = (await fileServiceJob(created)) ?? `Added to ${room ?? WHOLE_HOUSE}`;
+      const said = unlinked
+        ? `Added to ${room ?? WHOLE_HOUSE} — couldn't link what it's used with`
+        : (await fileServiceJob(created)) ?? `Added to ${room ?? WHOLE_HOUSE}`;
       showToast(
         said,
         room === showingRoom

@@ -12,7 +12,7 @@
 // then the row in `home.product_lookups`.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { GEMINI_ENDPOINT, isBusy, quotaRefusal } from '../read-label/gemini.ts';
+import { GEMINI_ENDPOINT, isBusy, isOutOfCredit, quotaRefusal } from '../read-label/gemini.ts';
 import {
   hasFacts, htmlText, lookupFromGemini, lookupRequest, pdfStreams, pdfStrings, urlsToOpen,
   verifyLookup, type Page, type ProductFacts,
@@ -83,6 +83,8 @@ export async function lookUp(
       `lookup-product: ${modelName} ${attempt.status}:`,
       quota ? `quota — ${quota.detail}` : detail.slice(0, 500),
     );
+    // No credit on the key: billing is per project, so no model will answer.
+    if (isOutOfCredit(attempt.status)) return { status: 'failed', reason: 'limit' };
     if (isBusy(attempt.status)) {
       // A per-minute limit is busy by another name; a used-up day, or an
       // allowance the plan does not include, is not — and saying "busy" there

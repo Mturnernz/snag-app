@@ -18,10 +18,9 @@ import { Platform } from 'react-native';
  *   have to be: `default-src 'self'` allows no CDN, and `"output": "single"`
  *   in app.json means there are no lazy chunks to fetch either.
  *
- * On native there is no DOM. `expo-file-system` can write the bytes, and the
- * honest limit is that presenting a share sheet afterwards needs
- * `expo-sharing`, which this app does not carry — so native writes the file and
- * says where it went rather than pretending to have handed it over.
+ * On native there is no DOM. `expo-file-system` writes the bytes and says
+ * where they went; handing them to the share sheet is `shareFile`'s job
+ * (lib/share.ts), which this function does not pretend to do.
  */
 export interface SavedFile {
   /** Where it went, for native. Null on web, where the browser decides. */
@@ -57,7 +56,10 @@ export async function saveFile(
   // Native. Imported here rather than at module scope because
   // `expo-file-system` has no web implementation and its stub throws — a
   // top-level import would take the web build down on load. See TESTING.md.
-  const FileSystem = require('expo-file-system');
+  // The legacy entry point: since SDK 54 the package's root exports the new
+  // File API, and `documentDirectory` / `writeAsStringAsync` there are stubs
+  // that throw at runtime — so every native export failed on the first write.
+  const FileSystem = require('expo-file-system/legacy');
   const directory = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
   const path = `${directory}${fileName}`;
   const isText = typeof contents === 'string';
@@ -70,7 +72,7 @@ export async function saveFile(
 }
 
 /** Chunked so a big extract can't blow the argument limit on String.fromCharCode. */
-function bytesToBase64(bytes: Uint8Array): string {
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {

@@ -36,6 +36,7 @@ const KIND_ICONS: Record<ThingKind, React.ComponentProps<typeof Icon>['name']> =
   fitting: 'bulb-outline',
   fabric: 'home-outline',
   contact: 'call-outline',
+  consumable: 'basket-outline',
 };
 
 interface Props {

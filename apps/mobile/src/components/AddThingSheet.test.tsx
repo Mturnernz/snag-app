@@ -107,7 +107,7 @@ it('opens on the photo, and moves on the moment there is one — before the read
   await shoot(r);
   expect(texts(r)).toContain('Which room?');
   // Nobody has said what it is yet, so the reader is asked to say.
-  expect(mock_readLabel).toHaveBeenCalledWith('h1/plate.jpg', null);
+  expect(mock_readLabel).toHaveBeenCalledWith('h1/plate.jpg', null, ['Kitchen']);
 });
 
 it('lets the photo be skipped, and a photo from the library does the same as the camera', async () => {
@@ -136,7 +136,7 @@ it('skips what a ghost has already answered, and still says the kind it knows', 
   expect(texts(r)).toContain('Step 1 of 2');
   await shoot(r);
   expect(texts(r)).toContain('Anything else?');
-  expect(mock_readLabel).toHaveBeenCalledWith('h1/plate.jpg', 'appliance');
+  expect(mock_readLabel).toHaveBeenCalledWith('h1/plate.jpg', 'appliance', ['Kitchen']);
 });
 
 it('lays what the plate says into the empty boxes and names them', async () => {
@@ -233,6 +233,71 @@ it('marks a reading used once it was shown in the boxes, so no card asks again',
   expect(mock_resolve).toHaveBeenCalledWith('r1', 'used');
 });
 
+async function openIn(rooms: string[]) {
+  let r!: RenderResult;
+  await TestRenderer.act(async () => {
+    r = render(
+      <AddThingSheet
+        visible
+        locations={rooms.map((name, i) => ({ id: `l${i}`, propertyId: 'p', name, sortOrder: i }) as any)}
+        pathPrefix="h1"
+        start={null}
+        onAddRoom={jest.fn()}
+        onCancel={jest.fn()}
+        onAdd={onAdd}
+        onLateReading={onLateReading}
+      />
+    );
+  });
+  return r;
+}
+
+describe('the photo suggests the room', () => {
+  it('chooses the room the photo says, from the place’s own rooms, and says so', async () => {
+    mock_readLabel.mockResolvedValue(answer(null, { name: 'Oven', kind: 'appliance', room: null }));
+    const r = await openIn(['Kitchen', 'Laundry']);
+    await shoot(r);
+    expect(mock_readLabel).toHaveBeenCalledWith('h1/plate.jpg', null, ['Kitchen', 'Laundry']);
+    expect(press(r, 'Kitchen').props.accessibilityState).toEqual({ selected: true });
+    expect(texts(r).join(' ')).toContain('Kitchen, from the photo');
+  });
+
+  it('takes the reader’s own room when it is one of the place’s, in the place’s spelling', async () => {
+    mock_readLabel.mockResolvedValue(answer(null, { name: 'Thing', kind: 'appliance', room: 'laundry' }));
+    const r = await openIn(['Kitchen', 'Laundry']);
+    await shoot(r);
+    expect(press(r, 'Laundry').props.accessibilityState).toEqual({ selected: true });
+  });
+
+  it('ignores a room the place has not got', async () => {
+    mock_readLabel.mockResolvedValue(answer(null, { name: 'Thing', kind: 'appliance', room: 'Garage' }));
+    const r = await openIn(['Kitchen', 'Laundry']);
+    await shoot(r);
+    expect(press(r, 'Kitchen').props.accessibilityState).toEqual({ selected: false });
+    expect(press(r, 'Laundry').props.accessibilityState).toEqual({ selected: false });
+  });
+
+  it('never lays the photo’s room over a tap', async () => {
+    let land!: (v: unknown) => void;
+    mock_readLabel.mockReturnValue(new Promise((resolve) => { land = resolve; }));
+    const r = await openIn(['Kitchen', 'Laundry']);
+    await shoot(r);
+    await tap(r, 'Laundry');
+    await TestRenderer.act(async () => { land(answer(null, { name: 'Oven', kind: 'appliance', room: null })); });
+    expect(press(r, 'Laundry').props.accessibilityState).toEqual({ selected: true });
+    expect(press(r, 'Kitchen').props.accessibilityState).toEqual({ selected: false });
+    expect(texts(r).join(' ')).not.toContain('from the photo');
+  });
+
+  it('leaves a room the + already answered alone', async () => {
+    mock_readLabel.mockResolvedValue(answer(null, { name: 'Dryer', kind: 'appliance', room: null }));
+    const r = await open({ room: 'Kitchen' });
+    await shoot(r);
+    await tap(r, 'Back');
+    expect(press(r, 'Kitchen').props.accessibilityState).toEqual({ selected: true });
+  });
+});
+
 it('offers the photo’s guess at what it is, chosen only while nothing else is', async () => {
   mock_readLabel.mockResolvedValue(answer(null, { name: 'Heat pump', kind: 'appliance' }));
   const r = await open(null);
@@ -257,7 +322,7 @@ it('carries a paint’s tin into the record: code, sheen, tint and swatch', asyn
   }));
   const r = await openGhost('finish', 'Wan White');
   await shoot(r);
-  expect(mock_readLabel).toHaveBeenCalledWith('h1/plate.jpg', 'finish');
+  expect(mock_readLabel).toHaveBeenCalledWith('h1/plate.jpg', 'finish', ['Kitchen']);
 
   expect(boxes(r).Brand.props.value).toBe('Resene');
   expect(boxes(r)['Colour code'].props.value).toBe('N93-005-105');
@@ -388,5 +453,80 @@ describe('with label reading off, as v1 ships', () => {
     const r = await open(null);
     expect(texts(r)).toContain('The plate carries the make, model and serial, so it is the photo worth keeping.');
     expect(texts(r).some((t) => /read while you carry on/.test(t))).toBe(false);
+  });
+});
+
+describe('a consumable', () => {
+  const dishwasher = { id: 'd', kind: 'appliance', name: 'Bosch dishwasher', room: 'Kitchen' } as any;
+  const mower = { id: 'm', kind: 'appliance', name: 'Lawnmower', room: 'Garage' } as any;
+  const tabsOnShelf = { id: 't', kind: 'consumable', name: 'Rinse aid', room: 'Kitchen' } as any;
+  const PACK = {
+    legible: true, make: 'Finish', model: null, serial: null, manufactured: null, colourName: null,
+    colourCode: null, product: 'Quantum Ultimate', sheen: null, tint: null, hex: null, consumables: [],
+    size: '60 tablets', usedFor: 'dishwashers',
+  };
+
+  async function openWith(recorded: any[]) {
+    let r!: RenderResult;
+    await TestRenderer.act(async () => {
+      r = render(
+        <AddThingSheet
+          visible
+          locations={['Garage', 'Kitchen'].map((name, i) => ({ id: `l${i}`, propertyId: 'p', name, sortOrder: i }) as any)}
+          pathPrefix="h1"
+          start={null}
+          recorded={recorded}
+          onAddRoom={jest.fn()}
+          onCancel={jest.fn()}
+          onAdd={onAdd}
+          onLateReading={onLateReading}
+        />
+      );
+    });
+    return r;
+  }
+
+  it('is put where the appliance it is for lives, ticked against it, and added with the link', async () => {
+    mock_readLabel.mockResolvedValue(answer(PACK, { name: 'Dishwasher tablets', kind: 'consumable', room: null }));
+    const r = await openWith([dishwasher, mower, tabsOnShelf]);
+    await shoot(r);
+    expect(press(r, 'Kitchen').props.accessibilityState).toEqual({ selected: true });
+    await tap(r, 'Next');
+    expect(press(r, 'From the photo: Dishwasher tablets').props.accessibilityState).toEqual({ selected: true });
+    await tap(r, 'Next');
+
+    expect(texts(r)).toContain("What's it used with?");
+    expect(press(r, 'Bosch dishwasher · Kitchen').props.accessibilityState).toEqual({ selected: true });
+    expect(press(r, 'Lawnmower · Garage').props.accessibilityState).toEqual({ selected: false });
+    // Another consumable is never something a consumable is used with.
+    expect(press(r, 'Rinse aid · Kitchen')).toBeUndefined();
+    expect(boxes(r).Size.props.value).toBe('60 tablets');
+    expect(boxes(r).Product.props.value).toBe('Quantum Ultimate');
+    // A pack takes nothing and is never serviced.
+    expect(texts(r)).not.toContain('Serviced how often?');
+
+    await tap(r, 'Add it to the house');
+    expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'consumable', room: 'Kitchen', name: 'Dishwasher tablets', make: 'Finish',
+      model: 'Quantum Ultimate', spec: { size: '60 tablets' }, consumables: [], serviceDays: null,
+      usedWith: ['d'],
+    }));
+  });
+
+  it('never ticks over somebody’s own answer', async () => {
+    let land!: (v: unknown) => void;
+    mock_readLabel.mockReturnValue(new Promise((resolve) => { land = resolve; }));
+    const r = await openWith([dishwasher, mower]);
+    await shoot(r);
+    await tap(r, 'Garage');
+    await tap(r, 'Next');
+    await tap(r, 'Something else…');
+    await TestRenderer.act(async () => { boxes(r)['What is it'].props.onChangeText('Weed killer'); });
+    await tap(r, 'Consumable');
+    await tap(r, 'Next');
+    await tap(r, 'Lawnmower · Garage');
+    await TestRenderer.act(async () => { land(answer(PACK, { name: 'Dishwasher tablets', kind: 'consumable', room: null })); });
+    expect(press(r, 'Bosch dishwasher · Kitchen').props.accessibilityState).toEqual({ selected: false });
+    expect(press(r, 'Lawnmower · Garage').props.accessibilityState).toEqual({ selected: true });
   });
 });

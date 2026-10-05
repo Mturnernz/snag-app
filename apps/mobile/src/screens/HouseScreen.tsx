@@ -25,6 +25,7 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useAddThing } from '../hooks/useAddThing';
 import { useOnReturn } from '../hooks/useOnReturn';
+import { useFirstCapture } from '../hooks/useFirstCapture';
 import { getAbsentThings, getFileUrls, getThings } from '../lib/supabase';
 import { labelsToCheck } from '../lib/labelChecks';
 import { showAlert } from '../lib/alert';
@@ -162,6 +163,17 @@ export default function HouseScreen() {
   }, RETURN_RELOAD_MS);
 
   const adding = useAddThing(load);
+
+  // The tour's *Try it* for the rooms or an appliance, sent here by the list.
+  const firstCapture = useFirstCapture();
+  useEffect(() => {
+    if (!propertyId) return;
+    const action = firstCapture.takeAction(['addRoom', 'addThing']);
+    if (action === 'addRoom') setRoomOpen(true);
+    else if (action === 'addThing') adding.open(null);
+    // `adding` is re-made every render; the hand-off is taken exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propertyId, firstCapture]);
 
   const visible = useMemo(() => searchThings(things, query), [things, query]);
   const searching = query.trim().length > 0;

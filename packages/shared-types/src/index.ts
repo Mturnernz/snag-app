@@ -480,7 +480,13 @@ export type ThingKind =
   | 'tile'
   | 'fitting'
   | 'fabric'
-  | 'contact';
+  | 'contact'
+  /**
+   * Something bought and used up — dishwasher tablets, weed killer, a box of
+   * filters — recorded for the brand and the exact product, and linked to what
+   * it is used with (`usedWith`). October 2026.
+   */
+  | 'consumable';
 
 /**
  * The three that are built. Everything else is deliberately not offered yet.
@@ -490,7 +496,7 @@ export type ThingKind =
  * has a size and a grout colour, and "Paint" over a tile code is the wrong word
  * on the one page whose job is to be believed in a shop eight months later.
  */
-export const THING_KINDS: ThingKind[] = ['appliance', 'finish', 'tile'];
+export const THING_KINDS: ThingKind[] = ['appliance', 'finish', 'tile', 'consumable'];
 
 /** On a chip, where it names one thing. */
 export const THING_KIND_LABELS: Record<ThingKind, string> = {
@@ -500,6 +506,7 @@ export const THING_KIND_LABELS: Record<ThingKind, string> = {
   fitting: 'Fitting',
   fabric: 'The house',
   contact: 'Who to call',
+  consumable: 'Consumable',
 };
 
 /**
@@ -527,6 +534,9 @@ export const THING_KIND_FIELD_LABELS: Record<
   fitting: { make: 'Brand', model: 'Part', notes: 'Notes' },
   fabric: { make: 'Type', model: 'Spec', notes: 'Notes' },
   contact: { make: 'Trade', model: 'Phone', notes: 'What they did' },
+  // A pack's brand and the product it is — Finish, Quantum Ultimate — the two
+  // strings read off the shelf in the aisle.
+  consumable: { make: 'Brand', model: 'Product', notes: 'Notes' },
 };
 
 /**
@@ -550,6 +560,28 @@ export const FINISH_SPEC_FIELDS: { key: string; label: string; placeholder: stri
   // never what anybody takes to the counter — the code and the tint are.
   { key: 'hex', label: 'Swatch (hex)', placeholder: '' },
 ];
+
+/**
+ * The spec keys a consumable offers. The size is what tells the 60-tablet box
+ * from the 100; where it is bought and what is left are what the trip needs.
+ */
+export const CONSUMABLE_SPEC_FIELDS: { key: string; label: string; placeholder: string }[] = [
+  { key: 'size', label: 'Size', placeholder: '' },
+  { key: 'buyFrom', label: 'Where to buy', placeholder: '' },
+  { key: 'leftOver', label: "What's left", placeholder: '' },
+];
+
+/**
+ * One end of a link between two records, as `things_with_details` carries it:
+ * enough to draw a pill and open the other page, never a whole `Thing`.
+ */
+export interface ThingLink {
+  id: string;
+  name: string | null;
+  room: string | null;
+  kind?: ThingKind;
+  make?: string | null;
+}
 
 /**
  * The places a paint goes, offered as one-tap answers to *Where it went*.
@@ -625,6 +657,11 @@ export interface Thing {
   propertyName: string;
   snagCount: number;
   openSnagCount: number;
+
+  /** A consumable's appliances: what it is used with (`home.thing_uses`). */
+  usedWith?: ThingLink[];
+  /** An appliance's consumables: the recorded products it uses. */
+  uses?: ThingLink[];
 }
 
 /**

@@ -4,6 +4,7 @@ import TestRenderer from 'react-test-renderer';
 import { render } from '../test/render';
 import { Colors } from '../constants/theme';
 import HouseScreen from './HouseScreen';
+import { FirstCaptureProvider } from '../hooks/useFirstCapture';
 import { COMMON_ROOMS } from '../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -608,5 +609,33 @@ describe('with label reading off, as v1 ships', () => {
     await settle();
     expect(texts(result).some((t) => /label/i.test(t))).toBe(false);
     expect(mock_getLabelReadingsToCheck).not.toHaveBeenCalled();
+  });
+});
+
+// The tour's *Try it*, sent here by the list: the rooms sheet, or the
+// walkthrough, opened once.
+describe('what the tour asked for', () => {
+  it('opens Add a room', async () => {
+    const result = render(
+      <FirstCaptureProvider uri={null} action="addRoom">
+        <HouseScreen />
+      </FirstCaptureProvider>
+    );
+    await settle();
+    const without = render(<HouseScreen />);
+    await settle();
+    // The sheet's own title, beside the grid's *Add a room* row.
+    const count = (r: ReturnType<typeof render>) => texts(r).filter((t) => t === 'Add a room').length;
+    expect(count(result)).toBeGreaterThan(count(without));
+  });
+
+  it('opens the walkthrough for an appliance', async () => {
+    render(
+      <FirstCaptureProvider uri={null} action="addThing">
+        <HouseScreen />
+      </FirstCaptureProvider>
+    );
+    await settle();
+    expect((global as any).__addSheet.visible).toBe(true);
   });
 });

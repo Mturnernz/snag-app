@@ -13,6 +13,8 @@ import NameStep from './steps/NameStep';
 import HouseholdStep from './steps/HouseholdStep';
 import RoomsStep from './steps/RoomsStep';
 import InviteStep from './steps/InviteStep';
+import TourStep from './steps/TourStep';
+import type { FirstAction } from '../hooks/useFirstCapture';
 
 /**
  * Every step's screen, by id. A `Record`, so a step added to `SETUP_STEPS`
@@ -23,6 +25,7 @@ const SCREENS: Record<SetupStepId, React.ComponentType<StepProps>> = {
   household: HouseholdStep,
   rooms: RoomsStep,
   invite: InviteStep,
+  tour: TourStep,
 };
 
 interface Props {
@@ -46,8 +49,11 @@ interface Props {
    */
   onStart?: () => void;
   onJoinToken?: (token: string) => void;
-  /** The run is over. Carries the photograph from *Snap your first job*, if one was taken. */
-  onFinish: (firstPhoto: string | null) => void;
+  /**
+   * The run is over. Carries the photograph from *Snap your first job*, if one
+   * was taken, or what the tour's *Try it* asked the app to open.
+   */
+  onFinish: (firstPhoto: string | null, firstAction?: FirstAction | null) => void;
 }
 
 type Screen = SetupStepId | 'intro' | 'all-set' | null;
@@ -115,6 +121,16 @@ export default function SetupFlow({
     }
   }, [screen, ctx, seen, done, mode, onFinish]);
 
+  // *Try it* on the tour: the step is seen, the rest of the run is passed over,
+  // and the app opens on what was asked for. Anything still required was asked
+  // before the tour, which comes last.
+  function tryIt(action: FirstAction) {
+    if (finished.current) return;
+    markSetupSeen(['tour']).catch((err) => console.error('Failed to record a setup step:', err));
+    finished.current = true;
+    onFinish(null, action);
+  }
+
   function leave(id: SetupStepId) {
     markSetupSeen([id]).catch((err) => console.error('Failed to record a setup step:', err));
     setHistory((current) => [...current, id]);
@@ -170,6 +186,7 @@ export default function SetupFlow({
       onReady={onReady}
       suggestedName={suggestedName}
       onJoinToken={onJoinToken}
+      onTry={tryIt}
     />
   );
 }

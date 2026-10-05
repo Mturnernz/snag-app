@@ -40,7 +40,18 @@ jest.mock('../lib/exportFile', () => ({
   // business and is pinned in `exportFile.test.ts` against the real library;
   // what this file cares about is which rows reached the extract.
   loadExportImages: async () => [],
+  renderPdf: (...a: unknown[]) => mock_renderPdf(...a),
 }));
+const mock_renderPdf = jest.fn((..._a: unknown[]) => new Uint8Array([37, 80, 68, 70]));
+const mock_shareFile = jest.fn();
+let mock_canShareFiles = true;
+jest.mock('../lib/share', () => ({
+  shareFile: (...a: unknown[]) => mock_shareFile(...a),
+  canShareFiles: () => mock_canShareFiles,
+}));
+const mock_saveFile = jest.fn().mockResolvedValue({ path: null });
+jest.mock('../lib/download', () => ({ saveFile: (...a: unknown[]) => mock_saveFile(...a) }));
+const mock_getComments = jest.fn();
 
 const mock_getSnags = jest.fn();
 const mock_markListSeen = jest.fn();
@@ -57,6 +68,7 @@ jest.mock('../lib/supabase', () => ({
   createSnag: (...a: unknown[]) => mock_createSnag(...a),
   updateSnag: (...a: unknown[]) => mock_updateSnag(...a),
   setPartBought: (...a: unknown[]) => mock_setPartBought(...a),
+  getComments: (...a: unknown[]) => mock_getComments(...a),
 }));
 // Coming back to the app is an event the test fires by hand: the listeners the
 // screen registers are kept here, and `returnAfter` calls them.
@@ -927,5 +939,131 @@ describe('capturing from the +', () => {
     await TestRenderer.act(async () => box(r).props.onChangeText('Gutters'));
     await press(r, 'Cancel');
     expect(mock_createSnag).not.toHaveBeenCalled();
+  });
+});
+
+// Holding a card down chooses it; the chosen jobs go out as a PDF for a quote,
+// through the phone's own share sheet. These pin the choosing, what reaches the
+// file, and that the household's notes stay out unless asked for.
+describe('choosing jobs to share', () => {
+  const byLabel = (r: ReturnType<typeof render>, label: string) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
+      && (typeof n.props?.onPress === 'function' || typeof n.props?.onLongPress === 'function'),
+  )[0];
+  const tap = async (r: ReturnType<typeof render>, label: string) => {
+    await TestRenderer.act(async () => { await byLabel(r, label).props.onPress(); });
+    await settle();
+  };
+
+  // Untagged, because the fold tests above remember rooms they folded, and a
+  // folded room draws no cards.
+  async function withJobs() {
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done') ? [] : [
+        snag({ id: 'a', reference: 'S-1', description: 'Rangehood filter', room: null }),
+        snag({ id: 'b', reference: 'S-2', description: 'Shelf brackets', room: null }),
+      ],
+    ));
+    const r = render(<SnagListScreen />);
+    await settle();
+    return r;
+  }
+
+  beforeEach(() => {
+    mock_canShareFiles = true;
+    mock_shareFile.mockResolvedValue('shared');
+  });
+
+  it('starts on a long press, and a tap then chooses rather than opens', async () => {
+    const r = await withJobs();
+    await TestRenderer.act(async () => { byLabel(r, 'Rangehood filter').props.onLongPress(); });
+    expect(texts(r)).toContain('1 selected');
+    expect(texts(r)).toContain('Share 1 job');
+
+    await tap(r, 'Shelf brackets');
+    expect(mock_navigate).not.toHaveBeenCalled();
+    expect(texts(r)).toContain('2 selected');
+    await tap(r, 'Unselect: Rangehood filter');
+    expect(texts(r)).toContain('1 selected');
+
+    await tap(r, 'Stop choosing jobs');
+    expect(texts(r)).not.toContain('1 selected');
+    await tap(r, 'Rangehood filter');
+    expect(mock_navigate).toHaveBeenCalledWith('SnagDetail', { snagId: 'a' });
+  });
+
+  it('can start from a word, for a desktop with no long press', async () => {
+    const r = await withJobs();
+    await tap(r, 'Choose jobs to share');
+    expect(texts(r)).toContain('0 selected');
+    expect(texts(r)).toContain('Tap the jobs to share');
+  });
+
+  it('makes the PDF of the chosen jobs only, with no notes, and shares it', async () => {
+    const r = await withJobs();
+    await TestRenderer.act(async () => { byLabel(r, 'Shelf brackets').props.onLongPress(); });
+    await tap(r, 'Share 1 job');
+
+    const [table, , brief] = mock_renderPdf.mock.calls[0] as any[];
+    expect(table.rows.map((row: string[]) => row[0])).toEqual(['S-2']);
+    expect(table.columns).not.toContain('Notes');
+    expect(brief.title).toBe('Could you quote for this job?');
+    expect(mock_getComments).not.toHaveBeenCalled();
+
+    await tap(r, 'Share');
+    expect(mock_shareFile).toHaveBeenCalledWith(
+      expect.any(Uint8Array), expect.stringMatching(/^jobs-to-quote-.*\.pdf$/), 'application/pdf', '1 job to quote',
+    );
+    expect(mock_showToast).toHaveBeenCalledWith('Shared');
+    expect(texts(r)).not.toContain('1 selected');
+  });
+
+  it('reads the notes one job at a time, only when asked', async () => {
+    mock_getComments.mockResolvedValue([{ body: 'Ordered the part' }]);
+    const r = await withJobs();
+    await TestRenderer.act(async () => { byLabel(r, 'Rangehood filter').props.onLongPress(); });
+    await tap(r, 'Shelf brackets');
+    await tap(r, 'Share 2 jobs');
+    await tap(r, 'Put them in');
+    expect(mock_getComments).toHaveBeenCalledTimes(2);
+    const [table] = mock_renderPdf.mock.calls[mock_renderPdf.mock.calls.length - 1] as any[];
+    expect(table.columns).toContain('Notes');
+    expect(table.rows[0][table.columns.indexOf('Notes')]).toBe('Ordered the part');
+  });
+
+  it('offers a download and an email where the browser cannot share a file', async () => {
+    mock_canShareFiles = false;
+    const r = await withJobs();
+    await TestRenderer.act(async () => { byLabel(r, 'Rangehood filter').props.onLongPress(); });
+    await tap(r, 'Share 1 job');
+    expect(byLabel(r, 'Share')).toBeUndefined();
+    await tap(r, 'Download PDF');
+    expect(mock_saveFile).toHaveBeenCalledWith(expect.stringMatching(/\.pdf$/), expect.any(Uint8Array), 'application/pdf');
+    expect(mock_showToast).toHaveBeenCalledWith(expect.stringMatching(/downloaded$/));
+  });
+});
+
+// The tour's *Try it*: logging a job opens this screen's sheet; the rooms and
+// an appliance belong to the House tab, so the list sends them there.
+describe('what the tour asked for', () => {
+  it('opens the capture sheet for Log a job, once', async () => {
+    const r = render(
+      <FirstCaptureProvider uri={null} action="logJob">
+        <SnagListScreen />
+      </FirstCaptureProvider>
+    );
+    await settle();
+    expect(texts(r)).toContain('Continue without picture');
+    expect(mock_navigate).not.toHaveBeenCalled();
+  });
+
+  it('sends the rooms and an appliance to the House tab', async () => {
+    render(
+      <FirstCaptureProvider uri={null} action="addThing">
+        <SnagListScreen />
+      </FirstCaptureProvider>
+    );
+    await settle();
+    expect(mock_navigate).toHaveBeenCalledWith('House');
   });
 });

@@ -5,6 +5,7 @@ import {
   parseLooseDate, sameNamedThing, searchThings,
   thingDetailLine, thingHeadline, thingKindGroups, thingSearchText, thingsInArea, wallColour,
   TILE_BULLET_LIMIT,
+  roomForThing, suggestRoom, thingsUsedFor,
 } from '@snag/supabase-queries';
 import type { Thing } from '../types';
 
@@ -688,5 +689,75 @@ describe('a name the room already has', () => {
 
   it('has nothing to say about a thing with no name yet', () => {
     expect(sameNamedThing([thing({ room: 'Garage', name: null })], 'Garage', '')).toBeNull();
+  });
+});
+
+describe('the room a photo suggests', () => {
+  const seeded = ['Kitchen', 'Laundry', 'Master bedroom'];
+
+  it('reads the catalogue backwards where it names one room', () => {
+    expect(roomForThing('Oven', seeded)).toBe('Kitchen');
+    expect(roomForThing('Dryer', seeded)).toBe('Laundry');
+    expect(roomForThing('Bosch dishwasher', seeded)).toBe('Kitchen');
+  });
+
+  it('says nothing where the catalogue names several rooms, even if the place has only one of them', () => {
+    expect(roomForThing('Smoke alarm', seeded)).toBeNull();
+    expect(roomForThing('Heat pump head', ['Master bedroom'])).toBeNull();
+  });
+
+  it('never answers paint, which is in every room', () => {
+    expect(roomForThing('Paint', seeded)).toBeNull();
+  });
+
+  it('only ever names a room the place has, in its own spelling', () => {
+    expect(roomForThing('Oven', ['Laundry'])).toBeNull();
+    expect(roomForThing('Oven', ['kitchen'])).toBe('kitchen');
+    expect(roomForThing('Weed killer', ['Kitchen', 'Outside'])).toBe('Outside');
+    expect(roomForThing('Weed killer', ['Outside', 'Garage'])).toBe('Garage');
+    expect(roomForThing('Weed killer', ['Kitchen'])).toBeNull();
+  });
+
+  it('knows the things the catalogue never suggests', () => {
+    expect(roomForThing('Dishwasher tablets', seeded)).toBe('Kitchen');
+    expect(roomForThing('Microwave', seeded)).toBe('Kitchen');
+  });
+
+  it('matches whole words, never inside one', () => {
+    expect(roomForThing('Ovenproof dish', seeded)).toBeNull();
+  });
+
+  it('takes the reader’s room when the place has it, and falls back to the name', () => {
+    expect(suggestRoom({ name: 'Thing', kind: 'appliance', room: 'laundry room' }, seeded)).toBe('Laundry');
+    expect(suggestRoom({ name: 'Oven', kind: 'appliance', room: 'Garage' }, seeded)).toBe('Kitchen');
+    expect(suggestRoom({ name: null, kind: null, room: 'Garage' }, seeded)).toBeNull();
+    expect(suggestRoom(null, seeded)).toBeNull();
+  });
+});
+
+describe('what a pack says it is for', () => {
+  const dishwasher = thing({ id: 'd', name: 'Bosch dishwasher', room: 'Kitchen' });
+  const head1 = thing({ id: 'h1', name: 'Heat pump head', room: 'Lounge' });
+  const head2 = thing({ id: 'h2', name: 'Heat pump head', room: 'Master bedroom' });
+  const tabs = thing({ id: 't', name: 'Dishwasher tablets', kind: 'consumable' });
+  const all = [dishwasher, head1, head2, tabs];
+
+  it('finds the appliances the pack names, past a plural', () => {
+    expect(thingsUsedFor('dishwashers', all).map((t) => t.id)).toEqual(['d']);
+    expect(thingsUsedFor('For all heat pumps', all).map((t) => t.id)).toEqual(['h1', 'h2']);
+  });
+
+  it('never offers another consumable, nor anything when the pack says nothing', () => {
+    expect(thingsUsedFor('dishwasher tablets', [tabs])).toEqual([]);
+    expect(thingsUsedFor(null, all)).toEqual([]);
+    expect(thingsUsedFor('for all', all)).toEqual([]);
+  });
+
+  it('matches whole words, never inside one', () => {
+    expect(thingsUsedFor('lawns and paths', all)).toEqual([]);
+  });
+
+  it('gives consumables a heading of their own on a room’s page', () => {
+    expect(thingKindGroups([dishwasher, tabs]).map((g) => g.key)).toEqual(['appliances', 'consumables']);
   });
 });

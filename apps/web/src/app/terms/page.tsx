@@ -12,9 +12,9 @@ export const metadata: Metadata = {
  * The terms of use.
  *
  * **In force from 30 September 2026.** They name SnagHQ as the provider and,
- * by the owner's decision, carry no NZBN and no postal address; the way to
- * reach SnagHQ is help@snaghq.co.nz, at the foot. (Until then the page said
- * *Draft, not yet in force* over bracketed placeholders for both.)
+ * since 5 October 2026 and by the owner's decision, give its NZBN
+ * (9429054008427); there is still no postal address, and the way to reach
+ * SnagHQ is help@snaghq.co.nz, at the foot. The same NZBN is on /privacy.
  *
  * It lives beside /privacy for the same reason: it has to open in any browser
  * for somebody who has no account yet.
@@ -33,12 +33,12 @@ export default function TermsPage() {
 
       <h1 className={styles.title}>Terms</h1>
       <p className={styles.updated}>
-        Last updated 30 September 2026
+        Last updated 5 October 2026
       </p>
 
       <p>
         Snag is a shared list for looking after a house. It is provided by SnagHQ, in New
-        Zealand. These terms are the agreement between you and SnagHQ when you use it. How Snag handles your information is in the{' '}
+        Zealand (NZBN 9429054008427). These terms are the agreement between you and SnagHQ when you use it. How Snag handles your information is in the{' '}
         <Link href="/privacy">privacy statement</Link>.
       </p>
 

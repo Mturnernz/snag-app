@@ -5365,8 +5365,8 @@ both, and they have to open in any browser for somebody who has no account yet. 
 steps (there is no store listing), and links privacy, terms, help and recovery. Every sentence on it
 is a rule in this file: capture asks after it files, suggestions are offers, nothing sends a
 notification. A claim there that the app cannot keep is the fastest way to lose somebody on their
-first day. `/terms` names SnagHQ as the provider and, by the owner's decision, carries no NZBN or
-postal address; it is in force from 30 September 2026. The front page describes the four tabs v1
+first day. `/terms` names SnagHQ as the provider and, by the owner's decision (5 October 2026), gives its NZBN,
+9429054008427, as `/privacy` does; it still carries no postal address. It is in force from 30 September 2026. The front page describes the four tabs v1
 has — List, House, Schedule, You — and promises nothing about renovations or label reading.
 
 `@supabase/ssr` forces PKCE, and a PKCE recovery link only works in the browser that asked for it

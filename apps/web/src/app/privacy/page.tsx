@@ -30,10 +30,10 @@ export default function PrivacyPage() {
       </Link>
 
       <h1 className={styles.title}>Privacy</h1>
-      <p className={styles.updated}>Last updated 28 September 2026</p>
+      <p className={styles.updated}>Last updated 5 October 2026</p>
 
       <p>
-        Snag is a shared list for looking after a house, run by SnagHQ in New Zealand. This page
+        Snag is a shared list for looking after a house, run by SnagHQ in New Zealand (NZBN 9429054008427). This page
         says what Snag keeps about you and your household, why, and who else handles it.
       </p>
 

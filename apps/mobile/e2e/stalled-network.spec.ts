@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { reachPassword } from './welcome';
+import { pastSetup, reachPassword } from './welcome';
 
 // A stalled request must not wedge the app.
 //
@@ -39,7 +39,8 @@ async function signIn(page: Page) {
   await page.getByText('Sign in', { exact: true }).click();
   // The list is the initial route — there is no Add tab; capture is the + on
   // this screen.
-  await expect(page.getByLabel('Capture a new job')).toBeVisible({ timeout: 90_000 });
+  // A catch-up step (the tour) can come first for an account set up before it.
+  await pastSetup(page);
   await placeChosen;
 }
 

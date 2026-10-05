@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { reachPassword } from './welcome';
+import { pastSetup, reachPassword } from './welcome';
 
 // Coming back to the tab must not look like signing in.
 //
@@ -33,7 +33,8 @@ async function signIn(page: Page) {
   await reachPassword(page, EMAIL!);
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD!);
   await page.getByText('Sign in', { exact: true }).click();
-  await expect(page.getByLabel('Capture a new job')).toBeVisible({ timeout: 90_000 });
+  // A catch-up step (the tour) can come first for an account set up before it.
+  await pastSetup(page);
 }
 
 /**

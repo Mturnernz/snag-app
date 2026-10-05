@@ -82,6 +82,11 @@ function AppGates() {
   // wait on it either: a write that failed would otherwise put the whole run
   // back on screen. They are asked again on the next launch instead.
   const [setupDone, setSetupDone] = useState(false);
+  // A setup run is on screen and has not finished. It keeps the screen until it
+  // calls onFinish: making a house can leave nothing pending, and letting the
+  // app in on that re-read is how a new house came out with no rooms step and
+  // landed on the Household screen. See gates.ts.
+  const [setupRunning, setSetupRunning] = useState(false);
   // The photograph from setup's *Snap your first job*, for the list to file.
   const [firstPhoto, setFirstPhoto] = useState<string | null>(null);
 
@@ -159,6 +164,7 @@ function AppGates() {
         setHouseholds([]);
         setMemberCount(0);
         setSetupDone(false);
+        setSetupRunning(false);
         setFirstPhoto(null);
         setLoading(false);
         return;
@@ -199,6 +205,7 @@ function AppGates() {
     hasProfile: !!profile,
     hasHousehold: !!household,
     hasPendingSteps,
+    setupRunning,
   });
 
   if (gate === 'loading') {
@@ -287,10 +294,17 @@ function AppGates() {
             memberCount={memberCount}
             suggestedName={nameFromIdentity(session?.user.user_metadata)}
             onReady={loadAccount}
+            onStart={() => setSetupRunning(true)}
             onJoinToken={setJoinToken}
             onFinish={(photo) => {
+              // Setup ends on the list. The address bar can still hold the
+              // screen the run began from (a household deleted from
+              // /household), and the navigator about to mount would open
+              // there — past the list, which is what files the first photo.
+              resetWebPathIfStale();
               setFirstPhoto(photo);
               setSetupDone(true);
+              setSetupRunning(false);
               loadAccount();
             }}
           />

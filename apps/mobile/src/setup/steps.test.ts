@@ -3,7 +3,7 @@ import { join } from 'path';
 
 import {
   SETUP_BASELINE, SETUP_STEPS, expectedStepCount, flowMode, isPending, nextStep, pendingSteps,
-  type SetupContext, type SetupStep,
+  seenThisRun, type SetupContext, type SetupStep,
 } from './steps';
 import type { Household, Profile } from '../types';
 
@@ -181,5 +181,44 @@ describe('walking the run', () => {
   it('drops the invite from the count once it turns out not to apply', () => {
     const joiner = ctx({ profile: profile(), household: HOUSE, memberCount: 2 });
     expect(expectedStepCount(joiner, none, new Set(['name', 'household']))).toBe(3);
+  });
+});
+
+// The house steps are about a house, not a person. miketsturner had seen the
+// rooms and the invite for a house since deleted, so a new one was named and
+// nothing was left to ask: no rooms, no invite, no *You're all set*.
+describe('a run that begins with no house', () => {
+  const before = new Set(EVER_SHIPPED);
+
+  it('asks the rooms and the invite for the new house, whatever was seen for an old one', () => {
+    const seen = seenThisRun(before, false);
+    const made = ctx({ profile: profile(EVER_SHIPPED), household: HOUSE, memberCount: 1 });
+    expect(nextStep(made, seen, new Set(['household']))?.id).toBe('rooms');
+    expect(nextStep(made, seen, new Set(['household', 'rooms']))?.id).toBe('invite');
+  });
+
+  it('still never asks the name again, which is about the person', () => {
+    const seen = seenThisRun(before, false);
+    expect(seen.has('name')).toBe(true);
+    expect(seen.has('household')).toBe(true);
+  });
+
+  it('forgets exactly the steps that need a house, so a later one is covered too', () => {
+    const houseSteps = SETUP_STEPS.filter((s) => s.needsHousehold).map((s) => s.id);
+    const seen = seenThisRun(before, false);
+    for (const id of EVER_SHIPPED) expect(seen.has(id)).toBe(!houseSteps.includes(id as never));
+  });
+
+  it('counts the house steps in the dots before the house exists', () => {
+    const c = ctx({ profile: profile(EVER_SHIPPED) });
+    expect(expectedStepCount(c, seenThisRun(before, false), none)).toBe(3);
+  });
+
+  // A catch-up, or a first run picked up after the house was made, is about
+  // the house already there: what was seen of it stays seen.
+  it('keeps what was seen when the run begins with a house', () => {
+    expect([...seenThisRun(before, true)].sort()).toEqual([...EVER_SHIPPED].sort());
+    const c = ctx({ profile: profile(EVER_SHIPPED), household: HOUSE, memberCount: 1 });
+    expect(pendingSteps(c, seenThisRun(before, true))).toEqual([]);
   });
 });

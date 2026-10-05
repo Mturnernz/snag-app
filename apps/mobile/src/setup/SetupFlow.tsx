@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { markSetupSeen } from '../lib/supabase';
 import { Household, Profile } from '../types';
 import {
-  expectedStepCount, flowMode, nextStep, pendingSteps,
+  expectedStepCount, flowMode, nextStep, pendingSteps, seenThisRun,
   type SetupContext, type SetupStepId,
 } from './steps';
 import type { StepProps } from './types';
@@ -33,6 +33,12 @@ interface Props {
   suggestedName?: string | null;
   /** Re-reads the account in App.tsx. */
   onReady: () => Promise<void>;
+  /**
+   * The run is on screen. App.tsx keeps it there until `onFinish`, even once
+   * nothing is pending: making a house answers the last required step, and the
+   * gate letting the app in at that moment is what cut the run off at the name.
+   */
+  onStart?: () => void;
   onJoinToken?: (token: string) => void;
   /** The run is over. Carries the photograph from *Snap your first job*, if one was taken. */
   onFinish: (firstPhoto: string | null) => void;
@@ -48,8 +54,9 @@ type Screen = SetupStepId | 'intro' | 'all-set' | null;
  * which still want an answer, judged against the data as it stands; this only
  * walks them in order, keeps a back stack, and records each one as seen as it
  * is left. It stays mounted while App.tsx re-reads the account after a write —
- * the gate keeps it on screen while anything is pending — so making the house
- * half way through does not throw away where the run had got to.
+ * the gate keeps it on screen from `onStart` until `onFinish`, whatever is
+ * pending in between — so making the house half way through does not throw
+ * away where the run had got to.
  *
  * A step is recorded as seen when it is left, not when the run ends: somebody
  * who closes the app after the rooms is not asked about the rooms again. The
@@ -57,13 +64,24 @@ type Screen = SetupStepId | 'intro' | 'all-set' | null;
  * once more next time, which is a smaller cost than a setup that stalls on it.
  */
 export default function SetupFlow({
-  profile, household, memberCount, suggestedName, onReady, onJoinToken, onFinish,
+  profile, household, memberCount, suggestedName, onReady, onStart, onJoinToken, onFinish,
 }: Props) {
   const ctx: SetupContext = useMemo(
     () => ({ profile, household, memberCount }),
     [profile, household, memberCount]
   );
-  const seen = useMemo(() => new Set(profile?.setupSeen ?? []), [profile?.setupSeen]);
+  // Decided once, like the mode below: the household step making a house half
+  // way through is exactly the case this is for. See seenThisRun.
+  const [startedWithHousehold] = useState(() => !!household);
+  const seen = useMemo(
+    () => seenThisRun(new Set(profile?.setupSeen ?? []), startedWithHousehold),
+    [profile?.setupSeen, startedWithHousehold]
+  );
+
+  useEffect(() => {
+    // Once, on mount: a run starts once however often the account is re-read.
+    onStart?.();
+  }, []);
 
   // Decided once, from what was waiting when the run began: a household made
   // half way through must not turn a first run into a catch-up.

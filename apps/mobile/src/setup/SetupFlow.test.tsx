@@ -101,6 +101,7 @@ const type = async (r: ReturnType<typeof render>, label: string, text: string) =
 
 const onFinish = jest.fn();
 const onJoinToken = jest.fn();
+const onStart = jest.fn();
 
 function Harness({ suggestedName }: { suggestedName?: string | null }) {
   const [account, setAccount] = useState({ ...world });
@@ -111,6 +112,7 @@ function Harness({ suggestedName }: { suggestedName?: string | null }) {
       memberCount={account.members}
       suggestedName={suggestedName}
       onReady={async () => setAccount({ ...world })}
+      onStart={onStart}
       onJoinToken={onJoinToken}
       onFinish={onFinish}
     />
@@ -200,6 +202,46 @@ describe('a brand-new account, start to finish', () => {
     expect(title(r, 'Here are your rooms')).toBe(true);
     // Nothing earlier in this run to go back to.
     expect(r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Back')).toHaveLength(0);
+  });
+});
+
+// miketsturner, 5 October 2026: an account that had set up a house, deleted
+// it, and made another. setup_seen already held the rooms and the invite, so
+// the new house was named and the run had nothing left to ask — and App.tsx let
+// the app in on that write, onto the Household screen it was deleted from.
+describe('a new house for somebody who has set one up before', () => {
+  beforeEach(() => {
+    world = { profile: profile(['name', 'household', 'rooms', 'invite'], 'Mike'), household: null, members: 0 };
+  });
+
+  it('is taken through its rooms, the invite and the last screen', async () => {
+    const r = await start();
+    expect(title(r, 'Nice to meet you, Mike')).toBe(true);
+    await press(r, 'Start a new house');
+    await type(r, "Your place's name", 'Home');
+    await press(r, 'Create it');
+    expect(mock.createHousehold).toHaveBeenCalledWith('Home', 'Home');
+
+    expect(title(r, 'Here are your rooms')).toBe(true);
+    await press(r, 'Continue');
+    expect(title(r, 'Bring someone in')).toBe(true);
+    await press(r, 'Set up later');
+    expect(title(r, "You're all set, Mike")).toBe(true);
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  it('is never asked its name again', async () => {
+    const r = await start();
+    expect(title(r, 'What should we call you?')).toBe(false);
+  });
+
+  it('says the run has started once, however often the account is re-read', async () => {
+    const r = await start();
+    await press(r, 'Start a new house');
+    await type(r, "Your place's name", 'Home');
+    await press(r, 'Create it');
+    await press(r, 'Continue');
+    expect(onStart).toHaveBeenCalledTimes(1);
   });
 });
 

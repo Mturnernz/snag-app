@@ -34,6 +34,14 @@ export interface GateState {
    * before it existed this way too.
    */
   hasPendingSteps?: boolean;
+  /**
+   * A setup run is on screen and has not finished. It keeps the screen until it
+   * does, pending steps or none: the household step answers the last required
+   * question, and letting the app in on that write cut a run off after the
+   * name, with no rooms, no invite and no *You're all set* — and dropped the
+   * person on whatever screen the address bar last held.
+   */
+  setupRunning?: boolean;
 }
 
 export function chooseGate(state: GateState): Gate {
@@ -48,6 +56,6 @@ export function chooseGate(state: GateState): Gate {
   // itself when there isn't one.
   if (state.hasJoinToken) return 'join';
   if (!state.hasProfile || !state.hasHousehold) return 'setup';
-  if (state.hasPendingSteps) return 'setup';
+  if (state.hasPendingSteps || state.setupRunning) return 'setup';
   return 'app';
 }

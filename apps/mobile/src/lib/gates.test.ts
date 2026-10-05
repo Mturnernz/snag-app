@@ -74,3 +74,24 @@ describe('a step not yet shown', () => {
     expect(gate({ hasPendingSteps: true, signedIn: false })).toBe('auth');
   });
 });
+
+// A run, once on screen, keeps it until it finishes. Making a house answers
+// the last required step; letting the app in on that write cut a run off at
+// the name and opened whatever screen the address bar last held.
+describe('a setup run on screen', () => {
+  it('keeps the screen once nothing is pending', () => {
+    expect(gate({ setupRunning: true, hasPendingSteps: false })).toBe('setup');
+  });
+
+  it('gives it up once it has finished', () => {
+    expect(gate({ setupRunning: false, hasPendingSteps: false })).toBe('app');
+  });
+
+  it('never beats a join code pasted half way through', () => {
+    expect(gate({ setupRunning: true, hasJoinToken: true })).toBe('join');
+  });
+
+  it('never beats sign-out', () => {
+    expect(gate({ setupRunning: true, signedIn: false })).toBe('auth');
+  });
+});

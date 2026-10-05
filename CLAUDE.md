@@ -4309,9 +4309,19 @@ whether it can be put off. `SetupFlow` only walks them; `App.tsx`'s gate asks th
   and the You tab cannot come to disagree about what an answer does. A skippable step says where
   it can be changed later (`changeLater`), and the test requires it.
 - **The flow stays mounted while the account is re-read.** The gate is `setup` whenever anything
-  is pending, so making the house half way through carries on to the rooms rather than starting
-  again, and `onFinish` is what lets the app in (a `setup_seen` write that failed is asked again
-  next launch, never a run that loops).
+  is pending, and from the run's `onStart` until its `onFinish` whatever is pending
+  (`setupRunning`), so making the house half way through carries on to the rooms rather than
+  starting again, and `onFinish` is what lets the app in (a `setup_seen` write that failed is asked
+  again next launch, never a run that loops). It was "whenever anything is pending" alone, and
+  that let the app in on the household step's own write whenever nothing was left to ask.
+- **A run that begins with no house asks the house steps for the new one** (`seenThisRun`). The
+  rooms and the invite are about a house and `setup_seen` is per person: on 5 October 2026 an
+  account that had set up, deleted its house and made another was asked only the name, then
+  dropped on the Household screen it had deleted from, with no rooms, invite or *You're all set*.
+  A run that begins with a house (a catch-up, a first run picked up half way) keeps what was seen.
+- **Setup ends on the list.** `onFinish` puts the address bar back to `/` (`resetWebPathIfStale`)
+  before the navigator mounts, or the web build reopens whatever path the run began from — past
+  the list, which is what files the first photo.
 - **Who is asked what** comes from the data: the second person, arriving by invitation or join
   code, sees their name, *Join*, the rooms (they may know about the room the first one missed,
   and removing one asks, since it is the other person's too) and *All set* — never *Bring someone
@@ -4343,7 +4353,9 @@ rest.
 only people who have set up. `setup/SetupFlow.test.tsx` pins the whole first run in order with its
 writes, the Google name, the invitation beating the question (carried over from the old Setup
 screen, with the waiting page, the pasted link and the no-email wording), the joiner's shorter run,
-*Set up later* becoming *Continue* once there is a link, and the camera on the last screen.
+*Set up later* becoming *Continue* once there is a link, the camera on the last screen, and a new
+house for somebody who has set one up before getting its rooms, invite and last screen.
+`gates.test.ts` pins a running setup keeping the screen.
 `setup/WelcomeFlow.test.tsx` pins the greeting, the reduced-motion case, Google first, both email
 paths and recovery; `lib/googleSignIn.test.ts` the redirect target and the token parse;
 `gates.test.ts` the pending-step gate; `SnagListScreen.test.tsx` the first photo filed once.

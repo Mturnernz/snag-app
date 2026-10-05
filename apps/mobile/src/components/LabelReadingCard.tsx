@@ -46,6 +46,7 @@ const FAILED_WORDS: Record<NonNullable<LabelReadingToCheck['reason']>, string> =
   illegible: "Couldn't make out the label in this photo — type the make and model from it.",
   busy: 'The label reader was busy when this was added.',
   quota: "That day's label reads were used up when this was added.",
+  limit: "Label reading wasn't available when this was added — type the make and model from the photo.",
   error: "Couldn't read the label when this was added.",
 };
 
@@ -76,7 +77,7 @@ export default function LabelReadingCard({
             <Text style={styles.caption}>{FAILED_WORDS[reason]}</Text>
           </View>
           <View style={styles.actions}>
-            {reason !== 'illegible' ? (
+            {reason !== 'illegible' && reason !== 'limit' ? (
               <TextButton label="Try again" onPress={onRetry} bold accessibilityLabel="Read the label again" />
             ) : null}
             <TextButton label="Dismiss" onPress={onDismiss} accessibilityLabel="Dismiss the label reading" />

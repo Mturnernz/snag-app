@@ -1447,6 +1447,14 @@ nor *What the maker says*, and the House tab counts no labels to check. To bring
 auto-reload on the key, one real plate read, then the variable and a redeploy. The specs below run
 with it on; each suite also pins the off state.
 
+**A key with no credit is said, not retried** (`20261005130000`). `isOutOfCredit` (402) ends the
+round at once in both functions, because billing is per project and no other model will answer; a
+429 naming a daily allowance or a limit of 0 is `limit` too, after the other models have been asked.
+`limit` is a reason on `label_readings` as it already was on `product_lookups`: the sheet says
+*Label reading isn't available right now*, and the thing page's card says so **with no *Try
+again***, which could only spend another of the day's reads. `readLabelGemini.test.ts` and
+`ThingDetailScreen.test.tsx` pin it.
+
 The walkthrough has always photographed the rating plate "because it carries the make, model and
 serial at once" — and then asked somebody to type all three off the photo they had just taken.
 `supabase/functions/read-label` reads it, and the walkthrough lays the answer into the boxes.

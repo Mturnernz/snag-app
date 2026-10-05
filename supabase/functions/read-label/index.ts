@@ -47,7 +47,9 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { encodeBase64 } from 'jsr:@std/encoding/base64';
-import { GEMINI_ENDPOINT, geminiRequest, isBusy, modelsToTry, quotaRefusal, readingFromGemini } from './gemini.ts';
+import {
+  GEMINI_ENDPOINT, geminiRequest, isBusy, isOutOfCredit, modelsToTry, quotaRefusal, readingFromGemini,
+} from './gemini.ts';
 import { lookUpAndKeep } from '../lookup-product/run.ts';
 
 const BUCKET = 'home-photos';
@@ -80,6 +82,10 @@ const NOT_NOW = "Couldn't read the label just now — type what it says.";
 const BUSY_STILL_TRYING =
   "The label reader is busy — it'll keep trying. Carry on, and check what it read on the item's page.";
 const USED_UP = "That's today's label reads used up — type what this one says.";
+// Google would not run the read at all — no credit on the key, or an allowance
+// that will not come back within the minute. Not "busy": nothing the person
+// can wait out, and a Try again here only spends another of the day's reads.
+const UNAVAILABLE = "Label reading isn't available right now — type what the label says.";
 // How long to leave a busy model before the background round. A 503 for
 // "high demand" clears in tens of seconds, not in one.
 const BACKGROUND_RETRY_PAUSE_MS = 20_000;
@@ -96,6 +102,7 @@ declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 type Asked =
   | { kind: 'reply'; json: unknown }
   | { kind: 'busy' }
+  | { kind: 'limit' }
   | { kind: 'notSetUp' }
   | { kind: 'error' };
 
@@ -108,6 +115,7 @@ type Asked =
 async function askModels(models: string[], body: string, apiKey: string): Promise<Asked> {
   const deadline = Date.now() + MODEL_TIMEOUT_MS;
   let busy = false;
+  let limited = false;
 
   for (const [index, model] of models.entries()) {
     const left = deadline - Date.now();
@@ -132,8 +140,14 @@ async function askModels(models: string[], body: string, apiKey: string): Promis
     const detail = await attempt.text().catch(() => '');
     const quota = quotaRefusal(attempt.status, detail);
     console.error(`read-label: ${model} ${attempt.status}:`, quota ? `quota — ${quota.detail}` : detail.slice(0, 500));
+    // Billing is per project: no other model will answer either.
+    if (isOutOfCredit(attempt.status)) return { kind: 'limit' };
     if (isBusy(attempt.status)) {
-      busy = true;
+      // A per-minute limit is busy by another name; a used-up day is not, but
+      // another model is still asked, since Google keeps most allowances per
+      // model — `lookup-product`'s rule.
+      if (quota && !quota.perMinute) limited = true;
+      else busy = true;
       if (!last) await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSE_MS));
       continue;
     }
@@ -144,14 +158,15 @@ async function askModels(models: string[], body: string, apiKey: string): Promis
     }
     return { kind: 'error' };
   }
-  return busy ? { kind: 'busy' } : { kind: 'error' };
+  return busy ? { kind: 'busy' } : limited ? { kind: 'limit' } : { kind: 'error' };
 }
 
 /** A reply, as what the waiting room keeps and what the caller is told. */
 function settle(asked: Asked):
   | { status: 'read'; reading: unknown }
-  | { status: 'failed'; reason: 'illegible' | 'busy' | 'error'; http: number; words: string } {
+  | { status: 'failed'; reason: 'illegible' | 'busy' | 'limit' | 'error'; http: number; words: string } {
   if (asked.kind === 'busy') return { status: 'failed', reason: 'busy', http: 503, words: BUSY };
+  if (asked.kind === 'limit') return { status: 'failed', reason: 'limit', http: 503, words: UNAVAILABLE };
   if (asked.kind === 'notSetUp') return { status: 'failed', reason: 'error', http: 503, words: NOT_SET_UP };
   if (asked.kind === 'error') return { status: 'failed', reason: 'error', http: 502, words: NOT_NOW };
   const outcome = readingFromGemini(asked.json);

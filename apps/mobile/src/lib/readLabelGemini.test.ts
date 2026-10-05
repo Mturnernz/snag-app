@@ -1,5 +1,5 @@
 import {
-  DEFAULT_MODEL, FALLBACK_MODEL, LAST_RESORT_MODEL, geminiRequest, isBusy, modelsToTry, quotaRefusal, readingFromGemini,
+  DEFAULT_MODEL, FALLBACK_MODEL, LAST_RESORT_MODEL, geminiRequest, isBusy, isOutOfCredit, modelsToTry, quotaRefusal, readingFromGemini,
   SCHEMA, SYSTEM,
 } from '../../../../supabase/functions/read-label/gemini';
 import { parseLabelReading } from '@snag/supabase-queries';
@@ -113,6 +113,20 @@ describe('asking a second model when the first is busy', () => {
 
   it.each([400, 401, 403, 404])('does not retry %i, which every model would refuse alike', (status) => {
     expect(isBusy(status)).toBe(false);
+  });
+});
+
+describe('a key with no credit left', () => {
+  // The day before launch every read answered 402 and the app offered a Try
+  // again that could not work. Billing is per project, so it is neither busy
+  // nor worth asking another model.
+  it('is a 402 and nothing else', () => {
+    expect(isOutOfCredit(402)).toBe(true);
+    for (const status of [400, 401, 403, 429, 500, 503]) expect(isOutOfCredit(status)).toBe(false);
+  });
+
+  it('is not busy', () => {
+    expect(isBusy(402)).toBe(false);
   });
 });
 

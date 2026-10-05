@@ -37,6 +37,17 @@ export function isBusy(status: number): boolean {
   return status === 503 || status === 500 || status === 429;
 }
 
+/**
+ * Whether Google refused because the key's project has no credit left. A 402
+ * is billing, which is per project rather than per model, so no other model
+ * will answer either and no wait will fix it. This is what every read
+ * answered on the day before launch, when the prepaid credits ran out, and the
+ * app worded it as a failure with a *Try again* that could only fail again.
+ */
+export function isOutOfCredit(status: number): boolean {
+  return status === 402;
+}
+
 /** What a 429 says about which allowance ran out, as far as Google says. */
 export interface QuotaRefusal {
   /**

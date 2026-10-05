@@ -1954,7 +1954,7 @@ export async function readLabel(
 }
 
 /** Why a reading waiting on the thing's page came to nothing. */
-export type LabelReadingReason = 'illegible' | 'busy' | 'quota' | 'error';
+export type LabelReadingReason = 'illegible' | 'busy' | 'quota' | 'limit' | 'error';
 
 /**
  * A reading of a thing's photographed label that nobody has answered yet —
@@ -1972,7 +1972,7 @@ export interface LabelReadingToCheck {
   createdAt: string;
 }
 
-const READING_REASONS: LabelReadingReason[] = ['illegible', 'busy', 'quota', 'error'];
+const READING_REASONS: LabelReadingReason[] = ['illegible', 'busy', 'quota', 'limit', 'error'];
 
 /**
  * Every reading at this place waiting on somebody, with the thing it is about.

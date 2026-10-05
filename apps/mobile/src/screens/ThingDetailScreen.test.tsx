@@ -789,6 +789,13 @@ describe('a label reading waiting to be checked', () => {
     expect(texts(result)).toContain('Read from the label');
   });
 
+  it('offers no Try again when Google would not run the read', async () => {
+    mock_getLabelReadingsToCheck.mockResolvedValue([check({ status: 'failed', reading: null, reason: 'limit' })]);
+    const result = await open({ name: 'Heat pump' });
+    expect(texts(result).join(' ')).toContain("Label reading wasn't available when this was added");
+    expect(texts(result)).not.toContain('Try again');
+  });
+
   it('draws the record when the readings cannot be fetched', async () => {
     mock_getLabelReadingsToCheck.mockRejectedValue(new Error('offline'));
     const result = await open({ name: 'Heat pump' });

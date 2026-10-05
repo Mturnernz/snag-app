@@ -4432,6 +4432,22 @@ whether it can be put off. `SetupFlow` only walks them; `App.tsx`'s gate asks th
   over through `useFirstCapture`, and filed by the list through `fileCapturedPhoto`, the shutter's
   own path, capture sheet and all. Taken once: coming back to the list does not file it twice.
 
+**The tour is the first step added after the baseline** (`tour`, `since: 2`, October 2026): three
+swipeable cards — *Set up your house*, *Add an appliance*, *Log an issue* — on `TourStep`, paged by
+*Next* as well as a swipe, because a desktop has no swipe. Everybody who set up before it gets it
+once as a catch-up (*One new thing*); a new account sees it after *Bring someone in* and before
+*You're all set*. It is **not `needsHousehold`**, though it waits for a house: it is about the app,
+so *Add another home* does not show it again. Every card says only what the app does today — the
+appliance card claims the label is read only while label reading is on (`tourCards`).
+
+**Each card's *Try it* ends setup and opens the real thing**: the step is marked seen, `onFinish`
+carries a `FirstAction` (`addRoom`, `addThing`, `logJob`), and `FirstCaptureProvider` holds it the
+way it holds the first photo — taken once. The list takes `logJob` and opens its capture sheet, and
+sends the other two to the House tab, which opens *Add a room* or the walkthrough. The You tab keeps
+**How Snag works**, the same cards in a sheet with no *Try it* (every door is a tab away).
+`steps.test.ts` pins the catch-up and the second home; `SetupFlow.test.tsx` the run, paging and each
+*Try it*; `SnagListScreen.test.tsx`, `HouseScreen.test.tsx` and `ProfileScreen.test.tsx` the rest.
+
 **Google** (`lib/googleSignIn.ts`) is Supabase's redirect on the web build — the page leaves and
 comes back holding the session in the fragment, which `detectSessionInUrl` already reads — and the
 system auth browser plus `setSession` on native, via `snag://auth-callback`. The web redirect keeps

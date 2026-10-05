@@ -26,7 +26,7 @@
  */
 import type { Household, Profile } from '../types';
 
-export type SetupStepId = 'name' | 'household' | 'rooms' | 'invite';
+export type SetupStepId = 'name' | 'household' | 'rooms' | 'invite' | 'tour';
 
 /** The steps that shipped with the flow. Existing accounts were marked as having seen these. */
 export const SETUP_BASELINE = 1;
@@ -100,6 +100,23 @@ export const SETUP_STEPS: SetupStep[] = [
     skippable: true,
     needsHousehold: true,
     changeLater: 'the You tab, under your house',
+  },
+  {
+    // Three cards — set up the house, add an appliance, log an issue — each
+    // with a *Try it* that opens the real thing. Added October 2026, so
+    // everybody who set up before it is shown it once, as a catch-up.
+    //
+    // **Not `needsHousehold`**, though it is only asked once there is a
+    // house: it is about how the app works, which a second home does not
+    // change, so *Add another home* must not show it again.
+    id: 'tour',
+    since: 2,
+    applies: (ctx) => !!ctx.household,
+    answered: () => false,
+    skippable: true,
+    needsHousehold: false,
+    whatsNew: 'A quick look at how Snag works',
+    changeLater: 'the You tab, under How Snag works',
   },
 ];
 

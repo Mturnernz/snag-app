@@ -10,6 +10,8 @@ import Avatar from '../components/Avatar';
 import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
 import InstallCard from '../components/InstallCard';
+import Sheet from '../components/Sheet';
+import TourCards from '../components/TourCards';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -47,6 +49,9 @@ export default function ProfileScreen() {
   const [ends, setEnds] = useState<LooseEnd[]>([]);
   const [endsOpen, setEndsOpen] = useState(false);
   const [gathering, setGathering] = useState(false);
+  /** *How Snag works*: the setup tour, again, in a sheet. */
+  const [tourOpen, setTourOpen] = useState(false);
+  const [tourIndex, setTourIndex] = useState(0);
 
   /**
    * What the app knows is half-finished and can name the next move for.
@@ -258,6 +263,31 @@ export default function ProfileScreen() {
           <Icon name="chevron-forward" size="md" color={Colors.textMuted} />
         </Card>
       </Pressable>
+
+      {/* The tour from setup, for anybody who skipped it or wants it again.
+          No *Try it* here: every one of its doors is a tab away already. */}
+      <Pressable
+        onPress={() => { setTourIndex(0); setTourOpen(true); }}
+        accessibilityRole="button"
+        accessibilityLabel="How Snag works"
+      >
+        <Card elevation="md" style={styles.linkRow}>
+          <Icon name="help-circle-outline" size="md" color={Colors.primary} />
+          <View style={styles.linkBody}>
+            <Text style={styles.linkTitle}>How Snag works</Text>
+            <Text style={styles.linkHint}>Your house, an appliance, an issue</Text>
+          </View>
+          <Icon name="chevron-forward" size="md" color={Colors.textMuted} />
+        </Card>
+      </Pressable>
+      <Sheet
+        visible={tourOpen}
+        title="How Snag works"
+        onClose={() => setTourOpen(false)}
+        closeLabel="Done"
+      >
+        <TourCards index={tourIndex} onIndex={setTourIndex} />
+      </Sheet>
 
       {/* No Projects switch here for v1. The tab is off by default, and on only
           for the accounts it was turned on for in SQL

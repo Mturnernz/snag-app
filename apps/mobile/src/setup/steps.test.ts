@@ -26,7 +26,9 @@ const none = new Set<string>();
 // Every id that has ever shipped. An id is stored in profiles.setup_seen, so
 // renaming one asks everybody the question again and reusing one makes a new
 // question look answered. Add to this list; never edit what is already on it.
-const EVER_SHIPPED = ['name', 'household', 'rooms', 'invite'];
+const EVER_SHIPPED = ['name', 'household', 'rooms', 'invite', 'tour'];
+// What everybody who set up before October 2026 has seen: the baseline.
+const BASELINE = ['name', 'household', 'rooms', 'invite'];
 
 describe('the ids', () => {
   it('are unique', () => {
@@ -81,7 +83,7 @@ describe('who is asked what', () => {
 
   it('with a house of its own and nobody else in it, the rooms and the invite follow', () => {
     const c = ctx({ profile: profile(['name', 'household']), household: HOUSE, memberCount: 1 });
-    expect(ids(pendingSteps(c, new Set(['name', 'household'])))).toEqual(['rooms', 'invite']);
+    expect(ids(pendingSteps(c, new Set(['name', 'household'])))).toEqual(['rooms', 'invite', 'tour']);
   });
 
   // The second person arrived by invitation. They may know about the room the
@@ -89,7 +91,7 @@ describe('who is asked what', () => {
   // knowing who it is talking to.
   it('a joiner sees the rooms and is never asked to bring somebody in', () => {
     const c = ctx({ profile: profile(), household: HOUSE, memberCount: 2 });
-    expect(ids(pendingSteps(c, none))).toEqual(['rooms']);
+    expect(ids(pendingSteps(c, none))).toEqual(['rooms', 'tour']);
   });
 
   it('somebody already set up is asked nothing', () => {
@@ -168,7 +170,7 @@ describe('walking the run', () => {
 
   it('never shows a step twice in one run', () => {
     const c = ctx({ profile: profile(), household: HOUSE, memberCount: 1 });
-    expect(nextStep(c, none, new Set(['name', 'household', 'rooms', 'invite']))).toBeNull();
+    expect(nextStep(c, none, new Set(['name', 'household', 'rooms', 'invite', 'tour']))).toBeNull();
   });
 
   // The dots: a person with no house yet will be asked about its rooms and
@@ -180,7 +182,7 @@ describe('walking the run', () => {
 
   it('drops the invite from the count once it turns out not to apply', () => {
     const joiner = ctx({ profile: profile(), household: HOUSE, memberCount: 2 });
-    expect(expectedStepCount(joiner, none, new Set(['name', 'household']))).toBe(3);
+    expect(expectedStepCount(joiner, none, new Set(['name', 'household']))).toBe(4);
   });
 });
 
@@ -229,5 +231,26 @@ describe('a run for a new house', () => {
     expect([...seenThisRun(before, false)].sort()).toEqual([...EVER_SHIPPED].sort());
     const c = ctx({ profile: profile(EVER_SHIPPED), household: HOUSE, memberCount: 1 });
     expect(pendingSteps(c, seenThisRun(before, false))).toEqual([]);
+  });
+});
+
+// The tour arrived in October 2026, after people had set up. Everybody is shown
+// it once — as a catch-up for those already in — and never again, a second
+// home included.
+describe('the tour', () => {
+  it('reaches somebody who set up before it, alone, as a catch-up', () => {
+    const c = ctx({ profile: profile(BASELINE), household: HOUSE, memberCount: 2 });
+    const pending = pendingSteps(c, new Set(BASELINE));
+    expect(ids(pending)).toEqual(['tour']);
+    expect(flowMode(pending)).toBe('catch-up');
+  });
+
+  it('is not asked before there is a house to tour', () => {
+    expect(ids(pendingSteps(ctx({ profile: profile() }), none))).not.toContain('tour');
+  });
+
+  it('is not asked again for a home added later', () => {
+    const added = ctx({ profile: profile(EVER_SHIPPED), household: HOUSE, memberCount: 1 });
+    expect(ids(pendingSteps(added, seenThisRun(new Set(EVER_SHIPPED), true)))).not.toContain('tour');
   });
 });

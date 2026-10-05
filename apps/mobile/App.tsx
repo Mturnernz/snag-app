@@ -23,7 +23,7 @@ import SetupFlow from './src/setup/SetupFlow';
 import JoinScreen from './src/screens/JoinScreen';
 import { ToastProvider } from './src/hooks/useToast';
 import { HouseholdProvider } from './src/hooks/useHousehold';
-import { FirstCaptureProvider } from './src/hooks/useFirstCapture';
+import { FirstCaptureProvider, type FirstAction } from './src/hooks/useFirstCapture';
 import AppErrorBoundary from './src/components/AppErrorBoundary';
 import { initMonitoring } from './src/lib/monitoring';
 
@@ -95,6 +95,8 @@ function AppGates() {
   const newHome = newHomeId ? households.find((h) => h.id === newHomeId) ?? null : null;
   // The photograph from setup's *Snap your first job*, for the list to file.
   const [firstPhoto, setFirstPhoto] = useState<string | null>(null);
+  /** What the tour's *Try it* asked the app to open, held until the screen that does it takes it. */
+  const [firstAction, setFirstAction] = useState<FirstAction | null>(null);
 
   // Anything touching Supabase from the auth callback goes through here.
   const queueAuthWork = useRef(createAuthEventQueue()).current;
@@ -306,13 +308,14 @@ function AppGates() {
             onReady={loadAccount}
             onStart={() => setSetupRunning(true)}
             onJoinToken={setJoinToken}
-            onFinish={(photo) => {
+            onFinish={(photo, action) => {
               // Setup ends on the list. The address bar can still hold the
               // screen the run began from (a household deleted from
               // /household), and the navigator about to mount would open
               // there — past the list, which is what files the first photo.
               resetWebPathIfStale();
               setFirstPhoto(photo);
+              setFirstAction(action ?? null);
               setSetupDone(true);
               setSetupRunning(false);
               setNewHomeId(null);
@@ -337,7 +340,7 @@ function AppGates() {
         }}
       >
         <ToastProvider>
-          <FirstCaptureProvider uri={firstPhoto}>
+          <FirstCaptureProvider uri={firstPhoto} action={firstAction}>
             <NavigationContainer linking={linking}>
               <RootNavigator />
             </NavigationContainer>

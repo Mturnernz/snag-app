@@ -805,6 +805,18 @@ export default function SnagListScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProperty, firstCapture, household.id]);
 
+  // The tour's *Try it*. Logging a job is this screen's + and its sheet; the
+  // rooms and the walkthrough are the House tab's, which takes them there.
+  useEffect(() => {
+    if (!activeProperty) return;
+    if (firstCapture.takeAction(['logJob'])) {
+      setCapturing(true);
+      return;
+    }
+    const waiting = firstCapture.peekAction();
+    if (waiting === 'addRoom' || waiting === 'addThing') navigation.navigate('House' as never);
+  }, [activeProperty, firstCapture, navigation]);
+
   /**
    * The prompt after a photo.
    *

@@ -183,9 +183,12 @@ describe('a brand-new account, start to finish', () => {
     expect(title(r, 'Bring someone in')).toBe(true);
     await press(r, 'Set up later');
 
+    expect(title(r, 'How Snag works')).toBe(true);
+    await press(r, 'Skip');
+
     expect(title(r, "You're all set, Alyssa")).toBe(true);
     expect(mock.markSetupSeen.mock.calls.map((c) => c[0][0])).toEqual(
-      ['name', 'household', 'rooms', 'invite']
+      ['name', 'household', 'rooms', 'invite', 'tour']
     );
   });
 
@@ -198,7 +201,7 @@ describe('a brand-new account, start to finish', () => {
   });
 
   it('never goes back to "Start a new house" once there is a house', async () => {
-    world = { profile: profile(['name', 'household']), household: HOUSE, members: 1 };
+    world = { profile: profile(['name', 'household', 'tour']), household: HOUSE, members: 1 };
     const r = await start();
     expect(title(r, 'Here are your rooms')).toBe(true);
     // Nothing earlier in this run to go back to.
@@ -212,7 +215,7 @@ describe('a brand-new account, start to finish', () => {
 // the app in on that write, onto the Household screen it was deleted from.
 describe('a new house for somebody who has set one up before', () => {
   beforeEach(() => {
-    world = { profile: profile(['name', 'household', 'rooms', 'invite'], 'Mike'), household: null, members: 0 };
+    world = { profile: profile(['name', 'household', 'rooms', 'invite', 'tour'], 'Mike'), household: null, members: 0 };
   });
 
   it('is taken through its rooms, the invite and the last screen', async () => {
@@ -252,7 +255,7 @@ describe('a home added from the Household screen', () => {
   const BACH = { id: 'bach', name: 'Martins Bay', createdAt: '2026-10-05T00:00:00Z' } as Household;
 
   beforeEach(() => {
-    world = { profile: profile(['name', 'household', 'rooms', 'invite'], 'Mike'), household: BACH, members: 1 };
+    world = { profile: profile(['name', 'household', 'rooms', 'invite', 'tour'], 'Mike'), household: BACH, members: 1 };
     mock.getMyProperties.mockResolvedValue([
       { id: 'p', householdId: 'h', name: '32 Le Roy' },
       { id: 'pb', householdId: 'bach', name: 'Martins Bay' },
@@ -284,7 +287,7 @@ describe('a home added from the Household screen', () => {
 
 describe('the last screen', () => {
   async function allSet() {
-    world = { profile: profile(['name', 'household', 'rooms', 'invite']), household: HOUSE, members: 1 };
+    world = { profile: profile(['name', 'household', 'rooms', 'invite', 'tour']), household: HOUSE, members: 1 };
     // Nothing pending, first run: straight to the end.
     const r = await start();
     return r;
@@ -319,6 +322,8 @@ describe('the second person', () => {
     expect(title(r, 'Here are your rooms')).toBe(true);
     await press(r, 'Continue');
     expect(title(r, 'Bring someone in')).toBe(false);
+    expect(title(r, 'How Snag works')).toBe(true);
+    await press(r, 'Skip');
     expect(title(r, "You're all set, Alyssa")).toBe(true);
   });
 
@@ -338,7 +343,7 @@ describe('the second person', () => {
   // The rooms are cards, and the last one is a dashed card that opens the rooms
   // this house hasn't got, most common first, and a box for anything else.
   it('adds a ready-made room from the dashed card in one tap', async () => {
-    world = { profile: profile(['name', 'household']), household: HOUSE, members: 1 };
+    world = { profile: profile(['name', 'household', 'tour']), household: HOUSE, members: 1 };
     const r = await start();
     await press(r, 'Add another room');
     mock.getLocations.mockResolvedValue([
@@ -357,7 +362,7 @@ describe('the second person', () => {
   });
 
   it('adds another room from the dashed card', async () => {
-    world = { profile: profile(['name', 'household']), household: HOUSE, members: 1 };
+    world = { profile: profile(['name', 'household', 'tour']), household: HOUSE, members: 1 };
     const r = await start();
     expect(title(r, 'Kitchen')).toBe(true);
     await press(r, 'Add another room');
@@ -374,7 +379,7 @@ describe('the second person', () => {
   });
 
   it('a first owner removes a room in one tap: nothing has been filed there yet', async () => {
-    world = { profile: profile(['name', 'household']), household: HOUSE, members: 1 };
+    world = { profile: profile(['name', 'household', 'tour']), household: HOUSE, members: 1 };
     const r = await start();
     await TestRenderer.act(async () => {
       await r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Remove Garage'
@@ -385,7 +390,7 @@ describe('the second person', () => {
 });
 
 describe('an invitation waiting at sign-up', () => {
-  const named = () => { world = { profile: profile(['name']), household: null, members: 0 }; };
+  const named = () => { world = { profile: profile(['name', 'tour']), household: null, members: 0 }; };
 
   it('is shown ahead of starting a house', async () => {
     named();
@@ -439,7 +444,7 @@ describe('an invitation waiting at sign-up', () => {
 
 describe('waiting to be invited', () => {
   async function waiting() {
-    world = { profile: profile(['name']), household: null, members: 0 };
+    world = { profile: profile(['name', 'tour']), household: null, members: 0 };
     const r = await start();
     await press(r, "Join someone's house");
     return r;
@@ -491,7 +496,7 @@ describe('waiting to be invited', () => {
 
 describe('bringing someone in', () => {
   async function invite() {
-    world = { profile: profile(['name', 'household', 'rooms']), household: HOUSE, members: 1 };
+    world = { profile: profile(['name', 'household', 'rooms', 'tour']), household: HOUSE, members: 1 };
     return start();
   }
 
@@ -521,5 +526,51 @@ describe('bringing someone in', () => {
     const r = await invite();
     await press(r, 'Share an invite link');
     expect(mock.createInviteLink).not.toHaveBeenCalled();
+  });
+});
+
+// Three cards, swiped or paged with the buttons; Try it ends setup and opens
+// that thing in the app. Shown once to everybody who set up before it.
+describe('the tour', () => {
+  const setUpBefore = () => {
+    world = { profile: profile(['name', 'household', 'rooms', 'invite']), household: HOUSE, members: 2 };
+  };
+
+  it('reaches somebody already set up as one new thing, then the app', async () => {
+    setUpBefore();
+    const r = await start();
+    expect(title(r, 'One new thing')).toBe(true);
+    await press(r, 'Continue');
+    expect(title(r, 'How Snag works')).toBe(true);
+    expect(title(r, 'Set up your house')).toBe(true);
+    await press(r, 'Next');
+    await press(r, 'Next');
+    await press(r, 'Done');
+    expect(mock.markSetupSeen).toHaveBeenCalledWith(['tour']);
+    expect(onFinish).toHaveBeenCalledWith(null);
+  });
+
+  it('pages with the buttons, and the last card is Done rather than Next', async () => {
+    setUpBefore();
+    const r = await start();
+    await press(r, 'Continue');
+    await press(r, 'Next');
+    await press(r, 'Next');
+    expect(title(r, 'Log an issue')).toBe(true);
+    expect(title(r, 'Done')).toBe(true);
+    expect(title(r, 'Skip')).toBe(false);
+  });
+
+  it.each([
+    ['Add a room', 'addRoom'],
+    ['Record an appliance', 'addThing'],
+    ['Log a job', 'logJob'],
+  ])('%s ends setup and asks the app to open it', async (label, action) => {
+    setUpBefore();
+    const r = await start();
+    await press(r, 'Continue');
+    await press(r, label);
+    expect(mock.markSetupSeen).toHaveBeenCalledWith(['tour']);
+    expect(onFinish).toHaveBeenCalledWith(null, action);
   });
 });

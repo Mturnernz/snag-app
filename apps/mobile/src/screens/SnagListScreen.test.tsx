@@ -1042,3 +1042,28 @@ describe('choosing jobs to share', () => {
     expect(mock_showToast).toHaveBeenCalledWith(expect.stringMatching(/downloaded$/));
   });
 });
+
+// The tour's *Try it*: logging a job opens this screen's sheet; the rooms and
+// an appliance belong to the House tab, so the list sends them there.
+describe('what the tour asked for', () => {
+  it('opens the capture sheet for Log a job, once', async () => {
+    const r = render(
+      <FirstCaptureProvider uri={null} action="logJob">
+        <SnagListScreen />
+      </FirstCaptureProvider>
+    );
+    await settle();
+    expect(texts(r)).toContain('Continue without picture');
+    expect(mock_navigate).not.toHaveBeenCalled();
+  });
+
+  it('sends the rooms and an appliance to the House tab', async () => {
+    render(
+      <FirstCaptureProvider uri={null} action="addThing">
+        <SnagListScreen />
+      </FirstCaptureProvider>
+    );
+    await settle();
+    expect(mock_navigate).toHaveBeenCalledWith('House');
+  });
+});

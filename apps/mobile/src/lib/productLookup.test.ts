@@ -344,6 +344,9 @@ describe('finding the pages', () => {
     expect(body.contents[0].parts[0].text).toMatch(/Search Google now for "Mitsubishi Electric MSZ-GS60VFD manual"/);
     expect(body.contents[0].parts[0].text).toMatch(/You must run at least one Google search before you answer/);
     expect(body.contents[0].parts[0].text).toMatch(/any page holding a copy of its manual/);
+    // The model number is the key, whatever country the household is in: nothing
+    // in the search names or prefers one.
+    expect(JSON.stringify(body)).not.toMatch(/New Zealand|Australia|\bNZ\b/);
   });
 
   const reply = (text: string, over: Record<string, unknown> = {}) => ({

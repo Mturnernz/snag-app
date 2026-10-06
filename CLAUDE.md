@@ -1826,6 +1826,12 @@ prompt was a command. `searchRequest` is that command. It is still not reliable,
 model** (`Stage.isWeak`, attempt kind `unsearched`); if no model does better, the first reply's addresses are used rather
 than nothing — the pages, not the model, are what get believed. The last model's reply is never refused for this.
 
+**The lookup is keyed by make and model and knows no country** (owner's decision, October 2026). The search once told
+the model *the household is in New Zealand* and to prefer the NZ or Australian site, which would have steered a US
+household's US model to the wrong region's pages. Both lines are gone; the checks (the page names this exact model, the
+code is printed for it, for this size) are what keep a regional variant's page out, not a country field. Don't add one to
+the lookup.
+
 Opening pages no longer drops a page for landing off the maker's site: `openPage` reads whatever it is sent to, and
 `candidateUrls` orders (maker, Google's links, everybody else's) rather than filters, so the maker is never what the
 eight-address cap leaves out.

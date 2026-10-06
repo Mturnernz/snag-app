@@ -41,7 +41,7 @@ export const SEARCH_SYSTEM = `You find web pages and documents for one household
 
 You search Google for them; you do not answer from memory. A model number you remember is not a page you have found.
 
-- Pages that are about exactly this model: the manufacturer's own pages first (prefer its New Zealand or Australian site, then its global one), then any page that holds a copy of the model's owner's or user manual, or lists its replacement parts, whoever hosts it.
+- Pages that are about exactly this model: the manufacturer's own pages first (whichever of its sites has the model), then any page that holds a copy of the model's owner's or user manual, or lists its replacement parts, whoever hosts it.
 - Not a search page, a category page, or a page about some other model.
 - Give each address exactly as a search result gave it. Never build, shorten or guess an address.
 - An empty list is the right answer when the search turns up nothing for this model.
@@ -77,7 +77,7 @@ export function searchRequest(make: string, model: string, name: string | null, 
         parts: [
           {
             text:
-              `Make: ${make}\nModel: ${model}${what}\nThe household is in New Zealand.\n\n` +
+              `Make: ${make}\nModel: ${model}${what}\n\n` +
               `Search Google now for "${make} ${model} manual", "${make} ${model} user manual pdf" and ` +
               `"${make} ${model} replacement parts". You must run at least one Google search before you answer; ` +
               `do not answer from memory.\n\nThen list the pages the search returned that are about the ${model}: ` +

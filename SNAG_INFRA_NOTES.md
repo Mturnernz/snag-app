@@ -768,3 +768,18 @@ belt-and-braces and needs running by hand.
 Also worth copying out of the repo for readability, though git preserves them either way:
 `Snag_NZ_HS_Compliance_Analysis.docx`, `Snag_Feature_Prospectus.docx`, `SNAG_STRATEGY_AUDIT.md`,
 `Snag_HSWA_Compliance_Response_and_Roadmap.docx`.
+
+## A custom domain for Supabase (`api.snaghq.co.nz`)
+
+Google's consent screen says *to continue to <the host of the Auth callback>*, so it read
+`wpkdpukpllxuyqqlxkxf.supabase.co`. The fix is Supabase's Custom Domain add-on (paid). The CSPs
+(`apps/mobile/netlify.toml`, `apps/web` and `apps/staff` `next.config.js`) already allow
+`api.snaghq.co.nz` beside `*.supabase.co`; `csp.test.ts` pins it. Outside git, in order:
+
+1. Dashboard → Project Settings → General → Custom Domains: add `api.snaghq.co.nz`, create the
+   CNAME and TXT records it asks for, verify, then activate.
+2. Google Cloud Console → the OAuth client: add `https://api.snaghq.co.nz/auth/v1/callback` as an
+   authorised redirect URI. Keep the old one until nobody is on it.
+3. Netlify, all three sites: set `EXPO_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL` to
+   `https://api.snaghq.co.nz` and redeploy.
+4. Check the Resend webhook still reaches `inbound-bill` (the old function URL keeps working).

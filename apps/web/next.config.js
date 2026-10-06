@@ -25,9 +25,9 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://*.supabase.co",
+  "img-src 'self' data: blob: https://*.supabase.co https://api.snaghq.co.nz",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.snaghq.co.nz wss://api.snaghq.co.nz",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   // Supabase belongs here for the same reason it's in connect-src, and leaving
@@ -40,7 +40,7 @@ const CSP = [
   // browser did all the waiting — query, upload, audit row, signing — and then
   // refused the last step. The file was written and recorded every time; only
   // the person who asked for it never saw it.
-  "form-action 'self' https://*.supabase.co",
+  "form-action 'self' https://*.supabase.co https://api.snaghq.co.nz",
   "object-src 'none'",
   "upgrade-insecure-requests",
 ].join('; ');

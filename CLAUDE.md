@@ -1704,16 +1704,19 @@ Bosch, "opened 0 of 0") and `failed/busy`, with Gemini reached every time. Three
 
 - **A 200 is not an answer.** The loop took the first HTTP success as the answer and stopped, and a reply body that
   would not read became `null`, which `lookupFromGemini` words as *no candidates*. Now `askModels` keeps a failing
-  request (402 stops; 429, 500, 503, a timeout and a 404 move on; any other 4xx stops) apart from an unusable reply
+  request (402 stops; 429, 500, 503, a timeout, an unreachable request and a 404 move on; any other 4xx stops) apart from an unusable reply
   (`empty`, `unparseable`, `truncated`, `blocked`, an unreadable body, or an object claiming nothing), and **every
   unusable reply is retried on the next model**. A blocked one is retried too: quoting a manual's sentence word for
   word is what trips `RECITATION`, and that is per output. One lookup is **one** claimed read however many models it
   asks.
 - **The time was not shared.** 55s, less 12s held back for pages that might not exist, left the second model ~13s and
-  the third none. The budget is 90s now (`lookup-product/index.ts`, and `read-label`'s `LOOKUP_BUDGET_MS`, which is
-  still capped by what is left of its 140s); the app's leash is 100s and the platform's wall clock 150s. A model gets
-  at most 30s while another is still to try, the last gets what remains, and only 5s is kept for pages, which get up to
-  12s of whatever is left once there are URLs to open.
+  the third none. The budget is 90s now for the button (`lookup-product/index.ts`) and 120s for the background lookup
+  (`read-label`'s `LOOKUP_BUDGET_MS`, still capped by what is left of its 140s); the app's leash is 100s and the
+  platform's wall clock 150s. A model gets at most 50s while another is still to try — **not 30s**: a grounded search
+  runs 30-50s, and a hot-fix deployed on 6 October had already found that a 30s cap cut every model off — the last gets
+  what remains, and only 5s is kept for pages, which get up to 12s of whatever is left once there are URLs to open.
+  **Running out of time, or not reaching Google, is `error` ("couldn't finish"), never `busy`**: only a 429, 500 or 503
+  is Google saying it is busy, and a *Try again* on a timeout meets the same clock.
 - **`nothing` meant five things.** `decideLookup` is found (any one verified value; each claim is judged on its own),
   `nothing`, or a **failure that can be asked again**. `nothing` is now only: the model says `none_published`, names the
   maker's pages it checked (`checkedUrls`), and this function opened one of them and found it to be about this model. A

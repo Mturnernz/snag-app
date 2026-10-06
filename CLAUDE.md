@@ -1668,9 +1668,10 @@ Four rules around it:
 - **Kept once per make and model, per household** (`home.product_lookups`, `20260927100000`,
   keyed by `home.product_key` — letters and digits only, so `MSZ-GS60VFD` and `msz gs60vfd` are one
   model). A second scan, or a second unit of the same model, shows the same answer and costs
-  nothing. `nothing` is an answer and is **never looked up again**; *Try again* exists only on a
-  failure (busy, used up for the day, an error). Asking again until something turns up is how one
-  model gets two answers. Per household rather than shared: a shared table would say which models
+  nothing. A `found` or `nothing` row is not looked up again unless somebody asks (`p_again`); *Try
+  again* is on a failure and *Look again* on `nothing` — see *A search that came to nothing is not an
+  answer* below. Asking again until something turns up is how one model gets two answers, which is
+  why `nothing` is now rare and has to be confirmed. Per household rather than shared: a shared table would say which models
   another household owns.
 - **It starts itself, and it can be asked.** `read-label` imports `lookup-product/run.ts` and, once
   a plate gives a make and a model on anything that is not paint or tile, starts a lookup in its own
@@ -1694,6 +1695,44 @@ Four rules around it:
   of 0, or anything not named per-minute is `limit` (`20260927110000`), and the card says *Google
   wouldn't run the search* rather than inviting a Try again that cannot work. The fix for `limit`
   is on the Google project, not in the app — see `SNAG_INFRA_NOTES.md`.
+
+### A search that came to nothing is not an answer (October 2026)
+
+On 6 October 2026 four lookups came back `failed/error` ("no answer: empty"), `nothing` twice (a Smeg and a
+Bosch, "opened 0 of 0") and `failed/busy`, with Gemini reached every time. Three faults in the pipeline, fixed in
+`lookup-product/ask.ts`, `lookup.ts` and `run.ts`:
+
+- **A 200 is not an answer.** The loop took the first HTTP success as the answer and stopped, and a reply body that
+  would not read became `null`, which `lookupFromGemini` words as *no candidates*. Now `askModels` keeps a failing
+  request (402 stops; 429, 500, 503, a timeout and a 404 move on; any other 4xx stops) apart from an unusable reply
+  (`empty`, `unparseable`, `truncated`, `blocked`, an unreadable body, or an object claiming nothing), and **every
+  unusable reply is retried on the next model**. A blocked one is retried too: quoting a manual's sentence word for
+  word is what trips `RECITATION`, and that is per output. One lookup is **one** claimed read however many models it
+  asks.
+- **The time was not shared.** 55s, less 12s held back for pages that might not exist, left the second model ~13s and
+  the third none. The budget is 90s now (`lookup-product/index.ts`, and `read-label`'s `LOOKUP_BUDGET_MS`, which is
+  still capped by what is left of its 140s); the app's leash is 100s and the platform's wall clock 150s. A model gets
+  at most 30s while another is still to try, the last gets what remains, and only 5s is kept for pages, which get up to
+  12s of whatever is left once there are URLs to open.
+- **`nothing` meant five things.** `decideLookup` is found (any one verified value; each claim is judged on its own),
+  `nothing`, or a **failure that can be asked again**. `nothing` is now only: the model says `none_published`, names the
+  maker's pages it checked (`checkedUrls`), and this function opened one of them and found it to be about this model. A
+  model that claims no value, claims whose pages would not open, and claims that all failed verification are `failed`
+  (reason `error`; the log says which). **Do not make a search that came back empty a permanent row again.**
+
+Rows written before that rule cannot be told from ones written after it, so *Look again* is offered on `nothing` as
+well as *Try again* on a failure. It is `p_again`, which resets the row: nothing is deleted and `begin_product_lookup`
+did not change. It costs one read, like any lookup.
+
+**Structured output is asked for, and dropped if refused.** The first request carries `responseMimeType` and
+`responseJsonSchema` beside the search tools (Google documents the combination for Gemini 3 models only). A 400 means
+the model would not take it: the same model is asked again without, and so is every later one in that lookup. The reply
+is still read out of prose either way. It is not known that the combination caused any empty reply; the log is how that
+gets found out — every attempt logs `http`, `ms`, `finishReason`, part counts (text, thought, other), grounding chunks
+and `urlsRead`, never a word of the reply.
+
+`askModels.test.ts` pins the loop against a fake `fetch`; `productLookup.test.ts` pins `decideLookup` and the reply's
+shape.
 
 `productLookup.test.ts` pins every rule above against the GS60's real pages and wording — the
 retailer refused, a redirect off the maker's site refused, another model's page refused, the range

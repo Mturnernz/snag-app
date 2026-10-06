@@ -33,9 +33,12 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { modelsToTry } from '../read-label/gemini.ts';
 import { lookUpAndKeep } from './run.ts';
 
-// Under the app's own leash (`LOOKUP_TIMEOUT_MS`), so the caller is answered
-// in words before it gives up. The work carries on either way.
-const BUDGET_MS = 55_000;
+// The whole lookup — every model asked, and the pages opened — under the
+// app's own leash (`LOOKUP_TIMEOUT_MS`, 100s), so the caller is answered in
+// words before it gives up, and well inside the platform's 150s wall clock. A
+// grounded search runs 15-40s, so three models need room: the work carries on
+// either way.
+const BUDGET_MS = 90_000;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',

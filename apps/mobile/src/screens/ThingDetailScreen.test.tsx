@@ -811,7 +811,7 @@ describe('a label reading waiting to be checked', () => {
 
 // What the maker's own website says, looked up once per model. These pin that
 // every value arrives with the page it is written on, that a part is only
-// ever an offer, that *nothing found* is said and never retried, and that the
+// ever an offer, that *nothing found* is said and can be asked again, and that the
 // page survives the lookup being unreadable.
 describe('what the maker says', () => {
   const HEAT_PUMP = { name: 'Heat pump', make: 'Mitsubishi Electric', model: 'MSZ-GS60VFD', room: 'Living room' };
@@ -897,13 +897,18 @@ describe('what the maker says', () => {
     expect(mock_createSnag).not.toHaveBeenCalled();
   });
 
-  it('says plainly when nothing could be confirmed, and offers no second try', async () => {
+  it('says plainly when nothing could be confirmed, and lets it be looked up again', async () => {
+    // Lookups before the server confirmed an absence filed any search that came
+    // back empty as this same permanent answer, so it is not a dead end.
     mock_getProductLookup.mockResolvedValue(found({ status: 'nothing', facts: null }));
+    mock_lookUpProduct.mockResolvedValue(found());
     const result = await open(HEAT_PUMP);
     expect(texts(result)).toContain(
       "Nothing for the MSZ-GS60VFD could be confirmed on Mitsubishi Electric's own website, so nothing is suggested.",
     );
-    expect(pressable(result, 'Look it up again')).toBeUndefined();
+    await TestRenderer.act(async () => { await pressable(result, 'Look it up again').props.onPress(); });
+    expect(mock_lookUpProduct).toHaveBeenCalledWith(expect.objectContaining({ again: true }));
+    expect(texts(result)).toContain('Manual');
   });
 
   it('offers a second try only on a lookup that failed', async () => {

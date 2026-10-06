@@ -12,10 +12,9 @@
 // then the row in `home.product_lookups`.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { GEMINI_ENDPOINT, isBusy, isOutOfCredit, quotaRefusal } from '../read-label/gemini.ts';
+import { askModels, type Attempt } from './ask.ts';
 import {
-  hasFacts, htmlText, lookupFromGemini, lookupRequest, pdfStreams, pdfStrings, urlsToOpen,
-  verifyLookup, type Page, type ProductFacts,
+  decideLookup, htmlText, pdfStreams, pdfStrings, urlsToOpen, verifyLookup, type LookupClaims, type Page, type ProductFacts,
 } from './lookup.ts';
 
 export type LookupResult =
@@ -23,22 +22,25 @@ export type LookupResult =
   | { status: 'nothing' }
   | { status: 'failed'; reason: 'busy' | 'error' | 'quota' | 'limit' };
 
-// A search and a few page reads take far longer than reading one plate, so the
-// early attempts get more room than read-label gives them — but still leave a
-// next model enough to answer.
-const EARLY_ATTEMPT_MS = 30_000;
-const MIN_ATTEMPT_MS = 12_000;
-const BUSY_PAUSE_MS = 1_000;
-// What opening the cited pages may take, kept back from the model's budget.
+// What opening the cited pages may take. Nothing is kept back for it while the
+// models are being asked — whether there is a page to open is not known until
+// one has answered — beyond the floor below, so a model that answers at the
+// very end still leaves its pages a chance.
 const PAGES_MS = 12_000;
+const PAGES_FLOOR_MS = 5_000;
 // A manual is a few megabytes; a page that is fifty is not one to wait for.
 const MAX_PAGE_BYTES = 15 * 1024 * 1024;
 const MAX_INFLATED_BYTES = 30 * 1024 * 1024;
 const USER_AGENT = 'Mozilla/5.0 (compatible; SnagHQ-lookup/1.0; +https://www.snaghq.co.nz)';
 
+const attemptLine = (a: Attempt) => `${a.model}:${a.kind}${a.status ? `/${a.status}` : ''}/${a.ms}ms`;
+
 /**
  * Asks the models in turn, and holds what they claim against the pages they
  * cite. `budgetMs` is the whole allowance, pages included.
+ *
+ * Every model is one attempt at the **same** lookup: a fallback is our retry,
+ * not a second read of the household's day (`lookUpAndKeep` claims once).
  */
 export async function lookUp(
   apiKey: string,
@@ -47,80 +49,58 @@ export async function lookUp(
   model: string,
   name: string | null,
   budgetMs: number,
+  tag = `${make} ${model}`,
 ): Promise<LookupResult> {
-  const deadline = Date.now() + budgetMs - PAGES_MS;
-  const body = JSON.stringify(lookupRequest(make, model, name));
-  let busy = false;
-  let limited = false;
-  let json: unknown = null;
-  let answered = false;
-
-  for (const [index, modelName] of models.entries()) {
-    const left = deadline - Date.now();
-    if (left < MIN_ATTEMPT_MS) break;
-    const last = index === models.length - 1;
-    let attempt: Response;
-    try {
-      attempt = await fetch(`${GEMINI_ENDPOINT}/${encodeURIComponent(modelName)}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body,
-        signal: AbortSignal.timeout(last ? left : Math.min(left, EARLY_ATTEMPT_MS)),
-      });
-    } catch (err) {
-      console.error(`lookup-product: ${modelName} unreachable or too slow:`, err);
-      busy = true;
-      continue;
-    }
-    if (attempt.ok) {
-      json = await attempt.json().catch(() => null);
-      answered = true;
-      break;
-    }
-    const detail = await attempt.text().catch(() => '');
-    const quota = quotaRefusal(attempt.status, detail);
-    console.error(
-      `lookup-product: ${modelName} ${attempt.status}:`,
-      quota ? `quota — ${quota.detail}` : detail.slice(0, 500),
-    );
-    // No credit on the key: billing is per project, so no model will answer.
-    if (isOutOfCredit(attempt.status)) return { status: 'failed', reason: 'limit' };
-    if (isBusy(attempt.status)) {
-      // A per-minute limit is busy by another name; a used-up day, or an
-      // allowance the plan does not include, is not — and saying "busy" there
-      // invites a Try again that cannot work. Another model is still asked,
-      // since Google keeps most allowances per model.
-      if (quota && !quota.perMinute) limited = true;
-      else busy = true;
-      if (!last) await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSE_MS));
-      continue;
-    }
-    return { status: 'failed', reason: 'error' };
+  const started = Date.now();
+  const end = started + budgetMs;
+  const asked = await askModels(
+    {
+      fetch: (url, init) => fetch(url, init),
+      now: () => Date.now(),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      timeout: (ms) => AbortSignal.timeout(ms),
+      log: (line) => console.log(line),
+      warn: (line) => console.error(line),
+    },
+    { apiKey, models, make, model, name, deadline: end - PAGES_FLOOR_MS, tag },
+  );
+  const tried = asked.attempts.map(attemptLine).join(' ');
+  if (!asked.ok) {
+    console.error(`lookup-product: ${tag} — no usable answer (${asked.reason}) after ${Date.now() - started}ms; attempts ${tried}`);
+    return { status: 'failed', reason: asked.reason };
   }
-  if (!answered) return { status: 'failed', reason: busy ? 'busy' : limited ? 'limit' : 'error' };
+  const claims: LookupClaims = asked.claims;
 
-  const outcome = lookupFromGemini(json);
-  if (!outcome.ok) {
-    console.error(`lookup-product: ${make} ${model} — no answer:`, outcome.reason);
-    return { status: 'failed', reason: 'error' };
-  }
-
-  const urls = urlsToOpen(make, outcome.claims);
-  const opened = await Promise.all(urls.map((url) => openPage(url, PAGES_MS - 1_000)));
+  // Time for pages is whatever is left, never less than the floor.
+  const pagesMs = Math.min(PAGES_MS, Math.max(PAGES_FLOOR_MS, end - Date.now()));
+  const urls = urlsToOpen(make, claims);
+  const openedAt = Date.now();
+  const opened = await Promise.all(urls.map((url) => openPage(url, pagesMs - 1_000)));
   const pages: Record<string, Page | undefined> = {};
   urls.forEach((url, i) => (pages[url] = opened[i] ?? undefined));
 
-  const facts = verifyLookup(make, model, outcome.claims, pages);
+  const decision = decideLookup(make, model, claims, pages);
   // What was claimed and what was kept, so a lookup that came to nothing can
   // be told apart from one that found the wrong things.
+  const facts = decision.status === 'found' ? decision.facts : verifyLookup(make, model, claims, pages);
+  const claimed = [claims.manualUrl, claims.service?.url, ...claims.parts.map((p) => p.url), ...(claims.checkedUrls ?? [])]
+    .filter(Boolean).length;
   console.log(
-    `lookup-product: ${make} ${model} — claimed manual ${outcome.claims.manualUrl ?? 'none'}, ` +
-      `${outcome.claims.parts.length} part(s) [${outcome.claims.parts.map((p) => `${p.code} @ ${p.url}`).join('; ')}], ` +
-      `service ${outcome.claims.service ? `${outcome.claims.service.months}mo @ ${outcome.claims.service.url}` : 'none'}; ` +
-      `opened ${opened.filter(Boolean).length} of ${urls.length}; ` +
-      `kept manual ${facts.manual ? 'yes' : 'no'}, ${facts.parts.length} part(s), service ${facts.service ? 'yes' : 'no'}`,
+    `lookup-product: ${tag} — model=${asked.model} outcome=${claims.outcome ?? 'unsaid'} ` +
+      `claimed manual=${claims.manualUrl ? 'yes' : 'no'} parts=${claims.parts.length} ` +
+      `service=${claims.service ? `${claims.service.months}mo` : 'no'} checked=${claims.checkedUrls?.length ?? 0}; ` +
+      `urls claimed=${claimed} accepted-as-maker=${urls.length} opened=${opened.filter(Boolean).length} ` +
+      `failedToOpen=${opened.filter((one) => !one).length} (${Date.now() - openedAt}ms); ` +
+      `verified manual=${facts.manual ? 'yes' : 'no'} parts=${facts.parts.length}/${claims.parts.length} ` +
+      `service=${facts.service ? 'yes' : 'no'}; ` +
+      `decision=${decision.status}${decision.status === 'failed' ? `/${decision.why}` : ''}; ` +
+      `total=${Date.now() - started}ms attempts ${tried}`,
   );
-  return hasFacts(facts) ? { status: 'found', facts } : { status: 'nothing' };
+  if (decision.status === 'found') return { status: 'found', facts: decision.facts };
+  if (decision.status === 'nothing') return { status: 'nothing' };
+  // Not an answer: nothing was confirmed, and nothing says the maker has
+  // none. The row is failed, so it can be asked again.
+  return { status: 'failed', reason: decision.reason };
 }
 
 /**
@@ -128,7 +108,8 @@ export async function lookUp(
  *
  * Returns without doing anything when `begin_product_lookup` says an answer is
  * already kept or one is under way. A read is claimed only when a search is
- * actually going to run, so a second scan of the same model costs nothing.
+ * actually going to run, so a second scan of the same model costs nothing —
+ * and **once**: the models `lookUp` falls back through are the same lookup.
  */
 export async function lookUpAndKeep(
   // Any schema: both callers make their client on `home`.
@@ -139,6 +120,8 @@ export async function lookUpAndKeep(
   ask: { householdId: string; make: string; model: string; name: string | null; again?: boolean },
   budgetMs: number,
 ): Promise<'kept' | 'already' | 'refused'> {
+  const t0 = Date.now();
+  const lap = () => `+${Date.now() - t0}ms`;
   const { data: id, error } = await supabase.rpc('begin_product_lookup', {
     p_household_id: ask.householdId,
     p_make: ask.make,
@@ -150,6 +133,8 @@ export async function lookUpAndKeep(
     return 'refused';
   }
   if (typeof id !== 'string') return 'already';
+  const tag = `${id.slice(0, 8)} ${ask.make} ${ask.model}`;
+  console.log(`lookup-product: ${tag} — begun ${lap()} again=${!!ask.again} budget=${budgetMs}ms`);
 
   const finish = async (result: LookupResult) => {
     const { error: finishError } = await supabase.rpc('finish_product_lookup', {
@@ -158,7 +143,11 @@ export async function lookUpAndKeep(
       p_result: result.status === 'found' ? result.facts : null,
       p_reason: result.status === 'failed' ? result.reason : null,
     });
-    if (finishError) console.error('lookup-product: could not keep the answer —', finishError.message);
+    if (finishError) console.error(`lookup-product: ${tag} — could not keep the answer —`, finishError.message);
+    console.log(
+      `lookup-product: ${tag} — finished ${lap()} status=${result.status}` +
+        `${result.status === 'failed' ? ` reason=${result.reason}` : ''}`,
+    );
   };
 
   // The same daily allowance a label read spends: a search is a model call
@@ -166,6 +155,7 @@ export async function lookUpAndKeep(
   const { data: allowed, error: claimError } = await supabase.rpc('claim_label_read', {
     p_household_id: ask.householdId,
   });
+  console.log(`lookup-product: ${tag} — read claimed ${lap()} allowed=${allowed === true}${claimError ? ` error=${claimError.message}` : ''}`);
   if (claimError || allowed !== true) {
     await finish({ status: 'failed', reason: claimError ? 'error' : 'quota' });
     return 'kept';
@@ -173,9 +163,10 @@ export async function lookUpAndKeep(
 
   let result: LookupResult;
   try {
-    result = await lookUp(apiKey, models, ask.make, ask.model, ask.name, budgetMs);
+    // What is left of the budget, now that the two calls above have spent some.
+    result = await lookUp(apiKey, models, ask.make, ask.model, ask.name, budgetMs - (Date.now() - t0), tag);
   } catch (err) {
-    console.error('lookup-product: failed —', err);
+    console.error(`lookup-product: ${tag} — failed —`, err);
     result = { status: 'failed', reason: 'error' };
   }
   await finish(result);

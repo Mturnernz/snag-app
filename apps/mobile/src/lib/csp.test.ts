@@ -60,6 +60,15 @@ describe('the web build’s deployed CSP', () => {
     );
   });
 
+  // The custom domain Supabase answers on. Without it the build points at
+  // auth.snaghq.co.nz and every request is blocked in the same silence.
+  it('allows the custom Supabase domain, over both protocols', () => {
+    expect(directive('connect-src')).toEqual(
+      expect.arrayContaining(['https://auth.snaghq.co.nz', 'wss://auth.snaghq.co.nz']),
+    );
+    expect(directive('img-src')).toContain('https://auth.snaghq.co.nz');
+  });
+
   // Not a load-bearing upload path, but the reason the header exists at all —
   // a framed copy of the app is how a QR-code landing page becomes a phishing
   // shell, and it would be quietly lost in an edit to the line above.

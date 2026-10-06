@@ -79,6 +79,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: { fetch: fetchWithTimeout },
   auth: {
     storage: Platform.OS === 'web' ? undefined : AsyncStorage,
+    // The default key is built from the URL's first label, so moving to the
+    // custom domain (auth.snaghq.co.nz) would rename it and sign everybody out
+    // once. Pinned to what the project-ref URL produced, so sessions carry over.
+    storageKey: 'sb-wpkdpukpllxuyqqlxkxf-auth-token',
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: Platform.OS === 'web',

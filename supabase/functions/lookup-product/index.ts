@@ -35,7 +35,7 @@ import { lookUpAndKeep } from './run.ts';
 
 // Under the app's own leash (`LOOKUP_TIMEOUT_MS`), so the caller is answered
 // in words before it gives up. The work carries on either way.
-const BUDGET_MS = 55_000;
+const BUDGET_MS = 60_000;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',

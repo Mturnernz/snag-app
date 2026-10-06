@@ -131,10 +131,10 @@ describe('deadlineFor', () => {
 
   it('gives a lookup longer than the function gives its search', () => {
     // It searches, then opens every page it cites to check them; the function
-    // stops at 55s so it can still answer in words.
+    // stops at 60s so it can still answer in words.
     const LOOKUP = 'https://p.supabase.co/functions/v1/lookup-product';
     expect(deadlineFor(LOOKUP)).toBe(LOOKUP_TIMEOUT_MS);
-    expect(LOOKUP_TIMEOUT_MS).toBeGreaterThan(55_000);
+    expect(LOOKUP_TIMEOUT_MS).toBeGreaterThan(60_000);
   });
 
   it('treats asking for a signed URL as the data call it is', () => {

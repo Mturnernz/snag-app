@@ -115,7 +115,7 @@ export const LABEL_TIMEOUT_MS = 45_000;
 export const READ_AGAIN_TIMEOUT_MS = 60_000;
 /**
  * *Look it up* searches the web and then opens every page the answer cites, to
- * check it — slower than reading a plate. The function stops at 55s so it can
+ * check it — slower than reading a plate. The function stops at 60s so it can
  * answer in words, and the search carries on behind it either way.
  */
 export const LOOKUP_TIMEOUT_MS = 70_000;

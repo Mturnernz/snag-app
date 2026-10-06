@@ -23,10 +23,11 @@ export type LookupResult =
   | { status: 'nothing' }
   | { status: 'failed'; reason: 'busy' | 'error' | 'quota' | 'limit' };
 
-// A search and a few page reads take far longer than reading one plate, so the
-// early attempts get more room than read-label gives them — but still leave a
-// next model enough to answer.
-const EARLY_ATTEMPT_MS = 30_000;
+// A search with page reading takes a model well over half a minute. Each
+// attempt gets whatever is left of the budget: the first live lookups (6
+// October 2026) were cut off at 30s on every model and recorded as "busy" when
+// nothing was busy — a capped search is a search that never finishes. A model
+// that is busy answers 503 in seconds, so the next one still has room.
 const MIN_ATTEMPT_MS = 12_000;
 const BUSY_PAUSE_MS = 1_000;
 // What opening the cited pages may take, kept back from the model's budget.
@@ -65,11 +66,12 @@ export async function lookUp(
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body,
-        signal: AbortSignal.timeout(last ? left : Math.min(left, EARLY_ATTEMPT_MS)),
+        signal: AbortSignal.timeout(left),
       });
     } catch (err) {
+      // Out of time, or unreachable: not Google saying it is busy, so it is
+      // never worded as busy. Another model is tried if there is time left.
       console.error(`lookup-product: ${modelName} unreachable or too slow:`, err);
-      busy = true;
       continue;
     }
     if (attempt.ok) {
@@ -97,6 +99,8 @@ export async function lookUp(
     }
     return { status: 'failed', reason: 'error' };
   }
+  // Ran out of time with nobody refusing is 'error' ("couldn't finish"), never
+  // 'busy': the log line above says which model was too slow.
   if (!answered) return { status: 'failed', reason: busy ? 'busy' : limited ? 'limit' : 'error' };
 
   const outcome = lookupFromGemini(json);

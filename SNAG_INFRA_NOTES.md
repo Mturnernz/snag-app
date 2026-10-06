@@ -232,17 +232,19 @@ but worth knowing when reading the logs.
 householder replaces and the service interval, and keeps only what it has itself found written on
 the maker's pages (`20260927100000`, `home.product_lookups`). `read-label` imports
 `lookup-product/run.ts` and starts one in the background once a plate gives a make and a model,
-so **deploy the two together** whenever `lookup-product/run.ts` or `lookup.ts` changes. Order:
+so **deploy the two together** whenever anything in `lookup-product/` changes (`run.ts`, `ask.ts`,
+`lookup.ts`, `pdf.ts`). Order:
 apply `20260927100000`, deploy `lookup-product` and then `read-label` (both JWT on, no new
 secrets — they share `GEMINI_API_KEY`), press *Look it up* on one real appliance and read the
 function's log line (it names what the model claimed and what survived), then merge. Until the
 migration is applied `read-label` logs *could not begin* and reads the plate as before.
 
-**What it costs.** Each lookup that actually runs is one model call with Google Search
-grounding and URL context on, plus the function opening up to six of the maker's pages itself.
-Google bills the search queries a grounded call makes separately from its tokens, and the pages
-the model opens count as input tokens — check the current Gemini pricing page for the model in
-`GEMINI_MODEL`, and the project's own billing, rather than trusting a figure written here. A
+**What it costs.** Each lookup that actually runs is two model calls (October 2026): one with
+Google Search grounding and nothing else, and one with no tools that reads the text of up to five
+of the maker's pages the function downloaded itself — at most 100,000 characters, so roughly
+25,000 input tokens. Google bills the search queries a grounded call makes separately from its
+tokens — check the current Gemini pricing page for the model in `GEMINI_MODEL`, and the project's
+own billing, rather than trusting a figure written here. A
 lookup is kept per make and model per household and never repeated unless it failed, and it
 spends one of the household's fifty daily reads (`claim_label_read`), so the ceiling that caps
 label reads caps this too.

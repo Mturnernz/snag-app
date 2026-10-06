@@ -1,6 +1,7 @@
 import {
-  codeIsForThisSize, htmlText, isMakersSite, lookupFromGemini, lookupRequest, LOOKUP_SYSTEM, mentionsModel, monthsSaid,
-  pageHas, pdfStreams, pdfStrings, registeredLabel, urlsToOpen, verifyLookup, type LookupClaims, type Page,
+  candidateUrls, codeIsForThisSize, documentLinks, excerpt, htmlText, isMakersSite, mentionsModel, monthsSaid, pageHas,
+  pageLinks, pagesToRead, PAGE_CHARS, READ_SYSTEM, readFromGemini, readRequest, registeredLabel, SEARCH_SYSTEM,
+  searchFromGemini, searchRequest, verifyLookup, type LookupClaims, type Page,
 } from '../../../../supabase/functions/lookup-product/lookup';
 import {
   monthsToDays, parseProductFacts, parseProductLookup, partLine, productOffers,
@@ -34,6 +35,7 @@ describe('whose site it is', () => {
     ['https://daikin.com.au/x', 'daikin'],
     ['https://media3.bosch-home.com/Documents/x.pdf', 'bosch-home'],
     ['https://www.samsung.com/nz/', 'samsung'],
+    ['https://media3.bsh-group.com/Documents/x.pdf', 'bsh-group'],
   ])('reads the registered name of %p as %p', (url, label) => {
     expect(registeredLabel(new URL(url).hostname)).toBe(label);
   });
@@ -46,6 +48,11 @@ describe('whose site it is', () => {
     ['Rinnai', 'https://rinnai.co.nz/products'],
     ['LG', 'https://www.lg.com/nz/'],
     ["De'Longhi", 'https://www.delonghi.com/en-nz'],
+    // The group's own document servers, named one by one.
+    ['Bosch', 'https://media3.bsh-group.com/Documents/9002017220_A.pdf'],
+    ['Neff', 'https://media3.bsh-group.com/Documents/x.pdf'],
+    ['LG', 'https://gscs.lge.com/downloadFile?fileId=x'],
+    ['Mitsubishi Heavy Industries', 'https://www.mhiaa.com.au/x.pdf'],
   ])('counts %p on %p', (make, url) => {
     expect(isMakersSite(make, url)).toBe(true);
   });
@@ -56,6 +63,9 @@ describe('whose site it is', () => {
     [MAKE, 'https://www.amazon.com/Mitsubishi-MAC-2370FT-E'],
     [MAKE, 'https://myfiltercompany.com/collections/mitsubishi-air-filters'],
     ['Daikin', 'https://daikinfilters.com.au/x'],
+    // A group domain is the group's makers', and nobody else's.
+    ['Samsung', 'https://media3.bsh-group.com/Documents/x.pdf'],
+    ['Daikin', 'https://gscs.lge.com/x'],
     [MAKE, 'ftp://mitsubishi-electric.co.nz/x'],
     [MAKE, 'not a url'],
   ])('refuses %p on %p', (make, url) => {
@@ -193,65 +203,153 @@ describe('verifyLookup', () => {
     expect(verifyLookup(MAKE, MODEL, claims({ service: { months: 1, quote: cleaning, url: MANUAL } }), { [MANUAL]: withCleaning }).service)
       .toBeNull();
   });
-
-  it('opens only the maker’s pages, once each', () => {
-    const said = claims({
-      manualUrl: MANUAL,
-      parts: [
-        { item: 'a', code: 'MAC-100FT-E', url: NZ_PAGE },
-        { item: 'b', code: 'MAC-2370FT-E', url: RETAILER },
-        { item: 'c', code: 'MAC-3000FT-E', url: NZ_PAGE },
-      ],
-    });
-    expect(urlsToOpen(MAKE, said)).toEqual([MANUAL, NZ_PAGE]);
-  });
 });
 
-describe('the request and the reply', () => {
-  it('searches and opens pages, and asks for the maker’s own words only', () => {
-    const body = lookupRequest(MAKE, MODEL, 'Heat pump');
-    expect(body.tools).toEqual([{ google_search: {} }, { url_context: {} }]);
+describe('finding the pages', () => {
+  it('searches with Google Search alone, briefly, and asks for addresses as the search gave them', () => {
+    const body = searchRequest(MAKE, MODEL, 'Heat pump');
+    expect(body.tools).toEqual([{ google_search: {} }]);
+    expect(body.generationConfig).toEqual({ thinkingConfig: { thinkingLevel: 'low' } });
+    expect('generationConfig' in searchRequest(MAKE, MODEL, null, { lean: true })).toBe(false);
     expect(body.contents[0].parts[0].text).toMatch(/Model: MSZ-GS60VFD/);
-    expect(LOOKUP_SYSTEM).toMatch(/Retailers, spare-parts shops/);
-    expect(LOOKUP_SYSTEM).toMatch(/Never complete or adjust a part number/);
-    expect(LOOKUP_SYSTEM).toMatch(/Returning nothing is normal and correct/);
+    expect(body.contents[0].parts[0].text).toMatch(/What it is: Heat pump/);
+    expect(SEARCH_SYSTEM).toMatch(/Not retailers, spare-parts shops/);
+    expect(SEARCH_SYSTEM).toMatch(/Never build, shorten or guess an address/);
   });
 
   const reply = (text: string, over: Record<string, unknown> = {}) => ({
     candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP', ...over }],
   });
 
-  it('reads the object out of prose around it, and drops a part without its page', () => {
-    const outcome = lookupFromGemini(reply(
-      'Here is what I found:\n```json\n' + JSON.stringify({
-        manualUrl: MANUAL,
-        parts: [{ item: 'Filter', code: 'MAC-100FT-E', url: NZ_PAGE }, { item: 'Filter', code: 'X1' }],
-        service: { months: 12, quote: 'once a year', url: MANUAL },
-      }) + '\n```',
+  it('reads the list out of prose, and adds the pages the search returned', () => {
+    const outcome = searchFromGemini(reply(
+      'Here you are:\n```json\n' + JSON.stringify({ pages: [{ url: MANUAL, what: 'Manual' }, { url: 'not a url' }, { url: NZ_PAGE }] }) + '\n```',
+      {
+        groundingMetadata: {
+          webSearchQueries: ['MSZ-GS60VFD manual', 'MSZ-GS60VFD filter'],
+          groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'mitsubishi-electric.co.nz' } }, { retrievedContext: {} }],
+        },
+      },
     ));
     expect(outcome).toEqual({
       ok: true,
-      claims: {
-        manualUrl: MANUAL,
-        parts: [{ item: 'Filter', code: 'MAC-100FT-E', url: NZ_PAGE }],
-        service: { months: 12, quote: 'once a year', url: MANUAL },
+      found: {
+        listed: [{ url: MANUAL, what: 'manual' }, { url: NZ_PAGE, what: 'other' }],
+        grounded: [{ url: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'mitsubishi-electric.co.nz' }],
+        queries: 2,
       },
     });
   });
 
+  it('takes the addresses written in prose when there is no list', () => {
+    const outcome = searchFromGemini(reply(`The manual is at ${MANUAL}. The product page is ${NZ_PAGE}, I think.`));
+    expect(outcome).toMatchObject({ ok: true, found: { listed: [{ url: MANUAL }, { url: NZ_PAGE }] } });
+  });
+
   it.each([
     ['a blocked prompt', { promptFeedback: { blockReason: 'SAFETY' } }, 'blocked'],
-    ['an answer cut off', reply('{"manualUrl":', { finishReason: 'MAX_TOKENS' }), 'truncated'],
+    ['an answer cut off', reply('{"pages":', { finishReason: 'MAX_TOKENS' }), 'truncated'],
     ['no candidates', { candidates: [] }, 'empty'],
-    ['prose with no object', reply('I could not find anything.'), 'unparseable'],
+    ['no words at all', reply(''), 'empty'],
   ])('tells apart %s', (_, raw, reason) => {
-    expect(lookupFromGemini(raw)).toEqual({ ok: false, reason });
+    expect(searchFromGemini(raw)).toEqual({ ok: false, reason });
+  });
+
+  it('opens the manual first, then the rest, and never a retailer', () => {
+    const found = {
+      listed: [{ url: NZ_PAGE, what: 'product' }, { url: RETAILER, what: 'parts' }, { url: MANUAL, what: 'manual' }],
+      grounded: [],
+      queries: 1,
+    };
+    expect(candidateUrls(MAKE, found)).toEqual([MANUAL, NZ_PAGE]);
+  });
+
+  it('follows Google’s redirects, unless the result already says it is somebody else’s site', () => {
+    const redirect = (id: string) => `https://vertexaisearch.cloud.google.com/grounding-api-redirect/${id}`;
+    const found = {
+      listed: [{ url: MANUAL, what: 'manual' }],
+      grounded: [
+        { url: redirect('maker'), title: 'mitsubishi-electric.co.nz' },
+        { url: redirect('shop'), title: 'hesatek.fi' },
+        { url: redirect('untitled'), title: null },
+        { url: redirect('page-title'), title: 'GS60 Standard High Wall Heat Pump' },
+        { url: MANUAL, title: 'mitsubishielectric.com.au' },
+      ],
+      queries: 1,
+    };
+    expect(candidateUrls(MAKE, found)).toEqual([MANUAL, redirect('maker'), redirect('untitled'), redirect('page-title')]);
   });
 });
 
-describe('reading pages', () => {
-  it('drops scripts and tags, and decodes entities', () => {
+describe('reading the pages', () => {
+  const pages = [
+    { url: MANUAL, kind: 'pdf' as const, text: 'MSZ-GS25-80VFD ... Parts Number GS25/35/50/60: MAC-408FT-E' },
+    { url: NZ_PAGE, kind: 'html' as const, text: '' },
+  ];
+
+  it('shows the read every page by number, with nothing to search with, and asks for what the pages state', () => {
+    const body = readRequest(MAKE, MODEL, 'Heat pump', pages);
+    expect('tools' in body).toBe(false);
+    const asked = body.contents[0].parts[0].text;
+    expect(asked).toMatch(/\[1\] https:\/\/www\.mitsubishielectric\.com\.au\/.*\(PDF\)\nMSZ-GS25-80VFD/);
+    expect(asked).toMatch(/\[2\] https:\/\/www\.mitsubishi-electric\.co\.nz\/.*\(web page\)\n\(Its text could not be read/);
+    expect(body.generationConfig).toMatchObject({ responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } });
+    expect('generationConfig' in readRequest(MAKE, MODEL, null, pages, { lean: true })).toBe(false);
+    expect(READ_SYSTEM).toMatch(/Use only the text of the numbered pages/);
+    expect(READ_SYSTEM).toMatch(/copied character for character/);
+    expect(READ_SYSTEM).toMatch(/Returning nothing is normal and correct/);
+  });
+
+  const said = (json: unknown) => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(json) }] }, finishReason: 'STOP' }] });
+
+  it('turns page numbers into the addresses this function opened, and drops a number that is not one of them', () => {
+    const outcome = readFromGemini(said({
+      manual: 1,
+      parts: [
+        { item: 'Air cleaning filter', code: 'MAC-408FT-E', page: 1 },
+        { item: 'Invented', code: 'MAC-999FT-E', page: 7 },
+        { item: 'No page', code: 'MAC-1FT-E' },
+      ],
+      service: { months: 12, quote: 'Have it inspected once a year.', page: 2 },
+    }), pages);
+    expect(outcome).toEqual({
+      ok: true,
+      claims: {
+        manualUrl: MANUAL,
+        parts: [{ item: 'Air cleaning filter', code: 'MAC-408FT-E', url: MANUAL }],
+        service: { months: 12, quote: 'Have it inspected once a year.', url: NZ_PAGE },
+      },
+    });
+    expect(readFromGemini(said({ manual: 0, parts: [], service: null }), pages)).toEqual({
+      ok: true, claims: { manualUrl: null, parts: [], service: null },
+    });
+  });
+
+  it.each([
+    ['prose with no object', { candidates: [{ content: { parts: [{ text: 'I found nothing.' }] } }] }, 'unparseable'],
+    ['no words', { candidates: [{ content: { parts: [] } }] }, 'empty'],
+    ['a blocked answer', { candidates: [{ finishReason: 'RECITATION' }] }, 'blocked'],
+  ])('tells apart %s', (_, raw, reason) => {
+    expect(readFromGemini(raw, pages)).toEqual({ ok: false, reason });
+  });
+
+  it('shows a long page as its opening and what is near the words for parts and servicing', () => {
+    const filler = 'Lorem ipsum dolor sit amet. '.repeat(4000);
+    const page = `COVER MSZ-GS25-80VFD ${filler} Parts Number GS25/35/50/60: MAC-408FT-E ${filler} Have it inspected by your dealer once a year. ${filler}`;
+    const shown = excerpt(page);
+    expect(shown.length).toBeLessThanOrEqual(PAGE_CHARS);
+    expect(shown).toMatch(/^COVER MSZ-GS25-80VFD/);
+    expect(shown).toMatch(/MAC-408FT-E/);
+    expect(shown).toMatch(/inspected by your dealer once a year/);
+    expect(shown).toMatch(/ … /);
+    expect(excerpt('short page')).toBe('short page');
+  });
+});
+
+describe('reading a web page', () => {
+  it('drops scripts and tags, decodes entities, and keeps a product’s structured description', () => {
     expect(htmlText('<p>MAC&#45;100FT&#8209;E</p><script>var x = "MAC-9";</script> &amp; more')).toBe('MAC-100FT‑E & more');
+    expect(htmlText('<h1>Heat pump</h1><script type="application/ld+json">{"sku":"MSZ-GS60VFD"}</script>')).toMatch(/MSZ-GS60VFD/);
   });
 
   it('finds a part number however the page spaces it', () => {
@@ -259,14 +357,55 @@ describe('reading pages', () => {
     expect(pageHas('MAC-2370FT-E', 'MAC-100FT-E')).toBe(false);
   });
 
-  it('finds a PDF’s text streams and skips its images', () => {
-    const file = '<< /Length 10 /Filter /FlateDecode >>\nstream\nxxxx\nendstream\n<< /Subtype /Image /Filter /FlateDecode >>\nstream\nyyyy\nendstream\n<< /Length 4 >>\nstream\nzzzz\nendstream';
-    expect(pdfStreams(file).map((one) => one.flate)).toEqual([true, false]);
+  it('lists its links as absolute addresses with their words, and the PDFs its scripts name', () => {
+    const html = '<a href="/docs/User_Manual.pdf#p2" class="x">Download <b>user manual</b></a>'
+      + '<a href=\'https://www.mitsubishi-electric.co.nz/gs60\'>GS60</a><a href="mailto:x@y.z">mail</a>'
+      + '<script>window.data = {"om":"https:\\/\\/www.mitsubishi-electric.co.nz\\/files\\/OM_GS.pdf"}</script>';
+    expect(pageLinks(html, NZ_PAGE)).toEqual([
+      { url: 'https://www.mitsubishi-electric.co.nz/docs/User_Manual.pdf', text: 'Download user manual' },
+      { url: 'https://www.mitsubishi-electric.co.nz/gs60', text: 'GS60' },
+      { url: 'https://www.mitsubishi-electric.co.nz/files/OM_GS.pdf', text: '' },
+    ]);
+  });
+});
+
+describe('the second hop: what the maker’s pages link to', () => {
+  const page = (links: { url: string; text: string }[]): Page => ({ finalUrl: NZ_PAGE, kind: 'html', text: 'GS60', links });
+  const ON_SITE = 'https://www.mitsubishi-electric.co.nz';
+
+  it('follows the maker’s manuals, best first, and nothing else', () => {
+    const links = [
+      { url: `${ON_SITE}/about-us`, text: 'About us' },
+      { url: `${ON_SITE}/files/brochure.pdf`, text: 'Brochure' },
+      { url: `${ON_SITE}/files/OM_AP.pdf`, text: 'Operating instructions' },
+      { url: `${ON_SITE}/files/User_Manual-MSZ-GS25-80VFD.pdf`, text: 'User manual' },
+      { url: 'https://www.manualslib.com/gs60.pdf', text: 'User manual' },
+      { url: `${ON_SITE}/downloads/filters.pdf`, text: 'Replacement filters' },
+    ];
+    expect(documentLinks(MAKE, MODEL, [page(links)], new Set())).toEqual([
+      `${ON_SITE}/files/User_Manual-MSZ-GS25-80VFD.pdf`,
+      `${ON_SITE}/files/OM_AP.pdf`,
+      `${ON_SITE}/downloads/filters.pdf`,
+    ]);
   });
 
-  it('reads the strings a content stream draws, and ignores glyph noise', () => {
-    expect(pdfStrings('BT (MSZ-GS60VFD) Tj [(MAC-) -20 (100FT-E)] TJ ET')).toBe('MSZ-GS60VFDMAC-100FT-E');
-    expect(pdfStrings('(\\001\\002\\003) Tj')).toBe('');
+  it('does not open a page twice, and reads no links off a page that is not the maker’s', () => {
+    const manual = `${ON_SITE}/files/User_Manual-MSZ-GS25-80VFD.pdf`;
+    expect(documentLinks(MAKE, MODEL, [page([{ url: manual, text: 'User manual' }])], new Set([manual]))).toEqual([]);
+    const elsewhere: Page = { finalUrl: RETAILER, kind: 'html', text: '', links: [{ url: manual, text: 'User manual' }] };
+    expect(documentLinks(MAKE, MODEL, [elsewhere], new Set())).toEqual([]);
+  });
+});
+
+describe('what the read is shown', () => {
+  it('shows only the maker’s pages about this model, by their words or their address, documents first', () => {
+    const shown = pagesToRead(MAKE, MODEL, [
+      html(NZ_PAGE, 'MSZ-GS60VFD-A1 GS60 Standard High Wall Heat Pump'),
+      html('https://www.mitsubishi-electric.co.nz/ap50', 'MSZ-AP50VGK'),
+      html(RETAILER, 'MSZ-GS60VFD MAC-2370FT-E'),
+      pdf(MANUAL, ''),
+    ]);
+    expect(shown.map((one) => one.finalUrl)).toEqual([MANUAL, NZ_PAGE]);
   });
 });
 
@@ -333,6 +472,8 @@ describe('decideLookup', () => {
   const nzPage = html(NZ_PAGE, 'MSZ-GS60VFD-A1 GS60 Standard High Wall Heat Pump. Optional Plasma Quad Connect MAC-100FT-E.');
   const SERVICE = 'Have the unit inspected by your dealer once a year.';
   const manualPage = pdf(MANUAL, `MSZ-GS25-80VFD ... ${SERVICE} ...`);
+  // A page of the maker's, read through, about this model and long enough to have said something.
+  const readThrough = pdf(MANUAL, `OPERATING INSTRUCTIONS MSZ-GS25VFD MSZ-GS35VFD MSZ-GS50VFD MSZ-GS60VFD ${'Clean the air filter every 2 weeks. '.repeat(20)}`);
 
   it('is found with a manual alone', () => {
     const decision = decideLookup(MAKE, MODEL, claims({ manualUrl: MANUAL }), { [MANUAL]: manualPage });
@@ -364,72 +505,41 @@ describe('decideLookup', () => {
     });
   });
 
-  it('is a failure that can be asked again when the model claims nothing at all', () => {
-    expect(decideLookup(MAKE, MODEL, claims(), {})).toEqual({ status: 'failed', reason: 'error', why: 'no_claims' });
-    // Saying it could not find anything is not saying the maker has none.
-    expect(decideLookup(MAKE, MODEL, claims({ outcome: 'could_not_find' }), {})).toMatchObject({ status: 'failed', why: 'no_claims' });
-  });
-
-  it('is a failure when every claim is rejected', () => {
-    const decision = decideLookup(MAKE, MODEL, claims({
-      parts: [{ item: 'Air cleaning filter', code: 'MAC-2370FT-E', url: NZ_PAGE }],
-    }), { [NZ_PAGE]: nzPage });
-    expect(decision).toEqual({ status: 'failed', reason: 'error', why: 'unverified' });
-  });
-
-  it('is a failure when the maker’s pages would not open', () => {
-    const decision = decideLookup(MAKE, MODEL, claims({ manualUrl: MANUAL }), {});
-    expect(decision).toEqual({ status: 'failed', reason: 'error', why: 'sources_unavailable' });
-  });
-
-  it('is a failure when the claims name only pages that are not the maker’s', () => {
-    const decision = decideLookup(MAKE, MODEL, claims({ parts: [{ item: 'Filter', code: 'MAC-2370FT-E', url: RETAILER }] }), {});
-    expect(decision).toMatchObject({ status: 'failed' });
-  });
-
   describe('nothing', () => {
-    const none = (checkedUrls: string[]) => claims({ outcome: 'none_published', checkedUrls });
-
-    it('needs the model to say so and a maker page this function opened about this model', () => {
-      expect(decideLookup(MAKE, MODEL, none([NZ_PAGE]), { [NZ_PAGE]: nzPage })).toEqual({ status: 'nothing' });
+    it('is the answer when a page of the maker’s about this model was read and stated none of it', () => {
+      expect(decideLookup(MAKE, MODEL, claims(), { [MANUAL]: readThrough })).toEqual({ status: 'nothing' });
+      // A claim that did not hold up on that page changes nothing.
+      const wrong = claims({ parts: [{ item: 'Air cleaning filter', code: 'MAC-2370FT-E', url: MANUAL }] });
+      expect(decideLookup(MAKE, MODEL, wrong, { [MANUAL]: readThrough })).toEqual({ status: 'nothing' });
     });
 
-    it('is not believed when the page could not be opened', () => {
-      expect(decideLookup(MAKE, MODEL, none([NZ_PAGE]), {})).toMatchObject({ status: 'failed' });
+    it('is not said when the only page about this model was so by its address alone', () => {
+      expect(decideLookup(MAKE, MODEL, claims(), { [MANUAL]: pdf(MANUAL, '') })).toEqual({ status: 'failed', reason: 'error', why: 'nothing_read' });
     });
 
-    it('is not believed when the page is about another model', () => {
-      const other = html(NZ_PAGE, 'MSZ-AP50VGK air cleaning filter');
-      expect(decideLookup(MAKE, MODEL, none([NZ_PAGE]), { [NZ_PAGE]: other })).toMatchObject({ status: 'failed' });
+    it('is not said over a page that is about another model, or too short to have said anything', () => {
+      const other = html(NZ_PAGE, `MSZ-AP50VGK ${'air cleaning filter '.repeat(40)}`);
+      expect(decideLookup(MAKE, MODEL, claims(), { [NZ_PAGE]: other })).toMatchObject({ status: 'failed' });
+      expect(decideLookup(MAKE, MODEL, claims(), { [NZ_PAGE]: html(NZ_PAGE, 'MSZ-GS60VFD') })).toMatchObject({ status: 'failed' });
     });
 
-    it('is not believed when the page is not the maker’s, or redirected off its site', () => {
-      expect(decideLookup(MAKE, MODEL, none([RETAILER]), { [RETAILER]: html(RETAILER, nzPage.text) })).toMatchObject({ status: 'failed' });
-      const moved = html('https://parts-reseller.example/x', nzPage.text);
-      expect(decideLookup(MAKE, MODEL, none([NZ_PAGE]), { [NZ_PAGE]: moved })).toMatchObject({ status: 'failed' });
+    it('is not said over a page that is not the maker’s, or redirected off its site', () => {
+      expect(decideLookup(MAKE, MODEL, claims(), { [RETAILER]: html(RETAILER, readThrough.text) })).toMatchObject({ status: 'failed' });
+      const moved = pdf('https://parts-reseller.example/x', readThrough.text);
+      expect(decideLookup(MAKE, MODEL, claims(), { [MANUAL]: moved })).toMatchObject({ status: 'failed' });
     });
 
-    it('is not believed when the model only says it could not find it', () => {
-      expect(decideLookup(MAKE, MODEL, claims({ outcome: 'could_not_find', checkedUrls: [NZ_PAGE] }), { [NZ_PAGE]: nzPage }))
-        .toMatchObject({ status: 'failed' });
+    it('is a failure that can be asked again when nothing was read at all', () => {
+      expect(decideLookup(MAKE, MODEL, claims(), {})).toEqual({ status: 'failed', reason: 'error', why: 'nothing_read' });
+      expect(decideLookup(MAKE, MODEL, claims({ manualUrl: MANUAL }), {})).toEqual({ status: 'failed', reason: 'error', why: 'unverified' });
     });
   });
 });
 
 describe('the reply’s own words about itself', () => {
-  it('reads outcome and the pages checked, and ignores anything else', () => {
-    const outcome = lookupFromGemini({
-      candidates: [{ content: { parts: [{ text: JSON.stringify({ outcome: 'None_Published', manualUrl: null, parts: [], service: null, checkedUrls: [NZ_PAGE, 7, ''] }) }] } }],
-    });
-    expect(outcome).toEqual({ ok: true, claims: { manualUrl: null, parts: [], service: null, outcome: 'none_published', checkedUrls: [NZ_PAGE] } });
-    const odd = lookupFromGemini({ candidates: [{ content: { parts: [{ text: '{"outcome":"sure","manualUrl":null}' }] } }] });
-    expect(odd).toEqual({ ok: true, claims: { manualUrl: null, parts: [], service: null } });
-  });
-
-  it('opens the pages it says it checked, with the rest', () => {
-    expect(urlsToOpen(MAKE, claims({ manualUrl: MANUAL, checkedUrls: [NZ_PAGE, RETAILER] }))).toEqual([MANUAL, NZ_PAGE]);
-    expect(claimsAreEmpty(claims({ checkedUrls: [NZ_PAGE] }))).toBe(false);
+  it('knows a read that claimed nothing', () => {
     expect(claimsAreEmpty(claims())).toBe(true);
+    expect(claimsAreEmpty(claims({ manualUrl: MANUAL }))).toBe(false);
   });
 
   it('describes a reply without carrying any of its words', () => {
@@ -437,24 +547,16 @@ describe('the reply’s own words about itself', () => {
       candidates: [{
         finishReason: 'STOP',
         content: { parts: [{ text: 'MAC-100FT-E' }, { thought: true, text: 'hidden' }, { executableCode: {} }] },
-        groundingMetadata: { groundingChunks: [{}, {}, {}] },
+        groundingMetadata: { groundingChunks: [{}, {}, {}], webSearchQueries: ['a', 'b'] },
         urlContextMetadata: { urlMetadata: [{}] },
       }],
+      usageMetadata: { promptTokenCount: 1234 },
     });
     expect(line).toBe(
       'blockReason=none candidates=1 finishReason=STOP parts=3 textParts=1 thoughtParts=1 otherParts=executableCode ' +
-        'textChars=11 grounding=true groundingChunks=3 urlContext=true urlsRead=1',
+        'textChars=11 grounding=true searches=2 groundingChunks=3 urlContext=true urlsRead=1 tokensIn=1234',
     );
     expect(line).not.toMatch(/MAC-100|hidden/);
     expect(describeReply(null)).toMatch(/candidates=0 finishReason=none parts=0/);
-  });
-
-  it('asks for structured output only when told to, and keeps the search tools either way', () => {
-    const plain = lookupRequest(MAKE, MODEL, null);
-    const structured = lookupRequest(MAKE, MODEL, null, { structured: true });
-    expect('generationConfig' in plain).toBe(false);
-    expect(structured.generationConfig).toMatchObject({ responseMimeType: 'application/json' });
-    expect(structured.tools).toEqual([{ google_search: {} }, { url_context: {} }]);
-    expect(LOOKUP_SYSTEM).toMatch(/could not find this.*does not publish this/);
   });
 });

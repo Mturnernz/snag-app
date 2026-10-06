@@ -37,13 +37,14 @@
 
 // ------------------------------------------------------------ stage one: find
 
-export const SEARCH_SYSTEM = `You find the manufacturer's own web pages and documents for one household appliance model, so that they can be downloaded and read.
+export const SEARCH_SYSTEM = `You find web pages and documents for one household appliance model, so that they can be downloaded, read and checked.
 
-Use Google Search. Search for the exact model number with the manufacturer's name, for its owner's, user or operating manual (usually a PDF), and for any page of the manufacturer's that lists its replacement parts or accessories. Prefer the manufacturer's New Zealand or Australian site, then its global site.
+You search Google for them; you do not answer from memory. A model number you remember is not a page you have found.
 
-- Only the manufacturer's own websites and document servers. Not retailers, spare-parts shops, marketplaces, manual-collection sites or forums, however well they match.
+- Pages that are about exactly this model: the manufacturer's own pages first (prefer its New Zealand or Australian site, then its global one), then any page that holds a copy of the model's owner's or user manual, or lists its replacement parts, whoever hosts it.
+- Not a search page, a category page, or a page about some other model.
 - Give each address exactly as a search result gave it. Never build, shorten or guess an address.
-- An empty list is the right answer when the search turns up nothing of the manufacturer's for this model.
+- An empty list is the right answer when the search turns up nothing for this model.
 
 Return one JSON object and nothing else:
 
@@ -55,6 +56,16 @@ At most six pages, the manual first.`;
  * The body of the search: the question, with Google Search on and nothing
  * else. `lean` drops the thinking setting, for a model that refuses it — the
  * same second chance `ask.ts` gives the read's schema.
+ *
+ * **The question is a command that names its searches.** Measured on
+ * 6 October 2026 against the live key: asked to "find the manufacturer's own
+ * pages" with a system prompt saying to use Google Search, the models answered
+ * from memory (plain addresses, no search-result links); told "Search Google
+ * now for '<make> <model> manual' … you must run at least one search before
+ * you answer", about half of 30 requests came back with Google's own result
+ * links. The reply carries no `groundingMetadata` at all on these models, so a
+ * search is recognised by its results (`searched` in `FoundPages`), not by
+ * the record it never wrote.
  */
 export function searchRequest(make: string, model: string, name: string | null, options: { lean?: boolean } = {}) {
   const what = name ? `\nWhat it is: ${name}` : '';
@@ -65,7 +76,12 @@ export function searchRequest(make: string, model: string, name: string | null, 
         role: 'user',
         parts: [
           {
-            text: `Make: ${make}\nModel: ${model}${what}\nThe household is in New Zealand.\n\nFind ${make}'s own pages for this model: its manual, and any page listing its replacement parts.`,
+            text:
+              `Make: ${make}\nModel: ${model}${what}\nThe household is in New Zealand.\n\n` +
+              `Search Google now for "${make} ${model} manual", "${make} ${model} user manual pdf" and ` +
+              `"${make} ${model} replacement parts". You must run at least one Google search before you answer; ` +
+              `do not answer from memory.\n\nThen list the pages the search returned that are about the ${model}: ` +
+              `${make}'s own pages first, then any page holding a copy of its manual or listing its parts.`,
           },
         ],
       },
@@ -86,8 +102,15 @@ export interface FoundPages {
   listed: { url: string; what: string }[];
   /** The pages Google's search returned. Often redirects, resolved when opened. */
   grounded: { url: string; title: string | null }[];
-  /** How many searches the model ran — none means it answered from memory. */
+  /** How many searches the reply says the model ran. Often 0 when one ran: see `searched`. */
   queries: number;
+  /**
+   * Whether anything in the reply came from a search: a recorded query, a
+   * result Google returned, or an address that is one of Google's result
+   * links, which the model can only have by searching. False means the
+   * addresses are the model's own recall.
+   */
+  searched: boolean;
 }
 
 export type ReplyFailure = 'blocked' | 'empty' | 'truncated' | 'unparseable';
@@ -170,7 +193,8 @@ export function searchFromGemini(raw: unknown): { ok: true; found: FoundPages } 
   const queries = Array.isArray(meta?.webSearchQueries) ? meta.webSearchQueries.length : 0;
 
   if (!listed.length && !grounded.length && !said.trim()) return { ok: false, reason: 'empty' };
-  return { ok: true, found: { listed: listed.slice(0, 8), grounded: grounded.slice(0, 12), queries } };
+  const searched = queries > 0 || grounded.length > 0 || listed.some((one) => isRedirector(one.url));
+  return { ok: true, found: { listed: listed.slice(0, 8), grounded: grounded.slice(0, 12), queries, searched } };
 }
 
 // Where a search result's address goes before it reaches the page: Google's
@@ -178,38 +202,46 @@ export function searchFromGemini(raw: unknown): { ok: true; found: FoundPages } 
 const REDIRECTORS = /^(?:[a-z0-9-]+\.)*(?:vertexaisearch\.cloud\.google\.com|google\.com)$/i;
 const looksLikeDomain = (value: string) => /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(value);
 
+function isRedirector(url: string): boolean {
+  try {
+    return REDIRECTORS.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
- * The addresses worth opening, in order: the manual the model listed, its
- * other pages, then the search's own results. An address on another site is
- * dropped unopened — unless it is one of Google's redirects, which is opened
- * and judged by where it lands. A redirect whose title already names some
- * other site (Google titles them with the domain) is not followed at all.
+ * The addresses worth opening: the manual the model listed, its other pages,
+ * then the search's own results — with the maker's own addresses first, then
+ * Google's result links (opened and judged by where they land), then anybody
+ * else's, so that when there are more than `max` the maker is never what is
+ * left out. An address on another site is opened too: whether what it says
+ * can be believed is `verifyLookup`'s question, and the answer depends on
+ * the page rather than on whose it is.
  */
 export function candidateUrls(make: string, found: FoundPages, max = 8): string[] {
-  const host = (url: string) => {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return '';
-    }
-  };
-  const worth = (url: string) => isMakersSite(make, url) || REDIRECTORS.test(host(url));
+  const rank = (url: string) => (isMakersSite(make, url) ? 0 : isRedirector(url) ? 1 : 2);
   const manuals = found.listed.filter((one) => one.what === 'manual').map((one) => one.url);
   const others = found.listed.filter((one) => one.what !== 'manual').map((one) => one.url);
-  const results = found.grounded
-    .filter((one) => !one.title || !looksLikeDomain(one.title) || isMakersSite(make, `https://${one.title}`))
-    .map((one) => one.url);
-  return [...manuals, ...others, ...results]
-    .filter((url) => worth(url))
-    .filter((url, i, list) => list.indexOf(url) === i)
+  const results = found.grounded.map((one) => one.url);
+  const ordered = [...manuals, ...others, ...results]
+    .filter((url) => isWebAddress(url))
+    .filter((url, i, list) => list.indexOf(url) === i);
+  // A stable sort: within a rank the model's own order stands.
+  return ordered
+    .map((url, i) => ({ url, i, rank: rank(url) }))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .map((one) => one.url)
     .slice(0, max);
 }
 
 // ------------------------------------------------------------ stage two: read
 
-export const READ_SYSTEM = `You read pages downloaded from an appliance manufacturer's own website, and report what they state about one model, for a household's record of what is in their house. They will buy parts and book servicing on what you report, so a wrong value costs them money and their trust in the record.
+export const READ_SYSTEM = `You read pages downloaded from the web, and report what they state about one appliance model, for a household's record of what is in their house. They will buy parts and book servicing on what you report, so a wrong value costs them money and their trust in the record.
 
 Use only the text of the numbered pages you are given — not anything you know about this model or similar ones, and not what a page says about a different model.
+
+Each page says whose it is. A page of the manufacturer's is the best source. A copy of a document (a PDF somebody else hosts) is the manufacturer's own words in a different place. Any other website — a shop, a manual library, a forum — is somebody else's page: report from it only what it states outright for exactly this model, never a list of parts that "fit", are "compatible with" or "also bought with" it, and never a part number given for a range or for other models.
 
 - manual: the number of the page that is this model's owner's, user, operating or use-and-care manual, or one for a range of models that includes it. Null if none of the pages is.
 - parts: consumables a householder buys and replaces themselves — filters, cartridges, bulbs, bags, belts — for which a page prints a part number for this model. Not parts a technician fits, and not a washable part that is cleaned rather than replaced. item is what it is in plain words ("Air cleaning filter"); code is the part number copied character for character from the page; page is the number of the page it is printed on. When a page gives different part numbers for different sizes or models, give only this model's. At most four. Empty when no page prints one.
@@ -287,7 +319,15 @@ export interface PageToRead {
   url: string;
   kind: 'html' | 'pdf';
   text: string;
+  /** Whose it is, so the read can weigh it; see `sourceOf`. */
+  source?: Source;
 }
+
+const SOURCE_WORDS: Record<Source, string> = {
+  maker: "the manufacturer's own site",
+  copy: 'a copy of a document, on somebody else\'s site',
+  web: "another website, not the manufacturer's",
+};
 
 /**
  * The body of the read: the downloaded pages, numbered, and the question. No
@@ -307,9 +347,10 @@ export function readRequest(
     const words = excerpt(page.text, Math.min(PAGE_CHARS, Math.max(0, left)));
     left -= words.length;
     const kind = page.kind === 'pdf' ? 'PDF' : 'web page';
+    const whose = page.source ? `, ${SOURCE_WORDS[page.source]}` : '';
     const body = words ||
       (page.text ? '(Not shown — the pages before it took all the room.)' : '(Its text could not be read — only its address is known.)');
-    return `[${i + 1}] ${page.url} (${kind})\n${body}`;
+    return `[${i + 1}] ${page.url} (${kind}${whose})\n${body}`;
   });
   return {
     systemInstruction: { parts: [{ text: READ_SYSTEM }] },
@@ -318,7 +359,7 @@ export function readRequest(
         role: 'user',
         parts: [
           {
-            text: `Make: ${make}\nModel: ${model}${what}\n\nPages downloaded from ${make}'s own website:\n\n${shown.join('\n\n')}\n\nWhat do these pages state about the ${model}?`,
+            text: `Make: ${make}\nModel: ${model}${what}\n\nPages downloaded from the web:\n\n${shown.join('\n\n')}\n\nWhat do these pages state about the ${model}?`,
           },
         ],
       },
@@ -651,7 +692,88 @@ export interface Page {
   links?: { url: string; text: string }[];
 }
 
-/** What survived: every value with the maker's page it is written on. */
+/**
+ * Whose a page is.
+ *
+ * - `maker`: the manufacturer's own site (`isMakersSite`), where any value that
+ *   passes the checks stands on its own.
+ * - `copy`: a document (a PDF) on somebody else's site. A manual hosted by a
+ *   library or a dealer is the maker's own words in another place, so it counts
+ *   when it reads as a manual and names this model — and a PDF that does not
+ *   (a shop's price list, a leaflet) stands for nothing alone.
+ * - `web`: any other page — a shop, a manual library's page, a forum. It can
+ *   point at a manual, and it can back a value another page states, but it
+ *   never settles a part number or an interval alone.
+ *
+ * Which site it is no longer decides whether a page is read. What the page
+ * says, and what a second page says, decide whether a value is believed.
+ */
+export type Source = 'maker' | 'copy' | 'web';
+
+export function sourceOf(make: string, page: { finalUrl: string; kind: 'html' | 'pdf' }): Source {
+  if (isMakersSite(make, page.finalUrl)) return 'maker';
+  return page.kind === 'pdf' ? 'copy' : 'web';
+}
+
+const MANUAL_SECTIONS = /safety|warning|installation|instruction|cleaning|maintenance|troubleshoot|warranty|operating|specification|disposal/gi;
+
+/**
+ * Whether a document's words read as a manual: long enough to be one, and
+ * holding at least three of the sections a manual has. A price list or a
+ * leaflet names a model and has none of them.
+ */
+export function looksLikeManual(text: string): boolean {
+  if (text.length < 3000) return false;
+  const seen = new Set((text.match(MANUAL_SECTIONS) ?? []).map((word) => word.toLowerCase()));
+  return seen.size >= 3;
+}
+
+/** Whether a page is somebody selling the thing: a cart, a stock line, a delivery offer. */
+export function isShopPage(text: string): boolean {
+  return /add to (?:cart|basket|trolley|bag)|buy now|checkout|in stock|free delivery|click (?:&|and) collect/i.test(text);
+}
+
+/**
+ * A page on a manual library that is this model's manual: not a shop, long
+ * enough to say something, naming the make and this model, and calling itself
+ * a manual (in its address or its opening words). It points at a manual; it
+ * does not settle anything the manual says, because a library's page often
+ * holds only the contents list and the document itself sits behind a viewer.
+ */
+export function isManualLibraryPage(make: string, model: string, page: Page): boolean {
+  if (page.kind !== 'html' || isShopPage(page.text) || page.text.length < 800) return false;
+  const first = letters(make.split(/[\s&+/]+/)[0] ?? '');
+  if (first.length < 2 || !letters(page.text).includes(first)) return false;
+  if (!mentionsModel(page.text, model)) return false;
+  let address = page.finalUrl;
+  try {
+    address = decodeURIComponent(page.finalUrl);
+  } catch {
+    // Keep it as written.
+  }
+  return /manual|instruction|user[- ]guide|handbook|owner/i.test(`${address} ${page.text.slice(0, 400)}`);
+}
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * The words under a value: the maker's host alone, or — for a value that came
+ * from somebody else's page — every host that stands behind it, with the plain
+ * statement that none of them is the maker's.
+ */
+export function sourceLabel(make: string, urls: string[]): string {
+  if (urls.length && urls.every((url) => isMakersSite(make, url))) return sourceName(urls[0]);
+  const hosts = urls.map(sourceName).filter((host, i, list) => list.indexOf(host) === i);
+  return `${hosts.join(' + ')} — not ${make}'s own website`;
+}
+
+/** What survived: every value with the page it is written on. */
 export interface ProductFacts {
   manual: { url: string; source: string } | null;
   service: { months: number; quote: string; url: string; source: string } | null;
@@ -668,17 +790,24 @@ export function hasFacts(facts: ProductFacts): boolean {
  * A value is kept only when **all** of these hold, checked here and not by the
  * model:
  *
- * - its page is on the maker's own site, before and after any redirect;
  * - the page was opened (`pages` holds only what `run.ts` fetched itself);
  * - the page, or the manual's own address, mentions this model or a range
  *   that includes it;
  * - for a part, the part number is on the page, and on a page covering several
  *   sizes it is this size's (`codeIsForThisSize`); for a service interval, the
  *   quoted sentence is on the page, talks about servicing, and says the
- *   interval claimed.
+ *   interval claimed;
+ * - and the page is good enough for the value, by whose it is (`Source`):
+ *   - the **maker's** page is enough for anything;
+ *   - a **copy** of a document is enough when it reads as a manual
+ *     (`looksLikeManual`) — it is the maker's own words in another place;
+ *   - any **other** page can name a manual (`isManualLibraryPage`), and can
+ *     state a part number only when a second page, on a different site, states
+ *     the same number for this same model. It never states an interval.
  *
  * Anything else is dropped without a word. The card says what was confirmed,
- * or that nothing was — never what was guessed.
+ * or that nothing was — never what was guessed. Every value from a page that is
+ * not the maker's says so under it (`sourceLabel`).
  */
 export function verifyLookup(
   make: string,
@@ -686,12 +815,7 @@ export function verifyLookup(
   claims: LookupClaims,
   pages: Record<string, Page | undefined>,
 ): ProductFacts {
-  const opened = (url: string | null | undefined): Page | null => {
-    if (!url || !isMakersSite(make, url)) return null;
-    const page = pages[url];
-    if (!page || !isMakersSite(make, page.finalUrl)) return null;
-    return page;
-  };
+  const opened = (url: string | null | undefined): Page | null => (url ? pages[url] ?? null : null);
   const readable = (url: string) => {
     try {
       return decodeURIComponent(url);
@@ -702,27 +826,44 @@ export function verifyLookup(
   // The address counts as well as the page: a manual's file name is often the
   // only place its range is written in words this can read.
   const aboutThisModel = (url: string, page: Page) => mentionsModel(`${page.text} ${readable(url)}`, model);
+  // A page somebody else hosts is held to its words alone: an address it
+  // chose says nothing about what the page holds.
+  const namesThisModel = (page: Page) => mentionsModel(page.text, model);
 
   let manual: ProductFacts['manual'] = null;
   const manualPage = opened(claims.manualUrl);
-  if (claims.manualUrl && manualPage && aboutThisModel(claims.manualUrl, manualPage)) {
-    manual = { url: claims.manualUrl, source: sourceName(claims.manualUrl) };
+  if (claims.manualUrl && manualPage) {
+    const tier = sourceOf(make, manualPage);
+    const fine =
+      (tier === 'maker' && aboutThisModel(claims.manualUrl, manualPage)) ||
+      (tier === 'copy' && namesThisModel(manualPage) && looksLikeManual(manualPage.text)) ||
+      (tier === 'web' && isManualLibraryPage(make, model, manualPage));
+    if (fine) manual = { url: claims.manualUrl, source: sourceLabel(make, [manualPage.finalUrl]) };
   }
 
   let service: ProductFacts['service'] = null;
   const s = claims.service;
   const servicePage = opened(s?.url);
-  if (
-    s && servicePage &&
-    Number.isInteger(s.months) && s.months >= 1 && s.months <= 120 &&
-    s.quote.length >= 15 &&
-    SERVICE_WORDS.test(s.quote) &&
-    monthsSaid(s.quote) === s.months &&
-    pageHas(servicePage.text, s.quote) &&
-    aboutThisModel(s.url, servicePage)
-  ) {
-    service = { months: s.months, quote: s.quote, url: s.url, source: sourceName(s.url) };
+  if (s && servicePage) {
+    const tier = sourceOf(make, servicePage);
+    const fine =
+      (tier === 'maker' && aboutThisModel(s.url, servicePage)) ||
+      (tier === 'copy' && namesThisModel(servicePage) && looksLikeManual(servicePage.text));
+    if (
+      fine &&
+      Number.isInteger(s.months) && s.months >= 1 && s.months <= 120 &&
+      s.quote.length >= 15 &&
+      SERVICE_WORDS.test(s.quote) &&
+      monthsSaid(s.quote) === s.months &&
+      pageHas(servicePage.text, s.quote)
+    ) {
+      service = { months: s.months, quote: s.quote, url: s.url, source: sourceLabel(make, [servicePage.finalUrl]) };
+    }
   }
+
+  // Whether a page states this code, for this model, for this size.
+  const states = (page: Page, code: string) =>
+    pageHas(page.text, code) && aboutThisModel(page.finalUrl, page) && codeIsForThisSize(page.text, code, model);
 
   const parts: ProductFacts['parts'] = [];
   for (const claim of claims.parts) {
@@ -732,11 +873,33 @@ export function verifyLookup(
     if (!/\d/.test(claim.code) || compact(claim.code).length < 3) continue;
     // Its own model number is not a part it takes.
     if (compact(claim.code) === compact(model)) continue;
-    if (!pageHas(page.text, claim.code) || !aboutThisModel(claim.url, page)) continue;
     // On a page covering several sizes, the code must be this size's.
-    if (!codeIsForThisSize(page.text, claim.code, model)) continue;
+    if (!states(page, claim.code)) continue;
     if (parts.some((one) => compact(one.code) === compact(claim.code))) continue;
-    parts.push({ item: claim.item, code: claim.code, url: claim.url, source: sourceName(claim.url) });
+
+    const tier = sourceOf(make, page);
+    let behind = [page.finalUrl];
+    let at = claim.url;
+    if (tier === 'copy' && namesThisModel(page) && looksLikeManual(page.text)) {
+      // A manual's own words, kept elsewhere.
+    } else if (tier !== 'maker') {
+      // Another site's page: believed only when a page on a different site
+      // states the same code for this model too — and if that page is the
+      // maker's, the row opens it instead.
+      const label = registeredLabel(hostOf(page.finalUrl));
+      const others = Object.values(pages).filter((other): other is Page =>
+        !!other && other !== page && registeredLabel(hostOf(other.finalUrl)) !== label && states(other, claim.code)
+      );
+      const second = others.find((other) => sourceOf(make, other) === 'maker') ?? others[0];
+      if (!second) continue;
+      if (sourceOf(make, second) === 'maker') {
+        behind = [second.finalUrl];
+        at = second.finalUrl;
+      } else {
+        behind = [page.finalUrl, second.finalUrl];
+      }
+    }
+    parts.push({ item: claim.item, code: claim.code, url: at, source: sourceLabel(make, behind) });
     if (parts.length === 4) break;
   }
 
@@ -756,14 +919,15 @@ const READ_ENOUGH = 400;
  * Found, nothing, or a failure that may be tried again — given the claims the
  * read made and **the pages it was shown**.
  *
- * `nothing` is the card's *Nothing could be confirmed on the maker's own
- * website*, and it is only said when that is what happened: a page of the
- * maker's was opened by this function, its own words (not merely its address)
- * name this model, the read was shown it, and no value survived. A lookup that
- * never got that far — no page of the maker's about this model was found or
- * would open — has said nothing about the maker, so it is a failure, and the
- * row can be asked again. The model is no longer asked whether the maker
- * publishes something: it can only say what the pages in front of it say.
+ * `nothing` is the card's *Nothing could be confirmed*, and it is only said
+ * when that is what happened: a page that could have said it was opened by this
+ * function — the maker's, or a copy of a manual that reads as one — its own
+ * words (not merely its address) name this model, the read was shown it, and no
+ * value survived. A lookup that never got that far has said nothing about the
+ * maker, so it is a failure, and the row can be asked again. A shop's page or a
+ * library's contents list never makes it `nothing`: neither is where the answer
+ * would have been. The model is not asked whether the maker publishes something:
+ * it can only say what the pages in front of it say.
  */
 export function decideLookup(
   make: string,
@@ -773,9 +937,11 @@ export function decideLookup(
 ): LookupDecision {
   const facts = verifyLookup(make, model, claims, pages);
   if (hasFacts(facts)) return { status: 'found', facts };
-  const read = Object.values(pages).some((page) =>
-    !!page && isMakersSite(make, page.finalUrl) && page.text.length >= READ_ENOUGH && mentionsModel(page.text, model)
-  );
+  const read = Object.values(pages).some((page) => {
+    if (!page || page.text.length < READ_ENOUGH || !mentionsModel(page.text, model)) return false;
+    const tier = sourceOf(make, page);
+    return tier === 'maker' || (tier === 'copy' && looksLikeManual(page.text));
+  });
   if (read) return { status: 'nothing' };
   if (claimsAreEmpty(claims)) return { status: 'failed', reason: 'error', why: 'nothing_read' };
   return { status: 'failed', reason: 'error', why: 'unverified' };
@@ -877,12 +1043,14 @@ export function documentLinks(make: string, model: string, pages: Page[], opened
 }
 
 /**
- * The pages the read is shown: the maker's, about this model by their words
- * or their address, documents first (a manual is where part numbers and
- * intervals are printed), at most `max`. A page that is about some other model,
- * or about nothing this can tell, costs the read time and tells it nothing.
+ * The pages the read is shown, at most `max`: those about this model, the
+ * maker's first and documents before web pages (a manual is where part numbers
+ * and intervals are printed), then a copy of a document, then everybody else's.
+ * A page of somebody else's is shown only when its own words name this model —
+ * its address is its owner's choice. A page that is about some other model, or
+ * about nothing this can tell, costs the read time and tells it nothing.
  */
-export function pagesToRead(make: string, model: string, pages: Page[], max = 5): Page[] {
+export function pagesToRead(make: string, model: string, pages: Page[], max = 6): Page[] {
   const address = (url: string) => {
     try {
       return decodeURIComponent(url);
@@ -890,10 +1058,17 @@ export function pagesToRead(make: string, model: string, pages: Page[], max = 5)
       return url;
     }
   };
+  const rank = (page: Page) => {
+    const tier = sourceOf(make, page);
+    return tier === 'maker' ? (page.kind === 'pdf' ? 0 : 1) : tier === 'copy' ? 2 : 3;
+  };
   return pages
-    .filter((page) => isMakersSite(make, page.finalUrl))
-    .filter((page) => mentionsModel(page.text, model) || mentionsModel(address(page.finalUrl), model))
+    .filter((page) =>
+      mentionsModel(page.text, model) || (isMakersSite(make, page.finalUrl) && mentionsModel(address(page.finalUrl), model))
+    )
     .filter((page, i, list) => list.findIndex((one) => one.finalUrl === page.finalUrl) === i)
-    .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'pdf' ? -1 : 1))
+    .map((page, i) => ({ page, i, rank: rank(page) }))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .map((one) => one.page)
     .slice(0, max);
 }

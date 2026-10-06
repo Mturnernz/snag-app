@@ -36,6 +36,7 @@ export type AttemptKind =
   | 'success'
   | ReplyFailure // the reply, a 200: empty, unparseable, truncated, blocked
   | 'no_claims' // valid, and holds nothing to go on
+  | 'unsearched' // valid, but shows no sign of a search: the model's recall, kept only if no model does better
   | 'body' // a 200 whose body could not be read, or was not JSON
   | 'timeout' // no answer in the time given: nobody refused, so never "busy"
   | 'unreachable' // the request itself did not get there
@@ -79,6 +80,13 @@ export interface Stage<T> {
   parse(json: unknown): { ok: true; value: T } | { ok: false; reason: ReplyFailure };
   /** A usable reply that still holds nothing to go on, so the next model is asked. */
   isEmpty(value: T): boolean;
+  /**
+   * A usable reply that is not what was asked for — the search that was not
+   * run. The next model is asked, and if none does better this reply is the
+   * answer after all: addresses from memory are still addresses to open, and
+   * the pages, not the model, are what get believed.
+   */
+  isWeak?(value: T): boolean;
   /** The most one model is given while another is still to try. */
   attemptMs: number;
 }
@@ -94,7 +102,9 @@ export interface AskArgs {
 
 /**
  * The search: Google Search on, and an answer worth having only when it names
- * an address — listed by the model or returned by the search. 40s a model: a
+ * an address — listed by the model or returned by the search — and shows it
+ * was searched for (`searched`: the replies carry no search record, so a
+ * search is recognised by Google's result links in what came back). 40s a model: a
  * search with a short think answers in seconds, and one cut off at 30s with
  * every option on (6 October 2026) is why this is not lower.
  */
@@ -108,6 +118,7 @@ export function searchStage(make: string, model: string, name: string | null): S
       return outcome.ok ? { ok: true, value: outcome.found } : outcome;
     },
     isEmpty: (found) => !found.listed.length && !found.grounded.length,
+    isWeak: (found) => !found.searched,
     attemptMs: 40_000,
   };
 }
@@ -137,6 +148,9 @@ const isTimeout = (err: unknown) => {
 
 export async function askModels<T>(deps: AskDeps, args: AskArgs, stage: Stage<T>): Promise<AskOutcome<T>> {
   const attempts: Attempt[] = [];
+  // The first reply that was usable but unsearched, kept in case no later model
+  // does better.
+  let weak: { value: T; model: string } | null = null;
   // Once a model has refused the full request, the rest of this question is
   // asked without its options: no model is likelier to take what one refused.
   let full = true;
@@ -149,6 +163,8 @@ export async function askModels<T>(deps: AskDeps, args: AskArgs, stage: Stage<T>
     const reason = kinds.has('busy') ? 'busy' : kinds.has('limit') ? 'limit' : 'error';
     return { ok: false, reason, attempts };
   };
+  const settle = (): AskOutcome<T> =>
+    weak ? { ok: true, value: weak.value, model: weak.model, attempts } : fail();
 
   for (const [index, modelName] of args.models.entries()) {
     const last = index === args.models.length - 1;
@@ -157,7 +173,7 @@ export async function askModels<T>(deps: AskDeps, args: AskArgs, stage: Stage<T>
       const left = args.deadline - deps.now();
       if (left < MIN_ATTEMPT_MS) {
         deps.warn(`lookup-product: ${args.tag} ${stage.name} model=${modelName} not asked — ${Math.max(0, Math.round(left))}ms left, ${MIN_ATTEMPT_MS}ms needed`);
-        return fail();
+        return settle();
       }
       const allowed = last ? left : Math.min(left, stage.attemptMs);
       const started = deps.now();
@@ -245,11 +261,17 @@ export async function askModels<T>(deps: AskDeps, args: AskArgs, stage: Stage<T>
         deps.warn(`${head()} http=${response.status} ms=${one.ms} ${shape} result=no_claims`);
         break;
       }
+      if (!last && stage.isWeak?.(outcome.value)) {
+        const one = record('unsearched', response.status);
+        deps.warn(`${head()} http=${response.status} ms=${one.ms} ${shape} result=unsearched, asking the next model`);
+        weak ??= { value: outcome.value, model: modelName };
+        break;
+      }
       const one = record('success', response.status);
       deps.log(`${head()} http=${response.status} ms=${one.ms} ${shape} result=success`);
       return { ok: true, value: outcome.value, model: modelName, attempts };
     }
   }
-  return fail();
+  return settle();
 }
 

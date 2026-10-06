@@ -842,7 +842,7 @@ describe('what the maker says', () => {
   it('offers to look it up when it never has been, and shows what was kept', async () => {
     const result = await open(HEAT_PUMP);
     expect(texts(result)).toContain('What Mitsubishi Electric says');
-    expect(texts(result)).toContain("Only what Mitsubishi Electric's own website says for the MSZ-GS60VFD");
+    expect(texts(result)).toContain("Only what can be checked on a page, for the MSZ-GS60VFD");
 
     mock_lookUpProduct.mockResolvedValue(found());
     await TestRenderer.act(async () => {
@@ -904,7 +904,7 @@ describe('what the maker says', () => {
     mock_lookUpProduct.mockResolvedValue(found());
     const result = await open(HEAT_PUMP);
     expect(texts(result)).toContain(
-      "Nothing for the MSZ-GS60VFD could be confirmed on Mitsubishi Electric's own website, so nothing is suggested.",
+      "Nothing for the MSZ-GS60VFD could be confirmed, so nothing is suggested.",
     );
     await TestRenderer.act(async () => { await pressable(result, 'Look it up again').props.onPress(); });
     expect(mock_lookUpProduct).toHaveBeenCalledWith(expect.objectContaining({ again: true }));
@@ -934,7 +934,7 @@ describe('what the maker says', () => {
     mock_getProductLookup.mockResolvedValue(found({ status: 'pending', facts: null }));
     let result = await open(HEAT_PUMP);
     expect(texts(result)).toContain(
-      "Looking on Mitsubishi Electric's own website and checking what it finds — this can take a minute.",
+      "Looking for Mitsubishi Electric's manual and parts and checking what it finds — this can take a minute.",
     );
     // Asked about again while it runs, and the timer goes with the page.
     await TestRenderer.act(async () => { result.unmount(); });

@@ -8,20 +8,23 @@
 //
 // Four steps, in order, all inside one budget:
 //
-// 1. **Find** — the model, with Google Search, names the maker's pages.
-// 2. **Open** — this function opens them itself, following redirects and
-//    dropping any that land off the maker's site; then, from the maker's web
-//    pages it opened, the PDFs they link to that read as a manual or a parts
-//    list (a product page is usually how a manual is found).
+// 1. **Find** — the model, with Google Search, names the pages: the maker's
+//    first, then any copy of its manual or list of its parts.
+// 2. **Open** — this function opens them itself, following redirects, whoever
+//    they land with; then, from the maker's web pages it opened, the PDFs they
+//    link to that read as a manual or a parts list (a product page is usually
+//    how a manual is found).
 // 3. **Read** — the model is shown the text of the pages about this model and
 //    says what they state, naming each value's page by number.
 // 4. **Check** — `decideLookup` holds every value to the page it names, as
-//    this function read it, and the row in `home.product_lookups` is written.
+//    this function read it, and to the standard its page's source sets (the
+//    maker's alone is enough; anybody else's must be backed), and the row in
+//    `home.product_lookups` is written.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { askModels, readStage, searchStage, type AskDeps, type Attempt } from './ask.ts';
 import {
-  candidateUrls, decideLookup, documentLinks, htmlText, isMakersSite, pageLinks, pagesToRead, verifyLookup,
+  candidateUrls, decideLookup, documentLinks, htmlText, pageLinks, pagesToRead, sourceOf, verifyLookup,
   type Page, type ProductFacts,
 } from './lookup.ts';
 import { latin1Of, pdfStreams, pdfText as readPdf, type PdfStream } from './pdf.ts';
@@ -90,24 +93,24 @@ export async function lookUp(
   // ---- 2. open
   const openedAt = Date.now();
   const candidates = candidateUrls(make, found);
-  const firstWave = await Promise.all(candidates.map((url) => openPage(url, FIRST_WAVE_MS, make)));
+  const firstWave = await Promise.all(candidates.map((url) => openPage(url, FIRST_WAVE_MS)));
   const pages: Page[] = firstWave.filter((one): one is Page => !!one);
   const tried = new Set<string>([...candidates, ...pages.map((page) => page.finalUrl)]);
   const links = documentLinks(make, model, pages, tried, SECOND_WAVE_LINKS);
   const secondMs = Math.min(SECOND_WAVE_MS, end - Date.now() - READ_FLOOR_MS);
   if (links.length && secondMs >= 2_000) {
-    const secondWave = await Promise.all(links.map((url) => openPage(url, secondMs, make)));
+    const secondWave = await Promise.all(links.map((url) => openPage(url, secondMs)));
     for (const page of secondWave) if (page && !pages.some((one) => one.finalUrl === page.finalUrl)) pages.push(page);
   }
   const toRead = pagesToRead(make, model, pages);
   const opening =
-    `listed=${found.listed.length} grounded=${found.grounded.length} searches=${found.queries} ` +
+    `listed=${found.listed.length} grounded=${found.grounded.length} searches=${found.queries} searched=${found.searched} ` +
     `candidates=${candidates.length} opened=${firstWave.filter(Boolean).length} linked=${links.length} ` +
-    `pages=${pages.length} (${pages.map((one) => `${one.kind}:${one.text.length}`).join(',')}) ` +
+    `pages=${pages.length} (${pages.map((one) => `${sourceOf(make, one)}/${one.kind}:${one.text.length}`).join(',')}) ` +
     `aboutModel=${toRead.length} (${Date.now() - openedAt}ms)`;
   if (!toRead.length) {
     console.error(
-      `lookup-product: ${tag} — no page of ${make}'s about this model could be opened; search model=${search.model} ` +
+      `lookup-product: ${tag} — no page about this model could be opened; search model=${search.model} ` +
         `${opening}; total=${Date.now() - started}ms attempts ${searchTried}`,
     );
     return { status: 'failed', reason: 'error' };
@@ -117,7 +120,7 @@ export async function lookUp(
   const read = await askModels(
     deps,
     { apiKey, models, deadline: end - 500, tag },
-    readStage(make, model, name, toRead.map((page) => ({ url: page.finalUrl, kind: page.kind, text: page.text }))),
+    readStage(make, model, name, toRead.map((page) => ({ url: page.finalUrl, kind: page.kind, text: page.text, source: sourceOf(make, page) }))),
   );
   const readTried = read.attempts.map(attemptLine).join(' ');
   if (!read.ok) {
@@ -145,8 +148,8 @@ export async function lookUp(
   );
   if (decision.status === 'found') return { status: 'found', facts: decision.facts };
   if (decision.status === 'nothing') return { status: 'nothing' };
-  // Not an answer: nothing was confirmed, and no page of the maker's about
-  // this model was read through. The row is failed, so it can be asked again.
+  // Not an answer: nothing was confirmed, and no page that could have said it
+  // was read through. The row is failed, so it can be asked again.
   return { status: 'failed', reason: decision.reason };
 }
 
@@ -222,12 +225,13 @@ export async function lookUpAndKeep(
 
 /**
  * One page, opened by this function: its words, or null if it would not open.
- * Given a `make`, a page that lands off the maker's site is dropped as soon as
- * its address is known, before its body is read — a search result is often a
- * redirect to somebody else's page. Exported so a real page can be checked by
- * hand against `verifyLookup`.
+ * Whose site it lands on is not asked here — a search result is often a
+ * redirect, and a copy of the manual may sit on somebody else's site — so the
+ * page is read whatever it is, and `verifyLookup` decides, from what it says
+ * and who else says it, whether anything on it is believed. Exported so a real
+ * page can be checked by hand against `verifyLookup`.
  */
-export async function openPage(url: string, ms: number, make?: string): Promise<Page | null> {
+export async function openPage(url: string, ms: number): Promise<Page | null> {
   try {
     const response = await fetch(url, {
       redirect: 'follow',
@@ -238,10 +242,6 @@ export async function openPage(url: string, ms: number, make?: string): Promise<
     if (!response.ok || !response.body) {
       response.body?.cancel().catch(() => {});
       if (!response.ok) console.error(`lookup-product: ${url} answered ${response.status}`);
-      return null;
-    }
-    if (make && !isMakersSite(make, finalUrl)) {
-      response.body.cancel().catch(() => {});
       return null;
     }
     const bytes = await readCapped(response.body, MAX_PAGE_BYTES);

@@ -17,7 +17,13 @@ const GOOD = { pages: [{ url: MANUAL, what: 'manual' }] };
 const ok = (json: unknown) => ({ kind: 'reply' as const, status: 200, text: () => Promise.resolve(JSON.stringify(json)) });
 const reply = (text: string, over: Record<string, unknown> = {}) =>
   ok({ candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP', ...over }] });
-const good = () => reply(JSON.stringify(GOOD));
+// A reply that shows it was searched for: a recorded query. (Live replies from
+// the 3.x models carry no record at all and show it by Google's result links —
+// `unsearched` below.)
+const good = () => reply(JSON.stringify(GOOD), { groundingMetadata: { webSearchQueries: ['q'] } });
+const REDIRECT = 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC123';
+const fromMemory = () => reply(JSON.stringify(GOOD));
+const viaResultLink = () => reply(JSON.stringify({ pages: [{ url: REDIRECT, what: 'manual' }] }));
 const http = (status: number, body = '') => ({ kind: 'reply' as const, status, text: () => Promise.resolve(body) });
 const bodyFails = () => ({ kind: 'reply' as const, status: 200, text: () => Promise.reject(new Error('stream reset')) });
 const throws = (name: string) => ({ kind: 'throw' as const, error: Object.assign(new Error(name), { name }) });
@@ -100,6 +106,46 @@ describe('a reply that is not an answer moves on to the next model', () => {
     const outcome = await h.run();
     expect(h.calls).toHaveLength(3);
     expect(outcome.attempts.map((a) => a.kind)).toEqual(['empty', 'no_claims', 'success']);
+  });
+
+  describe('a search that shows no sign of a search', () => {
+    it('asks the next model, and takes the one that searched', async () => {
+      const h = harness([fromMemory(), good()]);
+      const outcome = await h.run();
+      expect(h.calls.map((c) => c.model)).toEqual(['m1', 'm2']);
+      expect(outcome).toMatchObject({ ok: true, model: 'm2' });
+      expect(outcome.attempts.map((a) => a.kind)).toEqual(['unsearched', 'success']);
+    });
+
+    it('knows a search by Google’s own result links, which these models write without any record', async () => {
+      const h = harness([viaResultLink()]);
+      const outcome = await h.run();
+      expect(h.calls).toHaveLength(1);
+      expect(outcome).toMatchObject({ ok: true, model: 'm1' });
+    });
+
+    it('keeps the first one\'s addresses when no model does better, rather than nothing', async () => {
+      const h = harness([fromMemory(), ok({ candidates: [] }), reply('nothing found')]);
+      const outcome = await h.run();
+      expect(h.calls).toHaveLength(3);
+      expect(outcome).toMatchObject({ ok: true, model: 'm1' });
+      if (outcome.ok) expect((outcome.value as any).listed[0].url).toBe(MANUAL);
+    });
+
+    it('does not refuse the last model its answer for being unsearched', async () => {
+      const h = harness([ok({ candidates: [] }), reply('no'), fromMemory()]);
+      const outcome = await h.run();
+      expect(outcome).toMatchObject({ ok: true, model: 'm3' });
+      expect(outcome.attempts.map((a) => a.kind)).toEqual(['empty', 'no_claims', 'success']);
+    });
+
+    it('keeps the unsearched answer when the time for another has run out', async () => {
+      const clock = { t: 0 };
+      const h = harness([fromMemory()], clock, 76_000);
+      const outcome = await h.run({ deadline: 85_000 });
+      expect(h.calls).toHaveLength(1);
+      expect(outcome).toMatchObject({ ok: true, model: 'm1' });
+    });
   });
 
   it('fails as an error when every model gives an unusable reply, never as busy', async () => {

@@ -9,8 +9,10 @@ import {
 import type { Thing } from '../types';
 
 /**
- * What the maker's own website says about this model: the manual, the parts a
- * householder replaces, and how often it should be serviced.
+ * What can be checked about this model: the manual, the parts a householder
+ * replaces, and how often it should be serviced — from the maker's own website
+ * first, and from a copy of its manual or a second site when the maker's has
+ * nothing, each row saying which.
  *
  * **Only what could be checked, and each with where it says so.** The label
  * reader used to suggest parts from the model's memory, and four scans of one
@@ -68,7 +70,7 @@ export default function ProductFactsCard({
           <View style={styles.pending}>
             <ActivityIndicator size="small" color={Colors.textMuted} />
             <Text style={styles.caption}>
-              {`Looking on ${make}'s own website and checking what it finds — this can take a minute.`}
+              {`Looking for ${make}'s manual and parts and checking what it finds — this can take a minute.`}
             </Text>
           </View>
         </Group>
@@ -83,7 +85,7 @@ export default function ProductFactsCard({
         <Group>
           <Row
             title="Manual, parts and servicing"
-            subtitle={`Only what ${make}'s own website says for the ${model}`}
+            subtitle={`Only what can be checked on a page, for the ${model}`}
             accessory={
               <Pill
                 label="Look it up"
@@ -121,7 +123,7 @@ export default function ProductFactsCard({
         <Group>
           <View style={styles.body}>
             <Text style={styles.caption}>
-              {`Nothing for the ${model} could be confirmed on ${make}'s own website, so nothing is suggested.`}
+              {`Nothing for the ${model} could be confirmed, so nothing is suggested.`}
             </Text>
           </View>
           <View style={styles.actions}>
@@ -191,7 +193,7 @@ export default function ProductFactsCard({
       {/* A fact the reader can check, which is the only kind of line this
           app allows under a section: every row opens where it says so. */}
       <Text style={styles.note}>
-        {`Each one is written on ${make}'s own website for this model — tap it to see where.`}
+        {`Each one is written on the page it opens, for this model — tap it to see where. A page that is not ${make}'s own says so.`}
       </Text>
     </View>
   );

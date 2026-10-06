@@ -351,7 +351,7 @@ it('offers nothing the model remembers, and says the maker is being looked up in
   expect(press(r, 'Add Air cleaning filter MAC-2370FT-E')).toBeUndefined();
   // Said once, so nobody looks for the answer here: it lands on the thing's page.
   expect(texts(r)).toContain(
-    "Mitsubishi Electric's own website is being searched for the MSZ-GS60VFD's manual, parts and servicing. What can be checked will be on its page.",
+    "The MSZ-GS60VFD's manual, parts and servicing are being searched for. What can be checked will be on its page.",
   );
   // The year made is the plate's, in a box to be checked.
   expect(boxes(r)['Year made'].props.value).toBe('2016');

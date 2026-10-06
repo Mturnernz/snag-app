@@ -1622,7 +1622,7 @@ the self-closing reading, *Try again*, and the page surviving a failed read of t
 `HouseScreen.test.tsx` the pill and its absence at nought; `HouseRoomScreen.test.tsx` the row's
 marker and the room surviving a failed read.
 
-### What the maker says, looked up once and checked on the maker's own pages
+### What the maker says, looked up once and checked on a page that can be validated
 
 `supabase/functions/lookup-product` answers what the reader stopped guessing at: **the manual,
 the consumable parts a householder replaces, and the maker's recommended service interval**. The
@@ -1634,14 +1634,16 @@ finds the maker's pages; the function **opens them itself** and follows their li
 manual; Gemini, with no tools, reads that downloaded text and names the page each value is on.
 A value is kept only when all of these hold (`verifyLookup`, pure, in `lookup.ts`):
 
-- **The page is on the maker's own website**, before and after any redirect (`isMakersSite`: the
-  registered domain is the make, run together, or its first word with one of a short list of
-  words makers add — `mitsubishi-electric`, `fisherpaykel`, `bosch-home` — or one of the group
-  document servers written out by name in `GROUP_SITES`: `bsh-group` for Bosch, Siemens, Neff and
-  Gaggenau, `lge` for LG, `mhiaa` for Mitsubishi Heavy Industries). Retailers, parts shops and
-  "compatible with" lists never count, and they are exactly where MAC-2370FT-E came from. It is
-  deliberately strict: a maker whose documents live on a domain that is neither its name nor on
-  that list gets nothing from there — a missed answer rather than a wrong one.
+- **The page is good enough for the value, by whose it is** (`sourceOf`). *This was "the page is on
+  the maker's own website" until 6 October 2026, and the owner changed it: a site is not excluded if
+  it holds what is needed and what it says can be validated — see* Trust by validation, not by host
+  *below.* The maker's own site (`isMakersSite`: the registered domain is the make, run together, or
+  its first word with one of a short list of words makers add — `mitsubishi-electric`,
+  `fisherpaykel`, `bosch-home` — or one of the group document servers written out by name in
+  `GROUP_SITES`: `bsh-group` for Bosch, Siemens, Neff and Gaggenau, `lge` for LG, `mhiaa` for
+  Mitsubishi Heavy Industries) is still enough for anything that passes the rest. Anywhere else the
+  value has to prove more, and a retailer's or parts shop's "compatible with" list — exactly where
+  MAC-2370FT-E came from — proves nothing alone.
 - **The page is about this model**, by its number however spaced, or by a range or list that
   includes it (`mentionsModel`: *MSZ-GS25-80VFD* covers a GS60). A manual's file name counts,
   because it is often the only place its range is legible.
@@ -1651,8 +1653,9 @@ A value is kept only when all of these hold (`verifyLookup`, pure, in `lookup.ts
   this size out, and the nearest after it must not claim this size for itself. Only visible words
   count: a part number that appears only in a link's address is not on the page. A "part" with no
   digit, or the model's own number, is never one.
-- **A service interval is the maker's own sentence**, quoted, found on the page, talking about
-  servicing or inspection, and saying the interval claimed (`monthsSaid`). "Periodically" and
+- **A service interval is the maker's own sentence** (from the maker's site or a copy of its
+  manual — never a shop's page), quoted, found on the page, talking about servicing or inspection,
+  and saying the interval claimed (`monthsSaid`). "Periodically" and
   "after several seasons" are not intervals, and cleaning a filter yourself is not a service.
 
 A PDF is read by the function too (`lookup-product/pdf.ts`) — see *A manual's words are read
@@ -1740,26 +1743,30 @@ shape.
 The fixes above made the failures legible, and the same day the log said what they were: **no lookup had ever found
 anything** (eight rows, none `found`). The one request asked the model to search, open pages with `url_context` and fill
 a JSON schema at once. The first model timed out at 50s every time; the second answered in 25-39s with
-`grounding=false searches=0 urlsRead=0` — from memory, with part numbers that were not on the page it cited and addresses
-that would not open. `verifyLookup` threw all of it away, rightly, and the card said nothing could be found. So the
+`grounding=false searches=0 urlsRead=0` — which was read then as *from memory* (part numbers that were not on the page it
+cited, addresses that would not open); see *Trust by validation* for what that log line does and does not show. `verifyLookup` threw all of it away, rightly, and the card said nothing could be found. So the
 lookup is now two questions, each asked the way the model answers it well (`lookup.ts`, `ask.ts`, `run.ts`):
 
 1. **Find** (`searchRequest`): Google Search only — no `url_context`, no schema — and `thinkingLevel: low`. It returns
-   the maker's pages as a list, and **the search's own results (`groundingChunks`) count too**: those are addresses
+   pages as a list, and **the search's own results (`groundingChunks`) count too**: those are addresses
    Google returned, not ones the model wrote. They are Google redirects, so `candidateUrls` keeps them and the page is
-   judged by where it lands; one whose title already names another domain is not followed.
-2. **Open** (`run.ts`): the function opens up to eight, dropping any that land off the maker's site before reading the
-   body, then follows the maker's own pages' links to PDFs that read as a manual or a parts list (`documentLinks`,
-   up to three) — a product page is usually how the manual is reached. `pagesToRead` keeps the maker's pages about this
-   model, by their words or their address, documents first, at most five.
+   judged by where it lands. (The first version asked for the maker's pages only and dropped everything else
+   unopened; see *Trust by validation* for what replaced that.)
+2. **Open** (`run.ts`): the function opens up to eight — the maker's addresses first, then Google's result links, then
+   anybody else's — then follows the maker's own pages' links to PDFs that read as a manual or a parts list
+   (`documentLinks`, up to three); a product page is usually how the manual is reached. `pagesToRead` keeps the pages
+   about this model (a page that is not the maker's must name it in its own words, since its address is its owner's
+   choice): the maker's first, documents before pages, then copies, then everybody else's, at most six.
 3. **Read** (`readRequest`): no tools, `READ_SCHEMA`, `thinkingLevel: low`, and the downloaded text — each page numbered,
    a long one cut to its opening and the passages near the words parts and servicing are written beside
    (`excerpt`, 24,000 characters a page, 100,000 in all). The reply names pages **by number**, so an address cannot be
    invented: `readFromGemini` turns each number into the address this function opened, and drops one that is not.
 4. **Check**: `verifyLookup`, unchanged, against the whole page as the function read it.
 
-`nothing` follows from what was read, not from what the model says about the maker: a page of the maker's whose own
-words (not merely its address) name this model, at least 400 characters long, read through with no value surviving.
+`nothing` follows from what was read, not from what the model says about the maker: a page that could have said it — the
+maker's, or a copy of a manual that reads as one — whose own words (not merely its address) name this model, at least 400
+characters long, read through with no value surviving. A shop's page or a manual library's contents list never makes it
+`nothing`: neither is where the answer would have been.
 No page about the model opened, or the read failing, is `failed` and can be asked again. The model is never asked whether
 the maker publishes something — it can only say what the pages in front of it say.
 
@@ -1769,6 +1776,72 @@ question goes without. A search naming no page at all moves on to the next model
 The search has what is left after 34s is kept back — 8s and 6s for the two waves of pages, 20s for the read — so
 `read-label` no longer starts a background lookup with less than 50s (`LOOKUP_MIN_MS`). Still **one** claimed read per
 lookup, however many requests it makes.
+
+### Trust by validation, not by host (October 2026)
+
+The owner's decision, after the first live Smeg C6GMXA8 came back *Couldn't finish looking this up*: the top two Google
+results for it were a retailer (Appliances Online) and a manual library (manual.nz), neither Smeg's, and the rule had been
+that only the maker's own site counts. **A site is not excluded if it holds the information and what it says can be
+validated.** The maker-only rule was a proxy for *can be checked*, and a proxy drops real answers (Smeg publishes neither
+page); what it protected against — MAC-2370FT-E, a "compatible with" list on a shop — is protected by the checks, not by
+the host. Every rule below is still wrong only towards dropping a value.
+
+**Three sources** (`sourceOf`, `lookup.ts`), and what each is enough for:
+
+| Source | Is | Enough for |
+|---|---|---|
+| `maker` | the maker's own site (`isMakersSite`, unchanged) | anything that passes the page checks |
+| `copy` | a PDF on somebody else's site | the manual, a part number, an interval — **only when it reads as a manual** (`looksLikeManual`: 3,000+ characters and three of a manual's sections) **and names this model in its words** |
+| `web` | any other page | the manual only, from a manual library's page (`isManualLibraryPage`: not a shop, names the make and this model, calls itself a manual). A part number **only when a page on a different registered domain states the same number for this model too**. Never an interval. |
+
+- **The checks do not change with the source.** The page must be one this function opened, name this model, print the
+  code, and print it for this size (`codeIsForThisSize`); an interval is still a quoted sentence about servicing that
+  says the months claimed. The source only decides whether that is enough on its own.
+- **A second page backs a first, never itself.** Two pages on one registered domain are one site. A page about another
+  model, or one that does not print the code, backs nothing. If the second page is the maker's, the row opens the
+  maker's page and says so; there is nothing left to disclose.
+- **Every value from a page that is not the maker's says so under it** (`sourceLabel`): *manual.nz — not Smeg's own
+  website*, or both hosts for a backed part. The card never claims the maker said what it did not.
+- **A library's page is a pointer, not a source of facts.** manual.nz's page for the C6GMXA8 holds only the contents list
+  (about 13,000 characters); the manual itself is behind their viewer. So it gives the manual row and nothing else.
+- **A shop is read, because it can back a number, and is never a manual.** `isShopPage` (a cart, a stock line, a
+  delivery offer) refuses it as the manual whatever it calls itself.
+- **The read is told whose each page is** (`PageToRead.source`): *the manufacturer's own site*, *a copy of a document on
+  somebody else's site*, or *another website*, and `READ_SYSTEM` says what that means — never a list of parts that
+  "fit" or are "compatible with", never a code given for a range. The model is told; the check does not rely on it.
+- **`nothing` is unchanged in spirit**: only a page that could have said it makes it (maker, or a whole manual copy).
+
+**What the log does not show.** The 3.x models return **no `groundingMetadata` at all** — measured on 6 October 2026 with
+a probe function against the live key: the raw reply holds `candidates`, `usageMetadata` and nothing about a search, while
+the answer holds `vertexaisearch.cloud.google.com/grounding-api-redirect/…` addresses, which a model has only by having
+searched. So `grounding=false searches=0` meant *no record*, not *no search*, and this file's earlier reading of it as
+*from memory* was wrong. `FoundPages.searched` is the real signal (a recorded query, a returned result, or Google's own
+result links in the listed addresses), logged as `searched=`.
+
+**Whether it searches is the prompt's doing.** Asked in a system prompt to "use Google Search" and to find the maker's
+pages, the models answered with plain remembered addresses. Told in the user turn to *"Search Google now for '<make>
+<model> manual' … you must run at least one Google search before you answer; do not answer from memory"*, about half of 30
+requests (three models, three products) returned Google's own result links; thinking level was not the cause once the
+prompt was a command. `searchRequest` is that command. It is still not reliable, so **an unsearched reply asks the next
+model** (`Stage.isWeak`, attempt kind `unsearched`); if no model does better, the first reply's addresses are used rather
+than nothing — the pages, not the model, are what get believed. The last model's reply is never refused for this.
+
+Opening pages no longer drops a page for landing off the maker's site: `openPage` reads whatever it is sent to, and
+`candidateUrls` orders (maker, Google's links, everybody else's) rather than filters, so the maker is never what the
+eight-address cap leaves out.
+
+`productLookup.test.ts` pins the three sources (including the Smeg's two real pages as fixtures), the manual library's
+page and its refusals (a shop, another model, too short), a dealer's PDF kept only when it reads as a manual, a part
+believed only when two sites state it, the same site never backing itself, the maker's page replacing a shop's as the
+row's page, no interval from a page, the label under each value, `searched` in all three of its forms, and the read being
+told whose each page is. `askModels.test.ts` pins the unsearched retry: the next model asked, Google's links accepted as
+proof, the first reply kept when no model does better, and the last never refused. Checked against the real Smeg
+pages through `openPage` and `verifyLookup` under Deno: the manual comes back from manual.nz, labelled; the shop is refused.
+
+**Still open.** Corroboration is two sites agreeing, and two shops can copy each other; the check for that is the
+whole-manual copy (`looksLikeManual`), which is why a part number is better from a manual than from two shops, and why
+this section does not claim more than it does. And a shared catalogue of verified answers (so a second household's lookup
+of the same model costs nothing) is not built: lookups stay per household, as `product_lookups` says.
 
 ### A manual's words are read through its fonts
 

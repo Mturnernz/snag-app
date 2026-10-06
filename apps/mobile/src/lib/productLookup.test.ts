@@ -1,7 +1,8 @@
 import {
-  candidateUrls, codeIsForThisSize, documentLinks, excerpt, htmlText, isMakersSite, mentionsModel, monthsSaid, pageHas,
-  pageLinks, pagesToRead, PAGE_CHARS, READ_SYSTEM, readFromGemini, readRequest, registeredLabel, SEARCH_SYSTEM,
-  searchFromGemini, searchRequest, verifyLookup, type LookupClaims, type Page,
+  candidateUrls, codeIsForThisSize, documentLinks, excerpt, htmlText, isMakersSite, isManualLibraryPage, isShopPage,
+  looksLikeManual, mentionsModel, monthsSaid, pageHas, pageLinks, pagesToRead, PAGE_CHARS, READ_SYSTEM, readFromGemini,
+  readRequest, registeredLabel, SEARCH_SYSTEM, searchFromGemini, searchRequest, sourceLabel, sourceOf, verifyLookup,
+  type LookupClaims, type Page,
 } from '../../../../supabase/functions/lookup-product/lookup';
 import {
   monthsToDays, parseProductFacts, parseProductLookup, partLine, productOffers,
@@ -28,6 +29,9 @@ const RETAILER = 'https://hesatek.fi/en/products/silver-ionized-air-purifying-fi
 const html = (url: string, words: string): Page => ({ finalUrl: url, kind: 'html', text: words });
 const pdf = (url: string, words: string): Page => ({ finalUrl: url, kind: 'pdf', text: words });
 const claims = (over: Partial<LookupClaims> = {}): LookupClaims => ({ manualUrl: null, parts: [], service: null, ...over });
+// The words of a whole manual: long, and holding the sections a manual has.
+const manualWords = (about: string) =>
+  `${about} OPERATING INSTRUCTIONS safety warning installation cleaning maintenance troubleshooting warranty ${'Read these instructions before use. '.repeat(100)}`;
 
 describe('whose site it is', () => {
   it.each([
@@ -158,7 +162,7 @@ describe('verifyLookup', () => {
     expect(verifyLookup(MAKE, MODEL, said, {}).parts).toEqual([]);
   });
 
-  it('keeps nothing from a page that redirected off the maker’s site', () => {
+  it('keeps nothing from a page that redirected off the maker’s site, when nothing else says it', () => {
     const said = claims({ parts: [{ item: 'Plasma Quad Connect', code: 'MAC-100FT-E', url: NZ_PAGE }] });
     const moved = html('https://parts-reseller.example/mac-100ft-e', nzPage.text);
     expect(verifyLookup(MAKE, MODEL, said, { [NZ_PAGE]: moved }).parts).toEqual([]);
@@ -205,6 +209,127 @@ describe('verifyLookup', () => {
   });
 });
 
+describe('a source that is not the maker’s', () => {
+  // The Smeg C6GMXA8 the first live check could not do: the first two results
+  // for it are a retailer and a manual library, and Smeg's own site has neither.
+  const SMEG = 'Smeg';
+  const C6 = 'C6GMXA8';
+  const LIBRARY = 'https://www.manual.nz/smeg/c6gmxa8/manual';
+  const SHOP = 'https://www.appliancesonline.com.au/product/freestanding-smeg-dual-fuel-ovenstove-c6gmxa8/';
+  const library = html(LIBRARY, `Smeg C6GMXA8 manual (English - 36 pages) Manual . nz Smeg ovens Contents 1. INSTRUCTIONS FOR USE ${'section ... '.repeat(300)}`);
+  const shop = html(SHOP, `Smeg C6GMXA8 60cm Classic Aesthetic Freestanding Dual Fuel Oven/Stove ${'details '.repeat(300)} Add to cart In stock`);
+
+  const A = 'https://shop-a.example/gs60';
+  const B = 'https://shop-b.example/gs60-filters';
+  const DEALER = 'https://dealer.example/docs/gs60.pdf';
+  const stating = (url: string, extra = '') => html(url, `MSZ-GS60VFD heat pump. Plasma Quad Connect MAC-100FT-E. ${extra}`);
+  const part = (url: string) => claims({ parts: [{ item: 'Plasma Quad Connect', code: 'MAC-100FT-E', url }] });
+
+  it('says whose a page is: the maker’s, a document somebody else holds, or any other page', () => {
+    expect(sourceOf(MAKE, nzPageOf())).toBe('maker');
+    expect(sourceOf(MAKE, pdf(DEALER, ''))).toBe('copy');
+    expect(sourceOf(MAKE, html(RETAILER, ''))).toBe('web');
+  });
+  const nzPageOf = () => html(NZ_PAGE, '');
+
+  it('labels a value from somebody else’s page with its hosts and says it is not the maker’s', () => {
+    expect(sourceLabel(SMEG, [LIBRARY])).toBe("manual.nz — not Smeg's own website");
+    expect(sourceLabel(MAKE, [A, B])).toBe("shop-a.example + shop-b.example — not Mitsubishi Electric's own website");
+    expect(sourceLabel(MAKE, [NZ_PAGE])).toBe('mitsubishi-electric.co.nz');
+  });
+
+  describe('the manual', () => {
+    it('is kept from a manual library’s page that is this model’s, labelled as not the maker’s', () => {
+      expect(isManualLibraryPage(SMEG, C6, library)).toBe(true);
+      expect(verifyLookup(SMEG, C6, claims({ manualUrl: LIBRARY }), { [LIBRARY]: library }).manual)
+        .toEqual({ url: LIBRARY, source: "manual.nz — not Smeg's own website" });
+    });
+
+    it('is refused from a shop’s page, a page for another model, or a page too short to be one', () => {
+      expect(isShopPage(shop.text)).toBe(true);
+      expect(verifyLookup(SMEG, C6, claims({ manualUrl: SHOP }), { [SHOP]: shop }).manual).toBeNull();
+      const other = html(LIBRARY, library.text.replace(/C6GMXA8/g, 'C9GMXA8'));
+      expect(verifyLookup(SMEG, C6, claims({ manualUrl: LIBRARY }), { [LIBRARY]: other }).manual).toBeNull();
+      expect(verifyLookup(SMEG, C6, claims({ manualUrl: LIBRARY }), { [LIBRARY]: html(LIBRARY, 'Smeg C6GMXA8 manual') }).manual).toBeNull();
+    });
+
+    it('is kept from a document on a dealer’s site only when it reads as a manual naming this model', () => {
+      const copy = pdf(DEALER, manualWords('MSZ-GS60VFD'));
+      expect(looksLikeManual(copy.text)).toBe(true);
+      expect(verifyLookup(MAKE, MODEL, claims({ manualUrl: DEALER }), { [DEALER]: copy }).manual)
+        .toEqual({ url: DEALER, source: "dealer.example — not Mitsubishi Electric's own website" });
+      // A price list names the model and has none of a manual's sections.
+      const leaflet = pdf(DEALER, `MSZ-GS60VFD price list ${'Heat pump $1,999. '.repeat(300)}`);
+      expect(looksLikeManual(leaflet.text)).toBe(false);
+      expect(verifyLookup(MAKE, MODEL, claims({ manualUrl: DEALER }), { [DEALER]: leaflet }).manual).toBeNull();
+      // And a manual that is for something else.
+      expect(verifyLookup(MAKE, MODEL, claims({ manualUrl: DEALER }), { [DEALER]: pdf(DEALER, manualWords('MSZ-AP50VGK')) }).manual).toBeNull();
+    });
+  });
+
+  describe('a part number', () => {
+    it('is not settled by one page that is not the maker’s', () => {
+      expect(verifyLookup(MAKE, MODEL, part(A), { [A]: stating(A) }).parts).toEqual([]);
+    });
+
+    it('is believed when a page on a different site states the same number for this model too', () => {
+      const facts = verifyLookup(MAKE, MODEL, part(A), { [A]: stating(A), [B]: stating(B) });
+      expect(facts.parts).toEqual([
+        { item: 'Plasma Quad Connect', code: 'MAC-100FT-E', url: A, source: "shop-a.example + shop-b.example — not Mitsubishi Electric's own website" },
+      ]);
+    });
+
+    it('is not backed by the same site twice, by a page about another model, or by one that does not print it', () => {
+      const sameSite = 'https://www.shop-a.example/other';
+      expect(verifyLookup(MAKE, MODEL, part(A), { [A]: stating(A), [sameSite]: stating(sameSite) }).parts).toEqual([]);
+      const other = html(B, 'MSZ-AP50VGK air filter MAC-100FT-E');
+      expect(verifyLookup(MAKE, MODEL, part(A), { [A]: stating(A), [B]: other }).parts).toEqual([]);
+      const silent = html(B, 'MSZ-GS60VFD heat pump');
+      expect(verifyLookup(MAKE, MODEL, part(A), { [A]: stating(A), [B]: silent }).parts).toEqual([]);
+    });
+
+    it('opens the maker’s page when the maker’s page is the one that backs it', () => {
+      const facts = verifyLookup(MAKE, MODEL, part(A), { [A]: stating(A), [NZ_PAGE]: stating(NZ_PAGE) });
+      expect(facts.parts).toEqual([
+        { item: 'Plasma Quad Connect', code: 'MAC-100FT-E', url: NZ_PAGE, source: 'mitsubishi-electric.co.nz' },
+      ]);
+    });
+
+    it('is settled by a copy of the manual alone, and says whose it is', () => {
+      const copy = pdf(DEALER, manualWords('MSZ-GS60VFD Optional Plasma Quad Connect MAC-100FT-E'));
+      expect(verifyLookup(MAKE, MODEL, part(DEALER), { [DEALER]: copy }).parts).toEqual([
+        { item: 'Plasma Quad Connect', code: 'MAC-100FT-E', url: DEALER, source: "dealer.example — not Mitsubishi Electric's own website" },
+      ]);
+      // A document that is not a manual is a page like any other.
+      const leaflet = pdf(DEALER, `MSZ-GS60VFD price list MAC-100FT-E ${'Heat pump $1,999. '.repeat(300)}`);
+      expect(verifyLookup(MAKE, MODEL, part(DEALER), { [DEALER]: leaflet }).parts).toEqual([]);
+    });
+
+    it('still holds a range’s code to this size, whoever prints it', () => {
+      const copy = pdf(DEALER, manualWords(`MSZ-GS25-80VFD ${FILTERS_TEXT}`));
+      const gs71 = verifyLookup(MAKE, 'MSZ-GS71VFD', claims({ parts: [{ item: 'Filter', code: 'MAC-408FT-E', url: DEALER }] }), { [DEALER]: copy });
+      expect(gs71.parts).toEqual([]);
+    });
+  });
+
+  describe('a service interval', () => {
+    const quote = 'Have the unit inspected by your dealer once a year.';
+    const said = (url: string) => claims({ service: { months: 12, quote, url } });
+
+    it('is never taken from a page that is not a document', () => {
+      expect(verifyLookup(MAKE, MODEL, said(A), { [A]: stating(A, quote), [B]: stating(B, quote) }).service).toBeNull();
+    });
+
+    it('is taken from a copy of the manual that says it', () => {
+      const copy = pdf(DEALER, manualWords(`MSZ-GS60VFD ${quote}`));
+      expect(verifyLookup(MAKE, MODEL, said(DEALER), { [DEALER]: copy }).service)
+        .toMatchObject({ months: 12, source: "dealer.example — not Mitsubishi Electric's own website" });
+    });
+  });
+});
+
+const FILTERS_TEXT = 'Every year: MAC-408FT-E  GS71/80: MAC-2390FT-E  Important';
+
 describe('finding the pages', () => {
   it('searches with Google Search alone, briefly, and asks for addresses as the search gave them', () => {
     const body = searchRequest(MAKE, MODEL, 'Heat pump');
@@ -213,8 +338,12 @@ describe('finding the pages', () => {
     expect('generationConfig' in searchRequest(MAKE, MODEL, null, { lean: true })).toBe(false);
     expect(body.contents[0].parts[0].text).toMatch(/Model: MSZ-GS60VFD/);
     expect(body.contents[0].parts[0].text).toMatch(/What it is: Heat pump/);
-    expect(SEARCH_SYSTEM).toMatch(/Not retailers, spare-parts shops/);
+    expect(SEARCH_SYSTEM).toMatch(/you do not answer from memory/);
     expect(SEARCH_SYSTEM).toMatch(/Never build, shorten or guess an address/);
+    // A command that names its searches: the shape that made the models search.
+    expect(body.contents[0].parts[0].text).toMatch(/Search Google now for "Mitsubishi Electric MSZ-GS60VFD manual"/);
+    expect(body.contents[0].parts[0].text).toMatch(/You must run at least one Google search before you answer/);
+    expect(body.contents[0].parts[0].text).toMatch(/any page holding a copy of its manual/);
   });
 
   const reply = (text: string, over: Record<string, unknown> = {}) => ({
@@ -237,7 +366,29 @@ describe('finding the pages', () => {
         listed: [{ url: MANUAL, what: 'manual' }, { url: NZ_PAGE, what: 'other' }],
         grounded: [{ url: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'mitsubishi-electric.co.nz' }],
         queries: 2,
+        searched: true,
       },
+    });
+  });
+
+  describe('whether the reply was searched for', () => {
+    // The 3.x models write no search record at all: the raw reply on 6 October
+    // 2026 held only candidates and token counts. Google's result links in the
+    // answer are the evidence, since a model cannot have them without searching.
+    const searched = (raw: unknown) => (searchFromGemini(raw) as { ok: true; found: { searched: boolean } }).found.searched;
+
+    it('is yes when the answer holds Google’s result links, with no record of a query', () => {
+      const link = 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQabc';
+      expect(searched(reply(JSON.stringify({ pages: [{ url: link, what: 'manual' }] })))).toBe(true);
+    });
+
+    it('is yes when a query is recorded, or a result returned', () => {
+      expect(searched(reply(JSON.stringify({ pages: [{ url: MANUAL, what: 'manual' }] }), { groundingMetadata: { webSearchQueries: ['q'] } }))).toBe(true);
+      expect(searched(reply(JSON.stringify({ pages: [] }), { groundingMetadata: { groundingChunks: [{ web: { uri: 'https://example.com/x' } }] } }))).toBe(true);
+    });
+
+    it('is no when the addresses are plain ones with nothing to show they were searched for', () => {
+      expect(searched(reply(JSON.stringify({ pages: [{ url: MANUAL, what: 'manual' }, { url: NZ_PAGE, what: 'product' }] })))).toBe(false);
     });
   });
 
@@ -255,29 +406,46 @@ describe('finding the pages', () => {
     expect(searchFromGemini(raw)).toEqual({ ok: false, reason });
   });
 
-  it('opens the manual first, then the rest, and never a retailer', () => {
+  it('opens the maker’s addresses first, the manual first among them, then everybody else’s', () => {
     const found = {
-      listed: [{ url: NZ_PAGE, what: 'product' }, { url: RETAILER, what: 'parts' }, { url: MANUAL, what: 'manual' }],
+      listed: [{ url: RETAILER, what: 'parts' }, { url: NZ_PAGE, what: 'product' }, { url: MANUAL, what: 'manual' }],
       grounded: [],
       queries: 1,
+      searched: true,
     };
-    expect(candidateUrls(MAKE, found)).toEqual([MANUAL, NZ_PAGE]);
+    expect(candidateUrls(MAKE, found)).toEqual([MANUAL, NZ_PAGE, RETAILER]);
   });
 
-  it('follows Google’s redirects, unless the result already says it is somebody else’s site', () => {
+  it('opens Google’s result links between the maker’s addresses and the rest, and keeps at most eight', () => {
     const redirect = (id: string) => `https://vertexaisearch.cloud.google.com/grounding-api-redirect/${id}`;
     const found = {
-      listed: [{ url: MANUAL, what: 'manual' }],
+      listed: [{ url: MANUAL, what: 'manual' }, { url: RETAILER, what: 'other' }],
       grounded: [
         { url: redirect('maker'), title: 'mitsubishi-electric.co.nz' },
         { url: redirect('shop'), title: 'hesatek.fi' },
         { url: redirect('untitled'), title: null },
-        { url: redirect('page-title'), title: 'GS60 Standard High Wall Heat Pump' },
         { url: MANUAL, title: 'mitsubishielectric.com.au' },
       ],
       queries: 1,
+      searched: true,
     };
-    expect(candidateUrls(MAKE, found)).toEqual([MANUAL, redirect('maker'), redirect('untitled'), redirect('page-title')]);
+    // A result that already names another site is no longer dropped: whose it
+    // is no longer decides whether it is opened.
+    expect(candidateUrls(MAKE, found)).toEqual([MANUAL, redirect('maker'), redirect('shop'), redirect('untitled'), RETAILER]);
+    const many = {
+      listed: Array.from({ length: 6 }, (_, i) => ({ url: `https://shop${i}.example/p`, what: 'other' })),
+      grounded: [{ url: NZ_PAGE, title: null }, { url: MANUAL, title: null }, { url: `${NZ_PAGE}/b`, title: null }],
+      queries: 1,
+      searched: true,
+    };
+    const opened = candidateUrls(MAKE, many);
+    expect(opened).toHaveLength(8);
+    expect(opened.slice(0, 3)).toEqual([NZ_PAGE, MANUAL, `${NZ_PAGE}/b`]);
+  });
+
+  it('opens only web addresses', () => {
+    const found = { listed: [{ url: 'ftp://x.example/a', what: 'manual' }, { url: MANUAL, what: 'manual' }], grounded: [], queries: 0, searched: false };
+    expect(candidateUrls(MAKE, found)).toEqual([MANUAL]);
   });
 });
 
@@ -398,14 +566,41 @@ describe('the second hop: what the maker’s pages link to', () => {
 });
 
 describe('what the read is shown', () => {
-  it('shows only the maker’s pages about this model, by their words or their address, documents first', () => {
+  const DEALER_PDF = 'https://dealer.example/docs/gs60.pdf';
+
+  it('shows the pages about this model: the maker’s first, documents before pages, then copies, then everybody else’s', () => {
     const shown = pagesToRead(MAKE, MODEL, [
+      html(RETAILER, 'MSZ-GS60VFD MAC-2370FT-E'),
       html(NZ_PAGE, 'MSZ-GS60VFD-A1 GS60 Standard High Wall Heat Pump'),
       html('https://www.mitsubishi-electric.co.nz/ap50', 'MSZ-AP50VGK'),
-      html(RETAILER, 'MSZ-GS60VFD MAC-2370FT-E'),
+      pdf(DEALER_PDF, 'MSZ-GS60VFD manual'),
       pdf(MANUAL, ''),
     ]);
-    expect(shown.map((one) => one.finalUrl)).toEqual([MANUAL, NZ_PAGE]);
+    // The maker's manual is about the model by its address alone; the dealer's
+    // PDF and the shop's page must say so in their own words.
+    expect(shown.map((one) => one.finalUrl)).toEqual([MANUAL, NZ_PAGE, DEALER_PDF, RETAILER]);
+  });
+
+  it('does not show somebody else’s page for its address alone, or one about another model', () => {
+    const shown = pagesToRead(MAKE, MODEL, [
+      html('https://shop.example/msz-gs60vfd', 'a shop'),
+      html('https://shop.example/ap50', 'MSZ-AP50VGK'),
+    ]);
+    expect(shown).toEqual([]);
+  });
+
+  it('says whose each page is, so the read can weigh it', () => {
+    const body = readRequest(MAKE, MODEL, null, [
+      { url: NZ_PAGE, kind: 'html', text: 'a', source: 'maker' },
+      { url: 'https://dealer.example/m.pdf', kind: 'pdf', text: 'b', source: 'copy' },
+      { url: RETAILER, kind: 'html', text: 'c', source: 'web' },
+    ]);
+    const asked = body.contents[0].parts[0].text;
+    expect(asked).toMatch(/\(web page, the manufacturer's own site\)/);
+    expect(asked).toMatch(/\(PDF, a copy of a document, on somebody else's site\)/);
+    expect(asked).toMatch(/\(web page, another website, not the manufacturer's\)/);
+    expect(asked).toMatch(/Pages downloaded from the web/);
+    expect(READ_SYSTEM).toMatch(/never a list of parts that "fit", are "compatible with"/);
   });
 });
 
@@ -523,10 +718,15 @@ describe('decideLookup', () => {
       expect(decideLookup(MAKE, MODEL, claims(), { [NZ_PAGE]: html(NZ_PAGE, 'MSZ-GS60VFD') })).toMatchObject({ status: 'failed' });
     });
 
-    it('is not said over a page that is not the maker’s, or redirected off its site', () => {
+    it('is not said over a shop’s page, or a document that does not read as a manual', () => {
       expect(decideLookup(MAKE, MODEL, claims(), { [RETAILER]: html(RETAILER, readThrough.text) })).toMatchObject({ status: 'failed' });
-      const moved = pdf('https://parts-reseller.example/x', readThrough.text);
-      expect(decideLookup(MAKE, MODEL, claims(), { [MANUAL]: moved })).toMatchObject({ status: 'failed' });
+      const leaflet = pdf('https://parts-reseller.example/x.pdf', readThrough.text);
+      expect(decideLookup(MAKE, MODEL, claims(), { [leaflet.finalUrl]: leaflet })).toMatchObject({ status: 'failed' });
+    });
+
+    it('is said over a whole manual on somebody else’s site, read through, that states none of it', () => {
+      const copy = pdf('https://dealer.example/gs60.pdf', manualWords(`MSZ-GS60VFD ${'Wipe with a damp cloth. '.repeat(10)}`));
+      expect(decideLookup(MAKE, MODEL, claims(), { [copy.finalUrl]: copy })).toEqual({ status: 'nothing' });
     });
 
     it('is a failure that can be asked again when nothing was read at all', () => {

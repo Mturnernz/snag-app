@@ -1166,7 +1166,7 @@ export default function AddThingSheet({
                   </View>
                   {lookingUp ? (
                     <Text style={styles.hint}>
-                      {`${landed.current!.make}'s own website is being searched for the ${landed.current!.model}'s manual, parts and servicing. What can be checked will be on its page.`}
+                      {`The ${landed.current!.model}'s manual, parts and servicing are being searched for. What can be checked will be on its page.`}
                     </Text>
                   ) : null}
                   <Text style={styles.question2}>Serviced how often?</Text>

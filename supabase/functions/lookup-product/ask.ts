@@ -20,8 +20,14 @@
 import { GEMINI_ENDPOINT, isBusy, isOutOfCredit, quotaRefusal } from '../read-label/gemini.ts';
 import { claimsAreEmpty, describeReply, lookupFromGemini, lookupRequest, type LookupClaims } from './lookup.ts';
 
-/** The most one model is given while another is still to try. */
-export const EARLY_ATTEMPT_MS = 30_000;
+/**
+ * The most one model is given while another is still to try. A grounded search
+ * runs 30-50s, and the first live lookups (6 October 2026) were cut off at 30s
+ * on every model — a capped search is a search that never finishes — so this is
+ * well past that. A model that is busy answers 503 in seconds, which leaves the
+ * next one its time.
+ */
+export const EARLY_ATTEMPT_MS = 50_000;
 /** Below this a grounded search cannot finish, so none is started. */
 export const MIN_ATTEMPT_MS = 12_000;
 export const BUSY_PAUSE_MS = 1_000;
@@ -32,7 +38,8 @@ export type AttemptKind =
   | 'empty' | 'unparseable' | 'truncated' | 'blocked' // the reply, a 200
   | 'no_claims' // valid, and says nothing
   | 'body' // a 200 whose body could not be read, or was not JSON
-  | 'timeout' // no answer in the time given
+  | 'timeout' // no answer in the time given: nobody refused, so never "busy"
+  | 'unreachable' // the request itself did not get there
   | 'busy' | 'quota' | 'limit' // 429 / 500 / 503, and 402
   | 'schema' // 400 while asking for structured output; asked again without
   | 'error'; // anything else
@@ -91,7 +98,10 @@ export async function askModels(deps: AskDeps, args: AskArgs): Promise<AskOutcom
 
   const fail = (): AskOutcome => {
     const kinds = new Set(attempts.map((a) => a.kind));
-    const reason = kinds.has('busy') || kinds.has('timeout') ? 'busy' : kinds.has('limit') ? 'limit' : 'error';
+    // Busy is Google saying so (429, 500, 503). Running out of time, or not
+    // reaching it, is not that, and wording it so invites a Try again that
+    // would only meet the same clock: those are "couldn't finish".
+    const reason = kinds.has('busy') ? 'busy' : kinds.has('limit') ? 'limit' : 'error';
     return { ok: false, reason, attempts };
   };
 
@@ -124,7 +134,7 @@ export async function askModels(deps: AskDeps, args: AskArgs): Promise<AskOutcom
           signal,
         });
       } catch (err) {
-        const kind = isTimeout(err) ? 'timeout' : 'busy';
+        const kind = isTimeout(err) ? 'timeout' : 'unreachable';
         const one = record(kind, null);
         deps.warn(`${head()} request ${kind === 'timeout' ? 'timed out' : 'failed'} after ${one.ms}ms: ${String(err)}`);
         break;

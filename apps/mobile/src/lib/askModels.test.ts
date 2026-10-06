@@ -20,7 +20,7 @@ const throws = (name: string) => ({ kind: 'throw' as const, error: Object.assign
 
 type Step = ReturnType<typeof ok> | ReturnType<typeof throws> | ReturnType<typeof http>;
 
-function harness(steps: Step[], clock = { t: 0 }, spend = 0) {
+function harness(steps: Step[], clock = { t: 0 }, spend: number | number[] = 0) {
   const calls: { model: string; ms: number; body: any }[] = [];
   const slept: number[] = [];
   const lines: string[] = [];
@@ -29,7 +29,7 @@ function harness(steps: Step[], clock = { t: 0 }, spend = 0) {
     fetch: async (url, init) => {
       const step = steps[calls.length];
       calls.push({ model: decodeURIComponent(url.split('/models/')[1].split(':')[0]), ms: allowed, body: JSON.parse(init.body) });
-      clock.t += spend;
+      clock.t += Array.isArray(spend) ? (spend[calls.length - 1] ?? 0) : spend;
       if (!step) throw new Error('unexpected extra call');
       if (step.kind === 'throw') throw step.error;
       return { ok: step.status >= 200 && step.status < 300, status: step.status, text: step.text };
@@ -163,12 +163,28 @@ describe('a request that fails is classified by status', () => {
     expect(outcome).toMatchObject({ ok: true, model: 'm2' });
   });
 
-  it('moves on after a timeout, and calls it busy if nothing else answers', async () => {
+  it('moves on after a timeout, and never calls running out of time busy', async () => {
+    // The first live lookups were cut off by the clock and worded as busy when
+    // nothing was busy: a Try again on that meets the same clock.
     const h = harness([throws('TimeoutError'), throws('TimeoutError'), throws('AbortError')]);
     const outcome = await h.run();
     expect(h.calls).toHaveLength(3);
-    expect(outcome).toMatchObject({ ok: false, reason: 'busy' });
+    expect(outcome).toMatchObject({ ok: false, reason: 'error' });
     expect(outcome.attempts.map((a) => a.kind)).toEqual(['timeout', 'timeout', 'timeout']);
+  });
+
+  it('moves on when a request cannot get there, and does not call that busy either', async () => {
+    const h = harness([throws('TypeError'), good()]);
+    const outcome = await h.run();
+    expect(outcome).toMatchObject({ ok: true, model: 'm2' });
+    expect(outcome.attempts[0]).toMatchObject({ kind: 'unreachable', status: null });
+    expect(await harness([throws('TypeError'), throws('TypeError'), throws('TypeError')]).run())
+      .toMatchObject({ ok: false, reason: 'error' });
+  });
+
+  it('still calls a refusal busy when a model does say so, even beside a timeout', async () => {
+    const outcome = await harness([throws('TimeoutError'), http(503), throws('TimeoutError')]).run();
+    expect(outcome).toMatchObject({ ok: false, reason: 'busy' });
   });
 });
 
@@ -192,11 +208,22 @@ describe('the schema next to the search tools', () => {
 });
 
 describe('the time is shared out', () => {
+  it('lets a search run past 30s, which is what the first live lookups were cut off at', () => {
+    expect(EARLY_ATTEMPT_MS).toBeGreaterThan(30_000);
+  });
+
   it('gives the first model its cap and the next what is left', async () => {
-    const clock = { t: 0 };
-    const h = harness([throws('TimeoutError'), throws('TimeoutError'), good()], clock, EARLY_ATTEMPT_MS);
+    const h = harness([throws('TimeoutError'), good()], { t: 0 }, EARLY_ATTEMPT_MS);
     const outcome = await h.run({ deadline: 85_000 });
-    expect(h.calls.map((c) => c.ms)).toEqual([EARLY_ATTEMPT_MS, EARLY_ATTEMPT_MS, 25_000]);
+    expect(h.calls.map((c) => c.ms)).toEqual([EARLY_ATTEMPT_MS, 35_000]);
+    expect(outcome).toMatchObject({ ok: true, model: 'm2' });
+  });
+
+  it('still reaches the third model in the background budget, with what is left', async () => {
+    // read-label's lookup: 120s, less the 5s kept for pages.
+    const h = harness([throws('TimeoutError'), throws('TimeoutError'), good()], { t: 0 }, EARLY_ATTEMPT_MS);
+    const outcome = await h.run({ deadline: 115_000 });
+    expect(h.calls.map((c) => c.ms)).toEqual([EARLY_ATTEMPT_MS, EARLY_ATTEMPT_MS, 15_000]);
     expect(outcome).toMatchObject({ ok: true, model: 'm3' });
   });
 

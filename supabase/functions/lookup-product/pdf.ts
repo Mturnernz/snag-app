@@ -250,7 +250,7 @@ export function parseCMap(cmap: string): { width: 1 | 2; map: Map<number, string
 export function decodeWith(bytes: string, font: FontMap | null): string {
   if (!font || !font.map) {
     if (font?.width === 2) return '';
-    return /^[\x20-\x7e -ÿ\t\r\n]*$/.test(bytes) ? bytes : '';
+    return /^[\x20-\x7e\u00a0-\u00ff\t\r\n]*$/.test(bytes) ? bytes : '';
   }
   let out = '';
   for (let i = 0; i + font.width <= bytes.length; i += font.width) {

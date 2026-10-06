@@ -22,9 +22,12 @@ import type { Thing } from '../types';
  * vaguer. "Air cleaning filter" with no number is not an answer.
  *
  * **Looked up once per model.** A second scan, or a second unit of the same
- * model, shows the same answer. *Try again* is offered only when the lookup
- * failed — never on *nothing found*, which is an answer, and asking again
- * until something turns up is how one model gets two answers.
+ * model, shows the same answer. *Try again* is offered when the lookup failed.
+ * *Nothing found* is an answer only when the server could confirm it — the
+ * maker's own page for this model, opened and read, stating none of it — but
+ * lookups before that rule filed a search that simply came back empty as the
+ * same permanent answer, so *Look again* is offered there too, as a press that
+ * costs one of the day's reads like any other.
  *
  * Offers, never writes: a part is added to the thing's list with *Add*, the
  * interval opens *Schedule service* already set. The screen does the writes.
@@ -120,6 +123,9 @@ export default function ProductFactsCard({
             <Text style={styles.caption}>
               {`Nothing for the ${model} could be confirmed on ${make}'s own website, so nothing is suggested.`}
             </Text>
+          </View>
+          <View style={styles.actions}>
+            <TextButton label="Look again" onPress={() => onLookUp(true)} bold accessibilityLabel="Look it up again" />
           </View>
         </Group>
       </View>

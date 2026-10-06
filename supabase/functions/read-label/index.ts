@@ -94,7 +94,7 @@ const BACKGROUND_RETRY_PAUSE_MS = 20_000;
 // is left of that, up to its own budget, and is not started with too little to
 // finish — the thing's page offers *Look it up* instead.
 const WALL_CLOCK_MS = 140_000;
-const LOOKUP_BUDGET_MS = 55_000;
+const LOOKUP_BUDGET_MS = 90_000;
 const LOOKUP_MIN_MS = 30_000;
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };

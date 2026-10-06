@@ -323,3 +323,138 @@ describe('what the thing’s page is offered', () => {
     expect(parseProductLookup({ id: 'l', status: 'invented' })).toBeNull();
   });
 });
+
+// ----------------------------------------------------------------------------
+// What a lookup came to: found, nothing, or a failure that can be asked again.
+
+import { claimsAreEmpty, decideLookup, describeReply } from '../../../../supabase/functions/lookup-product/lookup';
+
+describe('decideLookup', () => {
+  const nzPage = html(NZ_PAGE, 'MSZ-GS60VFD-A1 GS60 Standard High Wall Heat Pump. Optional Plasma Quad Connect MAC-100FT-E.');
+  const SERVICE = 'Have the unit inspected by your dealer once a year.';
+  const manualPage = pdf(MANUAL, `MSZ-GS25-80VFD ... ${SERVICE} ...`);
+
+  it('is found with a manual alone', () => {
+    const decision = decideLookup(MAKE, MODEL, claims({ manualUrl: MANUAL }), { [MANUAL]: manualPage });
+    expect(decision).toMatchObject({ status: 'found', facts: { manual: { url: MANUAL }, parts: [], service: null } });
+  });
+
+  it('is found with parts alone', () => {
+    const decision = decideLookup(MAKE, MODEL, claims({ parts: [{ item: 'Plasma Quad Connect', code: 'MAC-100FT-E', url: NZ_PAGE }] }), { [NZ_PAGE]: nzPage });
+    expect(decision).toMatchObject({ status: 'found', facts: { manual: null, service: null } });
+  });
+
+  it('is found with a service interval alone', () => {
+    const decision = decideLookup(MAKE, MODEL, claims({ service: { months: 12, quote: SERVICE, url: MANUAL } }), { [MANUAL]: manualPage });
+    expect(decision).toMatchObject({ status: 'found', facts: { manual: null, parts: [], service: { months: 12 } } });
+  });
+
+  it('keeps what verified when another claim did not, each judged on its own', () => {
+    const decision = decideLookup(MAKE, MODEL, claims({
+      manualUrl: MANUAL,
+      parts: [
+        { item: 'Plasma Quad Connect', code: 'MAC-100FT-E', url: NZ_PAGE },
+        { item: 'Invented', code: 'MAC-999FT-E', url: NZ_PAGE },
+      ],
+      service: { months: 6, quote: SERVICE, url: MANUAL },
+    }), { [MANUAL]: manualPage, [NZ_PAGE]: nzPage });
+    expect(decision).toMatchObject({
+      status: 'found',
+      facts: { manual: { url: MANUAL }, service: null, parts: [{ code: 'MAC-100FT-E' }] },
+    });
+  });
+
+  it('is a failure that can be asked again when the model claims nothing at all', () => {
+    expect(decideLookup(MAKE, MODEL, claims(), {})).toEqual({ status: 'failed', reason: 'error', why: 'no_claims' });
+    // Saying it could not find anything is not saying the maker has none.
+    expect(decideLookup(MAKE, MODEL, claims({ outcome: 'could_not_find' }), {})).toMatchObject({ status: 'failed', why: 'no_claims' });
+  });
+
+  it('is a failure when every claim is rejected', () => {
+    const decision = decideLookup(MAKE, MODEL, claims({
+      parts: [{ item: 'Air cleaning filter', code: 'MAC-2370FT-E', url: NZ_PAGE }],
+    }), { [NZ_PAGE]: nzPage });
+    expect(decision).toEqual({ status: 'failed', reason: 'error', why: 'unverified' });
+  });
+
+  it('is a failure when the maker’s pages would not open', () => {
+    const decision = decideLookup(MAKE, MODEL, claims({ manualUrl: MANUAL }), {});
+    expect(decision).toEqual({ status: 'failed', reason: 'error', why: 'sources_unavailable' });
+  });
+
+  it('is a failure when the claims name only pages that are not the maker’s', () => {
+    const decision = decideLookup(MAKE, MODEL, claims({ parts: [{ item: 'Filter', code: 'MAC-2370FT-E', url: RETAILER }] }), {});
+    expect(decision).toMatchObject({ status: 'failed' });
+  });
+
+  describe('nothing', () => {
+    const none = (checkedUrls: string[]) => claims({ outcome: 'none_published', checkedUrls });
+
+    it('needs the model to say so and a maker page this function opened about this model', () => {
+      expect(decideLookup(MAKE, MODEL, none([NZ_PAGE]), { [NZ_PAGE]: nzPage })).toEqual({ status: 'nothing' });
+    });
+
+    it('is not believed when the page could not be opened', () => {
+      expect(decideLookup(MAKE, MODEL, none([NZ_PAGE]), {})).toMatchObject({ status: 'failed' });
+    });
+
+    it('is not believed when the page is about another model', () => {
+      const other = html(NZ_PAGE, 'MSZ-AP50VGK air cleaning filter');
+      expect(decideLookup(MAKE, MODEL, none([NZ_PAGE]), { [NZ_PAGE]: other })).toMatchObject({ status: 'failed' });
+    });
+
+    it('is not believed when the page is not the maker’s, or redirected off its site', () => {
+      expect(decideLookup(MAKE, MODEL, none([RETAILER]), { [RETAILER]: html(RETAILER, nzPage.text) })).toMatchObject({ status: 'failed' });
+      const moved = html('https://parts-reseller.example/x', nzPage.text);
+      expect(decideLookup(MAKE, MODEL, none([NZ_PAGE]), { [NZ_PAGE]: moved })).toMatchObject({ status: 'failed' });
+    });
+
+    it('is not believed when the model only says it could not find it', () => {
+      expect(decideLookup(MAKE, MODEL, claims({ outcome: 'could_not_find', checkedUrls: [NZ_PAGE] }), { [NZ_PAGE]: nzPage }))
+        .toMatchObject({ status: 'failed' });
+    });
+  });
+});
+
+describe('the reply’s own words about itself', () => {
+  it('reads outcome and the pages checked, and ignores anything else', () => {
+    const outcome = lookupFromGemini({
+      candidates: [{ content: { parts: [{ text: JSON.stringify({ outcome: 'None_Published', manualUrl: null, parts: [], service: null, checkedUrls: [NZ_PAGE, 7, ''] }) }] } }],
+    });
+    expect(outcome).toEqual({ ok: true, claims: { manualUrl: null, parts: [], service: null, outcome: 'none_published', checkedUrls: [NZ_PAGE] } });
+    const odd = lookupFromGemini({ candidates: [{ content: { parts: [{ text: '{"outcome":"sure","manualUrl":null}' }] } }] });
+    expect(odd).toEqual({ ok: true, claims: { manualUrl: null, parts: [], service: null } });
+  });
+
+  it('opens the pages it says it checked, with the rest', () => {
+    expect(urlsToOpen(MAKE, claims({ manualUrl: MANUAL, checkedUrls: [NZ_PAGE, RETAILER] }))).toEqual([MANUAL, NZ_PAGE]);
+    expect(claimsAreEmpty(claims({ checkedUrls: [NZ_PAGE] }))).toBe(false);
+    expect(claimsAreEmpty(claims())).toBe(true);
+  });
+
+  it('describes a reply without carrying any of its words', () => {
+    const line = describeReply({
+      candidates: [{
+        finishReason: 'STOP',
+        content: { parts: [{ text: 'MAC-100FT-E' }, { thought: true, text: 'hidden' }, { executableCode: {} }] },
+        groundingMetadata: { groundingChunks: [{}, {}, {}] },
+        urlContextMetadata: { urlMetadata: [{}] },
+      }],
+    });
+    expect(line).toBe(
+      'blockReason=none candidates=1 finishReason=STOP parts=3 textParts=1 thoughtParts=1 otherParts=executableCode ' +
+        'textChars=11 grounding=true groundingChunks=3 urlContext=true urlsRead=1',
+    );
+    expect(line).not.toMatch(/MAC-100|hidden/);
+    expect(describeReply(null)).toMatch(/candidates=0 finishReason=none parts=0/);
+  });
+
+  it('asks for structured output only when told to, and keeps the search tools either way', () => {
+    const plain = lookupRequest(MAKE, MODEL, null);
+    const structured = lookupRequest(MAKE, MODEL, null, { structured: true });
+    expect('generationConfig' in plain).toBe(false);
+    expect(structured.generationConfig).toMatchObject({ responseMimeType: 'application/json' });
+    expect(structured.tools).toEqual([{ google_search: {} }, { url_context: {} }]);
+    expect(LOOKUP_SYSTEM).toMatch(/could not find this.*does not publish this/);
+  });
+});

@@ -1629,16 +1629,19 @@ the consumable parts a householder replaces, and the maker's recommended service
 owner's rule for it is the whole design: *a return is only given if there is absolute confidence in
 the data, because wrong data devalues the trust in the app.* A model's confidence is not that — it
 was the thing that produced three answers for one heat pump — so **the model is not trusted
-either**. It searches (Gemini with Google Search grounding and URL context on) and says what it
-found and where; the function then **opens every page it cites itself** and keeps a value only
-when all of these hold (`verifyLookup`, pure, in `lookup.ts`):
+either**. It is asked two things in turn (see *Find, then read* below): Gemini with Google Search
+finds the maker's pages; the function **opens them itself** and follows their links to the
+manual; Gemini, with no tools, reads that downloaded text and names the page each value is on.
+A value is kept only when all of these hold (`verifyLookup`, pure, in `lookup.ts`):
 
 - **The page is on the maker's own website**, before and after any redirect (`isMakersSite`: the
   registered domain is the make, run together, or its first word with one of a short list of
-  words makers add — `mitsubishi-electric`, `fisherpaykel`, `bosch-home`). Retailers, parts shops
-  and "compatible with" lists never count, and they are exactly where MAC-2370FT-E came from. It is
-  deliberately strict: a maker whose documents live on a domain that is not its name gets nothing
-  from there — a missed answer rather than a wrong one.
+  words makers add — `mitsubishi-electric`, `fisherpaykel`, `bosch-home` — or one of the group
+  document servers written out by name in `GROUP_SITES`: `bsh-group` for Bosch, Siemens, Neff and
+  Gaggenau, `lge` for LG, `mhiaa` for Mitsubishi Heavy Industries). Retailers, parts shops and
+  "compatible with" lists never count, and they are exactly where MAC-2370FT-E came from. It is
+  deliberately strict: a maker whose documents live on a domain that is neither its name nor on
+  that list gets nothing from there — a missed answer rather than a wrong one.
 - **The page is about this model**, by its number however spaced, or by a range or list that
   includes it (`mentionsModel`: *MSZ-GS25-80VFD* covers a GS60). A manual's file name counts,
   because it is often the only place its range is legible.
@@ -1652,12 +1655,12 @@ when all of these hold (`verifyLookup`, pure, in `lookup.ts`):
   servicing or inspection, and saying the interval claimed (`monthsSaid`). "Periodically" and
   "after several seasons" are not intervals, and cleaning a filter yourself is not a service.
 
-A PDF is read by the function too — its Flate text streams inflated and their strings read
-(`pdfStreams`, `pdfStrings`); a PDF whose fonts do not map to ordinary characters reads as nothing,
-and nothing is kept from it. **Every rule is wrong only towards dropping a value.** Measured against
-Mitsubishi's real pages for the GS60: the NZ product page names no filter code in its text; the GS
-range manual is kept as the manual, keeps MAC-408FT-E for a GS60 (and not for a GS71), and gives no
-service interval — so none is shown. That is the honest answer, and it is the common one.
+A PDF is read by the function too (`lookup-product/pdf.ts`) — see *A manual's words are read
+through its fonts* below; a font with no `ToUnicode` map reads as nothing, and nothing is kept from
+it. **Every rule is wrong only towards dropping a value.** Measured against Mitsubishi's real pages
+for the GS60: the NZ product page names no filter code in its text; the GS range manual is kept as
+the manual, keeps MAC-408FT-E for a GS60 (and not for a GS71), and gives no service interval — so
+none is shown. That is the honest answer, and it is the common one.
 
 **The year made is not here.** It is a fact about one unit, and a website knows when a model was
 sold, not when this one was built. It comes off the plate (`read-label`'s `manufactured`) or is
@@ -1718,24 +1721,79 @@ Bosch, "opened 0 of 0") and `failed/busy`, with Gemini reached every time. Three
   **Running out of time, or not reaching Google, is `error` ("couldn't finish"), never `busy`**: only a 429, 500 or 503
   is Google saying it is busy, and a *Try again* on a timeout meets the same clock.
 - **`nothing` meant five things.** `decideLookup` is found (any one verified value; each claim is judged on its own),
-  `nothing`, or a **failure that can be asked again**. `nothing` is now only: the model says `none_published`, names the
-  maker's pages it checked (`checkedUrls`), and this function opened one of them and found it to be about this model. A
-  model that claims no value, claims whose pages would not open, and claims that all failed verification are `failed`
-  (reason `error`; the log says which). **Do not make a search that came back empty a permanent row again.**
+  `nothing`, or a **failure that can be asked again**. `nothing` is only said when a page of the maker's was read
+  through and stated none of it — the rule as it stands since *Find, then read* below. Everything short of that is
+  `failed` (reason `error`; the log says which). **Do not make a search that came back empty a permanent row again.**
 
 Rows written before that rule cannot be told from ones written after it, so *Look again* is offered on `nothing` as
 well as *Try again* on a failure. It is `p_again`, which resets the row: nothing is deleted and `begin_product_lookup`
 did not change. It costs one read, like any lookup.
 
-**Structured output is asked for, and dropped if refused.** The first request carries `responseMimeType` and
-`responseJsonSchema` beside the search tools (Google documents the combination for Gemini 3 models only). A 400 means
-the model would not take it: the same model is asked again without, and so is every later one in that lookup. The reply
-is still read out of prose either way. It is not known that the combination caused any empty reply; the log is how that
-gets found out — every attempt logs `http`, `ms`, `finishReason`, part counts (text, thought, other), grounding chunks
-and `urlsRead`, never a word of the reply.
+Every attempt logs `http`, `ms`, `finishReason`, part counts (text, thought, other), how many searches ran, grounding
+chunks and the prompt's token count — never a word of the reply. That log is what found the next fault.
 
 `askModels.test.ts` pins the loop against a fake `fetch`; `productLookup.test.ts` pins `decideLookup` and the reply's
 shape.
+
+### Find, then read (October 2026)
+
+The fixes above made the failures legible, and the same day the log said what they were: **no lookup had ever found
+anything** (eight rows, none `found`). The one request asked the model to search, open pages with `url_context` and fill
+a JSON schema at once. The first model timed out at 50s every time; the second answered in 25-39s with
+`grounding=false searches=0 urlsRead=0` — from memory, with part numbers that were not on the page it cited and addresses
+that would not open. `verifyLookup` threw all of it away, rightly, and the card said nothing could be found. So the
+lookup is now two questions, each asked the way the model answers it well (`lookup.ts`, `ask.ts`, `run.ts`):
+
+1. **Find** (`searchRequest`): Google Search only — no `url_context`, no schema — and `thinkingLevel: low`. It returns
+   the maker's pages as a list, and **the search's own results (`groundingChunks`) count too**: those are addresses
+   Google returned, not ones the model wrote. They are Google redirects, so `candidateUrls` keeps them and the page is
+   judged by where it lands; one whose title already names another domain is not followed.
+2. **Open** (`run.ts`): the function opens up to eight, dropping any that land off the maker's site before reading the
+   body, then follows the maker's own pages' links to PDFs that read as a manual or a parts list (`documentLinks`,
+   up to three) — a product page is usually how the manual is reached. `pagesToRead` keeps the maker's pages about this
+   model, by their words or their address, documents first, at most five.
+3. **Read** (`readRequest`): no tools, `READ_SCHEMA`, `thinkingLevel: low`, and the downloaded text — each page numbered,
+   a long one cut to its opening and the passages near the words parts and servicing are written beside
+   (`excerpt`, 24,000 characters a page, 100,000 in all). The reply names pages **by number**, so an address cannot be
+   invented: `readFromGemini` turns each number into the address this function opened, and drops one that is not.
+4. **Check**: `verifyLookup`, unchanged, against the whole page as the function read it.
+
+`nothing` follows from what was read, not from what the model says about the maker: a page of the maker's whose own
+words (not merely its address) name this model, at least 400 characters long, read through with no value surviving.
+No page about the model opened, or the read failing, is `failed` and can be asked again. The model is never asked whether
+the maker publishes something — it can only say what the pages in front of it say.
+
+Both questions go through one `askModels` loop (a `Stage` each: the search 40s a model, the read 35s). A 400 on the
+full request asks the same model again without its options (the schema, the thinking level), and the rest of that
+question goes without. A search naming no page at all moves on to the next model; a read that finds nothing is an answer.
+The search has what is left after 34s is kept back — 8s and 6s for the two waves of pages, 20s for the read — so
+`read-label` no longer starts a background lookup with less than 50s (`LOOKUP_MIN_MS`). Still **one** claimed read per
+lookup, however many requests it makes.
+
+### A manual's words are read through its fonts
+
+Two faults meant a manual could never confirm anything, whatever the model said.
+
+- **Deno threw every compressed stream away.** A stream ran to `endstream`, which takes in the line break before it,
+  and Deno's `DecompressionStream` answers anything after the compressed data by throwing *failed to write whole
+  buffer* and keeping nothing it had inflated. Node does not, which is why it never showed in a test: on the server,
+  all 226 compressed streams of a Bosch manual and 100 of the Mitsubishi GS manual's 112 read as nothing.
+  `pdfStreams` now ends a stream at its `/Length` when that is a number the file agrees with, and otherwise trims
+  the line break. And the bytes are turned to text by `latin1Of`, never `TextDecoder('latin1')`, which the Encoding
+  standard maps to windows-1252 and so changes bytes 0x80-0x9F.
+- **A manual draws glyph numbers, not letters.** The reader took the `(literal)` strings a page drew. A manual set in
+  embedded subset fonts draws `<0041004C>` instead, which means nothing without the font's `ToUnicode` map; on the
+  Bosch manual that reader got 3,838 characters of 56 pages, none of them the model number. `pdf.ts` reads the file's
+  objects (object streams included), each page's fonts (inherited from its parent where it states none, and inside
+  the forms it draws), decodes each string through the font in use when it is drawn, and adds the document's title,
+  subject and keywords, which often name the model. Only text objects are tokenised (`BT` … `ET`), because walking
+  every number of a page's drawing was most of the time it took.
+
+Measured through Deno on 6 October 2026: the Bosch SMS6HAI01A manual reads 86,759 characters and names its model; the
+Mitsubishi GS manual reads 33,315 and prints `Parts Number GS25/35/50/60: MAC-408FT-E GS71/80: MAC-2350FT-E` in words.
+`pdfText.test.ts` pins the map, the fonts, the object stream, the title and the stream ends against files built in the
+test (a maker's manual is not ours to commit); `productLookup.test.ts` pins the search's reading, `candidateUrls`, the
+read's request and page numbers, `excerpt`, `pageLinks`, `documentLinks`, `pagesToRead` and the new `nothing`.
 
 `productLookup.test.ts` pins every rule above against the GS60's real pages and wording — the
 retailer refused, a redirect off the maker's site refused, another model's page refused, the range

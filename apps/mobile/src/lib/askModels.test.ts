@@ -1,15 +1,19 @@
 import {
-  askModels, BUSY_PAUSE_MS, EARLY_ATTEMPT_MS, MIN_ATTEMPT_MS, type AskDeps,
+  askModels, BUSY_PAUSE_MS, MIN_ATTEMPT_MS, readStage, searchStage, type AskDeps, type Stage,
 } from '../../../../supabase/functions/lookup-product/ask';
 
 // The loop that asks Gemini, driven by a fake `fetch`. These pin what the live
 // log could not say on 6 October 2026: that a 200 is not an answer, that a
 // body which will not read is not "no candidates", that each way a reply can
 // be unusable moves on to the next model, and that the time is shared so the
-// third model is reachable.
+// third model is reachable. The loop asks both of a lookup's questions — the
+// search and the read — so it is pinned with each.
 
 const MODELS = ['m1', 'm2', 'm3'];
-const GOOD = { outcome: 'found', manualUrl: 'https://www.mitsubishi-electric.co.nz/m.pdf', parts: [], service: null };
+const MAKE = 'Mitsubishi Electric';
+const MODEL = 'MSZ-GS60VFD';
+const MANUAL = 'https://www.mitsubishi-electric.co.nz/m.pdf';
+const GOOD = { pages: [{ url: MANUAL, what: 'manual' }] };
 const ok = (json: unknown) => ({ kind: 'reply' as const, status: 200, text: () => Promise.resolve(JSON.stringify(json)) });
 const reply = (text: string, over: Record<string, unknown> = {}) =>
   ok({ candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP', ...over }] });
@@ -20,7 +24,14 @@ const throws = (name: string) => ({ kind: 'throw' as const, error: Object.assign
 
 type Step = ReturnType<typeof ok> | ReturnType<typeof throws> | ReturnType<typeof http>;
 
-function harness(steps: Step[], clock = { t: 0 }, spend: number | number[] = 0) {
+const SEARCH_MS = searchStage(MAKE, MODEL, null).attemptMs;
+
+function harness<T = unknown>(
+  steps: Step[],
+  clock = { t: 0 },
+  spend: number | number[] = 0,
+  stage: Stage<T> = searchStage(MAKE, MODEL, null) as unknown as Stage<T>,
+) {
   const calls: { model: string; ms: number; body: any }[] = [];
   const slept: number[] = [];
   const lines: string[] = [];
@@ -41,10 +52,7 @@ function harness(steps: Step[], clock = { t: 0 }, spend: number | number[] = 0) 
     warn: (line) => lines.push(line),
   };
   const run = (over: Partial<Parameters<typeof askModels>[1]> = {}) =>
-    askModels(deps, {
-      apiKey: 'k', models: MODELS, make: 'Mitsubishi Electric', model: 'MSZ-GS60VFD', name: null,
-      deadline: clock.t + 85_000, tag: 'test', ...over,
-    });
+    askModels(deps, { apiKey: 'k', models: MODELS, deadline: clock.t + 85_000, tag: 'test', ...over }, stage);
   return { run, calls, slept, lines };
 }
 
@@ -58,14 +66,13 @@ describe('a reply that is not an answer moves on to the next model', () => {
       ok({ candidates: [{ content: { parts: [{ thought: true, text: 'thinking' }, { toolCall: {} }] }, finishReason: 'STOP' }] }),
       'empty',
     ],
-    ['prose with no object', reply('I could not find anything.'), 'unparseable'],
-    ['malformed JSON', reply('{"manualUrl": '), 'unparseable'],
-    ['an answer cut off', reply('{"manualUrl":', { finishReason: 'MAX_TOKENS' }), 'truncated'],
+    ['prose naming no page', reply('I could not find anything.'), 'no_claims'],
+    ['an answer cut off', reply('{"pages":', { finishReason: 'MAX_TOKENS' }), 'truncated'],
     ['a blocked prompt', ok({ promptFeedback: { blockReason: 'SAFETY' } }), 'blocked'],
     ['a recitation stop', reply('', { finishReason: 'RECITATION' }), 'blocked'],
     ['a body that is not JSON', { kind: 'reply' as const, status: 200, text: () => Promise.resolve('<html>') }, 'body'],
     ['a body that will not read', bodyFails(), 'body'],
-    ['an object claiming nothing', reply(JSON.stringify({ outcome: 'could_not_find', manualUrl: null, parts: [], service: null })), 'no_claims'],
+    ['a list with no pages in it', reply(JSON.stringify({ pages: [] })), 'no_claims'],
   ])('%s', async (_, first, kind) => {
     const h = harness([first, good()]);
     const outcome = await h.run();
@@ -76,15 +83,15 @@ describe('a reply that is not an answer moves on to the next model', () => {
 
   it('says why a 200 was empty, in structure and not in words', async () => {
     const h = harness([
-      ok({ candidates: [{ content: { parts: [{ thought: true, text: 'secret thought' }, { toolCall: {} }] }, finishReason: 'STOP', groundingMetadata: { groundingChunks: [{}, {}] } }] }),
+      ok({ candidates: [{ content: { parts: [{ thought: true, text: 'secret thought' }, { toolCall: {} }] }, finishReason: 'STOP', groundingMetadata: { groundingChunks: [{}, {}], webSearchQueries: ['q'] } }] }),
       good(),
     ]);
     await h.run();
     const line = h.lines.find((l) => l.includes('result=empty'))!;
-    expect(line).toMatch(/model=m1/);
+    expect(line).toMatch(/search model=m1/);
     expect(line).toMatch(/http=200/);
     expect(line).toMatch(/candidates=1 finishReason=STOP parts=2 textParts=0 thoughtParts=1 otherParts=toolCall/);
-    expect(line).toMatch(/grounding=true groundingChunks=2/);
+    expect(line).toMatch(/grounding=true searches=1 groundingChunks=2/);
     expect(line).not.toMatch(/secret thought/);
   });
 
@@ -92,7 +99,7 @@ describe('a reply that is not an answer moves on to the next model', () => {
     const h = harness([ok({ candidates: [] }), reply('no object'), good()]);
     const outcome = await h.run();
     expect(h.calls).toHaveLength(3);
-    expect(outcome.attempts.map((a) => a.kind)).toEqual(['empty', 'unparseable', 'success']);
+    expect(outcome.attempts.map((a) => a.kind)).toEqual(['empty', 'no_claims', 'success']);
   });
 
   it('fails as an error when every model gives an unusable reply, never as busy', async () => {
@@ -103,20 +110,61 @@ describe('a reply that is not an answer moves on to the next model', () => {
   });
 });
 
-describe('the first usable answer ends the loop', () => {
-  it('does not ask the second model when the first is good', async () => {
-    const h = harness([good()]);
-    const outcome = await h.run();
-    expect(h.calls).toHaveLength(1);
+describe('the search', () => {
+  it('counts the pages Google returned, even when the model listed none', async () => {
+    const grounded = reply('Nothing I could list.', {
+      groundingMetadata: { groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'mitsubishi-electric.co.nz' } }] },
+    });
+    const outcome = await harness([grounded]).run();
     expect(outcome).toMatchObject({ ok: true, model: 'm1' });
+    if (outcome.ok) expect((outcome.value as any).grounded).toHaveLength(1);
   });
 
-  it('accepts a model saying the maker publishes none, with the pages it checked', async () => {
-    const said = { outcome: 'none_published', manualUrl: null, parts: [], service: null, checkedUrls: ['https://www.mitsubishi-electric.co.nz/x'] };
-    const h = harness([reply(JSON.stringify(said))]);
+  it('asks with Google Search alone and a short think, and drops the think for a model that refuses it', async () => {
+    const h = harness([http(400, 'thinking_level is not supported'), good()]);
     const outcome = await h.run();
-    expect(outcome).toMatchObject({ ok: true, claims: { outcome: 'none_published' } });
+    expect(h.calls.map((c) => c.model)).toEqual(['m1', 'm1']);
+    expect(h.calls[0].body.tools).toEqual([{ google_search: {} }]);
+    expect(h.calls[0].body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' });
+    expect(h.calls[1].body.generationConfig).toBeUndefined();
+    expect(h.calls[1].body.tools).toEqual([{ google_search: {} }]);
+    expect(outcome).toMatchObject({ ok: true, model: 'm1' });
+    expect(outcome.attempts[0].kind).toBe('config');
+  });
+
+  it('does not ask the next model for what a previous one refused', async () => {
+    const h = harness([http(400), ok({ candidates: [] }), good()]);
+    await h.run();
+    expect(h.calls.map((c) => !!c.body.generationConfig)).toEqual([true, false, false]);
+  });
+});
+
+describe('the read', () => {
+  const pages = [
+    { url: MANUAL, kind: 'pdf' as const, text: 'MSZ-GS25-80VFD Parts Number GS25/35/50/60: MAC-408FT-E' },
+    { url: 'https://www.mitsubishi-electric.co.nz/gs60', kind: 'html' as const, text: 'MSZ-GS60VFD' },
+  ];
+  const stage = readStage(MAKE, MODEL, 'Heat pump', pages);
+
+  it('accepts an answer with nothing in it — the pages may not say — and asks nobody else', async () => {
+    const h = harness([reply(JSON.stringify({ manual: null, parts: [], service: null }))], { t: 0 }, 0, stage);
+    const outcome = await h.run();
     expect(h.calls).toHaveLength(1);
+    expect(outcome).toMatchObject({ ok: true, value: { manualUrl: null, parts: [], service: null } });
+  });
+
+  it('asks with the pages and a schema and no tools, and drops the schema for a model that refuses it', async () => {
+    const answer = reply(JSON.stringify({ manual: 1, parts: [{ item: 'Air cleaning filter', code: 'MAC-408FT-E', page: 1 }], service: null }));
+    const h = harness([http(400, 'schema'), answer], { t: 0 }, 0, stage);
+    const outcome = await h.run();
+    expect(h.calls[0].body.tools).toBeUndefined();
+    expect(h.calls[0].body.generationConfig.responseJsonSchema).toBeDefined();
+    expect(h.calls[0].body.contents[0].parts[0].text).toMatch(/\[1\] https:\/\/www\.mitsubishi-electric\.co\.nz\/m\.pdf \(PDF\)/);
+    expect(h.calls[1].body.generationConfig).toBeUndefined();
+    expect(outcome).toMatchObject({
+      ok: true,
+      value: { manualUrl: MANUAL, parts: [{ item: 'Air cleaning filter', code: 'MAC-408FT-E', url: MANUAL }] },
+    });
   });
 });
 
@@ -149,12 +197,18 @@ describe('a request that fails is classified by status', () => {
     expect(outcome).toMatchObject({ ok: false, reason: 'limit' });
   });
 
-  it.each([[400], [401], [403]])('does not retry a %s, which would fail the same on every model', async (status) => {
+  it.each([[401], [403]])('does not retry a %s, which would fail the same on every model', async (status) => {
     const h = harness([http(status), good()]);
-    // No schema to drop on a 400 either, once it has been dropped.
     const outcome = await h.run();
-    expect(outcome.ok).toBe(status === 400 ? true : false);
-    if (status !== 400) expect(h.calls).toHaveLength(1);
+    expect(outcome.ok).toBe(false);
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it('does not retry a 400 on the request already asked without its options', async () => {
+    const h = harness([http(400), http(400), good()]);
+    const outcome = await h.run();
+    expect(h.calls).toHaveLength(2);
+    expect(outcome).toMatchObject({ ok: false, reason: 'error' });
   });
 
   it('tries the next model when this one is not available to the key', async () => {
@@ -188,43 +242,16 @@ describe('a request that fails is classified by status', () => {
   });
 });
 
-describe('the schema next to the search tools', () => {
-  it('is asked for first, and dropped for the rest of the lookup when a model refuses it', async () => {
-    const h = harness([http(400, 'response schema with tools not supported'), good()]);
-    const outcome = await h.run();
-    expect(h.calls.map((c) => c.model)).toEqual(['m1', 'm1']);
-    expect(h.calls[0].body.generationConfig.responseJsonSchema).toBeDefined();
-    expect(h.calls[1].body.generationConfig).toBeUndefined();
-    expect(h.calls[1].body.tools).toEqual([{ google_search: {} }, { url_context: {} }]);
-    expect(outcome).toMatchObject({ ok: true, model: 'm1' });
-    expect(outcome.attempts[0].kind).toBe('schema');
-  });
-
-  it('does not ask the next model for what a previous one refused', async () => {
-    const h = harness([http(400), ok({ candidates: [] }), good()]);
-    await h.run();
-    expect(h.calls.map((c) => !!c.body.generationConfig)).toEqual([true, false, false]);
-  });
-});
-
 describe('the time is shared out', () => {
   it('lets a search run past 30s, which is what the first live lookups were cut off at', () => {
-    expect(EARLY_ATTEMPT_MS).toBeGreaterThan(30_000);
+    expect(SEARCH_MS).toBeGreaterThan(30_000);
   });
 
   it('gives the first model its cap and the next what is left', async () => {
-    const h = harness([throws('TimeoutError'), good()], { t: 0 }, EARLY_ATTEMPT_MS);
-    const outcome = await h.run({ deadline: 85_000 });
-    expect(h.calls.map((c) => c.ms)).toEqual([EARLY_ATTEMPT_MS, 35_000]);
+    const h = harness([throws('TimeoutError'), good()], { t: 0 }, SEARCH_MS);
+    const outcome = await h.run({ deadline: 70_000 });
+    expect(h.calls.map((c) => c.ms)).toEqual([SEARCH_MS, 30_000]);
     expect(outcome).toMatchObject({ ok: true, model: 'm2' });
-  });
-
-  it('still reaches the third model in the background budget, with what is left', async () => {
-    // read-label's lookup: 120s, less the 5s kept for pages.
-    const h = harness([throws('TimeoutError'), throws('TimeoutError'), good()], { t: 0 }, EARLY_ATTEMPT_MS);
-    const outcome = await h.run({ deadline: 115_000 });
-    expect(h.calls.map((c) => c.ms)).toEqual([EARLY_ATTEMPT_MS, EARLY_ATTEMPT_MS, 15_000]);
-    expect(outcome).toMatchObject({ ok: true, model: 'm3' });
   });
 
   it('gives the last model everything that remains, not the early cap', async () => {
@@ -234,17 +261,17 @@ describe('the time is shared out', () => {
     expect(h.calls[2].ms).toBe(85_000 - 10_000);
   });
 
-  it('asks nobody when less than a search needs is left', async () => {
+  it('asks nobody when less than an attempt needs is left', async () => {
     const h = harness([good()]);
     const outcome = await h.run({ deadline: MIN_ATTEMPT_MS - 1 });
     expect(h.calls).toHaveLength(0);
     expect(outcome).toMatchObject({ ok: false, reason: 'error' });
   });
 
-  it('stops asking when what is left is too little for another search', async () => {
+  it('stops asking when what is left is too little for another attempt', async () => {
     const clock = { t: 0 };
-    const h = harness([throws('TimeoutError'), good()], clock, EARLY_ATTEMPT_MS);
-    const outcome = await h.run({ deadline: EARLY_ATTEMPT_MS + MIN_ATTEMPT_MS - 1 });
+    const h = harness([throws('TimeoutError'), good()], clock, SEARCH_MS);
+    const outcome = await h.run({ deadline: SEARCH_MS + MIN_ATTEMPT_MS - 1 });
     expect(h.calls).toHaveLength(1);
     expect(outcome.ok).toBe(false);
   });

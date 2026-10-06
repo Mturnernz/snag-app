@@ -92,10 +92,12 @@ const BACKGROUND_RETRY_PAUSE_MS = 20_000;
 // The lookup that follows a read runs in the same background work, which the
 // platform ends 150 seconds after the request arrived. A lookup is given what
 // is left of that, up to its own budget, and is not started with too little to
-// finish — the thing's page offers *Look it up* instead.
+// finish — the thing's page offers *Look it up* instead. A lookup keeps 34s
+// back from its search for opening pages and reading them, so under 50s the
+// search would have too little to run at all.
 const WALL_CLOCK_MS = 140_000;
 const LOOKUP_BUDGET_MS = 120_000;
-const LOOKUP_MIN_MS = 30_000;
+const LOOKUP_MIN_MS = 50_000;
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 

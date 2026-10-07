@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { canonical } from '@/lib/seo';
 import styles from '../privacy/privacy.module.css';
 
 export const metadata: Metadata = {
   title: 'Terms — Snag',
   description: 'The terms you use Snag under.',
   robots: { index: true, follow: true },
+  ...canonical('/terms'),
 };
 
 /**

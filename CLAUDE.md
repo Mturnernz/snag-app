@@ -5469,6 +5469,12 @@ first day. `/terms` names SnagHQ as the provider and, by the owner's decision, c
 postal address; it is in force from 30 September 2026. The front page describes the four tabs v1
 has — List, House, Schedule, You — and promises nothing about renovations or label reading.
 
+**Three pages ask to be indexed (`/`, `/privacy`, `/terms`), and `sitemap.xml` lists exactly those
+three** (`INDEXED_PATHS` in `src/lib/seo.ts`; `e2e/seo.spec.ts` compares the sitemap with what each
+page says about itself). Search Console reports the apex, plain http and the portal's root as *Page
+with redirect*. That is correct and not a fault to fix; see *Search Console* in
+`SNAG_INFRA_NOTES.md`.
+
 `@supabase/ssr` forces PKCE, and a PKCE recovery link only works in the browser that asked for it
 — auth-js wants the `code` *and* a stored verifier, and with the verifier missing it doesn't
 recognise the link as a callback at all. Nothing happens and nothing is said. Asking on a laptop

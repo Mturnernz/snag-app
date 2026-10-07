@@ -11,6 +11,20 @@
 export const SITE_URL = 'https://www.snaghq.co.nz';
 
 /**
+ * The pages that ask to be indexed (`robots: { index: true }`), which is what
+ * sitemap.xml lists. Everything else on this host is an account page and says
+ * noindex.
+ *
+ * Without a sitemap Google found these by following links, and reached most of
+ * them through a redirect: the apex and plain http both send it here. Search
+ * Console then reports those addresses as *Page with redirect*, which is
+ * correct. They redirect on purpose. The sitemap names the addresses the
+ * redirects end at. e2e/seo.spec.ts checks that each page listed here says
+ * index and names itself as canonical, and that no other route says index.
+ */
+export const INDEXED_PATHS = ['/', '/privacy', '/terms'] as const;
+
+/**
  * Canonical + og:url for one page, from one path.
  *
  * Both have to be absolute and both have to agree, and they are easy to drift

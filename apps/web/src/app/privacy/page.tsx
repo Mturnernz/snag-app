@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { canonical } from '@/lib/seo';
 import styles from './privacy.module.css';
 
 export const metadata: Metadata = {
   title: 'Privacy — Snag',
   description: 'What Snag keeps about you and your household, why, and who else handles it.',
   robots: { index: true, follow: true },
+  ...canonical('/privacy'),
 };
 
 /**

@@ -579,6 +579,40 @@ where u.email = '<E2E_EMAIL>';
 
 Apex redirects to `www`. DNS is Netlify-managed.
 
+### Search Console
+
+The property is the whole domain, `snaghq.co.nz`, so it covers every host above. On 7 October
+2026 it emailed *New reasons prevent pages from being indexed: Page with redirect*. **That reason
+is expected and nothing needs fixing.** Each address it lists redirects on purpose, and Google
+indexes the page the redirect ends at:
+
+| Address | Goes to | Why |
+|---|---|---|
+| `http://snaghq.co.nz/`, `https://snaghq.co.nz/` | `https://www.snaghq.co.nz/` | apex → `www` |
+| `http://www.…`, `http://app.…` | the `https://` address | Netlify forces HTTPS |
+| `https://staff.snaghq.co.nz/` | `/sign-in` | the portal's middleware; the whole host is noindex |
+| `https://www.snaghq.co.nz/staff/*` | `staff.snaghq.co.nz` | the portal's old path (`next.config.js`) |
+| `https://www.snaghq.co.nz/privacy/` | `/privacy` | Next drops a trailing slash |
+
+Treat it as a problem only if one of the **three indexed pages** turns up under that reason:
+`https://www.snaghq.co.nz/`, `/privacy` or `/terms`. Those are the only pages that ask to be
+indexed. `/forgot-password` and `/reset-password` say noindex, and so do the app and the portal.
+
+**`https://www.snaghq.co.nz/sitemap.xml` lists exactly those three** (`apps/web/src/app/sitemap.ts`,
+from `INDEXED_PATHS` in `src/lib/seo.ts`), and `/robots.txt` names it. Both answered 404 until
+October 2026, so Google found the pages through links, and through the redirects above. Submit the
+sitemap once under *Sitemaps* in Search Console. That step is outside git. Checking it:
+
+```bash
+curl -s https://www.snaghq.co.nz/robots.txt     # Allow: /  ·  Sitemap: …/sitemap.xml
+curl -s https://www.snaghq.co.nz/sitemap.xml    # three <loc>s on https://www.snaghq.co.nz
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://snaghq.co.nz/   # 301 → www
+```
+
+`app.snaghq.co.nz/robots.txt` answers with the app's `index.html`, because of the SPA rewrite in
+`apps/mobile/netlify.toml`. A crawler reads that as a robots file with no rules, which allows
+everything. Harmless.
+
 ## Resend
 
 One account, four entirely separate paths into it, which fail independently:

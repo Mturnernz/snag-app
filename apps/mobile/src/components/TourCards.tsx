@@ -151,5 +151,5 @@ const styles = StyleSheet.create({
   body: { fontSize: Typography.base, color: Colors.textSecondary, lineHeight: 22 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: Spacing.sm - 2, marginTop: Spacing.md },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.border },
-  dotOn: { width: 20, backgroundColor: Colors.primary },
+  dotOn: { width: 20, backgroundColor: Colors.selected },
 });

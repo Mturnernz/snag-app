@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.chip,
     backgroundColor: Colors.sunken,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   otherRow: { flexDirection: 'row', alignItems: 'stretch', gap: Spacing.sm },

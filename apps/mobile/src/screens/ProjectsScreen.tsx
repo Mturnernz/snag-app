@@ -19,6 +19,7 @@ import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import HomePickerSheet from '../components/HomePickerSheet';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
+import { useDockClearance } from '../navigation/Dock';
 import { useToast } from '../hooks/useToast';
 import {
   createLocation, createProject, formatMoney, getExpectedTotal, getProjects, getProjectsQuoted, inclGst,
@@ -72,6 +73,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * workbench.
  */
 export default function ProjectsScreen() {
+  const clearance = useDockClearance();
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
   const {
@@ -277,6 +279,7 @@ export default function ProjectsScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={[
             styles.listContent,
+            { paddingBottom: Math.max(clearance, Spacing.xxxl) + Spacing.lg },
             sections.length === 0 && styles.listEmpty,
           ]}
           stickySectionHeadersEnabled={false}

@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     borderRadius: Radius.chip,
   },
-  rowOn: { backgroundColor: Colors.primary },
+  rowOn: { backgroundColor: Colors.selected },
   rowLabel: { fontSize: Typography.base, color: Colors.textPrimary },
   rowLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   createRowLabel: { fontSize: Typography.base, color: Colors.primary, fontWeight: Typography.semibold },

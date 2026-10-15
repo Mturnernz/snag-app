@@ -15,6 +15,7 @@ import SnagDetailScreen from '../screens/SnagDetailScreen';
 import HouseholdScreen from '../screens/HouseholdScreen';
 import ThingDetailScreen from '../screens/ThingDetailScreen';
 import HouseRoomScreen from '../screens/HouseRoomScreen';
+import HistoryScreen from '../screens/HistoryScreen';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -113,6 +114,8 @@ export default function RootNavigator() {
           something anybody sends. */}
       <Stack.Screen name="HouseRoom" component={HouseRoomScreen} />
       <Stack.Screen name="Household" component={HouseholdScreen} />
+      {/* Everything finished, by month: a page read down, so a push. */}
+      <Stack.Screen name="History" component={HistoryScreen} />
       {/* A push, not a sheet: it is a paste and then a list of what that paste
           would change, and both want the whole height. */}
       {/* A sheet, for the same reason SnagDetail is one: filling in a heat

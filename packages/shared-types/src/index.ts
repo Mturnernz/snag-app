@@ -2258,6 +2258,11 @@ export type RootStackParamList = {
    */
   HouseRoom: { room: string | null };
   /**
+   * Everything finished, by month, searchable — past the seven days the list
+   * keeps. A push, like a room: a page somebody reads down, not a decision.
+   */
+  History: undefined;
+  /**
    * One renovation: the money, the parts of it, the paperwork.
    *
    * A push rather than a sheet, unlike SnagDetail and ThingDetail. Those are a

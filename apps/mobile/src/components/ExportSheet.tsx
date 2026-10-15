@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.button,
     backgroundColor: Colors.sunken,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
   chipCount: { fontSize: Typography.sm, color: Colors.textMuted },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },

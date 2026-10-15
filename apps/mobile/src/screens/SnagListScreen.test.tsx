@@ -69,7 +69,9 @@ jest.mock('../lib/supabase', () => ({
   updateSnag: (...a: unknown[]) => mock_updateSnag(...a),
   setPartBought: (...a: unknown[]) => mock_setPartBought(...a),
   getComments: (...a: unknown[]) => mock_getComments(...a),
+  getNotesSince: (...a: unknown[]) => mock_getNotesSince(...a),
 }));
+const mock_getNotesSince = jest.fn().mockResolvedValue([]);
 // Coming back to the app is an event the test fires by hand: the listeners the
 // screen registers are kept here, and `returnAfter` calls them.
 const mock_returnListeners: ((awayMs: number) => void)[] = [];
@@ -156,8 +158,10 @@ describe('SnagListScreen', () => {
     const all = texts(result);
     expect(all).toContain('New');
     // One addition, theirs. Yours is not news to you, and a month-old one of
-    // theirs was already seen.
-    expect(all.some((t) => t.startsWith('3 to do') && t.includes('1 added'))).toBe(true);
+    // theirs was already seen. The count is the screen's one big number, and
+    // the line under it says what is new.
+    expect(all).toContain('3 to do');
+    expect(all.some((t) => t.startsWith('1 added since'))).toBe(true);
   });
 
   it("names the place, not the household, for somebody on one place of two", async () => {
@@ -1063,5 +1067,115 @@ describe('what the tour asked for', () => {
     );
     await settle();
     expect(mock_navigate).toHaveBeenCalledWith('House');
+  });
+});
+
+// A reply on an existing job is news as much as a new job is: the product
+// sends nothing, so the list is the only place to be told.
+describe('notes as news', () => {
+  it('raises a job the other person wrote on since the last visit, and says so', async () => {
+    arrange();
+    mock_markListSeen.mockResolvedValue(ago(2));
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done') ? [] : [
+        snag({ id: 'seat', description: 'Toilet seat', room: 'Bathroom', reporterId: ME, createdAt: ago(20) }),
+        snag({ id: 'tap', description: 'Tap', room: 'Kitchen', reporterId: ME, createdAt: ago(20) }),
+      ],
+    ));
+    mock_getNotesSince.mockResolvedValue([
+      { snagId: 'seat', authorId: THEM, createdAt: ago(1) },
+      { snagId: 'seat', authorId: THEM, createdAt: ago(0.5) },
+      // Your own note is never news to you.
+      { snagId: 'tap', authorId: ME, createdAt: ago(1) },
+    ]);
+    const r = render(<SnagListScreen />);
+    await settle();
+    await settle();
+
+    const all = texts(r);
+    expect(all).toContain('New');
+    expect(all).toContain('2 new notes');
+    expect(all.some((t) => t.startsWith('2 new notes since'))).toBe(true);
+    // The tap is not news, and stays in its room.
+    expect(all).toContain('Kitchen · 1');
+  });
+
+  it('asks for nothing on a first visit', async () => {
+    arrange();
+    mock_markListSeen.mockResolvedValue(null);
+    mock_getSnags.mockResolvedValue([]);
+    mock_getNotesSince.mockClear();
+    render(<SnagListScreen />);
+    await settle();
+    expect(mock_getNotesSince).not.toHaveBeenCalled();
+  });
+
+  it('draws the list when the notes cannot be read', async () => {
+    arrange();
+    mock_markListSeen.mockResolvedValue(ago(2));
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done') ? [] : [snag({ id: 'a', description: 'Shelf', room: 'Kitchen' })],
+    ));
+    mock_getNotesSince.mockRejectedValue(new Error('offline'));
+    const r = render(<SnagListScreen />);
+    await settle();
+    expect(texts(r)).toContain('Shelf');
+  });
+});
+
+describe('searching the list', () => {
+  const box = (r: ReturnType<typeof render>) =>
+    r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Search the list' && n.props?.onChangeText)[0];
+
+  it('finds open and finished jobs by their words, room and parts, flat', async () => {
+    arrange();
+    mock_markListSeen.mockResolvedValue(ago(2));
+    mock_getNotesSince.mockResolvedValue([]);
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done')
+        ? [snag({ id: 'old', description: 'Gutters cleaned', room: 'Outside', status: 'done', doneAt: ago(40) })]
+        : [
+          snag({ id: 'a', description: 'Dripping mixer', room: 'Kitchen' }),
+          snag({ id: 'b', description: 'Shelf', room: 'Garage', parts: ['Gutter guard'] }),
+          snag({ id: 'c', description: 'Door', room: 'Bathroom' }),
+        ],
+    ));
+    const r = render(<SnagListScreen />);
+    await settle();
+    await TestRenderer.act(async () => { box(r).props.onChangeText('gutter'); });
+
+    const all = texts(r);
+    expect(all).toContain('Found · 2');
+    expect(all).toContain('Gutters cleaned');
+    expect(all).toContain('Shelf');
+    expect(all).not.toContain('Door');
+    expect(all).not.toContain('Kitchen · 1');
+  });
+
+  it('says so when nothing matches', async () => {
+    arrange();
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done') ? [] : [snag({ id: 'a', description: 'Shelf', room: 'Kitchen' })],
+    ));
+    const r = render(<SnagListScreen />);
+    await settle();
+    await TestRenderer.act(async () => { box(r).props.onChangeText('heat pump'); });
+    expect(texts(r)).toContain('Nothing matches “heat pump”');
+  });
+});
+
+describe('the way into history', () => {
+  it('opens everything finished from the foot of the list', async () => {
+    arrange();
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done')
+        ? [snag({ id: 'old', status: 'done', doneAt: ago(40) })]
+        : [snag({ id: 'a', description: 'Shelf' })],
+    ));
+    const r = render(<SnagListScreen />);
+    await settle();
+    const door = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'All finished jobs' && n.props?.onPress)[0];
+    await TestRenderer.act(async () => { door.props.onPress(); });
+    expect(mock_navigate).toHaveBeenCalledWith('History');
   });
 });

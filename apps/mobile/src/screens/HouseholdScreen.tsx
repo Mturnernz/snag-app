@@ -926,7 +926,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  linkChipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  linkChipOn: { backgroundColor: Colors.selected, borderColor: Colors.selected },
   linkLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
   linkLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   addRow: { marginTop: Spacing.xs },

@@ -109,6 +109,9 @@ export default function EditBudgetSheet({ visible, budget, budgetInclGst, onSave
 const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     position: 'absolute', left: 0, right: 0, bottom: 0,
     maxHeight: '90%',
     backgroundColor: Colors.surface,

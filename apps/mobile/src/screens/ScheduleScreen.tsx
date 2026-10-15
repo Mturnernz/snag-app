@@ -20,6 +20,7 @@ import HomePickerSheet from '../components/HomePickerSheet';
 import Icon from '../components/Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
+import { useDockClearance } from '../navigation/Dock';
 import { useOnReturn } from '../hooks/useOnReturn';
 import { getProjects, getSnags } from '../lib/supabase';
 import { RETURN_RELOAD_MS } from '../lib/foreground';
@@ -157,6 +158,7 @@ const MONTHS = [
 
 
 export default function ScheduleScreen() {
+  const clearance = useDockClearance();
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
   const { properties, activeProperty, profile } = useHousehold();
@@ -316,7 +318,7 @@ export default function ScheduleScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(clearance, Spacing.xxxl) + Spacing.lg }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -563,7 +565,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dayOn: { backgroundColor: Colors.primary },
+  dayOn: { backgroundColor: Colors.selected },
   dayToday: { backgroundColor: Colors.sunken },
   dayNumber: { fontSize: Typography.sm, color: Colors.textPrimary },
   // Still drawn, still tappable: the fortnight either side of a month change is

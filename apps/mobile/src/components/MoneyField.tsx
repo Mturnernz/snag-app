@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
   },
-  halfOn: { backgroundColor: Colors.primary },
+  halfOn: { backgroundColor: Colors.selected },
   halfLabel: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textSecondary },
   halfLabelOn: { color: Colors.white },
   other: {

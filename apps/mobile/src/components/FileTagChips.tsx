@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: Colors.sunken,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   label: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textSecondary },
   labelOn: { color: Colors.white },
 });

@@ -27,6 +27,7 @@ import Fab from '../components/Fab';
 import HomePickerSheet from '../components/HomePickerSheet';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
+import { useDockClearance } from '../navigation/Dock';
 import { useToast } from '../hooks/useToast';
 import { useAddThing } from '../hooks/useAddThing';
 import { useOnReturn } from '../hooks/useOnReturn';
@@ -87,6 +88,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * model number out.
  */
 export default function HouseScreen() {
+  const clearance = useDockClearance();
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
   const {
@@ -336,7 +338,7 @@ export default function HouseScreen() {
       ) : null}
 
       <ScrollView
-        contentContainerStyle={[groupedStyles.content, styles.content, empty && styles.contentEmpty]}
+        contentContainerStyle={[groupedStyles.content, styles.content, { paddingBottom: Math.max(clearance, Spacing.xxxl * 2) + Spacing.lg }, empty && styles.contentEmpty]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl

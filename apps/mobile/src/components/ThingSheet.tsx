@@ -335,7 +335,7 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: 10, backgroundColor: Colors.sunken,
     alignItems: 'center', justifyContent: 'center',
   },
-  thumbOn: { backgroundColor: Colors.primary },
+  thumbOn: { backgroundColor: Colors.selected },
   notes: {
     minHeight: 96, textAlignVertical: 'top', backgroundColor: Colors.surface, borderRadius: Radius.card,
     padding: Spacing.lg, fontSize: Typography.body, color: Colors.textPrimary,

@@ -238,6 +238,9 @@ export default function LinkAssetsSheet({
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(43, 39, 36, 0.4)' },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     backgroundColor: Colors.surface,
     borderTopLeftRadius: Radius.card,
     borderTopRightRadius: Radius.card,
@@ -282,7 +285,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.chip,
     backgroundColor: Colors.sunken,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   list: { maxHeight: 360 },

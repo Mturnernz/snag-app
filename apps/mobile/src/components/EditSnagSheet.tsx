@@ -129,7 +129,7 @@ export default function EditSnagSheet({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(17, 24, 39, 0.5)',
+    backgroundColor: Colors.scrim,
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.xl,

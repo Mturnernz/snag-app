@@ -1066,101 +1066,105 @@ export default function SnagListScreen() {
         </View>
       </View>
 
-      {/* The count — Bone & Glass's one big number — then one line about the
-          list, then the 2px rule. A count of concrete things, never a
-          percentage: what is left to do. */}
-      {selecting ? null : (
-        <View style={styles.countRow} accessibilityRole="header">
-          <Text style={styles.countLine}>
-            <Text style={styles.count}>{toDo}</Text>
-            <Text style={styles.unit}> to do</Text>
-          </Text>
-        </View>
-      )}
-
-      {/* The one line about the list, and the controls that reach all of it.
-          On the same line because both are *about* the list rather than in
-          it, and because this screen has already evicted two filter rails for
-          charging vertical rent on every visit.
-
-          The fold control says what pressing it does and decides that from
-          whether anything is still open, so the press on offer is never a
-          no-op. */}
-      {selecting ? (
-        // Choosing: the line says how many, and the way out. The rows' own
-        // boxes are what choose.
-        <View style={styles.sinceRow}>
-          <Text style={styles.selectedCount} accessibilityLiveRegion="polite">
-            {selected!.size} selected
-          </Text>
-          <Pressable
-            onPress={stopChoosing}
-            style={styles.selectTap}
-            accessibilityRole="button"
-            accessibilityLabel="Stop choosing jobs"
-          >
-            <Text style={styles.selectLabel}>Cancel</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View style={styles.sinceRow}>
-          <Text style={[styles.since, news && styles.sinceNews]} numberOfLines={2}>
-            {news ?? (since ? `Nothing new ${since}` : 'Everything on the list')}
-          </Text>
-          <View style={styles.sinceControls}>
-            {/* A long press chooses on a phone; a desktop has no long press,
-                so the same thing is a word here. */}
-            {snags.length > 0 && !searching ? (
-              <Pressable
-                onPress={() => setSelected(new Set())}
-                style={styles.selectTap}
-                accessibilityRole="button"
-                accessibilityLabel="Choose jobs to share"
-              >
-                <Text style={styles.selectLabel}>Select</Text>
-              </Pressable>
-            ) : null}
-            {!searching && sections.length + shoppingRooms.length > 1 ? (
-              <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
-            ) : null}
-          </View>
-        </View>
-      )}
-      <View style={styles.rule} />
-
-      {/* Search: words, rooms, parts, references and linked items, across the
-          jobs still to do and the finished ones. The House tab has had one
-          since it shipped; a household with thirty-four jobs needed this. */}
-      <View style={styles.searchWrap}>
-        <View style={styles.search}>
-          <Icon name="search" size="md" color={Colors.textMuted} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search jobs, rooms and parts"
-            placeholderTextColor={Colors.textMuted}
-            style={styles.searchInput}
-            returnKeyType="search"
-            autoCorrect={false}
-            accessibilityLabel="Search the list"
-          />
-          {searching ? (
-            <Pressable
-              onPress={() => setQuery('')}
-              style={styles.clearTap}
-              accessibilityRole="button"
-              accessibilityLabel="Clear the search"
-            >
-              <Icon name="close-circle-outline" size="md" color={Colors.textMuted} />
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
-
       <SectionList
         sections={shownSections}
         ListHeaderComponent={
           <>
+          {/* The count, the line about the list, the rule and the search
+              scroll away with the list: they are its top, not chrome. The
+              home picker and the cart stay above, where they always are. */}
+          <View style={styles.countBlock}>
+          {/* The count — Bone & Glass's one big number — then one line about the
+              list, then the 2px rule. A count of concrete things, never a
+              percentage: what is left to do. */}
+          {selecting ? null : (
+            <View style={styles.countRow} accessibilityRole="header">
+              <Text style={styles.countLine}>
+                <Text style={styles.count}>{toDo}</Text>
+                <Text style={styles.unit}> to do</Text>
+              </Text>
+            </View>
+          )}
+
+          {/* The one line about the list, and the controls that reach all of it.
+              On the same line because both are *about* the list rather than in
+              it, and because this screen has already evicted two filter rails for
+              charging vertical rent on every visit.
+
+              The fold control says what pressing it does and decides that from
+              whether anything is still open, so the press on offer is never a
+              no-op. */}
+          {selecting ? (
+            // Choosing: the line says how many, and the way out. The rows' own
+            // boxes are what choose.
+            <View style={styles.sinceRow}>
+              <Text style={styles.selectedCount} accessibilityLiveRegion="polite">
+                {selected!.size} selected
+              </Text>
+              <Pressable
+                onPress={stopChoosing}
+                style={styles.selectTap}
+                accessibilityRole="button"
+                accessibilityLabel="Stop choosing jobs"
+              >
+                <Text style={styles.selectLabel}>Cancel</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.sinceRow}>
+              <Text style={[styles.since, news && styles.sinceNews]} numberOfLines={2}>
+                {news ?? (since ? `Nothing new ${since}` : 'Everything on the list')}
+              </Text>
+              <View style={styles.sinceControls}>
+                {/* A long press chooses on a phone; a desktop has no long press,
+                    so the same thing is a word here. */}
+                {snags.length > 0 && !searching ? (
+                  <Pressable
+                    onPress={() => setSelected(new Set())}
+                    style={styles.selectTap}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose jobs to share"
+                  >
+                    <Text style={styles.selectLabel}>Select</Text>
+                  </Pressable>
+                ) : null}
+                {!searching && sections.length + shoppingRooms.length > 1 ? (
+                  <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
+                ) : null}
+              </View>
+            </View>
+          )}
+          <View style={styles.rule} />
+
+          {/* Search: words, rooms, parts, references and linked items, across the
+              jobs still to do and the finished ones. The House tab has had one
+              since it shipped; a household with thirty-four jobs needed this. */}
+          <View style={styles.searchWrap}>
+            <View style={styles.search}>
+              <Icon name="search" size="md" color={Colors.textMuted} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search jobs, rooms and parts"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.searchInput}
+                returnKeyType="search"
+                autoCorrect={false}
+                accessibilityLabel="Search the list"
+              />
+              {searching ? (
+                <Pressable
+                  onPress={() => setQuery('')}
+                  style={styles.clearTap}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear the search"
+                >
+                  <Icon name="close-circle-outline" size="md" color={Colors.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+          </View>
           {/* Asked once, in a browser tab only. The web build is installed
               from the browser, and a tab is the thing that gets closed and
               lost. */}
@@ -1480,6 +1484,9 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary, flexShrink: 1,
   },
   // The one big number, used once on the screen.
+  // The list's content is already inset by the gutter; the count's pieces
+  // carry their own, so the block steps back out to the screen's edge.
+  countBlock: { marginHorizontal: -Spacing.lg, paddingBottom: Spacing.xs },
   countRow: { paddingHorizontal: Spacing.lg, marginTop: -Spacing.xs },
   countLine: { color: Colors.textPrimary },
   count: {

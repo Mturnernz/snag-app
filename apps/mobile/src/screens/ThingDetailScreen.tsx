@@ -2307,7 +2307,7 @@ const styles = StyleSheet.create({
   change: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.xs },
   changeLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   serviceNow: { fontSize: Typography.base, color: Colors.textPrimary },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.scrim },
   sheet: {
     // The app's column on a wide screen (AppColumn): a Modal is drawn over
     // the whole page, so the sheet keeps itself to the same width.

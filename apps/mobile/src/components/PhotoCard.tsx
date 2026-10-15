@@ -10,6 +10,9 @@ import type { Snag } from '../types';
 export const PHOTO_CARD_WIDTH = 176;
 export const PHOTO_CARD_HEIGHT = 220;
 
+/** Twelve thin bands easing into the shade: a gradient without a dependency. */
+const SHADE_STEPS = [0.04, 0.08, 0.13, 0.19, 0.26, 0.34, 0.43, 0.53, 0.63, 0.74, 0.85, 0.94];
+
 interface Props {
   snag: Snag;
   photoUrl?: string | null;
@@ -56,8 +59,9 @@ export default function PhotoCard({
           {/* The shade under the words, eased in over three steps rather
               than a gradient, which would be a dependency for one card. */}
           <View style={styles.shade} pointerEvents="none">
-            <View style={[styles.shadeStep, { opacity: 0.25 }]} />
-            <View style={[styles.shadeStep, { opacity: 0.6 }]} />
+            {SHADE_STEPS.map((opacity) => (
+              <View key={opacity} style={[styles.shadeStep, { opacity }]} />
+            ))}
             <View style={[styles.shadeFoot]} />
           </View>
         </>
@@ -92,8 +96,8 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.85 },
   wordsGround: { padding: Spacing.lg, alignItems: 'flex-start' },
   shade: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end' },
-  shadeStep: { height: 28, backgroundColor: Colors.photoShade },
-  shadeFoot: { height: '45%', backgroundColor: Colors.photoShade },
+  shadeStep: { height: 7, backgroundColor: Colors.photoShade },
+  shadeFoot: { height: '42%', backgroundColor: Colors.photoShade },
   foot: { padding: Spacing.md, gap: 2 },
   why: {
     fontFamily: Fonts.mono,

@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
     // The ground the blur sits on. Near-opaque rather than the 82% a browser
     // can afford, because without blur a translucent bar smears the text
     // scrolling under it.
-    backgroundColor: 'rgba(249, 250, 251, 0.94)',
+    backgroundColor: Colors.glassSolid,
     ...Shadow.lg,
   },
   inner: {

@@ -47,8 +47,9 @@ export default function SchemePicker({ current, onChoose }: Props) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  choice: { alignItems: 'center', gap: Spacing.xs, minWidth: MIN_TOUCH_TARGET + 4, minHeight: MIN_TOUCH_TARGET },
+  // Three to a row: six swatches do not fit across a phone with their names.
+  row: { flexDirection: 'row', flexWrap: 'wrap', rowGap: Spacing.md },
+  choice: { width: '33.333%', alignItems: 'center', gap: Spacing.xs, minHeight: MIN_TOUCH_TARGET },
   ring: { padding: 3, borderRadius: 999, borderWidth: 2, borderColor: 'transparent' },
   ringOn: { borderColor: Colors.selected },
   ground: {

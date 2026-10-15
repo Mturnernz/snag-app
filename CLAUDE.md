@@ -375,7 +375,8 @@ this section wins**; the passages themselves keep their history.
 - **A new place is seeded with three rooms** — Kitchen, Laundry, Master bedroom
   (`20261004110000`); existing places keep theirs. The setup rooms step is a grid of cards with a
   dashed *Add another room* card, which opens `AddRoomSheet` — see *Adding a room, from the tab
-  that shows the house*. `RoomsEditor` (Location tags) is unchanged.
+  that shows the house*. (`RoomsEditor` and the Location tags screen went in d1b398d; a room is
+  renamed or removed on its own page now — see *The function review and Bone & Glass*.)
 - **House tab: no count on a tile**, and a **Recorded · All rooms** `Segmented` on the count row
   (remembered per device, `lib/houseView.ts`). Recorded hides rooms with nothing real in them;
   while nothing at all is recorded every room shows and no choice is offered, so day one is still
@@ -383,6 +384,98 @@ this section wins**; the passages themselves keep their history.
 - **The walkthrough's photo step offers *Enter details manually*** under the camera.
 - **Serviced by** (`spec.servicedBy`) shows as a pill on `ThingCard` and on a job's *Linked
   items* (`linked_things.serviced_by`, `20261004110100`).
+
+## The function review and Bone & Glass (October 2026)
+
+A function review (keep / cut / build, counted against the live database on 15 October) and a
+new design direction, **Bone & Glass**, landed together. **Where anything below disagrees, this
+section wins**; the passages themselves keep their history.
+
+**Cut.** Assignees are off the card, the `Snag` type, the filter and `SnagUpdate` (`update_snag`
+is still passed a null `p_assignee_id`; the column is for a later, planned migration with
+`priority` and `thing_id`). The export's *About* column reads `linked_things` (`snagAbout`), not
+`snags.thing_id`, and *Assigned to* is gone. **The assessment loop is gone** — the brief on
+Export, *Paste an assessment back in*, `PasteAdviceScreen` and its parser: 0 assessments ever.
+`snag_advice` stays because SnagHQ's staff write to it, and `AdviceCard` is read only while Ask
+SnagHQ is on. **Consumables are parked**: off `THING_KINDS`, and a pack read off a photo is not
+chosen as one; the kind, `thing_uses` and the page stay for anybody who has one. `BuildUpSheet`
+and `ScheduleSheet` are deleted with their rows on a price (no line or milestone was ever
+written); a set-aside is still made from the + sheet. The two orphaned sheets and three unused
+packages (`netinfo`, `expo-camera`, `expo-image`) are gone.
+
+**Built.**
+
+- **Search on the List** (`searchSnags`): every word typed, anywhere in a job's reference, words,
+  room, parts or linked items, across open **and finished** jobs, on the lists in hand. One flat
+  *Found · n* section; the shopping card and *New* step aside while it is up.
+- **History** (`HistoryScreen`, `historyEntries`, `historyMonths`): every finished job by local
+  month, newest first, searchable, each repeat at its `last_done_at`. Reached from *All finished
+  jobs* at the foot of the list. A read; every row opens the job.
+- **Notes are news** (`getNotesSince`, `snagsWithNewNotes`): a note somebody else wrote since the
+  last visit raises its job into *New* and the row says *New note*. No bodies are read, a first
+  visit counts nothing, and a failed read never touches the list.
+- **Your own note can be changed or taken back** (`20261015090000`: `edited_at`,
+  `update_comment`, `delete_comment`). *Edit* only on your notes; a change says *edited* beside
+  the time; neither starts the job. **Delete hides the note and waits out the Undo**
+  (`lib/noteEdits.ts`, `NOTE_UNDO_MS` past `TOAST_ACTION_MS`), because writing a deleted note
+  again would give it a new time and start the job. `getComments` names `edited_at` and falls back
+  to the old column list on `42703` until the migration is applied — remove the fallback then.
+- **A room is renamed or removed on its own page.** Remove calls `delete_location`, and the
+  confirmation says what keeps the name. **Rename** (`20261015090100`, `rename_location`) renames
+  the jobs, things, *not here* rows and project parts filed under it at that place in the same
+  call, which is what answers the old objection to renaming: nothing says the old name
+  afterwards. It refuses a name the place already has, in words.
+- **A desktop layout** (`AppColumn`): the app is a 640pt column on bone, and every bottom sheet
+  keeps to it (`width: '100%', maxWidth: 640, marginHorizontal: 'auto'`).
+- **Change password on the You tab** (`ChangePasswordSheet`), with sign-up's rules.
+- **A colour scheme on the You tab** — see *Colour schemes* under the Design System.
+
+**Not built, and still on the review's list:** capture that survives no signal, changing the
+email address, who fixed it and what it cost, the calendar feed, and bulk actions on a selection.
+
+**Apply both migrations before merging**, in order, then `notify pgrst, 'reload schema'`. Neither
+is applied by this change. Until they are, *Edit*/*Delete* on a note and *Rename this room* answer
+with the server's refusal, and everything else works.
+
+`history.test.ts` pins `searchSnags`, `snagAbout`, the history months (an Auckland evening stays
+in its month) and the note news; `noteEdits.test.ts` the wait and the Undo; `SnagListScreen.test.tsx`
+the search, a note raising a job, the first visit and the failed read, and the door into history;
+`SnagDetailScreen.test.tsx` the edit, the unchanged save, the Undo and nothing offered on the
+other person's note; `HouseRoomScreen.test.tsx` the rename, the refusal held open, the remove and
+Whole house offering neither; `ChangePasswordSheet.test.tsx` and `SchemePicker.test.tsx` theirs.
+
+### Bone & Glass, in the app
+
+The direction is the *Snag Bone & Glass* design system (published in October 2026, with its 92
+Snag Line icons). It replaces values, not behaviour.
+
+- **The type is two bundled families**: Schibsted Grotesk for everything people read, DM Mono for
+  things (references, model numbers, dates in a row, section labels). A bundled font is one file
+  per weight, and neither platform picks the file from `fontWeight`, so **every screen imports
+  `Text` and `TextInput` from `components/Text.tsx`, never from `react-native`**. It names the file
+  for the weight and sets the weight back to normal, so a browser does not smear a fake bold over
+  it. A nested `Text` that says nothing about type inherits, as React Native's does.
+- **`index.js` registers `Boot`, not `App`.** Every stylesheet reads `Colors` when its module
+  loads, and `Colors` is built from the colour scheme, so `Boot` settles the scheme (synchronously
+  on the web, from storage on a phone) and loads the fonts before it *requires* `App`. Nothing that
+  reaches `theme.ts` may be imported by `Boot` or `lib/colourScheme.ts`.
+- **Icons are Snag Line** (`components/snagLine.ts`, generated; `Icon.tsx` draws them with
+  `react-native-svg`, `Icon.web.tsx` as a plain `<svg>`). Screens may still pass an Ionicons name,
+  which draws the glyph that replaced it; rooms (`roomIcon`) and tabs name Snag Line glyphs.
+- **The tab bar is a floating glass dock** (`navigation/Dock.tsx`) 26pt above the foot, with the
+  capture + beside it. A `Fab` inside the dock hands itself over and draws nothing; outside one —
+  every screen test — it draws itself. Every tab pads its scroll by `useDockClearance()`, and the
+  dock goes while the keyboard is up.
+- **A tab opens with its count**: the home picker on one line, the big number (*10 to do*, *12
+  recorded*), one mono line, the 2px ink rule, then the search. It scrolls away with the content.
+- **New is photo cards** (`PhotoCard`, 176 × 220) above the rooms; **every other job is a hairline
+  row** (`SnagCard`): a 56pt photo, the headline, and state marks.
+- **A state is a dot and a word** (`StateMark`; `StatusBadge` and `DueBadge` draw through it),
+  never a tinted badge. Slate open, brass doing and due soon, clay overdue, a hollow graphite dot
+  for done or parked.
+- **A choice already made is ink** — a selected chip, segment, room row, calendar day or swatch
+  — with bone words. The action colour is for doing, never for marking a selection. This reverses
+  *a sunken well when off, solid fern when on* in *One chip, every rail*.
 
 ## Capture and triage are different moments
 
@@ -1318,9 +1411,9 @@ the tap, the refusal, the box on the way out, and a room already here — the li
 a room *Recorded* is hiding.
 
 The chip is on the room step because **the moment somebody notices the conservatory is missing is the
-moment they are trying to record something in it** — sending them to Profile → Location tags and
-back would lose the flow they were in. `LocationTagsScreen` still exists and is still where tags
-are *removed*; nothing about it changed.
+moment they are trying to record something in it** — sending them anywhere else and back would
+lose the flow they were in. A room is renamed or removed on its own page (`HouseRoomScreen`); the
+Location tags screen that used to do it went in d1b398d.
 
 Two rules make a new room behave:
 
@@ -4369,8 +4462,10 @@ groups by as well as what the capture sheet offers — so it is an interface, no
 Nobody sets this up, and nobody has to earn it by logging something first. `Elsewhere` is the
 escape hatch that keeps a fixed list from being a dead end.
 
-Beyond the seeded twelve, **Profile → Location tags** (`LocationTagsScreen`) adds and removes them
-per property, through `home.create_location` / `home.delete_location`. Three things about it:
+Beyond the seed, rooms are added wherever a room is chosen (*Add a room*, the room picker's
+*Create a new room*) and **renamed or removed on the room's own page** (`HouseRoomScreen`), through
+`home.create_location`, `home.rename_location` and `home.delete_location`. The Location tags screen
+that did this went in d1b398d. Three things about it:
 
 - **It is per property, with the same picker capture has**, rendered only when there is more than
   one place. Editing the house's list must not quietly edit the bach's.
@@ -4383,9 +4478,10 @@ per property, through `home.create_location` / `home.delete_location`. Three thi
   be pushed back with `reloadLocations()` — and only when the edited property is the one the list
   is showing.
 
-There is deliberately no rename: renaming would leave every snag filed under the old name saying
-the old name, which is the one outcome the TEXT column was chosen to avoid quietly happening.
-Remove and add instead.
+**A rename reaches everything filed under the room** (`20261015090100`): its jobs, its things, its
+*not here* rows and the parts of a renovation at that place, in one call. That is the answer to
+the reason there was once deliberately no rename — renaming the tag alone would have left every
+job filed under the old name saying the old name.
 
 **A second place is never a tag.** If someone asks for a "Bach" tag, the answer is
 `create_property`.
@@ -4497,7 +4593,7 @@ whether it can be put off. `SetupFlow` only walks them; `App.tsx`'s gate asks th
   new question look answered. `steps.test.ts` freezes every id that has shipped and fails if the
   migration's backfill stops being exactly the baseline.
 - **One writer per fact.** A step writes through the component the settings screen uses —
-  `RoomsEditor` is Location tags' editor, `InviteLinkPanel` is the Household screen's — so setup
+  `AddRoomSheet` is the House tab's, `InviteLinkPanel` is the Household screen's — so setup
   and the You tab cannot come to disagree about what an answer does. A skippable step says where
   it can be changed later (`changeLater`), and the test requires it.
 - **The flow stays mounted while the account is re-read.** The gate is `setup` whenever anything
@@ -4961,6 +5057,10 @@ file and what the brief asks.
 
 ### The PDF can carry the question, and the answer comes back by hand
 
+**Retired in October 2026** (the function review: 0 assessments ever). The brief, *Paste an
+assessment back in*, `PasteAdviceScreen` and its parser are gone; `snag_advice` and `AdviceCard`
+stay for SnagHQ's staff, read only while Ask SnagHQ is on. What follows is the history.
+
 The loop is deliberately **outside the app**: a briefed PDF goes out, somebody puts it in front of
 an assistant, and the reply is pasted back in. No key, no queue, no edge function, nothing to
 rate-limit and nothing that can fail while claiming it didn't. `assessmentBrief` writes the
@@ -5091,7 +5191,32 @@ authorises clearing them, and that a new member goes to the places that were pic
 ## Design System (DO NOT deviate)
 
 All tokens in `apps/mobile/src/constants/theme.ts`. Never hardcode colours, spacing or shadows.
-`apps/web/src/app/globals.css` and `apps/staff/src/app/globals.css` mirror the light values — change all three.
+`apps/web/src/app/globals.css` and `apps/staff/src/app/globals.css` mirror the light values (the
+fern scheme) — change all three.
+
+**Bone & Glass (October 2026) is the current direction, and its values replace the ones listed
+below where they differ** — see *Bone & Glass, in the app* near the top. In short: ground `bone`
+`#FAF9F6`, `paper` `#FFFFFF`, `well` `#F0EEE8`, `hairline` `#E3E1DA`; ink `#141413`, graphite
+`#57564F`, pencil `#6A6962` (ink 17.5:1 on bone; pencil 4.75:1 at its worst, on the well); fern,
+slate, brass and clay unchanged; glass `rgba(255,255,255,0.72)` with a blur, `scrim`
+`rgba(20,20,19,0.42)` everywhere; radii 12 thumbnails and fields, 16 cards and buttons, 24 photo
+cards, tiles and the top of a sheet; Schibsted Grotesk and DM Mono; Snag Line icons; 13pt the floor
+for words and 12pt for mono. What follows is the V2 history it grew from.
+
+### Colour schemes
+
+The You tab offers **Fern** (the default and the brand), **Blue**, **Orange**, **Silver**,
+**Metallic** and **Bronze** (`constants/schemes.ts`, `SchemePicker`). **A scheme changes the action
+colour and the ground it sits on, and nothing else**: the inks and the three state hues are a
+vocabulary, the same on every phone in the house. Each scheme is five values — the action, its
+tint, a bright version for an action on ink, a ground and a well — and `schemes.test.ts` holds
+every one to the default's floors: white on the action, the action on its ground, well, white and
+tint, every ink on the ground and the well, the state hues on the ground. A scheme that fails
+gets darker, not a waiver.
+
+It is remembered **per device** (`lib/colourScheme.ts`, guarded like `collapsed.ts`, failing to
+fern), because it is about one person's screen. The web build reloads to draw a new one; a phone
+draws it the next time the app opens, and the toast says so.
 
 **V2 (September 2026) is an iOS grouped-list look over the same palette.** White rounded groups on
 the plaster ground with hairline separators (`Colors.separator`), no outlines on cards, 34pt large

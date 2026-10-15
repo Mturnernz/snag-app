@@ -348,12 +348,6 @@ export const deleteSnag = (snagId: string) => queries.deleteSnag(supabase, snagI
 
 export const getSnagAdvice = (snagId: string) => queries.getSnagAdvice(supabase, snagId);
 
-export const recordSnagAdvice = (
-  snagId: string,
-  advice: Parameters<typeof queries.recordSnagAdvice>[2],
-  source: string,
-) => queries.recordSnagAdvice(supabase, snagId, advice, source);
-
 export const deleteSnagAdvice = (snagId: string) => queries.deleteSnagAdvice(supabase, snagId);
 
 export const getSupportRequestForSnag = (snagId: string) =>
@@ -500,7 +494,6 @@ export const addQuoteLine = (quoteId: string, input: queries.QuoteLineInput) =>
 export const updateQuoteLine = (lineId: string, update: Partial<queries.QuoteLineInput>) =>
   queries.updateQuoteLine(supabase, lineId, update);
 
-export const deleteQuoteLine = (lineId: string) => queries.deleteQuoteLine(supabase, lineId);
 
 export const addPayment = (quoteId: string, input: queries.PaymentInput) =>
   queries.addPayment(supabase, quoteId, input);
@@ -594,15 +587,6 @@ export const clearFigure = (
 ) => queries.clearFigure(supabase, projectId, field, elementId);
 
 export const getOverrides = (projectId: string) => queries.getOverrides(supabase, projectId);
-
-export const addMilestone = (quoteId: string, input: queries.MilestoneInput) =>
-  queries.addMilestone(supabase, quoteId, input);
-
-export const updateMilestone = (milestoneId: string, update: Partial<queries.MilestoneInput>) =>
-  queries.updateMilestone(supabase, milestoneId, update);
-
-export const deleteMilestone = (milestoneId: string) =>
-  queries.deleteMilestone(supabase, milestoneId);
 
 export const renameSupplier = (projectId: string, from: string, to: string) =>
   queries.renameSupplier(supabase, projectId, from, to);

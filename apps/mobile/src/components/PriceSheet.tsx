@@ -34,8 +34,6 @@ interface Props {
   lines: ProjectQuoteLine[];
   onClose: () => void;
   onChanged: (message: string) => Promise<void>;
-  onOpenBuildUp: (quote: ProjectQuote) => void;
-  onOpenSchedule: (quote: ProjectQuote) => void;
   onOpen: (quote: ProjectQuote) => void;
   /** The parts of the job, which rooms a price on the whole job can be shared with. */
   elements: ProjectElement[];
@@ -96,7 +94,7 @@ const parseAmount = (text: string): number | null => {
  */
 export default function PriceSheet({
   visible, quote, householdId, quotes, payments, lines, onClose, onChanged,
-  onOpenBuildUp, onOpenSchedule, onOpen, elements, locations, quoteRooms, onAddRoom, fileTags, expected = [],
+  onOpen, elements, locations, quoteRooms, onAddRoom, fileTags, expected = [],
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -400,16 +398,12 @@ export default function PriceSheet({
                   value={formatMoney(Math.max((quote.amountIncl ?? 0) - (quote.claimedTotal ?? 0), 0))}
                 />
               ) : null}
-              {!isBill && quote.status === 'accepted' ? (
-                <Row
-                  title="Set aside for things you’ll choose"
-                  value={setAsideCount ? String(setAsideCount) : 'None'}
-                  tone="muted"
-                  onPress={() => onOpenBuildUp(quote)}
-                />
-              ) : null}
-              {!isBill && quote.status === 'accepted' ? (
-                <Row title="Payment schedule" onPress={() => onOpenSchedule(quote)} />
+              {/* What it sets aside is said, never edited here. Breaking a
+                  price into lines and a payment schedule went in October 2026
+                  (the function review: no line or milestone had ever been
+                  written); a set-aside is still made from the + sheet. */}
+              {!isBill && quote.status === 'accepted' && setAsideCount ? (
+                <Row title="Set aside for things you’ll choose" value={String(setAsideCount)} tone="muted" />
               ) : null}
               {onePart ? <Row title="Room" value={onePart.name} tone="muted" /> : null}
               {shareable ? (

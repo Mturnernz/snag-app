@@ -118,20 +118,12 @@ export default function SnagCard({
           ) : null}
         </View>
 
-        {snag.assigneeName || snag.commentCount > 0 ? (
+        {snag.commentCount > 0 ? (
           <View style={styles.footer}>
-            {snag.assigneeName ? (
-              <View style={styles.footerItem}>
-                <Icon name="person-outline" size="sm" color={Colors.textMuted} />
-                <Text style={styles.footerText}>{snag.assigneeName}</Text>
-              </View>
-            ) : null}
-            {snag.commentCount > 0 ? (
-              <View style={styles.footerItem}>
-                <Icon name="chatbubble-outline" size="sm" color={Colors.textMuted} />
-                <Text style={styles.footerText}>{snag.commentCount}</Text>
-              </View>
-            ) : null}
+            <View style={styles.footerItem}>
+              <Icon name="chatbubble-outline" size="sm" color={Colors.textMuted} />
+              <Text style={styles.footerText}>{snag.commentCount}</Text>
+            </View>
           </View>
         ) : null}
       </View>

@@ -40,7 +40,7 @@ import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
 import HomePickerSheet from '../components/HomePickerSheet';
 import {
-  assessmentBrief, dueState, exportDateStamp, exportFileName, isDoneForNow, placeTitle, quoteBrief,
+  dueState, exportDateStamp, exportFileName, isDoneForNow, placeTitle, quoteBrief,
   shoppingCount, shoppingList, snagExportPhotos, snagExportTable, snagHeadline, snagQuoteTable,
 } from '@snag/supabase-queries';
 import { loadExportImages, renderPdf, writeExport, type ExportFormat } from '../lib/exportFile';
@@ -440,7 +440,7 @@ export default function SnagListScreen() {
    * because an extract is an archive, and one that silently honoured a filter
    * set twenty minutes ago is one nobody could read correctly later.
    */
-  async function handleExport(scope: ExportScope, format: ExportFormat, briefed: boolean) {
+  async function handleExport(scope: ExportScope, format: ExportFormat) {
     setExporting(true);
     try {
       const rows = scope === 'all'
@@ -460,22 +460,7 @@ export default function SnagListScreen() {
       const images = format === 'pdf'
         ? await loadExportImages(snagExportPhotos(rows), getFileUrls)
         : [];
-      // The brief names the scope the file was made under, and counts the
-      // photographs that actually got in rather than the ones that were asked
-      // for — a reader told there are twenty when four came is a reader who
-      // thinks sixteen jobs have no photograph.
-      const brief = briefed
-        ? assessmentBrief({
-          household: household.name,
-          place,
-          where: [activeProperty?.suburb, activeProperty?.town].filter(Boolean).join(', ') || null,
-          scope: scopeLabel,
-          stamp,
-          rowCount: rows.length,
-          photoCount: images.length,
-        })
-        : undefined;
-      const { fileName, path } = await writeExport(table, format, images, brief);
+      const { fileName, path } = await writeExport(table, format, images);
       setShowExport(false);
       showToast(path ? `Saved to ${fileName}` : `${fileName} downloaded`);
     } catch (err: any) {
@@ -1181,15 +1166,6 @@ export default function SnagListScreen() {
             {/* At the foot of the scrolled content, never pinned to the bottom
                 of the screen — that is the compose bar, and nothing goes on it. */}
             <ExportFooter label="Export this list" onPress={() => setShowExport(true)} />
-            {/* The way back in, under the way out, because they are the two
-                halves of one journey: a briefed PDF goes out here and the
-                reply comes back here. Drawn the same muted way — neither is an
-                action the screen is recommending. */}
-            <ExportFooter
-              label="Paste an assessment back in"
-              icon="clipboard-outline"
-              onPress={() => navigation.navigate('PasteAdvice')}
-            />
           </>
         }
         refreshControl={
@@ -1285,7 +1261,6 @@ export default function SnagListScreen() {
           all: snags.length + done.length,
         }}
         busy={exporting}
-        canBrief
         onExport={handleExport}
         onCancel={() => setShowExport(false)}
       />

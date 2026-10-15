@@ -124,7 +124,6 @@ function mapSnag(row: Row): Snag {
     needsParts: !!row.needs_parts,
     dueAt: row.due_at ?? null,
     repeatDays: row.repeat_days ?? null,
-    assigneeId: row.assignee_id ?? null,
     thingId: row.thing_id ?? null,
     projectId: row.project_id ?? null,
     projectItemId: row.project_item_id ?? null,
@@ -137,7 +136,6 @@ function mapSnag(row: Row): Snag {
     doneAt: row.done_at ?? null,
     propertyName: row.property_name,
     reporterName: row.reporter_name,
-    assigneeName: row.assignee_name ?? null,
     commentCount: row.comment_count ?? 0,
     thingName: row.thing_name ?? null,
     thingMake: row.thing_make ?? null,
@@ -956,7 +954,6 @@ export async function getSnags(
   if (filter.propertyId) query = query.eq('property_id', filter.propertyId);
   if (filter.status?.length) query = query.in('status', filter.status);
   if (filter.room) query = query.eq('room', filter.room);
-  if (filter.assigneeId) query = query.eq('assignee_id', filter.assigneeId);
   if (filter.projectId) query = query.eq('project_id', filter.projectId);
   // Projects off. Asked of Postgres rather than filtered afterwards, so the
   // header count, the shopping pill, the Schedule tab and both extracts cannot
@@ -1085,7 +1082,6 @@ export interface SnagUpdate {
   parts?: string[];
   dueAt?: string | null;
   repeatDays?: number | null;
-  assigneeId?: string | null;
   photoPaths?: string[];
   /**
    * What the snag is about, from the house record.
@@ -1106,7 +1102,6 @@ const CLEARABLE: Record<string, string> = {
   description: 'description',
   dueAt: 'due_at',
   repeatDays: 'repeat_days',
-  assigneeId: 'assignee_id',
   thingId: 'thing_id',
   projectId: 'project_id',
 };
@@ -1133,7 +1128,8 @@ export async function updateSnag(
     p_priority: null,
     p_due_at: update.dueAt ?? null,
     p_repeat_days: update.repeatDays ?? null,
-    p_assignee_id: update.assigneeId ?? null,
+    // Nothing assigns anybody any more; the signature is the server's.
+    p_assignee_id: null,
     p_photo_paths: update.photoPaths ?? null,
     p_parts: update.parts ?? null,
     p_thing_id: update.thingId ?? null,
@@ -3564,6 +3560,21 @@ export function exportFileName(base: string, stamp: string, extension: string): 
 }
 
 /**
+ * What a job is about, for an extract's *About* column: every linked item,
+ * name then make and model, split by a semicolon.
+ *
+ * Read from `linked_things`, the one source of what a job is about since
+ * `20260920100000`. It read `snags.thing_id` until October 2026, which only
+ * ever held the first link and which nothing on screen sets any more.
+ */
+export function snagAbout(snag: Pick<Snag, 'linkedThings'>): string {
+  return (snag.linkedThings ?? [])
+    .map((thing) => [thing.name, thing.make, thing.model].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join('; ');
+}
+
+/**
  * Every snag as a row.
  *
  * Deliberately wider than the card: an extract is read at a desk, where the
@@ -3580,7 +3591,7 @@ export function snagExportTable(
     subtitle: `${meta.place} · ${meta.scope} · ${meta.stamp}`,
     columns: [
       'Reference', 'What', 'Room', 'Status', 'Needs parts', 'Parts',
-      'Due', 'Repeats', 'About', 'Assigned to', 'Filed by', 'Filed', 'Done', 'Photos',
+      'Due', 'Repeats', 'About', 'Filed by', 'Filed', 'Done', 'Photos',
     ],
     rows: snags.map((snag) => [
       snag.reference,
@@ -3591,8 +3602,7 @@ export function snagExportTable(
       (snag.parts ?? []).join('; '),
       formatLooseDate(snag.dueAt),
       snag.repeatDays ? describeCycle(snag.repeatDays) : '',
-      [snag.thingName, snag.thingMake, snag.thingModel].filter(Boolean).join(' '),
-      snag.assigneeName ?? '',
+      snagAbout(snag),
       snag.reporterName ?? '',
       formatLooseDate(snag.createdAt),
       formatLooseDate(snag.doneAt ?? snag.lastDoneAt),
@@ -3761,47 +3771,20 @@ export function toCsv(table: ExportTable, { bom = true } = {}): string {
 
 // ---------------------------------------------------------------- the brief
 //
-// The PDF is the copy that goes to somebody who was not there. One of those
-// somebodies is now an assistant being asked what all this is and what it would
-// cost — so the PDF can carry the question as well as the evidence, and the
-// answer comes back as text that `parseSnagActions` files against the
-// references it was asked about.
+// The page at the front of a PDF sent for a quote, addressed to a person.
+// It rides in the PDF and only there, as the photographs do: a spreadsheet is
+// a thing you sort, and `ExportTable` holds rows.
 //
-// **The brief rides in the PDF, and only there**, exactly as the photographs
-// do. A spreadsheet is a thing you sort; the brief is prose addressed to a
-// reader, and `ExportTable` holds rows.
-//
-// Two rules in the wording, both of which exist because of how this fails:
-//
-//   * **It states the scope it was made under.** The chips already ask (this
-//     view, or everything) and *everything* includes finished work — so a brief
-//     that said "review all open issues" would contradict the file it is
-//     stapled to and spend half the answer on jobs already done.
-//   * **It requires a source for every tradesman and permits "none found".**
-//     Asked for three local tradesmen, an assistant with no way to look will
-//     produce three plausible names and three plausible numbers, and they
-//     arrive in a household's list indistinguishable from real ones. Nothing at
-//     this end can tell the difference; a URL is the only thing that can.
+// (An assessment brief asking an AI assistant what each job was, and a parser
+// for pasting its answer back, sat here until October 2026. Nobody ever used
+// them — 0 assessments — and they went in the function review's cuts. Advice
+// can still arrive from SnagHQ's staff, so `snag_advice` and its read stay.)
 
 /** One paragraph of the brief. `mono` is for the block somebody copies. */
 export interface BriefBlock {
   heading?: string;
   lines: string[];
   mono?: boolean;
-}
-
-export interface BriefMeta {
-  household: string;
-  /** The property's name — "Home", "The bach". */
-  place: string;
-  /** "Mount Eden, Auckland", or null when the place has not said. */
-  where: string | null;
-  /** The scope chip's own words, the same string the subtitle carries. */
-  scope: string;
-  stamp: string;
-  rowCount: number;
-  /** How many photographs actually ride in this file, after the cap. */
-  photoCount: number;
 }
 
 /**
@@ -3832,7 +3815,7 @@ export function snagQuoteTable(
       snag.reference,
       snagHeadline(snag),
       snag.room ?? '',
-      [snag.thingName, snag.thingMake, snag.thingModel].filter(Boolean).join(' '),
+      snagAbout(snag),
       (snag.parts ?? []).join('; '),
       String((snag.photoPaths ?? []).length || ''),
       ...(withNotes ? [(meta.notes?.[snag.id] ?? []).join(' / ')] : []),
@@ -3887,337 +3870,6 @@ export function quoteBrief(meta: {
   };
 }
 
-/** The fence the answer has to come back in, and what the parser looks for. */
-export const ACTIONS_FENCE = 'snag-actions';
-
-/**
- * The page at the front of a briefed PDF.
- *
- * Returned as blocks rather than a string so the renderer can page-break
- * between paragraphs and set the copy-me block in a mono face, and so the
- * wording can be asserted without a PDF.
- */
-export function assessmentBrief(meta: BriefMeta): { title: string; blocks: BriefBlock[] } {
-  const at = meta.where ? `${meta.place}, ${meta.where}` : meta.place;
-
-  return {
-    title: 'For whoever is assessing this list',
-    blocks: [
-      {
-        lines: [
-          `${meta.rowCount} ${meta.rowCount === 1 ? 'job' : 'jobs'} around a house at ${at}, `
-          + `taken out of the Snag app on ${meta.stamp}. Please work through them one at a time `
-          + 'and say what each one looks like, whether somebody living here can do it, and what '
-          + 'it would take.',
-          `Every job carries a reference — SNAG-0042 and so on, in the first column. Use those: `
-          + 'they are how the answers get filed back against the right job.',
-          `This file holds ${meta.scope.toLowerCase()}. Skip any row whose Status reads Done — `
-          + 'that work is finished.',
-        ],
-      },
-      {
-        heading: 'The photographs',
-        lines: [
-          meta.photoCount > 0
-            ? `${meta.photoCount} ${meta.photoCount === 1 ? 'photograph follows' : 'photographs follow'} `
-              + 'the table, each captioned with its job’s reference and the room it is in.'
-            : 'There are no photographs in this file.',
-          'Not every job has one, and a photograph of a damp patch cannot say what is behind the '
-          + 'wall. Where you cannot tell, say so and say what you would need to see — a guess '
-          + 'stated confidently is worse than no answer, because somebody will act on it.',
-        ],
-      },
-      {
-        heading: 'For each job',
-        lines: [
-          '1. What appears to be wrong, in a sentence or two.',
-          '2. Whether somebody living here can do it, or whether it needs a tradesman.',
-          '3. If they can: what to buy, where to buy it in New Zealand, roughly what that costs, '
-          + 'and no more than five short steps.',
-          '4. If it needs a tradesman: which trade, why, and three of them (see below).',
-        ],
-      },
-      {
-        heading: 'Work a householder must not do',
-        lines: [
-          'These are never do-it-yourself in New Zealand, whatever the photograph shows. Name the '
-          + 'trade and say why, and do not offer steps:',
-          '• Prescribed electrical work — a registered electrician (EWRB).',
-          '• Gasfitting, and most plumbing and drainlaying — PGDB registered.',
-          '• Building work needing a consent or a Licensed Building Practitioner.',
-          '• Anything that might disturb asbestos, which includes most disturbance of linings, '
-          + 'soffits or textured ceilings in a house built before 2000.',
-          '• Work at height on a roof.',
-        ],
-      },
-      {
-        heading: 'Naming a tradesman',
-        lines: [
-          'Search for each one, and give the business name, a phone number, a link, and the address '
-          + 'of the page you found it on. An entry with no source is no use here: nothing at this '
-          + 'end can tell a real firm from a plausible name, so an unsourced one is thrown away '
-          + 'rather than shown.',
-          'If you cannot source three, give two, or one, or say none found. Do not fill the gap. '
-          + 'Prefer firms on the relevant public register, and say where that can be checked.',
-          'Give two costs rather than one: what it costs to get them to the door, and the likely '
-          + 'total as a range. A callout fee and a total are decided on differently — four jobs '
-          + 'booked into one visit pay the callout once — and say that both are indicative.',
-        ],
-      },
-      {
-        heading: 'Finish with this block',
-        lines: [
-          'Everything above is for a person to read. This is for the app: one fenced block at the '
-          + 'very end, holding the same answers keyed by reference. Leave out anything you have no '
-          + 'answer for. Keep money as text, exactly as you wrote it — it is quoted back with '
-          + 'today’s date beside it, never turned into a number.',
-          '"verdict" is one of diy, trade or unclear. "need_to_see" is for the unclear ones.',
-        ],
-      },
-      {
-        mono: true,
-        lines: [
-          '```' + ACTIONS_FENCE,
-          '{',
-          '  "SNAG-0042": {',
-          '    "diagnosis": "...",',
-          '    "verdict": "trade",',
-          '    "reason": "...",',
-          '    "need_to_see": null,',
-          '    "steps": ["...", "..."],',
-          '    "parts": [{ "item": "...", "where": "Mitre 10", "approx_nzd": "35-45" }],',
-          '    "trade": "plumber",',
-          '    "tradies": [{ "name": "...", "phone": "...", "url": "...",',
-          '                  "source": "...", "callout_nzd": "95", "total_nzd": "180-260" }]',
-          '  }',
-          '}',
-          '```',
-        ],
-      },
-    ],
-  };
-}
-
-// ---------------------------------------------------------------- the answer
-
-/** One answer, before it has been matched to a snag. */
-export interface ParsedAdvice {
-  reference: string;
-  diagnosis: string;
-  verdict: AdviceVerdict;
-  reason: string | null;
-  steps: string[];
-  parts: AdvicePart[];
-  trade: string | null;
-  tradies: AdviceTradie[];
-  needToSee: string | null;
-}
-
-const VERDICTS: AdviceVerdict[] = ['diy', 'trade', 'unclear'];
-
-/** Everything pasted in is somebody else's text. Trim it, cap it, or drop it. */
-function text(value: unknown, max: number): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
-}
-
-function textList(value: unknown, max: number, each: number): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => text(entry, each))
-    .filter((entry): entry is string => entry !== null)
-    .slice(0, max);
-}
-
-const PART_LIMIT = 20;
-const TRADIE_LIMIT = 5;
-const STEP_LIMIT = 8;
-
-function parseParts(value: unknown): AdvicePart[] {
-  if (!Array.isArray(value)) return [];
-  const out: AdvicePart[] = [];
-  for (const entry of value) {
-    // A bare string is a perfectly good part, and an answer that gives one
-    // should not lose the part because it skipped the shop.
-    if (typeof entry === 'string') {
-      const item = text(entry, 60);
-      if (item) out.push({ item, where: null, approxNzd: null });
-      continue;
-    }
-    if (!entry || typeof entry !== 'object') continue;
-    const row = entry as Row;
-    const item = text(row.item, 60);
-    if (!item) continue;
-    out.push({
-      item,
-      where: text(row.where, 60),
-      approxNzd: text(row.approx_nzd ?? row.approxNzd, 40),
-    });
-    if (out.length === PART_LIMIT) break;
-  }
-  return out;
-}
-
-/**
- * **A tradesman with no source is dropped, not shown unsourced.**
- *
- * This is the one place the parser throws away something an answer went to the
- * trouble of providing, and it is deliberate. A name and a mobile number are
- * the easiest things in the world to produce and the hardest thing here to
- * check; the URL is the only part of the row that can be followed. Keeping the
- * unsourced ones behind a warning would mean the household's own list holds
- * phone numbers nobody can account for — which is the failure the invitation
- * screen already taught this codebase: the row was never the problem, the
- * unverifiable claim was.
- */
-function parseTradies(value: unknown): AdviceTradie[] {
-  if (!Array.isArray(value)) return [];
-  const out: AdviceTradie[] = [];
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const row = entry as Row;
-    const name = text(row.name, 80);
-    const source = text(row.source, 300);
-    if (!name || !source) continue;
-    out.push({
-      name,
-      phone: text(row.phone, 30),
-      url: text(row.url, 300),
-      source,
-      calloutNzd: text(row.callout_nzd ?? row.calloutNzd, 40),
-      totalNzd: text(row.total_nzd ?? row.totalNzd, 40),
-    });
-    if (out.length === TRADIE_LIMIT) break;
-  }
-  return out;
-}
-
-/** The JSON out of a reply, wherever in it the reply chose to put it. */
-function findBlock(reply: string): string | null {
-  const fenced = new RegExp('```\\s*' + ACTIONS_FENCE + '\\s*([\\s\\S]*?)```', 'i').exec(reply);
-  if (fenced) return fenced[1];
-
-  const json = /```\s*json\s*([\s\S]*?)```/i.exec(reply);
-  if (json) return json[1];
-
-  // No fence at all: somebody pasted the block on its own, or a reply used a
-  // heading instead. The outermost braces are the best guess available, and a
-  // wrong guess fails as a parse error rather than as silence.
-  const open = reply.indexOf('{');
-  const close = reply.lastIndexOf('}');
-  return open >= 0 && close > open ? reply.slice(open, close + 1) : null;
-}
-
-/**
- * Turn a pasted reply into answers.
- *
- * **Never throws, and says what went wrong in words.** The one thing somebody
- * doing this actually needs to know is whether the paste worked, and the three
- * ways it doesn't — nothing pasted, no block in it, the block isn't JSON — are
- * three different mistakes with three different fixes.
- *
- * Takes either an object keyed by reference or an array of objects each naming
- * their own, because both are what comes back and the difference is not worth
- * a second round trip to the person holding the phone.
- */
-export function parseSnagActions(reply: string): { entries: ParsedAdvice[]; error: string | null } {
-  if (!reply.trim()) return { entries: [], error: 'Nothing pasted yet.' };
-
-  const block = findBlock(reply);
-  if (!block) {
-    return {
-      entries: [],
-      error: `No ${ACTIONS_FENCE} block in that. Paste the whole reply, including the block at the end.`,
-    };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(block);
-  } catch {
-    return { entries: [], error: "That block isn't readable — it may have been cut off part way." };
-  }
-
-  const rows: [string, Row][] = [];
-  if (Array.isArray(parsed)) {
-    for (const entry of parsed) {
-      if (!entry || typeof entry !== 'object') continue;
-      const row = entry as Row;
-      const reference = text(row.reference ?? row.ref, 40);
-      if (reference) rows.push([reference, row]);
-    }
-  } else if (parsed && typeof parsed === 'object') {
-    for (const [key, value] of Object.entries(parsed as Row)) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) rows.push([key, value as Row]);
-    }
-  }
-
-  const entries: ParsedAdvice[] = [];
-  const seen = new Set<string>();
-  for (const [rawReference, row] of rows) {
-    const reference = rawReference.trim().toUpperCase();
-    if (!reference || seen.has(reference)) continue;
-
-    const verdictText = text(row.verdict, 20)?.toLowerCase() ?? '';
-    const advice: ParsedAdvice = {
-      reference,
-      diagnosis: text(row.diagnosis, 600) ?? '',
-      verdict: (VERDICTS as string[]).includes(verdictText)
-        ? (verdictText as AdviceVerdict)
-        : 'unclear',
-      reason: text(row.reason, 400),
-      steps: textList(row.steps, STEP_LIMIT, 200),
-      parts: parseParts(row.parts),
-      trade: text(row.trade, 40),
-      tradies: parseTradies(row.tradies),
-      needToSee: text(row.need_to_see ?? row.needToSee, 300),
-    };
-
-    // An entry that answered nothing is not an answer. Applying it would stamp
-    // a date and a source onto a snag and tell the household nothing at all.
-    const saidSomething = advice.diagnosis || advice.steps.length > 0
-      || advice.parts.length > 0 || advice.tradies.length > 0 || advice.needToSee;
-    if (!saidSomething) continue;
-
-    seen.add(reference);
-    entries.push(advice);
-  }
-
-  if (entries.length === 0) {
-    return { entries: [], error: 'That block had no answers in it.' };
-  }
-  return { entries, error: null };
-}
-
-/**
- * Line the answers up against the snags they claim to be about.
- *
- * **A reference that isn't in hand is dropped and named, never guessed at.**
- * The list passed in is what this person can see in this place, so an unknown
- * reference is either a job from somewhere else, a job since deleted, or an
- * invention — and all three are the same answer: it is not written, and the
- * review screen says which ones were skipped rather than quietly applying
- * eleven of twelve.
- */
-export function matchAdviceToSnags(
-  entries: ParsedAdvice[],
-  snags: Snag[]
-): { matched: { snag: Snag; advice: ParsedAdvice }[]; unknown: string[] } {
-  const byReference = new Map(snags.map((snag) => [snag.reference.toUpperCase(), snag]));
-  const matched: { snag: Snag; advice: ParsedAdvice }[] = [];
-  const unknown: string[] = [];
-
-  for (const advice of entries) {
-    const snag = byReference.get(advice.reference);
-    if (snag) matched.push({ snag, advice });
-    else unknown.push(advice.reference);
-  }
-
-  return { matched, unknown };
-}
-
 /**
  * The advice on one snag, or null.
  *
@@ -4259,36 +3911,6 @@ export function mapAdvice(row: Row): SnagAdvice {
   };
 }
 
-/**
- * File one answer against one snag.
- *
- * **This writes nothing to the snag.** Its parts are proposals until somebody
- * accepts one, at which point that goes through `updateSnag` like any other
- * part — and starts the job, correctly, because filling the shopping list is
- * the act that starts it. See the migration header for why the whole reply
- * cannot simply be applied.
- */
-export async function recordSnagAdvice(
-  client: SupabaseClient,
-  snagId: string,
-  advice: Omit<ParsedAdvice, 'reference'>,
-  source: string
-): Promise<SnagAdvice> {
-  const { data, error } = await client.rpc('record_snag_advice', {
-    p_snag_id: snagId,
-    p_diagnosis: advice.diagnosis,
-    p_verdict: advice.verdict,
-    p_source: source,
-    p_reason: advice.reason,
-    p_steps: advice.steps,
-    p_parts: advice.parts,
-    p_trade: advice.trade,
-    p_tradies: advice.tradies,
-    p_need_to_see: advice.needToSee,
-  });
-  return mapAdvice(unwrap<Row>(data, error, "Couldn't save that assessment"));
-}
-
 export async function deleteSnagAdvice(client: SupabaseClient, snagId: string): Promise<void> {
   const { error } = await client.rpc('delete_snag_advice', { p_snag_id: snagId });
   if (error) throw asError(error, "Couldn't remove that assessment");
@@ -4308,11 +3930,6 @@ export function formatDayFirst(iso: string | null): string {
   const [y, m, d] = iso.split('-').map(Number);
   if (!y || !m || !d) return '';
   return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
-}
-
-/** "Pasted 15 Sep" — the source line under the advice. */
-export function adviceSource(now = new Date()): string {
-  return `Pasted ${now.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}`;
 }
 
 // ---------------------------------------------------------------- asking SnagHQ

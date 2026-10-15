@@ -456,10 +456,9 @@ describe('with label reading off, as v1 ships', () => {
   });
 });
 
+// Consumables are parked (October 2026): the kind is not offered, and a pack
+// read off the photo is not chosen as one.
 describe('a consumable', () => {
-  const dishwasher = { id: 'd', kind: 'appliance', name: 'Bosch dishwasher', room: 'Kitchen' } as any;
-  const mower = { id: 'm', kind: 'appliance', name: 'Lawnmower', room: 'Garage' } as any;
-  const tabsOnShelf = { id: 't', kind: 'consumable', name: 'Rinse aid', room: 'Kitchen' } as any;
   const PACK = {
     legible: true, make: 'Finish', model: null, serial: null, manufactured: null, colourName: null,
     colourCode: null, product: 'Quantum Ultimate', sheen: null, tint: null, hex: null, consumables: [],
@@ -486,47 +485,23 @@ describe('a consumable', () => {
     return r;
   }
 
-  it('is put where the appliance it is for lives, ticked against it, and added with the link', async () => {
-    mock_readLabel.mockResolvedValue(answer(PACK, { name: 'Dishwasher tablets', kind: 'consumable', room: null }));
-    const r = await openWith([dishwasher, mower, tabsOnShelf]);
-    await shoot(r);
-    expect(press(r, 'Kitchen').props.accessibilityState).toEqual({ selected: true });
-    await tap(r, 'Next');
-    expect(press(r, 'From the photo: Dishwasher tablets').props.accessibilityState).toEqual({ selected: true });
-    await tap(r, 'Next');
-
-    expect(texts(r)).toContain("What's it used with?");
-    expect(press(r, 'Bosch dishwasher · Kitchen').props.accessibilityState).toEqual({ selected: true });
-    expect(press(r, 'Lawnmower · Garage').props.accessibilityState).toEqual({ selected: false });
-    // Another consumable is never something a consumable is used with.
-    expect(press(r, 'Rinse aid · Kitchen')).toBeUndefined();
-    expect(boxes(r).Size.props.value).toBe('60 tablets');
-    expect(boxes(r).Product.props.value).toBe('Quantum Ultimate');
-    // A pack takes nothing and is never serviced.
-    expect(texts(r)).not.toContain('Serviced how often?');
-
-    await tap(r, 'Add it to the house');
-    expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({
-      kind: 'consumable', room: 'Kitchen', name: 'Dishwasher tablets', make: 'Finish',
-      model: 'Quantum Ultimate', spec: { size: '60 tablets' }, consumables: [], serviceDays: null,
-      usedWith: ['d'],
-    }));
-  });
-
-  it('never ticks over somebody’s own answer', async () => {
-    let land!: (v: unknown) => void;
-    mock_readLabel.mockReturnValue(new Promise((resolve) => { land = resolve; }));
-    const r = await openWith([dishwasher, mower]);
+  it('is not offered when somebody names a thing themselves', async () => {
+    mock_readLabel.mockReturnValue(new Promise(() => {}));
+    const r = await openWith([]);
     await shoot(r);
     await tap(r, 'Garage');
     await tap(r, 'Next');
     await tap(r, 'Something else…');
-    await TestRenderer.act(async () => { boxes(r)['What is it'].props.onChangeText('Weed killer'); });
-    await tap(r, 'Consumable');
+    expect(press(r, 'Appliance')).toBeDefined();
+    expect(press(r, 'Consumable')).toBeUndefined();
+  });
+
+  it('is never chosen from a pack read off the photo', async () => {
+    mock_readLabel.mockResolvedValue(answer(PACK, { name: 'Dishwasher tablets', kind: 'consumable', room: null }));
+    const r = await openWith([]);
+    await shoot(r);
+    await tap(r, 'Kitchen');
     await tap(r, 'Next');
-    await tap(r, 'Lawnmower · Garage');
-    await TestRenderer.act(async () => { land(answer(PACK, { name: 'Dishwasher tablets', kind: 'consumable', room: null })); });
-    expect(press(r, 'Bosch dishwasher · Kitchen').props.accessibilityState).toEqual({ selected: false });
-    expect(press(r, 'Lawnmower · Garage').props.accessibilityState).toEqual({ selected: true });
+    expect(press(r, 'From the photo: Dishwasher tablets')?.props.accessibilityState).not.toEqual({ selected: true });
   });
 });

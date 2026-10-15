@@ -41,13 +41,12 @@ const byLabel = (r: ReturnType<typeof render>, label: string) =>
     { deep: true },
   )[0];
 
-const sheet = (counts = { view: 3, all: 12 }, canBrief = false) =>
+const sheet = (counts = { view: 3, all: 12 }) =>
   render(
     <ExportSheet
       visible
       what="the list"
       counts={counts}
-      canBrief={canBrief}
       onExport={onExport}
       onCancel={onCancel}
     />,
@@ -70,13 +69,13 @@ describe('choosing what goes in', () => {
     expect(onExport).not.toHaveBeenCalled();
 
     await press(pressableAround(r, 'Export'));
-    expect(onExport).toHaveBeenCalledWith('all', 'pdf', false);
+    expect(onExport).toHaveBeenCalledWith('all', 'pdf');
   });
 
   it('starts on what you are looking at, as a spreadsheet', async () => {
     const r = sheet();
     await press(pressableAround(r, 'Export'));
-    expect(onExport).toHaveBeenCalledWith('view', 'csv', false);
+    expect(onExport).toHaveBeenCalledWith('view', 'csv');
   });
 
   // One row is one row. "1 rows" is the kind of thing nobody notices until it
@@ -87,44 +86,13 @@ describe('choosing what goes in', () => {
   });
 });
 
-describe('the brief', () => {
-  // Two named chips rather than one that toggles: a single "include the brief"
-  // chip would leave the other answer as the unlabelled absence of a press,
-  // which is the mistake the capture sheet's Urgent chip made.
-  it('is offered on a PDF of the list, defaulted on', async () => {
-    const r = sheet({ view: 3, all: 12 }, true);
-    await press(byLabel(r, 'PDF'));
-    await press(pressableAround(r, 'Export'));
-    expect(onExport).toHaveBeenCalledWith('view', 'pdf', true);
-  });
-
-  it('is one tap to drop, for the copy somebody sends on', async () => {
-    const r = sheet({ view: 3, all: 12 }, true);
-    await press(byLabel(r, 'PDF'));
-    await press(byLabel(r, 'To send to somebody'));
-    await press(pressableAround(r, 'Export'));
-    expect(onExport).toHaveBeenCalledWith('view', 'pdf', false);
-  });
-
-  // A brief is prose addressed to a reader; a spreadsheet's job is to be
-  // sorted. The question goes away rather than greying out.
-  it('is not asked about at all for a spreadsheet', async () => {
-    const r = sheet({ view: 3, all: 12 }, true);
-    expect(r.queryByText('To get it assessed')).toBeNull();
-    await press(pressableAround(r, 'Export'));
-    expect(onExport).toHaveBeenCalledWith('view', 'csv', false);
-  });
-
-  // Nothing is wrong with a dishwasher that is merely recorded, so the house
-  // record never offers it — a question whose answer changes nothing is worse
-  // than no question.
-  it('is never offered on an extract that cannot carry it', async () => {
-    const r = sheet();
-    await press(byLabel(r, 'PDF'));
-    expect(r.queryByText('To get it assessed')).toBeNull();
-    await press(pressableAround(r, 'Export'));
-    expect(onExport).toHaveBeenCalledWith('view', 'pdf', false);
-  });
+// The assessment brief went in October 2026 (0 assessments ever). A PDF is
+// the list and its photos, with nothing addressed to anybody.
+it('asks nothing about what a PDF is for', async () => {
+  const r = sheet();
+  await press(byLabel(r, 'PDF'));
+  expect(r.queryByText('To get it assessed')).toBeNull();
+  expect(r.queryByText('To send to somebody')).toBeNull();
 });
 
 const button = (r: ReturnType<typeof render>, label: string) =>

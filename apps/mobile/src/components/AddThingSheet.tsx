@@ -527,7 +527,9 @@ export default function AddThingSheet({
     if (step !== 'what' || !guess?.name || guessOffered.current) return;
     guessOffered.current = true;
     const guessKind = guess.kind ?? 'appliance';
-    if (name.trim() || naming || guessKind === 'finish' || guessKind === 'tile') return;
+    // A consumable is parked (`THING_KINDS`): a pack read off the photo is not
+    // chosen as one, and the person names it themselves.
+    if (name.trim() || naming || guessKind === 'finish' || guessKind === 'tile' || guessKind === 'consumable') return;
     setKind(guessKind);
     setName(guess.name);
   }, [step, guess]);

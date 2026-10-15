@@ -34,12 +34,6 @@
       ],
       "expo-asset",
       [
-        "expo-camera",
-        {
-          "cameraPermission": "Snag needs your camera so you can photograph something that needs doing."
-        }
-      ],
-      [
         "expo-navigation-bar",
         {
           "visibility": "hidden",

@@ -216,8 +216,10 @@ export default function SnagDetailScreen() {
         getSnag(params.snagId),
         getComments(params.snagId),
         // Never fatal: a job with no assessment is the resting state, and a
-        // read that fails must not take the page down with it.
-        getSnagAdvice(params.snagId).catch(() => null),
+        // read that fails must not take the page down with it. Only SnagHQ's
+        // staff write one now (the paste-back loop went in October 2026), so
+        // it is not read while Ask SnagHQ is off.
+        askSnagHQEnabled() ? getSnagAdvice(params.snagId).catch(() => null) : null,
         // Never fatal either, for the same reason: most jobs were never asked
         // about, and a question nobody can fetch must not hide the job.
         // And not read at all while the feature is off.

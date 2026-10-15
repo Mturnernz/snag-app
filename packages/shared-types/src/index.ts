@@ -342,7 +342,6 @@ export interface Snag {
   needsParts: boolean;
   dueAt: string | null;
   repeatDays: number | null;
-  assigneeId: string | null;
 
   /**
    * What this snag is about, from the house record — the heat pump, the
@@ -392,7 +391,6 @@ export interface Snag {
   /** Joined in by `home.snags_with_details`. */
   propertyName: string;
   reporterName: string;
-  assigneeName: string | null;
   commentCount: number;
   /** The thing it points at, for a card that can say so without a second read. */
   thingName: string | null;
@@ -437,7 +435,6 @@ export interface SnagFilter {
   propertyId?: string | null;
   status?: SnagStatus[];
   room?: string | null;
-  assigneeId?: string | null;
   /** Only items with a due date at or before now. */
   dueOnly?: boolean;
   needsParts?: boolean;
@@ -489,14 +486,19 @@ export type ThingKind =
   | 'consumable';
 
 /**
- * The three that are built. Everything else is deliberately not offered yet.
+ * The kinds *What is it?* offers. Everything else is deliberately not offered.
  *
  * `tile` arrived with the projects work, because a renovation's most durable
  * answer is which tile went on the bathroom floor and a tile is not paint: it
  * has a size and a grout colour, and "Paint" over a tile code is the wrong word
  * on the one page whose job is to be believed in a shop eight months later.
+ *
+ * **`consumable` is parked** (October 2026, the function review): built on
+ * 5 October, and nobody recorded one or linked one in the ten days after. The
+ * kind, `home.thing_uses` and the page that shows one all stay, so a household
+ * that already had one keeps it; it is only no longer offered.
  */
-export const THING_KINDS: ThingKind[] = ['appliance', 'finish', 'tile', 'consumable'];
+export const THING_KINDS: ThingKind[] = ['appliance', 'finish', 'tile'];
 
 /** On a chip, where it names one thing. */
 export const THING_KIND_LABELS: Record<ThingKind, string> = {
@@ -860,12 +862,11 @@ export interface AbsentThing {
 
 // ---------------------------------------------------------------- advice
 //
-// What came back when somebody asked about the list.
-//
-// The loop is deliberately outside the app: a briefed PDF goes out, an answer
-// comes back as text, and `parseSnagActions` turns it into rows. Nothing here
-// is written by the app itself, which is why every field is treated as a claim
-// rather than a fact — see `SnagAdvice.source`.
+// An assessment of a job, written by SnagHQ's staff when a household asks
+// (`staff_reply`). It was also pasted back from an AI assistant's reply to a
+// briefed PDF until October 2026; that loop was never used and is gone. Nothing
+// here is written by the app itself, which is why every field is treated as a
+// claim rather than a fact — see `SnagAdvice.source`.
 
 /**
  * Whether the person holding the phone can do it.
@@ -2260,14 +2261,6 @@ export type RootStackParamList = {
    * the list it is covering.
    */
   ProjectDetail: { projectId: string };
-  /**
-   * Where an answer to a briefed extract comes back in.
-   *
-   * A screen rather than a sheet: it is a paste, then a list of what that paste
-   * would change, and both want the whole height. Reached from the foot of the
-   * list, beside the way out — the two halves of the same journey.
-   */
-  PasteAdvice: undefined;
 };
 
 export type MainTabParamList = {

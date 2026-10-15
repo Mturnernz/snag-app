@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { Text } from './Text';
 
 import Sheet from './Sheet';
 import { Group, PrimaryButton, RadioRow, SectionTitle, groupedStyles } from './Grouped';

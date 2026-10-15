@@ -1,7 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, Image, StyleSheet,
+  View,
+  Modal,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  Image,
+  StyleSheet,
 } from 'react-native';
+import { Text, TextInput } from './Text';
 import * as DocumentPicker from 'expo-document-picker';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
@@ -527,7 +534,9 @@ export default function AddThingSheet({
     if (step !== 'what' || !guess?.name || guessOffered.current) return;
     guessOffered.current = true;
     const guessKind = guess.kind ?? 'appliance';
-    if (name.trim() || naming || guessKind === 'finish' || guessKind === 'tile') return;
+    // A consumable is parked (`THING_KINDS`): a pack read off the photo is not
+    // chosen as one, and the person names it themselves.
+    if (name.trim() || naming || guessKind === 'finish' || guessKind === 'tile' || guessKind === 'consumable') return;
     setKind(guessKind);
     setName(guess.name);
   }, [step, guess]);
@@ -1396,8 +1405,11 @@ function LabelStatus({ reading }: { reading: Reading }) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.scrim },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     position: 'absolute',
     left: 0,
     right: 0,
@@ -1462,7 +1474,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.chip,
     backgroundColor: Colors.sunken,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   fields: { gap: Spacing.sm, marginTop: Spacing.sm },

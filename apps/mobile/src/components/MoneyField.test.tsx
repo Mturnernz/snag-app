@@ -53,9 +53,9 @@ it('offers two named halves rather than one chip that toggles', () => {
 
 it('lights the half that is selected, in the app’s one chip styling', () => {
   const r = arrange({ inclusive: true });
-  // Solid fern when on — never primaryLight, which is the tint behind fern
-  // text and not a selected state for a control.
-  expect(flattenStyle(fillOf(r, 'Includes GST').props.style).backgroundColor).toBe(Colors.primary);
+  // Ink when on (Bone & Glass: a choice already made is ink, and the action
+  // colour is for doing) — never primaryLight, the tint behind action text.
+  expect(flattenStyle(fillOf(r, 'Includes GST').props.style).backgroundColor).toBe(Colors.selected);
   expect(flattenStyle(fillOf(r, 'Excludes GST').props.style).backgroundColor).toBeUndefined();
 });
 

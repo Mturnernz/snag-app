@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { Text } from '../components/Text';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -10,10 +11,8 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import AddThingSheet from '../components/AddThingSheet';
 import ExportFooter from '../components/ExportFooter';
 import ProjectRoomsSheet from '../components/ProjectRoomsSheet';
-import BuildUpSheet from '../components/BuildUpSheet';
 import ExpectedCostSheet from '../components/ExpectedCostSheet';
 import EditBudgetSheet from '../components/EditBudgetSheet';
-import ScheduleSheet from '../components/ScheduleSheet';
 import InvoiceReviewCard from '../components/InvoiceReviewCard';
 import InvoiceReviewSheet from '../components/InvoiceReviewSheet';
 import ReviewEditSheet from '../components/ReviewEditSheet';
@@ -40,10 +39,10 @@ import { useToast } from '../hooks/useToast';
 import { showAlert } from '../lib/alert';
 import { fileServiceJob } from '../lib/serviceJob';
 import {
-  addExpectedCostLine, addMilestone, addQuoteLine, approveInvoiceReview, clearFigure,
+  addExpectedCostLine, approveInvoiceReview, clearFigure,
   createElement, createExpectedCost, createLocation, createThing, deleteElement,
   declineInvoiceReview, deleteExpectedCost, deleteExpectedCostLine, deleteInvoiceReview,
-  deleteMilestone, deleteProject, deleteQuoteLine, deleteStoredFiles, describeRoom,
+  deleteProject, deleteStoredFiles, describeRoom,
   formatMoney, getProjectPage, getSupplierNames, liveSetAsides, payBill, projectSummary,
   renameSupplier, restoreInvoiceReview, setExpectedCostConfirmed, updateExpectedCost, updateExpectedCostLine,
   updateProject, type ProjectPage, type RoomRow,
@@ -123,8 +122,6 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [removingElement, setRemovingElement] = useState<ProjectElement | null>(null);
-  const [buildUpFor, setBuildUpFor] = useState<ProjectQuote | null>(null);
-  const [scheduleFor, setScheduleFor] = useState<ProjectQuote | null>(null);
   const [expectedOpen, setExpectedOpen] = useState(false);
   const [editingExpected, setEditingExpected] = useState<ProjectExpectedCost | null>(null);
   const [thingFor, setThingFor] = useState<ProjectItem | null>(null);
@@ -1042,7 +1039,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       />
 
       <PriceSheet
-        visible={price !== null && buildUpFor === null && scheduleFor === null}
+        visible={price !== null}
         quote={price}
         householdId={project.householdId}
         quotes={quotes}
@@ -1050,8 +1047,6 @@ export default function ProjectDetailScreen({ route }: Props) {
         lines={page.lines}
         onClose={() => setOpenPrice(null)}
         onChanged={changed}
-        onOpenBuildUp={setBuildUpFor}
-        onOpenSchedule={setScheduleFor}
         onOpen={(q) => setOpenPrice(q.id)}
         elements={elements}
         locations={locations}
@@ -1108,40 +1103,6 @@ export default function ProjectDetailScreen({ route }: Props) {
         destructive
         onCancel={() => setRemovingElement(null)}
         onConfirm={() => removingElement && removeElement(removingElement)}
-      />
-
-      <BuildUpSheet
-        visible={buildUpFor !== null}
-        quote={buildUpFor}
-        lines={buildUpFor ? page.lines.filter((l) => l.quoteId === buildUpFor.id) : []}
-        quotes={quotes}
-        onClose={() => setBuildUpFor(null)}
-        onAddLine={async (input) => {
-          if (!buildUpFor) return;
-          await addQuoteLine(buildUpFor.id, input);
-          await changed('Added');
-        }}
-        onDeleteLine={async (lineId) => {
-          await deleteQuoteLine(lineId);
-          await changed('Removed');
-        }}
-      />
-
-      <ScheduleSheet
-        visible={scheduleFor !== null}
-        quote={scheduleFor}
-        milestones={scheduleFor ? page.milestones.filter((m) => m.quoteId === scheduleFor.id) : []}
-        claimedIds={quotes.map((q) => q.settlesMilestoneId).filter((id): id is string => id !== null)}
-        onClose={() => setScheduleFor(null)}
-        onAdd={async (input) => {
-          if (!scheduleFor) return;
-          await addMilestone(scheduleFor.id, input);
-          await changed('Added');
-        }}
-        onDelete={async (milestoneId) => {
-          await deleteMilestone(milestoneId);
-          await changed('Removed');
-        }}
       />
 
       <ExpectedCostSheet

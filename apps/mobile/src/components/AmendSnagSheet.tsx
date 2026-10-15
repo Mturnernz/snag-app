@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, Pressable, Modal, ActivityIndicator, StyleSheet,
+  View,
+  Pressable,
+  Modal,
+  ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import Icon from './Icon';
 import RoomPicker from './RoomPicker';
@@ -269,8 +274,11 @@ function nextLabel(step: AmendStep, note: string): string {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(43, 39, 36, 0.4)' },
+  backdrop: { flex: 1, backgroundColor: Colors.scrim },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     backgroundColor: Colors.surface,
     borderTopLeftRadius: Radius.card,
     borderTopRightRadius: Radius.card,

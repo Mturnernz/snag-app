@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { View, Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { Text } from './Text';
 
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -282,7 +283,7 @@ export function RadioRow({
       <Icon
         name={selected ? 'radio-button-on' : 'radio-button-off'}
         size={22}
-        color={selected ? Colors.primary : Colors.chevron}
+        color={selected ? Colors.selected : Colors.chevron}
       />
       <View style={styles.titles}>
         <Text style={styles.title}>{title}</Text>
@@ -364,18 +365,16 @@ const styles = StyleSheet.create({
   textButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.sm },
   textButtonLabel: { fontSize: Typography.body, color: Colors.primary },
   segment: {
-    flexDirection: 'row', backgroundColor: Colors.segment, borderRadius: 9, padding: 2,
+    flexDirection: 'row', backgroundColor: Colors.segment, borderRadius: Radius.input, padding: 3,
     alignSelf: 'flex-start',
   },
   segmentTap: { paddingVertical: 8, marginVertical: -8 },
-  segmentOption: { height: 32, paddingHorizontal: Spacing.md + 2, borderRadius: 7, justifyContent: 'center' },
-  segmentOn: {
-    backgroundColor: Colors.surface,
-    shadowColor: Colors.textPrimary, shadowOpacity: 0.15, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
+  segmentOption: { height: 32, paddingHorizontal: Spacing.md + 2, borderRadius: 9, justifyContent: 'center' },
+  // Bone & Glass: a choice already made is ink with bone words. The action
+  // colour is for doing, never for marking what is chosen.
+  segmentOn: { backgroundColor: Colors.selected },
   segmentLabel: { fontSize: Typography.subhead, color: Colors.textPrimary },
-  segmentLabelOn: { fontWeight: Typography.semibold },
+  segmentLabelOn: { fontWeight: Typography.semibold, color: Colors.onSelected },
   radioRow: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md, minHeight: 56,
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,

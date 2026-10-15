@@ -22,8 +22,12 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 const mock_navigate = jest.fn();
+const mock_goBack = jest.fn();
+const mock_setParams = jest.fn();
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: mock_navigate, goBack: jest.fn(), addListener: () => () => {} }),
+  useNavigation: () => ({
+    navigate: mock_navigate, goBack: mock_goBack, setParams: mock_setParams, addListener: () => () => {},
+  }),
 }));
 jest.mock('../components/AddThingSheet', () => {
   const React = require('react');
@@ -43,6 +47,8 @@ const mock_markThingAbsent = jest.fn();
 const mock_getFileUrls = jest.fn();
 const mock_getLabelReadingsToCheck = jest.fn();
 const mock_createThing = jest.fn();
+const mock_renameLocation = jest.fn().mockResolvedValue(undefined);
+const mock_deleteLocation = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => ({
   getLabelReadingsToCheck: (...a: unknown[]) => mock_getLabelReadingsToCheck(...a),
   getThings: (...a: unknown[]) => mock_getThings(...a),
@@ -50,6 +56,8 @@ jest.mock('../lib/supabase', () => ({
   markThingAbsent: (...a: unknown[]) => mock_markThingAbsent(...a),
   getFileUrls: (...a: unknown[]) => mock_getFileUrls(...a),
   createThing: (...a: unknown[]) => mock_createThing(...a),
+  renameLocation: (...a: unknown[]) => mock_renameLocation(...a),
+  deleteLocation: (...a: unknown[]) => mock_deleteLocation(...a),
   createLocation: jest.fn(),
 }));
 jest.mock('../lib/serviceJob', () => ({ fileServiceJob: jest.fn() }));
@@ -316,5 +324,59 @@ describe('Whole house', () => {
     // Null is a choice here: the walkthrough opens on "what is it".
     await TestRenderer.act(async () => pressable(r, 'Add something to Whole house').props.onPress());
     expect(sheet().start).toEqual({ room: null });
+  });
+});
+
+// A room can be renamed or taken away from its own page (October 2026). The
+// Location tags screen that used to do it went in d1b398d, and one place was
+// found with 27 rooms and no way to remove one.
+describe('the room itself', () => {
+  const tap = async (r: ReturnType<typeof render>, label: string) => {
+    const node = r.root.findAll((n: any) => n.props?.accessibilityLabel === label && n.props?.onPress)[0];
+    await TestRenderer.act(async () => { await node.props.onPress(); });
+  };
+  const box = (r: ReturnType<typeof render>) =>
+    r.root.findAll((n: any) => n.props?.accessibilityLabel === "The room's name" && n.props?.onChangeText)[0];
+
+  it('renames, in one call, and follows the room to its new name', async () => {
+    const r = await open('Laundry');
+    await tap(r, 'Rename Laundry');
+    await TestRenderer.act(async () => { box(r).props.onChangeText('Utility room'); });
+    await TestRenderer.act(async () => { box(r).props.onSubmitEditing(); });
+
+    expect(mock_renameLocation).toHaveBeenCalledWith('l1', 'Utility room');
+    expect((global as any).__household.reloadLocations).toHaveBeenCalled();
+    expect(mock_setParams).toHaveBeenCalledWith({ room: 'Utility room' });
+  });
+
+  it('writes nothing when the name did not change', async () => {
+    const r = await open('Laundry');
+    await tap(r, 'Rename Laundry');
+    await TestRenderer.act(async () => { box(r).props.onSubmitEditing(); });
+    expect(mock_renameLocation).not.toHaveBeenCalled();
+  });
+
+  it('holds the box open with the reason when the name is taken', async () => {
+    mock_renameLocation.mockRejectedValueOnce(new Error('Kitchen is already a room here'));
+    const r = await open('Laundry');
+    await tap(r, 'Rename Laundry');
+    await TestRenderer.act(async () => { box(r).props.onChangeText('Kitchen'); });
+    await TestRenderer.act(async () => { box(r).props.onSubmitEditing(); });
+    expect(r.queryByText('Kitchen is already a room here')).not.toBeNull();
+    expect(box(r)).toBeDefined();
+  });
+
+  it('removes a room after asking, and goes back when nothing was in it', async () => {
+    const r = await open('Hallway');
+    await tap(r, 'Remove Hallway');
+    const confirm = r.root.findAll((n: any) => typeof n.type !== 'string' && n.props?.title === 'Remove Hallway?')[0];
+    await TestRenderer.act(async () => { await confirm.props.onConfirm(); });
+    expect(mock_deleteLocation).toHaveBeenCalledWith('l2');
+    expect(mock_goBack).toHaveBeenCalled();
+  });
+
+  it('offers neither for Whole house, which is not a room', async () => {
+    const r = await open(null);
+    expect(r.root.findAll((n: any) => /^Rename /.test(n.props?.accessibilityLabel ?? '')).length).toBe(0);
   });
 });

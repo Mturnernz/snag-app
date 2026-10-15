@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, ScrollView, RefreshControl, Pressable, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,14 +9,19 @@ import {
 import ScreenHeader from '../components/ScreenHeader';
 import ThingCard, { GhostCard } from '../components/ThingCard';
 import EmptyState from '../components/EmptyState';
+import Sheet from '../components/Sheet';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { Text, TextInput } from '../components/Text';
 import Icon from '../components/Icon';
 import AddThingSheet from '../components/AddThingSheet';
 import { Group, SectionTitle, groupedStyles } from '../components/Grouped';
-import { Colors, Spacing, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useAddThing } from '../hooks/useAddThing';
 import { useOnReturn } from '../hooks/useOnReturn';
-import { getAbsentThings, getFileUrls, getThings, markThingAbsent } from '../lib/supabase';
+import {
+  deleteLocation, getAbsentThings, getFileUrls, getThings, markThingAbsent, renameLocation,
+} from '../lib/supabase';
 import { labelsToCheck } from '../lib/labelChecks';
 import { showAlert } from '../lib/alert';
 import { RETURN_RELOAD_MS } from '../lib/foreground';
@@ -56,7 +61,14 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export default function HouseRoomScreen({ route }: Props) {
   const { room } = route.params;
   const navigation = useNavigation<Nav>();
-  const { properties, activeProperty } = useHousehold();
+  const { properties, activeProperty, locations, reloadLocations } = useHousehold();
+  /** This room's tag, when the place still has one by this name. */
+  const location = room === null ? null : locations.find((one) => one.name === room) ?? null;
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [renameProblem, setRenameProblem] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const renameBusy = useRef(false);
 
   const [things, setThings] = useState<Thing[]>([]);
   const [absent, setAbsent] = useState<AbsentThing[]>([]);
@@ -137,6 +149,54 @@ export default function HouseRoomScreen({ route }: Props) {
 
   const empty = !loading && recorded.length === 0 && ghosts.length === 0;
 
+  /**
+   * Renaming a room renames everything filed under it at this place — its
+   * jobs, its things, what it hasn't got — in one call (`rename_location`), so
+   * nothing goes on saying the old name. The box writes when it is left, on
+   * Return or *Done*, and only when it says something new.
+   */
+  async function commitRename(): Promise<boolean> {
+    if (!location || renameBusy.current) return false;
+    const next = newName.trim();
+    if (!next || next === location.name) {
+      setRenaming(false);
+      return true;
+    }
+    renameBusy.current = true;
+    try {
+      await renameLocation(location.id, next);
+      await reloadLocations();
+      setRenaming(false);
+      navigation.setParams({ room: next });
+      return true;
+    } catch (err: any) {
+      // Held open with the words still there, rather than closing over a name
+      // it did not take.
+      setRenameProblem(err?.message ?? "Couldn't rename that room");
+      return false;
+    } finally {
+      renameBusy.current = false;
+    }
+  }
+
+  /**
+   * Removing a room stops it being offered — to capture, to the walkthrough,
+   * to a job's room picker. It does not rewrite what is filed under it: a job
+   * logged in the Sleepout still says Sleepout, because rooms are text so that
+   * history survives. The dialog says which.
+   */
+  async function remove() {
+    if (!location) return;
+    setRemoving(false);
+    try {
+      await deleteLocation(location.id);
+      await reloadLocations();
+      if (recorded.length === 0) navigation.goBack();
+    } catch (err: any) {
+      showAlert("Couldn't remove that room", err?.message ?? 'Please try again.');
+    }
+  }
+
   return (
     <View style={groupedStyles.screen}>
       <ScreenHeader
@@ -213,7 +273,65 @@ export default function HouseRoomScreen({ route }: Props) {
             message="The + at the top adds the first thing."
           />
         ) : null}
+
+        {/* The room itself: renamed or taken away here, where it is shown.
+            Quiet, at the foot, and only for a room the place still has. */}
+        {location ? (
+          <View style={styles.roomActions}>
+            <Pressable
+              onPress={() => { setNewName(location.name); setRenameProblem(null); setRenaming(true); }}
+              style={styles.roomAction}
+              accessibilityRole="button"
+              accessibilityLabel={`Rename ${location.name}`}
+            >
+              <Icon name="pencil-outline" size="sm" color={Colors.textSecondary} />
+              <Text style={styles.roomActionLabel}>Rename this room</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setRemoving(true)}
+              style={styles.roomAction}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${location.name}`}
+            >
+              <Icon name="trash-outline" size="sm" color={Colors.danger} />
+              <Text style={[styles.roomActionLabel, styles.roomActionDanger]}>Remove this room</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </ScrollView>
+
+      <Sheet
+        visible={renaming}
+        title="Rename this room"
+        subtitle="Its jobs and things move with it."
+        closeLabel="Done"
+        onClose={() => { void commitRename(); }}
+      >
+        <TextInput
+          value={newName}
+          onChangeText={(text) => { setNewName(text); setRenameProblem(null); }}
+          onSubmitEditing={() => { void commitRename(); }}
+          onBlur={() => { if (renaming) void commitRename(); }}
+          autoFocus
+          maxLength={40}
+          returnKeyType="done"
+          style={styles.renameBox}
+          accessibilityLabel="The room's name"
+        />
+        {renameProblem ? <Text style={styles.renameProblem}>{renameProblem}</Text> : null}
+      </Sheet>
+
+      <ConfirmDialog
+        visible={removing}
+        title={`Remove ${location?.name ?? 'this room'}?`}
+        message={recorded.length > 0
+          ? `It won't be offered for new jobs or things. The ${recorded.length === 1 ? 'thing' : `${recorded.length} things`} here, and any job filed in ${location?.name}, keep the name, so this page stays while they are here.`
+          : `It won't be offered for new jobs or things. Any job filed in ${location?.name} keeps the name.`}
+        confirmLabel="Remove"
+        destructive
+        onCancel={() => setRemoving(false)}
+        onConfirm={() => { void remove(); }}
+      />
 
       <AddThingSheet {...adding.sheet} recorded={things} />
     </View>
@@ -228,5 +346,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ghosts: { gap: Spacing.sm },
+  roomActions: { marginTop: Spacing.xxl, gap: Spacing.xs },
+  roomAction: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: MIN_TOUCH_TARGET,
+  },
+  roomActionLabel: { fontSize: Typography.subhead, color: Colors.textSecondary },
+  roomActionDanger: { color: Colors.danger },
+  renameBox: {
+    minHeight: MIN_TOUCH_TARGET,
+    borderRadius: Radius.input,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.md,
+    fontSize: Typography.body,
+    color: Colors.textPrimary,
+  },
+  renameProblem: { fontSize: Typography.sm, color: Colors.danger, marginTop: Spacing.sm },
   contentEmpty: { flexGrow: 1, justifyContent: 'center' },
 });

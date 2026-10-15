@@ -1,13 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, SectionList, ScrollView, RefreshControl, Pressable, StyleSheet, BackHandler,
-  Linking, Platform,
+  View,
+  SectionList,
+  ScrollView,
+  RefreshControl,
+  Pressable,
+  StyleSheet,
+  BackHandler,
+  Linking,
+  Platform,
 } from 'react-native';
+import { Text, TextInput } from '../components/Text';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import SnagCard from '../components/SnagCard';
+import PhotoCard from '../components/PhotoCard';
+import { useDockClearance } from '../navigation/Dock';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import { fileCapturedPhoto } from '../components/ComposeBar';
@@ -19,15 +29,15 @@ import ShareJobsSheet, { type ShareNotes } from '../components/ShareJobsSheet';
 import StickyActionBar from '../components/StickyActionBar';
 import Button from '../components/Button';
 import AmendSnagSheet from '../components/AmendSnagSheet';
-import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
 import { useCreateRoom } from '../hooks/useCreateRoom';
 import { useFirstCapture } from '../hooks/useFirstCapture';
 import { useOnReturn } from '../hooks/useOnReturn';
 import {
-  createSnag, getComments, getFileUrls, getSnags, getThings, markListSeen, setPartBought, setSnagStatus,
-  updateSnag,
+  createSnag, getComments, getFileUrls, getNotesSince, getSnags, getThings, markListSeen, setPartBought,
+  setSnagStatus, updateSnag,
 } from '../lib/supabase';
 import { canShareFiles, shareFile } from '../lib/share';
 import { saveFile } from '../lib/download';
@@ -40,8 +50,9 @@ import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
 import HomePickerSheet from '../components/HomePickerSheet';
 import {
-  assessmentBrief, dueState, exportDateStamp, exportFileName, isDoneForNow, placeTitle, quoteBrief,
+  dueState, exportDateStamp, exportFileName, isDoneForNow, placeTitle, quoteBrief, searchSnags,
   shoppingCount, shoppingList, snagExportPhotos, snagExportTable, snagHeadline, snagQuoteTable,
+  snagsWithNewNotes, type NoteStamp,
 } from '@snag/supabase-queries';
 import { loadExportImages, renderPdf, writeExport, type ExportFormat } from '../lib/exportFile';
 import { RootStackParamList, Snag, Thing } from '../types';
@@ -114,6 +125,16 @@ function describeSince(iso: string | null): string | null {
   return `since ${seen.toLocaleDateString()}`;
 }
 
+/** "2 added and 1 new note since Tuesday" — what the news is, in words. */
+function describeNews(jobs: number, notes: number, since: string | null): string | null {
+  if (!since || (jobs === 0 && notes === 0)) return null;
+  const parts = [
+    jobs > 0 ? `${jobs} added` : null,
+    notes > 0 ? `${notes} new ${notes === 1 ? 'note' : 'notes'}` : null,
+  ].filter(Boolean);
+  return `${parts.join(' and ')} ${since}`;
+}
+
 export default function SnagListScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
@@ -143,6 +164,16 @@ export default function SnagListScreen() {
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  /**
+   * What the search box holds. Run on the lists already in hand — open and
+   * finished — never the server, for the House tab's reason: the moment
+   * somebody is looking for a job is not the moment to wait on a round trip.
+   */
+  const [query, setQuery] = useState('');
+  const searching = query.trim().length > 0;
+  /** Notes written since the last visit, for *New*. See `getNotesSince`. */
+  const [notes, setNotes] = useState<NoteStamp[]>([]);
+  const clearance = useDockClearance();
 
   /** Where the "New" rule sits. Captured once per visit, not per render. */
   const [seenBefore, setSeenBefore] = useState<string | null>(null);
@@ -270,6 +301,30 @@ export default function SnagListScreen() {
     seenThisVisit.current = true;
     markListSeen().then(setSeenBefore);
   }, []);
+
+  /**
+   * The notes written since the last visit, read whenever the list is.
+   *
+   * Never fatal, and never in the way of the list: a list that will not draw
+   * because it could not check for news is far worse than one that does not
+   * mention a note. Keyed by the stamp, so working out "New" again after half
+   * an hour away reads them again too.
+   */
+  const notesSeq = useRef(0);
+  const loadNotes = useCallback(async (since: string | null) => {
+    const seq = ++notesSeq.current;
+    if (!since) {
+      setNotes([]);
+      return;
+    }
+    try {
+      const found = await getNotesSince(since);
+      if (seq === notesSeq.current) setNotes(found);
+    } catch {
+      // Said nowhere: the list is still the list.
+    }
+  }, []);
+  useEffect(() => { void loadNotes(seenBefore); }, [seenBefore, snags, loadNotes]);
 
   useEffect(() => {
     readCollapsed().then((keys) => setCollapsed(new Set(keys)));
@@ -440,7 +495,7 @@ export default function SnagListScreen() {
    * because an extract is an archive, and one that silently honoured a filter
    * set twenty minutes ago is one nobody could read correctly later.
    */
-  async function handleExport(scope: ExportScope, format: ExportFormat, briefed: boolean) {
+  async function handleExport(scope: ExportScope, format: ExportFormat) {
     setExporting(true);
     try {
       const rows = scope === 'all'
@@ -460,22 +515,7 @@ export default function SnagListScreen() {
       const images = format === 'pdf'
         ? await loadExportImages(snagExportPhotos(rows), getFileUrls)
         : [];
-      // The brief names the scope the file was made under, and counts the
-      // photographs that actually got in rather than the ones that were asked
-      // for — a reader told there are twenty when four came is a reader who
-      // thinks sixteen jobs have no photograph.
-      const brief = briefed
-        ? assessmentBrief({
-          household: household.name,
-          place,
-          where: [activeProperty?.suburb, activeProperty?.town].filter(Boolean).join(', ') || null,
-          scope: scopeLabel,
-          stamp,
-          rowCount: rows.length,
-          photoCount: images.length,
-        })
-        : undefined;
-      const { fileName, path } = await writeExport(table, format, images, brief);
+      const { fileName, path } = await writeExport(table, format, images);
       setShowExport(false);
       showToast(path ? `Saved to ${fileName}` : `${fileName} downloaded`);
     } catch (err: any) {
@@ -485,12 +525,37 @@ export default function SnagListScreen() {
     }
   }
 
-  // What somebody else has put on the list since you last looked.
+  /**
+   * Which jobs somebody else has written on since you last looked, and how
+   * many notes. A reply on an existing job — the part is ordered, arriving
+   * Tuesday — is news as much as a new job is, and this product sends nothing
+   * to say so; the list is the only place it can be told.
+   */
+  const noteNews = useMemo(
+    () => snagsWithNewNotes(notes, profile.id, seenBefore),
+    [notes, profile.id, seenBefore],
+  );
+
+  // What somebody else has put on the list since you last looked — a new job,
+  // or a new note on one.
+  const isNewJob = useCallback((s: Snag) => !!seenBefore
+    && s.reporterId !== profile.id && s.createdAt > seenBefore && !isDoneForNow(s), [seenBefore, profile.id]);
   const fresh = useMemo(() => {
     if (!seenBefore) return [];
-    return visible.filter((s) =>
-      s.reporterId !== profile.id && s.createdAt > seenBefore && !isDoneForNow(s));
-  }, [visible, seenBefore, profile.id]);
+    return visible.filter((s) => isNewJob(s) || noteNews.has(s.id));
+  }, [visible, seenBefore, isNewJob, noteNews]);
+  const freshJobs = useMemo(() => fresh.filter(isNewJob).length, [fresh, isNewJob]);
+  const freshNotes = useMemo(
+    () => fresh.reduce((n, s) => n + (noteNews.get(s.id) ?? 0), 0),
+    [fresh, noteNews],
+  );
+  /** Who each job is news from, by name, for the photo cards. */
+  const newsFrom = useCallback((s: Snag) => (isNewJob(s) ? s.reporterName : null), [isNewJob]);
+  /**
+   * *New* is a carousel of photo cards above the rooms, not a section of rows —
+   * except while choosing jobs, when every job has to be a row with a box.
+   */
+  const carousel = fresh.length > 0 && !selecting && !searching;
 
   /**
    * The one trip that clears several jobs.
@@ -636,8 +701,14 @@ export default function SnagListScreen() {
     // index would fold whatever slid into that position.
     const out: { key: string; title: string; isNew?: boolean; data: Snag[] }[] = [];
 
+    if (searching) {
+      // One flat answer, open jobs first and then the finished ones, the way the
+      // House tab's search answers flat across every room.
+      const found = searchSnags([...visible, ...done], query);
+      return found.length > 0 ? [{ key: 'found', title: `Found · ${found.length}`, data: found }] : [];
+    }
     if (pinned.length > 0) out.push({ key: 'just-added', title: 'Just added', isNew: true, data: pinned });
-    if (fresh.length > 0) {
+    if (fresh.length > 0 && selecting) {
       const others = fresh.filter((s) => s.id !== pinnedId);
       if (others.length > 0) out.push({ key: 'new', title: 'New', isNew: true, data: others });
     }
@@ -674,7 +745,7 @@ export default function SnagListScreen() {
       out.push({ key: 'done', title: 'Done this week', data: recentlyDone });
     }
     return out;
-  }, [fresh, visible, locations, showDone, recentlyDone, justAdded]);
+  }, [fresh, visible, locations, showDone, recentlyDone, justAdded, searching, query, done, selecting]);
 
   /**
    * The same sections, with the folded ones emptied rather than removed.
@@ -915,6 +986,7 @@ export default function SnagListScreen() {
   }
 
   const since = describeSince(seenBefore);
+  const news = describeNews(freshJobs, freshNotes, since);
   const placeName = placeTitle(activeProperty, properties);
 
   return (
@@ -926,9 +998,9 @@ export default function SnagListScreen() {
           style={styles.place}
           accessibilityRole={properties.length > 1 ? 'button' : undefined}
         >
-          <Text style={styles.title}>{placeName}</Text>
+          <Text style={styles.title} numberOfLines={1}>{placeName}</Text>
           {properties.length > 1 ? (
-            <Icon name="chevron-down" size="sm" color={Colors.textMuted} />
+            <Icon name="chevron-down" size="sm" color={Colors.textSecondary} />
           ) : null}
         </Pressable>
 
@@ -968,7 +1040,7 @@ export default function SnagListScreen() {
                 <Icon
                   name="cart-outline"
                   size="md"
-                  color={lens === 'parts' ? Colors.white : Colors.textSecondary}
+                  color={lens === 'parts' ? Colors.onSelected : Colors.textPrimary}
                 />
                 {toGet > 0 ? (
                   <View style={[styles.shopBadge, lens === 'parts' && styles.shopBadgeOn]}>
@@ -994,65 +1066,139 @@ export default function SnagListScreen() {
         </View>
       </View>
 
-      {/* The count, and the one control that reaches every section at once.
-          On the same line because both are *about* the list rather than in it,
-          and because this screen has already evicted two filter rails for
-          charging vertical rent on every visit — a row of its own for one
-          control would be the third.
-
-          It says what pressing it does and decides that from whether anything
-          is still open, so the press on offer is never a no-op. */}
-      {selecting ? (
-        // Choosing: the line says how many, and the way out. The cards' own
-        // ticks are what choose.
-        <View style={styles.sinceRow}>
-          <Text style={styles.since} accessibilityLiveRegion="polite">
-            {selected!.size} selected
-          </Text>
-          <Pressable
-            onPress={stopChoosing}
-            style={styles.selectTap}
-            accessibilityRole="button"
-            accessibilityLabel="Stop choosing jobs"
-          >
-            <Text style={styles.selectLabel}>Cancel</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View style={styles.sinceRow}>
-          <Text style={styles.since}>
-            {toDo} to do
-            {fresh.length > 0 && since ? ` · ${fresh.length} added ${since}` : ''}
-          </Text>
-          <View style={styles.sinceControls}>
-            {/* A long press chooses on a phone; a desktop has no long press,
-                so the same thing is a word here. */}
-            {snags.length > 0 ? (
-              <Pressable
-                onPress={() => setSelected(new Set())}
-                style={styles.selectTap}
-                accessibilityRole="button"
-                accessibilityLabel="Choose jobs to share"
-              >
-                <Text style={styles.selectLabel}>Select</Text>
-              </Pressable>
-            ) : null}
-            {sections.length + shoppingRooms.length > 1 ? (
-              <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
-            ) : null}
-          </View>
-        </View>
-      )}
-
       <SectionList
         sections={shownSections}
         ListHeaderComponent={
           <>
+          {/* The count, the line about the list, the rule and the search
+              scroll away with the list: they are its top, not chrome. The
+              home picker and the cart stay above, where they always are. */}
+          <View style={styles.countBlock}>
+          {/* The count — Bone & Glass's one big number — then one line about the
+              list, then the 2px rule. A count of concrete things, never a
+              percentage: what is left to do. */}
+          {selecting ? null : (
+            <View style={styles.countRow} accessibilityRole="header">
+              <Text style={styles.countLine}>
+                <Text style={styles.count}>{toDo}</Text>
+                <Text style={styles.unit}> to do</Text>
+              </Text>
+            </View>
+          )}
+
+          {/* The one line about the list, and the controls that reach all of it.
+              On the same line because both are *about* the list rather than in
+              it, and because this screen has already evicted two filter rails for
+              charging vertical rent on every visit.
+
+              The fold control says what pressing it does and decides that from
+              whether anything is still open, so the press on offer is never a
+              no-op. */}
+          {selecting ? (
+            // Choosing: the line says how many, and the way out. The rows' own
+            // boxes are what choose.
+            <View style={styles.sinceRow}>
+              <Text style={styles.selectedCount} accessibilityLiveRegion="polite">
+                {selected!.size} selected
+              </Text>
+              <Pressable
+                onPress={stopChoosing}
+                style={styles.selectTap}
+                accessibilityRole="button"
+                accessibilityLabel="Stop choosing jobs"
+              >
+                <Text style={styles.selectLabel}>Cancel</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.sinceRow}>
+              <Text style={[styles.since, news && styles.sinceNews]} numberOfLines={2}>
+                {news ?? (since ? `Nothing new ${since}` : 'Everything on the list')}
+              </Text>
+              <View style={styles.sinceControls}>
+                {/* A long press chooses on a phone; a desktop has no long press,
+                    so the same thing is a word here. */}
+                {snags.length > 0 && !searching ? (
+                  <Pressable
+                    onPress={() => setSelected(new Set())}
+                    style={styles.selectTap}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose jobs to share"
+                  >
+                    <Text style={styles.selectLabel}>Select</Text>
+                  </Pressable>
+                ) : null}
+                {!searching && sections.length + shoppingRooms.length > 1 ? (
+                  <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
+                ) : null}
+              </View>
+            </View>
+          )}
+          <View style={styles.rule} />
+
+          {/* Search: words, rooms, parts, references and linked items, across the
+              jobs still to do and the finished ones. The House tab has had one
+              since it shipped; a household with thirty-four jobs needed this. */}
+          <View style={styles.searchWrap}>
+            <View style={styles.search}>
+              <Icon name="search" size="md" color={Colors.textMuted} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search jobs, rooms and parts"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.searchInput}
+                returnKeyType="search"
+                autoCorrect={false}
+                accessibilityLabel="Search the list"
+              />
+              {searching ? (
+                <Pressable
+                  onPress={() => setQuery('')}
+                  style={styles.clearTap}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear the search"
+                >
+                  <Icon name="close-circle-outline" size="md" color={Colors.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+          </View>
           {/* Asked once, in a browser tab only. The web build is installed
               from the browser, and a tab is the thing that gets closed and
               lost. */}
           <InstallCard />
-          {shopping.length > 0 ? (
+          {/* **News gets the glass.** What the other person added, or wrote,
+              since you last looked, as photographs big enough to recognise at
+              a glance — and everything else as quiet rows below. */}
+          {carousel ? (
+            <View style={styles.newsBlock}>
+              <View style={styles.groupRow}>
+                <Text style={[styles.group, styles.groupNew]}>New</Text>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.carousel}
+                style={styles.carouselBleed}
+              >
+                {fresh.map((item) => (
+                  <PhotoCard
+                    key={item.id}
+                    snag={item}
+                    photoUrl={item.photoPaths[0] ? photoUrls[item.photoPaths[0]] : null}
+                    from={newsFrom(item)}
+                    newNotes={noteNews.get(item.id) ?? 0}
+                    isNewJob={isNewJob(item)}
+                    onPress={() => navigation.navigate('SnagDetail', { snagId: item.id })}
+                    onLongPress={() => startChoosing(item.id)}
+                  />
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+          {shopping.length > 0 && !searching ? (
             <View style={styles.shopping}>
               <View style={styles.shoppingHead}>
                 <Icon name="cart-outline" size="md" color={Colors.primary} />
@@ -1125,7 +1271,12 @@ export default function SnagListScreen() {
           </>
         }
         keyExtractor={(item) => item.id}
-        contentContainerStyle={[styles.listContent, sections.length === 0 && styles.listEmpty]}
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingBottom: Math.max(clearance, Spacing.xxxl * 3) + Spacing.lg },
+          sections.length === 0 && !carousel && styles.listEmpty,
+        ]}
+        keyboardShouldPersistTaps="handled"
         stickySectionHeadersEnabled={false}
         renderSectionHeader={({ section }) => {
           const shut = collapsed.has(section.key);
@@ -1141,19 +1292,21 @@ export default function SnagListScreen() {
               accessibilityState={{ expanded: !shut }}
               accessibilityLabel={`${section.title}, ${shut ? 'show' : 'hide'}`}
             >
+              <Text style={[styles.group, section.isNew && styles.groupNew]}>{section.title}</Text>
+              <View style={styles.groupRule} />
               <Icon
                 name={shut ? 'chevron-forward' : 'chevron-down'}
                 size="sm"
                 color={section.isNew ? Colors.primary : Colors.textMuted}
               />
-              <Text style={[styles.group, section.isNew && styles.groupNew]}>{section.title}</Text>
-              <View style={styles.groupRule} />
             </Pressable>
           );
         }}
-        renderItem={({ item }) => (
+        renderItem={({ item, section }) => (
           <SnagCard
             snag={item}
+            showRoom={!section.key.startsWith('room:')}
+            newNotes={noteNews.get(item.id) ?? 0}
             photoUrl={item.photoPaths[0] ? photoUrls[item.photoPaths[0]] : null}
             onPress={() => navigation.navigate('SnagDetail', { snagId: item.id })}
             onDone={() => finish(item)}
@@ -1178,18 +1331,19 @@ export default function SnagListScreen() {
                 </Text>
               </Pressable>
             ) : null}
+            {/* Everything finished, past the week this list keeps: a job leaves
+                after seven days, and "when did we last do the gutters?" had no
+                answer short of a dot on the calendar. */}
+            {done.length > 0 || snags.some((s) => s.lastDoneAt) ? (
+              <ExportFooter
+                label="All finished jobs"
+                icon="time-outline"
+                onPress={() => navigation.navigate('History')}
+              />
+            ) : null}
             {/* At the foot of the scrolled content, never pinned to the bottom
-                of the screen — that is the compose bar, and nothing goes on it. */}
+                of the screen. */}
             <ExportFooter label="Export this list" onPress={() => setShowExport(true)} />
-            {/* The way back in, under the way out, because they are the two
-                halves of one journey: a briefed PDF goes out here and the
-                reply comes back here. Drawn the same muted way — neither is an
-                action the screen is recommending. */}
-            <ExportFooter
-              label="Paste an assessment back in"
-              icon="clipboard-outline"
-              onPress={() => navigation.navigate('PasteAdvice')}
-            />
           </>
         }
         refreshControl={
@@ -1203,7 +1357,13 @@ export default function SnagListScreen() {
           />
         }
         ListEmptyComponent={
-          loading ? null : (
+          loading || carousel ? null : searching ? (
+            <EmptyState
+              icon="search"
+              title={`Nothing matches “${query.trim()}”`}
+              message="Search looks at what each job says, its room, its parts and what it is linked to — finished jobs too."
+            />
+          ) : (
             <EmptyState
               icon="home-outline"
               title={lens === 'all' ? 'Nothing needs doing' : 'Nothing here'}
@@ -1285,7 +1445,6 @@ export default function SnagListScreen() {
           all: snags.length + done.length,
         }}
         busy={exporting}
-        canBrief
         onExport={handleExport}
         onCancel={() => setShowExport(false)}
       />
@@ -1295,49 +1454,70 @@ export default function SnagListScreen() {
   );
 }
 
+const LABEL = {
+  fontFamily: Fonts.mono,
+  fontSize: Typography.label,
+  letterSpacing: 1.4,
+  textTransform: 'uppercase' as const,
+};
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   sinceControls: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   selectTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.sm },
-  selectLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
+  selectLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.primary },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
+    paddingTop: Spacing.sm,
     gap: Spacing.sm,
   },
-  place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
-  // V2: the iOS large title, the same on every tab. It keeps its height while
+  place: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1, minHeight: MIN_TOUCH_TARGET,
+  },
+  // The home picker: one line above the count. It keeps its height while
   // empty, before the places load, so the header does not jump when they do.
   title: {
-    fontSize: Typography.largeTitle, lineHeight: 41, minHeight: 41, fontWeight: Typography.bold,
-    color: Colors.textPrimary, letterSpacing: -0.4,
+    fontSize: Typography.body, lineHeight: 22, minHeight: 22, fontWeight: Typography.bold,
+    color: Colors.textPrimary, flexShrink: 1,
   },
-  // Both header buttons, from one style. They were a 48px square beside a
-  // lozenge half as wide again, vertically offset by the caption under the
-  // cart — two controls doing the same kind of job reading as two different
-  // kinds of control.
+  // The one big number, used once on the screen.
+  // The list's content is already inset by the gutter; the count's pieces
+  // carry their own, so the block steps back out to the screen's edge.
+  countBlock: { marginHorizontal: -Spacing.lg, paddingBottom: Spacing.xs },
+  countRow: { paddingHorizontal: Spacing.lg, marginTop: -Spacing.xs },
+  countLine: { color: Colors.textPrimary },
+  count: {
+    fontSize: Typography.count,
+    lineHeight: 84,
+    fontWeight: Typography.heavy,
+    letterSpacing: -5,
+    color: Colors.textPrimary,
+  },
+  unit: {
+    fontSize: Typography.title3,
+    fontWeight: Typography.bold,
+    letterSpacing: -0.4,
+    color: Colors.textPrimary,
+  },
+  // Both header buttons share a top edge, so the cart and its caption sit
+  // level with the home picker.
   headerBtns: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   iconBtn: {
     width: MIN_TOUCH_TARGET,
     height: MIN_TOUCH_TARGET,
-    borderRadius: Radius.button,
-    backgroundColor: Colors.sunken,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.well,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconBtnOn: { backgroundColor: Colors.primary },
-  // The app's one chip: a sunken well when off, solid fern when on, no border
-  // either way. The pill is ~34px and the tap area is the full 48 — a rail of
-  // lozenges outweighs the list it filters, and a 34px target is invisible
-  // until somebody is holding the phone one-handed.
+  // The trip sheet is up: a selection, so ink rather than the action colour.
+  iconBtnOn: { backgroundColor: Colors.selected },
   shopTap: { alignItems: 'center', gap: Spacing.xs },
   shopCaption: { fontSize: Typography.xs, color: Colors.textMuted },
-  // The count rides the corner rather than sitting inside the button. No new
-  // hue: fern when the button is a sunken well, and inverted to white-on-fern
-  // when the button itself has gone fern, so the two never collide.
+  // The count rides the corner rather than sitting inside the button.
   shopBadge: {
     position: 'absolute',
     top: -Spacing.xs,
@@ -1345,54 +1525,79 @@ const styles = StyleSheet.create({
     minWidth: 20,
     height: 20,
     paddingHorizontal: 5,
-    borderRadius: 10,
+    borderRadius: Radius.chip,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.primary,
   },
   shopBadgeOn: { backgroundColor: Colors.white },
   shopBadgeText: {
+    fontFamily: Fonts.mono,
     fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-    color: Colors.white,
+    fontWeight: Typography.semibold,
+    color: Colors.onPrimary,
   },
-  shopBadgeTextOn: { color: Colors.primary },
-  since: { fontSize: Typography.sm, color: Colors.textMuted, paddingHorizontal: Spacing.lg },
-  // Room at the foot for the + to float over without covering the export line.
-  listContent: { padding: Spacing.lg, paddingBottom: Spacing.xxxl * 3, gap: Spacing.md },
+  shopBadgeTextOn: { color: Colors.textPrimary },
+  since: { ...LABEL, flex: 1, color: Colors.textMuted, paddingLeft: Spacing.lg },
+  sinceNews: { color: Colors.primary },
+  selectedCount: {
+    flex: 1, fontSize: Typography.title3, fontWeight: Typography.bold, color: Colors.textPrimary,
+    paddingLeft: Spacing.lg, paddingTop: Spacing.lg,
+  },
+  // The 2px rule under a count. Ink, because it is the edge of the count.
+  rule: { height: 2, backgroundColor: Colors.textPrimary, marginHorizontal: Spacing.lg },
+  searchWrap: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
+  search: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingLeft: Spacing.md,
+    borderRadius: Radius.input,
+    backgroundColor: Colors.well,
+    minHeight: 44,
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: Typography.body,
+    color: Colors.textPrimary,
+    paddingVertical: Spacing.sm,
+  },
+  clearTap: { width: MIN_TOUCH_TARGET, height: 44, alignItems: 'center', justifyContent: 'center' },
+  listContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.xs },
   listEmpty: { flexGrow: 1, justifyContent: 'center' },
   sinceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.sm,
+    paddingRight: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET,
   },
-  // The whole heading is the tap target, so folding a room is the same gesture
-  // wherever on the rule somebody happens to reach.
+  // A section label, smaller than the jobs under it: mono, in capitals, in
+  // pencil. The whole label is the fold's tap target.
   groupRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    paddingTop: Spacing.sm,
+    paddingTop: Spacing.lg,
     minHeight: MIN_TOUCH_TARGET,
   },
-  // V2: a room is a section title in sentence case, not a caption in capitals.
-  group: {
-    fontSize: Typography.title3,
-    fontWeight: Typography.semibold,
-    color: Colors.textPrimary,
-    letterSpacing: -0.3,
-  },
+  group: { ...LABEL, color: Colors.textMuted },
   groupNew: { color: Colors.primary },
-  // V2: a section title stands on its own; the rule after it went with the capitals.
   groupRule: { flex: 1 },
-  // The only elevated surface on the screen, and only under one lens. It should
-  // feel like the thing you opened the app for on the way out the door.
+  newsBlock: { marginBottom: Spacing.sm },
+  // The carousel runs to the screen's edges, past the list's gutter.
+  carouselBleed: { marginHorizontal: -Spacing.lg },
+  carousel: { paddingHorizontal: Spacing.lg, gap: Spacing.md, paddingBottom: Spacing.lg },
+  // The trip sheet: the one paper surface on the screen, and only under one
+  // lens. It should feel like the thing you opened the app for on the way out.
   shopping: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.card,
     padding: Spacing.lg,
-    marginBottom: Spacing.md,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.sm,
     gap: Spacing.xs,
     ...Shadow.md,
   },
@@ -1404,30 +1609,21 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingVertical: Spacing.sm,
     paddingLeft: Spacing.lg,
+    minHeight: MIN_TOUCH_TARGET,
   },
-  // The room is the heading now, so a row is a tick and a noun. Indented under
-  // it, because a sub-list that shares the heading's left edge is not obviously
-  // under anything.
   shopRoomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
     minHeight: MIN_TOUCH_TARGET,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.hairline,
   },
-  shopRoom: {
-    flex: 1,
-    fontSize: Typography.xs,
-    fontWeight: Typography.semibold,
-    color: Colors.textMuted,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  shopRoomCount: { fontSize: Typography.sm, color: Colors.textMuted },
+  shopRoom: { ...LABEL, flex: 1, color: Colors.textMuted },
+  shopRoomCount: { fontFamily: Fonts.mono, fontSize: Typography.sm, color: Colors.textMuted },
   shoppingItem: { flex: 1, fontSize: Typography.base, color: Colors.textPrimary },
   shoppingItemGot: { color: Colors.textMuted, textDecorationLine: 'line-through' },
   shoppingFor: { fontSize: Typography.sm, color: Colors.textMuted },
-  doneLine: { paddingVertical: Spacing.lg, alignItems: 'center' },
-  doneText: { fontSize: Typography.sm, color: Colors.textMuted },
+  doneLine: { paddingVertical: Spacing.lg, alignItems: 'center', minHeight: MIN_TOUCH_TARGET },
+  doneText: { fontSize: Typography.sm, color: Colors.textSecondary },
 });

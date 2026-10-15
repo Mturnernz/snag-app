@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text, TextInput } from '../../components/Text';
 import { describePlaces } from '@snag/supabase-queries';
 
 import SetupShell, { setupStyles } from '../SetupShell';

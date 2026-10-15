@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, Modal, ScrollView, Pressable, StyleSheet,
+  View,
+  Modal,
+  ScrollView,
+  Pressable,
+  StyleSheet,
 } from 'react-native';
+import { Text, TextInput } from './Text';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
@@ -580,8 +585,11 @@ export default function ExpectedCostSheet({
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.scrim },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     position: 'absolute', left: 0, right: 0, bottom: 0,
     maxHeight: '90%',
     backgroundColor: Colors.surface,
@@ -635,7 +643,7 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
   },
-  halfOn: { backgroundColor: Colors.primary },
+  halfOn: { backgroundColor: Colors.selected },
   halfLabel: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textSecondary },
   halfLabelOn: { color: Colors.white },
   chips: { flexDirection: 'row', flexWrap: 'wrap' },
@@ -644,7 +652,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.sunken, borderRadius: Radius.chip,
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: {
     fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium,
   },

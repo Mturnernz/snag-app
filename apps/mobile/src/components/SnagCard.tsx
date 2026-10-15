@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import SignedImage from './SignedImage';
 import Icon from './Icon';
 import StatusBadge from './StatusBadge';
 import DueBadge from './DueBadge';
-import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
+import { Colors, Fonts, Radius, SETTLED_OPACITY, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { Snag } from '../types';
 import { isDoneForNow, snagHeadline, unboughtParts } from '@snag/supabase-queries';
 
@@ -35,18 +36,28 @@ interface Props {
   selected?: boolean;
   /** Toggles this card while choosing. */
   onSelect?: () => void;
+  /** Off under the room's own heading, where the room would be said twice. */
+  showRoom?: boolean;
+  /** Notes somebody else has written since the last visit — news on the list. */
+  newNotes?: number;
 }
 
 /**
- * The photo is the point, not decoration.
+ * A job in the list, as a Bone & Glass row: the photo at 56pt, the headline,
+ * one line of facts, and the tick.
  *
- * Twelve jobs with thumbnails is a Saturday morning you can act on; twelve
- * lines of text is a chore list you skim and close. So the image gets real
- * space and the metadata is a single wrapping row underneath rather than a
- * stack of labelled fields.
+ * **Hairlines, not boxes.** It was a white card with a shadow; it is a row on
+ * the bone ground now, split from the next by a hairline, because twelve
+ * shadowed cards is a wall of boxes and the photographs are what should stand
+ * out. The photo is still the point — it leads every row — and *New* shows the
+ * other person's jobs as large photo cards (`PhotoCard`) above the rows.
+ *
+ * The facts are state marks (a dot and a word), what is still to get, and the
+ * notes; the room in mono when the row is not already under its room.
  */
 export default function SnagCard({
   snag, photoUrl, onPress, onDone, finishing, onLongPress, selecting = false, selected = false, onSelect,
+  showRoom = true, newNotes = 0,
 }: Props) {
   const done = snag.status === 'done';
   // A repeating job that has been done and is waiting for its next turn gets
@@ -59,7 +70,7 @@ export default function SnagCard({
   const toGet = unboughtParts(snag);
 
   return (
-    <View style={[styles.card, settled && !selecting && styles.doneCard, selected && styles.selectedCard]}>
+    <View style={[styles.row, settled && !selecting && styles.settled]}>
     {/* The tick is a sibling of the door, never inside it: a Pressable inside
         a Pressable is a coin toss about which one gets the tap. */}
     <Pressable
@@ -77,8 +88,10 @@ export default function SnagCard({
         {photoUrl ? (
           <SignedImage uri={photoUrl} style={styles.image} resizeMode="cover" />
         ) : (
+          // A job with no photograph gets the notes glyph in a well, never an
+          // empty image frame.
           <View style={styles.noPhoto}>
-            <Icon name="image-outline" size="lg" color={Colors.textMuted} />
+            <Icon name="chatbubble-outline" size="md" color={Colors.textMuted} />
           </View>
         )}
       </View>
@@ -95,45 +108,35 @@ export default function SnagCard({
           {headline}
         </Text>
 
-        {snag.room ? (
-          <View style={styles.roomRow}>
-            <Icon name="location-outline" size="sm" color={Colors.textMuted} />
-            <Text style={styles.room}>{snag.room}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.badges}>
+        <View style={styles.facts}>
           <StatusBadge status={snag.status} />
           <DueBadge snag={snag} />
-          {/* What is still to get, never what was listed: a card claiming it
-              needs the seal you bought on Saturday is a card you stop
-              believing. The pill goes when the trip is done. */}
+          {showRoom && snag.room ? <Text style={styles.room} numberOfLines={1}>{snag.room}</Text> : null}
+          {/* What is still to get, never what was listed: a row claiming it
+              needs the seal you bought on Saturday is a row you stop
+              believing. It goes when the trip is done. */}
           {toGet.length > 0 ? (
-            <View style={styles.parts}>
-              <Icon name="cart-outline" size="sm" color={Colors.effort.fg} />
-              <Text style={styles.partsLabel}>
+            <View style={styles.fact}>
+              <Icon name="cart-outline" size="sm" color={Colors.textSecondary} />
+              <Text style={styles.factText} numberOfLines={1}>
                 {toGet.length === 1 ? toGet[0] : `${toGet.length} things to get`}
               </Text>
             </View>
           ) : null}
+          {newNotes > 0 ? (
+            <View style={styles.fact}>
+              <Icon name="chatbubble-outline" size="sm" color={Colors.primary} />
+              <Text style={[styles.factText, styles.news]}>
+                {newNotes === 1 ? 'New note' : `${newNotes} new notes`}
+              </Text>
+            </View>
+          ) : snag.commentCount > 0 ? (
+            <View style={styles.fact}>
+              <Icon name="chatbubble-outline" size="sm" color={Colors.textMuted} />
+              <Text style={styles.factText}>{snag.commentCount}</Text>
+            </View>
+          ) : null}
         </View>
-
-        {snag.assigneeName || snag.commentCount > 0 ? (
-          <View style={styles.footer}>
-            {snag.assigneeName ? (
-              <View style={styles.footerItem}>
-                <Icon name="person-outline" size="sm" color={Colors.textMuted} />
-                <Text style={styles.footerText}>{snag.assigneeName}</Text>
-              </View>
-            ) : null}
-            {snag.commentCount > 0 ? (
-              <View style={styles.footerItem}>
-                <Icon name="chatbubble-outline" size="sm" color={Colors.textMuted} />
-                <Text style={styles.footerText}>{snag.commentCount}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
       </View>
     </Pressable>
 
@@ -145,8 +148,9 @@ export default function SnagCard({
         accessibilityState={{ checked: selected }}
         accessibilityLabel={`${selected ? 'Unselect' : 'Select'}: ${headline}`}
       >
-        <View style={[styles.tickRing, selected && styles.tickRingOn]}>
-          {selected ? <Icon name="checkmark" size="sm" color={Colors.white} /> : null}
+        {/* A choice is ink, not the action colour: fern is for doing. */}
+        <View style={[styles.box, selected && styles.boxOn]}>
+          {selected ? <Icon name="checkmark" size="sm" color={Colors.onSelected} /> : null}
         </View>
       </Pressable>
     ) : onDone && !settled ? (
@@ -171,82 +175,79 @@ export default function SnagCard({
 }
 
 const styles = StyleSheet.create({
-  card: {
+  row: {
     flexDirection: 'row',
-    alignItems: 'stretch',
+    alignItems: 'center',
     gap: Spacing.xs,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
-    padding: Spacing.md,
+    paddingVertical: Spacing.md,
     minHeight: MIN_TOUCH_TARGET,
-    ...Shadow.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.hairline,
   },
-  open: { flex: 1, flexDirection: 'row', gap: Spacing.md },
+  open: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   pressed: { opacity: 0.7 },
-  // An outline circle, fern on white: an interaction, which is what fern is
-  // for — and hollow, because nothing is done until it is pressed.
+  // An outline circle in the action colour: an interaction, which is what the
+  // action colour is for — and hollow, because nothing is done until pressed.
   tick: {
     width: MIN_TOUCH_TARGET,
     minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
-    marginRight: -Spacing.xs,
+    marginRight: -Spacing.sm,
   },
   tickRing: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1.5,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.75,
     borderColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tickRingBusy: { borderColor: Colors.border },
-  // Chosen to share: solid fern, an interaction rather than a state.
-  tickRingOn: { backgroundColor: Colors.primary },
-  selectedCard: { borderWidth: 2, borderColor: Colors.primary, padding: Spacing.md - 2 },
-  doneCard: { opacity: 0.62 },
+  tickRingBusy: { borderColor: Colors.hairline },
+  box: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 1.75,
+    borderColor: Colors.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  boxOn: { backgroundColor: Colors.selected, borderColor: Colors.selected },
+  settled: { opacity: SETTLED_OPACITY },
   thumb: {
-    width: 84,
-    height: 84,
-    borderRadius: Radius.button,
+    width: 56,
+    height: 56,
+    borderRadius: Radius.thumb,
     overflow: 'hidden',
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.well,
   },
   image: { width: '100%', height: '100%' },
   noPhoto: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  body: { flex: 1, gap: Spacing.xs },
+  body: { flex: 1, gap: Spacing.xs + 2, minWidth: 0 },
   title: {
-    fontSize: Typography.base,
+    fontSize: Typography.body,
+    lineHeight: 22,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
+    letterSpacing: -0.17,
   },
   doneTitle: { textDecorationLine: 'line-through', color: Colors.textSecondary },
   // A headline the app supplied rather than one somebody wrote. Lighter, so
   // the eye goes to the photograph — which is the actual report.
   titleImplied: { fontWeight: Typography.medium, color: Colors.textSecondary },
-  roomRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
-  room: { fontSize: Typography.sm, color: Colors.textMuted },
-  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginTop: Spacing.xs / 2 },
-  // Named rather than counted when there is only one: "Hinge" tells you what
-  // the trip is for, which "Parts" never did.
-  parts: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs / 2,
-    borderRadius: Radius.chip,
-    backgroundColor: Colors.effort.bg,
-    alignSelf: 'flex-start',
+  facts: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: Spacing.md, rowGap: Spacing.xs },
+  room: {
+    fontFamily: Fonts.mono,
+    fontSize: Typography.label,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    flexShrink: 1,
   },
-  partsLabel: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.medium,
-    color: Colors.effort.fg,
-  },
-  footer: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.xs / 2 },
-  footerItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
-  footerText: { fontSize: Typography.sm, color: Colors.textMuted },
+  fact: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
+  factText: { fontSize: Typography.footnote, color: Colors.textSecondary, flexShrink: 1 },
+  news: { color: Colors.primary, fontWeight: Typography.semibold },
 });

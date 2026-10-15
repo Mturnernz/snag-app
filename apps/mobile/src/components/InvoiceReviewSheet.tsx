@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from './Text';
 
 import Icon from './Icon';
 import Button from './Button';
@@ -135,7 +136,7 @@ export default function InvoiceReviewSheet({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(17, 24, 39, 0.5)',
+    backgroundColor: Colors.scrim,
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.lg,

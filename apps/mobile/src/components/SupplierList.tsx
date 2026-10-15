@@ -1,8 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, Pressable, Animated, PanResponder, Platform, StyleSheet,
-  type LayoutChangeEvent, type ViewStyle,
+  View,
+  Pressable,
+  Animated,
+  PanResponder,
+  Platform,
+  StyleSheet,
+  type LayoutChangeEvent,
+  type ViewStyle,
 } from 'react-native';
+import { Text } from './Text';
 
 import Icon from './Icon';
 import { Pill } from './Grouped';

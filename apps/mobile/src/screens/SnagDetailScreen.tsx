@@ -1,8 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, Pressable, StyleSheet,
-  ActivityIndicator, KeyboardAvoidingView, Platform,
+  View,
+  ScrollView,
+  Pressable,
+  StyleSheet,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { Text, TextInput } from '../components/Text';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -34,12 +40,13 @@ import { useCreateRoom } from '../hooks/useCreateRoom';
 import { PHOTO_REFRESH_MS, useKeepCurrent } from '../hooks/useKeepCurrent';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
-  getSnag, getComments, addComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
+  getSnag, getComments, addComment, updateComment, updateSnag, setSnagStatus, deleteSnag, getFileUrls,
   deleteStoredFiles, getSnagAdvice, deleteSnagAdvice, setPartBought,
   getThingNotes, getThings, setSnagThings,
   getSupportRequestForSnag, createSupportRequest, addSupportMessage, closeSupportRequest,
 } from '../lib/supabase';
 import { showAlert } from '../lib/alert';
+import { deleteNoteLater, keepNote } from '../lib/noteEdits';
 import { readNoteDraft, writeNoteDraft } from '../lib/noteDrafts';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import { deleteFileLater, keepFile, withoutPhoto, withPhotoBack } from '../lib/photoEdits';
@@ -140,6 +147,11 @@ export default function SnagDetailScreen() {
 
   const [snag, setSnag] = useState<Snag | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  /** Your own note being changed in place, and what its box holds. */
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [noteEdit, setNoteEdit] = useState('');
+  /** Notes taken back and waiting out their Undo, hidden meanwhile. */
+  const [hiddenNotes, setHiddenNotes] = useState<Set<string>>(() => new Set());
   const [advice, setAdvice] = useState<SnagAdvice | null>(null);
   /** The latest question asked of SnagHQ about this job, open or not. */
   const [support, setSupport] = useState<SupportRequest | null>(null);
@@ -216,8 +228,10 @@ export default function SnagDetailScreen() {
         getSnag(params.snagId),
         getComments(params.snagId),
         // Never fatal: a job with no assessment is the resting state, and a
-        // read that fails must not take the page down with it.
-        getSnagAdvice(params.snagId).catch(() => null),
+        // read that fails must not take the page down with it. Only SnagHQ's
+        // staff write one now (the paste-back loop went in October 2026), so
+        // it is not read while Ask SnagHQ is off.
+        askSnagHQEnabled() ? getSnagAdvice(params.snagId).catch(() => null) : null,
         // Never fatal either, for the same reason: most jobs were never asked
         // about, and a question nobody can fetch must not hide the job.
         // And not read at all while the feature is off.
@@ -642,6 +656,56 @@ export default function SnagDetailScreen() {
     }
   }
 
+  /**
+   * Changing a note you wrote. Only yours offer it, and the server refuses
+   * anybody else's in words. It never starts the job — correcting a note is
+   * not new work — and the note says *edited* afterwards, so a change made
+   * after the other person read it does not pass for what they read.
+   */
+  async function saveNoteEdit(comment: Comment) {
+    const body = noteEdit.trim();
+    if (!body) return;
+    if (body === comment.body) {
+      setEditingNote(null);
+      return;
+    }
+    setBusy(true);
+    try {
+      const saved = await updateComment(comment.id, body);
+      setComments((now) => now.map((one) => (one.id === comment.id ? { ...saved, authorName: one.authorName } : one)));
+      setEditingNote(null);
+    } catch (err: any) {
+      showAlert("Couldn't change that note", err?.message ?? 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Taking a note back: gone from the page now, deleted once Undo has had its chance. */
+  function removeNote(comment: Comment) {
+    setEditingNote(null);
+    setHiddenNotes((now) => new Set(now).add(comment.id));
+    const unhide = () => setHiddenNotes((now) => {
+      const next = new Set(now);
+      next.delete(comment.id);
+      return next;
+    });
+    deleteNoteLater(comment.id).then((deleted) => {
+      if (deleted) setComments((now) => now.filter((one) => one.id !== comment.id));
+      else {
+        unhide();
+        showAlert("Couldn't delete that note", 'It is still on the job.');
+      }
+    });
+    showToast('Note deleted', {
+      label: 'Undo',
+      onPress: () => {
+        keepNote(comment.id);
+        unhide();
+      },
+    });
+  }
+
   async function handleComment() {
     if (!snag || !draft.trim()) return;
     setBusy(true);
@@ -920,18 +984,81 @@ export default function SnagDetailScreen() {
         <View style={styles.block}>
           <SectionTitle title={comments.length > 0 ? `Notes (${comments.length})` : 'Notes'} />
           <Card elevation="md" style={styles.card}>
-            {comments.map((comment, index) => (
-              <View key={comment.id} style={[styles.comment, index === 0 && styles.commentFirst]}>
-                <Text style={styles.commentAuthor}>
-                  {comment.authorId === profile.id ? 'You' : comment.authorName}
-                  <Text style={styles.commentDate}>
-                    {'  '}
-                    {new Date(comment.createdAt).toLocaleDateString()}
-                  </Text>
-                </Text>
-                <LinkedText style={styles.commentBody}>{comment.body}</LinkedText>
-              </View>
-            ))}
+            {comments.filter((one) => !hiddenNotes.has(one.id)).map((comment, index) => {
+              const mine = comment.authorId === profile.id;
+              const editing = editingNote === comment.id;
+              return (
+                <View key={comment.id} style={[styles.comment, index === 0 && styles.commentFirst]}>
+                  <View style={styles.commentHead}>
+                    <Text style={styles.commentAuthor}>
+                      {mine ? 'You' : comment.authorName}
+                      <Text style={styles.commentDate}>
+                        {'  '}
+                        {new Date(comment.createdAt).toLocaleDateString()}
+                        {comment.editedAt ? '  ·  edited' : ''}
+                      </Text>
+                    </Text>
+                    {/* Only your own notes can be changed: each person says
+                        their own piece. */}
+                    {mine && !editing ? (
+                      <Pressable
+                        onPress={() => { setEditingNote(comment.id); setNoteEdit(comment.body); }}
+                        style={styles.noteEditTap}
+                        accessibilityRole="button"
+                        accessibilityLabel="Change this note"
+                      >
+                        <Text style={styles.noteEditLabel}>Edit</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  {editing ? (
+                    <View style={styles.commentBox}>
+                      <TextInput
+                        style={[styles.commentInput, styles.noteEditInput]}
+                        value={noteEdit}
+                        onChangeText={setNoteEdit}
+                        multiline
+                        autoFocus
+                        maxLength={4000}
+                        accessibilityLabel="Change the note"
+                      />
+                      <View style={styles.noteEditActions}>
+                        <Pressable
+                          onPress={() => removeNote(comment)}
+                          style={styles.noteEditTap}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete this note"
+                        >
+                          <Text style={[styles.noteEditLabel, styles.noteDelete]}>Delete</Text>
+                        </Pressable>
+                        <View style={styles.flexGap} />
+                        <Pressable
+                          onPress={() => setEditingNote(null)}
+                          style={styles.noteEditTap}
+                          accessibilityRole="button"
+                          accessibilityLabel="Keep the note as it was"
+                        >
+                          <Text style={[styles.noteEditLabel, styles.noteCancel]}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => saveNoteEdit(comment)}
+                          disabled={!noteEdit.trim() || busy}
+                          style={[styles.commentSend, (!noteEdit.trim() || busy) && styles.commentSendOff]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Save the note"
+                        >
+                          <Text style={[styles.commentSendLabel, (!noteEdit.trim() || busy) && styles.commentSendLabelOff]}>
+                            Save
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <LinkedText style={styles.commentBody}>{comment.body}</LinkedText>
+                  )}
+                </View>
+              );
+            })}
             {/* One line until it is used, then four. It was a four-line box
                 with *Add note* under it on every job, which is a card of mostly
                 empty space on a page that is mostly read — so it rests as one
@@ -1659,6 +1786,14 @@ const styles = StyleSheet.create({
   // The first note sits at the top of its card now that the heading is above
   // the card rather than in it, so a rule over it would divide it from nothing.
   commentFirst: { borderTopWidth: 0, paddingTop: 0 },
+  commentHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
+  noteEditTap: { minHeight: MIN_TOUCH_TARGET, minWidth: MIN_TOUCH_TARGET, justifyContent: 'center', alignItems: 'center', paddingHorizontal: Spacing.sm },
+  noteEditLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
+  noteDelete: { color: Colors.danger },
+  noteCancel: { color: Colors.textSecondary },
+  noteEditInput: { minHeight: 96 },
+  noteEditActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  flexGap: { flex: 1 },
   commentAuthor: {
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,

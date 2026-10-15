@@ -17,9 +17,9 @@ describe('the contrast arithmetic', () => {
   });
 
   it('agrees with the pairs theme.ts says it measured', () => {
-    // "ink on ground 13.85 · muted on sunken 5.31"
-    expect(contrastRatio(Colors.textPrimary, Colors.background)).toBeCloseTo(13.85, 1);
-    expect(contrastRatio(Colors.textMuted, Colors.sunken)).toBeCloseTo(5.31, 1);
+    // Bone & Glass: "ink 17.5:1 on bone · pencil 4.75:1 at its worst (on the well)"
+    expect(contrastRatio(Colors.textPrimary, Colors.background)).toBeCloseTo(17.5, 1);
+    expect(contrastRatio(Colors.textMuted, Colors.sunken)).toBeCloseTo(4.75, 1);
   });
 
   it('reads a three-digit hex as its six-digit twin', () => {

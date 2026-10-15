@@ -1,5 +1,5 @@
 import {
-  EXPORT_PHOTO_LIMIT, assessmentBrief, exportFileName, snagExportPhotos, snagExportTable,
+  EXPORT_PHOTO_LIMIT, quoteBrief, exportFileName, snagExportPhotos, snagExportTable,
   thingExportPhotos, thingExportTable, toCsv,
 } from '@snag/supabase-queries';
 import { loadExportImages, renderPdf, type ExportImage } from './exportFile';
@@ -21,11 +21,9 @@ import { loadExportImages, renderPdf, type ExportImage } from './exportFile';
 const snag = (over: Partial<any> = {}): any => ({
   id: 's1', reference: 'SNAG-0007', householdId: 'h', propertyId: 'p',
   room: 'Kitchen', photoPaths: [], description: 'Gutters', priority: 'low',
-  status: 'open', parts: [], bought: [], needsParts: false, dueAt: null, repeatDays: null,
-  assigneeId: null, thingId: null, reporterId: 'me',
+  status: 'open', parts: [], bought: [], needsParts: false, dueAt: null, repeatDays: null, thingId: null, reporterId: 'me',
   createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
-  lastDoneAt: null, doneAt: null, propertyName: 'Home', reporterName: 'Mike',
-  assigneeName: null, commentCount: 0, thingName: null, thingMake: null, thingModel: null,
+  lastDoneAt: null, doneAt: null, propertyName: 'Home', reporterName: 'Mike', commentCount: 0, thingName: null, thingMake: null, thingModel: null,
   projectId: null, projectName: null,
   projectItemId: null, projectItemName: null, projectElementName: null,
   ...over,
@@ -294,11 +292,10 @@ describe('the photos in the PDF', () => {
   });
 });
 
+// The brief is the quote request's page now (`quoteBrief`); the assessment
+// brief it was written for went in October 2026.
 describe('the brief at the front', () => {
-  const brief = assessmentBrief({
-    household: '32 Le Roy', place: 'Home', where: 'Mount Eden, Auckland',
-    scope: 'Everything', stamp: '2026-09-15', rowCount: 2, photoCount: 0,
-  });
+  const brief = quoteBrief({ where: 'Mount Eden, Auckland', stamp: '2026-09-15', rowCount: 2, photoCount: 0 });
 
   /** The text of a rendered PDF. jsPDF does not compress by default. */
   const read = (bytes: Uint8Array) => Buffer.from(bytes).toString('latin1');
@@ -309,28 +306,23 @@ describe('the brief at the front', () => {
     const briefed = countPages(renderPdf(table, [], brief));
 
     expect(briefed).toBeGreaterThan(plain);
-    expect(read(renderPdf(table, [], brief))).toContain('assessing this list');
-  });
-
-  it('carries the fence the parser looks for', () => {
-    // The whole return path hangs off this string surviving into the file.
-    expect(read(renderPdf(snagExportTable([snag()], META), [], brief)))
-      .toContain('snag-actions');
+    expect(read(renderPdf(table, [], brief))).toContain('Could you quote');
   });
 
   it('never reaches the spreadsheet', () => {
     // Same rule as the photographs: ExportTable holds rows to be sorted, and a
     // spreadsheet with a page of instructions in it cannot be sorted.
-    expect(toCsv(snagExportTable([snag()], META))).not.toContain('snag-actions');
+    expect(toCsv(snagExportTable([snag()], META))).not.toContain('Could you quote');
   });
 
   it('is counted by the page numbers on the table\u2019s own sheets', () => {
     // Otherwise the first sheet of the list claims to be page 1 of a file whose
     // page 1 is prose — and a loose sheet with the wrong number is worse than
     // one with none.
-    const briefed = read(renderPdf(snagExportTable([snag()], META), [], brief));
-    expect(briefed).toMatch(/page 3 of/);
-    expect(read(renderPdf(snagExportTable([snag()], META)))).toMatch(/page 1 of/);
+    const table = snagExportTable([snag()], META);
+    const briefPages = countPages(renderPdf(table, [], brief)) - countPages(renderPdf(table));
+    expect(read(renderPdf(table, [], brief))).toMatch(new RegExp(`page ${briefPages + 1} of`));
+    expect(read(renderPdf(table))).toMatch(/page 1 of/);
   });
 });
 

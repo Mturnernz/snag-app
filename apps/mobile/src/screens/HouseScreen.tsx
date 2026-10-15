@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, RefreshControl, Pressable, StyleSheet,
+  View,
+  ScrollView,
+  RefreshControl,
+  Pressable,
+  StyleSheet,
 } from 'react-native';
+import { Text, TextInput } from '../components/Text';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
@@ -22,6 +27,7 @@ import Fab from '../components/Fab';
 import HomePickerSheet from '../components/HomePickerSheet';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
+import { useDockClearance } from '../navigation/Dock';
 import { useToast } from '../hooks/useToast';
 import { useAddThing } from '../hooks/useAddThing';
 import { useOnReturn } from '../hooks/useOnReturn';
@@ -82,6 +88,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * model number out.
  */
 export default function HouseScreen() {
+  const clearance = useDockClearance();
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
   const {
@@ -275,63 +282,8 @@ export default function HouseScreen() {
         </Pressable>
       </View>
 
-      {/* Above the rooms, not behind a magnifier: the moment this tab is
-          opened for is a moment someone already knows what they want. */}
-      <View style={styles.searchRow}>
-        <Icon name="search" size="md" color={Colors.textMuted} />
-        <TextInput
-          style={styles.search}
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Make, model, colour, part…"
-          placeholderTextColor={Colors.textMuted}
-          autoCorrect={false}
-          autoCapitalize="none"
-          returnKeyType="search"
-          accessibilityLabel="Search the house record"
-        />
-        {searching ? (
-          <Pressable
-            onPress={() => setQuery('')}
-            style={styles.clear}
-            accessibilityRole="button"
-            accessibilityLabel="Clear the search"
-          >
-            <Icon name="close-circle-outline" size="md" color={Colors.textMuted} />
-          </Pressable>
-        ) : null}
-      </View>
-
-      {/* "Recorded", not "things": the ghosts behind the tiles are not things,
-          and counting them here would be the first place the two blur. */}
-      {!searching ? (
-        <View style={styles.countRow}>
-          <Text style={styles.count}>{recorded} recorded</Text>
-          {anyRecorded ? (
-            <Segmented
-              options={[
-                { value: 'recorded', label: 'Recorded' },
-                { value: 'all', label: 'All rooms' },
-              ]}
-              value={view}
-              onChange={chooseView}
-              accessibilityLabel="Which rooms to show"
-            />
-          ) : null}
-          {/* Absent at nought, like the shopping pill: a control with nothing
-              behind it is a choice that isn't one. It opens the first thing
-              with a reading waiting; each thing's row says so too. */}
-          {labelChecks.length > 0 ? (
-            <Pill
-              label={labelChecks.length === 1 ? '1 label to check' : `${labelChecks.length} labels to check`}
-              onPress={() => navigation.navigate('ThingDetail', { thingId: labelChecks[0] })}
-            />
-          ) : null}
-        </View>
-      ) : null}
-
       <ScrollView
-        contentContainerStyle={[groupedStyles.content, styles.content, empty && styles.contentEmpty]}
+        contentContainerStyle={[groupedStyles.content, styles.content, { paddingBottom: Math.max(clearance, Spacing.xxxl * 2) + Spacing.lg }, empty && styles.contentEmpty]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -344,6 +296,71 @@ export default function HouseScreen() {
           />
         }
       >
+        {/* The tab's one big number — what is recorded, and only what is:
+            the ghosts behind the tiles are not things, and counting them here
+            would be the first place the two blur. It scrolls away with the
+            rooms; the home picker stays above. */}
+        <View style={styles.countBlock}>
+          {!searching ? (
+            <Text style={styles.countLine} accessibilityRole="header">
+              <Text style={styles.bigCount}>{recorded}</Text>
+              <Text style={styles.unit}> recorded</Text>
+            </Text>
+          ) : null}
+          {/* "Recorded", not "things": the ghosts behind the tiles are not things,
+              and counting them here would be the first place the two blur. */}
+          {!searching ? (
+            <View style={styles.countRow}>
+              {anyRecorded ? (
+                <Segmented
+                  options={[
+                    { value: 'recorded', label: 'Recorded' },
+                    { value: 'all', label: 'All rooms' },
+                  ]}
+                  value={view}
+                  onChange={chooseView}
+                  accessibilityLabel="Which rooms to show"
+                />
+              ) : null}
+              {/* Absent at nought, like the shopping pill: a control with nothing
+                  behind it is a choice that isn't one. It opens the first thing
+                  with a reading waiting; each thing's row says so too. */}
+              {labelChecks.length > 0 ? (
+                <Pill
+                  label={labelChecks.length === 1 ? '1 label to check' : `${labelChecks.length} labels to check`}
+                  onPress={() => navigation.navigate('ThingDetail', { thingId: labelChecks[0] })}
+                />
+              ) : null}
+            </View>
+          ) : null}
+          <View style={styles.rule} />
+          {/* Above the rooms, not behind a magnifier: the moment this tab is
+              opened for is a moment someone already knows what they want. */}
+          <View style={styles.searchRow}>
+            <Icon name="search" size="md" color={Colors.textMuted} />
+            <TextInput
+              style={styles.search}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Make, model, colour, part…"
+              placeholderTextColor={Colors.textMuted}
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+              accessibilityLabel="Search the house record"
+            />
+            {searching ? (
+              <Pressable
+                onPress={() => setQuery('')}
+                style={styles.clear}
+                accessibilityRole="button"
+                accessibilityLabel="Clear the search"
+              >
+                <Icon name="close-circle-outline" size="md" color={Colors.textMuted} />
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
         {loading ? null : searching ? (
           // A search is a flat answer over real records only. Grouping three
           // results across three rooms buries the answer under its own filing,
@@ -534,10 +551,21 @@ const styles = StyleSheet.create({
   place: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexShrink: 1 },
   // V2: the iOS large title, the same on every tab. It keeps its height while
   // empty, before the places load, so the header does not jump when they do.
+  // The home picker: one line above the count.
   title: {
-    fontSize: Typography.largeTitle, lineHeight: 41, minHeight: 41, fontWeight: Typography.bold,
-    color: Colors.textPrimary, letterSpacing: -0.4,
+    fontSize: Typography.body, lineHeight: 22, minHeight: 22, fontWeight: Typography.bold,
+    color: Colors.textPrimary,
   },
+  // The count's pieces carry their own gutter, so the block steps back out of
+  // the scroll's.
+  countBlock: { marginHorizontal: -Spacing.lg, marginTop: -Spacing.md, marginBottom: Spacing.sm },
+  countLine: { color: Colors.textPrimary, paddingHorizontal: Spacing.lg },
+  bigCount: {
+    fontSize: Typography.count, lineHeight: 84, fontWeight: Typography.heavy, letterSpacing: -5,
+    color: Colors.textPrimary,
+  },
+  unit: { fontSize: Typography.title3, fontWeight: Typography.bold, letterSpacing: -0.4, color: Colors.textPrimary },
+  rule: { height: 2, backgroundColor: Colors.textPrimary, marginHorizontal: Spacing.lg, marginTop: Spacing.xs },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -577,7 +605,7 @@ const styles = StyleSheet.create({
   },
   // The wall colour's edge: ink at 10%, so it reads on Alabaster and vanishes
   // into a dark green rather than outlining it.
-  tilePainted: { borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(43, 39, 36, 0.10)' },
+  tilePainted: { borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(20, 20, 19, 0.10)' },
   tileScrim: {
     gap: 6,
     margin: -Spacing.xs,

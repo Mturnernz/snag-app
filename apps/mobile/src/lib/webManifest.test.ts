@@ -201,6 +201,6 @@ describe('web HTML shell', () => {
   it('paints the ground behind the app rather than leaving it white', () => {
     const reset = indexHtml.match(/<style id="expo-reset">([\s\S]*?)<\/style>/);
     expect(reset).not.toBeNull();
-    expect(reset![1]).toMatch(/background-color:\s*#FAF7F2/i);
+    expect(reset![1]).toMatch(/background-color:\s*#FAF9F6/i);
   });
 });

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import Icon from './Icon';
 import Sheet from './Sheet';
@@ -334,7 +335,7 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: 10, backgroundColor: Colors.sunken,
     alignItems: 'center', justifyContent: 'center',
   },
-  thumbOn: { backgroundColor: Colors.primary },
+  thumbOn: { backgroundColor: Colors.selected },
   notes: {
     minHeight: 96, textAlignVertical: 'top', backgroundColor: Colors.surface, borderRadius: Radius.card,
     padding: Spacing.lg, fontSize: Typography.body, color: Colors.textPrimary,

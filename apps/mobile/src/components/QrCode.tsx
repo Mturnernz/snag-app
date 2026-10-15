@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import QRCodeSvg from 'react-native-qrcode-svg';
 import { Colors, Radius, Spacing, Typography } from '../constants/theme';
 

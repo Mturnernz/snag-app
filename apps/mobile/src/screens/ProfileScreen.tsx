@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TextInput, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { Text, TextInput } from '../components/Text';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
@@ -12,6 +13,11 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import InstallCard from '../components/InstallCard';
 import Sheet from '../components/Sheet';
 import TourCards from '../components/TourCards';
+import SchemePicker from '../components/SchemePicker';
+import ChangePasswordSheet from '../components/ChangePasswordSheet';
+import { activeSchemeId, chooseScheme } from '../lib/colourScheme';
+import type { SchemeId } from '../constants/schemes';
+import { useDockClearance } from '../navigation/Dock';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -52,6 +58,21 @@ export default function ProfileScreen() {
   /** *How Snag works*: the setup tour, again, in a sheet. */
   const [tourOpen, setTourOpen] = useState(false);
   const [tourIndex, setTourIndex] = useState(0);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  /** The scheme this device draws; chosen ones wait for the next open on a phone. */
+  const [scheme, setScheme] = useState<SchemeId>(activeSchemeId());
+  const clearance = useDockClearance();
+
+  /**
+   * A colour scheme, for this device. The web build reloads to draw it — every
+   * stylesheet reads its colours once, when it loads — and a phone draws it
+   * the next time the app opens, which the toast says rather than pretending.
+   */
+  async function pickScheme(id: SchemeId) {
+    setScheme(id);
+    const how = await chooseScheme(id);
+    if (how === 'next-open') showToast('The new colours show next time Snag opens');
+  }
 
   /**
    * What the app knows is half-finished and can name the next move for.
@@ -158,7 +179,10 @@ export default function ProfileScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.md }]}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: insets.top + Spacing.md, paddingBottom: Math.max(clearance, Spacing.xxxl) + Spacing.lg },
+      ]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.header}>
@@ -288,6 +312,37 @@ export default function ProfileScreen() {
       >
         <TourCards index={tourIndex} onIndex={setTourIndex} />
       </Sheet>
+
+      {/* ── Colour ──
+          Per device, like the list's folds: it is about one person's screen,
+          not the house. Six schemes, each measured to the same contrast floors
+          as fern (constants/schemes.ts). */}
+      <Card elevation="md" style={styles.section}>
+        <Text style={styles.sectionTitle}>Colour scheme</Text>
+        <SchemePicker current={scheme} onChoose={pickScheme} />
+      </Card>
+
+      {/* Changing the password without asking for an email: the reset link on
+          the website was the only way, for something you already know. */}
+      <Pressable
+        onPress={() => setPasswordOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Change password"
+      >
+        <Card elevation="md" style={styles.linkRow}>
+          <Icon name="key-outline" size="md" color={Colors.primary} />
+          <View style={styles.linkBody}>
+            <Text style={styles.linkTitle}>Change password</Text>
+            <Text style={styles.linkHint}>For signing in with your email</Text>
+          </View>
+          <Icon name="chevron-forward" size="md" color={Colors.textMuted} />
+        </Card>
+      </Pressable>
+      <ChangePasswordSheet
+        visible={passwordOpen}
+        onClose={() => setPasswordOpen(false)}
+        onChanged={() => showToast('Password changed')}
+      />
 
       {/* No Projects switch here for v1. The tab is off by default, and on only
           for the accounts it was turned on for in SQL

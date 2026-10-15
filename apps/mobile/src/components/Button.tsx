@@ -1,12 +1,12 @@
 import React, { useEffect } from 'react';
 import {
   Pressable,
-  Text,
   StyleSheet,
   ActivityIndicator,
   ViewStyle,
   StyleProp,
 } from 'react-native';
+import { Text } from './Text';
 import * as Haptics from 'expo-haptics';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET, Shadow } from '../constants/theme';

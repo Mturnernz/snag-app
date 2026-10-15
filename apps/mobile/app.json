@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FAF7F2"
+      "backgroundColor": "#FAF9F6"
     },
     "ios": {
       "supportsTablet": false,
@@ -34,12 +34,6 @@
       ],
       "expo-asset",
       [
-        "expo-camera",
-        {
-          "cameraPermission": "Snag needs your camera so you can photograph something that needs doing."
-        }
-      ],
-      [
         "expo-navigation-bar",
         {
           "visibility": "hidden",
@@ -53,8 +47,8 @@
       "name": "Snag",
       "shortName": "Snag",
       "description": "A shared list of things that need doing around the house.",
-      "themeColor": "#FAF7F2",
-      "backgroundColor": "#FAF7F2",
+      "themeColor": "#FAF9F6",
+      "backgroundColor": "#FAF9F6",
       "favicon": "./assets/icon.png"
     },
     "extra": {

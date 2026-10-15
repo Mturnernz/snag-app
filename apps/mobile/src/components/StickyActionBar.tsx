@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Keyboard, Platform, KeyboardEvent } from 'react-native';
+import { View, StyleSheet, Keyboard, Platform, KeyboardEvent } from 'react-native';
+import { Text } from './Text';
 import { BlurView } from 'expo-blur';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { Colors, Spacing, Typography, Shadow } from '../constants/theme';
@@ -78,7 +79,7 @@ const styles = StyleSheet.create({
     // The ground the blur sits on. Near-opaque rather than the 82% a browser
     // can afford, because without blur a translucent bar smears the text
     // scrolling under it.
-    backgroundColor: 'rgba(249, 250, 251, 0.94)',
+    backgroundColor: Colors.glassSolid,
     ...Shadow.lg,
   },
   inner: {

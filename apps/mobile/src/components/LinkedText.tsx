@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { Text, StyleSheet, type StyleProp, type TextStyle } from 'react-native';
+import { StyleSheet, type StyleProp, type TextStyle } from 'react-native';
+import { Text } from './Text';
 
 import { Colors, Typography } from '../constants/theme';
 import { linkify, openUrl } from '../lib/openUrl';

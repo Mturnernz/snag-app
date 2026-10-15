@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import Sheet from './Sheet';
 import Button from './Button';
 import { Segmented } from './Grouped';

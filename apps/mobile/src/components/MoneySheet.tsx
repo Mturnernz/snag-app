@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, Switch, StyleSheet } from 'react-native';
+import { View, Pressable, Switch, StyleSheet } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import Icon from './Icon';
 import Sheet from './Sheet';
@@ -839,7 +840,7 @@ const styles = StyleSheet.create({
     height: 34, paddingHorizontal: Spacing.md, borderRadius: 17, justifyContent: 'center',
     backgroundColor: Colors.sunken,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: { fontSize: Typography.subhead, color: Colors.textPrimary },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   thingBlock: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, gap: Spacing.sm },

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import { roomAlreadyHere, roomsToOffer } from '@snag/supabase-queries';
 import Sheet from './Sheet';

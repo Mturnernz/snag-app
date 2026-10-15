@@ -1,7 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  Animated, PanResponder, Pressable, StyleSheet, Text, View,
+  Animated,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  View,
 } from 'react-native';
+import { Text } from './Text';
 
 import Icon from './Icon';
 import Button from './Button';

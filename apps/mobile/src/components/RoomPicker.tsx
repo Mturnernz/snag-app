@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -273,7 +274,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     borderRadius: Radius.chip,
   },
-  rowOn: { backgroundColor: Colors.primary },
+  rowOn: { backgroundColor: Colors.selected },
   rowLabel: { fontSize: Typography.base, color: Colors.textPrimary },
   rowLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   createRowLabel: { fontSize: Typography.base, color: Colors.primary, fontWeight: Typography.semibold },

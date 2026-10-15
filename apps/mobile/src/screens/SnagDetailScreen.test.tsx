@@ -81,9 +81,18 @@ jest.mock('../hooks/useKeepCurrent', () => ({
     mock_keepCurrent.paused = paused;
   },
 }));
+const mock_getComments = jest.fn().mockResolvedValue([]);
+const mock_updateComment = jest.fn();
+const mock_deleteNoteLater = jest.fn().mockResolvedValue(true);
+const mock_keepNote = jest.fn();
+jest.mock('../lib/noteEdits', () => ({
+  deleteNoteLater: (...a: unknown[]) => mock_deleteNoteLater(...a),
+  keepNote: (...a: unknown[]) => mock_keepNote(...a),
+}));
 jest.mock('../lib/supabase', () => ({
   getSnag: (...a: unknown[]) => mock_getSnag(...a),
-  getComments: jest.fn().mockResolvedValue([]),
+  getComments: (...a: unknown[]) => mock_getComments(...a),
+  updateComment: (...a: unknown[]) => mock_updateComment(...a),
   addComment: (...a: unknown[]) => mock_addComment(...a),
   updateSnag: (...a: unknown[]) => mock_updateSnag(...a),
   setSnagStatus: (...a: unknown[]) => mock_setSnagStatus(...a),
@@ -128,10 +137,10 @@ const snag = (over: Partial<any> = {}): any => ({
   linkedThings: [],
   room: 'Bathroom', photoPaths: [], description: 'Toilet cistern keeps running',
   status: 'open', parts: [], bought: [], needsParts: false,
-  dueAt: null, repeatDays: null, assigneeId: null, thingId: null,
+  dueAt: null, repeatDays: null, thingId: null,
   thingName: null, thingMake: null, thingModel: null,
   projectId: null, projectName: null,
-  reporterId: 'me', reporterName: 'Me', assigneeName: null, propertyName: 'Home',
+  reporterId: 'me', reporterName: 'Me', propertyName: 'Home',
   createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
   lastDoneAt: null, doneAt: null, commentCount: 0,
   ...over,
@@ -169,6 +178,8 @@ const press = async (node: any) => {
 beforeEach(() => {
   jest.clearAllMocks();
   mock_getSupport.mockResolvedValue(null);
+  mock_getComments.mockResolvedValue([]);
+  mock_deleteNoteLater.mockResolvedValue(true);
 });
 
 describe('finishing a snag', () => {
@@ -1458,5 +1469,62 @@ describe('asking SnagHQ, switched off', () => {
     expect(r.queryByText('Asked SnagHQ')).toBeNull();
     expect(mock_getSupport).not.toHaveBeenCalled();
     expect(r.queryByText('Notes')).not.toBeNull();
+  });
+});
+
+// A note can be corrected or taken back by the person who wrote it, and by
+// nobody else. Neither starts the job, and a changed note says so.
+describe('your own note', () => {
+  const note = (over: Partial<any> = {}) => ({
+    id: 'n1', snagId: 's1', authorId: 'me', authorName: 'Me', body: 'Ordered the part',
+    createdAt: '2026-10-10T00:00:00Z', editedAt: null, ...over,
+  });
+  const byLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll((n: any) => n.props?.accessibilityLabel === label && (n.props?.onPress || n.props?.onChangeText))[0];
+  const words = (r: ReturnType<typeof render>) => r.getAllByType('Text').map((n: any) =>
+    (n.children ?? []).map((c: any) => (typeof c === 'string' ? c : '')).join(''));
+
+  it('can be changed, in one write, and says it was edited', async () => {
+    mock_getComments.mockResolvedValue([note()]);
+    mock_updateComment.mockResolvedValue(note({ body: 'Ordered the part, arriving Tuesday', editedAt: '2026-10-11T00:00:00Z' }));
+    const r = await arrange();
+    await press(byLabel(r, 'Change this note'));
+    await TestRenderer.act(async () => { byLabel(r, 'Change the note').props.onChangeText('Ordered the part, arriving Tuesday'); });
+    await press(byLabel(r, 'Save the note'));
+
+    expect(mock_updateComment).toHaveBeenCalledWith('n1', 'Ordered the part, arriving Tuesday');
+    expect(mock_updateSnag).not.toHaveBeenCalled();
+    expect(r.queryByText('Ordered the part, arriving Tuesday')).not.toBeNull();
+    expect(words(r).some((t) => t.includes('edited'))).toBe(true);
+  });
+
+  it('writes nothing when the words did not change', async () => {
+    mock_getComments.mockResolvedValue([note()]);
+    const r = await arrange();
+    await press(byLabel(r, 'Change this note'));
+    await press(byLabel(r, 'Save the note'));
+    expect(mock_updateComment).not.toHaveBeenCalled();
+  });
+
+  it('is taken back with an Undo, and the Undo calls the delete off', async () => {
+    mock_getComments.mockResolvedValue([note()]);
+    mock_deleteNoteLater.mockReturnValue(new Promise(() => {}));
+    const r = await arrange();
+    await press(byLabel(r, 'Change this note'));
+    await press(byLabel(r, 'Delete this note'));
+
+    expect(mock_deleteNoteLater).toHaveBeenCalledWith('n1');
+    expect(r.queryByText('Ordered the part')).toBeNull();
+    const [message, action] = mock_showToast.mock.calls[mock_showToast.mock.calls.length - 1];
+    expect(message).toBe('Note deleted');
+    await TestRenderer.act(async () => { action.onPress(); });
+    expect(mock_keepNote).toHaveBeenCalledWith('n1');
+    expect(r.queryByText('Ordered the part')).not.toBeNull();
+  });
+
+  it("offers nothing on the other person's note", async () => {
+    mock_getComments.mockResolvedValue([note({ authorId: 'sam', authorName: 'Sam' })]);
+    const r = await arrange();
+    expect(byLabel(r, 'Change this note')).toBeUndefined();
   });
 });

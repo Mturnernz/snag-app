@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from './Text';
 
 import Icon from './Icon';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
@@ -54,8 +55,11 @@ export default function HomePickerSheet({ visible, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.scrim },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     position: 'absolute',
     left: 0,
     right: 0,

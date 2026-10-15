@@ -1,6 +1,7 @@
 import 'react-native-url-polyfill/auto';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { Text } from './src/components/Text';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
@@ -25,6 +26,7 @@ import { ToastProvider } from './src/hooks/useToast';
 import { HouseholdProvider } from './src/hooks/useHousehold';
 import { FirstCaptureProvider, type FirstAction } from './src/hooks/useFirstCapture';
 import AppErrorBoundary from './src/components/AppErrorBoundary';
+import AppColumn from './src/components/AppColumn';
 import { initMonitoring } from './src/lib/monitoring';
 
 // Before the first render, so an error during it is reported. A no-op off the
@@ -58,7 +60,9 @@ initMonitoring();
 export default function App() {
   return (
     <AppErrorBoundary>
-      <AppGates />
+      <AppColumn>
+        <AppGates />
+      </AppColumn>
     </AppErrorBoundary>
   );
 }

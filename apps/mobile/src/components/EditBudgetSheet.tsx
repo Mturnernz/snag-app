@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Modal, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Modal, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
@@ -106,8 +107,11 @@ export default function EditBudgetSheet({ visible, budget, budgetInclGst, onSave
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.scrim },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     position: 'absolute', left: 0, right: 0, bottom: 0,
     maxHeight: '90%',
     backgroundColor: Colors.surface,

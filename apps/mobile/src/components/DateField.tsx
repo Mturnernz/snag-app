@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TextInput, Modal, Pressable, StyleSheet } from 'react-native';
+import { View, Modal, Pressable, StyleSheet } from 'react-native';
+import { Text, TextInput } from './Text';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
@@ -324,8 +325,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.scrim },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     position: 'absolute',
     left: 0,
     right: 0,
@@ -369,7 +373,7 @@ const styles = StyleSheet.create({
   // it holds on every phone width without a layout pass.
   cell: { width: `${100 / 7}%`, alignItems: 'center', justifyContent: 'center', paddingVertical: 2 },
   day: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  dayOn: { backgroundColor: Colors.primary },
+  dayOn: { backgroundColor: Colors.selected },
   dayLabel: { fontSize: Typography.sm, color: Colors.textPrimary, fontFamily: Fonts.mono },
   dayOutside: { color: Colors.textMuted, opacity: 0.55 },
   dayLabelOn: { color: Colors.white, fontWeight: Typography.semibold },

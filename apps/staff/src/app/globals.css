@@ -47,9 +47,9 @@
   --weight-semibold: 600;
   --weight-bold: 700;
 
-  --shadow-sm: 0 1px 2px rgba(43, 39, 36, 0.06);
-  --shadow-md: 0 2px 6px rgba(43, 39, 36, 0.08);
-  --shadow-lg: 0 8px 24px rgba(43, 39, 36, 0.12);
+  --shadow-sm: 0 1px 2px rgba(20, 20, 19, 0.06);
+  --shadow-md: 0 2px 6px rgba(20, 20, 19, 0.08);
+  --shadow-lg: 0 8px 24px rgba(20, 20, 19, 0.12);
 
   /* The accent itself, not its tint. A tint ring was already weak on the old
      near-white ground and is effectively invisible on plaster — #E4EFE7 against
@@ -61,26 +61,24 @@
 /* ---------- Light (default) ---------- */
 :root,
 :root[data-theme='light'] {
-  --color-background: #FAF7F2;
+  --color-background: #FAF9F6;
   --color-surface: #FFFFFF;
   --color-surface-raised: #FFFFFF;
-  --color-border: #E7DFD3;
-  --color-border-strong: #D8CEC0;
+  --color-border: #E3E1DA;
+  --color-border-strong: #D3D0C6;
 
   --color-primary: #2E6A4F;
   --color-primary-hover: #245741;
-  --color-primary-light: #E4EFE7;
+  --color-primary-light: #DCEBE1;
   --color-on-primary: #FFFFFF;
 
-  /* Warm ink rather than blue-black: a blue-black on a warm ground looks like
-     two palettes stapled together. Measured on --color-background — 13.85,
-     6.87 and 5.68 — because a warm ground reads lighter than a cool one while
-     doing nothing at all to its measured luminance, which is how an earlier
-     pass of this palette failed three pairings that looked fine.
-     e2e/a11y.spec.ts holds the line. */
-  --color-text-primary: #2B2724;
-  --color-text-secondary: #5C554C;
-  --color-text-muted: #6A6156;
+  /* Bone & Glass (October 2026): ink, graphite and pencil on bone, mirrored
+     from apps/mobile/src/constants/theme.ts (the fern scheme). Measured on
+     --color-background — 17.5, 7.0 and 5.2 — and e2e/a11y.spec.ts holds the
+     line. */
+  --color-text-primary: #141413;
+  --color-text-secondary: #57564F;
+  --color-text-muted: #6A6962;
 
   --color-status-flagged: #3B82F6;
   --color-status-flagged-bg: #EFF6FF;
@@ -92,13 +90,13 @@
   --color-status-rca-pending-bg: #FEE2E2;
 
   --color-success: #2E6A4F;
-  --color-success-bg: #E4EFE7;
+  --color-success-bg: #DCEBE1;
   --color-success-border: #C6DDD0;
 
   --color-serious: #9E3522;
-  --color-serious-bg: #F9E7E1;
+  --color-serious-bg: #F6E2DB;
   --color-danger: #9E3522;
-  --color-danger-bg: #F9E7E1;
+  --color-danger-bg: #F6E2DB;
 
   --color-category-niggle: #6B7280;
   --color-category-niggle-bg: #F3F4F6;

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
+import { Text } from './Text';
 
 import Button from './Button';
 import { Colors, Spacing, Typography } from '../constants/theme';

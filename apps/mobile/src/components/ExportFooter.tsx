@@ -1,12 +1,13 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import Icon from './Icon';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from './Text';
+import Icon, { type IconName } from './Icon';
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 
 interface Props {
   label: string;
-  /** Defaults to the download arrow — the other one is the way back in. */
-  icon?: 'download-outline' | 'clipboard-outline';
+  /** Defaults to the download arrow. */
+  icon?: IconName;
   onPress: () => void;
 }
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import Sheet from './Sheet';
 import { Group, TextButton, groupedStyles } from './Grouped';
@@ -137,7 +138,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.chip,
     backgroundColor: Colors.sunken,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   otherRow: { flexDirection: 'row', alignItems: 'stretch', gap: Spacing.sm },

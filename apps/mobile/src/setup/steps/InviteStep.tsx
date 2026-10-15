@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Text } from 'react-native';
+import { Text } from '../../components/Text';
 
 import SetupShell, { setupStyles } from '../SetupShell';
 import InviteLinkPanel from '../../components/InviteLinkPanel';

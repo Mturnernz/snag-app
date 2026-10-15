@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
+  View,
+  Modal,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
+import { Text, TextInput } from './Text';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';
@@ -224,8 +230,11 @@ export default function ProjectRoomsSheet({
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(43, 39, 36, 0.45)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.scrim },
   sheet: {
+    // The app's column on a wide screen (AppColumn): a Modal is drawn over
+    // the whole page, so the sheet keeps itself to the same width.
+    width: '100%', maxWidth: 640, marginHorizontal: 'auto',
     position: 'absolute',
     left: 0,
     right: 0,
@@ -262,7 +271,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   chipNew: {

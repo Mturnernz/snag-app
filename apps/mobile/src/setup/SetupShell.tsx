@@ -1,7 +1,13 @@
 import React from 'react';
 import {
-  View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
+  View,
+  ScrollView,
+  Pressable,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { Text } from '../components/Text';
 
 import Button from '../components/Button';
 import Icon, { type IconName } from '../components/Icon';
@@ -182,7 +188,7 @@ const styles = StyleSheet.create({
   },
   dots: { flexDirection: 'row', gap: Spacing.sm - 2, alignItems: 'center' },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.border },
-  dotOn: { width: 20, backgroundColor: Colors.primary },
+  dotOn: { width: 20, backgroundColor: Colors.selected },
   content: {
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.xxl,

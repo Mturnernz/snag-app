@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Modal, View, Text, Pressable, StyleSheet } from 'react-native';
+import { Modal, View, Pressable, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import Button from './Button';
 import Icon from './Icon';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -8,21 +9,6 @@ import type { ExportFormat } from '../lib/exportFile';
 
 export type ExportScope = 'view' | 'all';
 
-/**
- * What the file is for, which on a PDF decides whether it opens with the brief.
- *
- * **Two named chips rather than one that toggles.** A single "Include the
- * brief" chip would leave the other answer as the unlabelled absence of a
- * press — the mistake the capture sheet's *Urgent* chip made, where the common
- * answer was a state nothing on the screen ever said out loud.
- *
- * It is asked every time and never remembered, like scope, because the two are
- * genuinely different documents: one opens with a page of instructions
- * addressed to an assistant, and putting that at the front of the copy
- * somebody emails their landlord is wrong.
- */
-export type ExportPurpose = 'send' | 'assess';
-
 interface Props {
   visible: boolean;
   /** "the list" or "the house record" — what the sentence is about. */
@@ -30,17 +16,7 @@ interface Props {
   /** How many rows each scope would produce, so the choice is a fact not a guess. */
   counts: { view: number; all: number };
   busy?: boolean;
-  /**
-   * Whether this extract can carry the brief.
-   *
-   * The list can: it is a set of jobs, and the brief asks what each one is and
-   * what it would take. The house record cannot — nothing is wrong with a
-   * dishwasher that is merely recorded — so the row is absent there rather than
-   * present and ignored, which would be a question whose answer changed
-   * nothing.
-   */
-  canBrief?: boolean;
-  onExport: (scope: ExportScope, format: ExportFormat, brief: boolean) => void;
+  onExport: (scope: ExportScope, format: ExportFormat) => void;
   onCancel: () => void;
 }
 
@@ -77,16 +53,11 @@ interface Props {
  * different kinds of thing.
  */
 export default function ExportSheet({
-  visible, what, counts, busy = false, canBrief = false, onExport, onCancel,
+  visible, what, counts, busy = false, onExport, onCancel,
 }: Props) {
   const [scope, setScope] = useState<ExportScope>('view');
   const [format, setFormat] = useState<ExportFormat>('csv');
-  // Defaulted to the brief, because getting the list assessed is now the main
-  // reason a PDF gets made — and it is one tap to drop when it isn't.
-  const [purpose, setPurpose] = useState<ExportPurpose>('assess');
-
   const rows = scope === 'view' ? counts.view : counts.all;
-  const briefed = canBrief && format === 'pdf' && purpose === 'assess';
 
   const chip = (
     on: boolean,
@@ -137,25 +108,6 @@ export default function ExportSheet({
             {chip(format === 'csv', 'Spreadsheet', () => setFormat('csv'), { icon: 'grid-outline' })}
             {chip(format === 'pdf', 'PDF', () => setFormat('pdf'), { icon: 'document-text-outline' })}
           </View>
-          {/* Only on a PDF: a brief is prose addressed to a reader, and a
-              spreadsheet's job is to be sorted. The row goes away rather than
-              greying out, because a question that cannot apply is not a
-              question. */}
-          {canBrief && format === 'pdf' ? (
-            <>
-              <Text style={styles.fieldLabel}>What it's for</Text>
-              <View style={styles.chipRow}>
-                {chip(purpose === 'assess', 'To get it assessed', () => setPurpose('assess'))}
-                {chip(purpose === 'send', 'To send to somebody', () => setPurpose('send'))}
-              </View>
-              <Text style={styles.hint}>
-                {briefed
-                  ? 'It opens with what to ask for — a fix, what it costs, and who to call. Paste the reply back in from the list.'
-                  : 'Just the list and the photos, with nothing addressed to anybody.'}
-              </Text>
-            </>
-          ) : null}
-
           {/* Said here rather than in the blurb, because it is the one real
               difference between the two files and it is the reason somebody
               picks the PDF. A spreadsheet cell cannot hold a picture, so the
@@ -177,7 +129,7 @@ export default function ExportSheet({
             <Button
               label="Export"
               icon="download-outline"
-              onPress={() => onExport(scope, format, briefed)}
+              onPress={() => onExport(scope, format)}
               loading={busy}
               disabled={busy || rows === 0}
               fullWidth
@@ -193,7 +145,7 @@ export default function ExportSheet({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(17, 24, 39, 0.5)',
+    backgroundColor: Colors.scrim,
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.xl,
@@ -237,7 +189,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.button,
     backgroundColor: Colors.sunken,
   },
-  chipOn: { backgroundColor: Colors.primary },
+  chipOn: { backgroundColor: Colors.selected },
   chipLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
   chipCount: { fontSize: Typography.sm, color: Colors.textMuted },
   chipLabelOn: { color: Colors.white, fontWeight: Typography.semibold },

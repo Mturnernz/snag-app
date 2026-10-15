@@ -1,7 +1,7 @@
 import {
   ExportTable, ExportPhoto, toCsv, exportDateStamp, exportFileName,
 } from '@snag/supabase-queries';
-import type { assessmentBrief } from '@snag/supabase-queries';
+import type { BriefBlock } from '@snag/supabase-queries';
 import { saveFile, type SavedFile } from './download';
 
 /**
@@ -20,14 +20,14 @@ import autoTable from 'jspdf-autotable';
 
 export type ExportFormat = 'csv' | 'pdf';
 
-/** What `assessmentBrief` hands back, without importing its shape twice. */
-export type AssessmentBrief = ReturnType<typeof assessmentBrief>;
+/** A page of prose at the front of a PDF — `quoteBrief`'s shape. */
+export type PdfBrief = { title: string; blocks: BriefBlock[] };
 
 export async function writeExport(
   table: ExportTable,
   format: ExportFormat,
   images: ExportImage[] = [],
-  brief?: AssessmentBrief,
+  brief?: PdfBrief,
 ): Promise<SavedFile & { fileName: string }> {
   // Stamped with the local day, so two extracts of the same list don't land in
   // a downloads folder as "(1)" and "(2)" with nothing to tell them apart.
@@ -106,7 +106,7 @@ export async function loadExportImages(
 export function renderPdf(
   table: ExportTable,
   images: ExportImage[] = [],
-  brief?: AssessmentBrief,
+  brief?: PdfBrief,
 ): Uint8Array {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
@@ -165,7 +165,7 @@ export function renderPdf(
  * Returns how many sheets it used, because the footer on the table's own pages
  * has to count them or the second sheet of the file claims to be the first.
  */
-function drawBriefPages(doc: jsPDF, brief: AssessmentBrief): number {
+function drawBriefPages(doc: jsPDF, brief: PdfBrief): number {
   const margin = 40;
   const pageH = doc.internal.pageSize.getHeight();
   const column = 520;

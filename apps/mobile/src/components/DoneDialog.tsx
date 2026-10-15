@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, View, Text, StyleSheet } from 'react-native';
+import { Modal, View, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import Button from './Button';
 import Icon from './Icon';
 import { Colors, Radius, Shadow, Spacing, Typography } from '../constants/theme';
@@ -54,7 +55,7 @@ export default function DoneDialog({ visible, headline, onClose }: Props) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(17, 24, 39, 0.5)',
+    backgroundColor: Colors.scrim,
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.xl,

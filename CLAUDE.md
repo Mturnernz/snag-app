@@ -462,10 +462,14 @@ Snag Line icons). It replaces values, not behaviour.
 - **Icons are Snag Line** (`components/snagLine.ts`, generated; `Icon.tsx` draws them with
   `react-native-svg`, `Icon.web.tsx` as a plain `<svg>`). Screens may still pass an Ionicons name,
   which draws the glyph that replaced it; rooms (`roomIcon`) and tabs name Snag Line glyphs.
-- **The tab bar is a floating glass dock** (`navigation/Dock.tsx`) 26pt above the foot, with the
-  capture + beside it. A `Fab` inside the dock hands itself over and draws nothing; outside one —
-  every screen test — it draws itself. Every tab pads its scroll by `useDockClearance()`, and the
-  dock goes while the keyboard is up.
+- **The tab bar is a floating glass dock** (`navigation/Dock.tsx`) 26pt above the foot, **the same
+  full width on every tab**, with the capture + floating above its right end on the tabs that have
+  one (List, House). The dock used to give up the + 's width on those two, so it was a different
+  size there from everywhere else and its labels ran together (*ProjectsSchedule*); the owner asked
+  for one size and the + moved, never the dock. A `Fab` inside the dock hands itself over and draws
+  nothing; outside one — every screen test — it draws itself. Every tab pads its scroll by
+  `useDockClearance()`, which counts the + on a tab that has one, and the dock goes while the
+  keyboard is up. `Dock.test.tsx` pins the one width and the + above it.
 - **A tab opens with its count**: the home picker on one line, the big number (*10 to do*, *12
   recorded*), one mono line, the 2px ink rule, then the search. It scrolls away with the content.
 - **New is photo cards** (`PhotoCard`, 176 × 220) above the rooms; **every other job is a hairline
@@ -5373,6 +5377,14 @@ grey mid-press reads as the action having failed.
   every thumbnail again, and never hands out one about to die. `SignedImage` (and `PhotoViewer`,
   through `useSignedUri`) signs the path again once if a link fails anyway, then draws a quiet
   placeholder. A bare `<Image>` on a signed URL goes blank for ever when it expires.
+- **A screen draws its rows before it signs their photos, never after.** The List and House tabs
+  used to await `getFileUrls` before drawing anything, so a slow signing call blanked the whole
+  tab. In October 2026 a colour-scheme reload landed while `project_page` calls were holding the
+  database: requests queued for 13s, the signing call came back 544, and both tabs read *0 to do*
+  and *30 recorded* over nothing — reported as "all snags disappear". Now the rows draw as soon as
+  their read lands, the links are merged in when they arrive, the count is a spinner until the
+  first read (never *0*), and a failed first read says so with *Try again* rather than *Nothing
+  needs doing*.
 - **Every request has a deadline** (`fetchWithTimeout` in `lib/supabase.ts`). supabase-js sets
   none, and it resolves an access token before every request — so one stalled `/auth/v1/token`
   refresh leaves `getSession()` pending forever and no later call is ever issued at all. Nothing

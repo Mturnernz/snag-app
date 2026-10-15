@@ -191,6 +191,58 @@ describe('HouseScreen', () => {
     expect(texts(result)).not.toContain('All rooms');
   });
 
+  it('draws the rooms without waiting for the photos to be signed', async () => {
+    // A colour-scheme reload once put this tab behind a signing call that took
+    // twenty seconds: "30 recorded" over an empty page, read as the record gone.
+    const { getFileUrls } = require('../lib/supabase');
+    getFileUrls.mockReturnValueOnce(new Promise(() => {}));
+    mock_getThings.mockResolvedValue([
+      thing({ id: 'w', name: 'Washing machine', room: 'Laundry', photoPaths: ['h/w.jpg'] }),
+    ]);
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(tiles(result)).toEqual(['Laundry']);
+    expect(texts(result)).toContain('Add a room');
+    expect(texts(result).join(' ')).toContain('1 recorded');
+  });
+
+  it('never says "0 recorded" before the record has been read', async () => {
+    mock_getThings.mockReturnValue(new Promise(() => {}));
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(texts(result).join(' ')).not.toContain('recorded');
+    expect(tiles(result)).toEqual([]);
+    expect(pressable(result, 'Try again')).toBeUndefined();
+  });
+
+  it('keeps waiting, rather than failing, while there is no place to read yet', async () => {
+    (global as any).__household = { ...(global as any).__household, activeProperty: null };
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(mock_getThings).not.toHaveBeenCalled();
+    expect(texts(result)).not.toContain("Couldn't load the house record");
+    expect(tiles(result)).toEqual([]);
+  });
+
+  it('says the record could not be read, rather than drawing empty rooms', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    mock_getThings.mockRejectedValueOnce(new Error('offline'));
+    const result = render(<HouseScreen />);
+    await settle();
+
+    expect(texts(result)).toContain("Couldn't load the house record");
+    expect(tiles(result)).toEqual([]);
+    expect(texts(result)).not.toContain('Not recorded yet');
+
+    mock_getThings.mockResolvedValueOnce([thing({ id: 'w', name: 'Dryer', room: 'Laundry' })]);
+    await TestRenderer.act(async () => pressable(result, 'Try again').props.onPress());
+    expect(tiles(result)).toEqual(['Laundry']);
+    (console.error as jest.Mock).mockRestore();
+  });
+
   it("names the place, not the household, for somebody on one place of two", async () => {
     const bay = { id: 'b', householdId: 'h', name: 'Martins Bay' };
     (global as any).__household = {

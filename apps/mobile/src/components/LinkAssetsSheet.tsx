@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Modal, View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, StyleSheet,
+  Modal,
+  View,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import Icon from './Icon';
 import Button from './Button';

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { openUrl } from '../lib/openUrl';

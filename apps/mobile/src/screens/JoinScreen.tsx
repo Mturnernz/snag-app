@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, ScrollView,
+  View,
+  ActivityIndicator,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from 'react-native';
+import { Text, TextInput } from '../components/Text';
 import { describePlaces } from '@snag/supabase-queries';
 
 import { useEdgeInsets } from '../hooks/useEdgeInsets';

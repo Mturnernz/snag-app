@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, StyleSheet, Animated, AccessibilityInfo, Pressable,
+  View,
+  StyleSheet,
+  Animated,
+  AccessibilityInfo,
+  Pressable,
 } from 'react-native';
+import { Text, TextInput } from '../components/Text';
 
 import SetupShell, { setupStyles } from './SetupShell';
 import Button from '../components/Button';

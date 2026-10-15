@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, Pressable, Modal, ActivityIndicator, StyleSheet,
+  View,
+  Pressable,
+  Modal,
+  ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import Icon from './Icon';
 import RoomPicker from './RoomPicker';

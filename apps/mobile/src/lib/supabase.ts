@@ -367,6 +367,13 @@ export const getThingNotes = (thingId: string, exceptSnagId: string) =>
 export const addComment = (snagId: string, body: string) =>
   queries.addComment(supabase, snagId, body);
 
+export const updateComment = (commentId: string, body: string) =>
+  queries.updateComment(supabase, commentId, body);
+
+export const deleteComment = (commentId: string) => queries.deleteComment(supabase, commentId);
+
+export const getNotesSince = (since: string) => queries.getNotesSince(supabase, since);
+
 export const markListSeen = () => queries.markListSeen(supabase);
 
 export const getLocations = (propertyId: string) => queries.getLocations(supabase, propertyId);
@@ -375,6 +382,9 @@ export const createLocation = (propertyId: string, name: string) =>
   queries.createLocation(supabase, propertyId, name);
 
 export const deleteLocation = (locationId: string) => queries.deleteLocation(supabase, locationId);
+
+export const renameLocation = (locationId: string, name: string) =>
+  queries.renameLocation(supabase, locationId, name);
 
 // ─── The house record ─────────────────────────────────────────────────────────
 

@@ -1,7 +1,13 @@
 import React from 'react';
 import {
-  View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform,
+  View,
+  ScrollView,
+  Pressable,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { Text } from '../components/Text';
 
 import Button from '../components/Button';
 import Icon, { type IconName } from '../components/Icon';

@@ -426,6 +426,12 @@ export interface Comment {
   authorName: string;
   body: string;
   createdAt: string;
+  /**
+   * When its author last changed it, or null. Said beside the time on the job
+   * page, so a note that changed after the other person read it does not pass
+   * for what they read (`20261015090000`).
+   */
+  editedAt: string | null;
 }
 
 // ---------------------------------------------------------------- filtering

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { Text } from '../components/Text';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';

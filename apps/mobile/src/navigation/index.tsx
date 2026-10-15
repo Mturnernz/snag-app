@@ -1,11 +1,9 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 
-import { Colors, IconSize, Typography } from '../constants/theme';
+import Dock, { DockProvider } from './Dock';
 import { useHousehold } from '../hooks/useHousehold';
-import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { MainTabParamList, RootStackParamList } from '../types';
 import SnagListScreen from '../screens/SnagListScreen';
 import ScheduleScreen from '../screens/ScheduleScreen';
@@ -21,55 +19,23 @@ import HouseRoomScreen from '../screens/HouseRoomScreen';
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-const TAB_ICONS: Record<keyof MainTabParamList, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
-  // [inactive, active] — filled is reserved for the active tab.
-  Snags: ['list-outline', 'list'],
-  House: ['home-outline', 'home'],
-  Projects: ['construct-outline', 'construct'],
-  Schedule: ['calendar-outline', 'calendar'],
-  Profile: ['person-circle-outline', 'person-circle'],
-};
-
 function MainTabs() {
   const { profile } = useHousehold();
-  // The tab bar measures the safe area itself, and on an installed Android
-  // phone that answer is zero — the manifest hides the system bars — so the
-  // corner tabs sat in the rounded bottom corners, where the swipe that brings
-  // the navigation bar back starts. Hand it the floored insets instead.
-  const edge = useEdgeInsets();
-
+  // Bone & Glass: the tab bar is a floating glass dock with the capture +
+  // beside it (`Dock.tsx`), so it measures nothing here. The dock floors the
+  // safe area itself (`useEdgeInsets`): on an installed Android phone the
+  // manifest hides the system bars and every inset is zero, and the corner
+  // tabs would otherwise sit where the swipe that brings them back starts.
   return (
+    <DockProvider>
     <Tab.Navigator
-      safeAreaInsets={{ bottom: edge.bottom, left: edge.left, right: edge.right }}
-      // The list. Adding something is a bar at the foot of it rather than a
-      // tab of its own, so there is nowhere else to open — and opening here is
-      // how one person finds out what the other added, which with no
-      // notifications anywhere in this product is the only way there is.
+      tabBar={(props) => <Dock {...props} />}
+      // The list. Adding something is the + beside the dock rather than a tab
+      // of its own, so there is nowhere else to open — and opening here is how
+      // one person finds out what the other added, which with no notifications
+      // anywhere in this product is the only way there is.
       initialRouteName="Snags"
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.textMuted,
-        // V2: the bar sits on the same plaster as the screen, split by a hairline.
-        tabBarStyle: {
-          backgroundColor: Colors.background,
-          borderTopColor: Colors.separator,
-        },
-        tabBarLabelStyle: {
-          fontSize: Typography.xs,
-          fontWeight: Typography.medium,
-        },
-        tabBarIcon: ({ focused, color }) => {
-          const [inactive, active] = TAB_ICONS[route.name];
-          return (
-            <Ionicons
-              name={focused ? active : inactive}
-              size={IconSize.lg}
-              color={color}
-            />
-          );
-        },
-      })}
+      screenOptions={{ headerShown: false }}
     >
       <Tab.Screen name="Snags" component={SnagListScreen} options={{ tabBarLabel: 'List' }} />
       {/* What's *there*, beside the list of what's wrong. Named "House"
@@ -110,6 +76,7 @@ function MainTabs() {
       <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ tabBarLabel: 'Schedule' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'You' }} />
     </Tab.Navigator>
+    </DockProvider>
   );
 }
 

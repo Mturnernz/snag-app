@@ -215,6 +215,7 @@ function mapComment(row: Row): Comment {
     authorName: row.author?.display_name ?? 'Someone',
     body: row.body,
     createdAt: row.created_at,
+    editedAt: row.edited_at ?? null,
   };
 }
 
@@ -1001,6 +1002,109 @@ export function snagHeadline(snag: Pick<Snag, 'description' | 'room'>): string {
   return snag.room ? `Something in the ${snag.room.toLowerCase()}` : 'Something to sort out';
 }
 
+// ---------------------------------------------------------------- finding a job
+
+/** Everything a job can be found by: its reference, words, room, parts and linked items. */
+function snagSearchText(snag: Snag): string {
+  return [
+    snag.reference,
+    snagHeadline(snag),
+    snag.room,
+    ...(snag.parts ?? []),
+    ...(snag.linkedThings ?? []).flatMap((thing) => [thing.name, thing.make, thing.model]),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+/**
+ * The jobs a search finds, in the order they came.
+ *
+ * The House tab's rule, so the two searches behave alike: any case, any
+ * spacing, every word typed found somewhere rather than the phrase in one
+ * place — "kitchen tap" finds the dripping mixer in the Kitchen. Run on the
+ * list already in hand, never the server, for the House tab's reason too.
+ */
+export function searchSnags<T extends Snag>(snags: T[], query: string): T[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return snags;
+  return snags.filter((snag) => {
+    const haystack = snagSearchText(snag);
+    return words.every((word) => haystack.includes(word));
+  });
+}
+
+// ---------------------------------------------------------------- history
+
+/** One finish: a job marked done, or the last time a repeat was. */
+export interface HistoryEntry {
+  snag: Snag;
+  /** When it was done. */
+  at: string;
+  /** A repeat, which comes round again rather than staying done. */
+  repeat: boolean;
+}
+
+export interface HistoryMonth {
+  /** `2026-10`, the local month. */
+  key: string;
+  /** "October 2026". */
+  label: string;
+  entries: HistoryEntry[];
+}
+
+/**
+ * Everything finished, newest first: the done jobs, and each repeat at the
+ * last time it was done.
+ *
+ * A repeat never reaches 'done' (`set_snag_status` rolls it forward), so its
+ * finish lives in `last_done_at` — and only the latest one, which is the
+ * honest limit of what the schema remembers. The Schedule tab draws the same
+ * marks and invents no history either.
+ */
+export function historyEntries(done: Snag[], open: Snag[]): HistoryEntry[] {
+  const entries: HistoryEntry[] = [];
+  for (const snag of done) {
+    const at = snag.doneAt ?? snag.lastDoneAt ?? snag.updatedAt;
+    if (at) entries.push({ snag, at, repeat: false });
+  }
+  for (const snag of open) {
+    if (snag.lastDoneAt) entries.push({ snag, at: snag.lastDoneAt, repeat: true });
+  }
+  return entries.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/** "October 2026" for `2026-10`. */
+export function monthLabel(key: string): string {
+  const [year, month] = key.split('-').map(Number);
+  return `${MONTH_NAMES[(month || 1) - 1]} ${year}`;
+}
+
+/**
+ * The entries by local month, newest month first, keeping their order inside
+ * each. A month is a local month — `dayKey`'s rule — so a job finished at 9pm
+ * on 31 October in Auckland is October's, not November's.
+ */
+export function historyMonths(entries: HistoryEntry[]): HistoryMonth[] {
+  const months: HistoryMonth[] = [];
+  for (const entry of entries) {
+    const key = dayKey(entry.at).slice(0, 7);
+    let month = months.find((one) => one.key === key);
+    if (!month) {
+      month = { key, label: monthLabel(key), entries: [] };
+      months.push(month);
+    }
+    month.entries.push(entry);
+  }
+  return months.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
+}
+
 /**
  * Capture. Everything else about a snag is set later, in triage.
  *
@@ -1279,15 +1383,104 @@ export async function deleteSnag(client: SupabaseClient, snagId: string): Promis
 
 // ---------------------------------------------------------------- comments
 
+const COMMENT_COLUMNS = 'id, snag_id, author_id, body, created_at, author:profiles!inner(display_name)';
+
 export async function getComments(client: SupabaseClient, snagId: string): Promise<Comment[]> {
-  const { data, error } = await client
+  const read = (columns: string) => client
     .from('comments')
-    .select('id, snag_id, author_id, body, created_at, author:profiles!inner(display_name)')
+    .select(columns)
     .eq('snag_id', snagId)
     .order('created_at');
 
+  let { data, error } = await read(`${COMMENT_COLUMNS}, edited_at`);
+  // `edited_at` arrived in `20261015090000`. A database that has not had it
+  // answers the whole read with 42703, and this read is the job page's: the
+  // page would not open. So it asks again without the column, and a note reads
+  // as never edited. Remove once the migration is applied everywhere.
+  if (error && (error.code === '42703' || /edited_at/.test(error.message ?? ''))) {
+    ({ data, error } = await read(COMMENT_COLUMNS));
+  }
+
   if (error) throw asError(error, "Couldn't load the comments");
-  return (data ?? []).map(mapComment);
+  return ((data ?? []) as Row[]).map(mapComment);
+}
+
+/**
+ * Changes a note's words. Only its author can, and it never starts the job:
+ * correcting a note is not new work (`20261015090000`).
+ */
+export async function updateComment(
+  client: SupabaseClient,
+  commentId: string,
+  body: string
+): Promise<Comment> {
+  const { data, error } = await client.rpc('update_comment', { p_comment_id: commentId, p_body: body });
+  const row = unwrap<Row>(data, error, "That didn’t save");
+  return mapComment(row);
+}
+
+/** Takes a note back. Only its author can; a note already gone is not an error. */
+export async function deleteComment(client: SupabaseClient, commentId: string): Promise<void> {
+  const { error } = await client.rpc('delete_comment', { p_comment_id: commentId });
+  if (error) throw asError(error, "Couldn't delete that note");
+}
+
+/**
+ * Who wrote what, and when, since a moment — for *New* on the list.
+ *
+ * New used to mean jobs somebody else added. A reply on an existing job — the
+ * part is ordered, arriving Tuesday — stayed invisible until somebody opened
+ * the job, and this product sends no notifications. So the list reads the
+ * notes written since its last visit and raises the jobs they are on.
+ *
+ * No bodies: the list only needs to know that something was said. RLS limits
+ * it to the places this person is on; the screen keeps the ones on jobs it is
+ * showing. Capped, because a list that has been away for a month needs to know
+ * which jobs have news, not every note.
+ */
+export async function getNotesSince(
+  client: SupabaseClient,
+  since: string
+): Promise<NoteStamp[]> {
+  const { data, error } = await client
+    .from('comments')
+    .select('snag_id, author_id, created_at')
+    .gt('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) throw asError(error, "Couldn't check for new notes");
+  return ((data ?? []) as Row[]).map((row) => ({
+    snagId: row.snag_id,
+    authorId: row.author_id,
+    createdAt: row.created_at,
+  }));
+}
+
+export interface NoteStamp {
+  snagId: string;
+  authorId: string;
+  createdAt: string;
+}
+
+/**
+ * The jobs somebody *else* has written on since `since`, with how many notes.
+ *
+ * Your own notes are never news to you, which is the list's rule for jobs too.
+ * Null `since` — a first visit — is nothing new, for the reason `mark_list_seen`
+ * returns null then: a new member is not greeted with the whole backlog.
+ */
+export function snagsWithNewNotes(
+  notes: NoteStamp[],
+  me: string,
+  since: string | null
+): Map<string, number> {
+  const news = new Map<string, number>();
+  if (!since) return news;
+  for (const note of notes) {
+    if (note.authorId === me || note.createdAt <= since) continue;
+    news.set(note.snagId, (news.get(note.snagId) ?? 0) + 1);
+  }
+  return news;
 }
 
 /**
@@ -1423,7 +1616,20 @@ export async function createLocation(
  */
 export async function deleteLocation(client: SupabaseClient, locationId: string): Promise<void> {
   const { error } = await client.rpc('delete_location', { p_location_id: locationId });
-  if (error) throw asError(error, "Couldn't remove that tag");
+  if (error) throw asError(error, "Couldn't remove that room");
+}
+
+/**
+ * Renames a room, and every job, thing and "not here" filed under it at this
+ * place, in one call (`20261015090100`). Nothing says the old name afterwards.
+ */
+export async function renameLocation(
+  client: SupabaseClient,
+  locationId: string,
+  name: string
+): Promise<void> {
+  const { error } = await client.rpc('rename_location', { p_location_id: locationId, p_name: name });
+  if (error) throw asError(error, "Couldn't rename that room");
 }
 
 

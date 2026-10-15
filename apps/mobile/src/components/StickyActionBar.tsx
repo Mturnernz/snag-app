@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Keyboard, Platform, KeyboardEvent } from 'react-native';
+import { View, StyleSheet, Keyboard, Platform, KeyboardEvent } from 'react-native';
+import { Text } from './Text';
 import { BlurView } from 'expo-blur';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { Colors, Spacing, Typography, Shadow } from '../constants/theme';

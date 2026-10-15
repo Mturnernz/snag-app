@@ -1,9 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal, View, Text, Pressable, Animated, PanResponder, StyleSheet,
-  useWindowDimensions, Platform,
-  type ViewStyle, type NativeTouchEvent,
+  Modal,
+  View,
+  Pressable,
+  Animated,
+  PanResponder,
+  StyleSheet,
+  useWindowDimensions,
+  Platform,
+  type ViewStyle,
+  type NativeTouchEvent,
 } from 'react-native';
+import { Text } from './Text';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { useSignedUri } from '../hooks/useSignedUri';
 

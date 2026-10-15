@@ -1,8 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, type LayoutChangeEvent,
-  type NativeScrollEvent, type NativeSyntheticEvent,
+  View,
+  ScrollView,
+  StyleSheet,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
+import { Text } from './Text';
 
 import Icon, { type IconName } from './Icon';
 import Button from './Button';

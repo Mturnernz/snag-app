@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import { Colors, Radius, Spacing, Typography, Fonts, MIN_TOUCH_TARGET } from '../constants/theme';
 // From the packages directly, never through `lib/supabase`: that module builds

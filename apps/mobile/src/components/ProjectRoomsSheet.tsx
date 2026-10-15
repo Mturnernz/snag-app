@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, Modal, ScrollView, Pressable, ActivityIndicator, StyleSheet,
+  View,
+  Modal,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
+import { Text, TextInput } from './Text';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';

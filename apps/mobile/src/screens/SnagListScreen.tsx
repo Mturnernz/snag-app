@@ -1,8 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, SectionList, ScrollView, RefreshControl, Pressable, StyleSheet, BackHandler,
-  Linking, Platform,
+  View,
+  SectionList,
+  ScrollView,
+  RefreshControl,
+  Pressable,
+  StyleSheet,
+  BackHandler,
+  Linking,
+  Platform,
 } from 'react-native';
+import { Text } from '../components/Text';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';

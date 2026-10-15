@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Modal, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Modal, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import Icon from './Icon';

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from './Text';
 import Icon from './Icon';
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 

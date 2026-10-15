@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { Text } from './Text';
 
 import { Group, Pill, Row, SectionTitle, TextButton } from './Grouped';
 import { Colors, Spacing, Typography } from '../constants/theme';

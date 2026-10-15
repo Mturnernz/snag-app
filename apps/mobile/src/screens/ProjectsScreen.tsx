@@ -1,7 +1,13 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, SectionList, Pressable, RefreshControl, ActivityIndicator, StyleSheet,
+  View,
+  SectionList,
+  Pressable,
+  RefreshControl,
+  ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
+import { Text } from '../components/Text';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';

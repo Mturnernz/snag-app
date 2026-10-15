@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { Text } from './Text';
 
 import Sheet from './Sheet';
 import { Group, PrimaryButton, TextButton, groupedStyles } from './Grouped';

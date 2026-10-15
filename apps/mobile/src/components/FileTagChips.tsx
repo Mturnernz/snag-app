@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from './Text';
 
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { FILE_TAGS, FILE_TAG_LABELS, type FileTag } from '@snag/shared-types';

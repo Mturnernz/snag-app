@@ -5,7 +5,7 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from 'react';
-import { Text } from 'react-native';
+import { Text } from '../components/Text';
 
 export function sheetStub(name: string, describe: (props: any) => string | null = () => null) {
   return {

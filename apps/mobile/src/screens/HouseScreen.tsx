@@ -5,6 +5,7 @@ import {
   RefreshControl,
   Pressable,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { Text, TextInput } from '../components/Text';
 import { useNavigation } from '@react-navigation/native';
@@ -105,6 +106,12 @@ export default function HouseScreen() {
   const [showExport, setShowExport] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  /**
+   * Whether the record has been read at all. Until it has, the count is not
+   * "0 recorded" and the grid is not a house of empty rooms: both are claims
+   * about a record nobody has looked at yet.
+   */
+  const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [roomOpen, setRoomOpen] = useState(false);
   /**
@@ -128,13 +135,15 @@ export default function HouseScreen() {
   const propertyId = activeProperty?.id ?? null;
 
   const load = useCallback(async () => {
+    // No place yet is the places still loading, not a record that failed to:
+    // the spinner stays until there is one to read.
     if (!propertyId) {
       setThings([]);
       setAbsent([]);
-      setLoading(false);
       setRefreshing(false);
       return;
     }
+    let covers: string[] = [];
     try {
       const [rows, hidden, checks] = await Promise.all([
         getThings(propertyId),
@@ -144,16 +153,24 @@ export default function HouseScreen() {
       setThings(rows);
       setAbsent(hidden);
       setLabelChecks(checks);
+      setLoaded(true);
       // Covers for the search results, which are the only thing rows this
       // screen draws; a room's page signs its own.
-      const covers = rows.map((t) => t.photoPaths[0]).filter(Boolean) as string[];
-      setPhotoUrls(await getFileUrls(covers));
+      covers = rows.map((t) => t.photoPaths[0]).filter(Boolean) as string[];
     } catch (err) {
       console.error('Failed to load the house record:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
+    // **The rooms are drawn before the photos are signed, never after.** The
+    // grid waited on this call, so a slow one — twenty seconds and a 544 while
+    // the database queued after a colour-scheme reload — left "30 recorded"
+    // over an empty page, which reads as the record gone. Only a search shows
+    // a cover, and it can wait for one.
+    if (covers.length === 0) return;
+    const urls = await getFileUrls(covers).catch(() => ({} as Record<string, string>));
+    setPhotoUrls((now) => ({ ...now, ...urls }));
   }, [propertyId]);
 
   useEffect(() => {
@@ -264,7 +281,7 @@ export default function HouseScreen() {
   const roomNames = useMemo(() => locations.map((l) => l.name), [locations]);
 
   const placeName = placeTitle(activeProperty, properties);
-  const empty = !loading && (searching ? visible.length === 0 : rooms.length === 0);
+  const empty = !loading && (!loaded || (searching ? visible.length === 0 : rooms.length === 0));
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -301,11 +318,17 @@ export default function HouseScreen() {
             would be the first place the two blur. It scrolls away with the
             rooms; the home picker stays above. */}
         <View style={styles.countBlock}>
-          {!searching ? (
+          {!searching && loaded ? (
             <Text style={styles.countLine} accessibilityRole="header">
               <Text style={styles.bigCount}>{recorded}</Text>
               <Text style={styles.unit}> recorded</Text>
             </Text>
+          ) : !searching ? (
+            <ActivityIndicator
+              color={Colors.textMuted}
+              style={styles.countLoading}
+              accessibilityLabel="Loading the house record"
+            />
           ) : null}
           {/* "Recorded", not "things": the ghosts behind the tiles are not things,
               and counting them here would be the first place the two blur. */}
@@ -361,7 +384,20 @@ export default function HouseScreen() {
             ) : null}
           </View>
         </View>
-        {loading ? null : searching ? (
+        {loading ? null : !loaded ? (
+          // The first read failed. A grid of empty rooms here would be the
+          // record claiming nothing was ever recorded.
+          <EmptyState
+            icon="alert-circle-outline"
+            title="Couldn't load the house record"
+            message="Everything recorded is safe. Check the connection and try again."
+            actionLabel="Try again"
+            onAction={() => {
+              setLoading(true);
+              load();
+            }}
+          />
+        ) : searching ? (
           // A search is a flat answer over real records only. Grouping three
           // results across three rooms buries the answer under its own filing,
           // and a ghost in a search result is the app offering something it
@@ -411,10 +447,10 @@ export default function HouseScreen() {
           />
         )}
 
-        {!loading && !searching ? (
+        {!loading && loaded && !searching ? (
           <AddRow label="Add a room" onPress={() => setRoomOpen(true)} />
         ) : null}
-        {!loading ? (
+        {!loading && loaded ? (
           <ExportFooter label="Export the house record" onPress={() => setShowExport(true)} />
         ) : null}
       </ScrollView>
@@ -564,6 +600,8 @@ const styles = StyleSheet.create({
     fontSize: Typography.count, lineHeight: 84, fontWeight: Typography.heavy, letterSpacing: -5,
     color: Colors.textPrimary,
   },
+  // The count's own height, so nothing below jumps when the number arrives.
+  countLoading: { height: 84, alignSelf: 'flex-start', marginLeft: Spacing.lg },
   unit: { fontSize: Typography.title3, fontWeight: Typography.bold, letterSpacing: -0.4, color: Colors.textPrimary },
   rule: { height: 2, backgroundColor: Colors.textPrimary, marginHorizontal: Spacing.lg, marginTop: Spacing.xs },
   searchRow: {

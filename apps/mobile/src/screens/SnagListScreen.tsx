@@ -9,6 +9,7 @@ import {
   BackHandler,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Text, TextInput } from '../components/Text';
 import { useNavigation } from '@react-navigation/native';
@@ -163,6 +164,13 @@ export default function SnagListScreen() {
   const [showDone, setShowDone] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  /**
+   * Whether the list has been read at all. Until it has, the count is not
+   * "0 to do" and the body is not *Nothing needs doing*: both are claims about
+   * jobs nobody has looked at yet, and on a slow connection they read as every
+   * job gone.
+   */
+  const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   /**
    * What the search box holds. Run on the lists already in hand — open and
@@ -227,10 +235,19 @@ export default function SnagListScreen() {
    * places — a tab switch, coming back to the app, the two-minute refresh, and
    * after every write — and two reads in flight can land in either order. The
    * older one landing last would put back a job that was just finished.
+   *
+   * **The jobs are drawn the moment they arrive; the photos follow.** It used
+   * to sign every cover before drawing anything, so a slow signing call held
+   * the whole list back. In October 2026, with the database queueing after a
+   * colour-scheme reload, one took twenty seconds and came back 544, and the
+   * list read "0 to do" over nothing for all of it. A job without its
+   * thumbnail yet is still the job; a list with nothing on it reads as every
+   * job gone.
    */
   const loadSeq = useRef(0);
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
+    let covers: string[] = [];
     try {
       const [open, finished] = await Promise.all([
         getSnags({ propertyId, excludeProjectSnags, status: ['open', 'doing'] }, 'newest'),
@@ -238,13 +255,11 @@ export default function SnagListScreen() {
         // only the last week of them is ever rendered.
         getSnags({ propertyId, excludeProjectSnags, status: ['done'] }, 'newest'),
       ]);
-      // One request for every visible cover photo rather than one per card.
-      const covers = [...open, ...finished].map((s) => s.photoPaths[0]).filter(Boolean) as string[];
-      const urls = await getFileUrls(covers);
       if (seq !== loadSeq.current) return;
       setSnags(open);
       setDone(finished);
-      setPhotoUrls(urls);
+      setLoaded(true);
+      covers = [...open, ...finished].map((s) => s.photoPaths[0]).filter(Boolean) as string[];
     } catch (err) {
       console.error('Failed to load snags:', err);
     } finally {
@@ -253,6 +268,12 @@ export default function SnagListScreen() {
         setRefreshing(false);
       }
     }
+    if (covers.length === 0) return;
+    // One request for every visible cover photo rather than one per card.
+    // Merged, not replaced: a link already on screen stays until its new one
+    // lands, and `getFileUrls` hands back the same link while it is fresh.
+    const urls = await getFileUrls(covers).catch(() => ({} as Record<string, string>));
+    if (seq === loadSeq.current) setPhotoUrls((now) => ({ ...now, ...urls }));
   }, [propertyId, excludeProjectSnags]);
 
   useEffect(() => {
@@ -1079,10 +1100,20 @@ export default function SnagListScreen() {
               percentage: what is left to do. */}
           {selecting ? null : (
             <View style={styles.countRow} accessibilityRole="header">
-              <Text style={styles.countLine}>
-                <Text style={styles.count}>{toDo}</Text>
-                <Text style={styles.unit}> to do</Text>
-              </Text>
+              {/* Not "0 to do" before the list has been read: that is a claim
+                  about jobs nobody has looked at yet. */}
+              {loaded ? (
+                <Text style={styles.countLine}>
+                  <Text style={styles.count}>{toDo}</Text>
+                  <Text style={styles.unit}> to do</Text>
+                </Text>
+              ) : (
+                <ActivityIndicator
+                  color={Colors.textMuted}
+                  style={styles.countLoading}
+                  accessibilityLabel="Loading the list"
+                />
+              )}
             </View>
           )}
 
@@ -1357,7 +1388,20 @@ export default function SnagListScreen() {
           />
         }
         ListEmptyComponent={
-          loading || carousel ? null : searching ? (
+          loading || carousel ? null : !loaded ? (
+            // The first read failed. Saying *Nothing needs doing* here would
+            // be the list claiming every job is gone.
+            <EmptyState
+              icon="alert-circle-outline"
+              title="Couldn't load the list"
+              message="Your jobs are safe. Check the connection and try again."
+              actionLabel="Try again"
+              onAction={() => {
+                setLoading(true);
+                load();
+              }}
+            />
+          ) : searching ? (
             <EmptyState
               icon="search"
               title={`Nothing matches “${query.trim()}”`}
@@ -1489,6 +1533,8 @@ const styles = StyleSheet.create({
   countBlock: { marginHorizontal: -Spacing.lg, paddingBottom: Spacing.xs },
   countRow: { paddingHorizontal: Spacing.lg, marginTop: -Spacing.xs },
   countLine: { color: Colors.textPrimary },
+  // The count's own height, so nothing below jumps when the number arrives.
+  countLoading: { height: 84, alignSelf: 'flex-start' },
   count: {
     fontSize: Typography.count,
     lineHeight: 84,

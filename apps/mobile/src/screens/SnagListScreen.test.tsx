@@ -164,6 +164,53 @@ describe('SnagListScreen', () => {
     expect(all.some((t) => t.startsWith('1 added since'))).toBe(true);
   });
 
+  it('draws the jobs without waiting for their photos to be signed', async () => {
+    // A colour-scheme reload once put the list behind a signing call that took
+    // twenty seconds and came back 544: "0 to do" over nothing, read as every
+    // job gone.
+    const { getFileUrls } = require('../lib/supabase');
+    getFileUrls.mockReturnValueOnce(new Promise(() => {}));
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done')
+        ? []
+        : [snag({ id: 'a', description: 'Gutters', room: 'Kitchen', photoPaths: ['h/a.jpg'] })],
+    ));
+    const result = render(<SnagListScreen />);
+    await settle();
+
+    expect(texts(result)).toContain('Gutters');
+    expect(texts(result)).toContain('1 to do');
+  });
+
+  it('never says "0 to do" before the list has been read', async () => {
+    mock_getSnags.mockReturnValue(new Promise(() => {}));
+    const result = render(<SnagListScreen />);
+    await settle();
+
+    expect(texts(result).join(' ')).not.toContain('to do');
+    expect(texts(result)).not.toContain('Nothing needs doing');
+  });
+
+  it('says the list could not be read, rather than that nothing needs doing', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    mock_getSnags.mockRejectedValue(new Error('offline'));
+    const result = render(<SnagListScreen />);
+    await settle();
+
+    expect(texts(result)).toContain("Couldn't load the list");
+    expect(texts(result)).not.toContain('Nothing needs doing');
+
+    mock_getSnags.mockImplementation((filter: any) => Promise.resolve(
+      filter.status?.includes('done') ? [] : [snag({ id: 'a', description: 'Gutters', room: 'Kitchen' })],
+    ));
+    const retry = result.root.findAll(
+      (n: any) => n.props?.accessibilityLabel === 'Try again' && !!n.props?.onPress,
+    )[0];
+    await TestRenderer.act(async () => retry.props.onPress());
+    expect(texts(result)).toContain('Gutters');
+    (console.error as jest.Mock).mockRestore();
+  });
+
   it("names the place, not the household, for somebody on one place of two", async () => {
     // Leonie, let into Martins Bay alone, of a household called 32 Le Roy: the
     // header read the house she cannot see.

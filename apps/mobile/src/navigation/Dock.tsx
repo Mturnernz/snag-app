@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { BlurView } from 'expo-blur';
+import * as Navigation from '@react-navigation/native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 import Icon, { type IconName } from '../components/Icon';
@@ -19,16 +20,24 @@ import type { MainTabParamList } from '../types';
  * what glass is for in Bone & Glass, and it is the only glass on a tab: a
  * sheet over the dock covers it rather than adding a second pane.
  *
- * **The + is the screen's, drawn by the dock.** The List's *Capture a new job*
- * and the House tab's *Add something to the house* are each a `Fab` in their
- * own screen, and a `Fab` inside the dock's provider hands itself to the dock
- * rather than drawing itself: one geometry, so the + and the dock line up on
- * every phone, and the dock gives up the + 's width only on a tab that has one.
- * A screen with no provider around it — every screen test — draws its own.
+ * **The dock is the same on every tab.** Full width between the gutters, five
+ * (or four) tabs at one size, whatever the tab showing does. It used to give up
+ * the + 's width on the two tabs that have one, so the dock was a different
+ * size on List and House from Projects, Schedule and You, and its labels ran
+ * into each other ("ProjectsSchedule") on exactly the tabs used most. The
+ * navigation is the one thing on screen that must not move when the tab does.
+ *
+ * **The + floats above the dock's right end**, never in its row (October 2026,
+ * by the owner's decision). The List's *Capture a new job* and the House tab's
+ * *Add something to the house* are each a `Fab` in their own screen, and a
+ * `Fab` inside the dock's provider hands itself to the dock rather than drawing
+ * itself: one geometry, so the + sits in the same place on every phone, over
+ * the right-hand thumb, and appears only on a tab that has one. A screen with
+ * no provider around it — every screen test — draws its own.
  *
  * **Nothing ends under the glass.** A tab's scroll pads its foot by
- * `useDockClearance()`, which is the dock's height and its gap and nothing on
- * a screen with no dock.
+ * `useDockClearance()`: the dock's height and its gap, the + above it on a tab
+ * that has one, and nothing on a screen with no dock.
  *
  * **It gets out of the way of the keyboard.** A floating bar over a box being
  * typed into is a bar in front of the words, so it goes while the keyboard is
@@ -37,6 +46,8 @@ import type { MainTabParamList } from '../types';
 
 export const DOCK_HEIGHT = 64;
 const FAB = 56;
+/** The gap between the top of the dock and the foot of the + above it. */
+const FAB_GAP = Spacing.md;
 
 interface DockAction {
   onPress: () => void;
@@ -51,16 +62,33 @@ interface DockApi {
 }
 
 const DockContext = createContext<DockApi | null>(null);
+const DockActions = createContext<Record<string, DockAction>>({});
+
+/**
+ * The route a screen is rendered for. A screen test that mocks the navigation
+ * library has no route context; it then reads as "not inside a tab", and the +
+ * draws itself.
+ */
+const NoRoute = createContext<{ key: string } | undefined>(undefined);
+export const RouteContext =
+  (Navigation as { NavigationRouteContext?: typeof NoRoute }).NavigationRouteContext ?? NoRoute;
 
 /** Whether this screen is inside the dock — `Fab` hands itself over when it is. */
 export function useDock(): DockApi | null {
   return useContext(DockContext);
 }
 
-/** How far a tab's scroll must pad its foot so its last row clears the dock. */
+/**
+ * How far a tab's scroll must pad its foot so its last row clears the dock —
+ * and the + floating above it, on a tab that has one.
+ */
 export function useDockClearance(): number {
   const dock = useContext(DockContext);
-  return dock ? dock.bottom + DOCK_HEIGHT + Spacing.lg : 0;
+  const actions = useContext(DockActions);
+  const route = useContext(RouteContext);
+  if (!dock) return 0;
+  const clear = dock.bottom + DOCK_HEIGHT + Spacing.lg;
+  return route && actions[route.key] ? clear + FAB + FAB_GAP : clear;
 }
 
 const TAB_GLYPHS: Record<keyof MainTabParamList, [IconName, IconName]> = {
@@ -101,8 +129,6 @@ export function DockProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-const DockActions = createContext<Record<string, DockAction>>({});
-
 export default function Dock({ state, descriptors, navigation }: BottomTabBarProps) {
   const dock = useContext(DockContext);
   const actions = useContext(DockActions);
@@ -115,8 +141,8 @@ export default function Dock({ state, descriptors, navigation }: BottomTabBarPro
   const bottom = dock?.bottom ?? Spacing.xxl;
 
   return (
-    <View style={[styles.row, { bottom }]} pointerEvents="box-none">
-      <View style={styles.dock}>
+    <>
+      <View style={[styles.dock, { bottom }]}>
         {Platform.OS === 'web' ? (
           <View style={[StyleSheet.absoluteFill, styles.webGlass]} />
         ) : (
@@ -162,7 +188,12 @@ export default function Dock({ state, descriptors, navigation }: BottomTabBarPro
         <Pressable
           onPress={action.onPress}
           disabled={action.disabled}
-          style={({ pressed }) => [styles.fab, action.disabled && styles.fabOff, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.fab,
+            { bottom: bottom + DOCK_HEIGHT + FAB_GAP },
+            action.disabled && styles.fabOff,
+            pressed && styles.pressed,
+          ]}
           accessibilityRole="button"
           accessibilityLabel={action.label}
           accessibilityState={{ disabled: action.disabled }}
@@ -170,21 +201,16 @@ export default function Dock({ state, descriptors, navigation }: BottomTabBarPro
           <Icon name={action.icon} size="xl" color={Colors.onPrimary} />
         </Pressable>
       ) : null}
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
+  // The same width on every tab: the gutters and nothing else.
+  dock: {
     position: 'absolute',
     left: Spacing.lg,
     right: Spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  dock: {
-    flex: 1,
     height: DOCK_HEIGHT,
     borderRadius: Radius.pill,
     overflow: 'hidden',
@@ -228,7 +254,10 @@ const styles = StyleSheet.create({
   },
   labelCrowded: { fontSize: Typography.xs },
   labelOn: { color: Colors.primary, fontWeight: Typography.semibold },
+  // Above the dock's right end, in line with its edge.
   fab: {
+    position: 'absolute',
+    right: Spacing.lg,
     width: FAB,
     height: FAB,
     borderRadius: FAB / 2,

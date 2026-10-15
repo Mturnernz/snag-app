@@ -1,25 +1,21 @@
-import React, { createContext, useContext, useEffect, useRef } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
-import * as Navigation from '@react-navigation/native';
 
 import Icon, { type IconName } from './Icon';
 import { Colors, Shadow, Spacing } from '../constants/theme';
-import { useDock } from '../navigation/Dock';
+import { RouteContext, useDock } from '../navigation/Dock';
 
 /**
  * The capture + — the List tab's way to capture a job and the House tab's way
  * to record a thing. One component so the two cannot drift apart.
  *
- * **Inside the app it is drawn by the dock**, beside the floating tab bar
- * (`navigation/Dock.tsx`): this hands the dock what it does and draws nothing
- * itself, so the + and the dock share one geometry. Outside a dock — a screen
+ * **Inside the app it is drawn by the dock**, floating above the tab bar's
+ * right end (`navigation/Dock.tsx`): this hands the dock what it does and
+ * draws nothing itself, so the + sits in one place on every tab that has one
+ * and the tab bar never changes size for it. Outside a dock — a screen
  * rendered on its own, as every screen test is — it draws itself in the
  * bottom-right corner, 56pt and `Spacing.lg` in, as it always did.
  */
-// A screen test that mocks the navigation library has no route context; it
-// then reads as "not inside a tab", and the + draws itself.
-const NoRoute = createContext<{ key: string } | undefined>(undefined);
-const RouteContext = (Navigation as { NavigationRouteContext?: typeof NoRoute }).NavigationRouteContext ?? NoRoute;
 
 export default function Fab({
   onPress, accessibilityLabel, icon = 'add', bottom = Spacing.lg, disabled = false,

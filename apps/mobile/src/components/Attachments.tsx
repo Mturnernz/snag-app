@@ -6,7 +6,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { openUrl } from '../lib/openUrl';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { documentFileName, documentName } from '@snag/supabase-queries';
-import { FILE_TAG_LABELS, type FileTag, type FileTags } from '@snag/shared-types';
+import { FILE_TAG_LABELS, FILE_TAG_PILL_LABELS, type FileTag, type FileTags } from '@snag/shared-types';
 import { getFileUrl, getFileUrls, uploadFile } from '../lib/supabase';
 import { addPhotos, PhotoSource } from '../lib/addPhotos';
 import { showAlert } from '../lib/alert';
@@ -254,7 +254,7 @@ export default function Attachments({
                 >
                   <View style={[styles.tagPill, tag ? null : styles.tagPillEmpty]}>
                     <Text style={[styles.tagLabel, tag ? null : styles.tagLabelEmpty]} numberOfLines={1}>
-                      {tag ? FILE_TAG_LABELS[tag] : 'Tag'}
+                      {tag ? FILE_TAG_PILL_LABELS[tag] : 'Tag'}
                     </Text>
                   </View>
                 </Pressable>
@@ -419,7 +419,9 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     paddingTop: Spacing.xs,
   },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.lg, marginTop: Spacing.xs },
+  // Across only: each control is already a 48pt target, so a gap between
+  // wrapped lines left "Attach a PDF" floating 40pt under the photo controls.
+  row: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.lg, marginTop: Spacing.xs },
   add: {
     flexDirection: 'row',
     alignItems: 'center',

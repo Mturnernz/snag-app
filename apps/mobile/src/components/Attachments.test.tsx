@@ -93,7 +93,10 @@ describe('tagging a document', () => {
 
   it('shows what a document has been tagged as', async () => {
     const { r } = await withTags({ [doc]: 'compliance' });
-    r.getByText('Compliance certificate');
+    // Short on the pill, so the name beside it keeps its room; in full to a
+    // screen reader.
+    r.getByText('Compliance');
+    expect(r.queryByText('Compliance certificate')).toBeNull();
   });
 
   it('opens the choices from the pill and writes the one pressed', async () => {

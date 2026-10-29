@@ -84,6 +84,25 @@ export function Row({
   accessibilityLabel, dim, bold, indent, expanded, tag,
 }: RowProps) {
   const folds = expanded !== undefined;
+  // A figure and a pill side by side took half a 360pt row, and a supplier's
+  // name beside them broke mid-word ("RELIABUILDE / R LIMITED"). With both,
+  // the figure sits above the pill and the name keeps the rest of the row.
+  const stacked = !!value && !!accessory;
+  const figure = value ? (
+    <Text
+      style={[
+        styles.value,
+        tone === 'muted' && styles.muted,
+        tone === 'good' && styles.good,
+        tone === 'danger' && styles.danger,
+        bold && styles.bold,
+        !stacked && styles.valueCap,
+      ]}
+      numberOfLines={1}
+    >
+      {value}
+    </Text>
+  ) : null;
   const body = (
     <>
       {leading}
@@ -96,20 +115,7 @@ export function Row({
           </View>
         ) : subtitle ? <Text style={styles.subtitle} numberOfLines={2}>{subtitle}</Text> : null}
       </View>
-      {value ? (
-        <Text
-          style={[
-            styles.value,
-            tone === 'muted' && styles.muted,
-            tone === 'good' && styles.good,
-            tone === 'danger' && styles.danger,
-            bold && styles.bold,
-          ]}
-          numberOfLines={1}
-        >
-          {value}
-        </Text>
-      ) : null}
+      {stacked ? null : figure}
       {onPress && !accessory ? (
         <Icon
           name={folds ? (expanded ? 'chevron-up' : 'chevron-down') : 'chevron-forward'}
@@ -134,7 +140,17 @@ export function Row({
       ) : (
         <View style={[styles.rowTap, indent && styles.indent]}>{body}</View>
       )}
-      {accessory}
+      {stacked ? (
+        <View style={styles.trailing}>
+          {/* The figure still opens the row; the pill stays a sibling, never inside it. */}
+          {onPress ? (
+            <Pressable onPress={onPress} focusable={false} style={styles.trailingFigure}>{figure}</Pressable>
+          ) : (
+            <View style={styles.trailingFigure}>{figure}</View>
+          )}
+          <View style={styles.trailingAccessory}>{accessory}</View>
+        </View>
+      ) : accessory}
     </View>
   );
 }
@@ -330,9 +346,18 @@ const styles = StyleSheet.create({
   // the row's figure off the screen, which a flexed text on web will otherwise do.
   tagSubtitle: { flexShrink: 1, minWidth: 0 },
   value: {
-    fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'],
+    fontSize: Typography.body, color: Colors.textPrimary,
     flexShrink: 0,
   },
+  // A figure never reaches this; words passed as a value do ("Part of" and a
+  // contract's name), and without it they pushed the title to nothing and ran
+  // past the card's edge. Capped, they end in an ellipsis instead.
+  valueCap: { maxWidth: '60%' },
+  // The pill's 48pt tap reaches past the visible pill; pulled back so the
+  // figure sits close above it rather than a blank band away.
+  trailing: { alignItems: 'flex-end', justifyContent: 'center', paddingVertical: Spacing.sm + 2 },
+  trailingFigure: { paddingLeft: Spacing.sm },
+  trailingAccessory: { marginTop: -Spacing.xs, marginBottom: -Spacing.sm },
   muted: { color: Colors.textMuted },
   good: { color: Colors.primary, fontWeight: Typography.semibold },
   danger: { color: Colors.danger },

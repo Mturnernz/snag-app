@@ -96,7 +96,7 @@ function linkedHeadline(thing: LinkedThing): string {
 function byline(snag: Snag, me: string): string {
   const parts: string[] = [];
   if (snag.reporterId !== me) parts.push(`Added by ${snag.reporterName}`);
-  if (snag.lastDoneAt) parts.push(`last done ${new Date(snag.lastDoneAt).toLocaleDateString()}`);
+  if (snag.lastDoneAt) parts.push(`last done ${formatDayFirst(dayKey(snag.lastDoneAt))}`);
   const line = parts.join(' · ');
   return line ? line.charAt(0).toUpperCase() + line.slice(1) : '';
 }
@@ -994,7 +994,7 @@ export default function SnagDetailScreen() {
                       {mine ? 'You' : comment.authorName}
                       <Text style={styles.commentDate}>
                         {'  '}
-                        {new Date(comment.createdAt).toLocaleDateString()}
+                        {formatDayFirst(dayKey(comment.createdAt))}
                         {comment.editedAt ? '  ·  edited' : ''}
                       </Text>
                     </Text>
@@ -1175,7 +1175,7 @@ export default function SnagDetailScreen() {
                     {note.authorName}
                     <Text style={styles.commentDate}>
                       {'  '}
-                      {new Date(note.createdAt).toLocaleDateString()} · {note.snagReference}
+                      {formatDayFirst(dayKey(note.createdAt))} · {note.snagReference}
                     </Text>
                   </Text>
                   <LinkedText style={styles.commentBody}>{note.body}</LinkedText>

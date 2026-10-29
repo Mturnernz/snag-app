@@ -4,6 +4,8 @@ import { render, flattenStyle } from '../test/render';
 import ProjectsScreen from './ProjectsScreen';
 import { Colors } from '../constants/theme';
 
+const NB = ' ';
+
 /**
  * The Projects tab.
  *
@@ -182,13 +184,27 @@ describe('the tab', () => {
       project({ paidTotal: 8990, itemCount: 9, pricedCount: 5, dueToPay: 5000 }),
     ]);
     r.getByText('$8,990');
-    r.getByText('4 to decide   ·   $5,000 to pay');
+    r.getByText(`4${NB}to${NB}decide${NB}${NB}${NB}·   $5,000${NB}to${NB}pay`);
+  });
+
+  // A narrow card wrapped mid-fact: "2 to" ending one line, "sort out" the
+  // next. Inside a fact and before each dot the spaces do not break.
+  it('breaks the facts line only after a dot', async () => {
+    const r = await arrange([
+      project({ itemCount: 9, pricedCount: 6, dueToPay: 46334.78, openSnagCount: 2 }),
+    ]);
+    const line = r.getAllByType('Text').map((n) => n.children.join('')).find((t) => t.includes('decide'))!;
+    expect(line.split(' ').filter(Boolean)).toEqual([
+      `3${NB}to${NB}decide${NB}${NB}${NB}·`,
+      `$46,334.78${NB}to${NB}pay${NB}${NB}${NB}·`,
+      `2${NB}to${NB}sort${NB}out`,
+    ]);
   });
 
   it('says nothing about money it has not got', async () => {
     const r = await arrange([project({ itemCount: 2 })]);
-    r.getByText('2 to decide');
-    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+    r.getByText(`2${NB}to${NB}decide`);
+    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ').replace(/ /g, ' ');
     expect(text).not.toContain('to pay');
     expect(text).not.toContain('Budget remaining');
   });

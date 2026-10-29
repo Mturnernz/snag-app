@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.title2, lineHeight: 28, fontWeight: Typography.bold,
     color: Colors.textPrimary, letterSpacing: -0.3,
   },
-  subtitle: { fontSize: Typography.body, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
+  subtitle: { fontSize: Typography.body, color: Colors.textMuted },
   close: { minHeight: MIN_TOUCH_TARGET, minWidth: MIN_TOUCH_TARGET, alignItems: 'flex-end', justifyContent: 'center', paddingLeft: Spacing.sm },
   closeLabel: { fontSize: Typography.body, color: Colors.primary },
   scroll: { marginTop: Spacing.lg },

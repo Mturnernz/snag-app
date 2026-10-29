@@ -656,14 +656,20 @@ export default function ProjectDetailScreen({ route }: Props) {
         ) : null}
 
         <View style={styles.tileStack}>
+          {/*
+            Side by side while both figures fit, one above the other when they
+            don't: each tile is as wide as its figure on one line, and the row
+            wraps rather than breaking a number. "$197,369 / .29" across two
+            lines is half a number on each.
+          */}
           <View style={styles.tiles}>
             <View style={styles.tile}>
               <Text style={styles.tileLabel}>Paid</Text>
-              <Text style={styles.tileFigure}>{money$(summary.paid)}</Text>
+              <Text style={styles.tileFigure} numberOfLines={1}>{money$(summary.paid)}</Text>
             </View>
             <View style={styles.tile}>
               <Text style={styles.tileLabel}>To pay</Text>
-              <Text style={styles.tileFigure}>{money$(summary.toPay)}</Text>
+              <Text style={styles.tileFigure} numberOfLines={1}>{money$(summary.toPay)}</Text>
             </View>
           </View>
           {/*
@@ -1351,7 +1357,7 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: Typography.subhead, color: Colors.textMuted },
   summaryFigure: {
     fontSize: 40, lineHeight: 48, fontWeight: Typography.bold, color: Colors.textPrimary,
-    letterSpacing: -0.8, marginTop: 2, fontVariant: ['tabular-nums'],
+    letterSpacing: -0.8, marginTop: 2,
   },
   bar: {
     flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden',
@@ -1363,7 +1369,7 @@ const styles = StyleSheet.create({
   summaryKey: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   summaryLineLabel: { fontSize: Typography.body, color: Colors.textPrimary },
-  summaryLineValue: { fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'] },
+  summaryLineValue: { fontSize: Typography.body, color: Colors.textPrimary },
   good: { color: Colors.primary, fontWeight: Typography.semibold },
   warn: { color: Colors.status.doing, fontWeight: Typography.semibold },
   danger: { color: Colors.danger, fontWeight: Typography.semibold },
@@ -1371,12 +1377,15 @@ const styles = StyleSheet.create({
   hairlineInset: { height: 1, backgroundColor: Colors.separator, marginLeft: 20 },
   budgetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 },
   budgetLabel: { fontSize: Typography.body, color: Colors.textMuted, paddingLeft: 20 },
-  budgetValue: { fontSize: Typography.body, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
+  budgetValue: { fontSize: Typography.body, color: Colors.textMuted },
   link: { color: Colors.primary },
   tileStack: { gap: Spacing.md },
-  tiles: { flexDirection: 'row', gap: Spacing.md },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md },
+  // Grows from its own content (`flexBasis` auto, never `flex: 1`'s zero
+  // basis, which squeezed the figure onto two lines), and at least to just
+  // under half the row so two tiles that fit are equal.
   tile: {
-    flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.card,
+    flexGrow: 1, minWidth: '40%', backgroundColor: Colors.surface, borderRadius: Radius.card,
     paddingVertical: Spacing.md + 2, paddingHorizontal: Spacing.lg, gap: 4,
   },
   // Not `flex: 0` — react-native-web writes that as a zero basis, and the
@@ -1389,7 +1398,7 @@ const styles = StyleSheet.create({
   tileFacts: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textMuted },
   tileFigure: {
     fontSize: Typography.title2, lineHeight: 28, fontWeight: Typography.semibold,
-    color: Colors.textPrimary, letterSpacing: -0.3, fontVariant: ['tabular-nums'],
+    color: Colors.textPrimary, letterSpacing: -0.3,
   },
   badgeSlot: { paddingLeft: Spacing.sm },
   docAdds: { paddingHorizontal: 4 },

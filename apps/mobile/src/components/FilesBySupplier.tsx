@@ -9,7 +9,7 @@ import FileTagChips from './FileTagChips';
 import { Group, Row } from './Grouped';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { describeFileHome, documentName, type FileGroup } from '@snag/supabase-queries';
-import { FILE_TAG_LABELS, type FileTag, type FileTags, type ProjectFile } from '@snag/shared-types';
+import { FILE_TAG_LABELS, FILE_TAG_PILL_LABELS, type FileTag, type FileTags, type ProjectFile } from '@snag/shared-types';
 import { getFileUrl, getFileUrls } from '../lib/supabase';
 import { openUrl } from '../lib/openUrl';
 import { showAlert } from '../lib/alert';
@@ -109,7 +109,7 @@ export default function FilesBySupplier({ groups, tags, onTag, onRemove }: Props
             const tag = tags[file.path] ?? null;
             const name = documentName(file.path);
             rows.push(
-              <View key={file.path} style={styles.doc}>
+              <View key={file.path} style={[styles.doc, file.level !== 'project' && styles.docNoRemove]}>
                 <Pressable
                   onPress={() => open(file.path)}
                   style={styles.docOpen}
@@ -134,7 +134,7 @@ export default function FilesBySupplier({ groups, tags, onTag, onRemove }: Props
                 >
                   <View style={[styles.tagPill, tag ? null : styles.tagPillEmpty]}>
                     <Text style={[styles.tagLabel, tag ? null : styles.tagLabelEmpty]} numberOfLines={1}>
-                      {tag ? FILE_TAG_LABELS[tag] : 'Tag'}
+                      {tag ? FILE_TAG_PILL_LABELS[tag] : 'Tag'}
                     </Text>
                   </View>
                 </Pressable>
@@ -214,6 +214,9 @@ export default function FilesBySupplier({ groups, tags, onTag, onRemove }: Props
 const styles = StyleSheet.create({
   list: { gap: Spacing.sm + 2 },
   doc: { flexDirection: 'row', alignItems: 'center', paddingRight: Spacing.xs },
+  // With no × after it, the tag pill is the last thing on the row and takes a
+  // row's own right margin, rather than sitting against the card's edge.
+  docNoRemove: { paddingRight: Spacing.md },
   docOpen: {
     flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     minHeight: 52, paddingVertical: Spacing.sm + 2, paddingLeft: Spacing.lg,

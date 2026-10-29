@@ -228,7 +228,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.body,
     color: Colors.textPrimary,
     textAlign: 'center',
-    fontVariant: ['tabular-nums'],
   },
   // Under the number, lined up with the word *Every* rather than the mark.
   units: { paddingLeft: 22 + Spacing.md, paddingBottom: Spacing.xs },

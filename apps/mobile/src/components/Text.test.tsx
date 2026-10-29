@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { render } from '../test/render';
@@ -26,6 +28,25 @@ describe('the file behind a weight', () => {
 
   it('leaves a family it does not know alone', () => {
     expect(resolveFont({ fontFamily: 'Ionicons' }, null)).toBeNull();
+  });
+});
+
+describe('figures', () => {
+  const SRC = path.resolve(__dirname, '..');
+  const files = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
+    const full = path.join(dir, d.name);
+    if (d.isDirectory()) return files(full);
+    return /\.tsx?$/.test(d.name) && !/\.test\.tsx?$/.test(d.name) ? [full] : [];
+  });
+
+  // Schibsted Grotesk's tabular figures are monospaced all through: the comma,
+  // the point and the $ each take a digit's width. "$95,115.40" measured 118px
+  // at 24pt and 151px with them, and on the project page the Paid tile read
+  // "$197,369 / .29" and a supplier beside a figure broke as "RELIABUILD / ER".
+  // DM Mono needs no feature to line up.
+  it('asks for no tabular figures, which in this face widen every comma and point', () => {
+    const offenders = files(SRC).filter((f) => /tabular-nums/.test(fs.readFileSync(f, 'utf8')));
+    expect(offenders.map((f) => path.relative(SRC, f))).toEqual([]);
   });
 });
 

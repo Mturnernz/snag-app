@@ -480,6 +480,20 @@ Snag Line icons). It replaces values, not behaviour.
 - **A choice already made is ink** — a selected chip, segment, room row, calendar day or swatch
   — with bone words. The action colour is for doing, never for marking a selection. This reverses
   *a sunken well when off, solid fern when on* in *One chip, every rail*.
+- **Figures are proportional; there is no `tabular-nums` anywhere** (October 2026). Schibsted
+  Grotesk's tabular figures are monospaced all through — the comma, the point and the $ take a
+  digit's width — so V2's *tabular figures* made every amount about 30% wider once the font
+  changed: the Downstairs page's Paid tile read *$197,369 / .29*, and a supplier beside a figure
+  broke as *RELIABUILD / ER LIMITED*. `Text.test.tsx` fails on the string. Three layout rules came
+  with it, all pinned only by rendering at 360pt (a Samsung's width) and 428pt:
+  - **Paid and To pay sit side by side while both fit and stack when they don't** — each tile
+    grows from its figure on one line (`flexGrow`, never `flex: 1`'s zero basis) and the row
+    wraps, so a number is never broken across lines.
+  - **A `Row` with a figure *and* a pill puts the figure above the pill**, giving the name back
+    the width the pair took. The figure stays a door to the row; the pill stays its sibling.
+  - **A `Row`'s inline value is capped at 60% of the row.** A figure never reaches it; words
+    passed as a value (*Part of* and a contract's name) used to push the title to nothing and run
+    off the card.
 
 ## Capture and triage are different moments
 
@@ -5224,8 +5238,8 @@ draws it the next time the app opens, and the toast says so.
 
 **V2 (September 2026) is an iOS grouped-list look over the same palette.** White rounded groups on
 the plaster ground with hairline separators (`Colors.separator`), no outlines on cards, 34pt large
-titles, 20pt sentence-case section titles, 17pt rows with 15pt facts under them, tabular figures,
-tinted pills for inline actions, one full-width filled button per screen. The primitives are
+titles, 20pt sentence-case section titles, 17pt rows with 15pt facts under them, tabular figures
+(proportional since Bone & Glass — see *Figures are proportional*), tinted pills for inline actions, one full-width filled button per screen. The primitives are
 `components/Grouped.tsx` (`Group`, `Row`, `SectionTitle`, `Pill`, `AddRow`, `PrimaryButton`,
 `TextButton`, `Segmented`, `RadioRow`) and `components/Sheet.tsx`; new screens use them rather than
 their own. `Radius.card` is 14 and `Radius.button` 12. The new colour tokens (`separator`,

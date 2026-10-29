@@ -38,6 +38,8 @@ import {
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+const NBSP = ' ';
+
 /**
  * The Projects tab — what we're *changing* about the place.
  *
@@ -489,7 +491,13 @@ function ProjectCard({
       ) : null}
       {facts.length > 0 ? (
         <Text style={[styles.facts, project.overdueTotal > 0.005 && styles.factsOverdue]}>
-          {facts.join('   ·   ')}
+          {/*
+            A fact never breaks across a line: its own spaces are non-breaking,
+            and so are the ones before each dot, so a narrow card wraps after a
+            dot rather than reading "2 to" at the end of one line and "sort out"
+            at the start of the next.
+          */}
+          {facts.map((f) => f!.replace(/ /g, NBSP)).join(`${NBSP}${NBSP}${NBSP}·   `)}
         </Text>
       ) : null}
     </Pressable>
@@ -566,7 +574,7 @@ const styles = StyleSheet.create({
   figureRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.md },
   figureLabel: { fontSize: Typography.subhead, color: Colors.textMuted, flexShrink: 1, minWidth: 0 },
   figureValue: {
-    fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'],
+    fontSize: Typography.body, color: Colors.textPrimary,
     flexShrink: 0, textAlign: 'right',
   },
   figureBlank: { fontSize: Typography.subhead, color: Colors.textMuted },
@@ -576,17 +584,17 @@ const styles = StyleSheet.create({
     flexShrink: 1, minWidth: 0,
   },
   remainingValue: {
-    fontSize: Typography.body, fontWeight: Typography.semibold, fontVariant: ['tabular-nums'],
+    fontSize: Typography.body, fontWeight: Typography.semibold,
     flexShrink: 0, textAlign: 'right',
   },
-  remainingCaption: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'], marginTop: -Spacing.xs },
+  remainingCaption: { fontSize: Typography.subhead, color: Colors.textMuted, marginTop: -Spacing.xs },
   bar: { height: 6, borderRadius: 3, backgroundColor: Colors.track, overflow: 'hidden', flexDirection: 'row' },
   barFill: { height: 6 },
   // Not gone out yet: the same hue as paid, lighter. No new colour.
   barRest: { opacity: 0.35 },
   // Where the budget ends, cut into the bar in the card's own white.
   barNotch: { position: 'absolute', top: 0, bottom: 0, width: 2, marginLeft: -1, backgroundColor: Colors.surface },
-  facts: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
+  facts: { fontSize: Typography.subhead, color: Colors.textMuted },
   factsOverdue: { color: Colors.danger },
 
   empty: { alignItems: 'center', paddingHorizontal: Spacing.xl },

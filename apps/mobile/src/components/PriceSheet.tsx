@@ -549,7 +549,7 @@ const styles = StyleSheet.create({
   kind: { alignSelf: 'center' },
   amount: {
     fontSize: 44, lineHeight: 52, fontWeight: Typography.bold, color: Colors.textPrimary,
-    letterSpacing: -1, fontVariant: ['tabular-nums'],
+    letterSpacing: -1,
   },
   badge: { height: 26, paddingHorizontal: 10, borderRadius: 13, justifyContent: 'center', backgroundColor: Colors.sunken },
   badgeDue: { backgroundColor: Colors.due.soonBg },

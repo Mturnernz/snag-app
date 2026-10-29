@@ -314,7 +314,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     minHeight: MIN_TOUCH_TARGET + 4, paddingHorizontal: Spacing.lg,
   },
-  figure: { fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'] },
-  amount: { flex: 0, width: 120, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  figure: { fontSize: Typography.body, color: Colors.textPrimary },
+  amount: { flex: 0, width: 120, textAlign: 'right' },
   over: { color: Colors.danger },
 });

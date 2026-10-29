@@ -2238,6 +2238,16 @@ export const FILE_TAG_LABELS: Record<FileTag, string> = {
   other: 'Other',
 };
 
+/**
+ * The tag as a pill beside a file's name. "Compliance certificate" took 170pt
+ * of a 360pt row and left the name to break as "Electric / al…"; the row's
+ * accessible name still says it in full.
+ */
+export const FILE_TAG_PILL_LABELS: Record<FileTag, string> = {
+  ...FILE_TAG_LABELS,
+  compliance: 'Compliance',
+};
+
 /** Storage path to tag, for the files one screen can see. */
 export type FileTags = Record<string, FileTag>;
 

@@ -51,7 +51,7 @@ import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
 import HomePickerSheet from '../components/HomePickerSheet';
 import {
-  dueState, exportDateStamp, exportFileName, isDoneForNow, placeTitle, quoteBrief, searchSnags,
+  dayKey, dueState, exportDateStamp, exportFileName, formatExactDate, isDoneForNow, placeTitle, quoteBrief, searchSnags,
   shoppingCount, shoppingList, snagExportPhotos, snagExportTable, snagHeadline, snagQuoteTable,
   snagsWithNewNotes, type NoteStamp,
 } from '@snag/supabase-queries';
@@ -116,14 +116,19 @@ const ROOM_MEMORY_MS = 10 * 60_000;
  */
 const LIST_REFRESH_MS = 2 * 60_000;
 
-/** "since Tuesday" for this week, a date once it stops being this week. */
+/**
+ * "since Tuesday" for this week, a date once it stops being this week — "since
+ * 19 Oct 2026", as every other date here is written. The phone's own locale
+ * wrote it as 10/19/2026 on a browser set to US English.
+ */
 function describeSince(iso: string | null): string | null {
   if (!iso) return null;
   const seen = new Date(iso);
   const days = Math.floor((Date.now() - seen.getTime()) / 86_400_000);
   if (days < 1) return 'since earlier today';
-  if (days < 7) return `since ${seen.toLocaleDateString(undefined, { weekday: 'long' })}`;
-  return `since ${seen.toLocaleDateString()}`;
+  if (days < 7) return `since ${seen.toLocaleDateString('en-NZ', { weekday: 'long' })}`;
+  // One piece: a narrow line breaks before the date, never inside it.
+  return `since ${formatExactDate(dayKey(seen)).replace(/ /g, ' ')}`;
 }
 
 /** "2 added and 1 new note since Tuesday" — what the news is, in words. */
@@ -1617,7 +1622,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.sm,
-    paddingRight: Spacing.sm,
+    // The gutter the rule and the search keep. At Spacing.sm the fold pill ran
+    // eight points past both, towards the glass's curve.
+    paddingRight: Spacing.lg,
     minHeight: MIN_TOUCH_TARGET,
   },
   // A section label, smaller than the jobs under it: mono, in capitals, in

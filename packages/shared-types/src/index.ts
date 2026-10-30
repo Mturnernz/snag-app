@@ -1989,6 +1989,13 @@ export interface InvoiceReview {
    * deposit paid". In the amount's GST basis; null when it takes nothing off.
    */
   alreadyPaid: number | null;
+  /**
+   * The quote this bill is a stage of, as chosen on the card — null with
+   * `claimDecided` is "no quote, it goes on an area". Undecided, the card
+   * offers the quote the bill's own words name (`reviewQuote`).
+   */
+  againstQuoteId: string | null;
+  claimDecided: boolean;
   /** What the email suggests this is. Free text: a fixed list would need setup. */
   category: string | null;
   sourceRef: string | null;

@@ -18,7 +18,7 @@ const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
   supplier: 'Tile Space', detail: null,
   amount: 2480, amountInclGst: true,
   invoiceNumber: 'TS-4471', dated: '2026-09-16', dueOn: null,
-  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, category: null,
+  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, againstQuoteId: null, claimDecided: false, category: null,
   sourceRef: null, sourceSubject: null, sourceFrom: null, sourceAt: null,
   inferred: [], state: 'pending', quoteId: null, decidedAt: null,
   photoPaths: [], documentPaths: [], roomIds: [], roomAmounts: null,
@@ -65,9 +65,11 @@ it('offers buttons as well as a swipe, because half its readers cannot swipe', (
   expect(onDecline).toHaveBeenCalledTimes(1);
 });
 
-it('leads with the supplier and the invoice number', () => {
+it('leads with the supplier alone, the number said once under Invoice', () => {
   const { r } = arrange();
-  expect(r.queryByText('Tile Space · TS-4471')).not.toBeNull();
+  r.getByText('Tile Space');
+  expect(r.queryByText('Tile Space · TS-4471')).toBeNull();
+  expect(r.getAllByText('TS-4471')).toHaveLength(1);
 });
 
 // The rule every figure in this app follows. An invoice whose amount could not
@@ -346,24 +348,32 @@ describe('what it offers to do as it lands', () => {
   const byLabel = (r: ReturnType<typeof render>, label: string) =>
     r.root.findAll((n: any) => n.props?.accessibilityLabel === label && n.props?.onPress, { deep: true })[0];
 
-  it('offers the contract a claim is a stage of, ticked, and allocates it linked', () => {
+  it('says on For the quote it goes in as a stage of, and allocates it linked', () => {
     const { r, onApprove } = arrange(
       { supplier: 'ReliaBuilder', detail: 'Deck — progress payment 45%', invoiceNumber: 'INV-0182' },
-      { claimOf: deck },
+      { claimOf: deck, onChooseFor: jest.fn() },
     );
-    r.getByText('A stage of ReliaBuilder · QU-0111');
-    r.getByText('Counts once, inside the agreed price');
-    r.getByText('Deck and sub structure replacement');
+    r.getByText('QU-0111 · Deck and sub structure replacement');
+    // The quote names what it is for; the bill's own words would say it twice.
+    expect(r.queryByText('Deck — progress payment 45%')).toBeNull();
+    expect(r.queryByText('Counts once, inside the agreed price')).toBeNull();
     press(r, 'Allocate');
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: 'c1', recordAlreadyPaid: false });
   });
 
-  it('allocates it on its own once the line is unticked', () => {
-    const { r, onApprove } = arrange({ supplier: 'ReliaBuilder' }, { claimOf: deck });
-    TestRenderer.act(() => byLabel(r, 'A stage of ReliaBuilder · QU-0111').props.onPress());
-    r.getByText('Counts on its own');
+  it('says the area when it is part of no quote, keeps its own words, and allocates it unlinked', () => {
+    const { r, onApprove } = arrange({ supplier: 'ReliaBuilder', detail: 'Variations' }, { landsOn: 'Deck', onChooseFor: jest.fn() });
+    r.getByText('Deck');
+    r.getByText('Variations');
     press(r, 'Allocate');
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: false });
+  });
+
+  it('opens What’s it for? from the For line', () => {
+    const onChooseFor = jest.fn();
+    const { r } = arrange({ supplier: 'ReliaBuilder' }, { claimOf: deck, onChooseFor });
+    TestRenderer.act(() => byLabel(r, 'For QU-0111 · Deck and sub structure replacement. Change what it is for').props.onPress());
+    expect(onChooseFor).toHaveBeenCalled();
   });
 
   it('records what the paper says was paid before it, and names the deposit going inside', () => {
@@ -386,13 +396,9 @@ describe('what it offers to do as it lands', () => {
     expect(onChangeKind).toHaveBeenCalledWith('quote');
   });
 
-  it('offers the rooms its words name, and a way to the right job', () => {
-    const onUseRooms = jest.fn();
+  it('offers a way to the right job', () => {
     const onMove = jest.fn();
-    const { r } = arrange({ supplier: 'elitebathroomware' }, { suggestedRooms: 'Downstairs Bathroom', onUseRooms, onMove });
-    r.getByText('Its words name Downstairs Bathroom');
-    TestRenderer.act(() => byLabel(r, 'Put it on Downstairs Bathroom').props.onPress());
-    expect(onUseRooms).toHaveBeenCalled();
+    const { r } = arrange({ supplier: 'elitebathroomware' }, { onMove });
     TestRenderer.act(() => byLabel(r, 'Move it to another job').props.onPress());
     expect(onMove).toHaveBeenCalled();
   });

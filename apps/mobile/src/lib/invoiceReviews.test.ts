@@ -17,7 +17,7 @@ const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
   supplier: 'ReliaBuilder Limited', detail: null,
   amount: 43987.5, amountInclGst: true,
   invoiceNumber: 'INV-0208', dated: '2026-07-02', dueOn: '2026-07-02',
-  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, category: null,
+  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, againstQuoteId: null, claimDecided: false, category: null,
   sourceRef: null, sourceSubject: null, sourceFrom: null, sourceAt: null,
   inferred: [], state: 'pending', quoteId: null, decidedAt: null,
   photoPaths: [], documentPaths: [], roomIds: [], roomAmounts: null,

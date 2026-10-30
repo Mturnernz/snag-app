@@ -4564,6 +4564,8 @@ function mapInvoiceReview(row: Row): InvoiceReview {
     paidOn: row.paid_on ?? null,
     paidEvidence: row.paid_evidence ?? null,
     alreadyPaid: numberOrNull(row.already_paid),
+    againstQuoteId: row.against_quote_id ?? null,
+    claimDecided: row.claim_decided === true,
     category: row.category ?? null,
     sourceRef: row.source_ref ?? null,
     sourceSubject: row.source_subject ?? null,
@@ -7028,6 +7030,15 @@ export async function setQuoteClaim(
 }
 
 /** Moves a waiting card to another project in the same household. */
+/**
+ * Says which quote a waiting bill is a stage of, or (null) that it is none and
+ * goes on an area. Kept on the card as it is chosen; Allocate reads it.
+ */
+export async function setInvoiceReviewClaim(client: SupabaseClient, reviewId: string, quoteId: string | null) {
+  const { error } = await client.rpc('set_invoice_review_claim', { p_review_id: reviewId, p_quote_id: quoteId });
+  if (error) throw asError(error, "That didn’t save");
+}
+
 export async function moveInvoiceReview(
   client: SupabaseClient,
   reviewId: string,

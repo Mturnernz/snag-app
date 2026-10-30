@@ -140,6 +140,22 @@ export function reviewClaim(
 }
 
 /**
+ * The quote a waiting bill will be allocated as a stage of: the one chosen on
+ * the card, or — while nobody has chosen — the one its own words name. A
+ * chosen quote that has since gone from the job is none.
+ */
+export function reviewQuote(
+  review: Pick<InvoiceReview, 'kind' | 'supplier' | 'detail' | 'sourceSubject' | 'againstQuoteId' | 'claimDecided'>,
+  quotes: ProjectQuote[],
+): ProjectQuote | null {
+  if (review.kind !== 'invoice') return null;
+  if (review.claimDecided) {
+    return review.againstQuoteId ? quotes.find((q) => q.id === review.againstQuoteId && q.kind === 'quote') ?? null : null;
+  }
+  return reviewClaim(review, quotes);
+}
+
+/**
  * The bill already on the job that a waiting card says was paid before it:
  * the same business, for exactly the card's *less deposit paid*. Kitchen
  * Mania's V3 ($8,244.11) is INV-15879's deposit; recorded as its own bill and

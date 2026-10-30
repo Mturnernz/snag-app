@@ -1,5 +1,5 @@
 import {
-  asksWhenPaid, businessKey, claimCandidates, depositBillFor, reviewClaim, duplicateQuotes, paidDayChoices, paymentEchoes, priceSaysQuote, quoteNumbersNamed, reviewSaysQuote,
+  asksWhenPaid, businessKey, claimCandidates, depositBillFor, reviewClaim, reviewQuote, duplicateQuotes, paidDayChoices, paymentEchoes, priceSaysQuote, quoteNumbersNamed, reviewSaysQuote,
   soundsLikeAClaim, suggestAreas, suggestedClaim, unlinkedClaims,
 } from '@snag/supabase-queries';
 import { quote } from '../test/projectFixtures';
@@ -178,6 +178,17 @@ describe('an emailed bill, before it lands', () => {
     expect(reviewClaim(card({ detail: 'Balance of 50% Required - Quote 0104' }), [deck])).toBeNull();
     expect(reviewClaim(card({ kind: 'quote', detail: 'Deposit 20%' }), [deck])).toBeNull();
     expect(reviewClaim(card({ detail: 'Variations' }), [deck])).toBeNull();
+  });
+
+  it('goes with the quote chosen on the card, or none, over what its words name', () => {
+    const other = quote({ id: 'qu104', projectId: 'p1', supplier: 'ReliaBuilder', invoiceNumber: 'QU-0104', amount: 58868.5 });
+    const words = card({ detail: 'Deck — progress payment 45%', againstQuoteId: null, claimDecided: false });
+    expect(reviewQuote(words, [deck])?.id).toBe('qu111');
+    expect(reviewQuote({ ...words, claimDecided: true, againstQuoteId: 'qu104' }, [deck, other])?.id).toBe('qu104');
+    expect(reviewQuote({ ...words, claimDecided: true, againstQuoteId: null }, [deck])).toBeNull();
+    // A chosen quote since deleted is none, never the words' guess.
+    expect(reviewQuote({ ...words, claimDecided: true, againstQuoteId: 'gone' }, [deck])).toBeNull();
+    expect(reviewQuote({ ...words, kind: 'quote' }, [deck])).toBeNull();
   });
 
   it('finds the deposit already on the job that the paper says was paid', () => {

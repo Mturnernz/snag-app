@@ -543,6 +543,8 @@ export const approveInvoiceReview = (reviewId: string, options?: queries.Approve
   queries.approveInvoiceReview(supabase, reviewId, options ?? {});
 export const setQuoteClaim = (quoteId: string, againstQuoteId: string | null) =>
   queries.setQuoteClaim(supabase, quoteId, againstQuoteId);
+export const setInvoiceReviewClaim = (reviewId: string, quoteId: string | null) =>
+  queries.setInvoiceReviewClaim(supabase, reviewId, quoteId);
 export const moveInvoiceReview = (reviewId: string, projectId: string) =>
   queries.moveInvoiceReview(supabase, reviewId, projectId);
 

@@ -20,8 +20,10 @@
 --     the household's prices when the business is the same (`business_key`,
 --     the twin of `businessKey` in `papers.ts`).
 --
--- And one move: a card forwarded to the wrong job's address can be moved to
--- another job in the same home, rather than declined and forwarded again.
+-- And two choices on a card: which quote a bill is a stage of, kept on the card
+-- as it is chosen (`set_invoice_review_claim`), and the move — a card forwarded
+-- to the wrong job's address goes to another job in the same home, rather than
+-- being declined and forwarded again.
 
 -- ------------------------------------------------------------ already paid
 
@@ -30,6 +32,73 @@ alter table home.invoice_reviews
 
 comment on column home.invoice_reviews.already_paid is
   'What the paper says was paid before it and taken off its total ("less deposit paid"), in the amount''s GST basis.';
+
+-- ------------------------------------------------------- which quote
+
+-- The card's *For* is one choice: a quote the bill is a stage of, or an area of
+-- the job with no quote. `claim_decided` is what tells "nobody has said" (the
+-- app offers the quote the bill's words name) from "somebody said no quote".
+-- A quote deleted while the card waits leaves it decided and unlinked.
+alter table home.invoice_reviews
+  add column against_quote_id uuid references home.project_quotes (id) on delete set null,
+  add column claim_decided boolean not null default false;
+
+-- Says which quote a waiting bill is a stage of, or (null) that it is none.
+-- Written as it is chosen, like every other answer on a card; allocating reads
+-- it. The refusals are `set_quote_claim`'s, made at the choice rather than at
+-- Allocate, so a card never offers a link the server will refuse.
+create function home.set_invoice_review_claim(p_review_id uuid, p_quote_id uuid)
+returns home.invoice_reviews
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_review home.invoice_reviews;
+  v_quote home.project_quotes;
+begin
+  select * into v_review from home.invoice_reviews where id = p_review_id;
+  if v_review.id is null then
+    raise exception 'No such invoice';
+  end if;
+
+  perform home.require_project_member(v_review.project_id);
+
+  if v_review.state <> 'pending' then
+    raise exception 'That one has already been ruled on';
+  end if;
+
+  if p_quote_id is not null then
+    if v_review.kind <> 'invoice' then
+      raise exception 'Only a bill can be part of a quote';
+    end if;
+    select * into v_quote from home.project_quotes where id = p_quote_id;
+    if v_quote.id is null then
+      raise exception 'No such quote';
+    end if;
+    if v_quote.kind <> 'quote' then
+      raise exception 'A bill can be part of a quote, not of another bill';
+    end if;
+    if home.quote_project(p_quote_id) is distinct from v_review.project_id then
+      raise exception 'That quote belongs to a different job';
+    end if;
+    if v_quote.status = 'declined' then
+      raise exception 'That quote was turned down';
+    end if;
+  end if;
+
+  update home.invoice_reviews set
+    against_quote_id = p_quote_id,
+    claim_decided = true,
+    updated_at = now()
+  where id = p_review_id
+  returning * into v_review;
+
+  return v_review;
+end;
+$$;
+revoke execute on function home.set_invoice_review_claim(uuid, uuid) from public, anon;
+grant execute on function home.set_invoice_review_claim(uuid, uuid) to authenticated;
 
 -- ---------------------------------------------------------- the spelling
 
@@ -344,9 +413,9 @@ $$;
 
 -- ---------------------------------------------------------- allocating
 
--- `p_against_quote_id`: the bill is a stage of that quote. It lands where the
--- quote sits — its rooms are the quote's to share — and is linked, so a signed
--- contract counts it once. `p_record_already_paid`: what the paper says was
+-- `p_against_quote_id`, or else the quote chosen on the card: the bill is a
+-- stage of that quote. It lands where the quote sits — its rooms are the
+-- quote's to share — and is linked, so a signed contract counts it once. `p_record_already_paid`: what the paper says was
 -- paid before it is recorded as a payment against it, undated, because the
 -- paper says it was paid and not when.
 drop function home.approve_invoice_review(uuid, uuid);
@@ -372,6 +441,7 @@ declare
   v_room_ids uuid[];
   v_room_amounts numeric[];
   v_balance numeric;
+  v_against uuid;
 begin
   select * into v_review from home.invoice_reviews where id = p_review_id;
 
@@ -389,18 +459,22 @@ begin
     raise exception 'Paperwork is filed on the job, not added as a price';
   end if;
 
-  if p_against_quote_id is not null then
+  -- The quote passed, or else the one chosen on the card.
+  v_against := coalesce(p_against_quote_id,
+    case when v_review.claim_decided then v_review.against_quote_id end);
+
+  if v_against is not null then
     if v_review.kind <> 'invoice' then
       raise exception 'Only a bill can be a claim against a contract';
     end if;
-    select * into v_contract from home.project_quotes where id = p_against_quote_id;
+    select * into v_contract from home.project_quotes where id = v_against;
     if v_contract.id is null then
       raise exception 'No such contract';
     end if;
     if v_contract.kind <> 'quote' then
       raise exception 'A claim has to be against a quote, not another bill';
     end if;
-    if home.quote_project(p_against_quote_id) is distinct from v_review.project_id then
+    if home.quote_project(v_against) is distinct from v_review.project_id then
       raise exception 'That contract belongs to a different job';
     end if;
     v_item := v_contract.item_id;
@@ -440,10 +514,10 @@ begin
     p_invoice_number => v_review.invoice_number,
     p_photo_paths => v_review.photo_paths,
     p_document_paths => v_review.document_paths,
-    p_against_quote_id => p_against_quote_id
+    p_against_quote_id => v_against
   );
 
-  if v_project is not null and p_against_quote_id is null
+  if v_project is not null and v_against is null
      and cardinality(coalesce(v_room_ids, '{}')) > 0 then
     perform home.set_quote_rooms(v_quote.id, v_room_ids, v_room_amounts);
   end if;
@@ -492,7 +566,7 @@ grant execute on function home.approve_invoice_review(uuid, uuid, uuid, boolean)
 -- A card forwarded to the wrong job's address goes to the right one. Only in
 -- the same home: the card's files are in this household's folder, and a job
 -- in another household could not open them. Where it was going on the old job
--- means nothing on the new one, so the part and the rooms are cleared.
+-- means nothing on the new one, so the part, the rooms and the quote are cleared.
 create function home.move_invoice_review(p_review_id uuid, p_project_id uuid)
 returns home.invoice_reviews
 language plpgsql
@@ -541,6 +615,8 @@ begin
     element_id = null,
     room_ids = '{}',
     room_amounts = null,
+    against_quote_id = null,
+    claim_decided = false,
     updated_at = now()
   where id = p_review_id
   returning * into v_review;

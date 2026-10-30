@@ -12,6 +12,8 @@
 --     and the balance it says was paid is dated by the paper, not the press;
 --   * a progress claim allocated against the deck quote lands where the quote
 --     sits, linked — and Committed counts the quote once;
+--   * the quote chosen on a card is kept and is what Allocate links, and
+--     choosing no quote is kept too;
 --   * a card moves to another job in the same home, and to nowhere else.
 
 begin;
@@ -124,6 +126,16 @@ begin
     p_dated => '2026-06-30', p_paid => true, p_paid_evidence => 'PAID — thank you',
     p_document_paths => array['h/docs/1-0-Invoice INV-15879.pdf'])).id);
 
+  -- Two more of the builder's bills, for choosing on the card.
+  insert into ids values ('chosen', (home.file_emailed_bill(
+    p_project_id => roof, p_sender_id => me, p_source_ref => 'email-chosen',
+    p_supplier => 'RELIABUILDER LIMITED', p_detail => 'Progress payment - 30%',
+    p_amount => 14844.66, p_invoice_number => 'INV-0178')).id);
+  insert into ids values ('variations', (home.file_emailed_bill(
+    p_project_id => roof, p_sender_id => me, p_source_ref => 'email-variations',
+    p_supplier => 'RELIABUILDER LIMITED', p_detail => 'Variations',
+    p_amount => 5587.85, p_invoice_number => 'INV-0184')).id);
+
   -- Wrongly addressed: the roof job's address, a kitchen paper.
   insert into ids values ('stray', (home.file_emailed_bill(
     p_project_id => roof, p_sender_id => me, p_source_ref => 'email-stray',
@@ -168,6 +180,29 @@ begin
   select committed_total into committed from home.projects_with_totals where id = (select id from ids where name = 'roof');
   perform pg_temp.expect(committed = 49482.20, 'Committed counts the contract once');
 
+  -- The quote chosen on a card is kept, and Allocate links it with nothing passed.
+  r := home.set_invoice_review_claim((select id from ids where name = 'chosen'), (select id from ids where name = 'deck'));
+  perform pg_temp.expect(r.claim_decided and r.against_quote_id = (select id from ids where name = 'deck'),
+    'the quote chosen on a card is kept on it');
+  q := home.approve_invoice_review(p_review_id => (select id from ids where name = 'chosen'));
+  perform pg_temp.expect(q.against_quote_id = (select id from ids where name = 'deck'), 'and Allocate links it');
+
+  -- Choosing no quote is kept too, and the bill counts on its own.
+  r := home.set_invoice_review_claim((select id from ids where name = 'variations'), null);
+  perform pg_temp.expect(r.claim_decided and r.against_quote_id is null, 'choosing no quote is an answer');
+  q := home.approve_invoice_review(p_review_id => (select id from ids where name = 'variations'));
+  perform pg_temp.expect(q.against_quote_id is null, 'and the bill lands unlinked');
+  select committed_total into committed from home.projects_with_totals where id = (select id from ids where name = 'roof');
+  perform pg_temp.expect(committed = 55070.05, 'counted on its own beside the contract');
+
+  -- A card cannot choose a bill, a quote on another job, or be a quote's stage when it is not a bill.
+  perform pg_temp.refuses(format('select home.set_invoice_review_claim(%L, %L)',
+    (select id from ids where name = 'stray'), (select id from ids where name = 'v3')),
+    'not of another bill', 'a card cannot be part of a bill');
+  perform pg_temp.refuses(format('select home.set_invoice_review_claim(%L, %L)',
+    (select id from ids where name = 'final'), (select id from ids where name = 'deck')),
+    'belongs to a different job', 'a card cannot be part of another job''s quote');
+
   -- The final invoice: the deposit recorded, the balance dated by the paper.
   q := home.approve_invoice_review(
     p_review_id => (select id from ids where name = 'final'), p_record_already_paid => true);
@@ -189,12 +224,15 @@ begin
     (select id from ids where name = 'stray'), (select id from ids where name = 'v3')),
     'not another bill', 'a claim on a bill rather than a quote');
 
-  -- The stray card moves to the kitchen, and nowhere outside this home.
+  -- The stray card moves to the kitchen, and nowhere outside this home. What
+  -- was chosen on the roof job means nothing in the kitchen, so it goes.
+  perform home.set_invoice_review_claim((select id from ids where name = 'stray'), (select id from ids where name = 'deck'));
   perform pg_temp.refuses(format('select home.move_invoice_review(%L, %L)',
     (select id from ids where name = 'stray'), (select id from ids where name = 'elsewhere')),
     'not linked to that property', 'a card cannot move to a job in somebody else’s home');
   r := home.move_invoice_review((select id from ids where name = 'stray'), (select id from ids where name = 'kitchen'));
   perform pg_temp.expect(r.project_id = (select id from ids where name = 'kitchen'), 'a card moves to another job in the home');
+  perform pg_temp.expect(r.against_quote_id is null and not r.claim_decided, 'and leaves its quote behind');
   perform pg_temp.refuses(format('select home.move_invoice_review(%L, %L)',
     (select id from ids where name = 'claim'), (select id from ids where name = 'kitchen')),
     'already been ruled on', 'an allocated card stays where it was allocated');

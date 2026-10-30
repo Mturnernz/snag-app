@@ -49,7 +49,7 @@ import {
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, suggestAreas, duplicateQuotes, paymentEchoes, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
+  asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, reviewQuote, suggestAreas, duplicateQuotes, paymentEchoes, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
   expectedAmountIncl, expectedPayee, expectedToPay, exportDateStamp, filesBySupplier, formatExactDate,
   formatLooseDate, groupBySupplier, inclGst, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
   remainingTone, reviewAlert, reviewGroups, supplierDirectory,
@@ -57,8 +57,9 @@ import {
 } from '@snag/supabase-queries';
 import {
   filePaperwork, setFileTags, getFileUrl, getFileUrls, rereadInvoiceReview, setInvoiceReviewRooms, updateInvoiceReview,
-  getProjects, moveInvoiceReview, updateQuote,
+  getProjects, moveInvoiceReview, setInvoiceReviewClaim, updateQuote,
 } from '../lib/supabase';
+import ReviewForSheet, { type ReviewFor } from '../components/ReviewForSheet';
 import { describeRooms } from '../components/RoomSplit';
 import { openUrl } from '../lib/openUrl';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
@@ -126,6 +127,8 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [payingAll, setPayingAll] = useState(false);
   /** A waiting card being moved, and the other jobs in this home it can go to. */
   const [moving, setMoving] = useState<InvoiceReview | null>(null);
+  /** The waiting card whose *For* is being chosen. */
+  const [choosingFor, setChoosingFor] = useState<string | null>(null);
   const [otherJobs, setOtherJobs] = useState<{ id: string; name: string }[]>([]);
   const [openRoom, setOpenRoom] = useState<string | null>(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
@@ -343,6 +346,22 @@ export default function ProjectDetailScreen({ route }: Props) {
     setMoving(null);
     if (!review) return;
     await rule(review, () => moveInvoiceReview(review.id, job.id), `Moved to ${job.name}`);
+  }
+
+  // *For* on a waiting card: a quote it is a stage of, or an area with no quote.
+  const forReview = reviews.find((r) => r.id === choosingFor) ?? null;
+  async function chooseFor(choice: ReviewFor) {
+    if (!forReview) return;
+    if ('quoteId' in choice) {
+      await setInvoiceReviewClaim(forReview.id, choice.quoteId);
+      const q = quotes.find((x) => x.id === choice.quoteId);
+      await changed(`For ${[q?.invoiceNumber, q?.detail].filter(Boolean).join(' · ') || 'that quote'}`);
+      return;
+    }
+    // No quote is an answer too, so the one its words name is not offered again.
+    await setInvoiceReviewClaim(forReview.id, null);
+    await setInvoiceReviewRooms(forReview.id, choice.elementId ? [choice.elementId] : [], null);
+    await changed(`For ${elements.find((e) => e.id === choice.elementId)?.name ?? 'the whole job'}`);
   }
 
   async function linkClaim(bill: string, contract: string) {
@@ -645,12 +664,8 @@ export default function ProjectDetailScreen({ route }: Props) {
                 {group.reviews.map((review) => {
                   const twin = duplicates.get(review.id);
                   const paperwork = review.kind === 'paperwork';
-                  const claimOf = reviewClaim(review, quotes);
+                  const claimOf = reviewQuote(review, quotes);
                   const deposit = depositBillFor(review, quotes);
-                  // Offered only while it has nowhere to go but the whole job.
-                  const named = paperwork || review.elementId || review.roomIds.length > 0 ? []
-                    : suggestAreas([review.supplier, review.detail, review.sourceSubject].filter(Boolean).join(' '), elements);
-                  const namedRooms = named.map((id) => elements.find((e) => e.id === id)?.name).filter(Boolean).join(' and ');
                   return (
                   <InvoiceReviewCard
                     key={review.id}
@@ -678,16 +693,8 @@ export default function ProjectDetailScreen({ route }: Props) {
                     }
                     paysOff={cardPaysOff.get(review.id)}
                     claimOf={claimOf}
+                    onChooseFor={() => setChoosingFor(review.id)}
                     deposit={deposit}
-                    suggestedRooms={named.length > 0 ? namedRooms : null}
-                    onUseRooms={named.length > 0 ? async () => {
-                      try {
-                        await setInvoiceReviewRooms(review.id, named, null);
-                        await changed(`It’s for ${namedRooms}`);
-                      } catch (err: unknown) {
-                        showToast(err instanceof Error ? err.message : 'That didn’t save');
-                      }
-                    } : undefined}
                     onMove={() => openMove(review)}
                     onApprove={(paysOff, extras = { againstQuoteId: null, recordAlreadyPaid: false }) => (paperwork
                       ? setFiling(review)
@@ -1252,6 +1259,20 @@ export default function ProjectDetailScreen({ route }: Props) {
           }
         }}
         onClose={() => setRoomsOpen(false)}
+      />
+
+      <ReviewForSheet
+        visible={forReview !== null}
+        review={forReview}
+        quotes={quotes}
+        elements={elements}
+        current={forReview ? reviewQuote(forReview, quotes) : null}
+        suggested={forReview ? reviewClaim(forReview, quotes) : null}
+        suggestedAreas={forReview
+          ? suggestAreas([forReview.supplier, forReview.detail, forReview.sourceSubject].filter(Boolean).join(' '), elements)
+          : []}
+        onPick={chooseFor}
+        onClose={() => setChoosingFor(null)}
       />
 
       <Sheet

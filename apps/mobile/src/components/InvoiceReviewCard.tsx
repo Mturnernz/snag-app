@@ -73,16 +73,15 @@ interface Props {
    */
   paysOff?: ExpectedMatch[];
   /**
-   * The contract this bill reads as a stage of (`reviewClaim`). Ticked when it
-   * arrives: allocating lands the bill where the contract sits, linked, so a
-   * signed price counts it once.
+   * The quote this bill goes in as a stage of (`reviewQuote`): the one chosen
+   * on *For*, or the one its words name. Allocating lands it where the quote
+   * sits, linked, so a signed price counts it once. Null, it goes on `landsOn`.
    */
   claimOf?: ProjectQuote | null;
+  /** Opens *What's it for?* — a quote, or an area with no quote. */
+  onChooseFor?: () => void;
   /** The bill on the job the paper's *less deposit paid* is (`depositBillFor`). */
   deposit?: ProjectQuote | null;
-  /** The rooms the bill's words name, as words, and the press that puts it there. */
-  suggestedRooms?: string | null;
-  onUseRooms?: () => void;
   /** Moves the card to another job in the home, for a bill sent to the wrong address. */
   onMove?: () => void;
 }
@@ -153,14 +152,13 @@ export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
  */
 export default function InvoiceReviewCard({
   review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate, onReread, rereading,
-  onChangeKind, paysOff: matches = NO_MATCHES, claimOf = null, deposit = null, suggestedRooms, onUseRooms, onMove,
+  onChangeKind, paysOff: matches = NO_MATCHES, claimOf = null, onChooseFor, deposit = null, onMove,
 }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
   const [choosingKind, setChoosingKind] = useState(false);
   const paysOff = usePaysOff(matches);
-  const [claimTicked, setClaimTicked] = useState(true);
   const [paidTicked, setPaidTicked] = useState(true);
-  const claiming = review.kind === 'invoice' && claimOf !== null && claimTicked;
+  const claiming = review.kind === 'invoice' && claimOf !== null;
   const alreadyPaid = review.kind === 'invoice' ? review.alreadyPaid ?? null : null;
   const approve = () => onApprove(paysOff.chosen, {
     againstQuoteId: claiming ? claimOf!.id : null,
@@ -273,11 +271,15 @@ export default function InvoiceReviewCard({
         style={[styles.card, { transform: [{ translateX: pan }] }]}
         accessibilityLabel={[kind.label, invoiceReviewHeadline(review), amount].filter(Boolean).join(', ')}
       >
+        {/*
+          Who it is from, and nothing else: the number is under *Invoice* and
+          what it is for is on *For*. Saying either twice was most of a line.
+        */}
+        <Text style={styles.headline} numberOfLines={2}>
+          {review.kind !== 'paperwork' && review.supplier ? review.supplier : invoiceReviewHeadline(review)}
+        </Text>
         <View style={styles.headRow}>
           <View style={styles.headText}>
-            <Text style={styles.headline} numberOfLines={2}>
-              {invoiceReviewHeadline(review)}
-            </Text>
             <View style={styles.chips}>
               {/*
                 What kind of paper it is, always — one email can hold a bill, a
@@ -316,7 +318,8 @@ export default function InvoiceReviewCard({
           <Text style={styles.guessed}>supplier guessed</Text>
         ) : null}
 
-        {review.detail && !paperwork ? <Text style={styles.detail}>{review.detail}</Text> : null}
+        {/* A quote it is a stage of names what it is for; the bill's own words would repeat it. */}
+        {review.detail && !paperwork && !claiming ? <Text style={styles.detail}>{review.detail}</Text> : null}
 
         {addressed ? <Text style={styles.detail}>{addressed}</Text> : null}
 
@@ -330,9 +333,33 @@ export default function InvoiceReviewCard({
           {review.dueOn ? (
             <Fact label="Due" value={formatLooseDate(review.dueOn) ?? review.dueOn} guessed={wasInferred(review, 'due_on')} />
           ) : null}
-          {claiming ? <Fact label="For" value={claimOf!.detail ?? 'The agreed price'} />
-            : landsOn ? <Fact label="For" value={landsOn} /> : null}
+          {!onChooseFor && (claiming || landsOn) ? (
+            <Fact label="For" value={claiming ? forQuote(claimOf!) : landsOn!} />
+          ) : null}
         </View>
+
+        {/*
+          *For* is one choice: a quote it is a stage of, or an area with no
+          quote. It replaced a ticked box offering only the quote the words
+          named, which took most of the card and could not name any other.
+        */}
+        {onChooseFor && !paperwork ? (
+          <Pressable
+            onPress={onChooseFor}
+            disabled={busy}
+            style={styles.forTap}
+            accessibilityRole="button"
+            accessibilityLabel={`For ${claiming ? forQuote(claimOf!) : landsOn ?? 'Whole job'}. Change what it is for`}
+          >
+            <Text style={styles.factLabel}>For</Text>
+            <View style={styles.forPill}>
+              <Text style={styles.forValue} numberOfLines={1}>
+                {claiming ? forQuote(claimOf!) : landsOn ?? 'Whole job'}
+              </Text>
+              <Icon name="chevron-down" size={14} color={Colors.textSecondary} />
+            </View>
+          </Pressable>
+        ) : null}
 
         {/*
           Never the flag on its own. The sentence it was read from is what lets
@@ -390,17 +417,6 @@ export default function InvoiceReviewCard({
           </View>
         ) : null}
 
-        {claimOf && review.kind === 'invoice' ? (
-          <OfferLine
-            title={`A stage of ${[claimOf.supplier, claimOf.invoiceNumber ?? claimOf.detail].filter(Boolean).join(' · ')}`}
-            note={!claimTicked ? 'Counts on its own'
-              : claimOf.status === 'accepted' ? 'Counts once, inside the agreed price'
-                : 'Linked — it counts on its own until the price is agreed'}
-            ticked={claimTicked}
-            onToggle={() => setClaimTicked((t) => !t)}
-          />
-        ) : null}
-
         {alreadyPaid !== null ? (
           <OfferLine
             title={`${formatMoney(alreadyPaid)}${review.amountInclGst ? '' : ' + GST'} paid before this invoice`}
@@ -410,21 +426,6 @@ export default function InvoiceReviewCard({
             ticked={paidTicked}
             onToggle={() => setPaidTicked((t) => !t)}
           />
-        ) : null}
-
-        {suggestedRooms && onUseRooms && !claiming ? (
-          <View style={styles.note}>
-            <Text style={styles.noteText}>{`Its words name ${suggestedRooms}`}</Text>
-            <Pressable
-              onPress={onUseRooms}
-              disabled={busy}
-              style={styles.noteAction}
-              accessibilityRole="button"
-              accessibilityLabel={`Put it on ${suggestedRooms}`}
-            >
-              <Text style={styles.noteActionLabel}>Put it there</Text>
-            </Pressable>
-          </View>
         ) : null}
 
         {onOpenFile && files.length > 0 ? (
@@ -540,6 +541,11 @@ export default function InvoiceReviewCard({
   );
 }
 
+/** A quote as the *For* line names it: its number and what it is for. */
+function forQuote(q: ProjectQuote): string {
+  return [q.invoiceNumber, q.detail].filter(Boolean).join(' · ') || 'A quote';
+}
+
 /** The mark that keeps a guess from reading as a reading. */
 function Guessed() {
   return <Text style={styles.guessed}>guessed</Text>;
@@ -599,7 +605,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     ...Shadow.sm,
   },
-  headRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  headRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   // `minWidth: 0` because anything flexed beside a fixed-width sibling needs it
   // on web, where the intrinsic width wins otherwise and pushes the figure off
   // the card — the trap the thing page's spec sheet already paid for.
@@ -656,6 +662,15 @@ const styles = StyleSheet.create({
 
   source: { fontSize: Typography.xs, color: Colors.textMuted },
   amountCol: { alignItems: 'flex-end' },
+  forTap: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET, alignSelf: 'stretch',
+  },
+  forPill: {
+    flexShrink: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    backgroundColor: Colors.sunken, borderRadius: Radius.chip, paddingHorizontal: Spacing.sm, paddingVertical: 6,
+  },
+  forValue: { flexShrink: 1, minWidth: 0, fontSize: Typography.sm, color: Colors.textPrimary },
   amountAside: { color: Colors.textMuted, fontWeight: Typography.regular },
   unread: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,

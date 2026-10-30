@@ -2587,11 +2587,21 @@ disagrees, this section wins.**
   (`home.known_supplier`, `home.business_key`, the SQL twin of `businessKey`): "RELIABUILDER
   LIMITED" and "ReliaBuilder" were two rows in every supplier rollup. A card sent to the wrong job
   moves to another job **in the same home** (`move_invoice_review`; the files are in this
-  household's folder). A card whose words name rooms offers *Put it there*
-  (`suggestAreas`); 17 of 18 live prices sat on the whole job.
-- **An emailed claim is allocated against its contract** (`reviewClaim`). The card offers *A stage
-  of ReliaBuilder · QU-0111*, ticked. `approve_invoice_review(p_against_quote_id)` lands the bill
-  where the contract sits, linked, and leaves its rooms to the contract.
+  household's folder).
+- **A waiting card says each thing once, and *For* is a dropdown** (by the owner's decision, from
+  the preview). The headline is the supplier alone (the number is under *Invoice*); the figure sits
+  on the kind pill's row; the bill's own words go when it is part of a quote, which names what it
+  is for. *For ▾* opens `ReviewForSheet`, *What's it for?*: **Part of a quote** — every quote on
+  the job not turned down, the bill's own business first, the one its words name marked (`reviewClaim`)
+  — or **On its own** — the whole job or an area, the areas its words name marked (`suggestAreas`;
+  17 of 18 live prices sat on the whole job). A press writes and closes. The quote is kept on the
+  card (`invoice_reviews.against_quote_id`, `claim_decided`, `set_invoice_review_claim`), so
+  choosing no quote is an answer the words' guess never overrides (`reviewQuote`); an area also
+  writes `set_invoice_review_rooms`. It replaced a ticked *A stage of …* box that could offer only
+  the quote the words named, and a separate *Put it there* box.
+- **An emailed claim is allocated against its quote**: `approve_invoice_review` takes
+  `p_against_quote_id`, or else the quote chosen on the card, lands the bill where the quote sits,
+  linked, and leaves its rooms to the quote. Moving a card clears its quote.
 - **Worth checking** sits above the totals on the project page, absent at nought: a claim counted
   beside its contract (with **Link**), a quote on the job twice, a deposit counted twice, and an
   invoice that reads as a quote. Each row is a figure below that is wrong until somebody looks, and
@@ -2607,10 +2617,12 @@ card's claim and deduction lines are refused on Allocate (plain allocation still
 `checks.test.ts` pins every helper against the live papers; `PriceSheet.test.tsx` the claim
 chooser, the *Link*, the paid-date question, the dated part payment, the quote hint and the fold;
 `ProjectDetailScreen.test.tsx` *Worth checking*, the *Paid* pill asking and *Mark the N…*;
-`InvoiceReviewCard.test.tsx` the card's offers; `inboundBill.test.ts` the reader's deduction, the
+`InvoiceReviewCard.test.tsx` the card's header, *For* and offers; `ReviewForSheet.test.tsx` the
+dropdown; `inboundBill.test.ts` the reader's deduction, the
 quote rule, the pasted images and the logo; `projectSummary.test.ts` the room breakdown under the
 linked rule. `supabase/tests/emailed_bills_say_more.sql` replays the spelling, the deduction, the
-paid date, the linked claim and the move, and holds `business_key` to `businessKey`'s answers.
+paid date, the linked claim, the quote kept on a card (and no quote kept), its refusals and the
+move, and holds `business_key` to `businessKey`'s answers.
 
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;

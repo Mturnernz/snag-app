@@ -27,7 +27,7 @@ import {
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
 import {
-  budgetRemaining, describeRemaining, exportDateStamp, groupProjectsByStatus, placeTitle,
+  budgetRemaining, describeFinishedCost, describeRemaining, exportDateStamp, hasCost, groupProjectsByStatus, placeTitle,
   projectExportTable, showsBudgetRemaining, type RemainingTone,
 } from '@snag/supabase-queries';
 import { writeExport, type ExportFormat } from '../lib/exportFile';
@@ -118,12 +118,13 @@ export default function ProjectsScreen() {
    * time**. It is the page's whole read (`project_page`) and the page's own
    * arithmetic, so it is the heaviest request in the app; firing one per card
    * at once is the fan-out *What a press costs* in CLAUDE.md is about. Only
-   * cards that show the line ask. A newer load abandons an older loop, and
+   * cards that show the line ask, and finished jobs with money on them, whose
+   * card says what they cost. A newer load abandons an older loop, and
    * what an older loop already read stays on screen until it is replaced
    * rather than flashing back to —.
    */
   async function readExpected(list: Project[], run: number) {
-    for (const p of list.filter(showsBudgetRemaining)) {
+    for (const p of list.filter((x) => showsBudgetRemaining(x) || (x.status === 'done' && hasCost(x)))) {
       if (run !== generation.current) return;
       try {
         // eslint-disable-next-line no-await-in-loop
@@ -222,21 +223,9 @@ export default function ProjectsScreen() {
     }
   }
 
+  // The headings below already count the jobs by state, so the line under the
+  // title names only the home, and only when there is more than one.
   const placeName = placeTitle(activeProperty, properties);
-  const counts = [
-    projects.filter((p) => p.status === 'underway').length,
-    projects.filter((p) => p.status === 'planned').length,
-    projects.filter((p) => p.status === 'done').length,
-  ];
-  const summary = projects.length
-    ? [
-        counts[0] ? `${counts[0]} underway` : null,
-        counts[1] ? `${counts[1]} planned` : null,
-        counts[2] ? `${counts[2]} complete` : null,
-      ]
-        .filter(Boolean)
-        .join(' · ')
-    : 'Nothing recorded yet';
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -264,9 +253,7 @@ export default function ProjectsScreen() {
             </View>
           </Pressable>
         </View>
-        <Text style={styles.sub}>
-          {properties.length > 1 ? `${placeName} · ${summary}` : summary}
-        </Text>
+        {properties.length > 1 ? <Text style={styles.sub}>{placeName}</Text> : null}
       </View>
 
       {loading ? (
@@ -393,8 +380,14 @@ export default function ProjectsScreen() {
  * bar past the notch.
  *
  * Under it: how many things are left to decide and what is owed — counts and
- * sums, nothing to believe. A complete project carries the same figures,
- * dimmed, because "what did it cost" is the question it is opened to answer.
+ * sums, nothing to believe.
+ *
+ * **A complete project says what it cost, and only that** (by the owner's
+ * decision): its name, when it finished, and one line — *Cost $58,868 ·
+ * $1,132 under budget* — dimmed. No figures to add up and no bar: a finished
+ * job is opened to answer "what did it cost", and the budget it no longer has
+ * to fit inside is a comparison, not a figure still moving. See
+ * `describeFinishedCost`.
  */
 const TONE: Record<RemainingTone, string> = {
   good: Colors.primary,
@@ -457,17 +450,23 @@ function ProjectCard({
         </View>
         <Icon name="chevron-forward" size={16} color={Colors.chevron} />
       </View>
-      <View style={styles.figures}>
-        {figures.map((f) => (
-          <View key={f.label} style={styles.figureRow}>
-            <Text style={styles.figureLabel}>{f.label}</Text>
-            <Text style={[styles.figureValue, f.value === null && styles.figureBlank]} numberOfLines={1}>
-              {f.value ?? f.blank}
-            </Text>
-          </View>
-        ))}
-      </View>
-      {shows ? (
+      {dim ? (
+        <Text style={styles.costLine}>
+          {hasCost(project) ? describeFinishedCost(expected, budget, money) : 'No costs recorded'}
+        </Text>
+      ) : (
+        <View style={styles.figures}>
+          {figures.map((f) => (
+            <View key={f.label} style={styles.figureRow}>
+              <Text style={styles.figureLabel}>{f.label}</Text>
+              <Text style={[styles.figureValue, f.value === null && styles.figureBlank]} numberOfLines={1}>
+                {f.value ?? f.blank}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {shows && !dim ? (
         <View style={styles.remaining}>
           <BudgetBar
             budget={budget ?? 0}
@@ -563,6 +562,7 @@ const styles = StyleSheet.create({
   cardName: { fontSize: Typography.body, lineHeight: 22, fontWeight: Typography.semibold, color: Colors.textPrimary },
   cardSub: { fontSize: Typography.subhead, color: Colors.textMuted },
   figures: { gap: Spacing.xs + 2 },
+  costLine: { fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'] },
   figureRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.md },
   figureLabel: { fontSize: Typography.subhead, color: Colors.textMuted, flexShrink: 1, minWidth: 0 },
   figureValue: {

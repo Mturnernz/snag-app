@@ -55,21 +55,23 @@ const press = (r: ReturnType<typeof render>, label: string) => {
 it('offers buttons as well as a swipe, because half its readers cannot swipe', () => {
   const { r, onApprove, onDecline } = arrange();
 
-  expect(r.queryByText('Allocate')).not.toBeNull();
+  expect(r.queryByText('Add to job')).not.toBeNull();
   expect(r.queryByText('Remove')).not.toBeNull();
 
-  press(r, 'Allocate');
+  press(r, 'Add to job');
   expect(onApprove).toHaveBeenCalledTimes(1);
 
   press(r, 'Remove');
   expect(onDecline).toHaveBeenCalledTimes(1);
 });
 
-it('leads with the supplier alone, the number said once under Invoice', () => {
+it('leads with the supplier alone, the number said once beside the pill', () => {
   const { r } = arrange();
   r.getByText('Tile Space');
   expect(r.queryByText('Tile Space · TS-4471')).toBeNull();
   expect(r.getAllByText('TS-4471')).toHaveLength(1);
+  // "Invoice" is the pill's word; the number carries no second one.
+  expect(r.getAllByText('Invoice')).toHaveLength(1);
 });
 
 // The rule every figure in this app follows. An invoice whose amount could not
@@ -109,9 +111,13 @@ it('shows the words the paid answer was drawn from', () => {
   expect(r.queryByText('Paid — Alyssa wrote “I’ve just paid the quote” on 16 Sep')).not.toBeNull();
 });
 
-it('states the unpaid answer rather than leaving it as the absence of a tick', () => {
-  const { r } = arrange({ paid: false });
-  expect(r.queryByText('Nothing in the thread says it was paid')).not.toBeNull();
+// Owing is what a new bill means, so the card says nothing about it: a box
+// saying "nothing says it was paid" on every card was most of the card.
+it('says nothing about payment when the email does not say it was paid', () => {
+  const { r } = arrange({ paid: false, paidEvidence: 'Due 20 days after invoice' });
+  const words = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+  expect(words).not.toContain('Nothing in the thread says it was paid');
+  expect(words).not.toMatch(/(^| )Paid —/);
 });
 
 it('says where it came from, so a card can be checked against the email', () => {
@@ -153,7 +159,7 @@ it('marks a supplier taken from the sender rather than the bill', () => {
   expect(r.queryByText('supplier guessed')).not.toBeNull();
 });
 
-it('says where allocating puts it, before anybody presses Allocate', () => {
+it('says where allocating puts it, before anybody presses Add to job', () => {
   const { r } = arrange({}, { landsOn: 'Bathroom, Laundry · split evenly' });
   expect(r.queryByText('For')).not.toBeNull();
   expect(r.queryByText('Bathroom, Laundry · split evenly')).not.toBeNull();
@@ -170,7 +176,7 @@ describe('a card that looks like a bill already on the job', () => {
     const open = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Open the bill it looks like' && n.props?.onPress)[0];
     TestRenderer.act(() => open.props.onPress());
     expect(onOpenDuplicate).toHaveBeenCalled();
-    press(r, 'Allocate');
+    press(r, 'Add to job');
     expect(onApprove).toHaveBeenCalled();
   });
 
@@ -196,7 +202,7 @@ describe('one email, several kinds of paper', () => {
   // have landed in *To pay*.
   it('adds a quote as a quote, and never asks whether it was paid', () => {
     const { r, onApprove } = arrange({ kind: 'quote', invoiceNumber: 'QU-0111' });
-    expect(r.queryByText('Allocate')).toBeNull();
+    expect(r.queryByText('Add to job')).toBeNull();
     press(r, 'Add quote');
     expect(onApprove).toHaveBeenCalled();
     expect(words(r)).not.toContain('paid');
@@ -208,7 +214,7 @@ describe('one email, several kinds of paper', () => {
       amount: null, invoiceNumber: null,
     });
     expect(r.queryByText('Good Connection · Certificate of compliance')).not.toBeNull();
-    expect(r.queryByText('Allocate')).toBeNull();
+    expect(r.queryByText('Add to job')).toBeNull();
     // A certificate is not an unpriced bill.
     expect(r.queryByText('Not priced')).toBeNull();
     expect(words(r)).not.toContain('paid');
@@ -250,7 +256,7 @@ describe('reading again', () => {
   it('holds the card while the reading is out', () => {
     const { r } = arrange(blank, { onReread: jest.fn(), rereading: true });
     const allocate = r.root.findAll(
-      (n: any) => typeof n.type !== 'string' && n.props?.label === 'Allocate', { deep: true },
+      (n: any) => typeof n.type !== 'string' && n.props?.label === 'Add to job', { deep: true },
     )[0];
     expect(allocate.props.disabled).toBe(true);
   });
@@ -266,16 +272,16 @@ describe('the kind pill', () => {
     r.root.findAll((n: any) => n.props?.accessibilityLabel === label && !!n.props?.onPress, { deep: true })[0];
 
   it('is a label, not a control, when nothing can change it', () => {
-    // Twice: the pill, and the label on the invoice number.
+    // Once: the pill. The number beside it carries no second "Invoice".
     const { r } = arrange();
-    expect(r.getAllByText('Invoice')).toHaveLength(2);
+    expect(r.getAllByText('Invoice')).toHaveLength(1);
     expect(pill(r, 'Invoice. Change what it is')).toBeUndefined();
   });
 
   it('opens the three answers, each saying what it does to the money', () => {
     const { r } = arrange({}, { onChangeKind: jest.fn().mockResolvedValue(undefined) });
     TestRenderer.act(() => pill(r, 'Invoice. Change what it is').props.onPress());
-    r.getByText('Allocated to the job as something to pay');
+    r.getByText('Added to the job as something to pay');
     r.getByText('Added as a price nobody has agreed to yet');
     r.getByText('Filed on the job — it counts towards no figure');
   });
@@ -315,7 +321,7 @@ describe('a bill for money that was earmarked', () => {
     const { r, onApprove } = arrange({}, { paysOff: [match()] });
     r.getByText('Pays off ReliaBuilder payment 3/4 · $43,987.50');
     r.getByText('Takes it off Expected to pay');
-    press(r, 'Allocate');
+    press(r, 'Add to job');
     expect(onApprove).toHaveBeenCalledWith(expect.objectContaining({ id: 'x1' }), { againstQuoteId: null, recordAlreadyPaid: false });
   });
 
@@ -326,14 +332,14 @@ describe('a bill for money that was earmarked', () => {
     )[0];
     TestRenderer.act(() => tick.props.onPress());
     r.getByText('Stays on Expected to pay');
-    press(r, 'Allocate');
+    press(r, 'Add to job');
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: false });
   });
 
   it('says nothing when nothing matches', () => {
     const { r, onApprove } = arrange();
     expect(r.queryByText('Takes it off Expected to pay')).toBeNull();
-    press(r, 'Allocate');
+    press(r, 'Add to job');
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: false });
   });
 });
@@ -357,7 +363,7 @@ describe('what it offers to do as it lands', () => {
     // The quote names what it is for; the bill's own words would say it twice.
     expect(r.queryByText('Deck — progress payment 45%')).toBeNull();
     expect(r.queryByText('Counts once, inside the agreed price')).toBeNull();
-    press(r, 'Allocate');
+    press(r, 'Add to job');
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: 'c1', recordAlreadyPaid: false });
   });
 
@@ -365,7 +371,7 @@ describe('what it offers to do as it lands', () => {
     const { r, onApprove } = arrange({ supplier: 'ReliaBuilder', detail: 'Variations' }, { landsOn: 'Deck', onChooseFor: jest.fn() });
     r.getByText('Deck');
     r.getByText('Variations');
-    press(r, 'Allocate');
+    press(r, 'Add to job');
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: false });
   });
 
@@ -386,7 +392,7 @@ describe('what it offers to do as it lands', () => {
     r.getByText('$8,244.11 (V3)');
     // A line like the dates, not a box to tick: the pencil is where it is corrected.
     expect(r.root.findAll((n) => n.props.accessibilityRole === 'checkbox')).toHaveLength(0);
-    press(r, 'Allocate');
+    press(r, 'Add to job');
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: true });
   });
 
@@ -398,10 +404,9 @@ describe('what it offers to do as it lands', () => {
     expect(onChangeKind).toHaveBeenCalledWith('quote');
   });
 
-  it('offers a way to the right job', () => {
-    const onMove = jest.fn();
-    const { r } = arrange({ supplier: 'elitebathroomware' }, { onMove });
-    TestRenderer.act(() => byLabel(r, 'Move it to another job').props.onPress());
-    expect(onMove).toHaveBeenCalled();
+  // Moving is rare, and a correction: it lives in the pencil's sheet.
+  it('leaves moving to the pencil’s sheet', () => {
+    const { r } = arrange({ supplier: 'elitebathroomware' });
+    expect(r.getAllByType('Text').map((n) => n.children.join('')).join(' ')).not.toContain('Sent to the wrong job');
   });
 });

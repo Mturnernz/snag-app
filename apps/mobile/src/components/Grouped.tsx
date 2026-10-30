@@ -265,12 +265,14 @@ export function Segmented<T extends string>({
 
 /** One answer in a list of them, with a radio mark. */
 export function RadioRow({
-  title, subtitle, selected, onPress,
+  title, subtitle, selected, onPress, accessibilityLabel,
 }: {
   title: string;
   subtitle?: string | null;
   selected: boolean;
   onPress: () => void;
+  /** When the same title can stand in two lists on one screen, a name that tells them apart. */
+  accessibilityLabel?: string;
 }) {
   return (
     <Pressable
@@ -278,7 +280,7 @@ export function RadioRow({
       style={styles.radioRow}
       accessibilityRole="radio"
       accessibilityState={{ selected, checked: selected }}
-      accessibilityLabel={title}
+      accessibilityLabel={accessibilityLabel ?? title}
     >
       <Icon
         name={selected ? 'radio-button-on' : 'radio-button-off'}

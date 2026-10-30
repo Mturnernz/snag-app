@@ -6,7 +6,7 @@ import Sheet from './Sheet';
 import MoneyField from './MoneyField';
 import DateField from './DateField';
 import RoomSplit, { resolveSplit, splitValueFrom, type RoomSplitValue } from './RoomSplit';
-import { Group, PrimaryButton, Segmented, groupedStyles } from './Grouped';
+import { Group, PrimaryButton, Segmented, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { formatDayFirst, parseLooseDate, type InvoiceReviewUpdate } from '@snag/supabase-queries';
 import type { InvoiceReview, InvoiceReviewKind, Location, ProjectElement } from '../types';
@@ -34,6 +34,12 @@ interface Props {
   onAddRoom: (name: string) => Promise<string | null>;
   onClose: () => void;
   onSave: (update: InvoiceReviewUpdate, rooms: ReviewRooms) => Promise<void>;
+  /**
+   * Moves the card to another job in the home, for a bill forwarded to the
+   * wrong job's address. Here rather than on the card, because it is rare and
+   * it is a correction like the rest of this sheet.
+   */
+  onMove?: () => void;
 }
 
 const parseAmount = (text: string): number | null | undefined => {
@@ -74,7 +80,7 @@ const parseAmount = (text: string): number | null | undefined => {
  * convention every update in this schema follows. A date or a figure it cannot
  * read holds the sheet open and says which, rather than saving something else.
  */
-export default function ReviewEditSheet({ review, elements, locations, onAddRoom, onClose, onSave }: Props) {
+export default function ReviewEditSheet({ review, elements, locations, onAddRoom, onClose, onSave, onMove }: Props) {
   const [kind, setKind] = useState<InvoiceReviewKind>('invoice');
   const [supplier, setSupplier] = useState('');
   const [detail, setDetail] = useState('');
@@ -242,6 +248,8 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
       ) : null}
 
       {error ? <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text> : null}
+
+      {onMove ? <TextButton label="Move to another job" onPress={onMove} /> : null}
     </Sheet>
   );
 }

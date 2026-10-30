@@ -135,7 +135,8 @@ describe('the tab', () => {
     // The enum is still `done`; the word on the tab is Complete.
     expect(seen).toEqual(['Underway', 'Planned', 'Complete']);
     expect(r.queryByText('Done')).toBeNull();
-    r.getByText('1 underway · 1 planned · 1 complete');
+    // The headings count the jobs; a line under the title saying so again is gone.
+    expect(r.getAllByType('Text').map((n) => n.children.join('')).join(' ')).not.toMatch(/\d underway/);
   });
 
   it('shows what was budgeted, what has been quoted and what has been paid', async () => {
@@ -306,15 +307,33 @@ describe('budget remaining', () => {
     expect(mock_getExpectedTotal.mock.calls.map((c) => c[0])).toEqual(['a', 'b']);
   });
 
-  it('is on a complete project too, dimmed with the rest of the card', async () => {
+  it('gives way on a complete project to one line saying what it cost', async () => {
     const r = await arrange(
       [project({ id: 'k', name: 'Kitchen', status: 'done', budget: 62000, paidTotal: 58300, invoicedTotal: 58300, finishedOn: '2024-11-20' })],
       {},
       { k: 58300 },
     );
-    r.getByText('Budget remaining');
-    expect(r.getAllByText('$58,300')).toHaveLength(2);
+    r.getByText('Cost $58,300 · $3,700 under budget');
+    for (const gone of ['Budgeted', 'Quoted', 'Paid', 'Expected total', 'Budget remaining']) {
+      expect(r.queryByText(gone)).toBeNull();
+    }
     expect(flattenStyle(cardFor(r, 'Kitchen').props.style).opacity).toBe(0.62);
+  });
+
+  it('reads a finished job’s cost even without a budget, and says it alone', async () => {
+    const r = await arrange(
+      [project({ id: 'k', name: 'Shed', status: 'done', paidTotal: 4200, invoicedTotal: 4200 })],
+      {},
+      { k: 4200 },
+    );
+    expect(mock_getExpectedTotal).toHaveBeenCalledWith('k');
+    r.getByText('Cost $4,200');
+  });
+
+  it('says a finished job with no money on it has none, and asks for nothing', async () => {
+    const r = await arrange([project({ id: 'k', name: 'Shed', status: 'done' })]);
+    r.getByText('No costs recorded');
+    expect(mock_getExpectedTotal).not.toHaveBeenCalled();
   });
 });
 

@@ -218,3 +218,34 @@ describe('what the paper says was paid before it', () => {
     expect(boxes(r)['Paid before this invoice']).toBeUndefined();
   });
 });
+
+// Moving a card to another job is rare and a correction, so it lives here
+// rather than as a line on every card.
+describe('a card sent to the wrong job', () => {
+  it('is moved from the foot of the sheet', async () => {
+    const onMove = jest.fn();
+    const onSave = jest.fn().mockResolvedValue(undefined);
+    let r!: RenderResult;
+    await TestRenderer.act(async () => {
+      r = render(
+        <ReviewEditSheet
+          review={review}
+          elements={[]}
+          locations={[]}
+          onAddRoom={jest.fn()}
+          onSave={onSave}
+          onClose={jest.fn()}
+          onMove={onMove}
+        />,
+      );
+    });
+    await TestRenderer.act(async () => { tap(r, 'Move to another job').props.onPress(); });
+    expect(onMove).toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('offers no move when there is nowhere to move it', async () => {
+    const { r } = await open();
+    expect(r.queryByText('Move to another job')).toBeNull();
+  });
+});

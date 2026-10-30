@@ -7194,24 +7194,6 @@ export function declinedReviews(reviews: InvoiceReview[]): InvoiceReview[] {
 }
 
 /**
- * What the bell says when it is pressed.
- *
- * **Absent at nought, in the caller.** Like the shopping pill and *Fit* in
- * `PhotoViewer`, a bell with nothing behind it is a control dressed as a
- * choice — so this returns null there rather than "you have 0 objects to
- * review", and the header draws nothing.
- *
- * It counts **pending only**. The bin is reachable through the same bell, but
- * a declined card is not something to review; it is something already ruled
- * on, and counting it would make the number go up when somebody clears one.
- */
-export function reviewAlert(reviews: InvoiceReview[]): string | null {
-  const n = pendingReviews(reviews).length;
-  if (n === 0) return null;
-  return `You have ${n} object${n === 1 ? '' : 's'} to review`;
-}
-
-/**
  * What a card is called.
  *
  * The supplier is what somebody recognises — "ReliaBuilder" answers the

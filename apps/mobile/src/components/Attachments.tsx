@@ -98,6 +98,10 @@ export default function Attachments({
   const [tagging, setTagging] = useState<string | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  // The three ways to add a file sit behind one button: three side by side on
+  // every bill and on the job's Documents, usually with nothing above them,
+  // was a row of controls standing in for one.
+  const [choosing, setChoosing] = useState(false);
   const [viewerAt, setViewerAt] = useState<number | null>(null);
   /**
    * Whether the signing round trip has been made yet, so a strip that is still
@@ -304,36 +308,58 @@ export default function Attachments({
 
       <View style={styles.row}>
         <Pressable
-          onPress={() => attachPhotos('camera')}
+          onPress={() => setChoosing((c) => !c)}
           disabled={busy || disabled}
           style={styles.add}
           accessibilityRole="button"
-          accessibilityLabel="Take a photo"
-        >
-          <Icon name="camera-outline" size="sm" color={Colors.primary} />
-          <Text style={styles.addLabel}>Take photo</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => attachPhotos('library')}
-          disabled={busy || disabled}
-          style={styles.add}
-          accessibilityRole="button"
-          accessibilityLabel="Choose photos"
-        >
-          <Icon name="images-outline" size="sm" color={Colors.primary} />
-          <Text style={styles.addLabel}>Choose photos</Text>
-        </Pressable>
-        <Pressable
-          onPress={attachDocument}
-          disabled={busy || disabled}
-          style={styles.add}
-          accessibilityRole="button"
-          accessibilityLabel="Attach a PDF"
+          accessibilityLabel="Add a file"
+          accessibilityState={{ expanded: choosing }}
         >
           <Icon name="add" size="sm" color={Colors.primary} />
-          <Text style={styles.addLabel}>Attach a PDF</Text>
+          <Text style={styles.addLabel}>Add a file</Text>
+          <Icon name={choosing ? 'chevron-up' : 'chevron-down'} size={14} color={Colors.primary} />
         </Pressable>
       </View>
+
+      {/*
+        Each one is pressed inside its own tap, which is what lets a browser
+        open the camera or the file picker; opening the choice is a tap of its
+        own and asks for nothing.
+      */}
+      {choosing ? (
+        <View style={styles.row}>
+          <Pressable
+            onPress={() => { setChoosing(false); attachPhotos('camera'); }}
+            disabled={busy || disabled}
+            style={styles.add}
+            accessibilityRole="button"
+            accessibilityLabel="Take a photo"
+          >
+            <Icon name="camera-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.addLabel}>Take photo</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { setChoosing(false); attachPhotos('library'); }}
+            disabled={busy || disabled}
+            style={styles.add}
+            accessibilityRole="button"
+            accessibilityLabel="Choose photos"
+          >
+            <Icon name="images-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.addLabel}>Choose photos</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { setChoosing(false); attachDocument(); }}
+            disabled={busy || disabled}
+            style={styles.add}
+            accessibilityRole="button"
+            accessibilityLabel="Attach a PDF"
+          >
+            <Icon name="document-text-outline" size="sm" color={Colors.primary} />
+            <Text style={styles.addLabel}>Attach a PDF</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <PhotoViewer
         visible={viewerAt !== null}

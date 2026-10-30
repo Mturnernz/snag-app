@@ -2261,7 +2261,8 @@ are asked:
 
 1. **Are we on budget?** *Expected total* in large type, with **Agreed** and **Undecided** as the
    rows under it — they add up to it, on screen — then *Budget remaining* (or *Over budget*, in
-   words and clay; brass within 15% — the list card's figure and colours), then *Budget*. Two tiles: **Paid** and **To pay**. Committed, Invoiced, Quoted and
+   words and clay; brass within 15% — the list card's figure and colours), then *Budget* and
+   **Paid** (the tiles went in *Each thing said once*). Committed, Invoiced, Quoted and
    Forecast are no longer words on the page; they are the accounting, and nobody asked it.
 2. **What's left to decide?** Every thing not yet chosen, with its option count and price range.
 3. **What do we have to pay?** Every bill still owing, with a **Paid** pill on the row — and,
@@ -2625,6 +2626,55 @@ quote rule, the pasted images and the logo; `projectSummary.test.ts` the room br
 linked rule. `supabase/tests/emailed_bills_say_more.sql` replays the spelling, the deduction, the
 paid date, the linked claim, the quote kept on a card (and no quote kept), its refusals and the
 move, and holds `business_key` to `businessKey`'s answers.
+
+### Each thing said once (October 2026)
+
+A review of the whole tab asked of every line whether it was said elsewhere or told a homeowner
+anything, and the owner chose item by item. **Where anything above or below disagrees, this
+section wins**; the passages keep their history.
+
+- **The list.** No *1 underway · 1 planned · 3 complete* under the title: the headings count the
+  jobs. **A finished job's card says what it cost and nothing else** — its name, when it
+  finished, and *Cost $58,868 · $1,132 under budget* (`describeFinishedCost`, the page's own
+  Expected total, read for a finished job with any money on it, `hasCost`). No bar, no figures.
+- **The top of a job.** The bell is gone (`ReviewBell` deleted, `reviewAlert` with it). The
+  cards sit under **New bills · N**, and a quiet ***N removed ›*** line under them opens the
+  removed ones (`InvoiceReviewSheet`, now only that list). It is there whenever anything has been
+  removed: the bell hid itself when nothing was waiting and took the removed ones with it.
+- **A waiting card.** The number sits beside the *Invoice ▾* pill, not under a second "Invoice".
+  The paid line shows **only when the email says it was paid**; an unpaid card says nothing,
+  because owing is what a new bill means. *Move to another job* is at the foot of the pencil's
+  sheet (`ReviewEditSheet`'s `onMove`), not on every card. The button reads **Add to job**, not
+  *Allocate*.
+- **Worth checking** gathers several claims against one quote into **one row** (*3 RELIABUILDER
+  LIMITED bills are stages of QU-0111*) with **Link all**, which links them in turn
+  (`linkClaims`); the row opens to list each bill. A likely double spelling of a supplier is a row
+  here too, with **Merge**.
+- **The totals card.** *Agreed* and *Undecided* show only while something is undecided — with
+  nothing undecided Agreed was the big figure again and Undecided read $0. **Paid** is a row of
+  the card. The *Paid*, *To pay* and *Expected to pay* tiles are gone (Paid wrapped mid-number on
+  a phone); *To pay* and *Expected to pay* carry their totals on their own headings.
+- **Where it's going.** A room whose money is all a shared bill says *On 1 shared bill*, not the
+  figure on its right again; a room with nothing says *Nothing yet* (`describeRoom`).
+- **Suppliers** is one row, *Suppliers · 3 ›*, opening the list where rename and press-hold-drop
+  still work (the sheet stops scrolling under a drag, `Sheet`'s `scrollEnabled`).
+- **Adding a file** is one *Add a file* button that opens *Take photo · Choose photos · Attach a
+  PDF* in place (`Attachments`, projects only; the thing page keeps its own row). Each is still
+  pressed in its own tap, which is what lets a browser open the camera.
+- **A bill's sheet.** The number is beside the supplier under the title, not a row under a pill
+  that already says *Invoice*. No *Recorded* row: the day it was typed in read as the day it was
+  paid. *Part of another bill?* and *A stage of an agreed price?* are **one row, *Part of***, whose
+  picker lists *Nothing*, then *A stage of* and *Inside another bill* where each applies (one
+  quote can stand in both, so each radio is named apart: *A stage of …*, *Inside …*).
+
+**Kept, by the owner's decision, so not proposed again:** the five figures on an underway job's
+card (Budgeted, Quoted, Paid, Expected total, Budget remaining); the *from … · date* line on a
+waiting card; both *Dated* and *Due* on it; and the *Invoice* / *Quote* tag on every row of a
+room sheet.
+
+`ProjectsScreen.test.tsx`, `projectSummary.test.ts`, `InvoiceReviewCard.test.tsx`,
+`ReviewEditSheet.test.tsx`, `ProjectDetailScreen.test.tsx`, `PriceSheet.test.tsx` and
+`Attachments.test.tsx` pin each of the above.
 
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;

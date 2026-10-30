@@ -24,7 +24,6 @@ import SupplierSheet from '../components/SupplierSheet';
 import ProjectStatusSheet from '../components/ProjectStatusSheet';
 import ProjectTitle from '../components/ProjectTitle';
 import EmailBillsSheet from '../components/EmailBillsSheet';
-import ReviewBell from '../components/ReviewBell';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import StatusBadge from '../components/StatusBadge';
 import MoneySheet, { type MoneyKind } from '../components/MoneySheet';
@@ -52,7 +51,7 @@ import {
   asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, reviewQuote, suggestAreas, duplicateQuotes, paymentEchoes, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
   expectedAmountIncl, expectedPayee, expectedToPay, exportDateStamp, filesBySupplier, formatExactDate,
   formatLooseDate, groupBySupplier, inclGst, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
-  remainingTone, reviewAlert, reviewGroups, supplierDirectory,
+  declinedReviews, remainingTone, reviewGroups, supplierDirectory,
   type RemainingTone, type SupplierEntry, type ThingInput,
 } from '@snag/supabase-queries';
 import {
@@ -107,6 +106,20 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * **Still one request, still single-flight.** The pool is ten connections; see
  * *What a press costs* in CLAUDE.md. `refresh` never has two reads on the wire.
  */
+/**
+ * One row under *Worth checking*: a figure below that is wrong until somebody
+ * looks. It opens where the fix is, or, when it gathers several bills, opens to
+ * list them; its pill does the fix in one press.
+ */
+interface Check {
+  key: string;
+  title: string;
+  subtitle: string;
+  onPress?: () => void;
+  action?: { label: string; a11y: string; run: () => void };
+  rows?: { key: string; title: string; subtitle: string | null; onPress: () => void }[];
+}
+
 export default function ProjectDetailScreen({ route }: Props) {
   const { projectId } = route.params;
   const navigation = useNavigation<Nav>();
@@ -154,6 +167,10 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [statusOpen, setStatusOpen] = useState(false);
   const [supplierOpen, setSupplierOpen] = useState<string | null>(null);
   const [merging, setMerging] = useState<{ from: SupplierEntry; to: SupplierEntry } | null>(null);
+  // The supplier list, behind its one row on the page.
+  const [suppliersOpen, setSuppliersOpen] = useState(false);
+  // Worth checking rows that gather several bills, opened to list them.
+  const [openChecks, setOpenChecks] = useState<Set<string>>(() => new Set());
   // True while a supplier row is lifted: the page stops scrolling under it.
   const [dragging, setDragging] = useState(false);
 
@@ -278,6 +295,7 @@ export default function ProjectDetailScreen({ route }: Props) {
 
   const { project, elements, items, quotes } = page;
   const reviews = pendingReviews(page.invoiceReviews);
+  const removedCount = declinedReviews(page.invoiceReviews).length;
   const thing = items.find((i) => i.id === openThing) ?? null;
   const price = quotes.find((q) => q.id === openPrice) ?? null;
   const room = summary.rooms.find((r) => r.key === openRoom) ?? null;
@@ -299,35 +317,79 @@ export default function ProjectDetailScreen({ route }: Props) {
   // figure on this page that is wrong until somebody looks.
   const paperName = (q: ProjectQuote): string => q.invoiceNumber ?? q.detail ?? (q.kind === 'quote' ? 'A quote' : 'An invoice');
   const paidAgainst = new Set(page.payments.map((p) => p.quoteId));
-  const checks: { key: string; title: string; subtitle: string; open: string; link?: { bill: string; contract: string } }[] = [
-    ...unlinkedClaims(quotes).map((c) => ({
-      key: `claim-${c.bill.id}`,
-      title: `${paperName(c.bill)} · ${money$(c.bill.amountIncl ?? 0)}`,
-      subtitle: `${c.bill.supplier ?? 'No supplier'} · a stage of ${paperName(c.contract)}, counted twice until linked`,
-      open: c.bill.id,
-      link: { bill: c.bill.id, contract: c.contract.id },
-    })),
-    ...duplicateQuotes(quotes).map((d) => ({
+  // Several claims against one quote are one row: the reason is the same, and
+  // three rows saying it three times was most of the section. The row opens to
+  // list them, each still opening its own bill; *Link all* links them in turn.
+  const claimGroups = new Map<string, { contract: ProjectQuote; bills: ProjectQuote[] }>();
+  for (const c of unlinkedClaims(quotes)) {
+    const group = claimGroups.get(c.contract.id) ?? { contract: c.contract, bills: [] };
+    group.bills.push(c.bill);
+    claimGroups.set(c.contract.id, group);
+  }
+  const checks: Check[] = [
+    ...[...claimGroups.values()].map(({ contract, bills }): Check => (bills.length === 1
+      ? {
+        key: `claim-${bills[0].id}`,
+        title: `${paperName(bills[0])} · ${money$(bills[0].amountIncl ?? 0)}`,
+        subtitle: `${bills[0].supplier ?? 'No supplier'} · a stage of ${paperName(contract)}, counted twice until linked`,
+        onPress: () => setOpenPrice(bills[0].id),
+        action: {
+          label: 'Link',
+          a11y: `Link ${paperName(bills[0])} to its agreed price`,
+          run: () => linkClaims(bills, contract),
+        },
+      }
+      : {
+        key: `claims-${contract.id}`,
+        title: `${bills.length} ${bills[0].supplier ?? 'unnamed'} bills are stages of ${paperName(contract)}`,
+        subtitle: `${bills.map(paperName).join(' · ')} · counted twice until linked`,
+        action: {
+          label: 'Link all',
+          a11y: `Link all ${bills.length} to ${paperName(contract)}`,
+          run: () => linkClaims(bills, contract),
+        },
+        rows: bills.map((b) => ({
+          key: b.id,
+          title: `${paperName(b)} · ${money$(b.amountIncl ?? 0)}`,
+          subtitle: b.detail,
+          onPress: () => setOpenPrice(b.id),
+        })),
+      })),
+    ...duplicateQuotes(quotes).map((d): Check => ({
       key: `twice-${d.quote.id}`,
       title: `${paperName(d.quote)} looks like it’s on the job twice`,
       subtitle: `${d.quote.supplier ?? 'No supplier'} · ${money$(d.quote.amountIncl ?? 0)} each`,
-      open: d.twin.id,
+      onPress: () => setOpenPrice(d.twin.id),
     })),
-    // Opens the deposit's own bill: *Part of another bill?* there is the fix.
-    ...paymentEchoes(quotes, page.payments).map((e) => ({
+    // Opens the deposit's own bill: *Part of* there is the fix.
+    ...paymentEchoes(quotes, page.payments).map((e): Check => ({
       key: `echo-${e.payment.id}`,
       title: `${paperName(e.twin)} looks like ${paperName(e.bill)}’s deposit`,
       subtitle: `${money$(inclGst(e.payment.amount, e.payment.amountInclGst) ?? 0)} is paid on both — counted twice unless ${paperName(e.twin)} goes inside ${paperName(e.bill)}`,
-      open: e.twin.id,
+      onPress: () => setOpenPrice(e.twin.id),
     })),
     ...quotes
       .filter((q) => !paidAgainst.has(q.id) && !q.againstQuoteId && q.status !== 'declined' && priceSaysQuote(q))
-      .map((q) => ({
+      .map((q): Check => ({
         key: `quote-${q.id}`,
         title: `${paperName(q)} reads as a quote`,
         subtitle: `${q.supplier ?? 'No supplier'} · recorded as an invoice, so it counts as billed and owing`,
-        open: q.id,
+        onPress: () => setOpenPrice(q.id),
       })),
+    // Two spellings of one business. The supplier list is folded behind one
+    // row now, so the offer to merge them comes up here, where it is seen.
+    ...suppliers
+      .filter((from) => from.mergeInto !== null)
+      .flatMap((from): Check[] => {
+        const to = suppliers.find((x) => x.key === from.mergeInto);
+        return to ? [{
+          key: `merge-${from.key}`,
+          title: `${from.name} looks like ${to.name}`,
+          subtitle: 'Two spellings of one business — merge them to count them as one supplier',
+          onPress: () => setSupplierOpen(from.key),
+          action: { label: 'Merge', a11y: `Merge ${from.name} into ${to.name}`, run: () => setMerging({ from, to }) },
+        }] : [];
+      }),
   ];
 
   async function openMove(review: InvoiceReview) {
@@ -364,12 +426,24 @@ export default function ProjectDetailScreen({ route }: Props) {
     await changed(`For ${elements.find((e) => e.id === choice.elementId)?.name ?? 'the whole job'}`);
   }
 
-  async function linkClaim(bill: string, contract: string) {
+  /**
+   * Links claims to the quote they are stages of, one write each and in turn
+   * (the pool is ten connections), then one re-read. A refusal part way says
+   * how many went and why the next did not.
+   */
+  async function linkClaims(bills: ProjectQuote[], contract: ProjectQuote) {
+    let linked = 0;
     try {
-      await setQuoteClaim(bill, contract);
-      await changed('Linked to the agreed price');
+      for (const bill of bills) {
+        // eslint-disable-next-line no-await-in-loop
+        await setQuoteClaim(bill.id, contract.id);
+        linked += 1;
+      }
+      await changed(bills.length === 1 ? 'Linked to the agreed price' : `Linked all ${bills.length} to ${paperName(contract)}`);
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'That didn’t link');
+      const why = err instanceof Error ? err.message : 'That didn’t link';
+      if (linked > 0) await changed(`Linked ${linked} of ${bills.length} — ${why}`);
+      else showToast(why);
     }
   }
 
@@ -600,7 +674,6 @@ export default function ProjectDetailScreen({ route }: Props) {
           <Text style={styles.backLabel}>Projects</Text>
         </Pressable>
         <View style={styles.navRight}>
-          <ReviewBell count={reviews.length} onPress={() => setReviewSheetOpen(true)} />
           <Pressable
             onPress={() => openMoney({})}
             style={styles.addTap}
@@ -646,9 +719,16 @@ export default function ProjectDetailScreen({ route }: Props) {
           </View>
         </View>
 
+        {/*
+          ── new bills ──────────────────────────────────────────────────────
+          The cards are the news, so the heading only names and counts them.
+          The removed ones are a quiet line under them, there whenever
+          anything has been removed — the bell that held them hid itself when
+          nothing was waiting, and took the removed ones with it.
+        */}
         {reviews.length > 0 ? (
           <View style={groupedStyles.block}>
-            <SectionTitle title={reviewAlert(page.invoiceReviews) ?? 'Bills waiting'} />
+            <SectionTitle title="New bills" count={reviews.length} />
             {reviewGroups(reviews).map((group) => (
               <View key={group.key} style={styles.emailGroup}>
                 {/*
@@ -695,7 +775,6 @@ export default function ProjectDetailScreen({ route }: Props) {
                     claimOf={claimOf}
                     onChooseFor={() => setChoosingFor(review.id)}
                     deposit={deposit}
-                    onMove={() => openMove(review)}
                     onApprove={(paysOff, extras = { againstQuoteId: null, recordAlreadyPaid: false }) => (paperwork
                       ? setFiling(review)
                       : rule(
@@ -728,13 +807,18 @@ export default function ProjectDetailScreen({ route }: Props) {
                           }
                         },
                       ))}
-                    onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — it’s under the bell')}
+                    onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — you can put it back')}
                   />
                   );
                 })}
               </View>
             ))}
+            {removedCount > 0 ? (
+              <TextButton label={`${removedCount} removed ›`} onPress={() => setReviewSheetOpen(true)} />
+            ) : null}
           </View>
+        ) : removedCount > 0 ? (
+          <TextButton label={`${removedCount} removed ›`} onPress={() => setReviewSheetOpen(true)} />
         ) : null}
 
         {/*
@@ -746,21 +830,32 @@ export default function ProjectDetailScreen({ route }: Props) {
           <View style={groupedStyles.block}>
             <SectionTitle title="Worth checking" count={checks.length} />
             <Group>
-              {checks.map((c) => (
-                <Row
-                  key={c.key}
-                  title={c.title}
-                  subtitle={c.subtitle}
-                  onPress={() => setOpenPrice(c.open)}
-                  accessory={c.link ? (
-                    <Pill
-                      label="Link"
-                      accessibilityLabel={`Link ${c.title} to its agreed price`}
-                      onPress={() => linkClaim(c.link!.bill, c.link!.contract)}
-                    />
-                  ) : undefined}
-                />
-              ))}
+              {checks.flatMap((c) => {
+                const open = openChecks.has(c.key);
+                const toggle = () => setOpenChecks((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(c.key)) next.delete(c.key);
+                  else next.add(c.key);
+                  return next;
+                });
+                return [
+                  <Row
+                    key={c.key}
+                    title={c.title}
+                    subtitle={c.subtitle}
+                    onPress={c.rows ? toggle : c.onPress}
+                    expanded={c.rows ? open : undefined}
+                    accessory={c.action ? (
+                      <Pill label={c.action.label} accessibilityLabel={c.action.a11y} onPress={c.action.run} />
+                    ) : undefined}
+                  />,
+                  ...(c.rows && open
+                    ? c.rows.map((row) => (
+                      <Row key={row.key} indent title={row.title} subtitle={row.subtitle} onPress={row.onPress} />
+                    ))
+                    : []),
+                ];
+              })}
             </Group>
           </View>
         ) : null}
@@ -778,9 +873,18 @@ export default function ProjectDetailScreen({ route }: Props) {
               <View style={{ flex: Math.max(1 - barAgreed - barUndecided, 0) }} />
             </View>
           ) : null}
-          <SummaryLine dot={Colors.primary} label="Agreed" value={money$(summary.agreed)} />
-          <View style={styles.hairlineInset} />
-          <SummaryLine dot={Colors.undecided} label="Undecided" value={money$(summary.undecided)} />
+          {/*
+            Agreed and Undecided add up to the total, so they are only worth a
+            line each while something is undecided: with nothing undecided,
+            Agreed is the big figure said again and Undecided is $0.
+          */}
+          {summary.undecided > 0.005 ? (
+            <>
+              <SummaryLine dot={Colors.primary} label="Agreed" value={money$(summary.agreed)} />
+              <View style={styles.hairlineInset} />
+              <SummaryLine dot={Colors.undecided} label="Undecided" value={money$(summary.undecided)} />
+            </>
+          ) : null}
           <View style={styles.hairline} />
           {budget !== null ? (
             <>
@@ -804,6 +908,16 @@ export default function ProjectDetailScreen({ route }: Props) {
               {budget === null ? 'Set a budget' : money$(budget)}
             </Text>
           </Pressable>
+          <View style={styles.hairlineInset} />
+          {/*
+            What has gone out, as a row of the card rather than a tile beside
+            it. To pay and Expected to pay carry their totals on their own
+            headings below, so nothing here says them twice.
+          */}
+          <View style={styles.budgetRow}>
+            <Text style={styles.budgetLabel}>Paid</Text>
+            <Text style={styles.paidValue} numberOfLines={1}>{money$(summary.paid)}</Text>
+          </View>
         </View>
 
         {typedOver ? (
@@ -818,33 +932,6 @@ export default function ProjectDetailScreen({ route }: Props) {
             />
           </Group>
         ) : null}
-
-        <View style={styles.tileStack}>
-          <View style={styles.tiles}>
-            <View style={styles.tile}>
-              <Text style={styles.tileLabel}>Paid</Text>
-              <Text style={styles.tileFigure}>{money$(summary.paid)}</Text>
-            </View>
-            <View style={styles.tile}>
-              <Text style={styles.tileLabel}>To pay</Text>
-              <Text style={styles.tileFigure}>{money$(summary.toPay)}</Text>
-            </View>
-          </View>
-          {/*
-            Its own row: three six-figure amounts at this size do not fit across a
-            phone, and half a number is worse than a tile a row lower. Absent when
-            nothing is earmarked, like the section it heads.
-          */}
-          {toExpect.count > 0 ? (
-            <View style={styles.tileWide}>
-              <Text style={styles.tileLabel}>Expected to pay</Text>
-              <Text style={styles.tileFigure} numberOfLines={1}>{money$(toExpect.total)}</Text>
-              {toExpect.unpriced > 0 ? (
-                <Text style={styles.tileFacts}>+ {toExpect.unpriced} not priced</Text>
-              ) : null}
-            </View>
-          ) : null}
-        </View>
 
         {/* ── what's left to decide ────────────────────────────────────── */}
         {summary.toDecide.length > 0 ? (
@@ -875,7 +962,11 @@ export default function ProjectDetailScreen({ route }: Props) {
         {/* ── what do we have to pay ───────────────────────────────────── */}
         {summary.bills.length > 0 ? (
           <View style={groupedStyles.block}>
-            <SectionTitle title="To pay" count={summary.bills.length} />
+            <SectionTitle
+              title="To pay"
+              count={summary.bills.length}
+              action={<Text style={styles.sectionFigure}>{money$(summary.toPay)}</Text>}
+            />
             <Group>
               {groupBySupplier(summary.bills).flatMap((group) => {
                 const billRow = (bill: ProjectBill, sub: boolean) => (
@@ -945,7 +1036,15 @@ export default function ProjectDetailScreen({ route }: Props) {
         */}
         {toExpect.count > 0 ? (
           <View style={groupedStyles.block}>
-            <SectionTitle title="Expected to pay" count={toExpect.count} />
+            <SectionTitle
+              title="Expected to pay"
+              count={toExpect.count}
+              action={(
+                <Text style={styles.sectionFigure}>
+                  {[money$(toExpect.total), toExpect.unpriced > 0 ? `+ ${toExpect.unpriced} not priced` : null].filter(Boolean).join(' ')}
+                </Text>
+              )}
+            />
             <Group>
               {groupBySupplier(expectedRows).flatMap((group) => {
                 const expectedRow = (row: (typeof expectedRows)[number], sub: boolean) => {
@@ -1074,18 +1173,21 @@ export default function ProjectDetailScreen({ route }: Props) {
           </View>
         ) : null}
 
-        {/* ── suppliers ────────────────────────────────────────────────── */}
+        {/*
+          ── suppliers ──────────────────────────────────────────────────────
+          One row that opens the list. It is there to rename and merge, and its
+          figures were the room sheets' and To pay's said again; a likely double
+          spelling is offered under Worth checking, where it is seen.
+        */}
         {suppliers.length > 0 ? (
-          <View style={groupedStyles.block}>
-            <SectionTitle title="Suppliers" count={suppliers.length} />
-            <SupplierList
-              suppliers={suppliers}
-              money={money$}
-              onOpen={(s) => setSupplierOpen(s.key)}
-              onMerge={(from, to) => { setSupplierOpen(null); setMerging({ from, to }); }}
-              onDragChange={setDragging}
+          <Group>
+            <Row
+              title="Suppliers"
+              value={String(suppliers.length)}
+              onPress={() => setSuppliersOpen(true)}
+              accessibilityLabel={`Suppliers, ${suppliers.length}. Rename or merge them`}
             />
-          </View>
+          </Group>
         ) : null}
 
         {/* ── documents ────────────────────────────────────────────────── */}
@@ -1175,8 +1277,9 @@ export default function ProjectDetailScreen({ route }: Props) {
           // The figure first: the split is checked against the bill as it now reads.
           await updateInvoiceReview(checking.id, update);
           await setInvoiceReviewRooms(checking.id, rooms.ids, rooms.amounts);
-          await changed('Saved — it still needs allocating');
+          await changed('Saved — not counted until you add it to the job');
         }}
+        onMove={checking ? () => { const review = checking; setChecking(null); openMove(review); } : undefined}
       />
 
       <FilePaperworkSheet
@@ -1371,6 +1474,23 @@ export default function ProjectDetailScreen({ route }: Props) {
           );
         }}
       />
+
+      <Sheet
+        visible={suppliersOpen}
+        title="Suppliers"
+        closeLabel="Done"
+        onClose={() => setSuppliersOpen(false)}
+        scrollEnabled={!dragging}
+      >
+        {/* Each choice closes this first, so one sheet is open at a time. */}
+        <SupplierList
+          suppliers={suppliers}
+          money={money$}
+          onOpen={(x) => { setSuppliersOpen(false); setSupplierOpen(x.key); }}
+          onMerge={(from, to) => { setSuppliersOpen(false); setSupplierOpen(null); setMerging({ from, to }); }}
+          onDragChange={setDragging}
+        />
+      </Sheet>
 
       <SupplierSheet
         supplier={openSupplier}
@@ -1584,24 +1704,10 @@ const styles = StyleSheet.create({
   budgetLabel: { fontSize: Typography.body, color: Colors.textMuted, paddingLeft: 20 },
   budgetValue: { fontSize: Typography.body, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
   link: { color: Colors.primary },
-  tileStack: { gap: Spacing.md },
-  tiles: { flexDirection: 'row', gap: Spacing.md },
-  tile: {
-    flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.card,
-    paddingVertical: Spacing.md + 2, paddingHorizontal: Spacing.lg, gap: 4,
-  },
-  // Not `flex: 0` — react-native-web writes that as a zero basis, and the
-  // tile collapses round its label with the figure clipped to nothing.
-  tileWide: {
-    backgroundColor: Colors.surface, borderRadius: Radius.card,
-    paddingVertical: Spacing.md + 2, paddingHorizontal: Spacing.lg, gap: 4,
-  },
-  tileLabel: { fontSize: Typography.subhead, color: Colors.textMuted },
-  tileFacts: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textMuted },
-  tileFigure: {
-    fontSize: Typography.title2, lineHeight: 28, fontWeight: Typography.semibold,
-    color: Colors.textPrimary, letterSpacing: -0.3, fontVariant: ['tabular-nums'],
-  },
+  // The figure never shrinks; the label gives way. Ink, because it is money
+  // that has gone out, where the budget beside it is a figure somebody typed.
+  paidValue: { fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'], flexShrink: 0 },
+  sectionFigure: { fontSize: Typography.body, color: Colors.textSecondary, fontVariant: ['tabular-nums'] },
   badgeSlot: { paddingLeft: Spacing.sm },
   docAdds: { paddingHorizontal: 4 },
 });

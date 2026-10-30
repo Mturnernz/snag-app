@@ -81,8 +81,6 @@ interface Props {
   onChooseFor?: () => void;
   /** The bill on the job the paper's *less deposit paid* is (`depositBillFor`). */
   deposit?: ProjectQuote | null;
-  /** Moves the card to another job in the home, for a bill sent to the wrong address. */
-  onMove?: () => void;
 }
 
 /**
@@ -94,14 +92,14 @@ interface Props {
 const NO_MATCHES: ExpectedMatch[] = [];
 
 const KIND: Record<InvoiceReviewKind, { label: string; yes: string; rail: string; number: string }> = {
-  invoice: { label: 'Invoice', yes: 'Allocate', rail: 'Allocate it', number: 'Invoice' },
+  invoice: { label: 'Invoice', yes: 'Add to job', rail: 'Add to job', number: 'Invoice' },
   quote: { label: 'Quote', yes: 'Add quote', rail: 'Add it', number: 'Quote' },
   paperwork: { label: 'Paperwork', yes: 'File it', rail: 'File it', number: 'Number' },
 };
 
 /** The three answers the pill offers, each saying what it does to the money. */
 export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
-  { value: 'invoice', label: 'Invoice', hint: 'Allocated to the job as something to pay' },
+  { value: 'invoice', label: 'Invoice', hint: 'Added to the job as something to pay' },
   { value: 'quote', label: 'Quote', hint: 'Added as a price nobody has agreed to yet' },
   { value: 'paperwork', label: 'Paperwork', hint: 'Filed on the job — it counts towards no figure' },
 ];
@@ -151,7 +149,7 @@ export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
  */
 export default function InvoiceReviewCard({
   review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate, onReread, rereading,
-  onChangeKind, paysOff: matches = NO_MATCHES, claimOf = null, onChooseFor, deposit = null, onMove,
+  onChangeKind, paysOff: matches = NO_MATCHES, claimOf = null, onChooseFor, deposit = null,
 }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
   const [choosingKind, setChoosingKind] = useState(false);
@@ -291,6 +289,21 @@ export default function InvoiceReviewCard({
                 onPress={onChangeKind && !busy ? () => setChoosingKind(true) : undefined}
                 accessibilityLabel={`${kind.label}${wasInferred(review, 'kind') ? ', guessed' : ''}. Change what it is`}
               />
+              {/*
+                The number sits beside the pill that names the paper, so the
+                word is said once: "Invoice ▾  INV-0190", not "Invoice" twice.
+              */}
+              {review.invoiceNumber ? (
+                <View style={styles.numberBeside}>
+                  <Text
+                    style={[styles.factValue, styles.factMono, wasInferred(review, 'invoice_number') ? styles.factGuessed : null]}
+                    accessibilityLabel={`${kind.number} ${review.invoiceNumber}`}
+                  >
+                    {review.invoiceNumber}
+                  </Text>
+                  {wasInferred(review, 'invoice_number') ? <Guessed /> : null}
+                </View>
+              ) : null}
               {review.category ? (
                 <View style={styles.categoryChip}>
                   <Text style={styles.categoryText}>{review.category}</Text>
@@ -322,9 +335,6 @@ export default function InvoiceReviewCard({
         {addressed ? <Text style={styles.detail}>{addressed}</Text> : null}
 
         <View style={styles.facts}>
-          {review.invoiceNumber ? (
-            <Fact label={kind.number} value={review.invoiceNumber} mono guessed={wasInferred(review, 'invoice_number')} />
-          ) : null}
           {review.dated ? (
             <Fact label="Dated" value={formatLooseDate(review.dated) ?? review.dated} guessed={wasInferred(review, 'dated')} />
           ) : null}
@@ -372,17 +382,14 @@ export default function InvoiceReviewCard({
         ) : null}
 
         {/*
-          Never the flag on its own. The sentence it was read from is what lets
-          somebody disagree with it, and a tick gives them nothing to disagree
-          with.
+          Said only when the email says it was paid, and never the flag on its
+          own: the sentence it was read from is what lets somebody disagree
+          with it. An unpaid bill says nothing, because owing is what a new
+          bill means — a box saying so on every card was most of the card.
         */}
-        {review.kind === 'invoice' ? (
-          <View style={[styles.paidRow, review.paid ? styles.paidYes : styles.paidNo]}>
-            <Icon
-              name={review.paid ? 'checkmark-circle-outline' : 'ellipse-outline'}
-              size="sm"
-              color={review.paid ? Colors.status.done : Colors.status.doingFg}
-            />
+        {review.kind === 'invoice' && review.paid ? (
+          <View style={[styles.paidRow, styles.paidYes]}>
+            <Icon name="checkmark-circle-outline" size="sm" color={Colors.status.done} />
             <Text style={styles.paidText}>{describePaidInference(review)}</Text>
           </View>
         ) : null}
@@ -407,8 +414,8 @@ export default function InvoiceReviewCard({
         ) : null}
 
         {/*
-          Its own words call it a quote, and it is down as a bill. Allocated as
-          an invoice it counts as billed and owing — for a price nobody agreed.
+          Its own words call it a quote, and it is down as a bill. Added as an
+          invoice it counts as billed and owing — for a price nobody agreed.
         */}
         {reviewSaysQuote(review) ? (
           <View style={styles.note}>
@@ -451,18 +458,6 @@ export default function InvoiceReviewCard({
               review.sourceAt ? formatLooseDate(review.sourceAt.slice(0, 10)) : null,
             ].filter(Boolean).join(' · ')}
           </Text>
-        ) : null}
-
-        {onMove ? (
-          <Pressable
-            onPress={onMove}
-            disabled={busy}
-            style={styles.move}
-            accessibilityRole="button"
-            accessibilityLabel="Move it to another job"
-          >
-            <Text style={styles.moveLabel}>Sent to the wrong job? Move it</Text>
-          </Pressable>
         ) : null}
 
         {/*
@@ -572,8 +567,6 @@ const styles = StyleSheet.create({
   noteText: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textPrimary },
   noteAction: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start' },
   noteActionLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.primary },
-  move: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start' },
-  moveLabel: { fontSize: Typography.footnote, color: Colors.primary },
   duplicate: {
     flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start',
     marginTop: Spacing.sm, padding: Spacing.md, borderRadius: Radius.input,
@@ -622,7 +615,8 @@ const styles = StyleSheet.create({
   },
   detail: { fontSize: Typography.sm, color: Colors.textSecondary },
 
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.xs },
+  numberBeside: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginLeft: Spacing.xs },
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -656,7 +650,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   paidYes: { backgroundColor: Colors.status.doneBg },
-  paidNo: { backgroundColor: Colors.status.doingBg },
   paidText: { flex: 1, minWidth: 0, fontSize: Typography.xs, color: Colors.textSecondary },
 
   source: { fontSize: Typography.xs, color: Colors.textMuted },

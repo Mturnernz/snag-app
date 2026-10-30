@@ -205,6 +205,32 @@ export function describeRemaining(
 }
 
 /**
+ * What a finished job cost, as its card says it: *Cost $58,868 · $1,132 under
+ * budget*. A finished job is opened to answer "what did it cost", so the card
+ * answers that and nothing else: no bar, no budget remaining. The figure is the
+ * page's own Expected total, never a second sum, so the card cannot disagree
+ * with the page it opens. Without a budget it is the cost alone; a cost the
+ * page has not been read for yet is *Cost —*, never a figure guessed from paid.
+ */
+export function describeFinishedCost(
+  expected: number | undefined,
+  budget: number | null,
+  money: (n: number) => string,
+): string {
+  if (expected === undefined) return 'Cost —';
+  const cost = `Cost ${money(expected)}`;
+  if (budget === null || budget <= 0) return cost;
+  const gap = round(budget - expected);
+  if (Math.abs(gap) < 0.005) return `${cost} · on budget`;
+  return `${cost} · ${money(Math.abs(gap))} ${gap > 0 ? 'under' : 'over'} budget`;
+}
+
+/** A finished job worth reading a cost for: anything agreed, billed or paid. */
+export function hasCost(p: { committedTotal: number | null; invoicedTotal: number | null; paidTotal: number | null }): boolean {
+  return [p.committedTotal, p.invoicedTotal, p.paidTotal].some((n) => n !== null && n > 0.005);
+}
+
+/**
  * Quotes for the whole job or a room that are still waiting on a decision.
  *
  * A quote for a thing is an option on it and is counted through the thing.
@@ -510,13 +536,18 @@ export function describeRoom(room: RoomRow, money: (n: number) => string): strin
   if (room.openQuotes > 0) {
     parts.push(room.openQuotes === 1 ? '1 quote not agreed' : `${room.openQuotes} quotes not agreed`);
   }
-  if (room.shared > 0) parts.push(`${money(room.shared)} of shared bills`);
-  else if (room.sharedCount > 0) {
-    parts.push(room.sharedCount === 1 ? 'On 1 shared bill' : `On ${room.sharedCount} shared bills`);
-  }
+  // The figure is on the row's right already: when shared bills are all the
+  // room holds, saying their dollars again was the figure twice.
+  const onShared = room.sharedCount === 1 ? 'On 1 shared bill' : `On ${room.sharedCount} shared bills`;
+  if (room.shared > 0 && Math.abs(room.shared - room.total) >= 0.005) parts.push(`${money(room.shared)} of shared bills`);
+  else if (room.sharedCount > 0) parts.push(onShared);
+  else if (room.shared > 0) parts.push('From shared bills');
   if (parts.length === 0 && room.supplierCount > 0) {
     parts.push(room.supplierCount === 1 ? '1 supplier' : `${room.supplierCount} suppliers`);
   }
+  // A room with nothing on it says so, rather than a bare row that reads as
+  // a figure that failed to load.
+  if (parts.length === 0 && Math.abs(room.total) < 0.005) parts.push('Nothing yet');
   return parts.join(' · ');
 }
 

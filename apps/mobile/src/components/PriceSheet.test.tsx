@@ -193,7 +193,10 @@ describe('a bill', () => {
 
   it('shows its invoice number, and a correction can change or empty it', async () => {
     const { r } = open({ ...bill, invoiceNumber: 'INV87022' });
-    r.getByText('INV87022');
+    // Beside who it is from, never under a second "Invoice", and no Recorded row.
+    r.getByText('Studio North · INV87022');
+    expect(r.getAllByText('Invoice')).toHaveLength(1);
+    expect(r.queryByText('Recorded')).toBeNull();
     await press(r, 'Edit');
     await TestRenderer.act(async () => { node(r, 'Invoice number', 'onChangeText').props.onChangeText('INV87023'); });
     await press(r, 'Save');
@@ -308,14 +311,14 @@ describe('a bill inside another bill', () => {
 
   it('asks, and says a bill of its own is one you pay', () => {
     const { r } = open(plumber, { quotes: [builder, plumber] });
-    expect(r.queryByText('Part of another bill?')).not.toBeNull();
-    expect(r.queryByText('No — we pay this one')).not.toBeNull();
+    expect(r.queryByText('Part of')).not.toBeNull();
+    expect(r.queryByText('Nothing — billed on its own')).not.toBeNull();
   });
 
   it('is put inside the bill chosen, through the one link the totals already read', async () => {
     const { r, onChanged } = open(plumber, { quotes: [builder, plumber] });
-    await TestRenderer.act(async () => { node(r, 'Part of another bill?').props.onPress(); });
-    await TestRenderer.act(async () => { node(r, 'RELIABUILDER LIMITED · INV-0184').props.onPress(); });
+    await TestRenderer.act(async () => { node(r, 'Part of').props.onPress(); });
+    await TestRenderer.act(async () => { node(r, 'Inside RELIABUILDER LIMITED · INV-0184').props.onPress(); });
     expect(mock_updateQuote).toHaveBeenCalledWith('fp', { billedThroughId: 'rb' });
     expect(onChanged).toHaveBeenCalledWith('Counted inside that bill');
   });
@@ -329,8 +332,8 @@ describe('a bill inside another bill', () => {
 
   it('can be counted on its own again', async () => {
     const { r } = open(inside, { quotes: [builder, inside] });
-    await TestRenderer.act(async () => { node(r, 'Part of another bill?').props.onPress(); });
-    await TestRenderer.act(async () => { node(r, 'No — we pay this one').props.onPress(); });
+    await TestRenderer.act(async () => { node(r, 'Part of').props.onPress(); });
+    await TestRenderer.act(async () => { node(r, 'Nothing — billed on its own').props.onPress(); });
     expect(mock_updateQuote).toHaveBeenCalledWith('fp', { billedThroughId: null });
   });
 
@@ -341,18 +344,19 @@ describe('a bill inside another bill', () => {
     expect(r.queryByText('The rest of this bill')).not.toBeNull();
     expect(r.queryByText('$4,449.14')).not.toBeNull();
     // A bill holding others is not itself put inside something.
-    expect(r.queryByText('Part of another bill?')).toBeNull();
+    expect(r.queryByText('Part of')).toBeNull();
   });
 
-  it('is not offered on a progress claim, which counts through its contract already', () => {
+  it('is not offered on a progress claim, which counts through its contract already', async () => {
     const claim = { ...plumber, againstQuoteId: 'rb' };
     const { r } = open(claim, { quotes: [builder, claim] });
-    expect(r.queryByText('Part of another bill?')).toBeNull();
+    await press(r, 'Part of');
+    expect(r.queryByText('Inside another bill')).toBeNull();
   });
 
-  it('is not offered when there is no other bill to be inside', () => {
+  it('is not offered when there is nothing to be part of', () => {
     const { r } = open(plumber, { quotes: [plumber] });
-    expect(r.queryByText('Part of another bill?')).toBeNull();
+    expect(r.queryByText('Part of')).toBeNull();
   });
 });
 
@@ -446,38 +450,38 @@ describe('a stage of an agreed price', () => {
   it('lets any quote at the bill’s scope be chosen, and the link be taken off', async () => {
     const variation = quote({ ...deposit, id: 'k2', detail: 'Variations' });
     const { r } = open(variation, { quotes: [deck, variation] });
-    r.getByText('No — billed on its own');
-    await press(r, 'A stage of an agreed price?');
-    r.getByText('A stage of an agreed price?');
-    await press(r, 'RELIABUILDER LIMITED · QU-0111');
+    r.getByText('Nothing — billed on its own');
+    await press(r, 'Part of');
+    r.getByText('A stage of');
+    await press(r, 'A stage of RELIABUILDER LIMITED · QU-0111');
     expect(mock_setQuoteClaim).toHaveBeenCalledWith('k2', 'c1');
 
     const linked = open({ ...variation, againstQuoteId: 'c1' }, { quotes: [deck, variation] });
-    linked.r.getByText('RELIABUILDER LIMITED · QU-0111');
-    await press(linked.r, 'A stage of an agreed price?');
-    await press(linked.r, 'No — it’s billed on its own');
+    linked.r.getByText('A stage of RELIABUILDER LIMITED · QU-0111');
+    await press(linked.r, 'Part of');
+    await press(linked.r, 'Nothing — billed on its own');
     expect(mock_setQuoteClaim).toHaveBeenLastCalledWith('k2', null);
   });
 
   it('says a claim on a price nobody has agreed still counts on its own', () => {
     const open_ = { ...deck, status: 'tbc' as const };
     const { r } = open({ ...deposit, againstQuoteId: 'c1' }, { quotes: [open_, deposit] });
-    r.getByText('RELIABUILDER LIMITED · QU-0111 — not agreed yet, so this counts on its own');
+    r.getByText('A stage of RELIABUILDER LIMITED · QU-0111 — not agreed yet, so this counts on its own');
   });
 
   it('keeps the chooser open over a refusal', async () => {
     mock_setQuoteClaim.mockRejectedValueOnce(new Error('A claim has to sit where its contract sits — move one of them first'));
     const variation = quote({ ...deposit, id: 'k2', detail: 'Variations' });
     const { r, onChanged } = open(variation, { quotes: [deck, variation] });
-    await press(r, 'A stage of an agreed price?');
-    await press(r, 'RELIABUILDER LIMITED · QU-0111');
+    await press(r, 'Part of');
+    await press(r, 'A stage of RELIABUILDER LIMITED · QU-0111');
     expect(onChanged).toHaveBeenCalledWith('A claim has to sit where its contract sits — move one of them first');
     r.getByText('A stage of');
   });
 
   it('is not asked of a quote, or of nothing to be a stage of', () => {
-    expect(open(deck, { quotes: [deck] }).r.queryByText('A stage of an agreed price?')).toBeNull();
-    expect(open(deposit, { quotes: [deposit] }).r.queryByText('A stage of an agreed price?')).toBeNull();
+    expect(open(deck, { quotes: [deck] }).r.queryByText('Part of')).toBeNull();
+    expect(open(deposit, { quotes: [deposit] }).r.queryByText('Part of')).toBeNull();
   });
 });
 

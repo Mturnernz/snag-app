@@ -156,10 +156,23 @@ describe('are we on budget', () => {
 
   it('keeps paid apart from what is still owed', async () => {
     const r = await arrange();
-    // The tile, and the pill on the one bill still owed.
+    // A row of the totals card, and the pill on the one bill still owed.
     expect(r.getAllByText('Paid')).toHaveLength(2);
     r.getByText('$16,020');
     expect(r.getAllByText('To pay').length).toBeGreaterThan(0);
+  });
+
+  // With nothing undecided, Agreed was the big figure said again and
+  // Undecided read $0.
+  it('splits the total only while something is undecided', async () => {
+    const r = await arrange(downstairs({
+      project: { committedTotal: 5000, allowanceOpen: 0 },
+      elements: [], items: [], lines: [], expected: [], bills: [],
+      quotes: [quote({ id: 'c9', projectId: 'p1', supplier: 'Tree Co', amount: 5000, status: 'accepted' })],
+    }));
+    r.getByText('Expected total');
+    expect(r.queryByText('Agreed')).toBeNull();
+    expect(r.queryByText('Undecided')).toBeNull();
   });
 
   it('never uses the accounting words', async () => {
@@ -207,9 +220,12 @@ describe('what do we have to pay', () => {
 
   it('lists what is owed with its due date', async () => {
     const r = await arrange();
-    // Named twice: once owed under To pay, once under Suppliers.
-    expect(r.getAllByText('ReliaBuilder')).toHaveLength(2);
+    // Once, under To pay: the supplier list is behind its own row now.
+    expect(r.getAllByText('ReliaBuilder')).toHaveLength(1);
     r.getByText('Progress bill 1 · Due 5 Oct 2026');
+    // The heading carries the total, which a tile beside it used to say again.
+    expect(r.getAllByText('$46,000')).toHaveLength(2);
+    expect(r.queryByText('To pay')).not.toBeNull();
   });
 
   it('pays the whole of what is owing from the row, then re-reads', async () => {
@@ -425,6 +441,38 @@ describe('a bill that looks like one already on the job', () => {
   });
 });
 
+// The cards are the news: the heading names and counts them, and what was
+// removed is a quiet line under them that stays when nothing is waiting —
+// the bell that held it hid itself then, and the removed ones with it.
+describe('new bills', () => {
+  const waiting = (over: any = {}) => ({
+    id: 'rv1', projectId: 'p1', state: 'pending', kind: 'invoice', addressedTo: null,
+    supplier: 'ReliaBuilder', amount: 2474.11, amountInclGst: true, invoiceNumber: 'INV-0190', paid: false,
+    createdAt: '2026-10-29T00:00:00Z', inferred: [], photoPaths: [], documentPaths: [],
+    roomIds: [], roomAmounts: null, ...over,
+  });
+
+  it('heads the cards with their count, in words a household uses', async () => {
+    const r = await arrange(downstairs({ invoiceReviews: [waiting()] }));
+    r.getByText('New bills');
+    const words = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
+    expect(words).not.toContain('object');
+    expect(words).not.toContain('removed ›');
+  });
+
+  it('keeps the removed ones a line away, with or without anything waiting', async () => {
+    const removed = waiting({ id: 'rv9', state: 'declined', decidedAt: '2026-10-28T00:00:00Z' });
+    const withCards = await arrange(downstairs({ invoiceReviews: [waiting(), removed] }));
+    withCards.getByText('1 removed ›');
+    withCards.unmount();
+
+    const alone = await arrange(downstairs({ invoiceReviews: [removed] }));
+    expect(alone.queryByText('New bills')).toBeNull();
+    await press(alone, '1 removed ›');
+    alone.getByText('Put it back');
+  });
+});
+
 describe('one email, several papers', () => {
   /** A `Button`, found by the word on it. */
   const pressButton = async (r: ReturnType<typeof render>, label: string) => {
@@ -576,10 +624,18 @@ describe('suppliers', () => {
     ],
   });
 
-  it('lists everybody the job names, and says which two look like one business', async () => {
+  it('is one row on the page, opening the list of everybody the job names', async () => {
     const r = await arrange(twoSpellings());
-    r.getByText('Suppliers');
+    expect(r.queryByText('Looks like ReliaBuilder · hold and drop onto it to merge')).toBeNull();
+    await press(r, 'Suppliers, 11. Rename or merge them');
     r.getByText('Looks like ReliaBuilder · hold and drop onto it to merge');
+  });
+
+  // The list is folded away, so the offer to merge comes up where it is seen.
+  it('says under Worth checking which two look like one business', async () => {
+    const r = await arrange(twoSpellings());
+    r.getByText('RELIABUILDER LIMITED looks like ReliaBuilder');
+    byLabel(r, 'Merge RELIABUILDER LIMITED into ReliaBuilder');
   });
 
   it('confirms a merge before writing it, then renames across the job once', async () => {
@@ -601,8 +657,9 @@ describe('suppliers', () => {
     expect(mock_renameSupplier).not.toHaveBeenCalled();
   });
 
-  it('stops the page scrolling while a supplier is held', async () => {
+  it('stops the list scrolling while a supplier is held', async () => {
     const r = await arrange(twoSpellings());
+    await press(r, 'Suppliers, 11. Rename or merge them');
     const scroll = () => r.root.findAll((n: any) => typeof n.type !== 'string' && 'scrollEnabled' in (n.props ?? {}), { deep: true })[0];
     expect(scroll().props.scrollEnabled).toBe(true);
     const row = r.root.findAll((n: any) => n.props?.onLongPress && String(n.props.accessibilityLabel).startsWith('RELIABUILDER LIMITED'), { deep: true })[0];
@@ -692,13 +749,13 @@ describe('expected to pay', () => {
   });
   const text = (r: ReturnType<typeof render>) => r.getAllByType('Text').map((n) => n.children.join('')).join(' | ');
 
-  it('totals what is earmarked in a tile of its own, and counts the unpriced in words', async () => {
+  it('totals what is earmarked on its own heading, and counts the unpriced in words', async () => {
     const r = await arrange(downstairs({ expected: earmarked }));
-    // The tile and the section's heading.
-    expect(r.getAllByText('Expected to pay')).toHaveLength(2);
-    // The tile and the builder's group.
-    expect(r.getAllByText('$87,975')).toHaveLength(2);
-    r.getByText('+ 1 not priced');
+    // The heading alone: the tile that said it again is gone.
+    expect(r.getAllByText('Expected to pay')).toHaveLength(1);
+    r.getByText('$87,975 + 1 not priced');
+    // The builder's group.
+    expect(r.getAllByText('$87,975')).toHaveLength(1);
   });
 
   it('lists them under the business their names spell, beside those with nobody named', async () => {
@@ -751,7 +808,7 @@ describe('expected to pay', () => {
     /** The card's own button, so the tick it carries is what is sent. */
     const allocate = async (r: ReturnType<typeof render>) => {
       const button = r.root.findAll(
-        (n: any) => typeof n.type !== 'string' && n.props?.label === 'Allocate' && n.props?.onPress, { deep: true },
+        (n: any) => typeof n.type !== 'string' && n.props?.label === 'Add to job' && n.props?.onPress, { deep: true },
       )[0];
       await TestRenderer.act(async () => { button.props.onPress(); });
     };
@@ -806,6 +863,7 @@ describe('expected to pay', () => {
 });
 
 describe('worth checking', () => {
+  const text = (r: ReturnType<typeof render>) => r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
   const deck = quote({
     id: 'c1', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', invoiceNumber: 'QU-0111',
     detail: 'Deck', amount: 49482.2, status: 'accepted',
@@ -819,9 +877,35 @@ describe('worth checking', () => {
     const r = await arrange(downstairs({ quotes: [deck, deposit] }));
     r.getByText('Worth checking');
     r.getByText('RELIABUILDER LIMITED · a stage of QU-0111, counted twice until linked');
-    await press(r, 'Link Deposit Required 20% · $9,896.44 to its agreed price');
+    await press(r, 'Link Deposit Required 20% to its agreed price');
     expect(mock_setQuoteClaim).toHaveBeenCalledWith('k1', 'c1');
     expect(mock_showToast).toHaveBeenCalledWith('Linked to the agreed price');
+  });
+
+  // Three rows saying one sentence three times was most of the section.
+  it('gathers several claims against one quote into one row, linked in one press', async () => {
+    const progress = quote({
+      id: 'k2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', detail: 'Progress payment - 30%',
+      invoiceNumber: 'INV-0178', kind: 'invoice', amount: 14844.66, unpaid: 0,
+    });
+    const r = await arrange(downstairs({ quotes: [deck, deposit, progress] }));
+    r.getByText('2 RELIABUILDER LIMITED bills are stages of QU-0111');
+    expect(text(r)).not.toContain('a stage of QU-0111, counted twice until linked');
+    await press(r, 'Link all 2 to QU-0111');
+    expect(mock_setQuoteClaim.mock.calls).toEqual([['k1', 'c1'], ['k2', 'c1']]);
+    expect(mock_showToast).toHaveBeenCalledWith('Linked all 2 to QU-0111');
+  });
+
+  it('opens a gathered row to list each bill, each still opening its own', async () => {
+    const progress = quote({
+      id: 'k2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', detail: 'Progress payment - 30%',
+      invoiceNumber: 'INV-0178', kind: 'invoice', amount: 14844.66, unpaid: 0,
+    });
+    const r = await arrange(downstairs({ quotes: [deck, deposit, progress] }));
+    expect(text(r)).not.toContain('INV-0178 · $14,844.66');
+    await press(r, '2 RELIABUILDER LIMITED bills are stages of QU-0111');
+    await press(r, 'INV-0178 · $14,844.66');
+    r.getByText('price sheet open: RELIABUILDER LIMITED');
   });
 
   it('names a quote on the job twice, and an invoice that reads as a quote', async () => {

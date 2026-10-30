@@ -3,6 +3,7 @@ import {
   formatMoney,
   groupBySupplier,
   projectSummary,
+  describeFinishedCost, hasCost,
 } from '@snag/supabase-queries';
 import { bill, downstairs, element, item, page, project, quote } from '../test/projectFixtures';
 
@@ -316,5 +317,52 @@ describe('projectSummary — an open quote for the whole job or a room', () => {
       ],
     }));
     expect(s.rooms.find((r) => r.key === 'job')).toBeUndefined();
+  });
+});
+
+// A finished job's card answers "what did it cost" and nothing else.
+describe('describeFinishedCost', () => {
+  const money = (n: number) => `$${n.toLocaleString('en-NZ')}`;
+
+  it('says the cost against the budget, either way', () => {
+    expect(describeFinishedCost(58868, 60000, money)).toBe('Cost $58,868 · $1,132 under budget');
+    expect(describeFinishedCost(62500, 60000, money)).toBe('Cost $62,500 · $2,500 over budget');
+    expect(describeFinishedCost(60000, 60000, money)).toBe('Cost $60,000 · on budget');
+  });
+
+  it('is the cost alone without a budget', () => {
+    expect(describeFinishedCost(5000, null, money)).toBe('Cost $5,000');
+    expect(describeFinishedCost(5000, 0, money)).toBe('Cost $5,000');
+  });
+
+  it('never guesses a cost the page has not been read for', () => {
+    expect(describeFinishedCost(undefined, 60000, money)).toBe('Cost —');
+  });
+
+  it('reads a cost only for a job with money on it', () => {
+    expect(hasCost({ committedTotal: null, invoicedTotal: null, paidTotal: null })).toBe(false);
+    expect(hasCost({ committedTotal: 0, invoicedTotal: 0, paidTotal: 0 })).toBe(false);
+    expect(hasCost({ committedTotal: null, invoicedTotal: 12, paidTotal: null })).toBe(true);
+  });
+});
+
+// "Deck · $24,741.10 of shared bills · $24,741.10" said the figure twice.
+describe('describeRoom, once', () => {
+  const base = {
+    key: 'e1', name: 'Deck', total: 0, agreed: 0, undecided: 0, toDecide: 0, setAside: null, chosen: null,
+    settled: false, openQuotes: 0, supplierCount: 0, shared: 0, sharedCount: 0,
+  } as any;
+
+  it('names the shared bill, not its dollars, when that is all the room holds', () => {
+    expect(describeRoom({ ...base, total: 24741.1, shared: 24741.1, sharedCount: 1 }, money)).toBe('On 1 shared bill');
+    expect(describeRoom({ ...base, total: 900, shared: 900, sharedCount: 2 }, money)).toBe('On 2 shared bills');
+  });
+
+  it('keeps the dollars when the room holds money of its own too', () => {
+    expect(describeRoom({ ...base, total: 3000, shared: 2000, sharedCount: 1 }, money)).toBe('$2,000 of shared bills');
+  });
+
+  it('says a room with nothing on it has nothing yet', () => {
+    expect(describeRoom(base, money)).toBe('Nothing yet');
   });
 });

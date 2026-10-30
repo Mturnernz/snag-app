@@ -101,7 +101,8 @@ export default function PriceSheet({
   onOpen, elements, locations, quoteRooms, onAddRoom, fileTags, expected = [], askWhenPaid = false,
 }: Props) {
   const [editing, setEditing] = useState(false);
-  const [placing, setPlacing] = useState(false);
+  /** Choosing what it is part of: a quote it is a stage of, or a bill it sits inside. */
+  const [linking, setLinking] = useState(false);
   const [rooming, setRooming] = useState(false);
   const [rooms, setRooms] = useState<RoomSplitValue>({ ids: [], kind: 'even', typed: {} });
   const [roomError, setRoomError] = useState<string | null>(null);
@@ -116,7 +117,6 @@ export default function PriceSheet({
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [choosingKind, setChoosingKind] = useState(false);
-  const [claiming, setClaiming] = useState(false);
   /** Asking "When was it paid?" — the figure being paid, once the press has asked. */
   const [whenPaid, setWhenPaid] = useState<number | null>(null);
   const [paidDay, setPaidDay] = useState<string>('');
@@ -130,10 +130,9 @@ export default function PriceSheet({
   useEffect(() => {
     if (!visible || !quote) return;
     setEditing(false);
-    setPlacing(false);
+    setLinking(false);
     setRooming(false);
     setChoosingKind(false);
-    setClaiming(false);
     setWhenPaid(null);
     setOtherDay('');
     setPartDay('');
@@ -284,7 +283,7 @@ export default function PriceSheet({
           : mine.length > 0 ? 'Part paid' : 'To pay';
   const tone = inside || !isBill ? 'neutral' : unpaid <= 0 ? 'neutral' : overdue ? 'overdue' : 'due';
 
-  const footer = placing || claiming
+  const footer = linking
     ? null
     : whenPaid !== null
     ? <PrimaryButton label="Save" onPress={savePaidDay} busy={busy} />
@@ -326,45 +325,76 @@ export default function PriceSheet({
     <>
       <Sheet
         visible={visible && !confirmDelete && !choosingKind}
-        title={placing ? 'Part of another bill?' : claiming ? 'A stage of an agreed price?' : whenPaid !== null ? 'When was it paid?'
+        title={linking ? 'Part of' : whenPaid !== null ? 'When was it paid?'
           : rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'An invoice' : 'A quote')}
-        subtitle={editing ? null : quote.supplier}
-        onClose={placing ? () => setPlacing(false) : claiming ? () => setClaiming(false) : whenPaid !== null ? (straightToPay ? onClose : () => setWhenPaid(null))
+        // The number beside who it is from: a row reading "Invoice" under a
+        // pill reading "Invoice" said the word twice.
+        subtitle={editing ? null : [quote.supplier, quote.invoiceNumber].filter(Boolean).join(' · ') || null}
+        onClose={linking ? () => setLinking(false) : whenPaid !== null ? (straightToPay ? onClose : () => setWhenPaid(null))
           : rooming ? () => setRooming(false) : editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
-        closeLabel={placing || claiming || whenPaid !== null || rooming || editing || paying ? 'Cancel' : 'Done'}
+        closeLabel={linking || whenPaid !== null || rooming || editing || paying ? 'Cancel' : 'Done'}
         footer={footer}
       >
-        {claiming ? (
+        {linking ? (
           <>
             <Group>
               <RadioRow
-                title="No — it’s billed on its own"
-                selected={!quote.againstQuoteId}
+                title="Nothing — billed on its own"
+                selected={!inside && !quote.againstQuoteId}
                 onPress={() => {
-                  if (!quote.againstQuoteId) { setClaiming(false); return; }
-                  run(() => setQuoteClaim(quote.id, null), 'Counted on its own').then((ok) => { if (ok) setClaiming(false); });
+                  if (!inside && !quote.againstQuoteId) { setLinking(false); return; }
+                  run(async () => {
+                    if (quote.againstQuoteId) await setQuoteClaim(quote.id, null);
+                    if (inside) await updateQuote(quote.id, { billedThroughId: null });
+                  }, 'Counted on its own').then((ok) => { if (ok) setLinking(false); });
                 }}
               />
             </Group>
-            <Text style={styles.heading}>A stage of</Text>
-            <Group>
-              {candidates.map((q) => (
-                <RadioRow
-                  key={q.id}
-                  title={hostName(q)}
-                  subtitle={[
-                    q.status === 'accepted' ? 'Agreed' : 'Not agreed yet',
-                    formatMoney(q.amountIncl),
-                    suggestion?.contract.id === q.id ? 'its words say so' : null,
-                  ].filter(Boolean).join(' · ')}
-                  selected={quote.againstQuoteId === q.id}
-                  onPress={() => {
-                    if (quote.againstQuoteId === q.id) { setClaiming(false); return; }
-                    run(() => setQuoteClaim(quote.id, q.id), `A claim on ${hostName(q)}`).then((ok) => { if (ok) setClaiming(false); });
-                  }}
-                />
-              ))}
-            </Group>
+            {canClaim ? (
+              <>
+                <Text style={styles.heading}>A stage of</Text>
+                <Group>
+                  {candidates.map((q) => (
+                    <RadioRow
+                      key={q.id}
+                      title={hostName(q)}
+                      accessibilityLabel={`A stage of ${hostName(q)}`}
+                      subtitle={[
+                        q.status === 'accepted' ? 'Agreed' : 'Not agreed yet',
+                        formatMoney(q.amountIncl),
+                        suggestion?.contract.id === q.id ? 'its words say so' : null,
+                      ].filter(Boolean).join(' · ')}
+                      selected={quote.againstQuoteId === q.id}
+                      onPress={() => {
+                        if (quote.againstQuoteId === q.id) { setLinking(false); return; }
+                        run(() => setQuoteClaim(quote.id, q.id), `A claim on ${hostName(q)}`).then((ok) => { if (ok) setLinking(false); });
+                      }}
+                    />
+                  ))}
+                </Group>
+              </>
+            ) : null}
+            {canPlace ? (
+              <>
+                <Text style={styles.heading}>Inside another bill</Text>
+                <Group>
+                  {hosts.map((q) => (
+                    <RadioRow
+                      key={q.id}
+                      title={hostName(q)}
+                      accessibilityLabel={`Inside ${hostName(q)}`}
+                      subtitle={[q.kind === 'invoice' ? 'Invoice' : 'Agreed price', formatMoney(q.amountIncl), q.dated ? formatExactDate(q.dated) : null]
+                        .filter(Boolean).join(' · ')}
+                      selected={quote.billedThroughId === q.id}
+                      onPress={() => {
+                        if (quote.billedThroughId === q.id) { setLinking(false); return; }
+                        run(() => updateQuote(quote.id, { billedThroughId: q.id }), 'Counted inside that bill').then((ok) => { if (ok) setLinking(false); });
+                      }}
+                    />
+                  ))}
+                </Group>
+              </>
+            ) : null}
           </>
         ) : whenPaid !== null ? (
           <>
@@ -388,35 +418,6 @@ export default function PriceSheet({
                 </View>
               </Group>
             ) : null}
-          </>
-        ) : placing ? (
-          <>
-            <Group>
-              <RadioRow
-                title="No — we pay this one"
-                selected={!inside}
-                onPress={() => {
-                  if (!inside) { setPlacing(false); return; }
-                  run(() => updateQuote(quote.id, { billedThroughId: null }), 'Counted on its own').then(() => setPlacing(false));
-                }}
-              />
-            </Group>
-            <Text style={styles.heading}>Inside</Text>
-            <Group>
-              {hosts.map((q) => (
-                <RadioRow
-                  key={q.id}
-                  title={hostName(q)}
-                  subtitle={[q.kind === 'invoice' ? 'Invoice' : 'Agreed price', formatMoney(q.amountIncl), q.dated ? formatExactDate(q.dated) : null]
-                    .filter(Boolean).join(' · ')}
-                  selected={quote.billedThroughId === q.id}
-                  onPress={() => {
-                    if (quote.billedThroughId === q.id) { setPlacing(false); return; }
-                    run(() => updateQuote(quote.id, { billedThroughId: q.id }), 'Counted inside that bill').then(() => setPlacing(false));
-                  }}
-                />
-              ))}
-            </Group>
           </>
         ) : rooming ? (
           <>
@@ -508,7 +509,6 @@ export default function PriceSheet({
 
             <Group>
               {isBill && unpaid > 0 && mine.length > 0 ? <Row title="Still to pay" value={formatMoney(unpaid)} bold /> : null}
-              {isBill && quote.invoiceNumber ? <Row title="Invoice" value={quote.invoiceNumber} tone="muted" /> : null}
               {isBill && quote.dueOn ? <Row title="Due" value={formatExactDate(quote.dueOn)} tone="muted" /> : null}
               {paidOff ? (
                 <Row
@@ -529,22 +529,22 @@ export default function PriceSheet({
                   )}
                 />
               ) : null}
-              {canPlace ? (
+              {/*
+                One row for what it is part of — a quote it is a stage of, or a
+                bill it sits inside. They were two rows reading "No" on nearly
+                every bill; the one picker behind this offers whichever apply.
+              */}
+              {canPlace || canClaim ? (
                 <Row
-                  title="Part of another bill?"
-                  subtitle={host ? `Inside ${hostName(host)} — not counted on its own` : 'No — we pay this one'}
-                  onPress={() => setPlacing(true)}
-                />
-              ) : null}
-              {canClaim ? (
-                <Row
-                  title="A stage of an agreed price?"
+                  title="Part of"
                   subtitle={contract
-                    ? `${hostName(contract)}${contract.status === 'accepted' ? '' : ' — not agreed yet, so this counts on its own'}`
-                    : suggestion
-                      ? `Its words say ${suggestion.contract.invoiceNumber ?? hostName(suggestion.contract)}, so it’s counted twice until linked`
-                      : 'No — billed on its own'}
-                  onPress={() => setClaiming(true)}
+                    ? `A stage of ${hostName(contract)}${contract.status === 'accepted' ? '' : ' — not agreed yet, so this counts on its own'}`
+                    : host
+                      ? `Inside ${hostName(host)} — not counted on its own`
+                      : suggestion
+                        ? `Its words say ${suggestion.contract.invoiceNumber ?? hostName(suggestion.contract)}, so it’s counted twice until linked`
+                        : 'Nothing — billed on its own'}
+                  onPress={() => setLinking(true)}
                   accessory={suggestion ? (
                     <Pill
                       label="Link"
@@ -588,7 +588,6 @@ export default function PriceSheet({
                   onPress={openRooms}
                 />
               ) : null}
-              <Row title="Recorded" value={formatExactDate(dayKey(quote.createdAt))} tone="muted" />
             </Group>
 
             {holds.length > 0 ? (

@@ -818,7 +818,7 @@ describe('worth checking', () => {
   it('names a claim counted beside its contract, and links it in a press', async () => {
     const r = await arrange(downstairs({ quotes: [deck, deposit] }));
     r.getByText('Worth checking');
-    r.getByText('RELIABUILDER LIMITED · its words say QU-0111 — counted on its own until linked');
+    r.getByText('RELIABUILDER LIMITED · a stage of QU-0111, counted twice until linked');
     await press(r, 'Link Deposit Required 20% · $9,896.44 to its agreed price');
     expect(mock_setQuoteClaim).toHaveBeenCalledWith('k1', 'c1');
     expect(mock_showToast).toHaveBeenCalledWith('Linked to the agreed price');

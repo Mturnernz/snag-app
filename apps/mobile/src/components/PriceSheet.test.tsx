@@ -125,6 +125,20 @@ describe('a bill', () => {
     expect(onChanged).toHaveBeenCalledWith('Paid · 5 Sep 2026');
   });
 
+  it('opened from a Paid press, asks at once and goes back to the page either way', async () => {
+    const past = { ...bill, dated: '2026-08-28', dueOn: '2026-09-05' };
+    const cancelled = open(past, { askWhenPaid: true });
+    cancelled.r.getByText('When was it paid?');
+    await press(cancelled.r, 'Cancel');
+    expect(cancelled.onClose).toHaveBeenCalled();
+    expect(mock_payBill).not.toHaveBeenCalled();
+
+    const saved = open(past, { askWhenPaid: true });
+    await press(saved.r, 'Save');
+    expect(mock_payBill).toHaveBeenCalledWith('b1', 4200, '2026-09-05');
+    expect(saved.onClose).toHaveBeenCalled();
+  });
+
   it('takes another day, and refuses one the calendar has not got', async () => {
     const { r, onChanged } = open({ ...bill, dated: '2026-08-28', dueOn: '2026-09-05' });
     await press(r, 'Mark as paid, $4,200');
@@ -423,7 +437,7 @@ describe('a stage of an agreed price', () => {
 
   it('offers the contract a deposit’s words describe, and links it in a press', async () => {
     const { r, onChanged } = open(deposit, { quotes: [deck, deposit] });
-    r.getByText('Its words say RELIABUILDER LIMITED · QU-0111 — counted on its own until it’s linked');
+    r.getByText('Its words say QU-0111, so it’s counted twice until linked');
     await press(r, 'Link to RELIABUILDER LIMITED · QU-0111');
     expect(mock_setQuoteClaim).toHaveBeenCalledWith('k1', 'c1');
     expect(onChanged).toHaveBeenCalledWith('A claim on RELIABUILDER LIMITED · QU-0111');

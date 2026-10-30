@@ -122,6 +122,8 @@ export default function PriceSheet({
   const [paidDay, setPaidDay] = useState<string>('');
   const [otherDay, setOtherDay] = useState('');
   const [partDay, setPartDay] = useState('');
+  /** Opened from a *Paid* press: cancelling or saving the date goes back to the page. */
+  const [straightToPay, setStraightToPay] = useState(false);
   /** Expected payments from this contract's supplier, offered to the contract once it is agreed. */
   const [folding, setFolding] = useState<ProjectExpectedCost[]>([]);
 
@@ -145,7 +147,9 @@ export default function PriceSheet({
     setAmount(quote.amount === null ? '' : String(quote.amount));
     setIncl(quote.amountInclGst);
     setDue(quote.dueOn ? formatDayFirst(quote.dueOn) : '');
-    if (askWhenPaid && quote.kind === 'invoice' && (quote.unpaid ?? 0) > 0) {
+    const straight = askWhenPaid && quote.kind === 'invoice' && (quote.unpaid ?? 0) > 0;
+    setStraightToPay(straight);
+    if (straight) {
       setPaidDay(paidDayChoices(quote, dayKey(new Date()))[0].day);
       setWhenPaid(quote.unpaid ?? 0);
     }
@@ -206,7 +210,8 @@ export default function PriceSheet({
       onChanged(otherDay.trim() ? 'That date isn’t one a calendar has' : 'Say when it was paid');
       return;
     }
-    run(() => payBill(quote!.id, whenPaid, day), `Paid · ${formatExactDate(day)}`).then((ok) => { if (ok) setWhenPaid(null); });
+    run(() => payBill(quote!.id, whenPaid, day), `Paid · ${formatExactDate(day)}`, straightToPay)
+      .then((ok) => { if (ok) setWhenPaid(null); });
   }
 
   /** Agrees or un-agrees the price; agreeing asks about the business's expected payments. */
@@ -324,7 +329,7 @@ export default function PriceSheet({
         title={placing ? 'Part of another bill?' : claiming ? 'A stage of an agreed price?' : whenPaid !== null ? 'When was it paid?'
           : rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'An invoice' : 'A quote')}
         subtitle={editing ? null : quote.supplier}
-        onClose={placing ? () => setPlacing(false) : claiming ? () => setClaiming(false) : whenPaid !== null ? () => setWhenPaid(null)
+        onClose={placing ? () => setPlacing(false) : claiming ? () => setClaiming(false) : whenPaid !== null ? (straightToPay ? onClose : () => setWhenPaid(null))
           : rooming ? () => setRooming(false) : editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
         closeLabel={placing || claiming || whenPaid !== null || rooming || editing || paying ? 'Cancel' : 'Done'}
         footer={footer}
@@ -537,7 +542,7 @@ export default function PriceSheet({
                   subtitle={contract
                     ? `${hostName(contract)}${contract.status === 'accepted' ? '' : ' — not agreed yet, so this counts on its own'}`
                     : suggestion
-                      ? `Its words say ${hostName(suggestion.contract)} — counted on its own until it’s linked`
+                      ? `Its words say ${suggestion.contract.invoiceNumber ?? hostName(suggestion.contract)}, so it’s counted twice until linked`
                       : 'No — billed on its own'}
                   onPress={() => setClaiming(true)}
                   accessory={suggestion ? (

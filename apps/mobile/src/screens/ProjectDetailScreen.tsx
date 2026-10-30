@@ -300,7 +300,7 @@ export default function ProjectDetailScreen({ route }: Props) {
     ...unlinkedClaims(quotes).map((c) => ({
       key: `claim-${c.bill.id}`,
       title: `${paperName(c.bill)} · ${money$(c.bill.amountIncl ?? 0)}`,
-      subtitle: `${c.bill.supplier ?? 'No supplier'} · its words say ${paperName(c.contract)} — counted on its own until linked`,
+      subtitle: `${c.bill.supplier ?? 'No supplier'} · a stage of ${paperName(c.contract)}, counted twice until linked`,
       open: c.bill.id,
       link: { bill: c.bill.id, contract: c.contract.id },
     })),

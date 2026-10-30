@@ -411,13 +411,137 @@ begin
 end;
 $$;
 
+-- ------------------------------------------------------ correcting one
+
+-- As `20260924120000` left it, with what the paper says was paid before it.
+-- The card shows that figure as a line of its own, and the figure is the
+-- answer: allocating records it, and clearing it here is how somebody says the
+-- reader got it wrong. A new argument list is a new function, so the old one
+-- goes and the grants are written again.
+drop function home.update_invoice_review(uuid, text, text, numeric,
+  boolean, text, date, date, boolean, date, text, uuid, text[], home.invoice_review_kind);
+
+create function home.update_invoice_review(
+  p_review_id uuid,
+  p_supplier text default null,
+  p_detail text default null,
+  p_amount numeric default null,
+  p_amount_incl_gst boolean default null,
+  p_invoice_number text default null,
+  p_dated date default null,
+  p_due_on date default null,
+  p_paid boolean default null,
+  p_paid_on date default null,
+  p_category text default null,
+  p_element_id uuid default null,
+  p_clear text[] default '{}',
+  p_kind home.invoice_review_kind default null,
+  p_already_paid numeric default null
+)
+returns home.invoice_reviews
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_review home.invoice_reviews;
+  v_clear text[] := coalesce(p_clear, '{}');
+  v_answered text[];
+  v_inferred text[];
+  v_kind home.invoice_review_kind;
+  v_amount numeric;
+  v_already numeric;
+begin
+  select * into v_review from home.invoice_reviews where id = p_review_id;
+
+  if v_review.id is null then
+    raise exception 'No such invoice';
+  end if;
+
+  perform home.require_project_member(v_review.project_id);
+
+  if v_review.state <> 'pending' then
+    raise exception 'That one has already been ruled on';
+  end if;
+
+  if p_element_id is not null
+     and home.element_project(p_element_id) is distinct from v_review.project_id then
+    raise exception 'That part belongs to another job';
+  end if;
+
+  v_kind := coalesce(p_kind, v_review.kind);
+  v_amount := case when 'amount' = any(v_clear) then null else coalesce(p_amount, v_review.amount) end;
+  -- Only an invoice deducts what was paid before it.
+  v_already := case when v_kind <> 'invoice' or 'already_paid' = any(v_clear) then null
+                    else coalesce(p_already_paid, v_review.already_paid) end;
+
+  if v_already is not null and v_already <= 0 then
+    raise exception 'What was paid before has to be more than nothing — or leave it empty';
+  end if;
+  if v_already is not null and v_amount is not null and v_already >= v_amount then
+    raise exception 'What was paid before has to be less than the bill’s total';
+  end if;
+
+  v_answered := v_clear
+    || case when p_supplier is not null then array['supplier'] else '{}' end
+    || case when p_detail is not null then array['detail'] else '{}' end
+    || case when p_amount is not null then array['amount'] else '{}' end
+    || case when p_amount_incl_gst is not null then array['amount_incl_gst'] else '{}' end
+    || case when p_invoice_number is not null then array['invoice_number'] else '{}' end
+    || case when p_dated is not null then array['dated'] else '{}' end
+    || case when p_due_on is not null then array['due_on'] else '{}' end
+    || case when p_paid is not null then array['paid'] else '{}' end
+    || case when p_category is not null then array['category'] else '{}' end
+    || case when p_kind is not null then array['kind'] else '{}' end
+    || case when p_already_paid is not null then array['already_paid'] else '{}' end;
+
+  select coalesce(array_agg(f), '{}'::text[]) into v_inferred
+  from unnest(v_review.inferred) as f
+  where not (f = any(v_answered));
+
+  update home.invoice_reviews set
+    kind = v_kind,
+    supplier = case when 'supplier' = any(v_clear) then null
+                    else coalesce(nullif(btrim(coalesce(p_supplier, '')), ''), supplier) end,
+    detail = case when 'detail' = any(v_clear) then null
+                  else coalesce(nullif(btrim(coalesce(p_detail, '')), ''), detail) end,
+    amount = v_amount,
+    amount_incl_gst = coalesce(p_amount_incl_gst, amount_incl_gst),
+    invoice_number = case when 'invoice_number' = any(v_clear) then null
+                          else coalesce(nullif(btrim(coalesce(p_invoice_number, '')), ''), invoice_number) end,
+    dated = case when 'dated' = any(v_clear) then null else coalesce(p_dated, dated) end,
+    due_on = case when 'due_on' = any(v_clear) then null else coalesce(p_due_on, due_on) end,
+    paid = v_kind = 'invoice' and coalesce(p_paid, paid),
+    paid_on = case when v_kind <> 'invoice' or 'paid_on' = any(v_clear) then null
+                   else coalesce(p_paid_on, paid_on) end,
+    paid_evidence = case when v_kind <> 'invoice' then null else paid_evidence end,
+    already_paid = v_already,
+    category = case when 'category' = any(v_clear) then null
+                    else coalesce(nullif(btrim(coalesce(p_category, '')), ''), category) end,
+    element_id = case when 'element_id' = any(v_clear) then null
+                      else coalesce(p_element_id, element_id) end,
+    inferred = v_inferred,
+    updated_at = now()
+  where id = p_review_id
+  returning * into v_review;
+
+  return v_review;
+end;
+$$;
+revoke execute on function home.update_invoice_review(uuid, text, text, numeric,
+  boolean, text, date, date, boolean, date, text, uuid, text[], home.invoice_review_kind, numeric) from public, anon;
+grant execute on function home.update_invoice_review(uuid, text, text, numeric,
+  boolean, text, date, date, boolean, date, text, uuid, text[], home.invoice_review_kind, numeric) to authenticated;
+
 -- ---------------------------------------------------------- allocating
 
 -- `p_against_quote_id`, or else the quote chosen on the card: the bill is a
 -- stage of that quote. It lands where the quote sits — its rooms are the
--- quote's to share — and is linked, so a signed contract counts it once. `p_record_already_paid`: what the paper says was
--- paid before it is recorded as a payment against it, undated, because the
--- paper says it was paid and not when.
+-- quote's to share — and is linked, so a signed contract counts it once.
+-- `p_record_already_paid`: what the paper says was paid before it is recorded
+-- as a payment against it, undated, because the paper says it was paid and not
+-- when. The card passes it whenever it holds a figure; clearing the figure
+-- with the pencil is how somebody says no.
 drop function home.approve_invoice_review(uuid, uuid);
 
 create function home.approve_invoice_review(

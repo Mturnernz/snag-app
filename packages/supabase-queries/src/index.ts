@@ -6917,6 +6917,7 @@ const INVOICE_REVIEW_CLEARABLE: Record<string, string> = {
   dueOn: 'due_on',
   paidOn: 'paid_on',
   category: 'category',
+  alreadyPaid: 'already_paid',
 };
 
 /**
@@ -6944,6 +6945,8 @@ export interface InvoiceReviewUpdate {
   paid?: boolean;
   paidOn?: string | null;
   category?: string | null;
+  /** What the paper says was paid before it. Cleared, allocating records nothing for it. */
+  alreadyPaid?: number | null;
 }
 
 export async function updateInvoiceReview(
@@ -6969,6 +6972,7 @@ export async function updateInvoiceReview(
     p_category: update.category ?? null,
     p_clear: clear,
     p_kind: update.kind ?? null,
+    p_already_paid: update.alreadyPaid ?? null,
   });
   return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
 }

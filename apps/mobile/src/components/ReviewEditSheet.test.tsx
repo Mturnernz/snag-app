@@ -193,3 +193,28 @@ describe('what kind of paper it is', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ kind: 'paperwork' }), { ids: [], amounts: null });
   });
 });
+
+// The card's *Paid before* line is a reading like the dates, and this is where
+// it is put right: emptied, allocating records nothing for it.
+describe('what the paper says was paid before it', () => {
+  it('is offered only when the reader found one, and never cleared by a save that did not offer it', async () => {
+    const { r, onSave } = await open();
+    expect(boxes(r)['Paid before this invoice']).toBeUndefined();
+    await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('alreadyPaid');
+  });
+
+  it('loads it, and an emptied box clears it', async () => {
+    const { r, onSave } = await open([], { amount: 27480.37, alreadyPaid: 8244.11 });
+    const box = boxes(r)['Paid before this invoice'];
+    expect(box.props.value).toBe('8244.11');
+    await TestRenderer.act(async () => { box.props.onChangeText(''); });
+    await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
+    expect(onSave.mock.calls[0][0]).toMatchObject({ alreadyPaid: null });
+  });
+
+  it('is not asked of a quote', async () => {
+    const { r } = await open([], { kind: 'quote', alreadyPaid: 8244.11 });
+    expect(boxes(r)['Paid before this invoice']).toBeUndefined();
+  });
+});

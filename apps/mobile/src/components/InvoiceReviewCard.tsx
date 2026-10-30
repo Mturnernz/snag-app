@@ -13,7 +13,6 @@ import Button from './Button';
 import KindPill from './KindPill';
 import KindSheet, { type KindOption } from './KindSheet';
 import PaysOffLine, { usePaysOff } from './PaysOffLine';
-import OfferLine from './OfferLine';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   describeAddressedTo, describePaidInference, documentName, formatLooseDate, formatMoney, invoiceReviewHeadline,
@@ -24,9 +23,9 @@ import {
 } from '../lib/swipeDecision';
 import type { InvoiceReview, InvoiceReviewKind, ProjectExpectedCost, ProjectQuote } from '../types';
 
-/** What the card's ticked lines ask allocating to do besides add the bill. */
+/** What allocating does besides add the bill, from what the card says. */
 export interface ApproveExtras {
-  /** The contract the bill is a stage of, when that line is ticked. */
+  /** The quote the bill is a stage of, chosen on *For*. */
   againstQuoteId: string | null;
   /** Record what the paper says was paid before it — and put the deposit's own bill inside it. */
   recordAlreadyPaid: boolean;
@@ -157,12 +156,11 @@ export default function InvoiceReviewCard({
   const pan = useRef(new Animated.Value(0)).current;
   const [choosingKind, setChoosingKind] = useState(false);
   const paysOff = usePaysOff(matches);
-  const [paidTicked, setPaidTicked] = useState(true);
   const claiming = review.kind === 'invoice' && claimOf !== null;
   const alreadyPaid = review.kind === 'invoice' ? review.alreadyPaid ?? null : null;
   const approve = () => onApprove(paysOff.chosen, {
     againstQuoteId: claiming ? claimOf!.id : null,
-    recordAlreadyPaid: alreadyPaid !== null && paidTicked,
+    recordAlreadyPaid: alreadyPaid !== null,
   });
   const [width, setWidth] = useState(0);
   const [lean, setLean] = useState<SwipeDecision | null>(null);
@@ -333,6 +331,18 @@ export default function InvoiceReviewCard({
           {review.dueOn ? (
             <Fact label="Due" value={formatLooseDate(review.dueOn) ?? review.dueOn} guessed={wasInferred(review, 'due_on')} />
           ) : null}
+          {/*
+            A deposit the paper deducts. It is a reading like the dates, so it
+            is a line like them: allocating records it as paid, and puts the
+            deposit's own bill inside this one. The pencil corrects it.
+          */}
+          {alreadyPaid !== null ? (
+            <Fact
+              label="Paid before"
+              value={`${formatMoney(alreadyPaid)}${review.amountInclGst ? '' : ' + GST'}${deposit?.invoiceNumber ? ` (${deposit.invoiceNumber})` : ''}`}
+              guessed={wasInferred(review, 'already_paid')}
+            />
+          ) : null}
           {!onChooseFor && (claiming || landsOn) ? (
             <Fact label="For" value={claiming ? forQuote(claimOf!) : landsOn!} />
           ) : null}
@@ -415,17 +425,6 @@ export default function InvoiceReviewCard({
               </Pressable>
             ) : null}
           </View>
-        ) : null}
-
-        {alreadyPaid !== null ? (
-          <OfferLine
-            title={`${formatMoney(alreadyPaid)}${review.amountInclGst ? '' : ' + GST'} paid before this invoice`}
-            note={!paidTicked ? 'Not recorded — the whole total stays owing'
-              : deposit ? `Recorded as paid on it, and ${[deposit.supplier, deposit.invoiceNumber].filter(Boolean).join(' ')} goes inside it so it isn’t counted twice`
-                : 'Recorded as paid on it'}
-            ticked={paidTicked}
-            onToggle={() => setPaidTicked((t) => !t)}
-          />
         ) : null}
 
         {onOpenFile && files.length > 0 ? (

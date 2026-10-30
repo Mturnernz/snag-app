@@ -376,14 +376,16 @@ describe('what it offers to do as it lands', () => {
     expect(onChooseFor).toHaveBeenCalled();
   });
 
-  it('records what the paper says was paid before it, and names the deposit going inside', () => {
+  it('says what the paper says was paid before it as one line, naming the deposit, and records it', () => {
     const v3 = quote({ id: 'v3', projectId: 'p1', supplier: 'Kitchen Mania', invoiceNumber: 'V3', kind: 'invoice', amount: 8244.11 });
     const { r, onApprove } = arrange(
       { supplier: 'Kitchen Mania', amount: 27480.37, alreadyPaid: 8244.11, invoiceNumber: 'INV-15879' },
       { deposit: v3 },
     );
-    r.getByText('$8,244.11 paid before this invoice');
-    r.getByText('Recorded as paid on it, and Kitchen Mania V3 goes inside it so it isn’t counted twice');
+    r.getByText('Paid before');
+    r.getByText('$8,244.11 (V3)');
+    // A line like the dates, not a box to tick: the pencil is where it is corrected.
+    expect(r.root.findAll((n) => n.props.accessibilityRole === 'checkbox')).toHaveLength(0);
     press(r, 'Allocate');
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: true });
   });

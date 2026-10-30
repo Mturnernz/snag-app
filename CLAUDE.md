@@ -2576,9 +2576,11 @@ disagrees, this section wins.**
 - **What a paper says was paid before it is kept** (`20261030090100`: `invoice_reviews.already_paid`).
   Kitchen Mania's INV-15879 is $27,480.37 less a deposit of $8,244.11, and that deposit, V3, was on
   the job as its own bill and paid again inside the total. The reader takes the total *before*
-  deductions and the deduction apart. The card offers it ticked: allocating records it as an undated
-  payment (the paper says it was paid, not when), and **the deposit's own bill goes inside the new
-  one** (`depositBillFor`, `billed_through_id`), so it counts once. *Worth checking* names the ones
+  deductions and the deduction apart. The card says it as one line beside the dates (*Paid before
+  $8,244.11 (V3)*), never a box to tick, by the owner's decision: it is a reading, and the pencil
+  corrects it (`update_invoice_review(p_already_paid)`; emptied, nothing is recorded). Allocating
+  records it as an undated payment (the paper says it was paid, not when), and **the deposit's own
+  bill goes inside the new one** (`depositBillFor`, `billed_through_id`), so it counts once. *Worth checking* names the ones
   already on the job (`paymentEchoes`).
 - **Emailed bills arrive tidier.** Every image pasted into an email's words is dropped when a PDF
   came too (banner logos, screenshots of the PDF). A paper read as *nothing* beside a real one is

@@ -170,6 +170,17 @@ begin
   select * into r from home.invoice_reviews where id = (select id from ids where name = 'odd');
   perform pg_temp.expect(r.already_paid is null, 'a deduction that is the whole bill is not');
 
+  -- The pencil corrects it: a deduction is a reading, and the card's figure is the answer.
+  r := home.update_invoice_review(p_review_id => (select id from ids where name = 'odd'), p_already_paid => 40);
+  perform pg_temp.expect(r.already_paid = 40, 'the pencil can say what was paid before');
+  perform pg_temp.refuses(format('select home.update_invoice_review(p_review_id => %L, p_already_paid => 100)',
+    (select id from ids where name = 'odd')), 'less than the bill', 'but not the whole bill');
+  r := home.update_invoice_review(p_review_id => (select id from ids where name = 'odd'), p_clear => array['already_paid']);
+  perform pg_temp.expect(r.already_paid is null, 'and an emptied box clears it');
+  r := home.update_invoice_review(p_review_id => (select id from ids where name = 'odd'), p_already_paid => 40);
+  r := home.update_invoice_review(p_review_id => (select id from ids where name = 'odd'), p_kind => 'quote');
+  perform pg_temp.expect(r.already_paid is null, 'a quote deducts nothing');
+
   -- The claim: allocated against the deck quote.
   q := home.approve_invoice_review(
     p_review_id => (select id from ids where name = 'claim'),

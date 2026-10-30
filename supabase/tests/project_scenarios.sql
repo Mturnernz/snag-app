@@ -97,7 +97,7 @@ do $$
 declare
   prop uuid;
   p uuid;
-  c uuid; v uuid; x uuid;
+  c uuid; v uuid; x uuid; b1 uuid; b2 uuid; b3 uuid;
   el_kitchen uuid; el_bath uuid; el_laundry uuid; el_living uuid; el_outside uuid;
   l_tiles uuid; l_fixtures uuid; l_laundry uuid; l_hardware uuid;
   i_tiles uuid; i_fixtures uuid; i_laundry uuid; i_hardware uuid; i_skylight uuid;
@@ -231,11 +231,11 @@ begin
   perform pg_temp.check(p, 'S5 whole house', 373845);
 
   -- ── 6 · one builder under two spellings, merged ─────────────────────────
-  -- The emailed invoice came in as "RELIABUILDER LIMITED". As two suppliers
-  -- the variation counts on its own; merged into "ReliaBuilder" it becomes a
-  -- bill from a supplier with a signed price at the same scope, which the pair
-  -- rule (`20260923090000`) reads as a draw on the contract. So Committed
-  -- moves by the variation, and the supplier rows still sum to it either way.
+  -- The emailed invoice came in as "RELIABUILDER LIMITED". Merged into
+  -- "ReliaBuilder" it is a bill from a supplier with a signed price at the same
+  -- scope — and it still counts, because a bill is part of a contract only when
+  -- it is linked to it (`20261030090000`). The supplier pair rule that used to
+  -- read it as a draw is gone, so merging moves nothing.
   p := (home.create_project(p_property_id => prop, p_name => 'S6 Merge', p_status => 'underway',
         p_summary => null, p_rooms => array['Laundry'], p_started_on => null, p_target_on => null,
         p_finished_on => null, p_budget => 195000, p_budget_incl_gst => true,
@@ -272,7 +272,65 @@ begin
   if not exists (select 1 from home.project_files f where f.project_id = p and f.level = 'payment' and f.supplier = 'ReliaBuilder') then
     raise exception 'S6 — the payment''s file should follow the rename';
   end if;
-  perform pg_temp.check(p, 'S6 merged', 101138.71);
+  perform pg_temp.check(p, 'S6 merged', 103278.71);
+
+  -- ── 7 · a contract and its claims, linked after the fact ────────────────
+  -- The live "Main Roof, Deck and Guest Room": the builder's accepted deck
+  -- quote, three claims on it, two 50% payments on a roof quote that is not
+  -- on the job, and a variation — all on the whole job, all unlinked. Unlinked,
+  -- every bill counts beside the contract (too much, never too little); linked,
+  -- the claims fold into it and the roof and the variation still count.
+  p := (home.create_project(p_property_id => prop, p_name => 'S7 Deck', p_status => 'underway',
+        p_summary => null, p_rooms => array['Deck'], p_started_on => null, p_target_on => null,
+        p_finished_on => null, p_budget => null, p_budget_incl_gst => true,
+        p_photo_paths => null, p_document_paths => null)).id;
+  select id into el_outside from home.project_elements where project_id = p limit 1;
+  c := pg_temp.q(p, 'ReliaBuilder', 49482.20, 'quote');
+  b1 := pg_temp.q(p, 'ReliaBuilder', 9896.44);
+  b2 := pg_temp.q(p, 'ReliaBuilder', 14844.66);
+  b3 := pg_temp.q(p, 'ReliaBuilder', 22266.99);
+  perform pg_temp.q(p, 'ReliaBuilder', 29434.25);
+  perform pg_temp.q(p, 'ReliaBuilder', 29434.25);
+  perform pg_temp.q(p, 'ReliaBuilder', 5587.85);
+  perform pg_temp.check(p, 'S7 unlinked', 160946.64);
+
+  perform home.set_quote_claim(b1, c);
+  perform home.set_quote_claim(b2, c);
+  perform home.set_quote_claim(b3, c);
+  perform pg_temp.check(p, 'S7 linked', 113938.55);
+  if (select claimed_total from home.project_quotes_with_totals where id = c) <> 47008.09 then
+    raise exception 'S7 — the contract should show 47,008.09 claimed';
+  end if;
+
+  -- Unlinking puts a claim back on its own account.
+  perform home.set_quote_claim(b3, null);
+  perform pg_temp.check(p, 'S7 one unlinked', 136205.54);
+  perform home.set_quote_claim(b3, c);
+
+  -- A claim against a quote nobody has agreed counts as the bill it is.
+  perform home.set_quote_status(c, 'tbc');
+  perform pg_temp.check(p, 'S7 contract not agreed', 111464.44);
+  perform home.set_quote_status(c, 'accepted');
+
+  begin
+    perform home.set_quote_claim(b1, b2);
+    raise exception 'S7 — a claim against another bill must be refused';
+  exception when raise_exception then
+    if sqlerrm not like 'A claim has to be against a quote%' then raise; end if;
+  end;
+  begin
+    perform home.set_quote_claim(c, c);
+    raise exception 'S7 — a quote cannot claim against a quote';
+  exception when raise_exception then
+    if sqlerrm not like 'Only a bill can be a claim%' then raise; end if;
+  end;
+  x := pg_temp.q(p, 'ReliaBuilder', 1000, el => el_outside);
+  begin
+    perform home.set_quote_claim(x, c);
+    raise exception 'S7 — a claim must sit where its contract sits';
+  exception when raise_exception then
+    if sqlerrm not like 'A claim has to sit where its contract sits%' then raise; end if;
+  end;
 end;
 $$;
 

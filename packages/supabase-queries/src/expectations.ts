@@ -235,3 +235,17 @@ export function matchExpectedEach(
   }
   return out;
 }
+
+/**
+ * The expected payments an agreed price from the same business may already
+ * hold — the builder's "payment 4/4" once their contract is signed. Both would
+ * count, so agreeing the price asks; nothing here decides. Unconfirmed ones are
+ * offered too: a guess the contract has replaced is a guess counted twice.
+ */
+export function expectedCoveredBy(contract: ProjectQuote, expected: ProjectExpectedCost[]): ProjectExpectedCost[] {
+  const key = businessKey(contract.supplier);
+  if (!key || contract.kind !== 'quote') return [];
+  return expected
+    .filter((x) => x.settledBy === null && isFrom(x, key))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}

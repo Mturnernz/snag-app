@@ -32,7 +32,8 @@ import ThingSheet from '../components/ThingSheet';
 import PriceSheet from '../components/PriceSheet';
 import RoomSheet from '../components/RoomSheet';
 import SettleExpectedSheet from '../components/SettleExpectedSheet';
-import { AddRow, Group, Pill, Row, SectionTitle, TextButton, groupedStyles } from '../components/Grouped';
+import Sheet from '../components/Sheet';
+import { AddRow, Group, Pill, RadioRow, Row, SectionTitle, TextButton, groupedStyles } from '../components/Grouped';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -43,19 +44,20 @@ import {
   createElement, createExpectedCost, createLocation, createThing, deleteElement,
   declineInvoiceReview, deleteExpectedCost, deleteExpectedCostLine, deleteInvoiceReview,
   deleteProject, deleteStoredFiles, describeRoom,
-  formatMoney, getProjectPage, getSupplierNames, liveSetAsides, payBill, projectSummary,
+  formatMoney, getProjectPage, getSupplierNames, liveSetAsides, payBill, projectSummary, setQuoteClaim,
   renameSupplier, restoreInvoiceReview, setExpectedCostConfirmed, updateExpectedCost, updateExpectedCostLine,
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  billFactsOfReview, dayKey, describeDuplicate, describeEmailGroup, describeRenameReach, duplicateReviews,
+  asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, suggestAreas, duplicateQuotes, paymentEchoes, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
   expectedAmountIncl, expectedPayee, expectedToPay, exportDateStamp, filesBySupplier, formatExactDate,
-  formatLooseDate, groupBySupplier, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
+  formatLooseDate, groupBySupplier, inclGst, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
   remainingTone, reviewAlert, reviewGroups, supplierDirectory,
   type RemainingTone, type SupplierEntry, type ThingInput,
 } from '@snag/supabase-queries';
 import {
   filePaperwork, setFileTags, getFileUrl, getFileUrls, rereadInvoiceReview, setInvoiceReviewRooms, updateInvoiceReview,
+  getProjects, moveInvoiceReview, updateQuote,
 } from '../lib/supabase';
 import { describeRooms } from '../components/RoomSplit';
 import { openUrl } from '../lib/openUrl';
@@ -118,6 +120,13 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [money, setMoney] = useState<MoneyStart | null>(null);
   const [openThing, setOpenThing] = useState<string | null>(null);
   const [openPrice, setOpenPrice] = useState<string | null>(null);
+  /** The price sheet opened from a *Paid* press, asking when. */
+  const [askPaid, setAskPaid] = useState(false);
+  /** Paying every old bill on its own due date, once confirmed. */
+  const [payingAll, setPayingAll] = useState(false);
+  /** A waiting card being moved, and the other jobs in this home it can go to. */
+  const [moving, setMoving] = useState<InvoiceReview | null>(null);
+  const [otherJobs, setOtherJobs] = useState<{ id: string; name: string }[]>([]);
   const [openRoom, setOpenRoom] = useState<string | null>(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
@@ -282,6 +291,92 @@ export default function ProjectDetailScreen({ route }: Props) {
   const expectedRows = page.expected
     .filter((x) => x.settledBy === null)
     .map((x) => ({ id: x.id, supplier: expectedPayee(x, quotes), dated: x.createdAt, x }));
+  const money$ = (n: number) => formatMoney(n) ?? '—';
+  // What the job's own paperwork says that its records do not: each one is a
+  // figure on this page that is wrong until somebody looks.
+  const paperName = (q: ProjectQuote): string => q.invoiceNumber ?? q.detail ?? (q.kind === 'quote' ? 'A quote' : 'An invoice');
+  const paidAgainst = new Set(page.payments.map((p) => p.quoteId));
+  const checks: { key: string; title: string; subtitle: string; open: string; link?: { bill: string; contract: string } }[] = [
+    ...unlinkedClaims(quotes).map((c) => ({
+      key: `claim-${c.bill.id}`,
+      title: `${paperName(c.bill)} · ${money$(c.bill.amountIncl ?? 0)}`,
+      subtitle: `${c.bill.supplier ?? 'No supplier'} · its words say ${paperName(c.contract)} — counted on its own until linked`,
+      open: c.bill.id,
+      link: { bill: c.bill.id, contract: c.contract.id },
+    })),
+    ...duplicateQuotes(quotes).map((d) => ({
+      key: `twice-${d.quote.id}`,
+      title: `${paperName(d.quote)} looks like it’s on the job twice`,
+      subtitle: `${d.quote.supplier ?? 'No supplier'} · ${money$(d.quote.amountIncl ?? 0)} each`,
+      open: d.twin.id,
+    })),
+    // Opens the deposit's own bill: *Part of another bill?* there is the fix.
+    ...paymentEchoes(quotes, page.payments).map((e) => ({
+      key: `echo-${e.payment.id}`,
+      title: `${paperName(e.twin)} looks like ${paperName(e.bill)}’s deposit`,
+      subtitle: `${money$(inclGst(e.payment.amount, e.payment.amountInclGst) ?? 0)} is paid on both — counted twice unless ${paperName(e.twin)} goes inside ${paperName(e.bill)}`,
+      open: e.twin.id,
+    })),
+    ...quotes
+      .filter((q) => !paidAgainst.has(q.id) && !q.againstQuoteId && q.status !== 'declined' && priceSaysQuote(q))
+      .map((q) => ({
+        key: `quote-${q.id}`,
+        title: `${paperName(q)} reads as a quote`,
+        subtitle: `${q.supplier ?? 'No supplier'} · recorded as an invoice, so it counts as billed and owing`,
+        open: q.id,
+      })),
+  ];
+
+  async function openMove(review: InvoiceReview) {
+    setMoving(review);
+    // Read when asked rather than with the page: the pool is ten connections.
+    try {
+      const jobs = await getProjects(project.propertyId);
+      setOtherJobs(jobs.filter((j) => j.id !== project.id).map((j) => ({ id: j.id, name: j.name })));
+    } catch {
+      setOtherJobs([]);
+    }
+  }
+
+  async function moveTo(job: { id: string; name: string }) {
+    const review = moving;
+    setMoving(null);
+    if (!review) return;
+    await rule(review, () => moveInvoiceReview(review.id, job.id), `Moved to ${job.name}`);
+  }
+
+  async function linkClaim(bill: string, contract: string) {
+    try {
+      await setQuoteClaim(bill, contract);
+      await changed('Linked to the agreed price');
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'That didn’t link');
+    }
+  }
+
+  // Bills that fell due before today, which *Paid* asks the day of.
+  const oldBills = summary.bills.filter((b) => (b.unpaid ?? 0) > 0 && asksWhenPaid(b, today));
+  async function payAllOnDueDates() {
+    setPayingAll(false);
+    if (payingId) return;
+    setPayingId('all');
+    let paid = 0;
+    try {
+      for (const bill of oldBills) {
+        // eslint-disable-next-line no-await-in-loop
+        await payBill(bill.id, bill.unpaid ?? 0, (bill.dueOn ?? bill.dated)!);
+        paid += 1;
+      }
+      await changed(paid === 1 ? 'Paid on its due date' : `${paid} paid on their due dates`);
+    } catch (err: unknown) {
+      await changed(paid > 0
+        ? `${paid} paid on their due dates, then: ${err instanceof Error ? err.message : 'that didn’t save'}`
+        : err instanceof Error ? err.message : 'That didn’t save');
+    } finally {
+      setPayingId(null);
+    }
+  }
+
   const expectedPlace = (x: ProjectExpectedCost): string => {
     const element = elements.find((e) => e.id === x.elementId);
     return element && !element.implicit ? element.room ?? element.name : 'Whole job';
@@ -326,8 +421,14 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
-  async function pay(bill: { id: string; unpaid: number | null }) {
+  async function pay(bill: ProjectBill) {
     if (payingId) return;
+    // A bill that fell due before today is asked when it went out, on its own sheet.
+    if (asksWhenPaid(bill, today)) {
+      setAskPaid(true);
+      setOpenPrice(bill.id);
+      return;
+    }
     setPayingId(bill.id);
     try {
       await payBill(bill.id, bill.unpaid ?? 0, today);
@@ -460,7 +561,6 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
-  const money$ = (n: number) => formatMoney(n) ?? '—';
   const dueText = (bill: ProjectBill): string | null => (
     bill.overdue && bill.dueOn ? `Overdue since ${formatExactDate(bill.dueOn)}`
       : bill.dueOn ? `Due ${formatExactDate(bill.dueOn)}` : null
@@ -545,6 +645,12 @@ export default function ProjectDetailScreen({ route }: Props) {
                 {group.reviews.map((review) => {
                   const twin = duplicates.get(review.id);
                   const paperwork = review.kind === 'paperwork';
+                  const claimOf = reviewClaim(review, quotes);
+                  const deposit = depositBillFor(review, quotes);
+                  // Offered only while it has nowhere to go but the whole job.
+                  const named = paperwork || review.elementId || review.roomIds.length > 0 ? []
+                    : suggestAreas([review.supplier, review.detail, review.sourceSubject].filter(Boolean).join(' '), elements);
+                  const namedRooms = named.map((id) => elements.find((e) => e.id === id)?.name).filter(Boolean).join(' and ');
                   return (
                   <InvoiceReviewCard
                     key={review.id}
@@ -571,19 +677,42 @@ export default function ProjectDetailScreen({ route }: Props) {
                           : elements.find((e) => e.id === review.elementId && !e.implicit)?.name ?? 'Whole job'
                     }
                     paysOff={cardPaysOff.get(review.id)}
-                    onApprove={(paysOff) => (paperwork
+                    claimOf={claimOf}
+                    deposit={deposit}
+                    suggestedRooms={named.length > 0 ? namedRooms : null}
+                    onUseRooms={named.length > 0 ? async () => {
+                      try {
+                        await setInvoiceReviewRooms(review.id, named, null);
+                        await changed(`It’s for ${namedRooms}`);
+                      } catch (err: unknown) {
+                        showToast(err instanceof Error ? err.message : 'That didn’t save');
+                      }
+                    } : undefined}
+                    onMove={() => openMove(review)}
+                    onApprove={(paysOff, extras = { againstQuoteId: null, recordAlreadyPaid: false }) => (paperwork
                       ? setFiling(review)
                       : rule(
                         review,
                         async () => {
-                          const said = review.kind === 'quote'
+                          let said = review.kind === 'quote'
                             ? 'Added as a quote — nothing’s agreed yet'
-                            : review.paid && review.amount !== null ? 'Added, and recorded as paid' : 'Added to the job';
-                          const bill = await approveInvoiceReview(review.id);
+                            : extras.againstQuoteId ? 'Added as a stage of the agreed price'
+                              : review.paid && review.amount !== null ? 'Added, and recorded as paid' : 'Added to the job';
+                          const bill = extras.againstQuoteId || extras.recordAlreadyPaid
+                            ? await approveInvoiceReview(review.id, extras)
+                            : await approveInvoiceReview(review.id);
+                          // The bill is on the job now: a refused follow-up must
+                          // not put the card back, or allocating again would
+                          // record it twice. So each is said, and left to do by hand.
+                          if (extras.recordAlreadyPaid && deposit) {
+                            try {
+                              await updateQuote(deposit.id, { billedThroughId: bill.id });
+                              said = `${said} · ${deposit.invoiceNumber ?? 'the deposit'} is inside it`;
+                            } catch {
+                              said = `${said}, but ${deposit.invoiceNumber ?? 'the deposit'} is still counted on its own — open it to put it inside`;
+                            }
+                          }
                           if (!paysOff) return said;
-                          // The bill is on the job now; a refused link must not
-                          // put the card back, or allocating again would record
-                          // it twice. So it is said, and left to *Billed*.
                           try {
                             await updateExpectedCost(paysOff.id, { settledBy: bill.id });
                             return `${said} · pays off ${paysOff.name}`;
@@ -598,6 +727,34 @@ export default function ProjectDetailScreen({ route }: Props) {
                 })}
               </View>
             ))}
+          </View>
+        ) : null}
+
+        {/*
+          ── worth checking ───────────────────────────────────────────────
+          Each row is a figure below that is wrong until somebody looks: a claim
+          counted beside its contract, a quote entered twice. Absent at nought.
+        */}
+        {checks.length > 0 ? (
+          <View style={groupedStyles.block}>
+            <SectionTitle title="Worth checking" count={checks.length} />
+            <Group>
+              {checks.map((c) => (
+                <Row
+                  key={c.key}
+                  title={c.title}
+                  subtitle={c.subtitle}
+                  onPress={() => setOpenPrice(c.open)}
+                  accessory={c.link ? (
+                    <Pill
+                      label="Link"
+                      accessibilityLabel={`Link ${c.title} to its agreed price`}
+                      onPress={() => linkClaim(c.link!.bill, c.link!.contract)}
+                    />
+                  ) : undefined}
+                />
+              ))}
+            </Group>
           </View>
         ) : null}
 
@@ -765,6 +922,12 @@ export default function ProjectDetailScreen({ route }: Props) {
                 ];
               })}
             </Group>
+            {oldBills.length > 1 && payingId === null ? (
+              <TextButton
+                label={`Mark the ${oldBills.length} past their due date as paid…`}
+                onPress={() => setPayingAll(true)}
+              />
+            ) : null}
           </View>
         ) : null}
 
@@ -1045,9 +1208,10 @@ export default function ProjectDetailScreen({ route }: Props) {
         quotes={quotes}
         payments={page.payments}
         lines={page.lines}
-        onClose={() => setOpenPrice(null)}
+        onClose={() => { setOpenPrice(null); setAskPaid(false); }}
         onChanged={changed}
-        onOpen={(q) => setOpenPrice(q.id)}
+        onOpen={(q) => { setAskPaid(false); setOpenPrice(q.id); }}
+        askWhenPaid={askPaid}
         elements={elements}
         locations={locations}
         quoteRooms={page.quoteRooms}
@@ -1088,6 +1252,32 @@ export default function ProjectDetailScreen({ route }: Props) {
           }
         }}
         onClose={() => setRoomsOpen(false)}
+      />
+
+      <Sheet
+        visible={moving !== null}
+        title="Which job is it for?"
+        subtitle={moving?.supplier ?? null}
+        onClose={() => setMoving(null)}
+      >
+        {otherJobs.length > 0 ? (
+          <Group>
+            {otherJobs.map((job) => (
+              <RadioRow key={job.id} title={job.name} selected={false} onPress={() => moveTo(job)} />
+            ))}
+          </Group>
+        ) : (
+          <Text style={groupedStyles.caption}>There’s no other job in this home to move it to.</Text>
+        )}
+      </Sheet>
+
+      <ConfirmDialog
+        visible={payingAll}
+        title={`Mark ${oldBills.length} invoices as paid?`}
+        message={`Each is recorded as paid in full on its own due date, or its date where it has none — ${money$(oldBills.reduce((t, b) => t + (b.unpaid ?? 0), 0))} in all. Any paid on another day can be changed on its own sheet.`}
+        confirmLabel="Mark them paid"
+        onCancel={() => setPayingAll(false)}
+        onConfirm={payAllOnDueDates}
       />
 
       <ConfirmDialog

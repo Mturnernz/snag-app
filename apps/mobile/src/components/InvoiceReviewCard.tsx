@@ -13,20 +13,29 @@ import Button from './Button';
 import KindPill from './KindPill';
 import KindSheet, { type KindOption } from './KindSheet';
 import PaysOffLine, { usePaysOff } from './PaysOffLine';
+import OfferLine from './OfferLine';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   describeAddressedTo, describePaidInference, documentName, formatLooseDate, formatMoney, invoiceReviewHeadline,
-  isUnreadReview, wasInferred, type ExpectedMatch,
+  isUnreadReview, reviewSaysQuote, wasInferred, type ExpectedMatch,
 } from '@snag/supabase-queries';
 import {
   isHorizontalDrag, swipeDecision, swipeLean, swipeProgress, type SwipeDecision,
 } from '../lib/swipeDecision';
-import type { InvoiceReview, InvoiceReviewKind, ProjectExpectedCost } from '../types';
+import type { InvoiceReview, InvoiceReviewKind, ProjectExpectedCost, ProjectQuote } from '../types';
+
+/** What the card's ticked lines ask allocating to do besides add the bill. */
+export interface ApproveExtras {
+  /** The contract the bill is a stage of, when that line is ticked. */
+  againstQuoteId: string | null;
+  /** Record what the paper says was paid before it — and put the deposit's own bill inside it. */
+  recordAlreadyPaid: boolean;
+}
 
 interface Props {
   review: InvoiceReview;
   /** Allocates it — and, when the *Pays off* line is ticked, the expected payment it pays off. */
-  onApprove: (paysOff: ProjectExpectedCost | null) => void;
+  onApprove: (paysOff: ProjectExpectedCost | null, extras: ApproveExtras) => void;
   onDecline: () => void;
   /** Opens the card to correct what was read off the email before ruling on it. */
   onEdit?: () => void;
@@ -63,6 +72,19 @@ interface Props {
    * The best arrives ticked, and allocating pays it off.
    */
   paysOff?: ExpectedMatch[];
+  /**
+   * The contract this bill reads as a stage of (`reviewClaim`). Ticked when it
+   * arrives: allocating lands the bill where the contract sits, linked, so a
+   * signed price counts it once.
+   */
+  claimOf?: ProjectQuote | null;
+  /** The bill on the job the paper's *less deposit paid* is (`depositBillFor`). */
+  deposit?: ProjectQuote | null;
+  /** The rooms the bill's words name, as words, and the press that puts it there. */
+  suggestedRooms?: string | null;
+  onUseRooms?: () => void;
+  /** Moves the card to another job in the home, for a bill sent to the wrong address. */
+  onMove?: () => void;
 }
 
 /**
@@ -131,12 +153,19 @@ export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
  */
 export default function InvoiceReviewCard({
   review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate, onReread, rereading,
-  onChangeKind, paysOff: matches = NO_MATCHES,
+  onChangeKind, paysOff: matches = NO_MATCHES, claimOf = null, deposit = null, suggestedRooms, onUseRooms, onMove,
 }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
   const [choosingKind, setChoosingKind] = useState(false);
   const paysOff = usePaysOff(matches);
-  const approve = () => onApprove(paysOff.chosen);
+  const [claimTicked, setClaimTicked] = useState(true);
+  const [paidTicked, setPaidTicked] = useState(true);
+  const claiming = review.kind === 'invoice' && claimOf !== null && claimTicked;
+  const alreadyPaid = review.kind === 'invoice' ? review.alreadyPaid ?? null : null;
+  const approve = () => onApprove(paysOff.chosen, {
+    againstQuoteId: claiming ? claimOf!.id : null,
+    recordAlreadyPaid: alreadyPaid !== null && paidTicked,
+  });
   const [width, setWidth] = useState(0);
   const [lean, setLean] = useState<SwipeDecision | null>(null);
   const [progress, setProgress] = useState(0);
@@ -301,7 +330,8 @@ export default function InvoiceReviewCard({
           {review.dueOn ? (
             <Fact label="Due" value={formatLooseDate(review.dueOn) ?? review.dueOn} guessed={wasInferred(review, 'due_on')} />
           ) : null}
-          {landsOn ? <Fact label="For" value={landsOn} /> : null}
+          {claiming ? <Fact label="For" value={claimOf!.detail ?? 'The agreed price'} />
+            : landsOn ? <Fact label="For" value={landsOn} /> : null}
         </View>
 
         {/*
@@ -339,6 +369,64 @@ export default function InvoiceReviewCard({
           </View>
         ) : null}
 
+        {/*
+          Its own words call it a quote, and it is down as a bill. Allocated as
+          an invoice it counts as billed and owing — for a price nobody agreed.
+        */}
+        {reviewSaysQuote(review) ? (
+          <View style={styles.note}>
+            <Text style={styles.noteText}>Its own words call it a quote — as an invoice it counts as billed, and owing.</Text>
+            {onChangeKind ? (
+              <Pressable
+                onPress={() => { onChangeKind('quote'); }}
+                disabled={busy}
+                style={styles.noteAction}
+                accessibilityRole="button"
+                accessibilityLabel="Make it a quote"
+              >
+                <Text style={styles.noteActionLabel}>Make it a quote</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        {claimOf && review.kind === 'invoice' ? (
+          <OfferLine
+            title={`A stage of ${[claimOf.supplier, claimOf.invoiceNumber ?? claimOf.detail].filter(Boolean).join(' · ')}`}
+            note={!claimTicked ? 'Counts on its own'
+              : claimOf.status === 'accepted' ? 'Counts once, inside the agreed price'
+                : 'Linked — it counts on its own until the price is agreed'}
+            ticked={claimTicked}
+            onToggle={() => setClaimTicked((t) => !t)}
+          />
+        ) : null}
+
+        {alreadyPaid !== null ? (
+          <OfferLine
+            title={`${formatMoney(alreadyPaid)}${review.amountInclGst ? '' : ' + GST'} paid before this invoice`}
+            note={!paidTicked ? 'Not recorded — the whole total stays owing'
+              : deposit ? `Recorded as paid on it, and ${[deposit.supplier, deposit.invoiceNumber].filter(Boolean).join(' ')} goes inside it so it isn’t counted twice`
+                : 'Recorded as paid on it'}
+            ticked={paidTicked}
+            onToggle={() => setPaidTicked((t) => !t)}
+          />
+        ) : null}
+
+        {suggestedRooms && onUseRooms && !claiming ? (
+          <View style={styles.note}>
+            <Text style={styles.noteText}>{`Its words name ${suggestedRooms}`}</Text>
+            <Pressable
+              onPress={onUseRooms}
+              disabled={busy}
+              style={styles.noteAction}
+              accessibilityRole="button"
+              accessibilityLabel={`Put it on ${suggestedRooms}`}
+            >
+              <Text style={styles.noteActionLabel}>Put it there</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {onOpenFile && files.length > 0 ? (
           <View style={styles.files}>
             {files.map((file) => (
@@ -363,6 +451,18 @@ export default function InvoiceReviewCard({
               review.sourceAt ? formatLooseDate(review.sourceAt.slice(0, 10)) : null,
             ].filter(Boolean).join(' · ')}
           </Text>
+        ) : null}
+
+        {onMove ? (
+          <Pressable
+            onPress={onMove}
+            disabled={busy}
+            style={styles.move}
+            accessibilityRole="button"
+            accessibilityLabel="Move it to another job"
+          >
+            <Text style={styles.moveLabel}>Sent to the wrong job? Move it</Text>
+          </Pressable>
         ) : null}
 
         {/*
@@ -460,6 +560,15 @@ function Fact({
 }
 
 const styles = StyleSheet.create({
+  note: {
+    marginTop: Spacing.sm, paddingHorizontal: Spacing.md, paddingTop: Spacing.sm,
+    borderRadius: Radius.input, backgroundColor: Colors.sunken,
+  },
+  noteText: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textPrimary },
+  noteAction: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start' },
+  noteActionLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.primary },
+  move: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start' },
+  moveLabel: { fontSize: Typography.footnote, color: Colors.primary },
   duplicate: {
     flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start',
     marginTop: Spacing.sm, padding: Spacing.md, borderRadius: Radius.input,

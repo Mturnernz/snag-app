@@ -268,24 +268,20 @@ export function liveSetAsides(page: Pick<ProjectPage, 'quotes' | 'lines'>): Proj
   return page.lines.filter((l) => l.isAllowance && !l.additional && signed.has(l.quoteId));
 }
 
-const supplierKey = (name: string | null): string | null => {
-  const key = name?.trim().toLowerCase();
-  return key ? key : null;
-};
-
 /**
  * What one price on the whole job puts in Agreed, which is the only part of
  * it a room share can move.
  *
  * The same rules the views apply, read off the row: a signed quote counts what
  * it contributes less its open set-asides; a bill counts unless it is a claim
- * (its contract counts instead) or the same supplier has a signed price on the
- * whole job (it is a draw on that). Anything declined, unsigned, or standing
- * in for a set-aside counts nothing here. Getting one of these wrong can only
- * leave money on *Whole job* — the room rows are a remainder, not a second sum.
+ * against a signed quote (the contract counts instead). Who sent it does not
+ * matter — a bill is part of a contract only when it is linked to it
+ * (`20261030090000`). Anything declined, unsigned, or standing in for a
+ * set-aside counts nothing here. Getting one of these wrong can only leave
+ * money on *Whole job* — the room rows are a remainder, not a second sum.
  */
 export function agreedContribution(page: Pick<ProjectPage, 'quotes'>, q: ProjectQuote): number {
-  if (q.status === 'declined' || q.supersedesLineId || q.againstQuoteId) return 0;
+  if (q.status === 'declined' || q.supersedesLineId) return 0;
   // A bill inside another bill counts through that one — the views drop it too.
   if (q.kind === 'invoice' && q.billedThroughId) return 0;
   if (q.kind === 'quote') {
@@ -293,11 +289,11 @@ export function agreedContribution(page: Pick<ProjectPage, 'quotes'>, q: Project
       ? round((q.effectiveAmount ?? q.amountIncl ?? 0) - q.allowanceOpen)
       : 0;
   }
-  const key = supplierKey(q.supplier);
-  const signed = key !== null && page.quotes.some((o) =>
-    o.id !== q.id && o.kind === 'quote' && o.status === 'accepted'
-      && o.projectId !== null && o.projectId === q.projectId && supplierKey(o.supplier) === key);
-  return signed ? 0 : q.amountIncl ?? 0;
+  if (q.againstQuoteId) {
+    const contract = page.quotes.find((o) => o.id === q.againstQuoteId);
+    if (contract && contract.kind === 'quote' && contract.status === 'accepted') return 0;
+  }
+  return q.amountIncl ?? 0;
 }
 
 /**

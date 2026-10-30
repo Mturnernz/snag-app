@@ -4563,6 +4563,7 @@ function mapInvoiceReview(row: Row): InvoiceReview {
     paid: !!row.paid,
     paidOn: row.paid_on ?? null,
     paidEvidence: row.paid_evidence ?? null,
+    alreadyPaid: numberOrNull(row.already_paid),
     category: row.category ?? null,
     sourceRef: row.source_ref ?? null,
     sourceSubject: row.source_subject ?? null,
@@ -6978,16 +6979,65 @@ export async function updateInvoiceReview(
  * A paid one also records its payment, and only where there is an amount for
  * the payment to be about.
  */
+export interface ApproveOptions {
+  /** The part of the job it lands on; null keeps the card's own answer. */
+  elementId?: string | null;
+  /**
+   * The contract this bill is a claim against. It then lands where the contract
+   * sits, whatever the card said, because a claim has to.
+   */
+  againstQuoteId?: string | null;
+  /** Records what the paper says was already paid as a payment, dated the bill's date. */
+  recordAlreadyPaid?: boolean;
+}
+
 export async function approveInvoiceReview(
   client: SupabaseClient,
   reviewId: string,
-  elementId?: string | null
+  options: ApproveOptions | string | null = {}
 ): Promise<ProjectQuote> {
-  const { data, error } = await client.rpc('approve_invoice_review', {
+  // A bare string is the old second argument, the part of the job.
+  const o: ApproveOptions = typeof options === 'string' || options === null ? { elementId: options } : options;
+  const args: Record<string, unknown> = {
     p_review_id: reviewId,
-    p_element_id: elementId ?? null,
-  });
+    p_element_id: o.elementId ?? null,
+  };
+  // Sent only when used, so this keeps working against a database the
+  // migration has not reached yet.
+  if (o.againstQuoteId) args.p_against_quote_id = o.againstQuoteId;
+  if (o.recordAlreadyPaid) args.p_record_already_paid = true;
+  const { data, error } = await client.rpc('approve_invoice_review', args);
   return mapQuote(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/**
+ * Says a bill already on the job is a claim against a quote, or (null) that it
+ * is not. The server refuses what `create_quote` refuses — only a bill, only
+ * against a quote, in this job, sitting where its contract sits — in words.
+ */
+export async function setQuoteClaim(
+  client: SupabaseClient,
+  quoteId: string,
+  againstQuoteId: string | null
+): Promise<void> {
+  const { error } = await client.rpc('set_quote_claim', {
+    p_quote_id: quoteId,
+    p_against_quote_id: againstQuoteId,
+  });
+  if (error) throw asError(error, "That didn’t link");
+}
+
+/** Moves a waiting card to another project in the same household. */
+export async function moveInvoiceReview(
+  client: SupabaseClient,
+  reviewId: string,
+  projectId: string
+): Promise<void> {
+  const { error } = await client.rpc('move_invoice_review', {
+    p_review_id: reviewId,
+    p_project_id: projectId,
+  });
+  if (error) throw asError(error, "That didn’t move");
 }
 
 /**
@@ -7252,3 +7302,4 @@ export * from './papers';
 export * from './suppliers';
 export * from './projectDates';
 export * from './expectations';
+export * from './checks';

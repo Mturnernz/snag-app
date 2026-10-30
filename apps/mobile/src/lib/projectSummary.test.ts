@@ -208,13 +208,21 @@ describe('projectSummary — a bill shared between rooms', () => {
     expect(rooms.Bathroom.shared + rooms.Laundry.shared).toBe(766.67);
   });
 
-  it('moves nothing for a bill that is a draw on a signed contract, a claim, or declined', () => {
-    const draw = quote({ id: 'rb', projectId: 'p1', supplier: 'ReliaBuilder', amount: 5000, kind: 'invoice' });
+  it('moves nothing for a claim on a signed contract, or a declined price', () => {
     const claim = quote({ id: 'cl', projectId: 'p1', supplier: 'ReliaBuilder', amount: 5000, kind: 'invoice', againstQuoteId: 'c1' });
     const declined = quote({ id: 'dq', projectId: 'p1', supplier: 'Tile Depot', amount: 5000, status: 'declined' });
-    const rows = ['rb', 'cl', 'dq'].map((quoteId) => ({ quoteId, elementId: 'eB', amount: 5000, sortOrder: 0 }));
-    const rooms = byName(shared(rows, [tiles, draw, claim, declined]));
+    const rows = ['cl', 'dq'].map((quoteId) => ({ quoteId, elementId: 'eB', amount: 5000, sortOrder: 0 }));
+    const rooms = byName(shared(rows, [tiles, claim, declined]));
     expect(rooms.Bathroom.shared).toBe(0);
+  });
+
+  // A bill is part of a contract only when it is linked to it. The builder's
+  // unlinked bill used to be read as a draw on their signed contract and move
+  // nothing; it is a bill like any other now, so its share moves.
+  it('moves the share of a bill from the contract’s supplier that is not linked to it', () => {
+    const unlinked = quote({ id: 'rb', projectId: 'p1', supplier: 'ReliaBuilder', amount: 5000, kind: 'invoice' });
+    const rooms = byName(shared([{ quoteId: 'rb', elementId: 'eB', amount: 5000, sortOrder: 0 }], [tiles, unlinked]));
+    expect(rooms.Bathroom.shared).toBe(5000);
   });
 
   it('scales shares that somehow add up to more than the bill back to it', () => {

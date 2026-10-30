@@ -18,7 +18,7 @@ const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
   supplier: 'Tile Space', detail: null,
   amount: 2480, amountInclGst: true,
   invoiceNumber: 'TS-4471', dated: '2026-09-16', dueOn: null,
-  paid: false, paidOn: null, paidEvidence: null, category: null,
+  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, category: null,
   sourceRef: null, sourceSubject: null, sourceFrom: null, sourceAt: null,
   inferred: [], state: 'pending', quoteId: null, decidedAt: null,
   photoPaths: [], documentPaths: [], roomIds: [], roomAmounts: null,
@@ -314,7 +314,7 @@ describe('a bill for money that was earmarked', () => {
     r.getByText('Pays off ReliaBuilder payment 3/4 · $43,987.50');
     r.getByText('Takes it off Expected to pay');
     press(r, 'Allocate');
-    expect(onApprove).toHaveBeenCalledWith(expect.objectContaining({ id: 'x1' }));
+    expect(onApprove).toHaveBeenCalledWith(expect.objectContaining({ id: 'x1' }), { againstQuoteId: null, recordAlreadyPaid: false });
   });
 
   it('allocates on its own once the tick is taken off', () => {
@@ -325,13 +325,75 @@ describe('a bill for money that was earmarked', () => {
     TestRenderer.act(() => tick.props.onPress());
     r.getByText('Stays on Expected to pay');
     press(r, 'Allocate');
-    expect(onApprove).toHaveBeenCalledWith(null);
+    expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: false });
   });
 
   it('says nothing when nothing matches', () => {
     const { r, onApprove } = arrange();
     expect(r.queryByText('Takes it off Expected to pay')).toBeNull();
     press(r, 'Allocate');
-    expect(onApprove).toHaveBeenCalledWith(null);
+    expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: false });
+  });
+});
+
+describe('what it offers to do as it lands', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { quote } = require('../test/projectFixtures');
+  const deck = quote({
+    id: 'c1', projectId: 'p1', supplier: 'ReliaBuilder', invoiceNumber: 'QU-0111',
+    detail: 'Deck and sub structure replacement', amount: 49482.2, status: 'accepted',
+  });
+  const byLabel = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll((n: any) => n.props?.accessibilityLabel === label && n.props?.onPress, { deep: true })[0];
+
+  it('offers the contract a claim is a stage of, ticked, and allocates it linked', () => {
+    const { r, onApprove } = arrange(
+      { supplier: 'ReliaBuilder', detail: 'Deck — progress payment 45%', invoiceNumber: 'INV-0182' },
+      { claimOf: deck },
+    );
+    r.getByText('A stage of ReliaBuilder · QU-0111');
+    r.getByText('Counts once, inside the agreed price');
+    r.getByText('Deck and sub structure replacement');
+    press(r, 'Allocate');
+    expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: 'c1', recordAlreadyPaid: false });
+  });
+
+  it('allocates it on its own once the line is unticked', () => {
+    const { r, onApprove } = arrange({ supplier: 'ReliaBuilder' }, { claimOf: deck });
+    TestRenderer.act(() => byLabel(r, 'A stage of ReliaBuilder · QU-0111').props.onPress());
+    r.getByText('Counts on its own');
+    press(r, 'Allocate');
+    expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: false });
+  });
+
+  it('records what the paper says was paid before it, and names the deposit going inside', () => {
+    const v3 = quote({ id: 'v3', projectId: 'p1', supplier: 'Kitchen Mania', invoiceNumber: 'V3', kind: 'invoice', amount: 8244.11 });
+    const { r, onApprove } = arrange(
+      { supplier: 'Kitchen Mania', amount: 27480.37, alreadyPaid: 8244.11, invoiceNumber: 'INV-15879' },
+      { deposit: v3 },
+    );
+    r.getByText('$8,244.11 paid before this invoice');
+    r.getByText('Recorded as paid on it, and Kitchen Mania V3 goes inside it so it isn’t counted twice');
+    press(r, 'Allocate');
+    expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: true });
+  });
+
+  it('says when its own words call it a quote, and makes it one in a press', async () => {
+    const onChangeKind = jest.fn().mockResolvedValue(undefined);
+    const { r } = arrange({ supplier: 'Elite Bathroomware', sourceSubject: 'Fwd: Fw: Quote 81914 from ELITE BATHROOMWARE' }, { onChangeKind });
+    r.getByText('Its own words call it a quote — as an invoice it counts as billed, and owing.');
+    await TestRenderer.act(async () => { byLabel(r, 'Make it a quote').props.onPress(); });
+    expect(onChangeKind).toHaveBeenCalledWith('quote');
+  });
+
+  it('offers the rooms its words name, and a way to the right job', () => {
+    const onUseRooms = jest.fn();
+    const onMove = jest.fn();
+    const { r } = arrange({ supplier: 'elitebathroomware' }, { suggestedRooms: 'Downstairs Bathroom', onUseRooms, onMove });
+    r.getByText('Its words name Downstairs Bathroom');
+    TestRenderer.act(() => byLabel(r, 'Put it on Downstairs Bathroom').props.onPress());
+    expect(onUseRooms).toHaveBeenCalled();
+    TestRenderer.act(() => byLabel(r, 'Move it to another job').props.onPress());
+    expect(onMove).toHaveBeenCalled();
   });
 });

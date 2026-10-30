@@ -16,7 +16,7 @@ const review: InvoiceReview = {
   id: 'r1', projectId: 'p1', elementId: null, kind: 'invoice', addressedTo: null, sourcePart: 0,
   supplier: 'Reliabuilder', detail: null, amount: 43987.5, amountInclGst: true,
   invoiceNumber: 'INV-0208', dated: '2026-09-20', dueOn: null,
-  paid: false, paidOn: null, paidEvidence: null, category: null,
+  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, category: null,
   sourceRef: 'em_1', sourceSubject: 'Fwd: Claim 2', sourceFrom: 'sam@example.com', sourceAt: null,
   inferred: ['supplier'], state: 'pending', quoteId: null, decidedAt: null,
   createdAt: '2026-09-20T00:00:00Z', photoPaths: [], documentPaths: ['h1/docs/1-2-INV.pdf'], roomIds: [], roomAmounts: null,

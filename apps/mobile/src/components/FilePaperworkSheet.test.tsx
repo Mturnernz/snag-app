@@ -17,7 +17,7 @@ const paper = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
   id: 'r1', projectId: 'p1', elementId: null, kind: 'paperwork', addressedTo: null, sourcePart: 1,
   supplier: 'Good Connection', detail: 'Certificate of compliance', amount: null, amountInclGst: true,
   invoiceNumber: null, dated: null, dueOn: null,
-  paid: false, paidOn: null, paidEvidence: null, category: null,
+  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, category: null,
   sourceRef: 'em_1', sourceSubject: 'Fwd: Variations', sourceFrom: null, sourceAt: null,
   inferred: [], state: 'pending', quoteId: null, decidedAt: null,
   createdAt: '2026-09-24T00:00:00Z', photoPaths: [], documentPaths: ['h/docs/1-1-CoC.pdf'],

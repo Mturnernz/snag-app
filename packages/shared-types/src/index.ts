@@ -1984,6 +1984,11 @@ export interface InvoiceReview {
   paidOn: string | null;
   /** The words `paid` was read from, shown under the answer. */
   paidEvidence: string | null;
+  /**
+   * What the paper says was paid before it and takes off its total — "less
+   * deposit paid". In the amount's GST basis; null when it takes nothing off.
+   */
+  alreadyPaid: number | null;
   /** What the email suggests this is. Free text: a fixed list would need setup. */
   category: string | null;
   sourceRef: string | null;

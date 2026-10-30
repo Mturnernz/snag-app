@@ -539,8 +539,12 @@ export const createInvoiceReview = (input: queries.InvoiceReviewInput) =>
 export const updateInvoiceReview = (reviewId: string, update: queries.InvoiceReviewUpdate) =>
   queries.updateInvoiceReview(supabase, reviewId, update);
 
-export const approveInvoiceReview = (reviewId: string, elementId?: string | null) =>
-  queries.approveInvoiceReview(supabase, reviewId, elementId);
+export const approveInvoiceReview = (reviewId: string, options?: queries.ApproveOptions | string | null) =>
+  queries.approveInvoiceReview(supabase, reviewId, options ?? {});
+export const setQuoteClaim = (quoteId: string, againstQuoteId: string | null) =>
+  queries.setQuoteClaim(supabase, quoteId, againstQuoteId);
+export const moveInvoiceReview = (reviewId: string, projectId: string) =>
+  queries.moveInvoiceReview(supabase, reviewId, projectId);
 
 export const setInvoiceReviewRooms = (reviewId: string, elementIds: string[], amounts: number[] | null) =>
   queries.setInvoiceReviewRooms(supabase, reviewId, elementIds, amounts);

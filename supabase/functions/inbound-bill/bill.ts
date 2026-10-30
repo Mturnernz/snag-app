@@ -127,17 +127,23 @@ const KEEP = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'
  *
  * PDFs and photographs only; nothing over 10 MB; ten at most. An **inline**
  * image under 50 KB is dropped, because that is the logo in somebody's email
- * signature and it would otherwise arrive as a "photo of the invoice". PDFs
- * come first, since that is nearly always where the figures are.
+ * signature and it would otherwise arrive as a "photo of the invoice". And
+ * **every** inline image goes when a PDF came too: the live job's forwards
+ * carried banner logos and pasted screenshots of the PDF beside it, each of
+ * which arrived as a *Photos* card nobody could do anything with. A photo
+ * somebody means to send is attached, not pasted into the words. PDFs come
+ * first, since that is nearly always where the figures are.
  */
 export function billAttachments(list: AttachmentMeta[]): AttachmentMeta[] {
-  return list
+  const kept = list
     .filter((a) => KEEP.has((a.content_type ?? '').toLowerCase()))
-    .filter((a) => (a.size ?? 0) <= MAX_ATTACHMENT_BYTES)
+    .filter((a) => (a.size ?? 0) <= MAX_ATTACHMENT_BYTES);
+  const hasPdf = kept.some((a) => (a.content_type ?? '').toLowerCase() === 'application/pdf');
+  return kept
     .filter((a) => !(
       (a.content_disposition ?? '').toLowerCase() === 'inline'
       && (a.content_type ?? '').startsWith('image/')
-      && (a.size ?? 0) < 50 * 1024
+      && (hasPdf || (a.size ?? 0) < 50 * 1024)
     ))
     .sort((a, b) => Number(b.content_type === 'application/pdf') - Number(a.content_type === 'application/pdf'))
     .slice(0, MAX_ATTACHMENTS);
@@ -181,7 +187,7 @@ export const PAPER_SCHEMA = {
   additionalProperties: false,
   required: [
     'kind', 'addressedToHousehold', 'addressedTo', 'supplier', 'detail', 'amount', 'amountInclGst',
-    'invoiceNumber', 'dated', 'dueOn', 'paid', 'paidOn', 'paidEvidence', 'guessed',
+    'invoiceNumber', 'dated', 'dueOn', 'paid', 'paidOn', 'paidEvidence', 'alreadyPaid', 'guessed',
   ],
   properties: {
     kind: { type: 'string', enum: [...PAPER_KINDS] },
@@ -197,6 +203,7 @@ export const PAPER_SCHEMA = {
     paid: { type: 'boolean' },
     paidOn: nullableText,
     paidEvidence: nullableText,
+    alreadyPaid: { type: ['number', 'null'] },
     guessed: { type: 'array', items: { type: 'string', enum: GUESSABLE } },
   },
 };
@@ -205,12 +212,13 @@ export const PAPER_SYSTEM = `You read one paper at a time from an email a New Ze
 
 Somebody will check every field against the paper before it counts, but a wrong figure they miss goes into their budget. Read; do not invent.
 
-- kind: "invoice" for a bill, progress claim, variation invoice or receipt asking for or confirming payment. "quote" for a price offered and not yet billed, including a quoted variation. "paperwork" for anything that records the work rather than charging for it: a certificate of compliance, producer statement, record of work, warranty, consent, inspection report, statement of account. "photo" for a photograph of the work or the site. "nothing" if it is none of these, such as a logo or a blank page. For a photograph of a printed bill or certificate, use what is printed.
+- kind: "invoice" for a bill, progress claim, variation invoice or receipt asking for or confirming payment. "quote" for a price offered and not yet billed, including a quoted variation. A paper whose own title says Quote, Quotation, Estimate or Proposal is a "quote" even when it asks for a deposit, unless it also says Tax Invoice. "paperwork" for anything that records the work rather than charging for it: a certificate of compliance, producer statement, record of work, warranty, consent, inspection report, statement of account. "photo" for a photograph of the work or the site. "nothing" if it is none of these, such as a logo or a blank page. For a photograph of a printed bill or certificate, use what is printed.
 - addressedToHousehold: for an invoice or quote, true if it is made out to one of the household (their names are given below) or to their address, false if it is plainly made out to somebody else — typically a subcontractor billing the builder. Null if it names nobody or you cannot tell.
 - addressedTo: the name it is made out to, as printed, when that is not the household. Otherwise null.
 - supplier: the business issuing it, written the way it writes its own name. For paperwork, who issued it (the electrician on a certificate). Null for a photo.
 - detail: a few words saying what it is ("Progress claim 2", "Variation — extra decking", "Electrical certificate of compliance"). Null if it does not say.
-- amount: the total to pay, as a number with no currency sign. If there is a total including GST, use that. Null if there is no single total, and null for a photo.
+- amount: the paper's total, as a number with no currency sign, before any payment already made is taken off it. If there is a total including GST, use that. Null if there is no single total, and null for a photo.
+- alreadyPaid: on an invoice, an amount the paper says was already paid towards it and takes off its total — "less deposit paid", "payments received" — as a positive number in the same GST basis as the amount. Null if it takes nothing off.
 - amountInclGst: true if that amount includes GST, false if it is stated as excluding GST, null if it does not say.
 - invoiceNumber: the invoice, quote, claim or certificate number exactly as printed.
 - dated: the paper's date. dueOn: when payment is due. Both as YYYY-MM-DD, null if not stated. New Zealand documents write dates day first.
@@ -274,12 +282,14 @@ export interface BillFields {
   paid: boolean;
   paidOn: string | null;
   paidEvidence: string | null;
+  /** What the paper says was paid before it and takes off its total. Less than the amount, or null. */
+  alreadyPaid: number | null;
   inferred: string[];
 }
 
 export const NOTHING_READ: BillFields = {
   supplier: null, detail: null, amount: null, amountInclGst: true, invoiceNumber: null,
-  dated: null, dueOn: null, paid: false, paidOn: null, paidEvidence: null, inferred: [],
+  dated: null, dueOn: null, paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, inferred: [],
 };
 
 /** One paper, read and checked. */
@@ -351,6 +361,11 @@ export function paperFromReading(raw: unknown): PaperReading | null {
   const paid = kind === 'invoice' && r.paid === true && paidEvidence !== null;
   const statedGst = typeof r.amountInclGst === 'boolean';
   if (amount !== null && !statedGst) inferred.add('amount_incl_gst');
+  // A deduction is a part of the total, so never all of it and never more.
+  const deducted = typeof r.alreadyPaid === 'number' && Number.isFinite(r.alreadyPaid) && r.alreadyPaid > 0
+    ? Math.round(r.alreadyPaid * 100) / 100
+    : null;
+  const alreadyPaid = kind === 'invoice' && deducted !== null && (amount === null || deducted < amount) ? deducted : null;
 
   return {
     kind,
@@ -365,7 +380,31 @@ export function paperFromReading(raw: unknown): PaperReading | null {
     paid,
     paidOn: paid ? isoDay(r.paidOn) : null,
     paidEvidence: paid ? paidEvidence : null,
+    alreadyPaid,
     inferred: [...inferred].sort(),
+  };
+}
+
+const QUOTE_WORDS = /\b(quote|quotation|proposal|estimate)\b/i;
+const BILL_WORDS = /\b(tax invoice|invoice|receipt|statement|paid)\b/i;
+
+/**
+ * A bill that calls itself a quote, made one. Elite Bathroomware's "Quote
+ * 81914" and an architect's "fee proposal" both landed as invoices on the live
+ * job — counted as billed, and as owing, for prices nobody had agreed. Read
+ * from the paper's own name and words: a quote word with no bill word, on a
+ * paper nobody said was paid. The kind is marked guessed, so the card says so.
+ */
+export function quoteByItsWords(card: PaperCard, fileName: string | null): PaperCard {
+  if (card.kind !== 'invoice' || card.paid) return card;
+  const words = [card.detail, card.invoiceNumber, fileName].filter(Boolean).join(' ');
+  if (!QUOTE_WORDS.test(words) || BILL_WORDS.test(words)) return card;
+  return {
+    ...card,
+    kind: 'quote',
+    dueOn: null,
+    alreadyPaid: null,
+    inferred: [...new Set([...card.inferred, 'kind'])].sort(),
   };
 }
 
@@ -412,13 +451,19 @@ function holding(paper: StoredPaper): Pick<PaperCard, 'photoPaths' | 'documentPa
  * Order is the email's own (PDFs first, as `billAttachments` sorts them), with
  * the photos card last. The position is the card's `source_part`.
  */
-export function cardsFromReadings(papers: StoredPaper[], readings: (PaperReading | null)[]): PaperCard[] {
+export function cardsFromReadings(
+  papers: StoredPaper[],
+  readings: (PaperReading | null)[],
+  options: { dropNothing?: boolean } = {},
+): PaperCard[] {
   const cards: PaperCard[] = [];
   const photos: StoredPaper[] = [];
   let unreadPhoto = false;
+  const dropped = new Set(options.dropNothing ? nothingPapers(papers, readings) : []);
 
   papers.forEach((paper, index) => {
     const reading = readings[index] ?? null;
+    if (dropped.has(paper.path)) return;
     if (reading === null) {
       if (paper.isPdf) {
         cards.push({ ...NOTHING_READ, kind: 'invoice', addressedTo: null, inferred: ['kind'], ...holding(paper) });
@@ -433,7 +478,7 @@ export function cardsFromReadings(papers: StoredPaper[], readings: (PaperReading
       return;
     }
     const { kind, ...fields } = reading;
-    cards.push({ ...fields, kind, ...holding(paper) });
+    cards.push(quoteByItsWords({ ...fields, kind, ...holding(paper) }, paper.isPdf ? paperName(paper.path) : null));
   });
 
   if (photos.length > 0) {
@@ -456,6 +501,19 @@ export function cardsFromReadings(papers: StoredPaper[], readings: (PaperReading
   }
 
   return cards;
+}
+
+/**
+ * The papers read as nothing at all — a logo, a blank page — when anything
+ * else in the email was read as something. They become no card, and the
+ * function deletes them: a *Photos* card holding a signature banner is a
+ * decision nobody needs to make. When nothing else was read they stay, because
+ * then a card is all there is to say the email came.
+ */
+export function nothingPapers(papers: StoredPaper[], readings: (PaperReading | null)[]): string[] {
+  const something = readings.some((r) => r !== null && r.kind !== 'nothing');
+  if (!something) return [];
+  return papers.filter((_, i) => readings[i]?.kind === 'nothing').map((p) => p.path);
 }
 
 /**

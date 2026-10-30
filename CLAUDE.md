@@ -2539,6 +2539,79 @@ and `ProjectDetailScreen.test.tsx` pin the above. `supabase/tests/kinds_and_date
 every refusal through the functions against a local stack, and asserts that Invoiced moves when a
 kind changes.
 
+### What the paperwork said that the records did not (October 2026)
+
+A review read every quote, invoice and email on the three live jobs against what was recorded, and
+three of five jobs showed a wrong figure. Each wrong figure had a sentence on its own paper that
+would have caught it. Seven fixes, two migrations, one edge function. **Where anything below
+disagrees, this section wins.**
+
+- **A claim counts inside its contract only when it is linked** (`20261030090000`, reversing the
+  pair rule in *Who is owed what*). The pair rule read every bill from a supplier with a signed
+  price at that scope as a draw on it. On "Main Roof, Deck and Guest Room" that swallowed the roof's
+  two 50% payments against a *different* quote (0104) and a variation into the deck quote
+  (QU-0111): Committed $49,482.20 against Invoiced $111,464.44, still to bill −$61,982.24.
+  `project_scope_money` and `project_supplier_totals` now drop a bill only when its
+  `against_quote_id` names a signed quote. **The failure moved to the safe side**: an unlinked
+  claim counts beside its contract (too much, never too little) until somebody links it.
+  `home.set_quote_claim` links one that already exists, with `create_quote`'s refusals. The bill's
+  sheet asks *A stage of an agreed price?* and offers a **Link** when its words say so
+  (`suggestedClaim`: it names the quote's number, or reads as a deposit, claim or percentage and its
+  business has exactly one quote there). A bill naming a quote the job does not hold gets nothing:
+  that guess is what broke the roof. `project_scenarios.sql` S7 replays the deck.
+- **Agreeing a price asks about the business's expected payments** (`expectedCoveredBy`): the
+  builder's *payment 4/4* is inside a signed contract, and both counted. *Yes* settles them with the
+  contract (`settled_by` on a quote, which `update_expected_cost` always allowed). The contract's
+  sheet then says *Covers …* with Undo.
+- **A quote is not recorded as a bill.** The reader is told a paper titled Quote, Quotation,
+  Estimate or Proposal is a quote unless it says Tax Invoice, and `quoteByItsWords` makes it one
+  from the file name and words if the model does not (kind marked guessed). A waiting card and a
+  bill on the job whose words say quote both say so, with *Make it a quote* (`reviewSaysQuote`,
+  `priceSaysQuote`). Four papers on the live jobs were bills that called themselves quotes.
+- **A bill past its due date asks when it was paid.** Fourteen bills were paid on the day of a
+  tidy-up. *Mark as paid* and the *Paid* pill on *To pay* ask *When was it paid?*: its due date, its
+  date, today, or another day (`asksWhenPaid`, `paidDayChoices`). A part payment takes a date.
+  *Mark the N past their due date as paid…* pays each on its own due date, once confirmed. An
+  emailed bill read as paid is dated by the paper, never by the press.
+- **What a paper says was paid before it is kept** (`20261030090100`: `invoice_reviews.already_paid`).
+  Kitchen Mania's INV-15879 is $27,480.37 less a deposit of $8,244.11, and that deposit, V3, was on
+  the job as its own bill and paid again inside the total. The reader takes the total *before*
+  deductions and the deduction apart. The card offers it ticked: allocating records it as an undated
+  payment (the paper says it was paid, not when), and **the deposit's own bill goes inside the new
+  one** (`depositBillFor`, `billed_through_id`), so it counts once. *Worth checking* names the ones
+  already on the job (`paymentEchoes`).
+- **Emailed bills arrive tidier.** Every image pasted into an email's words is dropped when a PDF
+  came too (banner logos, screenshots of the PDF). A paper read as *nothing* beside a real one is
+  on no card and is deleted from storage (`nothingPapers`). Reading again keeps every file, since
+  `refile_review` insists. A card takes the household's existing spelling of a business
+  (`home.known_supplier`, `home.business_key`, the SQL twin of `businessKey`): "RELIABUILDER
+  LIMITED" and "ReliaBuilder" were two rows in every supplier rollup. A card sent to the wrong job
+  moves to another job **in the same home** (`move_invoice_review`; the files are in this
+  household's folder). A card whose words name rooms offers *Put it there*
+  (`suggestAreas`); 17 of 18 live prices sat on the whole job.
+- **An emailed claim is allocated against its contract** (`reviewClaim`). The card offers *A stage
+  of ReliaBuilder · QU-0111*, ticked. `approve_invoice_review(p_against_quote_id)` lands the bill
+  where the contract sits, linked, and leaves its rooms to the contract.
+- **Worth checking** sits above the totals on the project page, absent at nought: a claim counted
+  beside its contract (with **Link**), a quote on the job twice, a deposit counted twice, and an
+  invoice that reads as a quote. Each row is a figure below that is wrong until somebody looks, and
+  each opens the price where it is fixed.
+
+**Order, because the client and the function move together:** apply `20261030090000` and
+`20261030090100`, `notify pgrst, 'reload schema'`, deploy `inbound-bill` (it sends
+`p_already_paid`, which the old `file_emailed_bill` does not take, so deploying the function before
+the migration files nothing), then merge and deploy. Neither migration is applied by this change.
+Until `20261030090000` is, *Link* answers with the server's refusal. Until `20261030090100` is, a
+card's claim and deduction lines are refused on Allocate (plain allocation still works).
+
+`checks.test.ts` pins every helper against the live papers; `PriceSheet.test.tsx` the claim
+chooser, the *Link*, the paid-date question, the dated part payment, the quote hint and the fold;
+`ProjectDetailScreen.test.tsx` *Worth checking*, the *Paid* pill asking and *Mark the N…*;
+`InvoiceReviewCard.test.tsx` the card's offers; `inboundBill.test.ts` the reader's deduction, the
+quote rule, the pasted images and the logo; `projectSummary.test.ts` the room breakdown under the
+linked rule. `supabase/tests/emailed_bills_say_more.sql` replays the spelling, the deduction, the
+paid date, the linked claim and the move, and holds `business_key` to `businessKey`'s answers.
+
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;
 Schedule stays last because it is the tab you go to with a question rather than the one where work
@@ -3205,6 +3278,10 @@ and status = 'accepted')` while fixing the direct-buy case. The rows added to $7
 Committed line reading $103,574.22 for three days, with nothing on screen able to show it;
 opening the figures is what found it. `20260921110000` restores the scope fallback on top of
 090400's direct-buy handling, measured against the live rows rather than asserted.
+
+**`20261030090000` replaced the pair rule below: a bill is a draw only when it is linked** to a
+signed quote (`against_quote_id`). The pair rule's "one known limit" turned out to be the common
+case — see *What the paperwork said that the records did not*. What follows is its history.
 
 **`20260923090000` moves the fallback from the scope to the pair — this supplier, at this scope.**
 The scope rule was still wrong the other way: once *anybody* signed at a level, *every* invoice

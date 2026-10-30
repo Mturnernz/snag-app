@@ -41,7 +41,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  billAttachments, bytesToBase64, cardFromEmail, cardsFromReadings, emailAddress, inboxToken,
+  billAttachments, bytesToBase64, cardFromEmail, cardsFromReadings, emailAddress, inboxToken, nothingPapers,
   storedPath, stripHtml, verifyWebhook, type AttachmentMeta, type PaperCard, type StoredPaper,
 } from './bill.ts';
 import { readPapers, type PaperFile } from './read.ts';
@@ -168,8 +168,16 @@ async function file(data: Json): Promise<void> {
     forModel, words, Array.isArray(people) ? people : [], MODEL_BUDGET_MS, `inbound-bill: ${emailId}`,
   );
   const cards: PaperCard[] = stored.length > 0
-    ? cardsFromReadings(stored, read.readings)
+    ? cardsFromReadings(stored, read.readings, { dropNothing: true })
     : [cardFromEmail(read.fromEmail)];
+
+  // A logo or a blank page read beside a real paper is on no card, so nothing
+  // would ever point at it. Never fatal: a file left over costs only space.
+  const unwanted = nothingPapers(stored, read.readings);
+  if (unwanted.length > 0) {
+    const { error: removeError } = await db.storage.from(BUCKET).remove(unwanted);
+    if (removeError) console.warn(`inbound-bill: ${emailId} — could not remove ${unwanted.length} unread file(s):`, removeError.message);
+  }
 
   // One card per paper, each filed on its own: the daily ceiling or a bad row
   // stopping the fourth paper must not lose the first three.
@@ -197,6 +205,7 @@ async function file(data: Json): Promise<void> {
       p_source_part: part,
       p_kind: card.kind,
       p_addressed_to: card.addressedTo,
+      p_already_paid: card.alreadyPaid,
     });
     if (fileError) {
       console.error(`inbound-bill: ${emailId} part ${part} — not filed:`, fileError.message);

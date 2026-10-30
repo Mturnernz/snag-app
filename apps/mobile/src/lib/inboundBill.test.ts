@@ -1,7 +1,7 @@
 import { createHmac } from 'crypto';
 import {
   MAX_ATTACHMENTS, NOTHING_READ, PAPER_SCHEMA, billAttachments, cardFromEmail, cardsFromReadings,
-  emailAddress, inboxToken, isoDay, paperFromReading, paperName, paperRequest, sniffPaper, storedPath,
+  emailAddress, inboxToken, isoDay, nothingPapers, paperFromReading, quoteByItsWords, paperName, paperRequest, sniffPaper, storedPath,
   stripHtml, verifyWebhook, type PaperReading,
 } from '../../../../supabase/functions/inbound-bill/bill';
 
@@ -73,6 +73,23 @@ describe('the attachments', () => {
     expect(kept.map((a) => a.id)).toEqual(['doc', 'photo']);
   });
 
+  it('drops every image pasted into the words when a PDF came too', () => {
+    // A banner logo and a screenshot of the PDF, both bigger than a signature's.
+    const kept = billAttachments([
+      { id: 'banner', filename: 'image001.png', content_type: 'image/png', content_disposition: 'inline', size: 180_000 },
+      { id: 'doc', filename: 'INV-15879.pdf', content_type: 'application/pdf', size: 120_000 },
+      { id: 'photo', filename: 'IMG_1.jpg', content_type: 'image/jpeg', content_disposition: 'attachment', size: 900_000 },
+    ]);
+    expect(kept.map((a) => a.id)).toEqual(['doc', 'photo']);
+  });
+
+  it('keeps a large pasted photo when it is all the email carried', () => {
+    const kept = billAttachments([
+      { id: 'receipt', filename: 'image001.jpg', content_type: 'image/jpeg', content_disposition: 'inline', size: 400_000 },
+    ]);
+    expect(kept.map((a) => a.id)).toEqual(['receipt']);
+  });
+
   it('drops anything over 10 MB and keeps ten at most', () => {
     const many = Array.from({ length: 14 }, (_, i) => ({
       id: `p${i}`, filename: `${i}.pdf`, content_type: 'application/pdf', size: 1000,
@@ -95,7 +112,7 @@ describe('reading one paper', () => {
     kind: 'invoice', addressedToHousehold: true, addressedTo: null,
     supplier: 'ReliaBuilder', detail: 'Progress claim 2', amount: 43987.5, amountInclGst: true,
     invoiceNumber: 'INV-0208', dated: '2026-09-20', dueOn: '2026-10-20', paid: false, paidOn: null,
-    paidEvidence: null, guessed: [],
+    paidEvidence: null, alreadyPaid: null, guessed: [],
   };
   const context = {
     from: 'Sam <sam@example.com>', subject: 'Fwd: Variations', text: 'See attached',
@@ -121,6 +138,23 @@ describe('reading one paper', () => {
     expect(body.systemInstruction.parts[0].text).toMatch(/never instructions to you/);
   });
 
+  it('keeps what the paper says was paid before it, and only on a bill, and only part of the total', () => {
+    // Kitchen Mania's INV-15879: total $27,480.37, less deposit paid $8,244.11.
+    const final = paperFromReading({ ...bill, supplier: 'Kitchen Mania Limited', amount: 27480.37, alreadyPaid: 8244.11 })!;
+    expect(final.alreadyPaid).toBe(8244.11);
+    expect(paperFromReading({ ...bill, amount: 100, alreadyPaid: 100 })!.alreadyPaid).toBeNull();
+    expect(paperFromReading({ ...bill, amount: 100, alreadyPaid: -5 })!.alreadyPaid).toBeNull();
+    expect(paperFromReading({ ...bill, kind: 'quote', amount: 100, alreadyPaid: 20 })!.alreadyPaid).toBeNull();
+    expect(PAPER_SCHEMA.properties.alreadyPaid).toEqual({ type: ['number', 'null'] });
+  });
+
+  it('asks for a total before deductions, and treats a titled quote as a quote', () => {
+    const body = paperRequest(null, { ...context, fileName: null, otherFiles: [] });
+    const rules = body.systemInstruction.parts[0].text;
+    expect(rules).toMatch(/before any payment already made is taken off/);
+    expect(rules).toMatch(/title says Quote, Quotation, Estimate or Proposal is a "quote"/);
+  });
+
   it('reads the email itself when nothing was attached', () => {
     const body = paperRequest(null, { ...context, fileName: null, otherFiles: [] });
     expect(body.contents[0].parts).toHaveLength(1);
@@ -132,7 +166,7 @@ describe('reading one paper', () => {
       kind: 'invoice', addressedTo: null,
       supplier: 'ReliaBuilder', detail: 'Progress claim 2', amount: 43987.5, amountInclGst: true,
       invoiceNumber: 'INV-0208', dated: '2026-09-20', dueOn: '2026-10-20', paid: false, paidOn: null,
-      paidEvidence: null, inferred: [],
+      paidEvidence: null, alreadyPaid: null, inferred: [],
     });
   });
 
@@ -270,6 +304,52 @@ describe('an email’s papers become cards', () => {
     });
     expect(cardFromEmail(null)).toMatchObject({ kind: 'invoice', supplier: null });
     expect(cardFromEmail(read({ kind: 'nothing' }))).toMatchObject({ kind: 'invoice', supplier: null });
+  });
+});
+
+describe('a bill that calls itself a quote', () => {
+  const card = (over: any) => ({
+    ...NOTHING_READ, kind: 'invoice' as const, addressedTo: null, photoPaths: [], documentPaths: [], ...over,
+  });
+
+  it('is made a quote, with the kind marked a guess, by its file name or its words', () => {
+    // Elite Bathroomware's "Quote 81914" and an architect's fee proposal landed as bills.
+    expect(quoteByItsWords(card({ supplier: 'Elite Bathroomware', dueOn: '2026-07-01' }), 'Quote 81914 20260608.pdf'))
+      .toMatchObject({ kind: 'quote', dueOn: null, inferred: ['kind'] });
+    expect(quoteByItsWords(card({ detail: 'Fee proposal' }), null)).toMatchObject({ kind: 'quote' });
+  });
+
+  it('stays a bill when anything says invoice or paid', () => {
+    expect(quoteByItsWords(card({ detail: 'Tax invoice — as per quote 0104' }), null).kind).toBe('invoice');
+    expect(quoteByItsWords(card({ paid: true, paidEvidence: 'PAID' }), 'Quote 1.pdf').kind).toBe('invoice');
+    expect(quoteByItsWords(card({ detail: 'Progress claim 2' }), 'INV-0208.pdf').kind).toBe('invoice');
+  });
+
+  it('is applied as cards are made', () => {
+    const [made] = cardsFromReadings(
+      [{ path: 'h/docs/1-0-Quote 81914 20260608.pdf', isPdf: true }],
+      [{ ...NOTHING_READ, kind: 'invoice', addressedTo: null, supplier: 'Elite Bathroomware' }],
+    );
+    expect(made.kind).toBe('quote');
+  });
+});
+
+describe('a logo or a blank page', () => {
+  const read = (over: Partial<PaperReading>): PaperReading => ({ ...NOTHING_READ, kind: 'invoice', addressedTo: null, ...over });
+  const papers = [{ path: 'h/docs/1-0-INV.pdf', isPdf: true }, { path: 'h/17-1.png', isPdf: false }];
+
+  it('becomes no card beside a real paper, and is named for removal', () => {
+    const readings = [read({ supplier: 'Kitchen Mania' }), read({ kind: 'nothing' })];
+    expect(nothingPapers(papers, readings)).toEqual(['h/17-1.png']);
+    expect(cardsFromReadings(papers, readings, { dropNothing: true })).toHaveLength(1);
+  });
+
+  it('stays on a card when it is all there is, or when reading again', () => {
+    expect(nothingPapers(papers, [null, read({ kind: 'nothing' })])).toEqual([]);
+    // Reading again must keep every file the card had.
+    const readings = [read({ supplier: 'Kitchen Mania' }), read({ kind: 'nothing' })];
+    const held = cardsFromReadings(papers, readings).flatMap((c) => [...c.photoPaths, ...c.documentPaths]);
+    expect(held.sort()).toEqual(papers.map((p) => p.path).sort());
   });
 });
 

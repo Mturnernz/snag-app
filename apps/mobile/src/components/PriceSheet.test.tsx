@@ -27,6 +27,7 @@ const mock_setQuoteStatus = jest.fn().mockResolvedValue(undefined);
 const mock_setQuoteRooms = jest.fn().mockResolvedValue([]);
 const mock_setQuoteKind = jest.fn().mockResolvedValue(undefined);
 const mock_updateExpectedCost = jest.fn().mockResolvedValue(undefined);
+const mock_setQuoteClaim = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -41,6 +42,7 @@ jest.mock('../lib/supabase', () => {
     setQuoteRooms: (...a: unknown[]) => mock_setQuoteRooms(...a),
     setFileTags: jest.fn().mockResolvedValue(undefined),
     updateExpectedCost: (...a: unknown[]) => mock_updateExpectedCost(...a),
+    setQuoteClaim: (...a: unknown[]) => mock_setQuoteClaim(...a),
     formatMoney: real.formatMoney,
   };
 });
@@ -105,8 +107,35 @@ describe('a bill', () => {
   it('is paid in one press, for exactly what is owing, dated today', async () => {
     const { r, onChanged } = open();
     await press(r, 'Mark as paid, $4,200');
-    expect(mock_payBill).toHaveBeenCalledWith('b1', 4200, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+    expect(mock_payBill).toHaveBeenCalledWith('b1', 4200, '2026-09-20');
     expect(onChanged).toHaveBeenCalledWith('Paid');
+  });
+
+  it('asks when a bill that fell due before today was paid, offering its due date first', async () => {
+    // Fourteen bills on the live job were marked paid on the day of a tidy-up,
+    // months after they went out: the payment's date was the press, not the bank.
+    const { r, onChanged } = open({ ...bill, dated: '2026-08-28', dueOn: '2026-09-05' });
+    await press(r, 'Mark as paid, $4,200');
+    expect(mock_payBill).not.toHaveBeenCalled();
+    r.getByText('When was it paid?');
+    r.getByText('On its due date');
+    r.getByText('On the bill’s date');
+    await press(r, 'Save');
+    expect(mock_payBill).toHaveBeenCalledWith('b1', 4200, '2026-09-05');
+    expect(onChanged).toHaveBeenCalledWith('Paid · 5 Sep 2026');
+  });
+
+  it('takes another day, and refuses one the calendar has not got', async () => {
+    const { r, onChanged } = open({ ...bill, dated: '2026-08-28', dueOn: '2026-09-05' });
+    await press(r, 'Mark as paid, $4,200');
+    await press(r, 'Another day');
+    await TestRenderer.act(async () => { node(r, 'Paid on', 'onChangeText').props.onChangeText('31/02/2026'); });
+    await press(r, 'Save');
+    expect(mock_payBill).not.toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalledWith('That date isn’t one a calendar has');
+    await TestRenderer.act(async () => { node(r, 'Paid on', 'onChangeText').props.onChangeText('2/9/2026'); });
+    await press(r, 'Save');
+    expect(mock_payBill).toHaveBeenCalledWith('b1', 4200, '2026-09-02');
   });
 
   it('takes a part payment as a payment, never as a flag', async () => {
@@ -114,8 +143,30 @@ describe('a bill', () => {
     await press(r, 'Record a part payment');
     await TestRenderer.act(async () => { node(r, 'Amount paid', 'onChangeText').props.onChangeText('2000'); });
     await press(r, 'Save payment');
-    expect(mock_addPayment).toHaveBeenCalledWith('b1', expect.objectContaining({ amount: 2000 }));
+    expect(mock_addPayment).toHaveBeenCalledWith('b1', expect.objectContaining({ amount: 2000, paidOn: '2026-09-20' }));
     expect(mock_payBill).not.toHaveBeenCalled();
+  });
+
+  it('dates a part payment on the day it is given', async () => {
+    const { r } = open();
+    await press(r, 'Record a part payment');
+    await TestRenderer.act(async () => { node(r, 'Amount paid', 'onChangeText').props.onChangeText('2000'); });
+    await TestRenderer.act(async () => { node(r, 'Paid on', 'onChangeText').props.onChangeText('3/9/2026'); });
+    await press(r, 'Save payment');
+    expect(mock_addPayment).toHaveBeenCalledWith('b1', expect.objectContaining({ amount: 2000, paidOn: '2026-09-03' }));
+  });
+
+  it('says when its own words call it a quote, and makes it one in a press', async () => {
+    const { r } = open({ ...bill, supplier: 'Regency Plumbing', detail: 'Customer Quotation No. 33737' });
+    r.getByText('Its own words call it a quote');
+    await press(r, 'Make it a quote');
+    expect(mock_setQuoteKind).toHaveBeenCalledWith('b1', 'quote');
+  });
+
+  it('says nothing about quote words on a bill already paid against', () => {
+    const paid = { id: 'p', quoteId: 'b1', amount: 100, amountInclGst: true, paidOn: '2026-09-01', reference: null, notes: null, photoPaths: [], documentPaths: [], createdAt: '' };
+    const { r } = open({ ...bill, detail: 'Customer Quotation No. 33737' }, { payments: [paid] });
+    expect(r.queryByText('Its own words call it a quote')).toBeNull();
   });
 
   it('can be corrected', async () => {
@@ -165,7 +216,7 @@ describe('an agreed price', () => {
 
   it('says what has been billed against it and what is left', () => {
     const { r } = open(contract);
-    r.getByText('$46,000');
+    r.getByText('$46,000 · 25%');
     r.getByText('$139,000');
   });
 
@@ -357,5 +408,93 @@ describe('a bill that paid off an earmark', () => {
   it('says nothing about an earmark another bill paid off', () => {
     const { r } = open(bill, { expected: [earmark({ settledBy: 'someone-else' })] });
     expect(r.queryByText('Pays off ReliaBuilder payment 3/4')).toBeNull();
+  });
+});
+
+describe('a stage of an agreed price', () => {
+  const deck = quote({
+    id: 'c1', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', invoiceNumber: 'QU-0111',
+    detail: 'Deck and sub structure replacement', amount: 49482.2, status: 'accepted',
+  });
+  const deposit = quote({
+    id: 'k1', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', detail: 'Deposit Required 20%',
+    kind: 'invoice', amount: 9896.44, unpaid: 0,
+  });
+
+  it('offers the contract a deposit’s words describe, and links it in a press', async () => {
+    const { r, onChanged } = open(deposit, { quotes: [deck, deposit] });
+    r.getByText('Its words say RELIABUILDER LIMITED · QU-0111 — counted on its own until it’s linked');
+    await press(r, 'Link to RELIABUILDER LIMITED · QU-0111');
+    expect(mock_setQuoteClaim).toHaveBeenCalledWith('k1', 'c1');
+    expect(onChanged).toHaveBeenCalledWith('A claim on RELIABUILDER LIMITED · QU-0111');
+  });
+
+  it('lets any quote at the bill’s scope be chosen, and the link be taken off', async () => {
+    const variation = quote({ ...deposit, id: 'k2', detail: 'Variations' });
+    const { r } = open(variation, { quotes: [deck, variation] });
+    r.getByText('No — billed on its own');
+    await press(r, 'A stage of an agreed price?');
+    r.getByText('A stage of an agreed price?');
+    await press(r, 'RELIABUILDER LIMITED · QU-0111');
+    expect(mock_setQuoteClaim).toHaveBeenCalledWith('k2', 'c1');
+
+    const linked = open({ ...variation, againstQuoteId: 'c1' }, { quotes: [deck, variation] });
+    linked.r.getByText('RELIABUILDER LIMITED · QU-0111');
+    await press(linked.r, 'A stage of an agreed price?');
+    await press(linked.r, 'No — it’s billed on its own');
+    expect(mock_setQuoteClaim).toHaveBeenLastCalledWith('k2', null);
+  });
+
+  it('says a claim on a price nobody has agreed still counts on its own', () => {
+    const open_ = { ...deck, status: 'tbc' as const };
+    const { r } = open({ ...deposit, againstQuoteId: 'c1' }, { quotes: [open_, deposit] });
+    r.getByText('RELIABUILDER LIMITED · QU-0111 — not agreed yet, so this counts on its own');
+  });
+
+  it('keeps the chooser open over a refusal', async () => {
+    mock_setQuoteClaim.mockRejectedValueOnce(new Error('A claim has to sit where its contract sits — move one of them first'));
+    const variation = quote({ ...deposit, id: 'k2', detail: 'Variations' });
+    const { r, onChanged } = open(variation, { quotes: [deck, variation] });
+    await press(r, 'A stage of an agreed price?');
+    await press(r, 'RELIABUILDER LIMITED · QU-0111');
+    expect(onChanged).toHaveBeenCalledWith('A claim has to sit where its contract sits — move one of them first');
+    r.getByText('A stage of');
+  });
+
+  it('is not asked of a quote, or of nothing to be a stage of', () => {
+    expect(open(deck, { quotes: [deck] }).r.queryByText('A stage of an agreed price?')).toBeNull();
+    expect(open(deposit, { quotes: [deposit] }).r.queryByText('A stage of an agreed price?')).toBeNull();
+  });
+});
+
+describe('agreeing a price that holds an expected payment', () => {
+  const contract = quote({ id: 'c1', projectId: 'p1', supplier: 'ReliaBuilder', detail: 'QU-0115', amount: 176755, status: 'tbc' });
+  const earmark = (over: any = {}): any => ({
+    id: 'x2', projectId: 'p1', elementId: null, name: 'Reliabuilder payment 4/4',
+    amount: 43987.5, amountInclGst: true, likelySupplier: null, note: null,
+    confirmed: true, settledBy: null, createdAt: '2026-09-24T09:33:57Z', ...over,
+  });
+
+  it('asks whether the business’s expected payments are part of it, and settles them with it', async () => {
+    const { r, onChanged } = open(contract, { expected: [earmark()] });
+    await press(r, 'Agreed');
+    expect(mock_setQuoteStatus).toHaveBeenCalledWith('c1', 'accepted');
+    r.getByText('Is Reliabuilder payment 4/4 part of this price?');
+    const yes = r.root.findAll((n: any) => n.props?.label === 'Yes, it’s included' && n.props?.onPress, { deep: true });
+    await TestRenderer.act(async () => { yes[0].props.onPress(); });
+    expect(mock_updateExpectedCost).toHaveBeenCalledWith('x2', { settledBy: 'c1' });
+    expect(onChanged).toHaveBeenLastCalledWith('Reliabuilder payment 4/4 is part of this price');
+  });
+
+  it('leaves them alone on No, and asks nothing about another business’s', async () => {
+    const { r } = open(contract, { expected: [earmark()] });
+    await press(r, 'Agreed');
+    const no = r.root.findAll((n: any) => n.props?.label === 'No, it’s extra' && n.props?.onPress, { deep: true });
+    await TestRenderer.act(async () => { no[0].props.onPress(); });
+    expect(mock_updateExpectedCost).not.toHaveBeenCalled();
+
+    const other = open(contract, { expected: [earmark({ name: 'Architect fees', likelySupplier: 'Studio North' })] });
+    await press(other.r, 'Agreed');
+    expect(other.r.queryByText('Is Architect fees part of this price?')).toBeNull();
   });
 });

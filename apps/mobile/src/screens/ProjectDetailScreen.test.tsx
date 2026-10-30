@@ -27,7 +27,9 @@ jest.mock('@react-navigation/native', () => ({
 // Each sheet stands in as a line saying whether it is open and on what.
 jest.mock('../components/MoneySheet', () => require('../test/sheetStub').sheetStub('money sheet', (p: any) => JSON.stringify(p.start ?? {})));
 jest.mock('../components/ThingSheet', () => require('../test/sheetStub').sheetStub('thing sheet', (p: any) => p.item?.name ?? null));
-jest.mock('../components/PriceSheet', () => require('../test/sheetStub').sheetStub('price sheet', (p: any) => p.quote?.supplier ?? null));
+jest.mock('../components/PriceSheet', () => require('../test/sheetStub').sheetStub(
+  'price sheet', (p: any) => (p.quote ? `${p.quote.supplier}${p.askWhenPaid ? ' · asking when it was paid' : ''}` : null),
+));
 jest.mock('../components/RoomSheet', () => require('../test/sheetStub').sheetStub('room sheet', (p: any) => p.room?.name ?? null));
 jest.mock('../components/AddThingSheet', () => require('../test/sheetStub').sheetStub('add thing sheet', (p: any) => p.start?.name ?? null));
 jest.mock('../components/ProjectRoomsSheet', () => require('../test/sheetStub').sheetStub('rooms sheet'));
@@ -49,6 +51,7 @@ const mock_renameSupplier = jest.fn().mockResolvedValue(1);
 const mock_updateProject = jest.fn().mockResolvedValue({});
 const mock_updateInvoiceReview = jest.fn().mockResolvedValue({});
 const mock_updateExpectedCost = jest.fn().mockResolvedValue(undefined);
+const mock_setQuoteClaim = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -69,6 +72,7 @@ jest.mock('../lib/supabase', () => {
     deleteQuoteLine: jest.fn(), deleteStoredFiles: jest.fn(), setExpectedCostConfirmed: jest.fn(),
     updateExpectedCost: (...a: unknown[]) => mock_updateExpectedCost(...a), updateExpectedCostLine: jest.fn(),
     updateProject: (...a: unknown[]) => mock_updateProject(...a),
+    setQuoteClaim: (...a: unknown[]) => mock_setQuoteClaim(...a),
     getFileUrls: jest.fn().mockResolvedValue({}),
     // The pure ones are real: mocking the summary would mock away the rule.
     projectSummary: real.projectSummary,
@@ -191,6 +195,16 @@ describe('what is left to decide', () => {
 });
 
 describe('what do we have to pay', () => {
+  // Today is pinned to September 2026: the due dates here were written then,
+  // and a bill past its due date is asked when it was paid. Only Date is faked.
+  beforeEach(() => jest.useFakeTimers({
+    now: new Date(2026, 8, 20, 12),
+    doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask', 'requestAnimationFrame',
+      'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'performance', 'hrtime'],
+  }));
+  afterEach(() => jest.useRealTimers());
+
   it('lists what is owed with its due date', async () => {
     const r = await arrange();
     // Named twice: once owed under To pay, once under Suppliers.
@@ -226,8 +240,40 @@ describe('what do we have to pay', () => {
     r.getByText('Overdue since 20 Jul 2026');
     r.getByText('Due 30 Sep 2026');
     // Each bill under it is still paid on its own.
-    await press(r, 'Mark MSC Consulting June $3,565 as paid');
-    expect(mock_payBill).toHaveBeenCalledWith('m1', 3565, expect.any(String));
+    await press(r, 'Mark msc consulting  August $437 as paid');
+    expect(mock_payBill).toHaveBeenCalledWith('m2', 437, '2026-09-20');
+  });
+
+  it('asks when a bill past its due date was paid, on the bill’s own sheet', async () => {
+    const r = await arrange(downstairs({
+      bills: [bill({ id: 'b1', overdue: true, dueOn: '2026-07-20' })],
+      quotes: [quote({ id: 'b1', kind: 'invoice', supplier: 'ReliaBuilder', amount: 46000, dueOn: '2026-07-20' })],
+    }));
+    await press(r, 'Mark ReliaBuilder $46,000 as paid');
+    expect(mock_payBill).not.toHaveBeenCalled();
+    r.getByText('price sheet open: ReliaBuilder · asking when it was paid');
+  });
+
+  it('marks every bill past its due date paid on that date, once confirmed', async () => {
+    const r = await arrange(downstairs({
+      bills: [
+        bill({ id: 'm1', supplier: 'MSC Consulting', detail: 'June', unpaid: 3565, dueOn: '2026-07-20', overdue: true }),
+        bill({ id: 'm2', supplier: 'MSC Consulting', detail: 'July', dated: '2026-08-01', unpaid: 437, dueOn: null }),
+        bill({ id: 'b9', unpaid: 100, dueOn: '2026-10-05' }),
+      ],
+    }));
+    await press(r, 'Mark the 2 past their due date as paid…');
+    r.getByText('Mark 2 invoices as paid?');
+    expect(mock_payBill).not.toHaveBeenCalled();
+    const yes = r.root.findAll((n: any) => n.props?.label === 'Mark them paid' && n.props?.onPress, { deep: true });
+    await TestRenderer.act(async () => { yes[0].props.onPress(); });
+    expect(mock_payBill.mock.calls).toEqual([['m1', 3565, '2026-07-20'], ['m2', 437, '2026-08-01']]);
+    expect(mock_showToast).toHaveBeenCalledWith('2 paid on their due dates');
+  });
+
+  it('offers no way to pay them all while only one is past due', async () => {
+    const r = await arrange(downstairs({ bills: [bill({ overdue: true, dueOn: '2026-09-01' }), bill({ id: 'b2', dueOn: '2026-10-05' })] }));
+    expect(r.queryByText('Mark the 1 past their due date as paid…')).toBeNull();
   });
 
   it('folds a supplier’s bills under the heading', async () => {
@@ -276,6 +322,16 @@ describe('one way in for money', () => {
 });
 
 describe('what a press costs', () => {
+  // Today is pinned to September 2026: the due dates here were written then,
+  // and a bill past its due date is asked when it was paid. Only Date is faked.
+  beforeEach(() => jest.useFakeTimers({
+    now: new Date(2026, 8, 20, 12),
+    doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask', 'requestAnimationFrame',
+      'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'performance', 'hrtime'],
+  }));
+  afterEach(() => jest.useRealTimers());
+
   it('never has two reads on the wire, however many presses land', async () => {
     const r = await arrange();
     let release!: () => void;
@@ -746,5 +802,40 @@ describe('expected to pay', () => {
       expect(offered('rv1')).toEqual(['x1', 'x2']);
       expect(offered('rv2')).toEqual(['x2']);
     });
+  });
+});
+
+describe('worth checking', () => {
+  const deck = quote({
+    id: 'c1', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', invoiceNumber: 'QU-0111',
+    detail: 'Deck', amount: 49482.2, status: 'accepted',
+  });
+  const deposit = quote({
+    id: 'k1', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', detail: 'Deposit Required 20%',
+    kind: 'invoice', amount: 9896.44, unpaid: 0,
+  });
+
+  it('names a claim counted beside its contract, and links it in a press', async () => {
+    const r = await arrange(downstairs({ quotes: [deck, deposit] }));
+    r.getByText('Worth checking');
+    r.getByText('RELIABUILDER LIMITED · its words say QU-0111 — counted on its own until linked');
+    await press(r, 'Link Deposit Required 20% · $9,896.44 to its agreed price');
+    expect(mock_setQuoteClaim).toHaveBeenCalledWith('k1', 'c1');
+    expect(mock_showToast).toHaveBeenCalledWith('Linked to the agreed price');
+  });
+
+  it('names a quote on the job twice, and an invoice that reads as a quote', async () => {
+    const twin = quote({ id: 'c2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 49482.2 });
+    const regency = quote({ id: 'r1', projectId: 'p1', supplier: 'Regency', kind: 'invoice', detail: 'Customer Quotation No. 33737', amount: 33384.1 });
+    const r = await arrange(downstairs({ quotes: [deck, twin, regency] }));
+    r.getByText('QU-0111 looks like it’s on the job twice');
+    r.getByText('Customer Quotation No. 33737 reads as a quote');
+    await press(r, 'Customer Quotation No. 33737 reads as a quote');
+    r.getByText('price sheet open: Regency');
+  });
+
+  it('is absent when the paperwork and the records agree', async () => {
+    const r = await arrange(downstairs({ quotes: [deck, { ...deposit, againstQuoteId: 'c1' }] }));
+    expect(r.queryByText('Worth checking')).toBeNull();
   });
 });

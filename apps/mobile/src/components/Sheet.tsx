@@ -17,6 +17,8 @@ interface Props {
   children: React.ReactNode;
   /** Pinned under the scroll — the one filled button, when there is one. */
   footer?: React.ReactNode;
+  /** False while something inside is being dragged, so the sheet holds still under the finger. */
+  scrollEnabled?: boolean;
 }
 
 /**
@@ -30,7 +32,7 @@ interface Props {
  * build people install.
  */
 export default function Sheet({
-  visible, title, subtitle, onClose, closeLabel = 'Cancel', children, footer,
+  visible, title, subtitle, onClose, closeLabel = 'Cancel', children, footer, scrollEnabled = true,
 }: Props) {
   const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
@@ -63,6 +65,7 @@ export default function Sheet({
           keyboardShouldPersistTaps="handled"
           style={styles.scroll}
           contentContainerStyle={styles.content}
+          scrollEnabled={scrollEnabled}
         >
           {children}
         </ScrollView>

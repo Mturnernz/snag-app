@@ -168,11 +168,11 @@ describe('confirmed, the answer that turns a guess into a commitment', () => {
     expect(byLabel(r, 'Unconfirmed').props.accessibilityState.selected).toBe(true);
   });
 
-  it('says what each answer means, rather than only naming it', async () => {
+  it('says where each answer counts, in the totals card’s own words', async () => {
     const { r } = arrange();
-    r.getByText('It counts towards the forecast alone, and every figure that holds it says it’s a guess.');
+    r.getByText('Counts as Undecided');
     await TestRenderer.act(async () => byLabel(r, 'Confirmed').props.onPress());
-    r.getByText('It counts as committed, and it’s still not invoiced or paid — so it sits in what’s left to be billed.');
+    r.getByText('Counts as Agreed');
   });
 
   it('carries the answer into the create rather than writing it twice', async () => {

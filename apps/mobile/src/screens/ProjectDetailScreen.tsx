@@ -24,7 +24,6 @@ import SupplierSheet from '../components/SupplierSheet';
 import ProjectStatusSheet from '../components/ProjectStatusSheet';
 import ProjectTitle from '../components/ProjectTitle';
 import EmailBillsSheet from '../components/EmailBillsSheet';
-import ReviewBell from '../components/ReviewBell';
 import ExportSheet, { type ExportScope } from '../components/ExportSheet';
 import StatusBadge from '../components/StatusBadge';
 import MoneySheet, { type MoneyKind } from '../components/MoneySheet';
@@ -32,7 +31,8 @@ import ThingSheet from '../components/ThingSheet';
 import PriceSheet from '../components/PriceSheet';
 import RoomSheet from '../components/RoomSheet';
 import SettleExpectedSheet from '../components/SettleExpectedSheet';
-import { AddRow, Group, Pill, Row, SectionTitle, TextButton, groupedStyles } from '../components/Grouped';
+import Sheet from '../components/Sheet';
+import { AddRow, Group, Pill, RadioRow, Row, SectionTitle, TextButton, groupedStyles } from '../components/Grouped';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useToast } from '../hooks/useToast';
@@ -43,20 +43,22 @@ import {
   createElement, createExpectedCost, createLocation, createThing, deleteElement,
   declineInvoiceReview, deleteExpectedCost, deleteExpectedCostLine, deleteInvoiceReview,
   deleteProject, deleteStoredFiles, describeRoom,
-  formatMoney, getProjectPage, getSupplierNames, liveSetAsides, payBill, projectSummary,
+  formatMoney, getProjectPage, getSupplierNames, liveSetAsides, payBill, projectSummary, setQuoteClaim,
   renameSupplier, restoreInvoiceReview, setExpectedCostConfirmed, updateExpectedCost, updateExpectedCostLine,
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  billFactsOfReview, dayKey, describeDuplicate, describeEmailGroup, describeRenameReach, duplicateReviews,
+  asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, reviewQuote, suggestAreas, duplicateQuotes, paymentEchoes, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
   expectedAmountIncl, expectedPayee, expectedToPay, exportDateStamp, filesBySupplier, formatExactDate,
-  formatLooseDate, groupBySupplier, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
-  remainingTone, reviewAlert, reviewGroups, supplierDirectory,
+  formatLooseDate, groupBySupplier, inclGst, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
+  declinedReviews, remainingTone, reviewGroups, supplierDirectory,
   type RemainingTone, type SupplierEntry, type ThingInput,
 } from '@snag/supabase-queries';
 import {
   filePaperwork, setFileTags, getFileUrl, getFileUrls, rereadInvoiceReview, setInvoiceReviewRooms, updateInvoiceReview,
+  getProjects, moveInvoiceReview, setInvoiceReviewClaim, updateQuote,
 } from '../lib/supabase';
+import ReviewForSheet, { type ReviewFor } from '../components/ReviewForSheet';
 import { describeRooms } from '../components/RoomSplit';
 import { openUrl } from '../lib/openUrl';
 import { loadExportImages, writeExport, type ExportFormat } from '../lib/exportFile';
@@ -104,6 +106,20 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * **Still one request, still single-flight.** The pool is ten connections; see
  * *What a press costs* in CLAUDE.md. `refresh` never has two reads on the wire.
  */
+/**
+ * One row under *Worth checking*: a figure below that is wrong until somebody
+ * looks. It opens where the fix is, or, when it gathers several bills, opens to
+ * list them; its pill does the fix in one press.
+ */
+interface Check {
+  key: string;
+  title: string;
+  subtitle: string;
+  onPress?: () => void;
+  action?: { label: string; a11y: string; run: () => void };
+  rows?: { key: string; title: string; subtitle: string | null; onPress: () => void }[];
+}
+
 export default function ProjectDetailScreen({ route }: Props) {
   const { projectId } = route.params;
   const navigation = useNavigation<Nav>();
@@ -118,6 +134,15 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [money, setMoney] = useState<MoneyStart | null>(null);
   const [openThing, setOpenThing] = useState<string | null>(null);
   const [openPrice, setOpenPrice] = useState<string | null>(null);
+  /** The price sheet opened from a *Paid* press, asking when. */
+  const [askPaid, setAskPaid] = useState(false);
+  /** Paying every old bill on its own due date, once confirmed. */
+  const [payingAll, setPayingAll] = useState(false);
+  /** A waiting card being moved, and the other jobs in this home it can go to. */
+  const [moving, setMoving] = useState<InvoiceReview | null>(null);
+  /** The waiting card whose *For* is being chosen. */
+  const [choosingFor, setChoosingFor] = useState<string | null>(null);
+  const [otherJobs, setOtherJobs] = useState<{ id: string; name: string }[]>([]);
   const [openRoom, setOpenRoom] = useState<string | null>(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
@@ -142,6 +167,10 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [statusOpen, setStatusOpen] = useState(false);
   const [supplierOpen, setSupplierOpen] = useState<string | null>(null);
   const [merging, setMerging] = useState<{ from: SupplierEntry; to: SupplierEntry } | null>(null);
+  // The supplier list, behind its one row on the page.
+  const [suppliersOpen, setSuppliersOpen] = useState(false);
+  // Worth checking rows that gather several bills, opened to list them.
+  const [openChecks, setOpenChecks] = useState<Set<string>>(() => new Set());
   // True while a supplier row is lifted: the page stops scrolling under it.
   const [dragging, setDragging] = useState(false);
 
@@ -242,7 +271,7 @@ export default function ProjectDetailScreen({ route }: Props) {
     setRereadingId(review.id);
     try {
       const { cards } = await rereadInvoiceReview(review.id);
-      await changed(cards > 1 ? `Read — that email held ${cards} papers` : 'Read — check it before you allocate it');
+      await changed(cards > 1 ? `Read · ${cards} papers` : 'Read');
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Couldn’t read that one just now');
     } finally {
@@ -266,6 +295,7 @@ export default function ProjectDetailScreen({ route }: Props) {
 
   const { project, elements, items, quotes } = page;
   const reviews = pendingReviews(page.invoiceReviews);
+  const removedCount = declinedReviews(page.invoiceReviews).length;
   const thing = items.find((i) => i.id === openThing) ?? null;
   const price = quotes.find((q) => q.id === openPrice) ?? null;
   const room = summary.rooms.find((r) => r.key === openRoom) ?? null;
@@ -282,6 +312,164 @@ export default function ProjectDetailScreen({ route }: Props) {
   const expectedRows = page.expected
     .filter((x) => x.settledBy === null)
     .map((x) => ({ id: x.id, supplier: expectedPayee(x, quotes), dated: x.createdAt, x }));
+  const money$ = (n: number) => formatMoney(n) ?? '—';
+  // What the job's own paperwork says that its records do not: each one is a
+  // figure on this page that is wrong until somebody looks.
+  const paperName = (q: ProjectQuote): string => q.invoiceNumber ?? q.detail ?? (q.kind === 'quote' ? 'A quote' : 'An invoice');
+  const paidAgainst = new Set(page.payments.map((p) => p.quoteId));
+  // Several claims against one quote are one row: the reason is the same, and
+  // three rows saying it three times was most of the section. The row opens to
+  // list them, each still opening its own bill; *Link all* links them in turn.
+  const claimGroups = new Map<string, { contract: ProjectQuote; bills: ProjectQuote[] }>();
+  for (const c of unlinkedClaims(quotes)) {
+    const group = claimGroups.get(c.contract.id) ?? { contract: c.contract, bills: [] };
+    group.bills.push(c.bill);
+    claimGroups.set(c.contract.id, group);
+  }
+  const checks: Check[] = [
+    ...[...claimGroups.values()].map(({ contract, bills }): Check => (bills.length === 1
+      ? {
+        key: `claim-${bills[0].id}`,
+        title: `${paperName(bills[0])} · ${money$(bills[0].amountIncl ?? 0)}`,
+        subtitle: `Stage of ${paperName(contract)} · not linked`,
+        onPress: () => setOpenPrice(bills[0].id),
+        action: {
+          label: 'Link',
+          a11y: `Link ${paperName(bills[0])} to its agreed price`,
+          run: () => linkClaims(bills, contract),
+        },
+      }
+      : {
+        key: `claims-${contract.id}`,
+        title: `${bills.length} ${bills[0].supplier ?? 'unnamed'} invoices are stages of ${paperName(contract)}`,
+        subtitle: `${bills.map(paperName).join(' · ')} · not linked`,
+        action: {
+          label: 'Link all',
+          a11y: `Link all ${bills.length} to ${paperName(contract)}`,
+          run: () => linkClaims(bills, contract),
+        },
+        rows: bills.map((b) => ({
+          key: b.id,
+          title: `${paperName(b)} · ${money$(b.amountIncl ?? 0)}`,
+          subtitle: b.detail,
+          onPress: () => setOpenPrice(b.id),
+        })),
+      })),
+    ...duplicateQuotes(quotes).map((d): Check => ({
+      key: `twice-${d.quote.id}`,
+      title: `${paperName(d.quote)} looks like it’s on the job twice`,
+      subtitle: `${d.quote.supplier ?? 'No supplier'} · ${money$(d.quote.amountIncl ?? 0)} each`,
+      onPress: () => setOpenPrice(d.twin.id),
+    })),
+    // Opens the deposit's own bill: *Part of* there is the fix.
+    ...paymentEchoes(quotes, page.payments).map((e): Check => ({
+      key: `echo-${e.payment.id}`,
+      title: `${paperName(e.twin)} looks like ${paperName(e.bill)}’s deposit`,
+      subtitle: `Paid twice · ${money$(inclGst(e.payment.amount, e.payment.amountInclGst) ?? 0)}`,
+      onPress: () => setOpenPrice(e.twin.id),
+    })),
+    ...quotes
+      .filter((q) => !paidAgainst.has(q.id) && !q.againstQuoteId && q.status !== 'declined' && priceSaysQuote(q))
+      .map((q): Check => ({
+        key: `quote-${q.id}`,
+        title: `${paperName(q)} reads as a quote`,
+        subtitle: `${q.supplier ?? 'No supplier'} · recorded as an invoice`,
+        onPress: () => setOpenPrice(q.id),
+      })),
+    // Two spellings of one business. The supplier list is folded behind one
+    // row now, so the offer to merge them comes up here, where it is seen.
+    ...suppliers
+      .filter((from) => from.mergeInto !== null)
+      .flatMap((from): Check[] => {
+        const to = suppliers.find((x) => x.key === from.mergeInto);
+        return to ? [{
+          key: `merge-${from.key}`,
+          title: `${from.name} looks like ${to.name}`,
+          subtitle: 'Same business, two spellings',
+          onPress: () => setSupplierOpen(from.key),
+          action: { label: 'Merge', a11y: `Merge ${from.name} into ${to.name}`, run: () => setMerging({ from, to }) },
+        }] : [];
+      }),
+  ];
+
+  async function openMove(review: InvoiceReview) {
+    setMoving(review);
+    // Read when asked rather than with the page: the pool is ten connections.
+    try {
+      const jobs = await getProjects(project.propertyId);
+      setOtherJobs(jobs.filter((j) => j.id !== project.id).map((j) => ({ id: j.id, name: j.name })));
+    } catch {
+      setOtherJobs([]);
+    }
+  }
+
+  async function moveTo(job: { id: string; name: string }) {
+    const review = moving;
+    setMoving(null);
+    if (!review) return;
+    await rule(review, () => moveInvoiceReview(review.id, job.id), `Moved to ${job.name}`);
+  }
+
+  // *For* on a waiting card: a quote it is a stage of, or an area with no quote.
+  const forReview = reviews.find((r) => r.id === choosingFor) ?? null;
+  async function chooseFor(choice: ReviewFor) {
+    if (!forReview) return;
+    if ('quoteId' in choice) {
+      await setInvoiceReviewClaim(forReview.id, choice.quoteId);
+      const q = quotes.find((x) => x.id === choice.quoteId);
+      await changed(`For ${[q?.invoiceNumber, q?.detail].filter(Boolean).join(' · ') || 'that quote'}`);
+      return;
+    }
+    // No quote is an answer too, so the one its words name is not offered again.
+    await setInvoiceReviewClaim(forReview.id, null);
+    await setInvoiceReviewRooms(forReview.id, choice.elementId ? [choice.elementId] : [], null);
+    await changed(`For ${elements.find((e) => e.id === choice.elementId)?.name ?? 'the whole job'}`);
+  }
+
+  /**
+   * Links claims to the quote they are stages of, one write each and in turn
+   * (the pool is ten connections), then one re-read. A refusal part way says
+   * how many went and why the next did not.
+   */
+  async function linkClaims(bills: ProjectQuote[], contract: ProjectQuote) {
+    let linked = 0;
+    try {
+      for (const bill of bills) {
+        // eslint-disable-next-line no-await-in-loop
+        await setQuoteClaim(bill.id, contract.id);
+        linked += 1;
+      }
+      await changed(bills.length === 1 ? 'Linked to the agreed price' : `Linked all ${bills.length} to ${paperName(contract)}`);
+    } catch (err: unknown) {
+      const why = err instanceof Error ? err.message : 'That didn’t link';
+      if (linked > 0) await changed(`Linked ${linked} of ${bills.length} · ${why}`);
+      else showToast(why);
+    }
+  }
+
+  // Bills that fell due before today, which *Paid* asks the day of.
+  const oldBills = summary.bills.filter((b) => (b.unpaid ?? 0) > 0 && asksWhenPaid(b, today));
+  async function payAllOnDueDates() {
+    setPayingAll(false);
+    if (payingId) return;
+    setPayingId('all');
+    let paid = 0;
+    try {
+      for (const bill of oldBills) {
+        // eslint-disable-next-line no-await-in-loop
+        await payBill(bill.id, bill.unpaid ?? 0, (bill.dueOn ?? bill.dated)!);
+        paid += 1;
+      }
+      await changed(paid === 1 ? 'Paid on its due date' : `${paid} paid on their due dates`);
+    } catch (err: unknown) {
+      await changed(paid > 0
+        ? `${paid} paid on their due dates, then: ${err instanceof Error ? err.message : 'that didn’t save'}`
+        : err instanceof Error ? err.message : 'That didn’t save');
+    } finally {
+      setPayingId(null);
+    }
+  }
+
   const expectedPlace = (x: ProjectExpectedCost): string => {
     const element = elements.find((e) => e.id === x.elementId);
     return element && !element.implicit ? element.room ?? element.name : 'Whole job';
@@ -326,8 +514,14 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
-  async function pay(bill: { id: string; unpaid: number | null }) {
+  async function pay(bill: ProjectBill) {
     if (payingId) return;
+    // A bill that fell due before today is asked when it went out, on its own sheet.
+    if (asksWhenPaid(bill, today)) {
+      setAskPaid(true);
+      setOpenPrice(bill.id);
+      return;
+    }
     setPayingId(bill.id);
     try {
       await payBill(bill.id, bill.unpaid ?? 0, today);
@@ -460,7 +654,6 @@ export default function ProjectDetailScreen({ route }: Props) {
     }
   }
 
-  const money$ = (n: number) => formatMoney(n) ?? '—';
   const dueText = (bill: ProjectBill): string | null => (
     bill.overdue && bill.dueOn ? `Overdue since ${formatExactDate(bill.dueOn)}`
       : bill.dueOn ? `Due ${formatExactDate(bill.dueOn)}` : null
@@ -481,7 +674,6 @@ export default function ProjectDetailScreen({ route }: Props) {
           <Text style={styles.backLabel}>Projects</Text>
         </Pressable>
         <View style={styles.navRight}>
-          <ReviewBell count={reviews.length} onPress={() => setReviewSheetOpen(true)} />
           <Pressable
             onPress={() => openMoney({})}
             style={styles.addTap}
@@ -527,9 +719,16 @@ export default function ProjectDetailScreen({ route }: Props) {
           </View>
         </View>
 
+        {/*
+          ── new bills ──────────────────────────────────────────────────────
+          The cards are the news, so the heading only names and counts them.
+          The removed ones are a quiet line under them, there whenever
+          anything has been removed — the bell that held them hid itself when
+          nothing was waiting, and took the removed ones with it.
+        */}
         {reviews.length > 0 ? (
           <View style={groupedStyles.block}>
-            <SectionTitle title={reviewAlert(page.invoiceReviews) ?? 'Bills waiting'} />
+            <SectionTitle title="New bills" count={reviews.length} />
             {reviewGroups(reviews).map((group) => (
               <View key={group.key} style={styles.emailGroup}>
                 {/*
@@ -545,6 +744,8 @@ export default function ProjectDetailScreen({ route }: Props) {
                 {group.reviews.map((review) => {
                   const twin = duplicates.get(review.id);
                   const paperwork = review.kind === 'paperwork';
+                  const claimOf = reviewQuote(review, quotes);
+                  const deposit = depositBillFor(review, quotes);
                   return (
                   <InvoiceReviewCard
                     key={review.id}
@@ -571,33 +772,91 @@ export default function ProjectDetailScreen({ route }: Props) {
                           : elements.find((e) => e.id === review.elementId && !e.implicit)?.name ?? 'Whole job'
                     }
                     paysOff={cardPaysOff.get(review.id)}
-                    onApprove={(paysOff) => (paperwork
+                    claimOf={claimOf}
+                    onChooseFor={() => setChoosingFor(review.id)}
+                    deposit={deposit}
+                    onApprove={(paysOff, extras = { againstQuoteId: null, recordAlreadyPaid: false }) => (paperwork
                       ? setFiling(review)
                       : rule(
                         review,
                         async () => {
-                          const said = review.kind === 'quote'
-                            ? 'Added as a quote — nothing’s agreed yet'
-                            : review.paid && review.amount !== null ? 'Added, and recorded as paid' : 'Added to the job';
-                          const bill = await approveInvoiceReview(review.id);
+                          let said = review.kind === 'quote'
+                            ? 'Added as a quote'
+                            : extras.againstQuoteId ? 'Added · stage of the quote'
+                              : review.paid && review.amount !== null ? 'Added · paid' : 'Added to the job';
+                          const bill = extras.againstQuoteId || extras.recordAlreadyPaid
+                            ? await approveInvoiceReview(review.id, extras)
+                            : await approveInvoiceReview(review.id);
+                          // The bill is on the job now: a refused follow-up must
+                          // not put the card back, or allocating again would
+                          // record it twice. So each is said, and left to do by hand.
+                          if (extras.recordAlreadyPaid && deposit) {
+                            try {
+                              await updateQuote(deposit.id, { billedThroughId: bill.id });
+                              said = `${said} · ${deposit.invoiceNumber ?? 'the deposit'} included`;
+                            } catch {
+                              said = `${said} · ${deposit.invoiceNumber ?? 'the deposit'} uncategorised`;
+                            }
+                          }
                           if (!paysOff) return said;
-                          // The bill is on the job now; a refused link must not
-                          // put the card back, or allocating again would record
-                          // it twice. So it is said, and left to *Billed*.
                           try {
                             await updateExpectedCost(paysOff.id, { settledBy: bill.id });
                             return `${said} · pays off ${paysOff.name}`;
                           } catch {
-                            return `${said}, but not linked to ${paysOff.name} — use Billed on Expected to pay`;
+                            return `${said} · not linked to ${paysOff.name}`;
                           }
                         },
                       ))}
-                    onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — it’s under the bell')}
+                    onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed')}
                   />
                   );
                 })}
               </View>
             ))}
+            {removedCount > 0 ? (
+              <TextButton label={`${removedCount} removed ›`} onPress={() => setReviewSheetOpen(true)} />
+            ) : null}
+          </View>
+        ) : removedCount > 0 ? (
+          <TextButton label={`${removedCount} removed ›`} onPress={() => setReviewSheetOpen(true)} />
+        ) : null}
+
+        {/*
+          ── worth checking ───────────────────────────────────────────────
+          Each row is a figure below that is wrong until somebody looks: a claim
+          counted beside its contract, a quote entered twice. Absent at nought.
+        */}
+        {checks.length > 0 ? (
+          <View style={groupedStyles.block}>
+            <SectionTitle title="Worth checking" count={checks.length} />
+            <Group>
+              {checks.flatMap((c) => {
+                const open = openChecks.has(c.key);
+                const toggle = () => setOpenChecks((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(c.key)) next.delete(c.key);
+                  else next.add(c.key);
+                  return next;
+                });
+                return [
+                  <Row
+                    key={c.key}
+                    title={c.title}
+                    subtitle={c.subtitle}
+                    onPress={c.rows ? toggle : c.onPress}
+                    expanded={c.rows ? open : undefined}
+                    accessory={c.action ? (
+                      <Pill label={c.action.label} accessibilityLabel={c.action.a11y} onPress={c.action.run} />
+                    ) : undefined}
+                  />,
+                  ...(c.rows && open
+                    ? c.rows.map((row) => (
+                      <Row key={row.key} indent title={row.title} subtitle={row.subtitle} onPress={row.onPress} />
+                    ))
+                    : []),
+                ];
+              })}
+            </Group>
           </View>
         ) : null}
 
@@ -614,9 +873,18 @@ export default function ProjectDetailScreen({ route }: Props) {
               <View style={{ flex: Math.max(1 - barAgreed - barUndecided, 0) }} />
             </View>
           ) : null}
-          <SummaryLine dot={Colors.primary} label="Agreed" value={money$(summary.agreed)} />
-          <View style={styles.hairlineInset} />
-          <SummaryLine dot={Colors.undecided} label="Undecided" value={money$(summary.undecided)} />
+          {/*
+            Agreed and Undecided add up to the total, so they are only worth a
+            line each while something is undecided: with nothing undecided,
+            Agreed is the big figure said again and Undecided is $0.
+          */}
+          {summary.undecided > 0.005 ? (
+            <>
+              <SummaryLine dot={Colors.primary} label="Agreed" value={money$(summary.agreed)} />
+              <View style={styles.hairlineInset} />
+              <SummaryLine dot={Colors.undecided} label="Undecided" value={money$(summary.undecided)} />
+            </>
+          ) : null}
           <View style={styles.hairline} />
           {budget !== null ? (
             <>
@@ -640,6 +908,16 @@ export default function ProjectDetailScreen({ route }: Props) {
               {budget === null ? 'Set a budget' : money$(budget)}
             </Text>
           </Pressable>
+          <View style={styles.hairlineInset} />
+          {/*
+            What has gone out, as a row of the card rather than a tile beside
+            it. To pay and Expected to pay carry their totals on their own
+            headings below, so nothing here says them twice.
+          */}
+          <View style={styles.budgetRow}>
+            <Text style={styles.budgetLabel}>Paid</Text>
+            <Text style={styles.paidValue} numberOfLines={1}>{money$(summary.paid)}</Text>
+          </View>
         </View>
 
         {typedOver ? (
@@ -654,33 +932,6 @@ export default function ProjectDetailScreen({ route }: Props) {
             />
           </Group>
         ) : null}
-
-        <View style={styles.tileStack}>
-          <View style={styles.tiles}>
-            <View style={styles.tile}>
-              <Text style={styles.tileLabel}>Paid</Text>
-              <Text style={styles.tileFigure}>{money$(summary.paid)}</Text>
-            </View>
-            <View style={styles.tile}>
-              <Text style={styles.tileLabel}>To pay</Text>
-              <Text style={styles.tileFigure}>{money$(summary.toPay)}</Text>
-            </View>
-          </View>
-          {/*
-            Its own row: three six-figure amounts at this size do not fit across a
-            phone, and half a number is worse than a tile a row lower. Absent when
-            nothing is earmarked, like the section it heads.
-          */}
-          {toExpect.count > 0 ? (
-            <View style={styles.tileWide}>
-              <Text style={styles.tileLabel}>Expected to pay</Text>
-              <Text style={styles.tileFigure} numberOfLines={1}>{money$(toExpect.total)}</Text>
-              {toExpect.unpriced > 0 ? (
-                <Text style={styles.tileFacts}>+ {toExpect.unpriced} not priced</Text>
-              ) : null}
-            </View>
-          ) : null}
-        </View>
 
         {/* ── what's left to decide ────────────────────────────────────── */}
         {summary.toDecide.length > 0 ? (
@@ -711,7 +962,11 @@ export default function ProjectDetailScreen({ route }: Props) {
         {/* ── what do we have to pay ───────────────────────────────────── */}
         {summary.bills.length > 0 ? (
           <View style={groupedStyles.block}>
-            <SectionTitle title="To pay" count={summary.bills.length} />
+            <SectionTitle
+              title="To pay"
+              count={summary.bills.length}
+              action={<Text style={styles.sectionFigure}>{money$(summary.toPay)}</Text>}
+            />
             <Group>
               {groupBySupplier(summary.bills).flatMap((group) => {
                 const billRow = (bill: ProjectBill, sub: boolean) => (
@@ -765,6 +1020,12 @@ export default function ProjectDetailScreen({ route }: Props) {
                 ];
               })}
             </Group>
+            {oldBills.length > 1 && payingId === null ? (
+              <TextButton
+                label={`Mark the ${oldBills.length} past their due date as paid…`}
+                onPress={() => setPayingAll(true)}
+              />
+            ) : null}
           </View>
         ) : null}
 
@@ -775,7 +1036,15 @@ export default function ProjectDetailScreen({ route }: Props) {
         */}
         {toExpect.count > 0 ? (
           <View style={groupedStyles.block}>
-            <SectionTitle title="Expected to pay" count={toExpect.count} />
+            <SectionTitle
+              title="Expected to pay"
+              count={toExpect.count}
+              action={(
+                <Text style={styles.sectionFigure}>
+                  {[money$(toExpect.total), toExpect.unpriced > 0 ? `+ ${toExpect.unpriced} not priced` : null].filter(Boolean).join(' ')}
+                </Text>
+              )}
+            />
             <Group>
               {groupBySupplier(expectedRows).flatMap((group) => {
                 const expectedRow = (row: (typeof expectedRows)[number], sub: boolean) => {
@@ -800,7 +1069,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                       accessory={(
                         <Pill
                           label="Billed"
-                          accessibilityLabel={`Say which bill paid ${x.name}`}
+                          accessibilityLabel={`Say which invoice paid ${x.name}`}
                           onPress={() => setSettling(x)}
                         />
                       )}
@@ -904,18 +1173,21 @@ export default function ProjectDetailScreen({ route }: Props) {
           </View>
         ) : null}
 
-        {/* ── suppliers ────────────────────────────────────────────────── */}
+        {/*
+          ── suppliers ──────────────────────────────────────────────────────
+          One row that opens the list. It is there to rename and merge, and its
+          figures were the room sheets' and To pay's said again; a likely double
+          spelling is offered under Worth checking, where it is seen.
+        */}
         {suppliers.length > 0 ? (
-          <View style={groupedStyles.block}>
-            <SectionTitle title="Suppliers" count={suppliers.length} />
-            <SupplierList
-              suppliers={suppliers}
-              money={money$}
-              onOpen={(s) => setSupplierOpen(s.key)}
-              onMerge={(from, to) => { setSupplierOpen(null); setMerging({ from, to }); }}
-              onDragChange={setDragging}
+          <Group>
+            <Row
+              title="Suppliers"
+              value={String(suppliers.length)}
+              onPress={() => setSuppliersOpen(true)}
+              accessibilityLabel={`Suppliers, ${suppliers.length}. Rename or merge them`}
             />
-          </View>
+          </Group>
         ) : null}
 
         {/* ── documents ────────────────────────────────────────────────── */}
@@ -983,7 +1255,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         onChoose={async (bill) => {
           if (!settling) return;
           await updateExpectedCost(settling.id, { settledBy: bill.id });
-          await changed(`Paid off by ${bill.invoiceNumber ?? bill.supplier ?? 'that bill'}`);
+          await changed(`Paid off by ${bill.invoiceNumber ?? bill.supplier ?? 'that invoice'}`);
         }}
         onRecord={() => {
           const x = settling;
@@ -1005,8 +1277,9 @@ export default function ProjectDetailScreen({ route }: Props) {
           // The figure first: the split is checked against the bill as it now reads.
           await updateInvoiceReview(checking.id, update);
           await setInvoiceReviewRooms(checking.id, rooms.ids, rooms.amounts);
-          await changed('Saved — it still needs allocating');
+          await changed('Saved');
         }}
+        onMove={checking ? () => { const review = checking; setChecking(null); openMove(review); } : undefined}
       />
 
       <FilePaperworkSheet
@@ -1045,9 +1318,10 @@ export default function ProjectDetailScreen({ route }: Props) {
         quotes={quotes}
         payments={page.payments}
         lines={page.lines}
-        onClose={() => setOpenPrice(null)}
+        onClose={() => { setOpenPrice(null); setAskPaid(false); }}
         onChanged={changed}
-        onOpen={(q) => setOpenPrice(q.id)}
+        onOpen={(q) => { setAskPaid(false); setOpenPrice(q.id); }}
+        askWhenPaid={askPaid}
         elements={elements}
         locations={locations}
         quoteRooms={page.quoteRooms}
@@ -1088,6 +1362,46 @@ export default function ProjectDetailScreen({ route }: Props) {
           }
         }}
         onClose={() => setRoomsOpen(false)}
+      />
+
+      <ReviewForSheet
+        visible={forReview !== null}
+        review={forReview}
+        quotes={quotes}
+        elements={elements}
+        current={forReview ? reviewQuote(forReview, quotes) : null}
+        suggested={forReview ? reviewClaim(forReview, quotes) : null}
+        suggestedAreas={forReview
+          ? suggestAreas([forReview.supplier, forReview.detail, forReview.sourceSubject].filter(Boolean).join(' '), elements)
+          : []}
+        onPick={chooseFor}
+        onClose={() => setChoosingFor(null)}
+      />
+
+      <Sheet
+        visible={moving !== null}
+        title="Which job is it for?"
+        subtitle={moving?.supplier ?? null}
+        onClose={() => setMoving(null)}
+      >
+        {otherJobs.length > 0 ? (
+          <Group>
+            {otherJobs.map((job) => (
+              <RadioRow key={job.id} title={job.name} selected={false} onPress={() => moveTo(job)} />
+            ))}
+          </Group>
+        ) : (
+          <Text style={groupedStyles.caption}>There’s no other job in this home to move it to.</Text>
+        )}
+      </Sheet>
+
+      <ConfirmDialog
+        visible={payingAll}
+        title={`Mark ${oldBills.length} invoices as paid?`}
+        message={`Paid on each due date · ${money$(oldBills.reduce((t, b) => t + (b.unpaid ?? 0), 0))} in all`}
+        confirmLabel="Mark them paid"
+        onCancel={() => setPayingAll(false)}
+        onConfirm={payAllOnDueDates}
       />
 
       <ConfirmDialog
@@ -1161,6 +1475,23 @@ export default function ProjectDetailScreen({ route }: Props) {
         }}
       />
 
+      <Sheet
+        visible={suppliersOpen}
+        title="Suppliers"
+        closeLabel="Done"
+        onClose={() => setSuppliersOpen(false)}
+        scrollEnabled={!dragging}
+      >
+        {/* Each choice closes this first, so one sheet is open at a time. */}
+        <SupplierList
+          suppliers={suppliers}
+          money={money$}
+          onOpen={(x) => { setSuppliersOpen(false); setSupplierOpen(x.key); }}
+          onMerge={(from, to) => { setSuppliersOpen(false); setSupplierOpen(null); setMerging({ from, to }); }}
+          onDragChange={setDragging}
+        />
+      </Sheet>
+
       <SupplierSheet
         supplier={openSupplier}
         all={suppliers}
@@ -1173,9 +1504,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       <ConfirmDialog
         visible={merging !== null}
         title={merging ? `Merge “${merging.from.name}” into “${merging.to.name}”?` : ''}
-        message={merging
-          ? `${describeRenameReach(merging.from)} will be renamed “${merging.to.name}” on this job, so their bills, payments and files sit under one supplier. Agreed and To pay may change once they count as one.`
-          : undefined}
+        message={merging ? 'Totals may change.' : undefined}
         confirmLabel="Merge"
         onCancel={() => setMerging(null)}
         onConfirm={async () => {
@@ -1373,24 +1702,10 @@ const styles = StyleSheet.create({
   budgetLabel: { fontSize: Typography.body, color: Colors.textMuted, paddingLeft: 20 },
   budgetValue: { fontSize: Typography.body, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
   link: { color: Colors.primary },
-  tileStack: { gap: Spacing.md },
-  tiles: { flexDirection: 'row', gap: Spacing.md },
-  tile: {
-    flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.card,
-    paddingVertical: Spacing.md + 2, paddingHorizontal: Spacing.lg, gap: 4,
-  },
-  // Not `flex: 0` — react-native-web writes that as a zero basis, and the
-  // tile collapses round its label with the figure clipped to nothing.
-  tileWide: {
-    backgroundColor: Colors.surface, borderRadius: Radius.card,
-    paddingVertical: Spacing.md + 2, paddingHorizontal: Spacing.lg, gap: 4,
-  },
-  tileLabel: { fontSize: Typography.subhead, color: Colors.textMuted },
-  tileFacts: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textMuted },
-  tileFigure: {
-    fontSize: Typography.title2, lineHeight: 28, fontWeight: Typography.semibold,
-    color: Colors.textPrimary, letterSpacing: -0.3, fontVariant: ['tabular-nums'],
-  },
+  // The figure never shrinks; the label gives way. Ink, because it is money
+  // that has gone out, where the budget beside it is a figure somebody typed.
+  paidValue: { fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'], flexShrink: 0 },
+  sectionFigure: { fontSize: Typography.body, color: Colors.textSecondary, fontVariant: ['tabular-nums'] },
   badgeSlot: { paddingLeft: Spacing.sm },
   docAdds: { paddingHorizontal: 4 },
 });

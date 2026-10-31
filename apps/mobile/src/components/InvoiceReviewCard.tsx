@@ -16,17 +16,25 @@ import PaysOffLine, { usePaysOff } from './PaysOffLine';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   describeAddressedTo, describePaidInference, documentName, formatLooseDate, formatMoney, invoiceReviewHeadline,
-  isUnreadReview, wasInferred, type ExpectedMatch,
+  isUnreadReview, reviewSaysQuote, wasInferred, type ExpectedMatch,
 } from '@snag/supabase-queries';
 import {
   isHorizontalDrag, swipeDecision, swipeLean, swipeProgress, type SwipeDecision,
 } from '../lib/swipeDecision';
-import type { InvoiceReview, InvoiceReviewKind, ProjectExpectedCost } from '../types';
+import type { InvoiceReview, InvoiceReviewKind, ProjectExpectedCost, ProjectQuote } from '../types';
+
+/** What allocating does besides add the bill, from what the card says. */
+export interface ApproveExtras {
+  /** The quote the bill is a stage of, chosen on *For*. */
+  againstQuoteId: string | null;
+  /** Record what the paper says was paid before it — and put the deposit's own bill inside it. */
+  recordAlreadyPaid: boolean;
+}
 
 interface Props {
   review: InvoiceReview;
   /** Allocates it — and, when the *Pays off* line is ticked, the expected payment it pays off. */
-  onApprove: (paysOff: ProjectExpectedCost | null) => void;
+  onApprove: (paysOff: ProjectExpectedCost | null, extras: ApproveExtras) => void;
   onDecline: () => void;
   /** Opens the card to correct what was read off the email before ruling on it. */
   onEdit?: () => void;
@@ -63,6 +71,16 @@ interface Props {
    * The best arrives ticked, and allocating pays it off.
    */
   paysOff?: ExpectedMatch[];
+  /**
+   * The quote this bill goes in as a stage of (`reviewQuote`): the one chosen
+   * on *For*, or the one its words name. Allocating lands it where the quote
+   * sits, linked, so a signed price counts it once. Null, it goes on `landsOn`.
+   */
+  claimOf?: ProjectQuote | null;
+  /** Opens *What's it for?* — a quote, or an area with no quote. */
+  onChooseFor?: () => void;
+  /** The bill on the job the paper's *less deposit paid* is (`depositBillFor`). */
+  deposit?: ProjectQuote | null;
 }
 
 /**
@@ -74,16 +92,16 @@ interface Props {
 const NO_MATCHES: ExpectedMatch[] = [];
 
 const KIND: Record<InvoiceReviewKind, { label: string; yes: string; rail: string; number: string }> = {
-  invoice: { label: 'Invoice', yes: 'Allocate', rail: 'Allocate it', number: 'Invoice' },
+  invoice: { label: 'Invoice', yes: 'Add to job', rail: 'Add to job', number: 'Invoice' },
   quote: { label: 'Quote', yes: 'Add quote', rail: 'Add it', number: 'Quote' },
   paperwork: { label: 'Paperwork', yes: 'File it', rail: 'File it', number: 'Number' },
 };
 
-/** The three answers the pill offers, each saying what it does to the money. */
+/** The three answers the pill offers. */
 export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
-  { value: 'invoice', label: 'Invoice', hint: 'Allocated to the job as something to pay' },
-  { value: 'quote', label: 'Quote', hint: 'Added as a price nobody has agreed to yet' },
-  { value: 'paperwork', label: 'Paperwork', hint: 'Filed on the job — it counts towards no figure' },
+  { value: 'invoice', label: 'Invoice' },
+  { value: 'quote', label: 'Quote' },
+  { value: 'paperwork', label: 'Paperwork' },
 ];
 
 /**
@@ -131,12 +149,17 @@ export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
  */
 export default function InvoiceReviewCard({
   review, onApprove, onDecline, onEdit, busy, onOpenFile, landsOn, duplicate, onOpenDuplicate, onReread, rereading,
-  onChangeKind, paysOff: matches = NO_MATCHES,
+  onChangeKind, paysOff: matches = NO_MATCHES, claimOf = null, onChooseFor, deposit = null,
 }: Props) {
   const pan = useRef(new Animated.Value(0)).current;
   const [choosingKind, setChoosingKind] = useState(false);
   const paysOff = usePaysOff(matches);
-  const approve = () => onApprove(paysOff.chosen);
+  const claiming = review.kind === 'invoice' && claimOf !== null;
+  const alreadyPaid = review.kind === 'invoice' ? review.alreadyPaid ?? null : null;
+  const approve = () => onApprove(paysOff.chosen, {
+    againstQuoteId: claiming ? claimOf!.id : null,
+    recordAlreadyPaid: alreadyPaid !== null,
+  });
   const [width, setWidth] = useState(0);
   const [lean, setLean] = useState<SwipeDecision | null>(null);
   const [progress, setProgress] = useState(0);
@@ -199,6 +222,7 @@ export default function InvoiceReviewCard({
   );
 
   const kind = KIND[review.kind] ?? KIND.invoice;
+  const saysQuote = reviewSaysQuote(review);
   const paperwork = review.kind === 'paperwork';
   // Paperwork with no figure has nothing to say in the money column — "Not
   // priced" would call a certificate an unpriced bill. With one (a
@@ -244,11 +268,15 @@ export default function InvoiceReviewCard({
         style={[styles.card, { transform: [{ translateX: pan }] }]}
         accessibilityLabel={[kind.label, invoiceReviewHeadline(review), amount].filter(Boolean).join(', ')}
       >
+        {/*
+          Who it is from, and nothing else: the number is under *Invoice* and
+          what it is for is on *For*. Saying either twice was most of a line.
+        */}
+        <Text style={styles.headline} numberOfLines={2}>
+          {review.kind !== 'paperwork' && review.supplier ? review.supplier : invoiceReviewHeadline(review)}
+        </Text>
         <View style={styles.headRow}>
           <View style={styles.headText}>
-            <Text style={styles.headline} numberOfLines={2}>
-              {invoiceReviewHeadline(review)}
-            </Text>
             <View style={styles.chips}>
               {/*
                 What kind of paper it is, always — one email can hold a bill, a
@@ -262,6 +290,36 @@ export default function InvoiceReviewCard({
                 onPress={onChangeKind && !busy ? () => setChoosingKind(true) : undefined}
                 accessibilityLabel={`${kind.label}${wasInferred(review, 'kind') ? ', guessed' : ''}. Change what it is`}
               />
+              {/*
+                Its own words call it a quote and it is down as an invoice. The
+                dropdown is the answer, with *Quote* marked Suggested in it; this
+                says so beside the pill rather than in a sentence about money.
+              */}
+              {saysQuote && onChangeKind ? (
+                <Pressable
+                  onPress={busy ? undefined : () => setChoosingKind(true)}
+                  style={styles.suggest}
+                  accessibilityRole="button"
+                  accessibilityLabel="Suggested: Quote. Change what it is"
+                >
+                  <Text style={styles.suggestLabel}>Suggested: Quote</Text>
+                </Pressable>
+              ) : null}
+              {/*
+                The number sits beside the pill that names the paper, so the
+                word is said once: "Invoice ▾  INV-0190", not "Invoice" twice.
+              */}
+              {review.invoiceNumber ? (
+                <View style={styles.numberBeside}>
+                  <Text
+                    style={[styles.factValue, styles.factMono, wasInferred(review, 'invoice_number') ? styles.factGuessed : null]}
+                    accessibilityLabel={`${kind.number} ${review.invoiceNumber}`}
+                  >
+                    {review.invoiceNumber}
+                  </Text>
+                  {wasInferred(review, 'invoice_number') ? <Guessed /> : null}
+                </View>
+              ) : null}
               {review.category ? (
                 <View style={styles.categoryChip}>
                   <Text style={styles.categoryText}>{review.category}</Text>
@@ -287,35 +345,67 @@ export default function InvoiceReviewCard({
           <Text style={styles.guessed}>supplier guessed</Text>
         ) : null}
 
-        {review.detail && !paperwork ? <Text style={styles.detail}>{review.detail}</Text> : null}
+        {/* A quote it is a stage of names what it is for; the bill's own words would repeat it. */}
+        {review.detail && !paperwork && !claiming ? <Text style={styles.detail}>{review.detail}</Text> : null}
 
         {addressed ? <Text style={styles.detail}>{addressed}</Text> : null}
 
         <View style={styles.facts}>
-          {review.invoiceNumber ? (
-            <Fact label={kind.number} value={review.invoiceNumber} mono guessed={wasInferred(review, 'invoice_number')} />
-          ) : null}
           {review.dated ? (
             <Fact label="Dated" value={formatLooseDate(review.dated) ?? review.dated} guessed={wasInferred(review, 'dated')} />
           ) : null}
           {review.dueOn ? (
             <Fact label="Due" value={formatLooseDate(review.dueOn) ?? review.dueOn} guessed={wasInferred(review, 'due_on')} />
           ) : null}
-          {landsOn ? <Fact label="For" value={landsOn} /> : null}
+          {/*
+            A deposit the paper deducts. It is a reading like the dates, so it
+            is a line like them: allocating records it as paid, and puts the
+            deposit's own bill inside this one. The pencil corrects it.
+          */}
+          {alreadyPaid !== null ? (
+            <Fact
+              label="Paid before"
+              value={`${formatMoney(alreadyPaid)}${review.amountInclGst ? '' : ' + GST'}${deposit?.invoiceNumber ? ` (${deposit.invoiceNumber})` : ''}`}
+              guessed={wasInferred(review, 'already_paid')}
+            />
+          ) : null}
+          {!onChooseFor && (claiming || landsOn) ? (
+            <Fact label="For" value={claiming ? forQuote(claimOf!) : landsOn!} />
+          ) : null}
         </View>
 
         {/*
-          Never the flag on its own. The sentence it was read from is what lets
-          somebody disagree with it, and a tick gives them nothing to disagree
-          with.
+          *For* is one choice: a quote it is a stage of, or an area with no
+          quote. It replaced a ticked box offering only the quote the words
+          named, which took most of the card and could not name any other.
         */}
-        {review.kind === 'invoice' ? (
-          <View style={[styles.paidRow, review.paid ? styles.paidYes : styles.paidNo]}>
-            <Icon
-              name={review.paid ? 'checkmark-circle-outline' : 'ellipse-outline'}
-              size="sm"
-              color={review.paid ? Colors.status.done : Colors.status.doingFg}
-            />
+        {onChooseFor && !paperwork ? (
+          <Pressable
+            onPress={onChooseFor}
+            disabled={busy}
+            style={styles.forTap}
+            accessibilityRole="button"
+            accessibilityLabel={`For ${claiming ? forQuote(claimOf!) : landsOn ?? 'Whole job'}. Change what it is for`}
+          >
+            <Text style={styles.factLabel}>For</Text>
+            <View style={styles.forPill}>
+              <Text style={styles.forValue} numberOfLines={1}>
+                {claiming ? forQuote(claimOf!) : landsOn ?? 'Whole job'}
+              </Text>
+              <Icon name="chevron-down" size={14} color={Colors.textSecondary} />
+            </View>
+          </Pressable>
+        ) : null}
+
+        {/*
+          Said only when the email says it was paid, and never the flag on its
+          own: the sentence it was read from is what lets somebody disagree
+          with it. An unpaid bill says nothing, because owing is what a new
+          bill means — a box saying so on every card was most of the card.
+        */}
+        {review.kind === 'invoice' && review.paid ? (
+          <View style={[styles.paidRow, styles.paidYes]}>
+            <Icon name="checkmark-circle-outline" size="sm" color={Colors.status.done} />
             <Text style={styles.paidText}>{describePaidInference(review)}</Text>
           </View>
         ) : null}
@@ -392,7 +482,7 @@ export default function InvoiceReviewCard({
                   onPress={onOpenDuplicate}
                   style={styles.duplicateOpen}
                   accessibilityRole="button"
-                  accessibilityLabel="Open the bill it looks like"
+                  accessibilityLabel="Open the invoice it looks like"
                 >
                   <Text style={styles.duplicateOpenLabel}>Open that one</Text>
                 </Pressable>
@@ -432,12 +522,18 @@ export default function InvoiceReviewCard({
           subtitle={review.supplier}
           options={REVIEW_KIND_OPTIONS}
           value={review.kind}
+          suggested={saysQuote ? 'quote' : null}
           onPick={onChangeKind}
           onClose={() => setChoosingKind(false)}
         />
       ) : null}
     </View>
   );
+}
+
+/** A quote as the *For* line names it: its number and what it is for. */
+function forQuote(q: ProjectQuote): string {
+  return [q.invoiceNumber, q.detail].filter(Boolean).join(' · ') || 'A quote';
 }
 
 /** The mark that keeps a guess from reading as a reading. */
@@ -460,6 +556,8 @@ function Fact({
 }
 
 const styles = StyleSheet.create({
+  suggest: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.xs },
+  suggestLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   duplicate: {
     flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start',
     marginTop: Spacing.sm, padding: Spacing.md, borderRadius: Radius.input,
@@ -490,7 +588,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     ...Shadow.sm,
   },
-  headRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  headRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   // `minWidth: 0` because anything flexed beside a fixed-width sibling needs it
   // on web, where the intrinsic width wins otherwise and pushes the figure off
   // the card — the trap the thing page's spec sheet already paid for.
@@ -508,7 +606,8 @@ const styles = StyleSheet.create({
   },
   detail: { fontSize: Typography.sm, color: Colors.textSecondary },
 
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.xs },
+  numberBeside: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginLeft: Spacing.xs },
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -542,11 +641,19 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   paidYes: { backgroundColor: Colors.status.doneBg },
-  paidNo: { backgroundColor: Colors.status.doingBg },
   paidText: { flex: 1, minWidth: 0, fontSize: Typography.xs, color: Colors.textSecondary },
 
   source: { fontSize: Typography.xs, color: Colors.textMuted },
   amountCol: { alignItems: 'flex-end' },
+  forTap: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    minHeight: MIN_TOUCH_TARGET, alignSelf: 'stretch',
+  },
+  forPill: {
+    flexShrink: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    backgroundColor: Colors.sunken, borderRadius: Radius.chip, paddingHorizontal: Spacing.sm, paddingVertical: 6,
+  },
+  forValue: { flexShrink: 1, minWidth: 0, fontSize: Typography.sm, color: Colors.textPrimary },
   amountAside: { color: Colors.textMuted, fontWeight: Typography.regular },
   unread: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,

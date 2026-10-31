@@ -4563,6 +4563,9 @@ function mapInvoiceReview(row: Row): InvoiceReview {
     paid: !!row.paid,
     paidOn: row.paid_on ?? null,
     paidEvidence: row.paid_evidence ?? null,
+    alreadyPaid: numberOrNull(row.already_paid),
+    againstQuoteId: row.against_quote_id ?? null,
+    claimDecided: row.claim_decided === true,
     category: row.category ?? null,
     sourceRef: row.source_ref ?? null,
     sourceSubject: row.source_subject ?? null,
@@ -6914,6 +6917,7 @@ const INVOICE_REVIEW_CLEARABLE: Record<string, string> = {
   dueOn: 'due_on',
   paidOn: 'paid_on',
   category: 'category',
+  alreadyPaid: 'already_paid',
 };
 
 /**
@@ -6941,6 +6945,8 @@ export interface InvoiceReviewUpdate {
   paid?: boolean;
   paidOn?: string | null;
   category?: string | null;
+  /** What the paper says was paid before it. Cleared, allocating records nothing for it. */
+  alreadyPaid?: number | null;
 }
 
 export async function updateInvoiceReview(
@@ -6966,6 +6972,7 @@ export async function updateInvoiceReview(
     p_category: update.category ?? null,
     p_clear: clear,
     p_kind: update.kind ?? null,
+    p_already_paid: update.alreadyPaid ?? null,
   });
   return mapInvoiceReview(unwrap<Row>(data, error, "That didn’t save"));
 }
@@ -6978,16 +6985,74 @@ export async function updateInvoiceReview(
  * A paid one also records its payment, and only where there is an amount for
  * the payment to be about.
  */
+export interface ApproveOptions {
+  /** The part of the job it lands on; null keeps the card's own answer. */
+  elementId?: string | null;
+  /**
+   * The contract this bill is a claim against. It then lands where the contract
+   * sits, whatever the card said, because a claim has to.
+   */
+  againstQuoteId?: string | null;
+  /** Records what the paper says was already paid as a payment, dated the bill's date. */
+  recordAlreadyPaid?: boolean;
+}
+
 export async function approveInvoiceReview(
   client: SupabaseClient,
   reviewId: string,
-  elementId?: string | null
+  options: ApproveOptions | string | null = {}
 ): Promise<ProjectQuote> {
-  const { data, error } = await client.rpc('approve_invoice_review', {
+  // A bare string is the old second argument, the part of the job.
+  const o: ApproveOptions = typeof options === 'string' || options === null ? { elementId: options } : options;
+  const args: Record<string, unknown> = {
     p_review_id: reviewId,
-    p_element_id: elementId ?? null,
-  });
+    p_element_id: o.elementId ?? null,
+  };
+  // Sent only when used, so this keeps working against a database the
+  // migration has not reached yet.
+  if (o.againstQuoteId) args.p_against_quote_id = o.againstQuoteId;
+  if (o.recordAlreadyPaid) args.p_record_already_paid = true;
+  const { data, error } = await client.rpc('approve_invoice_review', args);
   return mapQuote(unwrap<Row>(data, error, "That didn’t save"));
+}
+
+/**
+ * Says a bill already on the job is a claim against a quote, or (null) that it
+ * is not. The server refuses what `create_quote` refuses — only a bill, only
+ * against a quote, in this job, sitting where its contract sits — in words.
+ */
+export async function setQuoteClaim(
+  client: SupabaseClient,
+  quoteId: string,
+  againstQuoteId: string | null
+): Promise<void> {
+  const { error } = await client.rpc('set_quote_claim', {
+    p_quote_id: quoteId,
+    p_against_quote_id: againstQuoteId,
+  });
+  if (error) throw asError(error, "That didn’t link");
+}
+
+/** Moves a waiting card to another project in the same household. */
+/**
+ * Says which quote a waiting bill is a stage of, or (null) that it is none and
+ * goes on an area. Kept on the card as it is chosen; Allocate reads it.
+ */
+export async function setInvoiceReviewClaim(client: SupabaseClient, reviewId: string, quoteId: string | null) {
+  const { error } = await client.rpc('set_invoice_review_claim', { p_review_id: reviewId, p_quote_id: quoteId });
+  if (error) throw asError(error, "That didn’t save");
+}
+
+export async function moveInvoiceReview(
+  client: SupabaseClient,
+  reviewId: string,
+  projectId: string
+): Promise<void> {
+  const { error } = await client.rpc('move_invoice_review', {
+    p_review_id: reviewId,
+    p_project_id: projectId,
+  });
+  if (error) throw asError(error, "That didn’t move");
 }
 
 /**
@@ -7129,24 +7194,6 @@ export function declinedReviews(reviews: InvoiceReview[]): InvoiceReview[] {
 }
 
 /**
- * What the bell says when it is pressed.
- *
- * **Absent at nought, in the caller.** Like the shopping pill and *Fit* in
- * `PhotoViewer`, a bell with nothing behind it is a control dressed as a
- * choice — so this returns null there rather than "you have 0 objects to
- * review", and the header draws nothing.
- *
- * It counts **pending only**. The bin is reachable through the same bell, but
- * a declined card is not something to review; it is something already ruled
- * on, and counting it would make the number go up when somebody clears one.
- */
-export function reviewAlert(reviews: InvoiceReview[]): string | null {
-  const n = pendingReviews(reviews).length;
-  if (n === 0) return null;
-  return `You have ${n} object${n === 1 ? '' : 's'} to review`;
-}
-
-/**
  * What a card is called.
  *
  * The supplier is what somebody recognises — "ReliaBuilder" answers the
@@ -7252,3 +7299,4 @@ export * from './papers';
 export * from './suppliers';
 export * from './projectDates';
 export * from './expectations';
+export * from './checks';

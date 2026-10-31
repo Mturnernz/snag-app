@@ -125,7 +125,7 @@ export default function ProjectStatusSheet({
     if (next.moved) {
       const day = formatDayFirst(next.moved === 'started' ? next.startedOn : next.finishedOn);
       put(next.moved, day);
-      setMoved(`${next.moved === 'started' ? 'Started' : 'Finished'} moved to ${day} — a job can’t finish before it starts.`);
+      setMoved(`${next.moved === 'started' ? 'Started' : 'Finished'} moved to ${day}`);
     }
     return { startIso: next.startedOn, finishIso: next.finishedOn };
   }

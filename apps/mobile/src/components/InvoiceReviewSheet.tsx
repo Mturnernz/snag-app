@@ -6,7 +6,7 @@ import Icon from './Icon';
 import Button from './Button';
 import { Colors, Fonts, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
-  declinedReviews, formatLooseDate, formatMoney, invoiceReviewHeadline, pendingReviews, reviewAlert,
+  declinedReviews, formatLooseDate, formatMoney, invoiceReviewHeadline,
 } from '@snag/supabase-queries';
 import type { InvoiceReview } from '../types';
 
@@ -21,8 +21,7 @@ interface Props {
 }
 
 /**
- * What the bell opens: how much is waiting, and everything that was thrown
- * away.
+ * The removed cards, opened from the *N removed* line under the waiting ones.
  *
  * **The bin is the whole reason this sheet exists.** Swiping a card left is a
  * judgement made in about a second, which makes it the judgement most likely to
@@ -30,12 +29,11 @@ interface Props {
  * mistakes are found. Without somewhere to look, the cheapest gesture on the
  * screen would also be the only irreversible one.
  *
- * Two rules about what it says:
- *
- * **The count is pending only.** The bin is reached through the same bell, but
- * a removed card is not something to review — it has been ruled on. Counting it
- * would make the number climb as somebody cleared the deck, which is the screen
- * contradicting the work being done to it.
+ * **It holds only what was removed.** It used to open from a bell that also
+ * counted what was waiting, and it said that count again — a third telling of
+ * cards already on the page. The bell went (it hid itself when nothing was
+ * waiting, which took the bin with it), and the line that opens this is there
+ * whenever anything has been removed.
  *
  * **Deleting for good is a second, quieter control.** Restoring is the offer
  * this sheet is making and it gets the button; the × beside it is the one that
@@ -45,41 +43,20 @@ interface Props {
 export default function InvoiceReviewSheet({
   visible, reviews, onClose, onRestore, onDelete, busyId,
 }: Props) {
-  const waiting = pendingReviews(reviews);
   const removed = declinedReviews(reviews);
-  const alert = reviewAlert(reviews);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <View style={styles.header}>
-            <Text style={styles.title}>Invoices</Text>
+            <Text style={styles.title}>Removed</Text>
             <Pressable style={styles.close} onPress={onClose} accessibilityLabel="Close">
               <Icon name="close" size="lg" color={Colors.textSecondary} />
             </Pressable>
           </View>
 
           <ScrollView contentContainerStyle={styles.body}>
-            {/*
-              The same sentence the bell is counting, said in full. It is absent
-              at nought rather than reading "0 objects", on the shopping pill's
-              own rule — but the line under it still explains why, because an
-              empty sheet with nothing on it reads as one that failed to load.
-            */}
-            <Text style={styles.alert}>{alert ?? 'Nothing waiting to be reviewed'}</Text>
-            <Text style={styles.alertHint}>
-              {waiting.length > 0
-                ? 'Swipe right to allocate one to the job, left to remove it. Removed ones come back here.'
-                : 'Anything you remove is kept here, in case that was a mistake.'}
-            </Text>
-
-            <View style={styles.rule} />
-
-            <Text style={styles.sectionHeading}>
-              Removed{removed.length > 0 ? ` · ${removed.length}` : ''}
-            </Text>
-
             {removed.length === 0 ? (
               <Text style={styles.empty}>Nothing has been removed.</Text>
             ) : (
@@ -165,16 +142,6 @@ const styles = StyleSheet.create({
   },
   body: { padding: Spacing.xl, paddingTop: Spacing.sm, gap: Spacing.sm },
 
-  alert: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
-  alertHint: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: 19 },
-
-  rule: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.md },
-
-  sectionHeading: {
-    fontSize: Typography.sm,
-    fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
-  },
   empty: { fontSize: Typography.sm, color: Colors.textMuted },
 
   row: {

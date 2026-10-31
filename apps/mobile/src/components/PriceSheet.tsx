@@ -15,11 +15,12 @@ import { Group, Pill, PrimaryButton, RadioRow, Row, Segmented, TextButton, group
 import { Colors, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import {
   addPayment, deletePayment, deleteQuote, deleteStoredFiles, formatMoney, payBill,
-  setFileTags, setQuoteKind, setQuoteRooms, setQuoteStatus, updateExpectedCost, updateQuote,
+  setFileTags, setQuoteClaim, setQuoteKind, setQuoteRooms, setQuoteStatus, updateExpectedCost, updateQuote,
 } from '../lib/supabase';
 import {
-  billHosts, billsInside, dayKey, expectedAmountIncl, expectedPaidBy, formatDayFirst, formatExactDate, inclGst,
-  isInsideAnotherBill, parseLooseDate,
+  asksWhenPaid, billHosts, billsInside, claimCandidates, dayKey, expectedAmountIncl, expectedCoveredBy, expectedPaidBy,
+  formatDayFirst, formatExactDate, inclGst, isInsideAnotherBill, paidDayChoices, parseLooseDate, priceSaysQuote,
+  suggestedClaim,
 } from '@snag/supabase-queries';
 import type {
   FileTags, Location, ProjectElement, ProjectExpectedCost, ProjectPayment, ProjectQuote, ProjectQuoteLine,
@@ -46,12 +47,14 @@ interface Props {
   fileTags?: FileTags;
   /** The job's expected payments, so a bill can say which one it paid off. */
   expected?: ProjectExpectedCost[];
+  /** Opened from a *Paid* press: go straight to asking when it was paid. */
+  askWhenPaid?: boolean;
 }
 
 /** What a price can be said to be. Paperwork is a waiting card's answer, never a price's. */
 const PRICE_KIND_OPTIONS: KindOption<'quote' | 'invoice'>[] = [
-  { value: 'quote', label: 'Quote', hint: 'A price — it counts once you’ve agreed to it' },
-  { value: 'invoice', label: 'Invoice', hint: 'Something you’ve been charged for, and pay' },
+  { value: 'quote', label: 'Quote' },
+  { value: 'invoice', label: 'Invoice' },
 ];
 
 const parseAmount = (text: string): number | null => {
@@ -95,10 +98,11 @@ const parseAmount = (text: string): number | null => {
  */
 export default function PriceSheet({
   visible, quote, householdId, quotes, payments, lines, onClose, onChanged,
-  onOpen, elements, locations, quoteRooms, onAddRoom, fileTags, expected = [],
+  onOpen, elements, locations, quoteRooms, onAddRoom, fileTags, expected = [], askWhenPaid = false,
 }: Props) {
   const [editing, setEditing] = useState(false);
-  const [placing, setPlacing] = useState(false);
+  /** Choosing what it is part of: a quote it is a stage of, or a bill it sits inside. */
+  const [linking, setLinking] = useState(false);
   const [rooming, setRooming] = useState(false);
   const [rooms, setRooms] = useState<RoomSplitValue>({ ids: [], kind: 'even', typed: {} });
   const [roomError, setRoomError] = useState<string | null>(null);
@@ -113,13 +117,26 @@ export default function PriceSheet({
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [choosingKind, setChoosingKind] = useState(false);
+  /** Asking "When was it paid?" — the figure being paid, once the press has asked. */
+  const [whenPaid, setWhenPaid] = useState<number | null>(null);
+  const [paidDay, setPaidDay] = useState<string>('');
+  const [otherDay, setOtherDay] = useState('');
+  const [partDay, setPartDay] = useState('');
+  /** Opened from a *Paid* press: cancelling or saving the date goes back to the page. */
+  const [straightToPay, setStraightToPay] = useState(false);
+  /** Expected payments from this contract's supplier, offered to the contract once it is agreed. */
+  const [folding, setFolding] = useState<ProjectExpectedCost[]>([]);
 
   useEffect(() => {
     if (!visible || !quote) return;
     setEditing(false);
-    setPlacing(false);
+    setLinking(false);
     setRooming(false);
     setChoosingKind(false);
+    setWhenPaid(null);
+    setOtherDay('');
+    setPartDay('');
+    setFolding([]);
     setRoomError(null);
     setPaying(false);
     setPartAmount('');
@@ -129,6 +146,12 @@ export default function PriceSheet({
     setAmount(quote.amount === null ? '' : String(quote.amount));
     setIncl(quote.amountInclGst);
     setDue(quote.dueOn ? formatDayFirst(quote.dueOn) : '');
+    const straight = askWhenPaid && quote.kind === 'invoice' && (quote.unpaid ?? 0) > 0;
+    setStraightToPay(straight);
+    if (straight) {
+      setPaidDay(paidDayChoices(quote, dayKey(new Date()))[0].day);
+      setWhenPaid(quote.unpaid ?? 0);
+    }
   }, [visible, quote?.id]);
 
   if (!quote) return null;
@@ -159,6 +182,52 @@ export default function PriceSheet({
   // a wrong match puts the earmark back on *Expected to pay* and nothing else.
   const paidOff = expectedPaidBy(quote.id, expected);
   const paidOffAmount = paidOff ? expectedAmountIncl(paidOff) : null;
+  // Whether this bill is a stage of an agreed price — the link the rollups read,
+  // offered when its own words name the quote or a stage of it.
+  const candidates = isBill ? claimCandidates(quote, quotes) : [];
+  const suggestion = isBill && !quote.againstQuoteId ? suggestedClaim(quote, quotes) : null;
+  const canClaim = isBill && !inside && quote.supersedesLineId === null
+    && (quote.againstQuoteId !== null || candidates.length > 0);
+  // Its own words call it a quote: the kind dropdown offers Quote as Suggested.
+  const suggestQuote = isBill && priceSaysQuote(quote) && mine.length === 0 && !quote.againstQuoteId;
+  const dayChoices = paidDayChoices(quote, today);
+
+  /** Pays what is owing — asking when first if the bill fell due before today. */
+  function markPaid() {
+    if (asksWhenPaid(quote!, today)) {
+      setPaidDay(dayChoices[0].day);
+      setOtherDay('');
+      setWhenPaid(unpaid);
+      return;
+    }
+    run(() => payBill(quote!.id, unpaid, today), 'Paid');
+  }
+
+  function savePaidDay() {
+    if (whenPaid === null) return;
+    const day = paidDay === 'other' ? parseLooseDate(otherDay) : paidDay;
+    if (!day) {
+      onChanged(otherDay.trim() ? 'That date isn’t one a calendar has' : 'Say when it was paid');
+      return;
+    }
+    run(() => payBill(quote!.id, whenPaid, day), `Paid · ${formatExactDate(day)}`, straightToPay)
+      .then((ok) => { if (ok) setWhenPaid(null); });
+  }
+
+  /** Agrees or un-agrees the price; agreeing asks about the business's expected payments. */
+  async function setStatus(next: ProjectQuote['status']) {
+    const covered = next === 'accepted' ? expectedCoveredBy(quote!, expected) : [];
+    const ok = await run(() => setQuoteStatus(quote!.id, next), next === 'accepted' ? 'Agreed' : next === 'declined' ? 'Turned down' : 'Saved');
+    if (ok && covered.length > 0) setFolding(covered);
+  }
+
+  function foldEarmarks() {
+    const list = folding;
+    setFolding([]);
+    run(async () => {
+      for (const x of list) await updateExpectedCost(x.id, { settledBy: quote!.id });
+    }, list.length === 1 ? `${list[0].name} is part of this price` : `${list.length} expected payments are part of this price`);
+  }
 
   function openRooms() {
     setRooms(splitValueFrom(roomIds, roomAmounts, quote!.amount, 1));
@@ -172,15 +241,18 @@ export default function PriceSheet({
     run(() => setQuoteRooms(quote!.id, split.ids, split.amounts), 'Saved').then(() => setRooming(false));
   }
 
-  async function run(work: () => Promise<unknown>, message: string, close = false) {
-    if (busy) return;
+  /** Writes, re-reads and says so. True when the write went through. */
+  async function run(work: () => Promise<unknown>, message: string, close = false): Promise<boolean> {
+    if (busy) return false;
     setBusy(true);
     try {
       await work();
       await onChanged(message);
       if (close) onClose();
+      return true;
     } catch (err: unknown) {
       await onChanged(err instanceof Error ? err.message : 'That didn’t save');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -204,7 +276,7 @@ export default function PriceSheet({
 
   const hostName = (q: ProjectQuote) => [q.supplier ?? 'No supplier', q.invoiceNumber].filter(Boolean).join(' · ');
 
-  const status = inside ? 'Inside another bill' : !isBill
+  const status = inside ? 'Included in another invoice' : !isBill
     ? quote.status === 'accepted' ? 'Agreed' : quote.status === 'declined' ? 'Turned down' : 'Not agreed yet'
     : unpaid <= 0 ? 'Paid'
       : overdue ? `Overdue since ${formatExactDate(quote.dueOn)}`
@@ -212,8 +284,10 @@ export default function PriceSheet({
           : mine.length > 0 ? 'Part paid' : 'To pay';
   const tone = inside || !isBill ? 'neutral' : unpaid <= 0 ? 'neutral' : overdue ? 'overdue' : 'due';
 
-  const footer = placing
+  const footer = linking
     ? null
+    : whenPaid !== null
+    ? <PrimaryButton label="Save" onPress={savePaidDay} busy={busy} />
     : rooming
     ? <PrimaryButton label="Save" onPress={saveRooms} busy={busy} />
     : editing
@@ -224,7 +298,7 @@ export default function PriceSheet({
           <PrimaryButton
             label="Mark as paid"
             accessibilityLabel={`Mark as paid, ${formatMoney(unpaid)}`}
-            onPress={() => run(() => payBill(quote.id, unpaid, today), 'Paid')}
+            onPress={markPaid}
             busy={busy}
           />
           <TextButton label="Record a part payment" onPress={() => setPaying(true)} />
@@ -239,7 +313,9 @@ export default function PriceSheet({
             onPress={() => {
               const money = parseAmount(partAmount);
               if (money === null) return;
-              run(() => addPayment(quote.id, { amount: money, amountInclGst: true, paidOn: today }), 'Payment recorded')
+              const day = partDay.trim() ? parseLooseDate(partDay) : today;
+              if (!day) { onChanged('That date isn’t one a calendar has'); return; }
+              run(() => addPayment(quote.id, { amount: money, amountInclGst: true, paidOn: day }), 'Payment recorded')
                 .then(() => setPaying(false));
             }}
           />
@@ -250,40 +326,99 @@ export default function PriceSheet({
     <>
       <Sheet
         visible={visible && !confirmDelete && !choosingKind}
-        title={placing ? 'Part of another bill?' : rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'An invoice' : 'A quote')}
-        subtitle={editing ? null : quote.supplier}
-        onClose={placing ? () => setPlacing(false) : rooming ? () => setRooming(false) : editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
-        closeLabel={placing || rooming || editing || paying ? 'Cancel' : 'Done'}
+        title={linking ? 'Part of' : whenPaid !== null ? 'When was it paid?'
+          : rooming ? 'Rooms' : editing ? 'Edit' : quote.detail ?? (isBill ? 'An invoice' : 'A quote')}
+        // The number beside who it is from: a row reading "Invoice" under a
+        // pill reading "Invoice" said the word twice.
+        subtitle={editing ? null : [quote.supplier, quote.invoiceNumber].filter(Boolean).join(' · ') || null}
+        onClose={linking ? () => setLinking(false) : whenPaid !== null ? (straightToPay ? onClose : () => setWhenPaid(null))
+          : rooming ? () => setRooming(false) : editing ? () => setEditing(false) : paying ? () => setPaying(false) : onClose}
+        closeLabel={linking || whenPaid !== null || rooming || editing || paying ? 'Cancel' : 'Done'}
         footer={footer}
       >
-        {placing ? (
+        {linking ? (
           <>
             <Group>
               <RadioRow
-                title="No — we pay this one"
-                selected={!inside}
+                title="Uncategorised"
+                selected={!inside && !quote.againstQuoteId}
                 onPress={() => {
-                  if (!inside) { setPlacing(false); return; }
-                  run(() => updateQuote(quote.id, { billedThroughId: null }), 'Counted on its own').then(() => setPlacing(false));
+                  if (!inside && !quote.againstQuoteId) { setLinking(false); return; }
+                  run(async () => {
+                    if (quote.againstQuoteId) await setQuoteClaim(quote.id, null);
+                    if (inside) await updateQuote(quote.id, { billedThroughId: null });
+                  }, 'Uncategorised').then((ok) => { if (ok) setLinking(false); });
                 }}
               />
             </Group>
-            <Text style={styles.heading}>Inside</Text>
+            {canClaim ? (
+              <>
+                <Text style={styles.heading}>Stage of</Text>
+                <Group>
+                  {candidates.map((q) => (
+                    <RadioRow
+                      key={q.id}
+                      title={hostName(q)}
+                      accessibilityLabel={`Stage of ${hostName(q)}`}
+                      subtitle={[
+                        q.status === 'accepted' ? 'Agreed' : 'Not agreed yet',
+                        formatMoney(q.amountIncl),
+                        suggestion?.contract.id === q.id ? 'Suggested' : null,
+                      ].filter(Boolean).join(' · ')}
+                      selected={quote.againstQuoteId === q.id}
+                      onPress={() => {
+                        if (quote.againstQuoteId === q.id) { setLinking(false); return; }
+                        run(() => setQuoteClaim(quote.id, q.id), `Stage of ${hostName(q)}`).then((ok) => { if (ok) setLinking(false); });
+                      }}
+                    />
+                  ))}
+                </Group>
+              </>
+            ) : null}
+            {canPlace ? (
+              <>
+                <Text style={styles.heading}>Included in</Text>
+                <Group>
+                  {hosts.map((q) => (
+                    <RadioRow
+                      key={q.id}
+                      title={hostName(q)}
+                      accessibilityLabel={`Included in ${hostName(q)}`}
+                      subtitle={[q.kind === 'invoice' ? 'Invoice' : 'Agreed price', formatMoney(q.amountIncl), q.dated ? formatExactDate(q.dated) : null]
+                        .filter(Boolean).join(' · ')}
+                      selected={quote.billedThroughId === q.id}
+                      onPress={() => {
+                        if (quote.billedThroughId === q.id) { setLinking(false); return; }
+                        run(() => updateQuote(quote.id, { billedThroughId: q.id }), `Included in ${hostName(q)}`).then((ok) => { if (ok) setLinking(false); });
+                      }}
+                    />
+                  ))}
+                </Group>
+              </>
+            ) : null}
+          </>
+        ) : whenPaid !== null ? (
+          <>
+            <Text style={groupedStyles.question}>{`${formatMoney(whenPaid)} — when did it go out?`}</Text>
             <Group>
-              {hosts.map((q) => (
+              {dayChoices.map((c) => (
                 <RadioRow
-                  key={q.id}
-                  title={hostName(q)}
-                  subtitle={[q.kind === 'invoice' ? 'Invoice' : 'Agreed price', formatMoney(q.amountIncl), q.dated ? formatExactDate(q.dated) : null]
-                    .filter(Boolean).join(' · ')}
-                  selected={quote.billedThroughId === q.id}
-                  onPress={() => {
-                    if (quote.billedThroughId === q.id) { setPlacing(false); return; }
-                    run(() => updateQuote(quote.id, { billedThroughId: q.id }), 'Counted inside that bill').then(() => setPlacing(false));
-                  }}
+                  key={c.key}
+                  title={c.key === 'due' ? 'On its due date' : c.key === 'dated' ? 'On the invoice date' : 'Today'}
+                  subtitle={formatExactDate(c.day)}
+                  selected={paidDay === c.day}
+                  onPress={() => setPaidDay(c.day)}
                 />
               ))}
+              <RadioRow title="Another day" selected={paidDay === 'other'} onPress={() => setPaidDay('other')} />
             </Group>
+            {paidDay === 'other' ? (
+              <Group>
+                <View style={styles.field}>
+                  <DateField label="Paid on" value={otherDay} onChangeValue={setOtherDay} pickerTitle="When it was paid" />
+                </View>
+              </Group>
+            ) : null}
           </>
         ) : rooming ? (
           <>
@@ -330,6 +465,16 @@ export default function PriceSheet({
                 accessibilityLabel={`${isBill ? 'Invoice' : 'Quote'}. Change what it is`}
                 style={styles.kind}
               />
+              {suggestQuote ? (
+                <Pressable
+                  onPress={() => setChoosingKind(true)}
+                  style={styles.suggest}
+                  accessibilityRole="button"
+                  accessibilityLabel="Suggested: Quote. Change what it is"
+                >
+                  <Text style={styles.suggestLabel}>Suggested: Quote</Text>
+                </Pressable>
+              ) : null}
               <Text style={styles.amount}>{formatMoney(quote.amountIncl) ?? '—'}</Text>
               <View style={[styles.badge, tone === 'overdue' && styles.badgeOverdue, tone === 'due' && styles.badgeDue]}>
                 <Text style={[styles.badgeLabel, tone === 'overdue' && styles.badgeLabelOverdue, tone === 'due' && styles.badgeLabelDue]}>
@@ -351,7 +496,7 @@ export default function PriceSheet({
                   value={quote.status}
                   onChange={(next) => {
                     if (next === quote.status) return;
-                    run(() => setQuoteStatus(quote.id, next), next === 'accepted' ? 'Agreed' : next === 'declined' ? 'Turned down' : 'Saved');
+                    setStatus(next);
                   }}
                 />
               </View>
@@ -359,11 +504,10 @@ export default function PriceSheet({
 
             <Group>
               {isBill && unpaid > 0 && mine.length > 0 ? <Row title="Still to pay" value={formatMoney(unpaid)} bold /> : null}
-              {isBill && quote.invoiceNumber ? <Row title="Invoice" value={quote.invoiceNumber} tone="muted" /> : null}
               {isBill && quote.dueOn ? <Row title="Due" value={formatExactDate(quote.dueOn)} tone="muted" /> : null}
               {paidOff ? (
                 <Row
-                  title={`Pays off ${paidOff.name}`}
+                  title={`${isBill ? 'Pays off' : 'Covers'} ${paidOff.name}`}
                   subtitle={paidOffAmount !== null
                     ? `${formatMoney(paidOffAmount)} expected · off Expected to pay`
                     : 'Off Expected to pay'}
@@ -380,18 +524,44 @@ export default function PriceSheet({
                   )}
                 />
               ) : null}
-              {canPlace ? (
+              {/*
+                One row for what it is part of, in plain terms: *Stage of* a
+                quote, *Included in* another bill, or *Uncategorised*. They were
+                two rows reading "No" on nearly every bill, then one row of
+                sentences; the one picker behind it offers whichever apply.
+              */}
+              {canPlace || canClaim ? (
                 <Row
-                  title="Part of another bill?"
-                  subtitle={host ? `Inside ${hostName(host)} — not counted on its own` : 'No — we pay this one'}
-                  onPress={() => setPlacing(true)}
+                  title="Part of"
+                  subtitle={contract
+                    ? `Stage of ${hostName(contract)}${contract.status === 'accepted' ? '' : ' · not agreed'}`
+                    : host
+                      ? `Included in ${hostName(host)}`
+                      : suggestion
+                        ? `Uncategorised · suggested: ${suggestion.contract.invoiceNumber ?? hostName(suggestion.contract)}`
+                        : 'Uncategorised'}
+                  onPress={() => setLinking(true)}
+                  accessory={suggestion ? (
+                    <Pill
+                      label="Link"
+                      disabled={busy}
+                      accessibilityLabel={`Link to ${hostName(suggestion.contract)}`}
+                      onPress={() => run(() => setQuoteClaim(quote.id, suggestion.contract.id), `Stage of ${hostName(suggestion.contract)}`)}
+                    />
+                  ) : undefined}
                 />
               ) : null}
               {contract ? (
-                <Row title="Part of" value={contract.detail ?? 'Agreed price'} tone="muted" onPress={() => onOpen(contract)} />
+                <Row title="Open the agreed price" value={contract.detail ?? hostName(contract)} tone="muted" onPress={() => onOpen(contract)} />
               ) : null}
               {!isBill && quote.status === 'accepted' ? (
-                <Row title="Billed so far" value={formatMoney(quote.claimedTotal ?? 0)} />
+                <Row
+                  title="Billed so far"
+                  value={[
+                    formatMoney(quote.claimedTotal ?? 0),
+                    quote.amountIncl ? `${Math.round(((quote.claimedTotal ?? 0) / quote.amountIncl) * 100)}%` : null,
+                  ].filter(Boolean).join(' · ')}
+                />
               ) : null}
               {!isBill && quote.status === 'accepted' ? (
                 <Row
@@ -414,7 +584,6 @@ export default function PriceSheet({
                   onPress={openRooms}
                 />
               ) : null}
-              <Row title="Recorded" value={formatExactDate(dayKey(quote.createdAt))} tone="muted" />
             </Group>
 
             {holds.length > 0 ? (
@@ -432,7 +601,7 @@ export default function PriceSheet({
                   ))}
                   {quote.amountIncl !== null ? (
                     <Row
-                      title="The rest of this bill"
+                      title="The rest of this invoice"
                       value={formatMoney(Math.round((quote.amountIncl - holds.reduce((t, q) => t + (q.amountIncl ?? 0), 0)) * 100) / 100)}
                       tone="muted"
                     />
@@ -443,12 +612,12 @@ export default function PriceSheet({
 
             {claims.length > 0 ? (
               <View style={groupedStyles.block}>
-                <Text style={styles.heading}>Progress bills</Text>
+                <Text style={styles.heading}>Stages</Text>
                 <Group>
                   {claims.map((claim) => (
                     <Row
                       key={claim.id}
-                      title={claim.detail ?? 'Progress bill'}
+                      title={claim.detail ?? 'Stage'}
                       subtitle={(claim.unpaid ?? 0) > 0 ? 'To pay' : 'Paid'}
                       value={formatMoney(claim.amountIncl)}
                       onPress={() => onOpen(claim)}
@@ -489,6 +658,9 @@ export default function PriceSheet({
                 <View style={styles.field}>
                   <MoneyField label="Amount paid" value={partAmount} onChangeValue={setPartAmount} inclusive onChangeInclusive={() => {}} autoFocus />
                 </View>
+                <View style={styles.field}>
+                  <DateField label="Paid on" value={partDay} onChangeValue={setPartDay} pickerTitle="When it was paid" placeholder="Today" />
+                </View>
               </Group>
             ) : null}
 
@@ -518,11 +690,22 @@ export default function PriceSheet({
         subtitle={quote.supplier}
         options={PRICE_KIND_OPTIONS}
         value={isBill ? 'invoice' : 'quote'}
+        suggested={suggestQuote ? 'quote' : null}
         onPick={async (next) => {
           await setQuoteKind(quote.id, next);
-          await onChanged(next === 'invoice' ? 'Now an invoice' : 'Now a quote — not agreed yet');
+          await onChanged(next === 'invoice' ? 'Now an invoice' : 'Now a quote');
         }}
         onClose={() => setChoosingKind(false)}
+      />
+
+      <ConfirmDialog
+        visible={folding.length > 0}
+        title={folding.length === 1 ? `Is ${folding[0].name} part of this price?` : 'Are these part of this price?'}
+        message={folding.map((x) => [x.name, formatMoney(expectedAmountIncl(x))].filter(Boolean).join(' · ')).join('\n')}
+        confirmLabel="Included"
+        cancelLabel="Extra"
+        onCancel={() => setFolding([])}
+        onConfirm={foldEarmarks}
       />
 
       <ConfirmDialog
@@ -547,6 +730,8 @@ export default function PriceSheet({
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', gap: Spacing.sm, paddingVertical: Spacing.sm },
   kind: { alignSelf: 'center' },
+  suggest: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.sm },
+  suggestLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   amount: {
     fontSize: 44, lineHeight: 52, fontWeight: Typography.bold, color: Colors.textPrimary,
     letterSpacing: -1, fontVariant: ['tabular-nums'],

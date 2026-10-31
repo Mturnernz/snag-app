@@ -119,7 +119,7 @@ export default function RoomSheet({
 
       {prices.length > 0 ? (
         <View style={groupedStyles.block}>
-          <Text style={styles.heading}>Quotes and bills</Text>
+          <Text style={styles.heading}>Quotes and invoices</Text>
           <Group>
             {groupBySupplier(prices).flatMap((group) => {
               if (group.rows.length === 1) {

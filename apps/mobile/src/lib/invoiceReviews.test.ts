@@ -1,5 +1,5 @@
 import {
-  declinedReviews, describePaidInference, invoiceReviewHeadline, pendingReviews, reviewAlert,
+  declinedReviews, describePaidInference, invoiceReviewHeadline, pendingReviews,
   wasInferred,
 } from '@snag/supabase-queries';
 import type { InvoiceReview } from '../types';
@@ -17,41 +17,12 @@ const review = (over: Partial<InvoiceReview> = {}): InvoiceReview => ({
   supplier: 'ReliaBuilder Limited', detail: null,
   amount: 43987.5, amountInclGst: true,
   invoiceNumber: 'INV-0208', dated: '2026-07-02', dueOn: '2026-07-02',
-  paid: false, paidOn: null, paidEvidence: null, category: null,
+  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, againstQuoteId: null, claimDecided: false, category: null,
   sourceRef: null, sourceSubject: null, sourceFrom: null, sourceAt: null,
   inferred: [], state: 'pending', quoteId: null, decidedAt: null,
   photoPaths: [], documentPaths: [], roomIds: [], roomAmounts: null,
   createdAt: '2026-07-02T00:00:00Z',
   ...over,
-});
-
-describe('what the bell says', () => {
-  it('counts what is waiting, in words', () => {
-    expect(reviewAlert([review(), review({ id: 'r2' })])).toBe('You have 2 objects to review');
-  });
-
-  it('says one object rather than 1 objects', () => {
-    expect(reviewAlert([review()])).toBe('You have 1 object to review');
-  });
-
-  // The shopping pill's rule, and *Fit* in PhotoViewer: at nought it would be
-  // a control dressed as a choice, and a bell that is always there teaches
-  // people it never means anything.
-  it('is absent at nought rather than reading zero', () => {
-    expect(reviewAlert([])).toBeNull();
-    expect(reviewAlert([review({ state: 'declined' }), review({ id: 'r2', state: 'approved' })]))
-      .toBeNull();
-  });
-
-  // Counting the bin would make the number climb as somebody cleared the deck,
-  // which is the screen contradicting the work being done to it.
-  it('counts pending only, so removing one makes it go down', () => {
-    const deck = [review(), review({ id: 'r2' }), review({ id: 'r3' })];
-    expect(reviewAlert(deck)).toBe('You have 3 objects to review');
-
-    const afterRemoving = deck.map((r) => (r.id === 'r3' ? { ...r, state: 'declined' as const } : r));
-    expect(reviewAlert(afterRemoving)).toBe('You have 2 objects to review');
-  });
 });
 
 describe('the deck and the bin', () => {

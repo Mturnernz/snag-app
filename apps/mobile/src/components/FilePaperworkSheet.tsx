@@ -92,7 +92,7 @@ export default function FilePaperworkSheet({ review, quotes, elements, onClose, 
       key={quote.id}
       title={[quote.supplier ?? 'No supplier', quote.invoiceNumber].filter(Boolean).join(' · ')}
       subtitle={[
-        quote.kind === 'quote' ? 'Quote' : 'Bill',
+        quote.kind === 'quote' ? 'Quote' : 'Invoice',
         quote.amount !== null ? formatMoney(quote.amount) : null,
         quote.dated ? formatLooseDate(quote.dated) : null,
       ].filter(Boolean).join(' · ')}
@@ -118,14 +118,14 @@ export default function FilePaperworkSheet({ review, quotes, elements, onClose, 
             onChange={(next) => { setTag(next ?? 'none'); setGuessed(false); }}
           />
           {guessed && tag !== 'none' ? (
-            <Text style={groupedStyles.hint}>Suggested from its title: {FILE_TAG_LABELS[tag]}</Text>
+            <Text style={groupedStyles.hint}>Suggested: {FILE_TAG_LABELS[tag]}</Text>
           ) : null}
         </>
       ) : null}
 
       {homes.suggested.length > 0 ? (
         <>
-          <SectionTitle title="With the bill it’s about" />
+          <SectionTitle title="With the invoice it’s about" />
           <Group>{homes.suggested.map(billRow)}</Group>
         </>
       ) : null}
@@ -149,12 +149,11 @@ export default function FilePaperworkSheet({ review, quotes, elements, onClose, 
 
       {homes.others.length > 0 ? (
         <>
-          <SectionTitle title={homes.suggested.length > 0 ? 'Another bill' : 'With a bill'} />
+          <SectionTitle title={homes.suggested.length > 0 ? 'Another invoice' : 'With an invoice'} />
           <Group>{homes.others.map(billRow)}</Group>
         </>
       ) : null}
 
-      <Text style={groupedStyles.hint}>It goes with the job’s paperwork. No figure changes.</Text>
       {error ? <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text> : null}
     </Sheet>
   );

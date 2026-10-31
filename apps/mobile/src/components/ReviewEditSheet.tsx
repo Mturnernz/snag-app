@@ -6,7 +6,7 @@ import Sheet from './Sheet';
 import MoneyField from './MoneyField';
 import DateField from './DateField';
 import RoomSplit, { resolveSplit, splitValueFrom, type RoomSplitValue } from './RoomSplit';
-import { Group, PrimaryButton, Segmented, groupedStyles } from './Grouped';
+import { Group, PrimaryButton, Segmented, TextButton, groupedStyles } from './Grouped';
 import { Colors, Spacing, Typography } from '../constants/theme';
 import { formatDayFirst, parseLooseDate, type InvoiceReviewUpdate } from '@snag/supabase-queries';
 import type { InvoiceReview, InvoiceReviewKind, Location, ProjectElement } from '../types';
@@ -34,6 +34,12 @@ interface Props {
   onAddRoom: (name: string) => Promise<string | null>;
   onClose: () => void;
   onSave: (update: InvoiceReviewUpdate, rooms: ReviewRooms) => Promise<void>;
+  /**
+   * Moves the card to another job in the home, for a bill forwarded to the
+   * wrong job's address. Here rather than on the card, because it is rare and
+   * it is a correction like the rest of this sheet.
+   */
+  onMove?: () => void;
 }
 
 const parseAmount = (text: string): number | null | undefined => {
@@ -74,7 +80,7 @@ const parseAmount = (text: string): number | null | undefined => {
  * convention every update in this schema follows. A date or a figure it cannot
  * read holds the sheet open and says which, rather than saving something else.
  */
-export default function ReviewEditSheet({ review, elements, locations, onAddRoom, onClose, onSave }: Props) {
+export default function ReviewEditSheet({ review, elements, locations, onAddRoom, onClose, onSave, onMove }: Props) {
   const [kind, setKind] = useState<InvoiceReviewKind>('invoice');
   const [supplier, setSupplier] = useState('');
   const [detail, setDetail] = useState('');
@@ -83,6 +89,7 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
   const [invoiceNo, setInvoiceNo] = useState('');
   const [dated, setDated] = useState('');
   const [due, setDue] = useState('');
+  const [before, setBefore] = useState('');
   const [rooms, setRooms] = useState<RoomSplitValue>({ ids: [], kind: 'even', typed: {} });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -97,11 +104,17 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
     setInvoiceNo(review.invoiceNumber ?? '');
     setDated(formatDayFirst(review.dated));
     setDue(formatDayFirst(review.dueOn));
+    setBefore(review.alreadyPaid === null ? '' : String(review.alreadyPaid));
     const ids = review.roomIds.length > 0 ? review.roomIds : review.elementId ? [review.elementId] : [];
     setRooms(splitValueFrom(ids, review.roomIds.length > 0 ? review.roomAmounts : null, review.amount, 2));
     setError(null);
     setBusy(false);
   }, [review]);
+
+  // What the paper says was paid before it — a deposit it deducts. Offered only
+  // when the reader found one: it is the card's *Paid before* line, and
+  // emptying it is how somebody says the reader got it wrong.
+  const asksBefore = kind === 'invoice' && review?.alreadyPaid != null;
 
   async function save() {
     if (!review || busy) return;
@@ -109,8 +122,10 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
     const datedIso = parseLooseDate(dated);
     const dueIso = parseLooseDate(due);
     if (figure === undefined) { setError('That amount isn’t a figure.'); return; }
-    if (datedIso === undefined) { setError('The date on the bill isn’t a day the calendar has.'); return; }
+    if (datedIso === undefined) { setError('The invoice date isn’t a day the calendar has.'); return; }
     if (dueIso === undefined) { setError('The due date isn’t a day the calendar has.'); return; }
+    const beforeFigure = parseAmount(before);
+    if (beforeFigure === undefined) { setError('What was paid before isn’t a figure.'); return; }
     const paperwork = kind === 'paperwork';
     // Paperwork is filed on one level when it is filed, so it carries no split.
     const split = paperwork ? { ids: [], amounts: null } : resolveSplit(rooms, figure, 2);
@@ -128,6 +143,8 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
         invoiceNumber: invoiceNo.trim() || null,
         dated: datedIso,
         dueOn: kind === 'invoice' ? dueIso : null,
+        // Only sent when the box was offered, so saving never clears a figure nobody saw.
+        ...(asksBefore ? { alreadyPaid: beforeFigure } : {}),
       }, split);
       onClose();
     } catch (err: unknown) {
@@ -140,7 +157,7 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
   return (
     <Sheet
       visible={review !== null}
-      title={kind === 'paperwork' ? 'Check this paperwork' : kind === 'quote' ? 'Check this quote' : 'Check this bill'}
+      title={kind === 'paperwork' ? 'Check this paperwork' : kind === 'quote' ? 'Check this quote' : 'Check this invoice'}
       subtitle={review?.sourceSubject ?? null}
       onClose={onClose}
       footer={<PrimaryButton label="Save" onPress={save} busy={busy} />}
@@ -152,9 +169,6 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
         onChange={setKind}
         accessibilityLabel="What kind of paper this is"
       />
-      {kind === 'paperwork' ? (
-        <Text style={groupedStyles.hint}>Filed on the job — it doesn’t count towards any figure.</Text>
-      ) : null}
 
       <Group>
         <View style={styles.field}>
@@ -194,11 +208,25 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
           />
         </View>
         <View style={styles.field}>
-          <DateField label="Dated" value={dated} onChangeValue={setDated} pickerTitle="The date on the bill" />
+          <DateField label="Dated" value={dated} onChangeValue={setDated} pickerTitle="The invoice date" />
         </View>
         {kind === 'invoice' ? (
           <View style={styles.field}>
             <DateField label="Due" value={due} onChangeValue={setDue} pickerTitle="When it’s due" />
+          </View>
+        ) : null}
+        {asksBefore ? (
+          <View style={styles.field}>
+            <Text style={styles.label}>Paid before this invoice</Text>
+            <TextInput
+              style={styles.input}
+              value={before}
+              onChangeText={setBefore}
+              keyboardType="decimal-pad"
+              placeholder="Nothing"
+              placeholderTextColor={Colors.textMuted}
+              accessibilityLabel="Paid before this invoice"
+            />
           </View>
         ) : null}
       </Group>
@@ -217,6 +245,8 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
       ) : null}
 
       {error ? <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text> : null}
+
+      {onMove ? <TextButton label="Move to another job" onPress={onMove} /> : null}
     </Sheet>
   );
 }
@@ -224,5 +254,6 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
 const styles = StyleSheet.create({
   field: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm + 2 },
   input: { fontSize: Typography.body, color: Colors.textPrimary, minHeight: 32 },
+  label: { fontSize: Typography.footnote, color: Colors.textMuted },
   error: { fontSize: Typography.sm, color: Colors.danger, paddingHorizontal: 4 },
 });

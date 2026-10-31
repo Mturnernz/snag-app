@@ -301,10 +301,7 @@ export default function ExpectedCostSheet({
             inclusive={incl}
             onChangeInclusive={setIncl}
           />
-          <Text style={styles.hint}>
-            Leave it empty if nobody has given you a figure. It&rsquo;ll show as a gap rather than
-            disappearing.
-          </Text>
+          <Text style={styles.hint}>Optional</Text>
 
           <Text style={styles.label}>PROBABLY FROM</Text>
           <TextInput
@@ -314,11 +311,6 @@ export default function ExpectedCostSheet({
             autoCapitalize="words"
             accessibilityLabel="Who it will probably come from"
           />
-          <Text style={styles.hint}>
-            {confirmed
-              ? 'Confirmed, so this is who the money is owed to — the row shows under who we’re paying.'
-              : 'A hint, not a supplier — you can’t owe money to a guess, so this doesn’t reach who’s owed what yet.'}
-          </Text>
 
           {/* ── the one answer that moves a total ─────────────────────────
               Two named halves, in the app's one chip shape: a sunken well, a
@@ -354,8 +346,8 @@ export default function ExpectedCostSheet({
           </View>
           <Text style={styles.hint}>
             {confirmed
-              ? 'It counts as committed, and it’s still not invoiced or paid — so it sits in what’s left to be billed.'
-              : 'It counts towards the forecast alone, and every figure that holds it says it’s a guess.'}
+              ? 'Counts as Agreed'
+              : 'Counts as Undecided'}
           </Text>
 
           {showElements && elements.length > 0 ? (

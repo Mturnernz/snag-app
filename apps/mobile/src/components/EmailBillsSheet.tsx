@@ -61,7 +61,7 @@ export default function EmailBillsSheet({ visible, projectId, onClose }: Props) 
     setBusy(true);
     try {
       setAddress(await rotateProjectInbox(projectId));
-      showToast('New address — the old one no longer works');
+      showToast('New address');
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't change the address");
     } finally {
@@ -91,8 +91,7 @@ export default function EmailBillsSheet({ visible, projectId, onClose }: Props) 
         </View>
       </Group>
       <Text style={groupedStyles.hint}>
-        Forward bills from the address you sign in with. Each one waits here to be checked before it
-        counts.
+        Forward from the address you sign in with.
       </Text>
       {address ? <TextButton label="Change the address" onPress={rotate} /> : null}
     </Sheet>

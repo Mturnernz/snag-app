@@ -113,3 +113,25 @@ describe('tagging a document', () => {
     expect(onTag).toHaveBeenCalledWith(doc, null);
   });
 });
+
+// Three add buttons side by side on every bill, usually under nothing, were a
+// row of controls standing in for one.
+describe('adding a file', () => {
+  const labelled = (r: ReturnType<typeof render>, label: string) =>
+    r.root.findAll((n: any) => n.props?.accessibilityLabel === label && n.props?.onPress, { deep: true })[0];
+
+  it('is one button, which opens the camera, the library and a PDF', async () => {
+    const { addPhotos } = jest.requireMock('../lib/addPhotos');
+    const r = await arrange([], {});
+    expect(labelled(r, 'Take a photo')).toBeUndefined();
+    expect(labelled(r, 'Attach a PDF')).toBeUndefined();
+    await TestRenderer.act(async () => { labelled(r, 'Add a file').props.onPress(); });
+    // Camera and library are both still offered.
+    expect(labelled(r, 'Choose photos')).toBeDefined();
+    expect(labelled(r, 'Attach a PDF')).toBeDefined();
+    await TestRenderer.act(async () => { labelled(r, 'Take a photo').props.onPress(); });
+    expect(addPhotos).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'camera');
+    // Choosing one closes the choice again.
+    expect(labelled(r, 'Take a photo')).toBeUndefined();
+  });
+});

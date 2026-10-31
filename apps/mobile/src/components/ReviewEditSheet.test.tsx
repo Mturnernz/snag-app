@@ -16,7 +16,7 @@ const review: InvoiceReview = {
   id: 'r1', projectId: 'p1', elementId: null, kind: 'invoice', addressedTo: null, sourcePart: 0,
   supplier: 'Reliabuilder', detail: null, amount: 43987.5, amountInclGst: true,
   invoiceNumber: 'INV-0208', dated: '2026-09-20', dueOn: null,
-  paid: false, paidOn: null, paidEvidence: null, category: null,
+  paid: false, paidOn: null, paidEvidence: null, alreadyPaid: null, againstQuoteId: null, claimDecided: false, category: null,
   sourceRef: 'em_1', sourceSubject: 'Fwd: Claim 2', sourceFrom: 'sam@example.com', sourceAt: null,
   inferred: ['supplier'], state: 'pending', quoteId: null, decidedAt: null,
   createdAt: '2026-09-20T00:00:00Z', photoPaths: [], documentPaths: ['h1/docs/1-2-INV.pdf'], roomIds: [], roomAmounts: null,
@@ -89,7 +89,7 @@ it('writes a correction to the card, an emptied box as a clear, and the one room
 it('does not offer a part that nobody has seen', async () => {
   const { r } = await open([element('e1', 'Downstairs laundry', true)]);
   expect(r.queryByText('Downstairs laundry')).toBeNull();
-  expect(r.queryByText('None ticked — it goes on the whole job.')).not.toBeNull();
+  expect(r.queryByText('Whole job')).not.toBeNull();
 });
 
 describe('more than one room', () => {
@@ -105,7 +105,7 @@ describe('more than one room', () => {
     expect(onSave.mock.calls[0][1]).toEqual({ ids: ['e1', 'e2', 'e3'], amounts: [333.34, 333.33, 333.33] });
   });
 
-  it('takes amounts, says what stays on the whole job, and refuses more than the bill', async () => {
+  it('takes amounts, says what stays on the whole job, and refuses more than the total', async () => {
     const { r, onSave } = await open(rooms, { amount: 1000 });
     await TestRenderer.act(async () => { tap(r, 'Bathroom').props.onPress(); });
     await TestRenderer.act(async () => { tap(r, 'Laundry').props.onPress(); });
@@ -119,7 +119,7 @@ describe('more than one room', () => {
     await TestRenderer.act(async () => { boxes(r)['Laundry share'].props.onChangeText('500'); });
     await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
     expect(onSave).not.toHaveBeenCalled();
-    expect(r.getAllByText('The rooms add up to more than the bill.').length).toBeGreaterThan(0);
+    expect(r.getAllByText('The rooms add up to more than the total.').length).toBeGreaterThan(0);
 
     await TestRenderer.act(async () => { boxes(r)['Laundry share'].props.onChangeText('400'); });
     await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
@@ -191,5 +191,61 @@ describe('what kind of paper it is', () => {
     expect(boxes(r)['Number on it']).toBeDefined();
     await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ kind: 'paperwork' }), { ids: [], amounts: null });
+  });
+});
+
+// The card's *Paid before* line is a reading like the dates, and this is where
+// it is put right: emptied, allocating records nothing for it.
+describe('what the paper says was paid before it', () => {
+  it('is offered only when the reader found one, and never cleared by a save that did not offer it', async () => {
+    const { r, onSave } = await open();
+    expect(boxes(r)['Paid before this invoice']).toBeUndefined();
+    await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('alreadyPaid');
+  });
+
+  it('loads it, and an emptied box clears it', async () => {
+    const { r, onSave } = await open([], { amount: 27480.37, alreadyPaid: 8244.11 });
+    const box = boxes(r)['Paid before this invoice'];
+    expect(box.props.value).toBe('8244.11');
+    await TestRenderer.act(async () => { box.props.onChangeText(''); });
+    await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
+    expect(onSave.mock.calls[0][0]).toMatchObject({ alreadyPaid: null });
+  });
+
+  it('is not asked of a quote', async () => {
+    const { r } = await open([], { kind: 'quote', alreadyPaid: 8244.11 });
+    expect(boxes(r)['Paid before this invoice']).toBeUndefined();
+  });
+});
+
+// Moving a card to another job is rare and a correction, so it lives here
+// rather than as a line on every card.
+describe('a card sent to the wrong job', () => {
+  it('is moved from the foot of the sheet', async () => {
+    const onMove = jest.fn();
+    const onSave = jest.fn().mockResolvedValue(undefined);
+    let r!: RenderResult;
+    await TestRenderer.act(async () => {
+      r = render(
+        <ReviewEditSheet
+          review={review}
+          elements={[]}
+          locations={[]}
+          onAddRoom={jest.fn()}
+          onSave={onSave}
+          onClose={jest.fn()}
+          onMove={onMove}
+        />,
+      );
+    });
+    await TestRenderer.act(async () => { tap(r, 'Move to another job').props.onPress(); });
+    expect(onMove).toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('offers no move when there is nowhere to move it', async () => {
+    const { r } = await open();
+    expect(r.queryByText('Move to another job')).toBeNull();
   });
 });

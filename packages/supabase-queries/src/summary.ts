@@ -205,6 +205,32 @@ export function describeRemaining(
 }
 
 /**
+ * What a finished job cost, as its card says it: *Cost $58,868 · $1,132 under
+ * budget*. A finished job is opened to answer "what did it cost", so the card
+ * answers that and nothing else: no bar, no budget remaining. The figure is the
+ * page's own Expected total, never a second sum, so the card cannot disagree
+ * with the page it opens. Without a budget it is the cost alone; a cost the
+ * page has not been read for yet is *Cost —*, never a figure guessed from paid.
+ */
+export function describeFinishedCost(
+  expected: number | undefined,
+  budget: number | null,
+  money: (n: number) => string,
+): string {
+  if (expected === undefined) return 'Cost —';
+  const cost = `Cost ${money(expected)}`;
+  if (budget === null || budget <= 0) return cost;
+  const gap = round(budget - expected);
+  if (Math.abs(gap) < 0.005) return `${cost} · on budget`;
+  return `${cost} · ${money(Math.abs(gap))} ${gap > 0 ? 'under' : 'over'} budget`;
+}
+
+/** A finished job worth reading a cost for: anything agreed, billed or paid. */
+export function hasCost(p: { committedTotal: number | null; invoicedTotal: number | null; paidTotal: number | null }): boolean {
+  return [p.committedTotal, p.invoicedTotal, p.paidTotal].some((n) => n !== null && n > 0.005);
+}
+
+/**
  * Quotes for the whole job or a room that are still waiting on a decision.
  *
  * A quote for a thing is an option on it and is counted through the thing.
@@ -268,24 +294,20 @@ export function liveSetAsides(page: Pick<ProjectPage, 'quotes' | 'lines'>): Proj
   return page.lines.filter((l) => l.isAllowance && !l.additional && signed.has(l.quoteId));
 }
 
-const supplierKey = (name: string | null): string | null => {
-  const key = name?.trim().toLowerCase();
-  return key ? key : null;
-};
-
 /**
  * What one price on the whole job puts in Agreed, which is the only part of
  * it a room share can move.
  *
  * The same rules the views apply, read off the row: a signed quote counts what
  * it contributes less its open set-asides; a bill counts unless it is a claim
- * (its contract counts instead) or the same supplier has a signed price on the
- * whole job (it is a draw on that). Anything declined, unsigned, or standing
- * in for a set-aside counts nothing here. Getting one of these wrong can only
- * leave money on *Whole job* — the room rows are a remainder, not a second sum.
+ * against a signed quote (the contract counts instead). Who sent it does not
+ * matter — a bill is part of a contract only when it is linked to it
+ * (`20261030090000`). Anything declined, unsigned, or standing in for a
+ * set-aside counts nothing here. Getting one of these wrong can only leave
+ * money on *Whole job* — the room rows are a remainder, not a second sum.
  */
 export function agreedContribution(page: Pick<ProjectPage, 'quotes'>, q: ProjectQuote): number {
-  if (q.status === 'declined' || q.supersedesLineId || q.againstQuoteId) return 0;
+  if (q.status === 'declined' || q.supersedesLineId) return 0;
   // A bill inside another bill counts through that one — the views drop it too.
   if (q.kind === 'invoice' && q.billedThroughId) return 0;
   if (q.kind === 'quote') {
@@ -293,11 +315,11 @@ export function agreedContribution(page: Pick<ProjectPage, 'quotes'>, q: Project
       ? round((q.effectiveAmount ?? q.amountIncl ?? 0) - q.allowanceOpen)
       : 0;
   }
-  const key = supplierKey(q.supplier);
-  const signed = key !== null && page.quotes.some((o) =>
-    o.id !== q.id && o.kind === 'quote' && o.status === 'accepted'
-      && o.projectId !== null && o.projectId === q.projectId && supplierKey(o.supplier) === key);
-  return signed ? 0 : q.amountIncl ?? 0;
+  if (q.againstQuoteId) {
+    const contract = page.quotes.find((o) => o.id === q.againstQuoteId);
+    if (contract && contract.kind === 'quote' && contract.status === 'accepted') return 0;
+  }
+  return q.amountIncl ?? 0;
 }
 
 /**
@@ -514,13 +536,18 @@ export function describeRoom(room: RoomRow, money: (n: number) => string): strin
   if (room.openQuotes > 0) {
     parts.push(room.openQuotes === 1 ? '1 quote not agreed' : `${room.openQuotes} quotes not agreed`);
   }
-  if (room.shared > 0) parts.push(`${money(room.shared)} of shared bills`);
-  else if (room.sharedCount > 0) {
-    parts.push(room.sharedCount === 1 ? 'On 1 shared bill' : `On ${room.sharedCount} shared bills`);
-  }
+  // The figure is on the row's right already: when shared bills are all the
+  // room holds, saying their dollars again was the figure twice.
+  const onShared = room.sharedCount === 1 ? 'On 1 shared bill' : `On ${room.sharedCount} shared bills`;
+  if (room.shared > 0 && Math.abs(room.shared - room.total) >= 0.005) parts.push(`${money(room.shared)} of shared bills`);
+  else if (room.sharedCount > 0) parts.push(onShared);
+  else if (room.shared > 0) parts.push('From shared bills');
   if (parts.length === 0 && room.supplierCount > 0) {
     parts.push(room.supplierCount === 1 ? '1 supplier' : `${room.supplierCount} suppliers`);
   }
+  // A room with nothing on it says so, rather than a bare row that reads as
+  // a figure that failed to load.
+  if (parts.length === 0 && Math.abs(room.total) < 0.005) parts.push('Nothing yet');
   return parts.join(' · ');
 }
 

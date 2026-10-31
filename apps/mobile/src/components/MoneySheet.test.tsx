@@ -113,7 +113,7 @@ describe('what have you got?', () => {
     const { r } = open();
     await press(r, 'An invoice');
     await pickSupplier(r, 'Tile Space');
-    r.getByText('New bill');
+    r.getByText('New invoice');
     r.getByText('Tile Space');
   });
 });
@@ -200,11 +200,11 @@ describe('a bill', () => {
     await press(r, 'An invoice');
     await pickSupplier(r, 'ReliaBuilder');
     await type(r, 'Amount', '40000');
-    r.getByText('Is this part of an agreed price?');
+    r.getByText('Part of');
     r.getByText('$185,000 · $46,000 billed so far');
     await press(r, 'Save');
     expect(mock_createQuote).not.toHaveBeenCalled();
-    await press(r, 'Building contract');
+    await press(r, 'Stage of Building contract');
     r.getByText('$99,000 left to bill after this one');
     await press(r, 'Save');
     // It lands exactly where its contract sits, and says which contract.
@@ -219,9 +219,9 @@ describe('a bill', () => {
     const { r } = open({ quotes: [contract, variation] });
     await press(r, 'An invoice');
     await pickSupplier(r, 'ReliaBuilder');
-    r.getByText('Building contract');
-    r.getByText('Variation — stone benchtop');
-    r.getByText('No, it’s extra');
+    r.getByText('Stage of Building contract');
+    r.getByText('Stage of Variation — stone benchtop');
+    r.getByText('Uncategorised');
   });
 
   it('that is extra is not a claim on anything', async () => {
@@ -229,7 +229,7 @@ describe('a bill', () => {
     await press(r, 'An invoice');
     await pickSupplier(r, 'ReliaBuilder');
     await type(r, 'Amount', '800');
-    await press(r, 'No, it’s extra');
+    await press(r, 'Uncategorised');
     await press(r, 'Save');
     expect(mock_createQuote).toHaveBeenCalledWith(expect.objectContaining({ againstQuoteId: null, projectId: 'p1' }));
   });
@@ -264,7 +264,7 @@ describe('a bill that is already on the job', () => {
     await type(r, 'Invoice number', 'inv-87022');
     r.getByText('Looks like INV87022 from MSC Consulting ($437, 31 Aug 2026), already on the job');
     r.getByText('Save anyway');
-    await press(r, 'Open the bill already on the job');
+    await press(r, 'Open the invoice already on the job');
     expect(onOpenBill).toHaveBeenCalledWith(onJob);
     await press(r, 'Save anyway');
     expect(mock_createQuote).toHaveBeenCalledWith(expect.objectContaining({ invoiceNumber: 'inv-87022' }));
@@ -404,7 +404,7 @@ describe('a bill for money that was earmarked', () => {
     await press(r, 'Save');
     expect(mock_createQuote).toHaveBeenCalledTimes(1);
     expect(onSaved).toHaveBeenCalledWith(
-      'Recorded, but not linked to ReliaBuilder payment 3/4 — use Billed on Expected to pay',
+      'Recorded · not linked to ReliaBuilder payment 3/4',
     );
     expect(onClose).toHaveBeenCalled();
   });

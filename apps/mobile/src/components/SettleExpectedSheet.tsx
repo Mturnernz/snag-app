@@ -87,7 +87,7 @@ export default function SettleExpectedSheet({ expected, quotes, all, onClose, on
           <Pill
             label="This one"
             disabled={busy !== null}
-            accessibilityLabel={`Paid by ${bill.supplier ?? 'a bill'}${bill.invoiceNumber ? ` ${bill.invoiceNumber}` : ''}${figure !== null ? `, ${formatMoney(figure)}` : ''}`}
+            accessibilityLabel={`Paid by ${bill.supplier ?? 'an invoice'}${bill.invoiceNumber ? ` ${bill.invoiceNumber}` : ''}${figure !== null ? `, ${formatMoney(figure)}` : ''}`}
             onPress={() => choose(bill)}
           />
         )}
@@ -98,7 +98,7 @@ export default function SettleExpectedSheet({ expected, quotes, all, onClose, on
   return (
     <Sheet
       visible={expected !== null}
-      title="Which bill paid this?"
+      title="Which invoice paid this?"
       subtitle={expected
         ? [expected.name, amount !== null ? formatMoney(amount) : 'No figure'].join(' · ')
         : null}
@@ -112,18 +112,18 @@ export default function SettleExpectedSheet({ expected, quotes, all, onClose, on
       ) : (
         <Text style={groupedStyles.hint}>
           {payee
-            ? `No bill from ${payee} within 10% of it on the job yet.`
-            : 'No bill on the job looks like it yet.'}
+            ? `No matching invoice from ${payee} yet`
+            : 'No matching invoice yet'}
         </Text>
       )}
 
       <Group>
-        <AddRow label="Record the bill" onPress={onRecord} />
+        <AddRow label="Record the invoice" onPress={onRecord} />
       </Group>
 
       {others.length > 0 ? (
         <>
-          <SectionTitle title={matches.length > 0 ? 'Another bill' : 'A bill on the job'} />
+          <SectionTitle title={matches.length > 0 ? 'Another invoice' : 'An invoice on the job'} />
           <Group>{others.map((bill) => billRow(bill, null))}</Group>
         </>
       ) : null}

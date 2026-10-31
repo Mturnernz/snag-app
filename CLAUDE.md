@@ -2261,7 +2261,8 @@ are asked:
 
 1. **Are we on budget?** *Expected total* in large type, with **Agreed** and **Undecided** as the
    rows under it — they add up to it, on screen — then *Budget remaining* (or *Over budget*, in
-   words and clay; brass within 15% — the list card's figure and colours), then *Budget*. Two tiles: **Paid** and **To pay**. Committed, Invoiced, Quoted and
+   words and clay; brass within 15% — the list card's figure and colours), then *Budget* and
+   **Paid** (the tiles went in *Each thing said once*). Committed, Invoiced, Quoted and
    Forecast are no longer words on the page; they are the accounting, and nobody asked it.
 2. **What's left to decide?** Every thing not yet chosen, with its option count and price range.
 3. **What do we have to pay?** Every bill still owing, with a **Paid** pill on the row — and,
@@ -2538,6 +2539,185 @@ supplier's heading, *Delete invoice*, and the pill. *To pay*, *billed* (a verb),
 and `ProjectDetailScreen.test.tsx` pin the above. `supabase/tests/kinds_and_dates.sql` replays
 every refusal through the functions against a local stack, and asserts that Invoiced moves when a
 kind changes.
+
+### What the paperwork said that the records did not (October 2026)
+
+A review read every quote, invoice and email on the three live jobs against what was recorded, and
+three of five jobs showed a wrong figure. Each wrong figure had a sentence on its own paper that
+would have caught it. Seven fixes, two migrations, one edge function. **Where anything below
+disagrees, this section wins.**
+
+- **A claim counts inside its contract only when it is linked** (`20261030090000`, reversing the
+  pair rule in *Who is owed what*). The pair rule read every bill from a supplier with a signed
+  price at that scope as a draw on it. On "Main Roof, Deck and Guest Room" that swallowed the roof's
+  two 50% payments against a *different* quote (0104) and a variation into the deck quote
+  (QU-0111): Committed $49,482.20 against Invoiced $111,464.44, still to bill −$61,982.24.
+  `project_scope_money` and `project_supplier_totals` now drop a bill only when its
+  `against_quote_id` names a signed quote. **The failure moved to the safe side**: an unlinked
+  claim counts beside its contract (too much, never too little) until somebody links it.
+  `home.set_quote_claim` links one that already exists, with `create_quote`'s refusals. The bill's
+  sheet asks *A stage of an agreed price?* and offers a **Link** when its words say so
+  (`suggestedClaim`: it names the quote's number, or reads as a deposit, claim or percentage and its
+  business has exactly one quote there). A bill naming a quote the job does not hold gets nothing:
+  that guess is what broke the roof. `project_scenarios.sql` S7 replays the deck.
+- **Agreeing a price asks about the business's expected payments** (`expectedCoveredBy`): the
+  builder's *payment 4/4* is inside a signed contract, and both counted. *Yes* settles them with the
+  contract (`settled_by` on a quote, which `update_expected_cost` always allowed). The contract's
+  sheet then says *Covers …* with Undo.
+- **A quote is not recorded as a bill.** The reader is told a paper titled Quote, Quotation,
+  Estimate or Proposal is a quote unless it says Tax Invoice, and `quoteByItsWords` makes it one
+  from the file name and words if the model does not (kind marked guessed). A waiting card and a
+  bill on the job whose words say quote both say so, with *Make it a quote* (`reviewSaysQuote`,
+  `priceSaysQuote`). Four papers on the live jobs were bills that called themselves quotes.
+- **A bill past its due date asks when it was paid.** Fourteen bills were paid on the day of a
+  tidy-up. *Mark as paid* and the *Paid* pill on *To pay* ask *When was it paid?*: its due date, its
+  date, today, or another day (`asksWhenPaid`, `paidDayChoices`). A part payment takes a date.
+  *Mark the N past their due date as paid…* pays each on its own due date, once confirmed. An
+  emailed bill read as paid is dated by the paper, never by the press.
+- **What a paper says was paid before it is kept** (`20261030090100`: `invoice_reviews.already_paid`).
+  Kitchen Mania's INV-15879 is $27,480.37 less a deposit of $8,244.11, and that deposit, V3, was on
+  the job as its own bill and paid again inside the total. The reader takes the total *before*
+  deductions and the deduction apart. The card says it as one line beside the dates (*Paid before
+  $8,244.11 (V3)*), never a box to tick, by the owner's decision: it is a reading, and the pencil
+  corrects it (`update_invoice_review(p_already_paid)`; emptied, nothing is recorded). Allocating
+  records it as an undated payment (the paper says it was paid, not when), and **the deposit's own
+  bill goes inside the new one** (`depositBillFor`, `billed_through_id`), so it counts once. *Worth checking* names the ones
+  already on the job (`paymentEchoes`).
+- **Emailed bills arrive tidier.** Every image pasted into an email's words is dropped when a PDF
+  came too (banner logos, screenshots of the PDF). A paper read as *nothing* beside a real one is
+  on no card and is deleted from storage (`nothingPapers`). Reading again keeps every file, since
+  `refile_review` insists. A card takes the household's existing spelling of a business
+  (`home.known_supplier`, `home.business_key`, the SQL twin of `businessKey`): "RELIABUILDER
+  LIMITED" and "ReliaBuilder" were two rows in every supplier rollup. A card sent to the wrong job
+  moves to another job **in the same home** (`move_invoice_review`; the files are in this
+  household's folder).
+- **A waiting card says each thing once, and *For* is a dropdown** (by the owner's decision, from
+  the preview). The headline is the supplier alone (the number is under *Invoice*); the figure sits
+  on the kind pill's row; the bill's own words go when it is part of a quote, which names what it
+  is for. *For ▾* opens `ReviewForSheet`, *What's it for?*: **Part of a quote** — every quote on
+  the job not turned down, the bill's own business first, the one its words name marked (`reviewClaim`)
+  — or **On its own** — the whole job or an area, the areas its words name marked (`suggestAreas`;
+  17 of 18 live prices sat on the whole job). A press writes and closes. The quote is kept on the
+  card (`invoice_reviews.against_quote_id`, `claim_decided`, `set_invoice_review_claim`), so
+  choosing no quote is an answer the words' guess never overrides (`reviewQuote`); an area also
+  writes `set_invoice_review_rooms`. It replaced a ticked *A stage of …* box that could offer only
+  the quote the words named, and a separate *Put it there* box.
+- **An emailed claim is allocated against its quote**: `approve_invoice_review` takes
+  `p_against_quote_id`, or else the quote chosen on the card, lands the bill where the quote sits,
+  linked, and leaves its rooms to the quote. Moving a card clears its quote.
+- **Worth checking** sits above the totals on the project page, absent at nought: a claim counted
+  beside its contract (with **Link**), a quote on the job twice, a deposit counted twice, and an
+  invoice that reads as a quote. Each row is a figure below that is wrong until somebody looks, and
+  each opens the price where it is fixed.
+
+**Order, because the client and the function move together:** apply `20261030090000` and
+`20261030090100`, `notify pgrst, 'reload schema'`, deploy `inbound-bill` (it sends
+`p_already_paid`, which the old `file_emailed_bill` does not take, so deploying the function before
+the migration files nothing), then merge and deploy. Neither migration is applied by this change.
+Until `20261030090000` is, *Link* answers with the server's refusal. Until `20261030090100` is, a
+card's claim and deduction lines are refused on Allocate (plain allocation still works).
+
+`checks.test.ts` pins every helper against the live papers; `PriceSheet.test.tsx` the claim
+chooser, the *Link*, the paid-date question, the dated part payment, the quote hint and the fold;
+`ProjectDetailScreen.test.tsx` *Worth checking*, the *Paid* pill asking and *Mark the N…*;
+`InvoiceReviewCard.test.tsx` the card's header, *For* and offers; `ReviewForSheet.test.tsx` the
+dropdown; `inboundBill.test.ts` the reader's deduction, the
+quote rule, the pasted images and the logo; `projectSummary.test.ts` the room breakdown under the
+linked rule. `supabase/tests/emailed_bills_say_more.sql` replays the spelling, the deduction, the
+paid date, the linked claim, the quote kept on a card (and no quote kept), its refusals and the
+move, and holds `business_key` to `businessKey`'s answers.
+
+### Each thing said once (October 2026)
+
+A review of the whole tab asked of every line whether it was said elsewhere or told a homeowner
+anything, and the owner chose item by item. **Where anything above or below disagrees, this
+section wins**; the passages keep their history.
+
+- **The list.** No *1 underway · 1 planned · 3 complete* under the title: the headings count the
+  jobs. **A finished job's card says what it cost and nothing else** — its name, when it
+  finished, and *Cost $58,868 · $1,132 under budget* (`describeFinishedCost`, the page's own
+  Expected total, read for a finished job with any money on it, `hasCost`). No bar, no figures.
+- **The top of a job.** The bell is gone (`ReviewBell` deleted, `reviewAlert` with it). The
+  cards sit under **New bills · N**, and a quiet ***N removed ›*** line under them opens the
+  removed ones (`InvoiceReviewSheet`, now only that list). It is there whenever anything has been
+  removed: the bell hid itself when nothing was waiting and took the removed ones with it.
+- **A waiting card.** The number sits beside the *Invoice ▾* pill, not under a second "Invoice".
+  The paid line shows **only when the email says it was paid**; an unpaid card says nothing,
+  because owing is what a new bill means. *Move to another job* is at the foot of the pencil's
+  sheet (`ReviewEditSheet`'s `onMove`), not on every card. The button reads **Add to job**, not
+  *Allocate*.
+- **Worth checking** gathers several claims against one quote into **one row** (*3 RELIABUILDER
+  LIMITED bills are stages of QU-0111*) with **Link all**, which links them in turn
+  (`linkClaims`); the row opens to list each bill. A likely double spelling of a supplier is a row
+  here too, with **Merge**.
+- **The totals card.** *Agreed* and *Undecided* show only while something is undecided — with
+  nothing undecided Agreed was the big figure again and Undecided read $0. **Paid** is a row of
+  the card. The *Paid*, *To pay* and *Expected to pay* tiles are gone (Paid wrapped mid-number on
+  a phone); *To pay* and *Expected to pay* carry their totals on their own headings.
+- **Where it's going.** A room whose money is all a shared bill says *On 1 shared bill*, not the
+  figure on its right again; a room with nothing says *Nothing yet* (`describeRoom`).
+- **Suppliers** is one row, *Suppliers · 3 ›*, opening the list where rename and press-hold-drop
+  still work (the sheet stops scrolling under a drag, `Sheet`'s `scrollEnabled`).
+- **Adding a file** is one *Add a file* button that opens *Take photo · Choose photos · Attach a
+  PDF* in place (`Attachments`, projects only; the thing page keeps its own row). Each is still
+  pressed in its own tap, which is what lets a browser open the camera.
+- **A bill's sheet.** The number is beside the supplier under the title, not a row under a pill
+  that already says *Invoice*. No *Recorded* row: the day it was typed in read as the day it was
+  paid. *Part of another bill?* and *A stage of an agreed price?* are **one row, *Part of***, whose
+  picker lists *Uncategorised*, then *Stage of* and *Included in* where each applies (one quote
+  can stand in both, so each radio is named apart: *Stage of …*, *Included in …*).
+- ***Part of* says a term, never a sentence** (by the owner's decision, 31 October 2026). The row
+  reads *Uncategorised* when the bill is part of nothing, *Stage of RELIABUILDER LIMITED · QU-0111*
+  (with *· not agreed* when that quote is not), *Included in … · INV-0184*, or *Uncategorised ·
+  suggested: QU-0111* beside a **Link** pill. It used to explain each answer's arithmetic (*— not
+  agreed yet, so this counts on its own*); the term is the answer and the figures say the rest.
+  NZ spelling, as everywhere in the app.
+
+**Terms, not sentences** (31 October 2026, item by item by the owner, the same day). The *Part of*
+rule applied to the rest of the tab: a label, a hint or a toast names the answer and stops; the
+figures say what it does to the money. **Where anything in this file says otherwise about the
+words on the Projects tab, this wins.**
+
+- **One set of terms for what a bill is part of**, everywhere it is asked: *Part of* · *Stage of
+  …* · *Included in …* · *Uncategorised*. The money sheet's *Is this part of an agreed price?* is
+  *Part of* with *Stage of <number · what for>* rows and *Uncategorised* last. The card's *For ▾*
+  chooser is *Stage of* and *Area*. A guess from the paper's words is marked **Suggested**, never
+  *its words say so*.
+- **A paper whose words say quote is a suggestion, not a note.** The note (*Its own words call it a
+  quote — …*) and its *Make it a quote* button are gone from the card and the bill's sheet.
+  *Suggested: Quote* sits by the kind pill and opens the same dropdown, where *Quote* carries
+  *Suggested* (`KindSheet`'s `suggested`). The dropdown's options are the words alone: the
+  sentence under each (*Added as a price nobody has agreed to yet* …) is gone.
+- **Worth checking says what is wrong in a term**: *Stage of QU-0111 · not linked*, *Paid twice ·
+  $8,244.11*, *recorded as an invoice*, *Same business, two spellings*.
+- **Dialogs ask and stop.** Agreeing a price over expected payments lists them and offers
+  **Included** / **Extra**. *Mark the N past their due date as paid* says *Paid on each due date ·
+  $X in all*. A merge says *Totals may change.*
+- **Hints that explained are terms or gone**: *Whole job*, *Not split*, *All on Kitchen*; nothing
+  under a new job's name or its rooms, or under filing paperwork; *Forward from the address you
+  sign in with.* On an expected cost: *Optional* under the amount, nothing under *Probably from*,
+  and *Counts as Agreed* / *Counts as Undecided* under the answer — the totals card's own words,
+  where *committed*, *forecast* and *who we're paying* named rows the page no longer has.
+- **A toast says what happened**: *Read*, *Read · 4 papers*, *Added as a quote*, *Added · stage of
+  the quote*, *Added · paid*, *Saved*, *Removed*, *Now a quote*, and a loose end named in a term
+  (*· V3 uncategorised*, *· not linked to Reliabuilder payment 3/4*). A refusal is still the
+  server's words. A date moved to keep a job's order says only which moved (*Started moved to
+  25/06/2024*).
+- **One paper is an *invoice***, the rule above carried through: *Which invoice paid this?*,
+  *Record the invoice*, *Included in another invoice*, *Quotes and invoices*, *Check this invoice*,
+  *N invoices are stages of …*. A contract's claims are listed under **Stages**, the *Stage of*
+  word. *To pay*, *New bills*, *Email bills to this job*, *billed* and *Left to bill* stay; so does
+  *shared bill* on a room, since a shared price can be a quote. A room split compares with *the
+  total*, for the same reason.
+
+**Kept, by the owner's decision, so not proposed again:** the five figures on an underway job's
+card (Budgeted, Quoted, Paid, Expected total, Budget remaining); the *from … · date* line on a
+waiting card; both *Dated* and *Due* on it; and the *Invoice* / *Quote* tag on every row of a
+room sheet.
+
+`ProjectsScreen.test.tsx`, `projectSummary.test.ts`, `InvoiceReviewCard.test.tsx`,
+`ReviewEditSheet.test.tsx`, `ProjectDetailScreen.test.tsx`, `PriceSheet.test.tsx` and
+`Attachments.test.tsx` pin each of the above.
 
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;
@@ -3206,6 +3386,10 @@ Committed line reading $103,574.22 for three days, with nothing on screen able t
 opening the figures is what found it. `20260921110000` restores the scope fallback on top of
 090400's direct-buy handling, measured against the live rows rather than asserted.
 
+**`20261030090000` replaced the pair rule below: a bill is a draw only when it is linked** to a
+signed quote (`against_quote_id`). The pair rule's "one known limit" turned out to be the common
+case — see *What the paperwork said that the records did not*. What follows is its history.
+
 **`20260923090000` moves the fallback from the scope to the pair — this supplier, at this scope.**
 The scope rule was still wrong the other way: once *anybody* signed at a level, *every* invoice
 there stopped counting, so the builder's contract on the whole job hid the architect's, the
@@ -3857,7 +4041,7 @@ supplier rows still sum to Committed. `agreedContribution` drops it the same way
 breakdown agrees. Two rules:
 
 - **It names the bill, never merely "ignored".** A figure that stops counting says why, in words the
-  paper can be checked against: *Inside RELIABUILDER LIMITED · INV-0184 — not counted on its own*. A
+  paper can be checked against: *Included in RELIABUILDER LIMITED · INV-0184* (and *Included in another bill* above the figure). A
   generic ignore switch is a way to make any figure vanish with no reason on record, which is the
   shape the override rules exist to refuse.
 - **The bill it is inside says what it includes**, with *the rest of this bill* as the figure the

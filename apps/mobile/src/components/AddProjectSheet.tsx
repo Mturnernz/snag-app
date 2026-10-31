@@ -211,7 +211,7 @@ export default function AddProjectSheet({
       dates.current[next.moved] = day;
       if (next.moved === 'started') setStartedOn(day);
       else setFinishedOn(day);
-      setDatesMoved(`${next.moved === 'started' ? 'Started' : 'Finished'} moved to ${day} — a job can’t finish before it starts.`);
+      setDatesMoved(`${next.moved === 'started' ? 'Started' : 'Finished'} moved to ${day}`);
     }
     return { started: next.startedOn, finished: next.finishedOn };
   }
@@ -273,7 +273,6 @@ export default function AddProjectSheet({
               autoFocus
               accessibilityLabel="What are you doing?"
             />
-            <Text style={styles.hint}>The name you’d say out loud.</Text>
           </View>
         ) : null}
 
@@ -349,14 +348,6 @@ export default function AddProjectSheet({
                 </Pressable>
               </View>
             ) : null}
-
-            {/* Said in one line, at the moment the answer decides it, rather
-                than as a concept explained anywhere. */}
-            <Text style={styles.hint}>
-              {rooms.length >= 2
-                ? `Each room becomes a part of the job you can price on its own — ${rooms.length} of them.`
-                : 'Each room you pick becomes a part of the job you can price separately. Pick one and you won’t see parts at all.'}
-            </Text>
           </ScrollView>
         ) : null}
 

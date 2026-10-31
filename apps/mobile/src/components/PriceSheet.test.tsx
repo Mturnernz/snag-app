@@ -312,28 +312,28 @@ describe('a bill inside another bill', () => {
   it('asks, and says a bill of its own is one you pay', () => {
     const { r } = open(plumber, { quotes: [builder, plumber] });
     expect(r.queryByText('Part of')).not.toBeNull();
-    expect(r.queryByText('Nothing — billed on its own')).not.toBeNull();
+    expect(r.queryByText('Uncategorised')).not.toBeNull();
   });
 
   it('is put inside the bill chosen, through the one link the totals already read', async () => {
     const { r, onChanged } = open(plumber, { quotes: [builder, plumber] });
     await TestRenderer.act(async () => { node(r, 'Part of').props.onPress(); });
-    await TestRenderer.act(async () => { node(r, 'Inside RELIABUILDER LIMITED · INV-0184').props.onPress(); });
+    await TestRenderer.act(async () => { node(r, 'Included in RELIABUILDER LIMITED · INV-0184').props.onPress(); });
     expect(mock_updateQuote).toHaveBeenCalledWith('fp', { billedThroughId: 'rb' });
-    expect(onChanged).toHaveBeenCalledWith('Counted inside that bill');
+    expect(onChanged).toHaveBeenCalledWith('Included in RELIABUILDER LIMITED · INV-0184');
   });
 
   it('says which bill it is inside, and offers nothing to pay', () => {
     const { r } = open(inside, { quotes: [builder, inside] });
-    expect(r.queryByText('Inside another bill')).not.toBeNull();
-    expect(r.queryByText('Inside RELIABUILDER LIMITED · INV-0184 — not counted on its own')).not.toBeNull();
+    expect(r.queryByText('Included in another bill')).not.toBeNull();
+    expect(r.queryByText('Included in RELIABUILDER LIMITED · INV-0184')).not.toBeNull();
     expect(r.queryByText('Mark as paid')).toBeNull();
   });
 
   it('can be counted on its own again', async () => {
     const { r } = open(inside, { quotes: [builder, inside] });
     await TestRenderer.act(async () => { node(r, 'Part of').props.onPress(); });
-    await TestRenderer.act(async () => { node(r, 'Nothing — billed on its own').props.onPress(); });
+    await TestRenderer.act(async () => { node(r, 'Uncategorised').props.onPress(); });
     expect(mock_updateQuote).toHaveBeenCalledWith('fp', { billedThroughId: null });
   });
 
@@ -351,7 +351,7 @@ describe('a bill inside another bill', () => {
     const claim = { ...plumber, againstQuoteId: 'rb' };
     const { r } = open(claim, { quotes: [builder, claim] });
     await press(r, 'Part of');
-    expect(r.queryByText('Inside another bill')).toBeNull();
+    expect(r.queryByText('Included in')).toBeNull();
   });
 
   it('is not offered when there is nothing to be part of', () => {
@@ -441,32 +441,32 @@ describe('a stage of an agreed price', () => {
 
   it('offers the contract a deposit’s words describe, and links it in a press', async () => {
     const { r, onChanged } = open(deposit, { quotes: [deck, deposit] });
-    r.getByText('Its words say QU-0111, so it’s counted twice until linked');
+    r.getByText('Uncategorised · suggested: QU-0111');
     await press(r, 'Link to RELIABUILDER LIMITED · QU-0111');
     expect(mock_setQuoteClaim).toHaveBeenCalledWith('k1', 'c1');
-    expect(onChanged).toHaveBeenCalledWith('A claim on RELIABUILDER LIMITED · QU-0111');
+    expect(onChanged).toHaveBeenCalledWith('Stage of RELIABUILDER LIMITED · QU-0111');
   });
 
   it('lets any quote at the bill’s scope be chosen, and the link be taken off', async () => {
     const variation = quote({ ...deposit, id: 'k2', detail: 'Variations' });
     const { r } = open(variation, { quotes: [deck, variation] });
-    r.getByText('Nothing — billed on its own');
+    r.getByText('Uncategorised');
     await press(r, 'Part of');
-    r.getByText('A stage of');
-    await press(r, 'A stage of RELIABUILDER LIMITED · QU-0111');
+    r.getByText('Stage of');
+    await press(r, 'Stage of RELIABUILDER LIMITED · QU-0111');
     expect(mock_setQuoteClaim).toHaveBeenCalledWith('k2', 'c1');
 
     const linked = open({ ...variation, againstQuoteId: 'c1' }, { quotes: [deck, variation] });
-    linked.r.getByText('A stage of RELIABUILDER LIMITED · QU-0111');
+    linked.r.getByText('Stage of RELIABUILDER LIMITED · QU-0111');
     await press(linked.r, 'Part of');
-    await press(linked.r, 'Nothing — billed on its own');
+    await press(linked.r, 'Uncategorised');
     expect(mock_setQuoteClaim).toHaveBeenLastCalledWith('k2', null);
   });
 
-  it('says a claim on a price nobody has agreed still counts on its own', () => {
+  it('says in two words when the quote it is a stage of is not agreed', () => {
     const open_ = { ...deck, status: 'tbc' as const };
     const { r } = open({ ...deposit, againstQuoteId: 'c1' }, { quotes: [open_, deposit] });
-    r.getByText('A stage of RELIABUILDER LIMITED · QU-0111 — not agreed yet, so this counts on its own');
+    r.getByText('Stage of RELIABUILDER LIMITED · QU-0111 · not agreed');
   });
 
   it('keeps the chooser open over a refusal', async () => {
@@ -474,9 +474,9 @@ describe('a stage of an agreed price', () => {
     const variation = quote({ ...deposit, id: 'k2', detail: 'Variations' });
     const { r, onChanged } = open(variation, { quotes: [deck, variation] });
     await press(r, 'Part of');
-    await press(r, 'A stage of RELIABUILDER LIMITED · QU-0111');
+    await press(r, 'Stage of RELIABUILDER LIMITED · QU-0111');
     expect(onChanged).toHaveBeenCalledWith('A claim has to sit where its contract sits — move one of them first');
-    r.getByText('A stage of');
+    r.getByText('Stage of');
   });
 
   it('is not asked of a quote, or of nothing to be a stage of', () => {

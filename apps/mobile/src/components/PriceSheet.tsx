@@ -275,7 +275,7 @@ export default function PriceSheet({
 
   const hostName = (q: ProjectQuote) => [q.supplier ?? 'No supplier', q.invoiceNumber].filter(Boolean).join(' · ');
 
-  const status = inside ? 'Inside another bill' : !isBill
+  const status = inside ? 'Included in another bill' : !isBill
     ? quote.status === 'accepted' ? 'Agreed' : quote.status === 'declined' ? 'Turned down' : 'Not agreed yet'
     : unpaid <= 0 ? 'Paid'
       : overdue ? `Overdue since ${formatExactDate(quote.dueOn)}`
@@ -339,35 +339,35 @@ export default function PriceSheet({
           <>
             <Group>
               <RadioRow
-                title="Nothing — billed on its own"
+                title="Uncategorised"
                 selected={!inside && !quote.againstQuoteId}
                 onPress={() => {
                   if (!inside && !quote.againstQuoteId) { setLinking(false); return; }
                   run(async () => {
                     if (quote.againstQuoteId) await setQuoteClaim(quote.id, null);
                     if (inside) await updateQuote(quote.id, { billedThroughId: null });
-                  }, 'Counted on its own').then((ok) => { if (ok) setLinking(false); });
+                  }, 'Uncategorised').then((ok) => { if (ok) setLinking(false); });
                 }}
               />
             </Group>
             {canClaim ? (
               <>
-                <Text style={styles.heading}>A stage of</Text>
+                <Text style={styles.heading}>Stage of</Text>
                 <Group>
                   {candidates.map((q) => (
                     <RadioRow
                       key={q.id}
                       title={hostName(q)}
-                      accessibilityLabel={`A stage of ${hostName(q)}`}
+                      accessibilityLabel={`Stage of ${hostName(q)}`}
                       subtitle={[
                         q.status === 'accepted' ? 'Agreed' : 'Not agreed yet',
                         formatMoney(q.amountIncl),
-                        suggestion?.contract.id === q.id ? 'its words say so' : null,
+                        suggestion?.contract.id === q.id ? 'Suggested' : null,
                       ].filter(Boolean).join(' · ')}
                       selected={quote.againstQuoteId === q.id}
                       onPress={() => {
                         if (quote.againstQuoteId === q.id) { setLinking(false); return; }
-                        run(() => setQuoteClaim(quote.id, q.id), `A claim on ${hostName(q)}`).then((ok) => { if (ok) setLinking(false); });
+                        run(() => setQuoteClaim(quote.id, q.id), `Stage of ${hostName(q)}`).then((ok) => { if (ok) setLinking(false); });
                       }}
                     />
                   ))}
@@ -376,19 +376,19 @@ export default function PriceSheet({
             ) : null}
             {canPlace ? (
               <>
-                <Text style={styles.heading}>Inside another bill</Text>
+                <Text style={styles.heading}>Included in</Text>
                 <Group>
                   {hosts.map((q) => (
                     <RadioRow
                       key={q.id}
                       title={hostName(q)}
-                      accessibilityLabel={`Inside ${hostName(q)}`}
+                      accessibilityLabel={`Included in ${hostName(q)}`}
                       subtitle={[q.kind === 'invoice' ? 'Invoice' : 'Agreed price', formatMoney(q.amountIncl), q.dated ? formatExactDate(q.dated) : null]
                         .filter(Boolean).join(' · ')}
                       selected={quote.billedThroughId === q.id}
                       onPress={() => {
                         if (quote.billedThroughId === q.id) { setLinking(false); return; }
-                        run(() => updateQuote(quote.id, { billedThroughId: q.id }), 'Counted inside that bill').then((ok) => { if (ok) setLinking(false); });
+                        run(() => updateQuote(quote.id, { billedThroughId: q.id }), `Included in ${hostName(q)}`).then((ok) => { if (ok) setLinking(false); });
                       }}
                     />
                   ))}
@@ -530,27 +530,28 @@ export default function PriceSheet({
                 />
               ) : null}
               {/*
-                One row for what it is part of — a quote it is a stage of, or a
-                bill it sits inside. They were two rows reading "No" on nearly
-                every bill; the one picker behind this offers whichever apply.
+                One row for what it is part of, in plain terms: *Stage of* a
+                quote, *Included in* another bill, or *Uncategorised*. They were
+                two rows reading "No" on nearly every bill, then one row of
+                sentences; the one picker behind it offers whichever apply.
               */}
               {canPlace || canClaim ? (
                 <Row
                   title="Part of"
                   subtitle={contract
-                    ? `A stage of ${hostName(contract)}${contract.status === 'accepted' ? '' : ' — not agreed yet, so this counts on its own'}`
+                    ? `Stage of ${hostName(contract)}${contract.status === 'accepted' ? '' : ' · not agreed'}`
                     : host
-                      ? `Inside ${hostName(host)} — not counted on its own`
+                      ? `Included in ${hostName(host)}`
                       : suggestion
-                        ? `Its words say ${suggestion.contract.invoiceNumber ?? hostName(suggestion.contract)}, so it’s counted twice until linked`
-                        : 'Nothing — billed on its own'}
+                        ? `Uncategorised · suggested: ${suggestion.contract.invoiceNumber ?? hostName(suggestion.contract)}`
+                        : 'Uncategorised'}
                   onPress={() => setLinking(true)}
                   accessory={suggestion ? (
                     <Pill
                       label="Link"
                       disabled={busy}
                       accessibilityLabel={`Link to ${hostName(suggestion.contract)}`}
-                      onPress={() => run(() => setQuoteClaim(quote.id, suggestion.contract.id), `A claim on ${hostName(suggestion.contract)}`)}
+                      onPress={() => run(() => setQuoteClaim(quote.id, suggestion.contract.id), `Stage of ${hostName(suggestion.contract)}`)}
                     />
                   ) : undefined}
                 />

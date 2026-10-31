@@ -2664,8 +2664,14 @@ section wins**; the passages keep their history.
 - **A bill's sheet.** The number is beside the supplier under the title, not a row under a pill
   that already says *Invoice*. No *Recorded* row: the day it was typed in read as the day it was
   paid. *Part of another bill?* and *A stage of an agreed price?* are **one row, *Part of***, whose
-  picker lists *Nothing*, then *A stage of* and *Inside another bill* where each applies (one
-  quote can stand in both, so each radio is named apart: *A stage of …*, *Inside …*).
+  picker lists *Uncategorised*, then *Stage of* and *Included in* where each applies (one quote
+  can stand in both, so each radio is named apart: *Stage of …*, *Included in …*).
+- ***Part of* says a term, never a sentence** (by the owner's decision, 31 October 2026). The row
+  reads *Uncategorised* when the bill is part of nothing, *Stage of RELIABUILDER LIMITED · QU-0111*
+  (with *· not agreed* when that quote is not), *Included in … · INV-0184*, or *Uncategorised ·
+  suggested: QU-0111* beside a **Link** pill. It used to explain each answer's arithmetic (*— not
+  agreed yet, so this counts on its own*); the term is the answer and the figures say the rest.
+  NZ spelling, as everywhere in the app.
 
 **Kept, by the owner's decision, so not proposed again:** the five figures on an underway job's
 card (Budgeted, Quoted, Paid, Expected total, Budget remaining); the *from … · date* line on a
@@ -3998,7 +4004,7 @@ supplier rows still sum to Committed. `agreedContribution` drops it the same way
 breakdown agrees. Two rules:
 
 - **It names the bill, never merely "ignored".** A figure that stops counting says why, in words the
-  paper can be checked against: *Inside RELIABUILDER LIMITED · INV-0184 — not counted on its own*. A
+  paper can be checked against: *Included in RELIABUILDER LIMITED · INV-0184* (and *Included in another bill* above the figure). A
   generic ignore switch is a way to make any figure vanish with no reason on record, which is the
   shape the override rules exist to refuse.
 - **The bill it is inside says what it includes**, with *the rest of this bill* as the figure the

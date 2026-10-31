@@ -59,13 +59,13 @@ const press = async (r: ReturnType<typeof render>, label: string) => {
 
 it('offers the quotes not turned down, the bill’s own business first, then the areas', () => {
   const { r } = open();
-  r.getByText('Part of a quote');
+  r.getByText('Stage of');
   r.getByText('QU-0111 · Deck and sub structure replacement');
-  r.getByText('RELIABUILDER LIMITED · $49,482.20 · agreed · its words say so');
+  r.getByText('RELIABUILDER LIMITED · $49,482.20 · agreed · Suggested');
   r.getByText('QU-4068 · Reduce the griselinia');
   expect(r.queryByText('Too dear')).toBeNull();
   expect(r.queryByText('Variations')).toBeNull();
-  r.getByText('On its own');
+  r.getByText('Area');
   r.getByText('Whole job');
   r.getByText('Deck');
   const titles = [...new Set(r.root.findAll((n: any) => n.props?.accessibilityRole === 'radio', { deep: true })
@@ -96,9 +96,9 @@ it('writes nothing for the answer it already has', async () => {
 
 it('marks the area its words name, and offers a quote card only areas', () => {
   const { r } = open({ review: review({ kind: 'quote' }), current: null, suggested: null, suggestedAreas: ['e2'] });
-  expect(r.queryByText('Part of a quote')).toBeNull();
-  r.getByText('Where it goes');
-  r.getByText('its words name it');
+  expect(r.queryByText('Stage of')).toBeNull();
+  r.getByText('Area');
+  r.getByText('Suggested');
 });
 
 it('says a refusal in words and stays open', async () => {

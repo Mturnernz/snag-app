@@ -137,7 +137,7 @@ export default function ThingSheet({
             />
             <RadioRow
               title={builderQuote?.supplier ?? 'The builder'}
-              subtitle="On their bills"
+              subtitle="On their invoices"
               selected={through === 'builder'}
               onPress={() => setThrough('builder')}
             />
@@ -181,7 +181,7 @@ export default function ThingSheet({
                     title={option.detail ?? option.supplier ?? 'A price'}
                     subtitle={[
                       option.detail ? option.supplier : null,
-                      isChosen ? (option.billedThroughId ? 'Chosen · on the builder’s bills' : 'Chosen') : null,
+                      isChosen ? (option.billedThroughId ? 'Chosen · on the builder’s invoices' : 'Chosen') : null,
                       option.status === 'declined' ? 'Turned down' : null,
                     ].filter(Boolean).join(' · ') || null}
                     value={formatMoney(option.amountIncl)}
@@ -213,12 +213,12 @@ export default function ThingSheet({
 
         {bills.length > 0 ? (
           <View style={groupedStyles.block}>
-            <Text style={styles.heading}>Bills</Text>
+            <Text style={styles.heading}>Invoices</Text>
             <Group>
               {bills.map((bill) => (
                 <Row
                   key={bill.id}
-                  title={bill.supplier ?? 'A bill'}
+                  title={bill.supplier ?? 'An invoice'}
                   subtitle={(bill.unpaid ?? 0) > 0 ? 'To pay' : 'Paid'}
                   value={formatMoney(bill.amountIncl)}
                   onPress={() => onOpenBill(bill)}

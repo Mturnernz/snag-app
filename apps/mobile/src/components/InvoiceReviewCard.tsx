@@ -97,11 +97,11 @@ const KIND: Record<InvoiceReviewKind, { label: string; yes: string; rail: string
   paperwork: { label: 'Paperwork', yes: 'File it', rail: 'File it', number: 'Number' },
 };
 
-/** The three answers the pill offers, each saying what it does to the money. */
+/** The three answers the pill offers. */
 export const REVIEW_KIND_OPTIONS: KindOption<InvoiceReviewKind>[] = [
-  { value: 'invoice', label: 'Invoice', hint: 'Added to the job as something to pay' },
-  { value: 'quote', label: 'Quote', hint: 'Added as a price nobody has agreed to yet' },
-  { value: 'paperwork', label: 'Paperwork', hint: 'Filed on the job — it counts towards no figure' },
+  { value: 'invoice', label: 'Invoice' },
+  { value: 'quote', label: 'Quote' },
+  { value: 'paperwork', label: 'Paperwork' },
 ];
 
 /**
@@ -222,6 +222,7 @@ export default function InvoiceReviewCard({
   );
 
   const kind = KIND[review.kind] ?? KIND.invoice;
+  const saysQuote = reviewSaysQuote(review);
   const paperwork = review.kind === 'paperwork';
   // Paperwork with no figure has nothing to say in the money column — "Not
   // priced" would call a certificate an unpriced bill. With one (a
@@ -289,6 +290,21 @@ export default function InvoiceReviewCard({
                 onPress={onChangeKind && !busy ? () => setChoosingKind(true) : undefined}
                 accessibilityLabel={`${kind.label}${wasInferred(review, 'kind') ? ', guessed' : ''}. Change what it is`}
               />
+              {/*
+                Its own words call it a quote and it is down as an invoice. The
+                dropdown is the answer, with *Quote* marked Suggested in it; this
+                says so beside the pill rather than in a sentence about money.
+              */}
+              {saysQuote && onChangeKind ? (
+                <Pressable
+                  onPress={busy ? undefined : () => setChoosingKind(true)}
+                  style={styles.suggest}
+                  accessibilityRole="button"
+                  accessibilityLabel="Suggested: Quote. Change what it is"
+                >
+                  <Text style={styles.suggestLabel}>Suggested: Quote</Text>
+                </Pressable>
+              ) : null}
               {/*
                 The number sits beside the pill that names the paper, so the
                 word is said once: "Invoice ▾  INV-0190", not "Invoice" twice.
@@ -413,27 +429,6 @@ export default function InvoiceReviewCard({
           </View>
         ) : null}
 
-        {/*
-          Its own words call it a quote, and it is down as a bill. Added as an
-          invoice it counts as billed and owing — for a price nobody agreed.
-        */}
-        {reviewSaysQuote(review) ? (
-          <View style={styles.note}>
-            <Text style={styles.noteText}>Its own words call it a quote — as an invoice it counts as billed, and owing.</Text>
-            {onChangeKind ? (
-              <Pressable
-                onPress={() => { onChangeKind('quote'); }}
-                disabled={busy}
-                style={styles.noteAction}
-                accessibilityRole="button"
-                accessibilityLabel="Make it a quote"
-              >
-                <Text style={styles.noteActionLabel}>Make it a quote</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
-
         {onOpenFile && files.length > 0 ? (
           <View style={styles.files}>
             {files.map((file) => (
@@ -487,7 +482,7 @@ export default function InvoiceReviewCard({
                   onPress={onOpenDuplicate}
                   style={styles.duplicateOpen}
                   accessibilityRole="button"
-                  accessibilityLabel="Open the bill it looks like"
+                  accessibilityLabel="Open the invoice it looks like"
                 >
                   <Text style={styles.duplicateOpenLabel}>Open that one</Text>
                 </Pressable>
@@ -527,6 +522,7 @@ export default function InvoiceReviewCard({
           subtitle={review.supplier}
           options={REVIEW_KIND_OPTIONS}
           value={review.kind}
+          suggested={saysQuote ? 'quote' : null}
           onPick={onChangeKind}
           onClose={() => setChoosingKind(false)}
         />
@@ -560,13 +556,8 @@ function Fact({
 }
 
 const styles = StyleSheet.create({
-  note: {
-    marginTop: Spacing.sm, paddingHorizontal: Spacing.md, paddingTop: Spacing.sm,
-    borderRadius: Radius.input, backgroundColor: Colors.sunken,
-  },
-  noteText: { fontSize: Typography.subhead, lineHeight: 20, color: Colors.textPrimary },
-  noteAction: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start' },
-  noteActionLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.primary },
+  suggest: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.xs },
+  suggestLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   duplicate: {
     flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start',
     marginTop: Spacing.sm, padding: Spacing.md, borderRadius: Radius.input,

@@ -58,7 +58,7 @@ async function open(review: InvoiceReview, onFile = jest.fn().mockResolvedValue(
 
 it('puts the bill from the same business first, chosen already', async () => {
   const { r } = await open(paper());
-  expect(r.queryByText('With the bill it’s about')).not.toBeNull();
+  expect(r.queryByText('With the invoice it’s about')).not.toBeNull();
   expect(selected(r)).toEqual(['Good Connection Ltd · 5521']);
 });
 
@@ -71,7 +71,7 @@ it('suggests the bill of the business it was made out to', async () => {
 it('chooses the whole job when no bill is from that business, and offers the rest', async () => {
   const { r } = await open(paper({ supplier: 'Roof Inspections NZ' }));
   expect(selected(r)).toEqual(['The whole job']);
-  expect(r.queryByText('With a bill')).not.toBeNull();
+  expect(r.queryByText('With an invoice')).not.toBeNull();
   expect(radio(r, 'Roof')).toBeDefined();
 });
 
@@ -101,13 +101,13 @@ it('stays open and says why when the filing is refused', async () => {
 it('suggests what the paper is from its title, and files it with that tag', async () => {
   const { r } = await open(paper());
   expect(litTag(r)).toEqual(['Compliance certificate']);
-  expect(r.queryByText('Suggested from its title: Compliance certificate')).not.toBeNull();
+  expect(r.queryByText('Suggested: Compliance certificate')).not.toBeNull();
 });
 
 it('takes a different answer, and says nothing about a suggestion once somebody has answered', async () => {
   const { r, onFile } = await open(paper());
   await TestRenderer.act(async () => { radio(r, 'Warranty').props.onPress(); });
-  expect(r.queryByText('Suggested from its title: Compliance certificate')).toBeNull();
+  expect(r.queryByText('Suggested: Compliance certificate')).toBeNull();
   await TestRenderer.act(async () => { await tap(r, 'File it').props.onPress(); });
   expect(onFile).toHaveBeenCalledWith(expect.anything(), 'warranty');
 });

@@ -89,7 +89,7 @@ it('writes a correction to the card, an emptied box as a clear, and the one room
 it('does not offer a part that nobody has seen', async () => {
   const { r } = await open([element('e1', 'Downstairs laundry', true)]);
   expect(r.queryByText('Downstairs laundry')).toBeNull();
-  expect(r.queryByText('None ticked — it goes on the whole job.')).not.toBeNull();
+  expect(r.queryByText('Whole job')).not.toBeNull();
 });
 
 describe('more than one room', () => {
@@ -105,7 +105,7 @@ describe('more than one room', () => {
     expect(onSave.mock.calls[0][1]).toEqual({ ids: ['e1', 'e2', 'e3'], amounts: [333.34, 333.33, 333.33] });
   });
 
-  it('takes amounts, says what stays on the whole job, and refuses more than the bill', async () => {
+  it('takes amounts, says what stays on the whole job, and refuses more than the total', async () => {
     const { r, onSave } = await open(rooms, { amount: 1000 });
     await TestRenderer.act(async () => { tap(r, 'Bathroom').props.onPress(); });
     await TestRenderer.act(async () => { tap(r, 'Laundry').props.onPress(); });
@@ -119,7 +119,7 @@ describe('more than one room', () => {
     await TestRenderer.act(async () => { boxes(r)['Laundry share'].props.onChangeText('500'); });
     await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });
     expect(onSave).not.toHaveBeenCalled();
-    expect(r.getAllByText('The rooms add up to more than the bill.').length).toBeGreaterThan(0);
+    expect(r.getAllByText('The rooms add up to more than the total.').length).toBeGreaterThan(0);
 
     await TestRenderer.act(async () => { boxes(r)['Laundry share'].props.onChangeText('400'); });
     await TestRenderer.act(async () => { await tap(r, 'Save').props.onPress(); });

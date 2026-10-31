@@ -271,7 +271,7 @@ export default function ProjectDetailScreen({ route }: Props) {
     setRereadingId(review.id);
     try {
       const { cards } = await rereadInvoiceReview(review.id);
-      await changed(cards > 1 ? `Read — that email held ${cards} papers` : 'Read — check it before you allocate it');
+      await changed(cards > 1 ? `Read · ${cards} papers` : 'Read');
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Couldn’t read that one just now');
     } finally {
@@ -331,7 +331,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       ? {
         key: `claim-${bills[0].id}`,
         title: `${paperName(bills[0])} · ${money$(bills[0].amountIncl ?? 0)}`,
-        subtitle: `${bills[0].supplier ?? 'No supplier'} · a stage of ${paperName(contract)}, counted twice until linked`,
+        subtitle: `Stage of ${paperName(contract)} · not linked`,
         onPress: () => setOpenPrice(bills[0].id),
         action: {
           label: 'Link',
@@ -341,8 +341,8 @@ export default function ProjectDetailScreen({ route }: Props) {
       }
       : {
         key: `claims-${contract.id}`,
-        title: `${bills.length} ${bills[0].supplier ?? 'unnamed'} bills are stages of ${paperName(contract)}`,
-        subtitle: `${bills.map(paperName).join(' · ')} · counted twice until linked`,
+        title: `${bills.length} ${bills[0].supplier ?? 'unnamed'} invoices are stages of ${paperName(contract)}`,
+        subtitle: `${bills.map(paperName).join(' · ')} · not linked`,
         action: {
           label: 'Link all',
           a11y: `Link all ${bills.length} to ${paperName(contract)}`,
@@ -365,7 +365,7 @@ export default function ProjectDetailScreen({ route }: Props) {
     ...paymentEchoes(quotes, page.payments).map((e): Check => ({
       key: `echo-${e.payment.id}`,
       title: `${paperName(e.twin)} looks like ${paperName(e.bill)}’s deposit`,
-      subtitle: `${money$(inclGst(e.payment.amount, e.payment.amountInclGst) ?? 0)} is paid on both — counted twice unless ${paperName(e.twin)} goes inside ${paperName(e.bill)}`,
+      subtitle: `Paid twice · ${money$(inclGst(e.payment.amount, e.payment.amountInclGst) ?? 0)}`,
       onPress: () => setOpenPrice(e.twin.id),
     })),
     ...quotes
@@ -373,7 +373,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       .map((q): Check => ({
         key: `quote-${q.id}`,
         title: `${paperName(q)} reads as a quote`,
-        subtitle: `${q.supplier ?? 'No supplier'} · recorded as an invoice, so it counts as billed and owing`,
+        subtitle: `${q.supplier ?? 'No supplier'} · recorded as an invoice`,
         onPress: () => setOpenPrice(q.id),
       })),
     // Two spellings of one business. The supplier list is folded behind one
@@ -385,7 +385,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         return to ? [{
           key: `merge-${from.key}`,
           title: `${from.name} looks like ${to.name}`,
-          subtitle: 'Two spellings of one business — merge them to count them as one supplier',
+          subtitle: 'Same business, two spellings',
           onPress: () => setSupplierOpen(from.key),
           action: { label: 'Merge', a11y: `Merge ${from.name} into ${to.name}`, run: () => setMerging({ from, to }) },
         }] : [];
@@ -442,7 +442,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       await changed(bills.length === 1 ? 'Linked to the agreed price' : `Linked all ${bills.length} to ${paperName(contract)}`);
     } catch (err: unknown) {
       const why = err instanceof Error ? err.message : 'That didn’t link';
-      if (linked > 0) await changed(`Linked ${linked} of ${bills.length} — ${why}`);
+      if (linked > 0) await changed(`Linked ${linked} of ${bills.length} · ${why}`);
       else showToast(why);
     }
   }
@@ -781,9 +781,9 @@ export default function ProjectDetailScreen({ route }: Props) {
                         review,
                         async () => {
                           let said = review.kind === 'quote'
-                            ? 'Added as a quote — nothing’s agreed yet'
-                            : extras.againstQuoteId ? 'Added as a stage of the agreed price'
-                              : review.paid && review.amount !== null ? 'Added, and recorded as paid' : 'Added to the job';
+                            ? 'Added as a quote'
+                            : extras.againstQuoteId ? 'Added · stage of the quote'
+                              : review.paid && review.amount !== null ? 'Added · paid' : 'Added to the job';
                           const bill = extras.againstQuoteId || extras.recordAlreadyPaid
                             ? await approveInvoiceReview(review.id, extras)
                             : await approveInvoiceReview(review.id);
@@ -793,9 +793,9 @@ export default function ProjectDetailScreen({ route }: Props) {
                           if (extras.recordAlreadyPaid && deposit) {
                             try {
                               await updateQuote(deposit.id, { billedThroughId: bill.id });
-                              said = `${said} · ${deposit.invoiceNumber ?? 'the deposit'} is inside it`;
+                              said = `${said} · ${deposit.invoiceNumber ?? 'the deposit'} included`;
                             } catch {
-                              said = `${said}, but ${deposit.invoiceNumber ?? 'the deposit'} is still counted on its own — open it to put it inside`;
+                              said = `${said} · ${deposit.invoiceNumber ?? 'the deposit'} uncategorised`;
                             }
                           }
                           if (!paysOff) return said;
@@ -803,11 +803,11 @@ export default function ProjectDetailScreen({ route }: Props) {
                             await updateExpectedCost(paysOff.id, { settledBy: bill.id });
                             return `${said} · pays off ${paysOff.name}`;
                           } catch {
-                            return `${said}, but not linked to ${paysOff.name} — use Billed on Expected to pay`;
+                            return `${said} · not linked to ${paysOff.name}`;
                           }
                         },
                       ))}
-                    onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed — you can put it back')}
+                    onDecline={() => rule(review, () => declineInvoiceReview(review.id), 'Removed')}
                   />
                   );
                 })}
@@ -1069,7 +1069,7 @@ export default function ProjectDetailScreen({ route }: Props) {
                       accessory={(
                         <Pill
                           label="Billed"
-                          accessibilityLabel={`Say which bill paid ${x.name}`}
+                          accessibilityLabel={`Say which invoice paid ${x.name}`}
                           onPress={() => setSettling(x)}
                         />
                       )}
@@ -1255,7 +1255,7 @@ export default function ProjectDetailScreen({ route }: Props) {
         onChoose={async (bill) => {
           if (!settling) return;
           await updateExpectedCost(settling.id, { settledBy: bill.id });
-          await changed(`Paid off by ${bill.invoiceNumber ?? bill.supplier ?? 'that bill'}`);
+          await changed(`Paid off by ${bill.invoiceNumber ?? bill.supplier ?? 'that invoice'}`);
         }}
         onRecord={() => {
           const x = settling;
@@ -1277,7 +1277,7 @@ export default function ProjectDetailScreen({ route }: Props) {
           // The figure first: the split is checked against the bill as it now reads.
           await updateInvoiceReview(checking.id, update);
           await setInvoiceReviewRooms(checking.id, rooms.ids, rooms.amounts);
-          await changed('Saved — not counted until you add it to the job');
+          await changed('Saved');
         }}
         onMove={checking ? () => { const review = checking; setChecking(null); openMove(review); } : undefined}
       />
@@ -1398,7 +1398,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       <ConfirmDialog
         visible={payingAll}
         title={`Mark ${oldBills.length} invoices as paid?`}
-        message={`Each is recorded as paid in full on its own due date, or its date where it has none — ${money$(oldBills.reduce((t, b) => t + (b.unpaid ?? 0), 0))} in all. Any paid on another day can be changed on its own sheet.`}
+        message={`Paid on each due date · ${money$(oldBills.reduce((t, b) => t + (b.unpaid ?? 0), 0))} in all`}
         confirmLabel="Mark them paid"
         onCancel={() => setPayingAll(false)}
         onConfirm={payAllOnDueDates}
@@ -1504,9 +1504,7 @@ export default function ProjectDetailScreen({ route }: Props) {
       <ConfirmDialog
         visible={merging !== null}
         title={merging ? `Merge “${merging.from.name}” into “${merging.to.name}”?` : ''}
-        message={merging
-          ? `${describeRenameReach(merging.from)} will be renamed “${merging.to.name}” on this job, so their bills, payments and files sit under one supplier. Agreed and To pay may change once they count as one.`
-          : undefined}
+        message={merging ? 'Totals may change.' : undefined}
         confirmLabel="Merge"
         onCancel={() => setMerging(null)}
         onConfirm={async () => {

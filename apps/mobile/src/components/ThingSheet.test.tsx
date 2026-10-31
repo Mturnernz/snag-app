@@ -97,7 +97,7 @@ describe('choosing against a set-aside', () => {
     await press(r, 'Choose Caroma Luna');
     r.getByText('Who will bill you for it?');
     r.getByText('You pay them directly');
-    r.getByText('On their bills');
+    r.getByText('On their invoices');
     r.getByText('Bathroom hardware set aside');
     r.getByText('$12,000');
     r.getByText('$890');

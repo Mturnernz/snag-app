@@ -115,7 +115,7 @@ it('moves the start back to a finish set before it, and says so', async () => {
   TestRenderer.act(() => finished.props.onChangeText('25/06/2024'));
   TestRenderer.act(() => boxes(r)[1].props.onBlur());
   expect(boxes(r)[0].props.value).toBe('25/06/2024');
-  r.getByText('Started moved to 25/06/2024 — a job can’t finish before it starts.');
+  r.getByText('Started moved to 25/06/2024');
   await done(r);
   expect(onSave).toHaveBeenCalledWith({ status: 'done', startedOn: '2024-06-25', finishedOn: '2024-06-25' });
 });
@@ -125,7 +125,7 @@ it('moves the finish forward to a start set after it', async () => {
   TestRenderer.act(() => boxes(r)[0].props.onChangeText('10/09/2026'));
   TestRenderer.act(() => boxes(r)[0].props.onBlur());
   expect(boxes(r)[1].props.value).toBe('10/09/2026');
-  r.getByText('Finished moved to 10/09/2026 — a job can’t finish before it starts.');
+  r.getByText('Finished moved to 10/09/2026');
   await done(r);
   expect(onSave).toHaveBeenCalledWith({ status: 'done', startedOn: '2026-09-10', finishedOn: '2026-09-10' });
 });

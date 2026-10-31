@@ -2673,6 +2673,43 @@ section wins**; the passages keep their history.
   agreed yet, so this counts on its own*); the term is the answer and the figures say the rest.
   NZ spelling, as everywhere in the app.
 
+**Terms, not sentences** (31 October 2026, item by item by the owner, the same day). The *Part of*
+rule applied to the rest of the tab: a label, a hint or a toast names the answer and stops; the
+figures say what it does to the money. **Where anything in this file says otherwise about the
+words on the Projects tab, this wins.**
+
+- **One set of terms for what a bill is part of**, everywhere it is asked: *Part of* · *Stage of
+  …* · *Included in …* · *Uncategorised*. The money sheet's *Is this part of an agreed price?* is
+  *Part of* with *Stage of <number · what for>* rows and *Uncategorised* last. The card's *For ▾*
+  chooser is *Stage of* and *Area*. A guess from the paper's words is marked **Suggested**, never
+  *its words say so*.
+- **A paper whose words say quote is a suggestion, not a note.** The note (*Its own words call it a
+  quote — …*) and its *Make it a quote* button are gone from the card and the bill's sheet.
+  *Suggested: Quote* sits by the kind pill and opens the same dropdown, where *Quote* carries
+  *Suggested* (`KindSheet`'s `suggested`). The dropdown's options are the words alone: the
+  sentence under each (*Added as a price nobody has agreed to yet* …) is gone.
+- **Worth checking says what is wrong in a term**: *Stage of QU-0111 · not linked*, *Paid twice ·
+  $8,244.11*, *recorded as an invoice*, *Same business, two spellings*.
+- **Dialogs ask and stop.** Agreeing a price over expected payments lists them and offers
+  **Included** / **Extra**. *Mark the N past their due date as paid* says *Paid on each due date ·
+  $X in all*. A merge says *Totals may change.*
+- **Hints that explained are terms or gone**: *Whole job*, *Not split*, *All on Kitchen*; nothing
+  under a new job's name or its rooms, or under filing paperwork; *Forward from the address you
+  sign in with.* On an expected cost: *Optional* under the amount, nothing under *Probably from*,
+  and *Counts as Agreed* / *Counts as Undecided* under the answer — the totals card's own words,
+  where *committed*, *forecast* and *who we're paying* named rows the page no longer has.
+- **A toast says what happened**: *Read*, *Read · 4 papers*, *Added as a quote*, *Added · stage of
+  the quote*, *Added · paid*, *Saved*, *Removed*, *Now a quote*, and a loose end named in a term
+  (*· V3 uncategorised*, *· not linked to Reliabuilder payment 3/4*). A refusal is still the
+  server's words. A date moved to keep a job's order says only which moved (*Started moved to
+  25/06/2024*).
+- **One paper is an *invoice***, the rule above carried through: *Which invoice paid this?*,
+  *Record the invoice*, *Included in another invoice*, *Quotes and invoices*, *Check this invoice*,
+  *N invoices are stages of …*. A contract's claims are listed under **Stages**, the *Stage of*
+  word. *To pay*, *New bills*, *Email bills to this job*, *billed* and *Left to bill* stay; so does
+  *shared bill* on a room, since a shared price can be a quote. A room split compares with *the
+  total*, for the same reason.
+
 **Kept, by the owner's decision, so not proposed again:** the five figures on an underway job's
 card (Budgeted, Quoted, Paid, Expected total, Budget remaining); the *from … · date* line on a
 waiting card; both *Dated* and *Due* on it; and the *Invoice* / *Quote* tag on every row of a

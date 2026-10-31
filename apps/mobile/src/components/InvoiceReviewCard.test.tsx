@@ -173,7 +173,7 @@ describe('a card that looks like a bill already on the job', () => {
       onOpenDuplicate,
     });
     r.getByText('Looks like TS-4471 from Tile Space ($2,480, 16 Sep 2026), already on the job');
-    const open = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Open the bill it looks like' && n.props?.onPress)[0];
+    const open = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'Open the invoice it looks like' && n.props?.onPress)[0];
     TestRenderer.act(() => open.props.onPress());
     expect(onOpenDuplicate).toHaveBeenCalled();
     press(r, 'Add to job');
@@ -278,12 +278,13 @@ describe('the kind pill', () => {
     expect(pill(r, 'Invoice. Change what it is')).toBeUndefined();
   });
 
-  it('opens the three answers, each saying what it does to the money', () => {
+  it('opens the three answers as words, with nothing under them', () => {
     const { r } = arrange({}, { onChangeKind: jest.fn().mockResolvedValue(undefined) });
     TestRenderer.act(() => pill(r, 'Invoice. Change what it is').props.onPress());
-    r.getByText('Added to the job as something to pay');
-    r.getByText('Added as a price nobody has agreed to yet');
-    r.getByText('Filed on the job — it counts towards no figure');
+    r.getByText('Quote');
+    r.getByText('Paperwork');
+    expect(r.queryByText('Added to the job as something to pay')).toBeNull();
+    expect(r.queryByText('Suggested')).toBeNull();
   });
 
   it('writes the kind chosen, and says when the kind was a guess', async () => {
@@ -396,11 +397,14 @@ describe('what it offers to do as it lands', () => {
     expect(onApprove).toHaveBeenCalledWith(null, { againstQuoteId: null, recordAlreadyPaid: true });
   });
 
-  it('says when its own words call it a quote, and makes it one in a press', async () => {
+  it('suggests Quote beside the pill when its own words call it one, and the dropdown marks it', async () => {
     const onChangeKind = jest.fn().mockResolvedValue(undefined);
     const { r } = arrange({ supplier: 'Elite Bathroomware', sourceSubject: 'Fwd: Fw: Quote 81914 from ELITE BATHROOMWARE' }, { onChangeKind });
-    r.getByText('Its own words call it a quote — as an invoice it counts as billed, and owing.');
-    await TestRenderer.act(async () => { byLabel(r, 'Make it a quote').props.onPress(); });
+    r.getByText('Suggested: Quote');
+    expect(r.queryByText('Make it a quote')).toBeNull();
+    await TestRenderer.act(async () => { byLabel(r, 'Suggested: Quote. Change what it is').props.onPress(); });
+    r.getByText('Suggested');
+    await TestRenderer.act(async () => { byLabel(r, 'Quote').props.onPress(); });
     expect(onChangeKind).toHaveBeenCalledWith('quote');
   });
 

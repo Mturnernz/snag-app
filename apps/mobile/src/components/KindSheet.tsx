@@ -9,8 +9,6 @@ import { Colors, Typography } from '../constants/theme';
 export interface KindOption<T extends string> {
   value: T;
   label: string;
-  /** What choosing it does to the money, in one line. */
-  hint: string;
 }
 
 interface Props<T extends string> {
@@ -19,6 +17,8 @@ interface Props<T extends string> {
   subtitle?: string | null;
   options: KindOption<T>[];
   value: T;
+  /** The kind the paper's own words point to, marked *Suggested* when it is not already chosen. */
+  suggested?: T | null;
   /** Writes the new kind. A throw keeps the sheet open and says why. */
   onPick: (next: T) => Promise<void>;
   onClose: () => void;
@@ -28,17 +28,18 @@ interface Props<T extends string> {
  * Saying what a piece of paper is — the sheet the kind pill opens.
  *
  * **A press writes**, the app's rule for a tap, and the sheet closes behind
- * it. Pressing the kind it already is writes nothing. Each answer says in one
- * line what it does to the money, because that is the whole reason the answer
- * matters: an invoice is something to pay, a quote is a price nobody may have
- * agreed to, and paperwork counts towards nothing.
+ * it. Pressing the kind it already is writes nothing. The options are the
+ * words and nothing under them, by the owner's decision (October 2026): the
+ * one line an option can carry is *Suggested*, on the kind the paper's own
+ * words point to, so the likely answer is offered without a sentence
+ * explaining the money.
  *
  * A refusal — a paid invoice cannot become a quote, a contract with progress
  * bills against it cannot become an invoice — is said here, in the server's
  * words, with the sheet still open, because it is a fact about this choice.
  */
 export default function KindSheet<T extends string>({
-  visible, subtitle, options, value, onPick, onClose,
+  visible, subtitle, options, value, suggested = null, onPick, onClose,
 }: Props<T>) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +72,7 @@ export default function KindSheet<T extends string>({
           <RadioRow
             key={option.value}
             title={option.label}
-            subtitle={option.hint}
+            subtitle={option.value === suggested && option.value !== value ? 'Suggested' : undefined}
             selected={option.value === value}
             onPress={() => pick(option.value)}
           />

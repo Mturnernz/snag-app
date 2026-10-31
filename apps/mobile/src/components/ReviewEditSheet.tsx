@@ -122,7 +122,7 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
     const datedIso = parseLooseDate(dated);
     const dueIso = parseLooseDate(due);
     if (figure === undefined) { setError('That amount isn’t a figure.'); return; }
-    if (datedIso === undefined) { setError('The date on the bill isn’t a day the calendar has.'); return; }
+    if (datedIso === undefined) { setError('The invoice date isn’t a day the calendar has.'); return; }
     if (dueIso === undefined) { setError('The due date isn’t a day the calendar has.'); return; }
     const beforeFigure = parseAmount(before);
     if (beforeFigure === undefined) { setError('What was paid before isn’t a figure.'); return; }
@@ -157,7 +157,7 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
   return (
     <Sheet
       visible={review !== null}
-      title={kind === 'paperwork' ? 'Check this paperwork' : kind === 'quote' ? 'Check this quote' : 'Check this bill'}
+      title={kind === 'paperwork' ? 'Check this paperwork' : kind === 'quote' ? 'Check this quote' : 'Check this invoice'}
       subtitle={review?.sourceSubject ?? null}
       onClose={onClose}
       footer={<PrimaryButton label="Save" onPress={save} busy={busy} />}
@@ -169,9 +169,6 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
         onChange={setKind}
         accessibilityLabel="What kind of paper this is"
       />
-      {kind === 'paperwork' ? (
-        <Text style={groupedStyles.hint}>Filed on the job — it doesn’t count towards any figure.</Text>
-      ) : null}
 
       <Group>
         <View style={styles.field}>
@@ -211,7 +208,7 @@ export default function ReviewEditSheet({ review, elements, locations, onAddRoom
           />
         </View>
         <View style={styles.field}>
-          <DateField label="Dated" value={dated} onChangeValue={setDated} pickerTitle="The date on the bill" />
+          <DateField label="Dated" value={dated} onChangeValue={setDated} pickerTitle="The invoice date" />
         </View>
         {kind === 'invoice' ? (
           <View style={styles.field}>

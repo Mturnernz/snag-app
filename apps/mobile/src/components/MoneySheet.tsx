@@ -239,7 +239,7 @@ export default function MoneySheet({
     if (kind === 'expected') return detail.trim() ? null : 'Say what the cost is for';
     if (!supplier) return 'Say who it’s from';
     if (money === null) return 'Enter the amount';
-    if (isBill && signed.length > 0 && partOf === null) return 'Say whether it’s part of an agreed price';
+    if (isBill && signed.length > 0 && partOf === null) return 'Say what it’s part of';
     if (kind === 'quote' && !forAThing && agreed === null) return 'Say whether you’ve agreed to go ahead';
     return null;
   })();
@@ -320,7 +320,7 @@ export default function MoneySheet({
           await updateExpectedCost(paysOff.chosen.id, { settledBy: created.id });
           paidOff = paysOff.chosen.name;
         } catch {
-          await onSaved(`Recorded, but not linked to ${paysOff.chosen.name} — use Billed on Expected to pay`);
+          await onSaved(`Recorded · not linked to ${paysOff.chosen.name}`);
           onClose();
           return;
         }
@@ -337,7 +337,7 @@ export default function MoneySheet({
 
       const said = kind === 'receipt' || paid ? 'Recorded as paid'
         : forAThing ? 'Added as an option'
-          : contract ? 'Progress bill recorded' : 'Recorded';
+          : contract ? 'Recorded · stage of the quote' : 'Recorded';
       await onSaved(paidOff ? `${said} · pays off ${paidOff}` : said);
       onClose();
     } catch (err: unknown) {
@@ -386,7 +386,7 @@ export default function MoneySheet({
       : step === 'setAside' ? 'Does it set money aside for things you’ll choose?'
         : kind === 'quote' ? 'New quote'
           : kind === 'receipt' ? 'New receipt'
-            : kind === 'expected' ? 'A cost we’re expecting' : 'New bill';
+            : kind === 'expected' ? 'A cost we’re expecting' : 'New invoice';
 
   const subtitle = step === 'setAside' && saved
     ? `${saved.supplier ?? ''} · ${formatMoney(saved.amountIncl) ?? ''}`
@@ -512,12 +512,12 @@ export default function MoneySheet({
 
           {isBill && signed.length > 0 ? (
             <View style={groupedStyles.block}>
-              <Text style={groupedStyles.question}>Is this part of an agreed price?</Text>
+              <Text style={groupedStyles.question}>Part of</Text>
               <Group>
                 {signed.map((q) => (
                   <RadioRow
                     key={q.id}
-                    title={q.detail ?? 'Agreed price'}
+                    title={`Stage of ${[q.invoiceNumber, q.detail].filter(Boolean).join(' · ') || 'the agreed price'}`}
                     subtitle={`${formatMoney(q.amountIncl) ?? '—'} · ${
                       q.claimedTotal ? `${formatMoney(q.claimedTotal)} billed so far` : 'Nothing billed yet'
                     }`}
@@ -525,7 +525,7 @@ export default function MoneySheet({
                     onPress={() => setPartOf(q.id)}
                   />
                 ))}
-                <RadioRow title="No, it’s extra" selected={partOf === 'extra'} onPress={() => setPartOf('extra')} />
+                <RadioRow title="Uncategorised" selected={partOf === 'extra'} onPress={() => setPartOf('extra')} />
               </Group>
               {left !== null ? (
                 <Text style={groupedStyles.hint}>
@@ -638,7 +638,7 @@ export default function MoneySheet({
                     onPress={() => onOpenBill(duplicate.match.quote)}
                     style={styles.duplicateOpen}
                     accessibilityRole="button"
-                    accessibilityLabel="Open the bill already on the job"
+                    accessibilityLabel="Open the invoice already on the job"
                   >
                     <Text style={styles.duplicateOpenLabel}>Open that one</Text>
                   </Pressable>

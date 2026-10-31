@@ -119,7 +119,7 @@ describe('a bill', () => {
     expect(mock_payBill).not.toHaveBeenCalled();
     r.getByText('When was it paid?');
     r.getByText('On its due date');
-    r.getByText('On the bill’s date');
+    r.getByText('On the invoice date');
     await press(r, 'Save');
     expect(mock_payBill).toHaveBeenCalledWith('b1', 4200, '2026-09-05');
     expect(onChanged).toHaveBeenCalledWith('Paid · 5 Sep 2026');
@@ -170,10 +170,13 @@ describe('a bill', () => {
     expect(mock_addPayment).toHaveBeenCalledWith('b1', expect.objectContaining({ amount: 2000, paidOn: '2026-09-03' }));
   });
 
-  it('says when its own words call it a quote, and makes it one in a press', async () => {
+  it('suggests Quote when its own words call it one, in the dropdown rather than a sentence', async () => {
     const { r } = open({ ...bill, supplier: 'Regency Plumbing', detail: 'Customer Quotation No. 33737' });
-    r.getByText('Its own words call it a quote');
-    await press(r, 'Make it a quote');
+    r.getByText('Suggested: Quote');
+    expect(r.queryByText('Its own words call it a quote')).toBeNull();
+    await press(r, 'Suggested: Quote. Change what it is');
+    r.getByText('Suggested');
+    await press(r, 'Quote');
     expect(mock_setQuoteKind).toHaveBeenCalledWith('b1', 'quote');
   });
 
@@ -240,7 +243,7 @@ describe('an agreed price', () => {
   it('lists the progress bills that are part of it', () => {
     const claim = quote({ id: 'k1', supplier: 'ReliaBuilder', detail: 'Progress bill 1', kind: 'invoice', againstQuoteId: 'c1', amount: 46000, unpaid: 0 });
     const { r } = open(contract, { quotes: [contract, claim] });
-    r.getByText('Progress bills');
+    r.getByText('Stages');
     r.getByText('Progress bill 1');
   });
 
@@ -325,7 +328,7 @@ describe('a bill inside another bill', () => {
 
   it('says which bill it is inside, and offers nothing to pay', () => {
     const { r } = open(inside, { quotes: [builder, inside] });
-    expect(r.queryByText('Included in another bill')).not.toBeNull();
+    expect(r.queryByText('Included in another invoice')).not.toBeNull();
     expect(r.queryByText('Included in RELIABUILDER LIMITED · INV-0184')).not.toBeNull();
     expect(r.queryByText('Mark as paid')).toBeNull();
   });
@@ -341,7 +344,7 @@ describe('a bill inside another bill', () => {
     const { r } = open(builder, { quotes: [builder, inside] });
     expect(r.queryByText('Includes')).not.toBeNull();
     expect(r.queryByText('Force Plumbing')).not.toBeNull();
-    expect(r.queryByText('The rest of this bill')).not.toBeNull();
+    expect(r.queryByText('The rest of this invoice')).not.toBeNull();
     expect(r.queryByText('$4,449.14')).not.toBeNull();
     // A bill holding others is not itself put inside something.
     expect(r.queryByText('Part of')).toBeNull();
@@ -378,7 +381,7 @@ describe('what it is', () => {
     await press(r, 'Quote');
     expect(mock_setQuoteKind).toHaveBeenCalledWith('b1', 'quote');
     expect(mock_updateQuote).not.toHaveBeenCalled();
-    expect(onChanged).toHaveBeenCalledWith('Now a quote — not agreed yet');
+    expect(onChanged).toHaveBeenCalledWith('Now a quote');
   });
 
   it('writes nothing when the kind it already is is chosen', async () => {
@@ -498,7 +501,7 @@ describe('agreeing a price that holds an expected payment', () => {
     await press(r, 'Agreed');
     expect(mock_setQuoteStatus).toHaveBeenCalledWith('c1', 'accepted');
     r.getByText('Is Reliabuilder payment 4/4 part of this price?');
-    const yes = r.root.findAll((n: any) => n.props?.label === 'Yes, it’s included' && n.props?.onPress, { deep: true });
+    const yes = r.root.findAll((n: any) => n.props?.label === 'Included' && n.props?.onPress, { deep: true });
     await TestRenderer.act(async () => { yes[0].props.onPress(); });
     expect(mock_updateExpectedCost).toHaveBeenCalledWith('x2', { settledBy: 'c1' });
     expect(onChanged).toHaveBeenLastCalledWith('Reliabuilder payment 4/4 is part of this price');
@@ -507,7 +510,7 @@ describe('agreeing a price that holds an expected payment', () => {
   it('leaves them alone on No, and asks nothing about another business’s', async () => {
     const { r } = open(contract, { expected: [earmark()] });
     await press(r, 'Agreed');
-    const no = r.root.findAll((n: any) => n.props?.label === 'No, it’s extra' && n.props?.onPress, { deep: true });
+    const no = r.root.findAll((n: any) => n.props?.label === 'Extra' && n.props?.onPress, { deep: true });
     await TestRenderer.act(async () => { no[0].props.onPress(); });
     expect(mock_updateExpectedCost).not.toHaveBeenCalled();
 

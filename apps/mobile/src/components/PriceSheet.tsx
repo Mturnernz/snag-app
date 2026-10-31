@@ -53,8 +53,8 @@ interface Props {
 
 /** What a price can be said to be. Paperwork is a waiting card's answer, never a price's. */
 const PRICE_KIND_OPTIONS: KindOption<'quote' | 'invoice'>[] = [
-  { value: 'quote', label: 'Quote', hint: 'A price — it counts once you’ve agreed to it' },
-  { value: 'invoice', label: 'Invoice', hint: 'Something you’ve been charged for, and pay' },
+  { value: 'quote', label: 'Quote' },
+  { value: 'invoice', label: 'Invoice' },
 ];
 
 const parseAmount = (text: string): number | null => {
@@ -188,7 +188,8 @@ export default function PriceSheet({
   const suggestion = isBill && !quote.againstQuoteId ? suggestedClaim(quote, quotes) : null;
   const canClaim = isBill && !inside && quote.supersedesLineId === null
     && (quote.againstQuoteId !== null || candidates.length > 0);
-  const saysQuote = priceSaysQuote(quote);
+  // Its own words call it a quote: the kind dropdown offers Quote as Suggested.
+  const suggestQuote = isBill && priceSaysQuote(quote) && mine.length === 0 && !quote.againstQuoteId;
   const dayChoices = paidDayChoices(quote, today);
 
   /** Pays what is owing — asking when first if the bill fell due before today. */
@@ -275,7 +276,7 @@ export default function PriceSheet({
 
   const hostName = (q: ProjectQuote) => [q.supplier ?? 'No supplier', q.invoiceNumber].filter(Boolean).join(' · ');
 
-  const status = inside ? 'Included in another bill' : !isBill
+  const status = inside ? 'Included in another invoice' : !isBill
     ? quote.status === 'accepted' ? 'Agreed' : quote.status === 'declined' ? 'Turned down' : 'Not agreed yet'
     : unpaid <= 0 ? 'Paid'
       : overdue ? `Overdue since ${formatExactDate(quote.dueOn)}`
@@ -403,7 +404,7 @@ export default function PriceSheet({
               {dayChoices.map((c) => (
                 <RadioRow
                   key={c.key}
-                  title={c.key === 'due' ? 'On its due date' : c.key === 'dated' ? 'On the bill’s date' : 'Today'}
+                  title={c.key === 'due' ? 'On its due date' : c.key === 'dated' ? 'On the invoice date' : 'Today'}
                   subtitle={formatExactDate(c.day)}
                   selected={paidDay === c.day}
                   onPress={() => setPaidDay(c.day)}
@@ -464,6 +465,16 @@ export default function PriceSheet({
                 accessibilityLabel={`${isBill ? 'Invoice' : 'Quote'}. Change what it is`}
                 style={styles.kind}
               />
+              {suggestQuote ? (
+                <Pressable
+                  onPress={() => setChoosingKind(true)}
+                  style={styles.suggest}
+                  accessibilityRole="button"
+                  accessibilityLabel="Suggested: Quote. Change what it is"
+                >
+                  <Text style={styles.suggestLabel}>Suggested: Quote</Text>
+                </Pressable>
+              ) : null}
               <Text style={styles.amount}>{formatMoney(quote.amountIncl) ?? '—'}</Text>
               <View style={[styles.badge, tone === 'overdue' && styles.badgeOverdue, tone === 'due' && styles.badgeDue]}>
                 <Text style={[styles.badgeLabel, tone === 'overdue' && styles.badgeLabelOverdue, tone === 'due' && styles.badgeLabelDue]}>
@@ -471,22 +482,6 @@ export default function PriceSheet({
                 </Text>
               </View>
             </View>
-
-            {isBill && saysQuote && mine.length === 0 && !quote.againstQuoteId ? (
-              <Group>
-                <Row
-                  title="Its own words call it a quote"
-                  subtitle="A quote counts once it’s agreed. Recorded as an invoice it counts as billed, and as owing."
-                  accessory={(
-                    <Pill
-                      label="Make it a quote"
-                      disabled={busy}
-                      onPress={() => run(() => setQuoteKind(quote.id, 'quote'), 'Now a quote — not agreed yet')}
-                    />
-                  )}
-                />
-              </Group>
-            ) : null}
 
             {!isBill ? (
               <View style={groupedStyles.block}>
@@ -606,7 +601,7 @@ export default function PriceSheet({
                   ))}
                   {quote.amountIncl !== null ? (
                     <Row
-                      title="The rest of this bill"
+                      title="The rest of this invoice"
                       value={formatMoney(Math.round((quote.amountIncl - holds.reduce((t, q) => t + (q.amountIncl ?? 0), 0)) * 100) / 100)}
                       tone="muted"
                     />
@@ -617,12 +612,12 @@ export default function PriceSheet({
 
             {claims.length > 0 ? (
               <View style={groupedStyles.block}>
-                <Text style={styles.heading}>Progress bills</Text>
+                <Text style={styles.heading}>Stages</Text>
                 <Group>
                   {claims.map((claim) => (
                     <Row
                       key={claim.id}
-                      title={claim.detail ?? 'Progress bill'}
+                      title={claim.detail ?? 'Stage'}
                       subtitle={(claim.unpaid ?? 0) > 0 ? 'To pay' : 'Paid'}
                       value={formatMoney(claim.amountIncl)}
                       onPress={() => onOpen(claim)}
@@ -695,9 +690,10 @@ export default function PriceSheet({
         subtitle={quote.supplier}
         options={PRICE_KIND_OPTIONS}
         value={isBill ? 'invoice' : 'quote'}
+        suggested={suggestQuote ? 'quote' : null}
         onPick={async (next) => {
           await setQuoteKind(quote.id, next);
-          await onChanged(next === 'invoice' ? 'Now an invoice' : 'Now a quote — not agreed yet');
+          await onChanged(next === 'invoice' ? 'Now an invoice' : 'Now a quote');
         }}
         onClose={() => setChoosingKind(false)}
       />
@@ -705,9 +701,9 @@ export default function PriceSheet({
       <ConfirmDialog
         visible={folding.length > 0}
         title={folding.length === 1 ? `Is ${folding[0].name} part of this price?` : 'Are these part of this price?'}
-        message={`${folding.map((x) => [x.name, formatMoney(expectedAmountIncl(x))].filter(Boolean).join(' · ')).join('\n')}\n\nIf the agreed price includes ${folding.length === 1 ? 'it' : 'them'}, ${folding.length === 1 ? 'it comes' : 'they come'} off Expected to pay, so the money isn’t counted twice.`}
-        confirmLabel="Yes, it’s included"
-        cancelLabel="No, it’s extra"
+        message={folding.map((x) => [x.name, formatMoney(expectedAmountIncl(x))].filter(Boolean).join(' · ')).join('\n')}
+        confirmLabel="Included"
+        cancelLabel="Extra"
         onCancel={() => setFolding([])}
         onConfirm={foldEarmarks}
       />
@@ -734,6 +730,8 @@ export default function PriceSheet({
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', gap: Spacing.sm, paddingVertical: Spacing.sm },
   kind: { alignSelf: 'center' },
+  suggest: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: Spacing.sm },
+  suggestLabel: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
   amount: {
     fontSize: 44, lineHeight: 52, fontWeight: Typography.bold, color: Colors.textPrimary,
     letterSpacing: -1, fontVariant: ['tabular-nums'],

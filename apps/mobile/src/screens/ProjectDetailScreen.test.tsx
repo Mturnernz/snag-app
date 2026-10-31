@@ -418,7 +418,7 @@ describe('a bill that looks like one already on the job', () => {
   it('warns on the card, opens the bill it matches, and still allocates', async () => {
     const r = await arrange(downstairs({ quotes: [...downstairs().quotes, onJob], invoiceReviews: [waiting()] }));
     r.getByText('Looks like INV87022 from MSC Consulting ($437, 31 Aug 2026), already on the job');
-    await press(r, 'Open the bill it looks like');
+    await press(r, 'Open the invoice it looks like');
     r.getByText('price sheet open: MSC Consulting');
     const approve = r.root.findAll((n: any) => n.props?.onApprove, { deep: true })[0];
     await TestRenderer.act(async () => { approve.props.onApprove(); });
@@ -532,7 +532,7 @@ describe('one email, several papers', () => {
     const approve = r.root.findAll((n: any) => n.props?.onApprove, { deep: true })[0];
     await TestRenderer.act(async () => { approve.props.onApprove(); });
     expect(mock_approveInvoiceReview).toHaveBeenCalledWith('rv1');
-    expect(mock_showToast).toHaveBeenCalledWith('Added as a quote — nothing’s agreed yet');
+    expect(mock_showToast).toHaveBeenCalledWith('Added as a quote');
   });
 
   it('reads a blank card again, and says how many papers came back', async () => {
@@ -542,7 +542,7 @@ describe('one email, several papers', () => {
     const calls = mock_getProjectPage.mock.calls.length;
     await pressButton(r, 'Read again');
     expect(mock_rereadInvoiceReview).toHaveBeenCalledWith('rv1');
-    expect(mock_showToast).toHaveBeenCalledWith('Read — that email held 4 papers');
+    expect(mock_showToast).toHaveBeenCalledWith('Read · 4 papers');
     expect(mock_getProjectPage.mock.calls.length).toBe(calls + 1);
   });
 
@@ -778,8 +778,8 @@ describe('expected to pay', () => {
 
   it('asks which bill paid it, offers the builder’s claim first, and links the one chosen', async () => {
     const r = await arrange(downstairs({ expected: earmarked, quotes: [...downstairs().quotes, claim] }));
-    await press(r, 'Say which bill paid ReliaBuilder payment 3/4');
-    r.getByText('Which bill paid this?');
+    await press(r, 'Say which invoice paid ReliaBuilder payment 3/4');
+    r.getByText('Which invoice paid this?');
     r.getByText('From ReliaBuilder');
     await press(r, 'Paid by RELIABUILDER LIMITED INV-0231, $43,987.50');
     expect(mock_updateExpectedCost).toHaveBeenCalledWith('x1', { settledBy: 'b9' });
@@ -789,13 +789,13 @@ describe('expected to pay', () => {
 
   it('records the bill when it is not on the job yet, starting from the earmark', async () => {
     const r = await arrange(downstairs({ expected: earmarked }));
-    await press(r, 'Say which bill paid ReliaBuilder payment 3/4');
-    r.getByText('No bill from ReliaBuilder within 10% of it on the job yet.');
-    await press(r, 'Record the bill');
+    await press(r, 'Say which invoice paid ReliaBuilder payment 3/4');
+    r.getByText('No matching invoice from ReliaBuilder yet');
+    await press(r, 'Record the invoice');
     const sheet = r.getAllByType('Text').map((n) => n.children.join('')).find((t) => t.startsWith('money sheet open'));
     expect(sheet).toContain('"kind":"bill"');
     expect(sheet).toContain('"settle":{"id":"x1"');
-    expect(text(r)).not.toContain('Which bill paid this?');
+    expect(text(r)).not.toContain('Which invoice paid this?');
   });
 
   describe('an emailed claim that looks like one', () => {
@@ -841,7 +841,7 @@ describe('expected to pay', () => {
       const r = await arrange(downstairs({ expected: earmarked, invoiceReviews: [card()] }));
       await allocate(r);
       expect(mock_showToast).toHaveBeenCalledWith(
-        'Added to the job, but not linked to ReliaBuilder payment 3/4 — use Billed on Expected to pay',
+        'Added to the job · not linked to ReliaBuilder payment 3/4',
       );
     });
 
@@ -876,7 +876,7 @@ describe('worth checking', () => {
   it('names a claim counted beside its contract, and links it in a press', async () => {
     const r = await arrange(downstairs({ quotes: [deck, deposit] }));
     r.getByText('Worth checking');
-    r.getByText('RELIABUILDER LIMITED · a stage of QU-0111, counted twice until linked');
+    r.getByText('Stage of QU-0111 · not linked');
     await press(r, 'Link Deposit Required 20% to its agreed price');
     expect(mock_setQuoteClaim).toHaveBeenCalledWith('k1', 'c1');
     expect(mock_showToast).toHaveBeenCalledWith('Linked to the agreed price');
@@ -889,8 +889,8 @@ describe('worth checking', () => {
       invoiceNumber: 'INV-0178', kind: 'invoice', amount: 14844.66, unpaid: 0,
     });
     const r = await arrange(downstairs({ quotes: [deck, deposit, progress] }));
-    r.getByText('2 RELIABUILDER LIMITED bills are stages of QU-0111');
-    expect(text(r)).not.toContain('a stage of QU-0111, counted twice until linked');
+    r.getByText('2 RELIABUILDER LIMITED invoices are stages of QU-0111');
+    expect(text(r)).not.toContain('Stage of QU-0111 · not linked');
     await press(r, 'Link all 2 to QU-0111');
     expect(mock_setQuoteClaim.mock.calls).toEqual([['k1', 'c1'], ['k2', 'c1']]);
     expect(mock_showToast).toHaveBeenCalledWith('Linked all 2 to QU-0111');
@@ -903,7 +903,7 @@ describe('worth checking', () => {
     });
     const r = await arrange(downstairs({ quotes: [deck, deposit, progress] }));
     expect(text(r)).not.toContain('INV-0178 · $14,844.66');
-    await press(r, '2 RELIABUILDER LIMITED bills are stages of QU-0111');
+    await press(r, '2 RELIABUILDER LIMITED invoices are stages of QU-0111');
     await press(r, 'INV-0178 · $14,844.66');
     r.getByText('price sheet open: RELIABUILDER LIMITED');
   });

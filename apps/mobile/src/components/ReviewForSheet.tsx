@@ -31,10 +31,10 @@ interface Props {
 /**
  * *For ▾* on a waiting card: one list, two halves.
  *
- * **Part of a quote** — the bill is a stage of that price (a deposit, a
+ * **Stage of** — the bill is a stage of that price (a deposit, a
  * progress claim). It lands where the quote sits, linked, so a signed price
  * counts it once. Only a bill can be one; a quote card is offered the areas.
- * **On its own** — no quote; the bill goes on the whole job or an area and
+ * **Area** — no quote; the bill goes on the whole job or an area and
  * counts by itself. Either half is one press that writes and closes, the
  * app's rule for a tap, and the card says the answer on its *For* line.
  *
@@ -86,7 +86,7 @@ export default function ReviewForSheet({
     <Sheet visible={visible} title="What’s it for?" subtitle={review.supplier} onClose={onClose}>
       {offered.length > 0 ? (
         <>
-          <SectionTitle title="Part of a quote" />
+          <SectionTitle title="Stage of" />
           <Group>
             {offered.map((q) => (
               <RadioRow
@@ -96,7 +96,7 @@ export default function ReviewForSheet({
                   q.supplier,
                   formatMoney(q.amountIncl),
                   q.status === 'accepted' ? 'agreed' : 'not agreed yet',
-                  suggested?.id === q.id ? 'its words say so' : null,
+                  suggested?.id === q.id ? 'Suggested' : null,
                 ].filter(Boolean).join(' · ')}
                 selected={current?.id === q.id}
                 onPress={() => pick({ quoteId: q.id }, current?.id === q.id)}
@@ -105,7 +105,7 @@ export default function ReviewForSheet({
           </Group>
         </>
       ) : null}
-      <SectionTitle title={offered.length > 0 ? 'On its own' : 'Where it goes'} />
+      <SectionTitle title="Area" />
       <Group>
         {shared ? (
           <RadioRow title="Shared between rooms" subtitle="Change the split with the pencil" selected onPress={onClose} />
@@ -119,7 +119,7 @@ export default function ReviewForSheet({
           <RadioRow
             key={e.id}
             title={e.room ?? e.name}
-            subtitle={suggestedAreas.includes(e.id) ? 'its words name it' : null}
+            subtitle={suggestedAreas.includes(e.id) ? 'Suggested' : null}
             selected={onArea && review.elementId === e.id}
             onPress={() => pick({ elementId: e.id }, onArea && review.elementId === e.id)}
           />

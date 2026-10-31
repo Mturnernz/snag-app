@@ -235,7 +235,7 @@ describe('an already-finished project', () => {
     await TestRenderer.act(async () => inputByLabel(r, 'Finished').props.onChangeText('25/06/2024'));
     await TestRenderer.act(async () => inputByLabel(r, 'Finished').props.onBlur());
     expect(inputByLabel(r, 'Started').props.value).toBe('25/06/2024');
-    r.getByText('Started moved to 25/06/2024 — a job can’t finish before it starts.');
+    r.getByText('Started moved to 25/06/2024');
     await TestRenderer.act(async () => byLabel(r, 'Start it').props.onPress());
     expect(onCreate).toHaveBeenCalledWith(
       expect.objectContaining({ startedOn: '2024-06-25', finishedOn: '2024-06-25' })

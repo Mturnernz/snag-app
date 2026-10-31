@@ -79,7 +79,7 @@ export function resolveSplit(
 
   const amounts = ids.map((id) => parseShare(typed[id] ?? ''));
   if (amounts.some((a) => a === null)) return { error: 'Give every room a share, or choose Don’t split.' };
-  if (splitLeft(total, amounts as number[]) < 0) return { error: 'The rooms add up to more than the bill.' };
+  if (splitLeft(total, amounts as number[]) < 0) return { error: 'The rooms add up to more than the total.' };
   return { ids, amounts: amounts as number[] };
 }
 
@@ -241,10 +241,10 @@ export default function RoomSplit({
       </Group>
 
       {value.ids.length === 0 ? (
-        <Text style={groupedStyles.hint}>None ticked — it goes on the whole job.</Text>
+        <Text style={groupedStyles.hint}>Whole job</Text>
       ) : null}
       {splitFrom > 1 && value.ids.length === 1 ? (
-        <Text style={groupedStyles.hint}>All of it goes on {inRooms[0]?.name ?? 'that room'}.</Text>
+        <Text style={groupedStyles.hint}>All on {inRooms[0]?.name ?? 'that room'}</Text>
       ) : null}
 
       {splitting ? (
@@ -260,7 +260,7 @@ export default function RoomSplit({
             onChange={(kind) => onChange((v) => ({ ...v, kind }))}
           />
           {value.kind === 'none' ? (
-            <Text style={groupedStyles.hint}>The rooms are on record; the money stays on the whole job.</Text>
+            <Text style={groupedStyles.hint}>Not split</Text>
           ) : total === null ? (
             <Text style={groupedStyles.hint}>Put a figure on it first to split it.</Text>
           ) : (
@@ -288,8 +288,8 @@ export default function RoomSplit({
           {value.kind === 'amounts' && left !== null ? (
             <Text style={[groupedStyles.hint, left < 0 && styles.over]} accessibilityLiveRegion="polite">
               {left > 0 ? `${formatMoney(left)}${basis} stays on the whole job`
-                : left < 0 ? `${formatMoney(-left)}${basis} more than the bill`
-                  : 'Adds up to the bill'}
+                : left < 0 ? `${formatMoney(-left)}${basis} more than the total`
+                  : 'Adds up to the total'}
             </Text>
           ) : null}
         </>

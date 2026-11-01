@@ -11,6 +11,7 @@
  * Pure, so `checks.test.ts` can pin them without a network.
  */
 import type { InvoiceReview, ProjectElement, ProjectPayment, ProjectQuote } from '@snag/shared-types';
+import { billsOnJob, findDuplicateBill } from './duplicates';
 import { businessKey } from './papers';
 
 const round = (n: number): number => Math.round(n * 100) / 100;
@@ -95,16 +96,120 @@ export function suggestedClaim(bill: ProjectQuote, quotes: ProjectQuote[]): Clai
  * are there no bill can be told which one it claims against.
  */
 export function duplicateQuotes(quotes: ProjectQuote[]): { quote: ProjectQuote; twin: ProjectQuote }[] {
-  const live = quotes.filter((q) => q.kind === 'quote' && q.status !== 'declined' && q.amountIncl !== null);
+  const live = liveQuotes(quotes);
   const pairs: { quote: ProjectQuote; twin: ProjectQuote }[] = [];
   live.forEach((q, i) => {
-    const key = businessKey(q.supplier);
-    const twin = live.slice(i + 1).find((o) =>
-      key !== null && businessKey(o.supplier) === key && scopeOf(o) === scopeOf(q)
-      && Math.abs((o.amountIncl ?? 0) - (q.amountIncl ?? 0)) < 0.01);
+    const twin = live.slice(i + 1).find((o) => sameQuoteTwice(q, o));
     if (twin) pairs.push({ quote: q, twin });
   });
   return pairs;
+}
+
+const liveQuotes = (quotes: ProjectQuote[]): ProjectQuote[] =>
+  quotes.filter((q) => q.kind === 'quote' && q.status !== 'declined' && q.amountIncl !== null);
+
+/** The same business, the same part of the job, the same figure: `duplicateQuotes`' rule. */
+function sameQuoteTwice(a: ProjectQuote, b: ProjectQuote): boolean {
+  const key = businessKey(a.supplier);
+  return key !== null && businessKey(b.supplier) === key && scopeOf(a) === scopeOf(b)
+    && Math.abs((a.amountIncl ?? 0) - (b.amountIncl ?? 0)) < 0.01;
+}
+
+// ---------------------------------------------------------------- look-alikes
+
+/** Two prices somebody compared and kept, either way round. */
+export interface KeptPair {
+  quoteA: string;
+  quoteB: string;
+}
+
+const pairKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
+/** Prices on a job that look like one price recorded more than once. */
+export interface LookAlikeGroup {
+  kind: 'quote' | 'invoice';
+  /** Two or more, oldest first. */
+  prices: ProjectQuote[];
+}
+
+/**
+ * The prices *Worth checking* puts side by side to keep or delete.
+ *
+ * Two rules, each one the app already uses, so nothing new decides what "the
+ * same price" means:
+ *
+ *   * **A quote** that `duplicateQuotes` would name: the same business, the same
+ *     part of the job, the same figure. ReliaBuilder's $176,755 on Downstairs,
+ *     once as QU-0115 and once with no number.
+ *   * **An invoice** that `findDuplicateBill` would warn about on the way in:
+ *     the same number from the same business, or, with a number missing, the
+ *     same business and figure on dates that do not disagree. Two different
+ *     numbers are two bills, which keeps ReliaBuilder's claims of $43,987.50
+ *     apart.
+ *
+ * Pairs somebody kept are left out, and what is left is gathered into groups
+ * (three copies of one quote are one group of three, not three pairs), so a
+ * group whose every pair was kept is gone. Keeping a group writes every pair in
+ * it; deleting all but one leaves nothing to pair.
+ */
+export function lookAlikes(quotes: ProjectQuote[], kept: KeptPair[] = []): LookAlikeGroup[] {
+  const keptKeys = new Set(kept.map((k) => pairKey(k.quoteA, k.quoteB)));
+  const byId = new Map(quotes.map((q) => [q.id, q]));
+  const pairs: { a: string; b: string; kind: LookAlikeGroup['kind'] }[] = [];
+
+  const live = liveQuotes(quotes);
+  live.forEach((q, i) => live.slice(i + 1).forEach((o) => {
+    if (sameQuoteTwice(q, o)) pairs.push({ a: q.id, b: o.id, kind: 'quote' });
+  }));
+
+  const bills = billsOnJob(quotes);
+  bills.forEach((bill, i) => bills.slice(i + 1).forEach((other) => {
+    if (findDuplicateBill([other], bill)) pairs.push({ a: bill.id, b: other.id, kind: 'invoice' });
+  }));
+
+  // Gathered by who is paired with whom, left out where somebody kept the pair.
+  const parent = new Map<string, string>();
+  const root = (id: string): string => {
+    let r = id;
+    while (parent.has(r) && parent.get(r) !== r) r = parent.get(r)!;
+    parent.set(id, r);
+    return r;
+  };
+  const kinds = new Map<string, LookAlikeGroup['kind']>();
+  for (const { a, b, kind } of pairs) {
+    if (keptKeys.has(pairKey(a, b))) continue;
+    if (!parent.has(a)) parent.set(a, a);
+    if (!parent.has(b)) parent.set(b, b);
+    parent.set(root(a), root(b));
+    kinds.set(a, kind);
+    kinds.set(b, kind);
+  }
+
+  const groups = new Map<string, ProjectQuote[]>();
+  for (const id of parent.keys()) {
+    const r = root(id);
+    groups.set(r, [...(groups.get(r) ?? []), byId.get(id)!]);
+  }
+  return [...groups.values()]
+    .map((prices) => prices.sort((x, y) => x.createdAt.localeCompare(y.createdAt) || x.id.localeCompare(y.id)))
+    .map((prices) => ({ kind: kinds.get(prices[0].id)!, prices }))
+    .sort((x, y) => x.prices[0].createdAt.localeCompare(y.prices[0].createdAt));
+}
+
+/**
+ * Which facts differ between the cards being compared, by name. A fact is
+ * marked on every card when any two cards say it differently, so the eye goes
+ * to what tells the copies apart. A fact every card leaves empty is not a
+ * difference.
+ */
+export function factsThatDiffer(cards: Record<string, string | null>[]): Set<string> {
+  const names = new Set(cards.flatMap((c) => Object.keys(c)));
+  const differ = new Set<string>();
+  for (const name of names) {
+    const values = new Set(cards.map((c) => c[name] ?? ''));
+    if (values.size > 1) differ.add(name);
+  }
+  return differ;
 }
 
 /** Every bill on the job that reads like a claim on a contract it is not linked to. */

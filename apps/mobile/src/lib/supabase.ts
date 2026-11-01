@@ -497,6 +497,7 @@ export const setQuoteKind = (quoteId: string, kind: 'quote' | 'invoice') =>
   queries.setQuoteKind(supabase, quoteId, kind);
 
 export const deleteQuote = (quoteId: string) => queries.deleteQuote(supabase, quoteId);
+export const keepBothPrices = (quoteIds: string[]) => queries.keepBothPrices(supabase, quoteIds);
 
 export const addQuoteLine = (quoteId: string, input: queries.QuoteLineInput) =>
   queries.addQuoteLine(supabase, quoteId, input);

@@ -1665,6 +1665,11 @@ export interface ProjectQuote {
   photoPaths: string[];
   documentPaths: string[];
   createdAt: string;
+  /**
+   * Who put it on the job: the person who typed it in, or who added an emailed
+   * invoice from its card. Null on a row nobody was recorded against.
+   */
+  createdBy: string | null;
 
   /** Joined in by `home.project_quotes_with_totals`, all GST-inclusive. */
   amountIncl: number | null;

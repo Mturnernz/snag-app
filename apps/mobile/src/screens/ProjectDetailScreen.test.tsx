@@ -30,6 +30,10 @@ jest.mock('../components/ThingSheet', () => require('../test/sheetStub').sheetSt
 jest.mock('../components/PriceSheet', () => require('../test/sheetStub').sheetStub(
   'price sheet', (p: any) => (p.quote ? `${p.quote.supplier}${p.askWhenPaid ? ' · asking when it was paid' : ''}` : null),
 ));
+// Its own spec holds the cards; here, what the page hands it and does with its answers.
+jest.mock('../components/LookAlikeSheet', () => require('../test/sheetStub').sheetStub(
+  'look-alike sheet', (p: any) => { (global as any).__lookAlike = p; return p.group.prices.map((q: any) => q.id).join(','); },
+));
 jest.mock('../components/RoomSheet', () => require('../test/sheetStub').sheetStub('room sheet', (p: any) => p.room?.name ?? null));
 jest.mock('../components/AddThingSheet', () => require('../test/sheetStub').sheetStub('add thing sheet', (p: any) => p.start?.name ?? null));
 jest.mock('../components/ProjectRoomsSheet', () => require('../test/sheetStub').sheetStub('rooms sheet'));
@@ -52,6 +56,9 @@ const mock_updateProject = jest.fn().mockResolvedValue({});
 const mock_updateInvoiceReview = jest.fn().mockResolvedValue({});
 const mock_updateExpectedCost = jest.fn().mockResolvedValue(undefined);
 const mock_setQuoteClaim = jest.fn().mockResolvedValue(undefined);
+const mock_deleteQuote = jest.fn().mockResolvedValue(['h/docs/1790131965741-888034-QU-0115.pdf']);
+const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
+const mock_keepBothPrices = jest.fn().mockResolvedValue(undefined);
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -69,7 +76,10 @@ jest.mock('../lib/supabase', () => {
     createElement: jest.fn(), createExpectedCost: jest.fn(), createLocation: jest.fn(),
     createThing: jest.fn(), deleteElement: jest.fn(), deleteExpectedCost: jest.fn(),
     deleteExpectedCostLine: jest.fn(), deleteMilestone: jest.fn(), deleteProject: jest.fn(),
-    deleteQuoteLine: jest.fn(), deleteStoredFiles: jest.fn(), setExpectedCostConfirmed: jest.fn(),
+    deleteQuoteLine: jest.fn(), setExpectedCostConfirmed: jest.fn(),
+    deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
+    deleteQuote: (...a: unknown[]) => mock_deleteQuote(...a),
+    keepBothPrices: (...a: unknown[]) => mock_keepBothPrices(...a),
     updateExpectedCost: (...a: unknown[]) => mock_updateExpectedCost(...a), updateExpectedCostLine: jest.fn(),
     updateProject: (...a: unknown[]) => mock_updateProject(...a),
     setQuoteClaim: (...a: unknown[]) => mock_setQuoteClaim(...a),
@@ -916,6 +926,77 @@ describe('worth checking', () => {
     r.getByText('Customer Quotation No. 33737 reads as a quote');
     await press(r, 'Customer Quotation No. 33737 reads as a quote');
     r.getByText('price sheet open: Regency');
+  });
+
+  it('opens one quote on the job twice side by side, from the row or its pill', async () => {
+    const twin = quote({ id: 'c2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 49482.2 });
+    const r = await arrange(downstairs({ quotes: [deck, twin] }));
+    r.getByText('Same quote twice · RELIABUILDER LIMITED · $49,482.20');
+    await press(r, 'QU-0111 looks like it’s on the job twice');
+    r.getByText('look-alike sheet open: c1,c2');
+    expect(text(r)).not.toContain('price sheet open');
+    await TestRenderer.act(async () => { (global as any).__lookAlike.onClose(); });
+    expect(r.queryByText('look-alike sheet open: c1,c2')).toBeNull();
+    await press(r, 'Compare the 2 copies of QU-0111');
+    r.getByText('look-alike sheet open: c1,c2');
+  });
+
+  it('puts an invoice on the job twice up to compare too', async () => {
+    const one = quote({ id: 'i1', projectId: 'p1', supplier: 'Kitchen Mania', kind: 'invoice', invoiceNumber: 'INV-15879', amount: 27480.37 });
+    const two = quote({ ...one, id: 'i2', createdAt: '2026-09-28T00:00:00Z' });
+    const r = await arrange(downstairs({ quotes: [deck, one, two] }));
+    r.getByText('INV-15879 looks like it’s on the job twice');
+    r.getByText('Same invoice twice · Kitchen Mania · $27,480.37');
+  });
+
+  it('stops asking about prices somebody kept', async () => {
+    const twin = quote({ id: 'c2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 49482.2 });
+    const r = await arrange(downstairs({ quotes: [deck, twin], keptPairs: [{ quoteA: 'c1', quoteB: 'c2', keptBy: 'me', keptAt: '2026-11-01T00:00:00Z' }] }));
+    expect(text(r)).not.toContain('looks like it’s on the job twice');
+  });
+
+  it('deletes from the comparison with its files, says so and reads the page again', async () => {
+    const twin = quote({ id: 'c2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 49482.2 });
+    const r = await arrange(downstairs({ quotes: [deck, twin] }));
+    await press(r, 'QU-0111 looks like it’s on the job twice');
+    const reads = mock_getProjectPage.mock.calls.length;
+    await TestRenderer.act(async () => { await (global as any).__lookAlike.onDelete(twin); });
+    expect(mock_deleteQuote).toHaveBeenCalledWith('c2');
+    expect(mock_deleteStoredFiles).toHaveBeenCalledWith(['h/docs/1790131965741-888034-QU-0115.pdf']);
+    expect(mock_showToast).toHaveBeenCalledWith('Quote deleted');
+    expect(mock_getProjectPage.mock.calls.length).toBeGreaterThan(reads);
+  });
+
+  it('closes the comparison once one of the two has gone from the job', async () => {
+    const twin = quote({ id: 'c2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 49482.2 });
+    const r = await arrange(downstairs({ quotes: [deck, twin] }));
+    await press(r, 'QU-0111 looks like it’s on the job twice');
+    r.getByText('look-alike sheet open: c1,c2');
+    // The other phone deleted the copy; the next read no longer holds it.
+    mock_getProjectPage.mockResolvedValue(downstairs({ quotes: [deck] }));
+    await TestRenderer.act(async () => { await (global as any).__lookAlike.onDelete(twin); });
+    expect(text(r)).not.toContain('look-alike sheet open');
+  });
+
+  it('keeps them all for the household in one call', async () => {
+    const twin = quote({ id: 'c2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 49482.2 });
+    const r = await arrange(downstairs({ quotes: [deck, twin] }));
+    await press(r, 'QU-0111 looks like it’s on the job twice');
+    await TestRenderer.act(async () => { await (global as any).__lookAlike.onKeepAll([deck, twin]); });
+    expect(mock_keepBothPrices).toHaveBeenCalledWith(['c1', 'c2']);
+    expect(mock_showToast).toHaveBeenCalledWith('Kept both');
+  });
+
+  it('names who added a price: you, somebody on the household, or nobody it can name', async () => {
+    (global as any).__household.members = [{ householdId: 'h', profileId: 'mike', displayName: 'Mike', role: 'owner' }];
+    const twin = quote({ id: 'c2', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 49482.2 });
+    const r = await arrange(downstairs({ quotes: [deck, twin] }));
+    await press(r, 'QU-0111 looks like it’s on the job twice');
+    const { nameOf } = (global as any).__lookAlike.context;
+    expect(nameOf('me')).toBe('you');
+    expect(nameOf('mike')).toBe('Mike');
+    expect(nameOf('gone')).toBeNull();
+    expect(nameOf(null)).toBeNull();
   });
 
   it('is absent when the paperwork and the records agree', async () => {

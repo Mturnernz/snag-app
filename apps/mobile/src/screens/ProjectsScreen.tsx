@@ -89,6 +89,10 @@ export default function ProjectsScreen() {
   // that read answers, and after one that failed: the line says — rather than
   // falling back to a figure the page would contradict.
   const [expected, setExpected] = useState<Map<string, number>>(() => new Map());
+  // The project row each figure was read against, and the project last opened.
+  // See `readExpected`.
+  const readAgainst = useRef(new Map<string, string>());
+  const opened = useRef<string | null>(null);
   const generation = useRef(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -97,7 +101,7 @@ export default function ProjectsScreen() {
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     if (!activeProperty) return;
     const run = ++generation.current;
     try {
@@ -105,7 +109,7 @@ export default function ProjectsScreen() {
       setProjects(next);
       // Never fatal: a card without its quoted line is still a card.
       getProjectsQuoted(next.map((p) => p.id)).then(setQuoted, () => setQuoted(null));
-      readExpected(next, run);
+      readExpected(next, run, force);
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't load the projects");
     } finally {
@@ -122,17 +126,34 @@ export default function ProjectsScreen() {
    * card says what they cost. A newer load abandons an older loop, and
    * what an older loop already read stays on screen until it is replaced
    * rather than flashing back to —.
+   *
+   * **A figure is read again only when it can have changed** (31 October
+   * 2026). The list is read every time it comes into view, and it used to read
+   * every page again with it: four pages on the live household, one after
+   * another, on every return from a project. Each is half a second alone and
+   * five to nine when two overlap on this database, so tapping in and out
+   * stacked them past the 8s statement timeout and the tab stopped loading.
+   * Now a figure is kept while its project's row (every total on it, and when
+   * it was changed) is what it was read against, and read again when that row
+   * moves, when it is the project just opened (most edits happen there and not
+   * all of them move a total on the row), after a read that failed, or on a
+   * pull to refresh.
    */
-  async function readExpected(list: Project[], run: number) {
+  async function readExpected(list: Project[], run: number, force: boolean) {
     for (const p of list.filter((x) => showsBudgetRemaining(x) || (x.status === 'done' && hasCost(x)))) {
       if (run !== generation.current) return;
+      const row = JSON.stringify(p);
+      if (!force && p.id !== opened.current && readAgainst.current.get(p.id) === row) continue;
       try {
         // eslint-disable-next-line no-await-in-loop
         const total = await getExpectedTotal(p.id);
         if (run !== generation.current) return;
+        readAgainst.current.set(p.id, row);
+        if (opened.current === p.id) opened.current = null;
         setExpected((m) => new Map(m).set(p.id, total));
       } catch {
         if (run !== generation.current) return;
+        readAgainst.current.delete(p.id);
         setExpected((m) => {
           const next = new Map(m);
           next.delete(p.id);
@@ -142,9 +163,20 @@ export default function ProjectsScreen() {
     }
   }
 
+  /** Opens a project, and marks its figure to be read again on the way back. */
+  function openProject(projectId: string) {
+    opened.current = projectId;
+    navigation.navigate('ProjectDetail', { projectId });
+  }
+
   useFocusEffect(
     useCallback(() => {
       load();
+      // Leaving the list ends its reads. They went on behind the project just
+      // opened, competing with that page's own read for the same database.
+      return () => {
+        generation.current += 1;
+      };
     }, [load])
   );
 
@@ -187,7 +219,7 @@ export default function ProjectsScreen() {
       setSheetOpen(false);
       showToast('Started');
       await load();
-      navigation.navigate('ProjectDetail', { projectId: project.id });
+      openProject(project.id);
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't start that");
     }
@@ -275,7 +307,7 @@ export default function ProjectsScreen() {
               refreshing={refreshing}
               onRefresh={async () => {
                 setRefreshing(true);
-                await load();
+                await load(true);
                 setRefreshing(false);
               }}
               tintColor={Colors.primary}
@@ -290,7 +322,7 @@ export default function ProjectsScreen() {
               quoted={quoted ? quoted.get(item.id) ?? null : undefined}
               expected={expected.get(item.id)}
               dim={section.status === 'done'}
-              onPress={() => navigation.navigate('ProjectDetail', { projectId: item.id })}
+              onPress={() => openProject(item.id)}
             />
           )}
           ListFooterComponent={

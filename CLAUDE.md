@@ -2403,6 +2403,18 @@ over. Money that has not gone out is still money the budget has to cover — the
   cards that show the line (a budget and something paid). A newer load abandons an older loop.
   Until the figure arrives, or if it cannot be read, *Expected total* and the line say *—* —
   never budget less paid in the meantime, which is the figure being replaced.
+- **And it reads a figure again only when it can have changed** (31 October 2026). The list
+  read every card's page on every return to it, finished jobs' costs included, and kept reading
+  behind the project just opened. On the live household that was four `project_page` calls per
+  return, each about half a second alone and five to nine seconds when two overlapped on this
+  database (Micro compute). Tapping in and out stacked them past the 8s `statement_timeout`, and
+  the tab answered 500 on every read for two minutes. So leaving the list ends its loop (the
+  focus cleanup bumps `generation`), and a figure is kept while its project's row is what it
+  was read against (`JSON.stringify` of the `projects_with_totals` row: every total and
+  `updatedAt`). It is read again when that row moves, for the project just opened (most edits
+  happen there, and not all of them move a total on the row), after a failed read, and on a
+  pull to refresh. `ProjectsScreen.test.tsx` pins each case. **Anything new that reads
+  `project_page` per card has to keep to this.**
 - **The figure stands alone on its row and never shrinks**; the label gives way. It was
   *$68,101.19 · 38% l…* on a phone. Every figure on the card is `flexShrink: 0` now. The
   percentage moves to a line of its own beneath, with what the total counts that nobody has billed

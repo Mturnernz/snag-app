@@ -22,8 +22,30 @@ jest.mock('@react-navigation/native', () => ({
   // A fresh object per call spins any screen whose loader depends on it — the
   // same trap `start` has in AddThingSheet. One object, made once.
   useNavigation: () => (global as any).__nav,
-  useFocusEffect: (cb: () => void) => require('react').useEffect(cb, [cb]),
+  // Focus is the mount, and `leave()` / `comeBack()` below are the screen being
+  // covered by a project and uncovered again.
+  useFocusEffect: (cb: () => (() => void) | void) =>
+    require('react').useEffect(() => {
+      (global as any).__focus = cb;
+      const off = cb();
+      (global as any).__blur = off;
+      return off;
+    }, [cb]),
 }));
+
+/** Another screen covers the list: its focus cleanup runs. */
+async function leave() {
+  await TestRenderer.act(async () => {
+    (global as any).__blur?.();
+  });
+}
+
+/** The list is shown again: its focus effect runs afresh. */
+async function comeBack() {
+  await TestRenderer.act(async () => {
+    (global as any).__blur = (global as any).__focus();
+  });
+}
 jest.mock('../components/AddProjectSheet', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -334,6 +356,91 @@ describe('budget remaining', () => {
     const r = await arrange([project({ id: 'k', name: 'Shed', status: 'done' })]);
     r.getByText('No costs recorded');
     expect(mock_getExpectedTotal).not.toHaveBeenCalled();
+  });
+});
+
+describe('reading the figures without swamping the database', () => {
+  /**
+   * 31 October 2026: the list read every card's page again each time it came
+   * into view, and kept reading behind a project just opened. Tapping in and
+   * out stacked those reads past the 8s statement timeout, and the tab stopped
+   * loading. These hold the two halves of the fix.
+   */
+  const two = () => [
+    project({ id: 'a', name: 'Bathroom', budget: 30000, paidTotal: 1000 }),
+    project({ id: 'k', name: 'Kitchen', status: 'done', paidTotal: 4200, invoicedTotal: 4200 }),
+  ];
+  const asked = () => mock_getExpectedTotal.mock.calls.map((c) => c[0]);
+  const pressCard = async (r: ReturnType<typeof render>, name: string) => {
+    const card = r.root.findAll(
+      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === name && n.props?.onPress,
+      { deep: true }
+    )[0];
+    await TestRenderer.act(async () => { card.props.onPress(); });
+  };
+
+  it('stops reading when the list is left', async () => {
+    let answer!: (n: number) => void;
+    mock_getProjects.mockResolvedValue([
+      project({ id: 'a', name: 'Bathroom', budget: 30000, paidTotal: 1000 }),
+      project({ id: 'b', name: 'Deck', budget: 20000, paidTotal: 1000 }),
+    ]);
+    mock_getExpectedTotal.mockImplementation(() => new Promise<number>((resolve) => { answer = resolve; }));
+    render(<ProjectsScreen />);
+    await TestRenderer.act(async () => {});
+    expect(asked()).toEqual(['a']);
+    await leave();
+    await TestRenderer.act(async () => { answer(12000); });
+    expect(asked()).toEqual(['a']);
+  });
+
+  it('reads nothing again on coming back when no project has changed', async () => {
+    const r = await arrange(two(), {}, { a: 31000, k: 4200 });
+    expect(asked()).toEqual(['a', 'k']);
+    await leave();
+    await comeBack();
+    expect(asked()).toEqual(['a', 'k']);
+    expect(mock_getProjects).toHaveBeenCalledTimes(2);
+    r.getByText('Cost $4,200');
+  });
+
+  it('reads a project again once its row has moved', async () => {
+    await arrange(two(), {}, { a: 31000, k: 4200 });
+    mock_getProjects.mockResolvedValue([
+      project({ id: 'a', name: 'Bathroom', budget: 30000, paidTotal: 6000 }),
+      project({ id: 'k', name: 'Kitchen', status: 'done', paidTotal: 4200, invoicedTotal: 4200 }),
+    ]);
+    await leave();
+    await comeBack();
+    expect(asked()).toEqual(['a', 'k', 'a']);
+  });
+
+  it('reads the project just opened again, and only that one', async () => {
+    const r = await arrange(two(), {}, { a: 31000, k: 4200 });
+    await pressCard(r, 'Kitchen');
+    expect(mock_navigate).toHaveBeenCalledWith('ProjectDetail', { projectId: 'k' });
+    await leave();
+    await comeBack();
+    expect(asked()).toEqual(['a', 'k', 'k']);
+    // Read once on the way back, not on every return after it.
+    await leave();
+    await comeBack();
+    expect(asked()).toEqual(['a', 'k', 'k']);
+  });
+
+  it('asks again after a read that failed', async () => {
+    await arrange(two(), {}, { k: 4200 });
+    expect(asked()).toEqual(['a', 'k']);
+    await leave();
+    await comeBack();
+    expect(asked()).toEqual(['a', 'k', 'a']);
+  });
+
+  it('reads every figure on a pull to refresh', async () => {
+    const r = await arrange(two(), {}, { a: 31000, k: 4200 });
+    const list = r.root.findAll((n: any) => n.props?.refreshControl, { deep: true })[0];
+    await TestRenderer.act(async () => { await list.props.refreshControl.props.onRefresh(); });
+    expect(asked()).toEqual(['a', 'k', 'a', 'k']);
   });
 });
 

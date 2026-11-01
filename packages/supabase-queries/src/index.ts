@@ -4414,6 +4414,7 @@ function mapQuote(row: Row): ProjectQuote {
     photoPaths: row.photo_paths ?? [],
     documentPaths: row.document_paths ?? [],
     createdAt: row.created_at,
+    createdBy: row.created_by ?? null,
     amountIncl: numberOrNull(row.amount_incl),
     lineCount: row.line_count ?? 0,
     linesTotal: numberOrNull(row.lines_total),
@@ -5498,6 +5499,20 @@ export interface ProjectPage extends ProjectContents {
   invoiceReviews: InvoiceReview[];
   /** What each of the project's files has been tagged as, by storage path. */
   fileTags: FileTags;
+  /**
+   * Look-alike prices somebody compared and kept, as pairs. *Worth checking*
+   * stops asking about a group once every pair in it is here. Empty until
+   * `20261101090000` is applied, which is the safe reading: it asks.
+   */
+  keptPairs: KeptPricePair[];
+}
+
+/** Two prices somebody compared and kept both of. `quoteA` sorts first. */
+export interface KeptPricePair {
+  quoteA: string;
+  quoteB: string;
+  keptBy: string | null;
+  keptAt: string;
 }
 
 /**
@@ -5552,6 +5567,12 @@ export async function getProjectPage(
     snags: (page.snags ?? []).map(mapSnag),
     invoiceReviews: (page.invoiceReviews ?? []).map(mapInvoiceReview),
     fileTags: mapFileTags(page.fileTags),
+    keptPairs: (page.keptPairs ?? []).map((k: Row): KeptPricePair => ({
+      quoteA: k.quote_a,
+      quoteB: k.quote_b,
+      keptBy: k.kept_by ?? null,
+      keptAt: k.kept_at,
+    })),
   };
 }
 
@@ -6559,6 +6580,18 @@ export async function deleteQuote(client: SupabaseClient, quoteId: string): Prom
   const { data, error } = await client.rpc('delete_quote', { p_quote_id: quoteId });
   if (error) throw asError(error, "Couldn't remove that");
   return (data as string[] | null) ?? [];
+}
+
+/**
+ * Keeps every price given, so *Worth checking* stops asking whether they are
+ * one price twice. Every pair among them is kept in one call: several copies
+ * kept by halves would bring the question back with one pair missing. The
+ * server refuses fewer than two, prices on two jobs, and a job the caller is
+ * not on, in words.
+ */
+export async function keepBothPrices(client: SupabaseClient, quoteIds: string[]): Promise<void> {
+  const { error } = await client.rpc('keep_both_prices', { p_quote_ids: quoteIds });
+  if (error) throw asError(error, "Couldn't keep those");
 }
 
 // ---------------------------------------------------------- taking one out

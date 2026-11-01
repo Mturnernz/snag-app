@@ -29,6 +29,7 @@ import StatusBadge from '../components/StatusBadge';
 import MoneySheet, { type MoneyKind } from '../components/MoneySheet';
 import ThingSheet from '../components/ThingSheet';
 import PriceSheet from '../components/PriceSheet';
+import LookAlikeSheet, { type LookAlikeContext } from '../components/LookAlikeSheet';
 import RoomSheet from '../components/RoomSheet';
 import SettleExpectedSheet from '../components/SettleExpectedSheet';
 import Sheet from '../components/Sheet';
@@ -42,13 +43,13 @@ import {
   addExpectedCostLine, approveInvoiceReview, clearFigure,
   createElement, createExpectedCost, createLocation, createThing, deleteElement,
   declineInvoiceReview, deleteExpectedCost, deleteExpectedCostLine, deleteInvoiceReview,
-  deleteProject, deleteStoredFiles, describeRoom,
+  deleteProject, deleteQuote, deleteStoredFiles, describeRoom, keepBothPrices,
   formatMoney, getProjectPage, getSupplierNames, liveSetAsides, payBill, projectSummary, setQuoteClaim,
   renameSupplier, restoreInvoiceReview, setExpectedCostConfirmed, updateExpectedCost, updateExpectedCostLine,
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, reviewQuote, suggestAreas, duplicateQuotes, paymentEchoes, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
+  asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, reviewQuote, suggestAreas, lookAlikes, paymentEchoes, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
   expectedAmountIncl, expectedPayee, expectedToPay, exportDateStamp, filesBySupplier, formatExactDate,
   formatLooseDate, groupBySupplier, inclGst, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
   declinedReviews, remainingTone, reviewGroups, supplierDirectory,
@@ -124,7 +125,7 @@ export default function ProjectDetailScreen({ route }: Props) {
   const { projectId } = route.params;
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
-  const { household, locations, reloadLocations } = useHousehold();
+  const { household, profile, members, locations, reloadLocations } = useHousehold();
   const { showToast } = useToast();
 
   const [page, setPage] = useState<ProjectPage | null>(null);
@@ -134,6 +135,8 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [money, setMoney] = useState<MoneyStart | null>(null);
   const [openThing, setOpenThing] = useState<string | null>(null);
   const [openPrice, setOpenPrice] = useState<string | null>(null);
+  // The look-alike prices being compared, by id, from *Worth checking*.
+  const [comparing, setComparing] = useState<string[] | null>(null);
   /** The price sheet opened from a *Paid* press, asking when. */
   const [askPaid, setAskPaid] = useState(false);
   /** Paying every old bill on its own due date, once confirmed. */
@@ -355,12 +358,19 @@ export default function ProjectDetailScreen({ route }: Props) {
           onPress: () => setOpenPrice(b.id),
         })),
       })),
-    ...duplicateQuotes(quotes).map((d): Check => ({
-      key: `twice-${d.quote.id}`,
-      title: `${paperName(d.quote)} looks like it’s on the job twice`,
-      subtitle: `${d.quote.supplier ?? 'No supplier'} · ${money$(d.quote.amountIncl ?? 0)} each`,
-      onPress: () => setOpenPrice(d.twin.id),
-    })),
+    // One price on the job more than once. The row opens them side by side
+    // (`LookAlikeSheet`) to keep or delete, rather than opening one of them.
+    ...lookAlikes(quotes, page.keptPairs).map((g): Check => {
+      const ids = g.prices.map((p) => p.id);
+      const times = g.prices.length === 2 ? 'twice' : `${g.prices.length} times`;
+      return {
+        key: `twice-${ids[0]}`,
+        title: `${paperName(g.prices[0])} looks like it’s on the job ${times}`,
+        subtitle: `Same ${g.kind} ${times} · ${g.prices[0].supplier ?? 'No supplier'} · ${money$(g.prices[0].amountIncl ?? 0)}`,
+        onPress: () => setComparing(ids),
+        action: { label: 'Compare', a11y: `Compare the ${g.prices.length} copies of ${paperName(g.prices[0])}`, run: () => setComparing(ids) },
+      };
+    }),
     // Opens the deposit's own bill: *Part of* there is the fix.
     ...paymentEchoes(quotes, page.payments).map((e): Check => ({
       key: `echo-${e.payment.id}`,
@@ -391,6 +401,38 @@ export default function ProjectDetailScreen({ route }: Props) {
         }] : [];
       }),
   ];
+
+  // What is being compared, read off the page as it stands, so a delete drops
+  // out of the cards on the re-read. Fewer than two is nothing to compare (the
+  // other phone deleted one), and keeping a single price is refused, so the
+  // sheet closes. Kind from the prices themselves.
+  const comparedPrices = (comparing ?? [])
+    .map((id) => quotes.find((q) => q.id === id))
+    .filter((q): q is ProjectQuote => q !== undefined);
+  const compared = comparedPrices.length > 1
+    ? { kind: comparedPrices[0].kind === 'invoice' ? 'invoice' as const : 'quote' as const, prices: comparedPrices }
+    : null;
+  const lookAlikeContext: LookAlikeContext = {
+    quotes,
+    payments: page.payments,
+    reviews: page.invoiceReviews,
+    elements,
+    items,
+    nameOf: (id) => (id === null ? null
+      : id === profile?.id ? 'you'
+        : members.find((m) => m.profileId === id)?.displayName ?? null),
+  };
+
+  async function deleteLookAlike(target: ProjectQuote) {
+    const paths = await deleteQuote(target.id);
+    await deleteStoredFiles(paths);
+    await changed(target.kind === 'invoice' ? 'Invoice deleted' : 'Quote deleted');
+  }
+
+  async function keepLookAlikes(prices: ProjectQuote[]) {
+    await keepBothPrices(prices.map((p) => p.id));
+    await changed(prices.length === 2 ? 'Kept both' : `Kept all ${prices.length}`);
+  }
 
   async function openMove(review: InvoiceReview) {
     setMoving(review);
@@ -1309,6 +1351,15 @@ export default function ProjectDetailScreen({ route }: Props) {
         onAddOption={(item) => openMoney({ kind: 'quote', elementId: item.elementId, itemId: item.id })}
         onOpenBill={(q) => { setOpenThing(null); setOpenPrice(q.id); }}
         onRecordInHouse={(item) => { setOpenThing(null); setThingFor(item); }}
+      />
+
+      <LookAlikeSheet
+        visible={compared !== null}
+        group={compared}
+        context={lookAlikeContext}
+        onDelete={deleteLookAlike}
+        onKeepAll={keepLookAlikes}
+        onClose={() => setComparing(null)}
       />
 
       <PriceSheet

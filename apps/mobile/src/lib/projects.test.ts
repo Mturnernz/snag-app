@@ -79,7 +79,7 @@ const quote = (over: Partial<ProjectQuote> = {}): ProjectQuote => ({
   amount: 1000, amountInclGst: true, kind: 'quote', status: 'tbc', basis: 'fixed',
   dated: null, notes: null, supersedesLineId: null, photoPaths: [], documentPaths: [],
   dueOn: null, billedThroughId: null, settlesMilestoneId: null, againstQuoteId: null, invoiceNumber: null,
-  createdAt: '2026-08-04T00:00:00Z',
+  createdAt: '2026-08-04T00:00:00Z', createdBy: null,
   amountIncl: 1000, lineCount: 0, linesTotal: null, buildUp: null, allowanceOpen: 0,
   additionalOpen: 0,
   effectiveAmount: 1000, paidTotal: null, unpaid: null, claimedTotal: null,

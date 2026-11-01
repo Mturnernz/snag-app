@@ -53,7 +53,7 @@ export const quote = (over: any = {}): any => ({
   amount: null, amountInclGst: true, kind: 'quote', status: 'tbc', basis: 'fixed',
   dated: null, notes: null, supersedesLineId: null, dueOn: null, billedThroughId: null,
   settlesMilestoneId: null, againstQuoteId: null, invoiceNumber: null, photoPaths: [], documentPaths: [],
-  createdAt: '2026-04-06T00:00:00Z',
+  createdAt: '2026-04-06T00:00:00Z', createdBy: null,
   amountIncl: over.amount ?? null, lineCount: 0, linesTotal: null, buildUp: null,
   allowanceOpen: 0, additionalOpen: 0, effectiveAmount: over.amount ?? null,
   paidTotal: null, unpaid: null, claimedTotal: null, ...over,
@@ -74,7 +74,8 @@ export const bill = (over: any = {}): any => ({
 export const page = (over: any = {}): any => ({
   project: project(), elements: [element()], items: [], quotes: [], lines: [],
   payments: [], milestones: [], expected: [], expectedCostLines: [], bills: [],
-  suppliers: [], files: [], things: [], snags: [], invoiceReviews: [], quoteRooms: [], fileTags: {}, ...over,
+  suppliers: [], files: [], things: [], snags: [], invoiceReviews: [], quoteRooms: [], fileTags: {},
+  keptPairs: [], ...over,
 });
 
 /**

@@ -1,5 +1,5 @@
 import {
-  asksWhenPaid, businessKey, claimCandidates, depositBillFor, reviewClaim, reviewQuote, duplicateQuotes, paidDayChoices, paymentEchoes, priceSaysQuote, quoteNumbersNamed, reviewSaysQuote,
+  asksWhenPaid, businessKey, claimCandidates, depositBillFor, factsThatDiffer, lookAlikes, reviewClaim, reviewQuote, duplicateQuotes, paidDayChoices, paymentEchoes, priceSaysQuote, quoteNumbersNamed, reviewSaysQuote,
   soundsLikeAClaim, suggestAreas, suggestedClaim, unlinkedClaims,
 } from '@snag/supabase-queries';
 import { quote } from '../test/projectFixtures';
@@ -83,6 +83,68 @@ describe('claims a bill’s own words describe', () => {
     const b = quote({ id: 'b', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 176755 });
     const c = quote({ id: 'c', projectId: 'p1', supplier: 'Kitchen Mania', amount: 176755 });
     expect(duplicateQuotes([a, b, c]).map((d) => [d.quote.id, d.twin.id])).toEqual([['a', 'b']]);
+  });
+});
+
+describe('look-alikes to compare', () => {
+  // Downstairs on 31 October: ReliaBuilder's $176,755 twice, emailed in a day apart.
+  const unnumbered = quote({ id: 'a', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', amount: 176755, createdAt: '2026-09-25T01:00:00Z' });
+  const numbered = quote({ id: 'b', projectId: 'p1', supplier: 'RELIABUILDER LIMITED', invoiceNumber: 'QU-0115', amount: 176755, createdAt: '2026-09-26T01:00:00Z' });
+  const ids = (groups: ReturnType<typeof lookAlikes>) => groups.map((g) => [g.kind, ...g.prices.map((p) => p.id)]);
+
+  it('puts one quote recorded twice up to compare, oldest first', () => {
+    expect(ids(lookAlikes([numbered, unnumbered]))).toEqual([['quote', 'a', 'b']]);
+  });
+
+  it('gathers three copies into one group, not three pairs', () => {
+    const third = quote({ ...numbered, id: 'c', invoiceNumber: null, createdAt: '2026-09-27T01:00:00Z' });
+    expect(ids(lookAlikes([unnumbered, numbered, third]))).toEqual([['quote', 'a', 'b', 'c']]);
+  });
+
+  it('stops asking once the pair is kept, either way round', () => {
+    expect(lookAlikes([unnumbered, numbered], [{ quoteA: 'b', quoteB: 'a' }])).toEqual([]);
+    expect(lookAlikes([unnumbered, numbered], [{ quoteA: 'a', quoteB: 'b' }])).toEqual([]);
+  });
+
+  it('still asks about a copy nobody kept', () => {
+    const third = quote({ ...numbered, id: 'c', createdAt: '2026-09-27T01:00:00Z' });
+    expect(ids(lookAlikes([unnumbered, numbered, third], [{ quoteA: 'a', quoteB: 'b' }]))).toEqual([['quote', 'a', 'b', 'c']]);
+    expect(ids(lookAlikes([unnumbered, numbered, third], [
+      { quoteA: 'a', quoteB: 'b' }, { quoteA: 'a', quoteB: 'c' }, { quoteA: 'b', quoteB: 'c' },
+    ]))).toEqual([]);
+  });
+
+  it('never pairs a declined quote, another business, another part of the job or another figure', () => {
+    expect(lookAlikes([unnumbered, quote({ ...numbered, status: 'declined' })])).toEqual([]);
+    expect(lookAlikes([unnumbered, quote({ ...numbered, supplier: 'Kitchen Mania' })])).toEqual([]);
+    expect(lookAlikes([unnumbered, quote({ ...numbered, projectId: null, elementId: 'bathroom' })])).toEqual([]);
+    expect(lookAlikes([unnumbered, quote({ ...numbered, amount: 176000, amountIncl: 176000 })])).toEqual([]);
+  });
+
+  it('puts an invoice on the job twice up to compare, by its number', () => {
+    const first = bill('i1', 'Kitchen', 27480.37, { invoiceNumber: 'INV-15879', createdAt: '2026-09-24T01:00:00Z' });
+    const again = bill('i2', 'Kitchen', 27480.37, { invoiceNumber: 'inv 15879', createdAt: '2026-09-28T01:00:00Z' });
+    expect(ids(lookAlikes([again, first]))).toEqual([['invoice', 'i1', 'i2']]);
+  });
+
+  it('keeps two claims of one figure apart when their numbers differ', () => {
+    // ReliaBuilder's deposit and claim 2 are both $43,987.50, and are two bills.
+    const deposit = bill('0197', 'Deposit', 43987.5, { invoiceNumber: 'INV-0197' });
+    const claim2 = bill('0208', 'Claim 2', 43987.5, { invoiceNumber: 'INV-0208' });
+    expect(lookAlikes([deposit, claim2])).toEqual([]);
+  });
+
+  it('never pairs a quote with a bill of the same figure', () => {
+    expect(lookAlikes([unnumbered, bill('i3', null as any, 176755)])).toEqual([]);
+  });
+
+  it('marks only the facts the cards disagree on', () => {
+    const differ = factsThatDiffer([
+      { number: null, words: null, figure: '$176,755.00', added: '25 Sep 2026' },
+      { number: 'QU-0115', words: 'Downstairs Renovation ESTIMATE', figure: '$176,755.00', added: '26 Sep 2026' },
+    ]);
+    expect([...differ].sort()).toEqual(['added', 'number', 'words']);
+    expect(factsThatDiffer([{ due: null }, { due: null }]).size).toBe(0);
   });
 });
 

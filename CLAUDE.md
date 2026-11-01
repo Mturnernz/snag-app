@@ -2731,6 +2731,57 @@ room sheet.
 `ReviewEditSheet.test.tsx`, `ProjectDetailScreen.test.tsx`, `PriceSheet.test.tsx` and
 `Attachments.test.tsx` pin each of the above.
 
+### Look-alikes are compared side by side (November 2026)
+
+*Worth checking* named a quote on the job twice and opened one of the two, so deciding which to
+keep meant opening each in turn and remembering the other. The owner asked for a way to compare
+them, and chose each part. **Where anything above disagrees about that row, this wins.**
+
+- **Which prices.** `lookAlikes` (`checks.ts`) uses two rules the app already had, so nothing new
+  decides what the same price means. A **quote** is the one `duplicateQuotes` names: same business,
+  same part of the job, same figure. An **invoice** is the one `findDuplicateBill` warns about on
+  the way in. Two different numbers are two bills, so ReliaBuilder's $43,987.50 claims stay apart.
+  Revised quotes (same business, another figure) were offered and not chosen. Pairs are gathered
+  into groups, so three copies are one row. The row says *Same quote twice* and opens the
+  comparison, from the row or its **Compare** pill.
+- **One card at a time** (`LookAlikeSheet`). Each card shows its number and words, dates, agreed or
+  paid, its part of the job, **when it was added and by whom**, the email it came in on (date and
+  subject), its files (each opens), and what hangs off it (stages, invoices inside, payments,
+  lines). A fact the cards disagree on is bold on every card (`factsThatDiffer`). *Added by* reads
+  `project_quotes.created_by`, which the view always carried and the app never mapped. It says
+  *you*, a member's name, or nothing for somebody no longer on the household.
+- **Swipe left to delete, right to keep, and buttons that say the same.** A desktop has no swipe.
+  `swipeOutcome` decides: past 96pt, and more across than down, or it is a scroll. The card sets
+  `touch-action: pan-y` on the web. It is hand-rolled on `PanResponder`, like `PhotoViewer`.
+- **Delete asks first**, by the owner's decision, in the words the price's own sheet uses, naming
+  its payments. The sheet hides while it asks. Once a delete leaves one price, the sheet closes, so
+  the last copy is never deleted from here.
+- **Keeping every card is remembered for the household**, by the owner's decision, so neither
+  phone asks again. `home.kept_price_pairs` (`20261101090000`) holds one row per pair, ordered
+  low id first, cascading from both prices, read through the price's own policy.
+  `home.keep_both_prices(uuid[])` writes every pair in a group in one call. It refuses in words
+  fewer than two prices, a price that has gone, prices on two jobs, and a job the caller is not on.
+  `project_page` carries the pairs as `keptPairs`, in a statement of its own. Until the migration
+  is applied the page reads none, and the row keeps asking, which is the safe side.
+- **The export lists the new table**, and `thing_uses`, which was added in October and never
+  reached it.
+
+`checks.test.ts` pins the groups, the kept pairs, the rules' refusals and `factsThatDiffer`.
+`LookAlikeSheet.test.tsx` pins:
+- each card's facts and what is bold;
+- the names;
+- keep moving on, keeping all, and a refused keep;
+- delete asking first, naming payments, closing at one, staying at two, cancel and refusal;
+- the dots;
+- `swipeOutcome`.
+
+`ProjectDetailScreen.test.tsx` pins the row and pill opening it, the invoice row, a kept pair
+absent, and the delete and keep writes. The SQL was checked against a local Postgres holding the
+tables it touches. The checks: every refusal, two households, no direct writes, `anon` and
+`PUBLIC` refused, the page's read, and the cascade.
+
+**Apply `20261101090000` before merging**, then `notify pgrst, 'reload schema'`.
+
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;
 Schedule stays last because it is the tab you go to with a question rather than the one where work

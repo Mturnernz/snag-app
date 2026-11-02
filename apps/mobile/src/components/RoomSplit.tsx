@@ -181,7 +181,7 @@ export default function RoomSplit({
               accessibilityState={{ checked: on }}
               accessibilityLabel={part.name}
             >
-              <Icon name={on ? 'checkbox' : 'square-outline'} size={22} color={on ? Colors.primary : Colors.chevron} />
+              <Icon name={on ? 'checkbox-on' : 'square-outline'} size={22} color={on ? Colors.primary : Colors.chevron} />
               <Text style={styles.checkLabel}>{part.name}</Text>
             </Pressable>
           );

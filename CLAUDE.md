@@ -462,6 +462,10 @@ Snag Line icons). It replaces values, not behaviour.
 - **Icons are Snag Line** (`components/snagLine.ts`, generated; `Icon.tsx` draws them with
   `react-native-svg`, `Icon.web.tsx` as a plain `<svg>`). Screens may still pass an Ionicons name,
   which draws the glyph that replaced it; rooms (`roomIcon`) and tabs name Snag Line glyphs.
+  **Except four names a glyph hides** — `checkbox`, `calendar`, `list`, `person` — where the
+  glyph wins: `checkbox` is Snag Line's *empty* box, so a ticked row on the room picker and the
+  linked-items picker drew empty until November 2026. A ticked box is `checkbox-on`, an empty one
+  `square-outline`; `iconMarkup.test.ts` fails the build on any of the four.
 - **The tab bar is a floating glass dock** (`navigation/Dock.tsx`) 26pt above the foot, **the same
   full width on every tab**, with the capture + floating above its right end on the tabs that have
   one (List, House). The dock used to give up the + 's width on those two, so it was a different

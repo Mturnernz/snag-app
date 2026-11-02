@@ -211,7 +211,7 @@ export default function LinkAssetsSheet({
                 </View>
                 {item.room ? <Text style={styles.rowRoom}>{item.room}</Text> : null}
                 <Icon
-                  name={on ? 'checkbox' : 'square-outline'}
+                  name={on ? 'checkbox-on' : 'square-outline'}
                   size="md"
                   color={on ? Colors.primary : Colors.textMuted}
                 />

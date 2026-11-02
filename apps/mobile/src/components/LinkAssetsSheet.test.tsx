@@ -103,6 +103,19 @@ describe('choosing what a job is about', () => {
     expect(r.queryByText('None selected')).not.toBeNull();
   });
 
+  // `checkbox` is Snag Line's empty box. The row asked for it by its old
+  // Ionicons meaning, a ticked box, so a linked item drew as an empty one.
+  it('draws a ticked box on a linked row, and an empty one off it', async () => {
+    const { r } = open([thing({ id: 'k', name: 'Dishwasher', room: 'Kitchen' })], ['k']);
+    const box = () => [...new Set(byLabel(r, 'Dishwasher')
+      .findAll((n) => n.props.name === 'checkbox-on' || n.props.name === 'square-outline')
+      .map((n) => n.props.name))];
+
+    expect(box()).toEqual(['checkbox-on']);
+    await TestRenderer.act(async () => { byLabel(r, 'Dishwasher').props.onPress(); });
+    expect(box()).toEqual(['square-outline']);
+  });
+
   // One question — which things — so nothing reaches the row until Done. The
   // server replaces the whole set for the same reason.
   it('writes nothing until Done, and then the whole set', async () => {

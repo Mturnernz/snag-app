@@ -34,6 +34,9 @@ jest.mock('../components/PriceSheet', () => require('../test/sheetStub').sheetSt
 jest.mock('../components/LookAlikeSheet', () => require('../test/sheetStub').sheetStub(
   'look-alike sheet', (p: any) => { (global as any).__lookAlike = p; return p.group.prices.map((q: any) => q.id).join(','); },
 ));
+jest.mock('../components/PaidTwiceSheet', () => require('../test/sheetStub').sheetStub(
+  'paid twice sheet', (p: any) => { (global as any).__paidTwice = p; return `${p.echo.bill.id},${p.echo.twin.id}`; },
+));
 jest.mock('../components/RoomSheet', () => require('../test/sheetStub').sheetStub('room sheet', (p: any) => p.room?.name ?? null));
 jest.mock('../components/AddThingSheet', () => require('../test/sheetStub').sheetStub('add thing sheet', (p: any) => p.start?.name ?? null));
 jest.mock('../components/ProjectRoomsSheet', () => require('../test/sheetStub').sheetStub('rooms sheet'));
@@ -59,6 +62,7 @@ const mock_setQuoteClaim = jest.fn().mockResolvedValue(undefined);
 const mock_deleteQuote = jest.fn().mockResolvedValue(['h/docs/1790131965741-888034-QU-0115.pdf']);
 const mock_deleteStoredFiles = jest.fn().mockResolvedValue(undefined);
 const mock_keepBothPrices = jest.fn().mockResolvedValue(undefined);
+const mock_updateQuote = jest.fn().mockResolvedValue({});
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
@@ -80,6 +84,7 @@ jest.mock('../lib/supabase', () => {
     deleteStoredFiles: (...a: unknown[]) => mock_deleteStoredFiles(...a),
     deleteQuote: (...a: unknown[]) => mock_deleteQuote(...a),
     keepBothPrices: (...a: unknown[]) => mock_keepBothPrices(...a),
+    updateQuote: (...a: unknown[]) => mock_updateQuote(...a),
     updateExpectedCost: (...a: unknown[]) => mock_updateExpectedCost(...a), updateExpectedCostLine: jest.fn(),
     updateProject: (...a: unknown[]) => mock_updateProject(...a),
     setQuoteClaim: (...a: unknown[]) => mock_setQuoteClaim(...a),
@@ -985,6 +990,65 @@ describe('worth checking', () => {
     await TestRenderer.act(async () => { await (global as any).__lookAlike.onKeepAll([deck, twin]); });
     expect(mock_keepBothPrices).toHaveBeenCalledWith(['c1', 'c2']);
     expect(mock_showToast).toHaveBeenCalledWith('Kept both');
+  });
+
+  describe('a deposit counted twice', () => {
+    // Kitchen Mania's INV-15879 was paid $8,244.11 and then $19,236.26, and V3,
+    // the same $8,244.11, is on the job as its own paid invoice.
+    const bill = quote({
+      id: 'inv', projectId: 'p1', supplier: 'Kitchen Mania Limited', kind: 'invoice', amount: 27480.37,
+      invoiceNumber: 'INV-15879', unpaid: 0,
+    });
+    const v3 = quote({
+      id: 'v3', projectId: 'p1', supplier: 'Kitchen Mania Limited', kind: 'invoice', amount: 8244.11,
+      invoiceNumber: 'V3', unpaid: 0,
+    });
+    const pay = (id: string, quoteId: string, amount: number) => ({
+      id, quoteId, amount, amountInclGst: true, paidOn: '2026-09-26', reference: null, notes: null,
+      photoPaths: [], documentPaths: [], createdAt: '',
+    });
+    const payments = [pay('a', 'inv', 8244.11), pay('b', 'inv', 19236.26), pay('c', 'v3', 8244.11)];
+
+    it('opens the bill and the one like its deposit side by side, from the row or its pill', async () => {
+      const r = await arrange(downstairs({ quotes: [bill, v3], payments }));
+      r.getByText('V3 looks like INV-15879’s deposit');
+      r.getByText('Paid twice · $8,244.11');
+      await press(r, 'V3 looks like INV-15879’s deposit');
+      r.getByText('paid twice sheet open: inv,v3');
+      expect(text(r)).not.toContain('price sheet open');
+      await TestRenderer.act(async () => { (global as any).__paidTwice.onClose(); });
+      expect(text(r)).not.toContain('paid twice sheet open');
+      await press(r, 'Compare V3 with INV-15879');
+      r.getByText('paid twice sheet open: inv,v3');
+    });
+
+    it('puts V3 inside INV-15879 on It’s the deposit, says so and reads the page again', async () => {
+      const r = await arrange(downstairs({ quotes: [bill, v3], payments }));
+      await press(r, 'V3 looks like INV-15879’s deposit');
+      const reads = mock_getProjectPage.mock.calls.length;
+      const { echo, onDeposit } = (global as any).__paidTwice;
+      await TestRenderer.act(async () => { await onDeposit(echo); });
+      expect(mock_updateQuote).toHaveBeenCalledWith('v3', { billedThroughId: 'inv' });
+      expect(mock_showToast).toHaveBeenCalledWith('V3 · included in INV-15879');
+      expect(mock_getProjectPage.mock.calls.length).toBeGreaterThan(reads);
+    });
+
+    it('keeps both for the household on Two bills', async () => {
+      const r = await arrange(downstairs({ quotes: [bill, v3], payments }));
+      await press(r, 'V3 looks like INV-15879’s deposit');
+      const { echo, onTwoBills } = (global as any).__paidTwice;
+      await TestRenderer.act(async () => { await onTwoBills(echo); });
+      expect(mock_keepBothPrices).toHaveBeenCalledWith(['inv', 'v3']);
+      expect(mock_showToast).toHaveBeenCalledWith('Kept both');
+    });
+
+    it('stops asking once the two are kept, or V3 is inside the bill', async () => {
+      const kept = [{ quoteA: 'inv', quoteB: 'v3', keptBy: 'me', keptAt: '2026-11-02T00:00:00Z' }];
+      let r = await arrange(downstairs({ quotes: [bill, v3], payments, keptPairs: kept }));
+      expect(text(r)).not.toContain('’s deposit');
+      r = await arrange(downstairs({ quotes: [bill, { ...v3, billedThroughId: 'inv' }], payments }));
+      expect(text(r)).not.toContain('’s deposit');
+    });
   });
 
   it('names who added a price: you, somebody on the household, or nobody it can name', async () => {

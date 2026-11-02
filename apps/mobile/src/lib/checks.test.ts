@@ -189,6 +189,20 @@ describe('money counted twice', () => {
     expect(paymentEchoes([kitchen, other], [pay('a', 'inv', 8244.11)])).toEqual([]);
     expect(paymentEchoes([v3, kitchen], [pay('c', 'v3', 8244.11)])).toEqual([]);
   });
+
+  // *Two bills* keeps the pair in the look-alike table, stored low id first.
+  it('says nothing once the pair is kept as two bills, either way round', () => {
+    const payments = [pay('a', 'inv', 8244.11), pay('b', 'inv', 19236.26)];
+    expect(paymentEchoes([kitchen, v3], payments, [{ quoteA: 'inv', quoteB: 'v3' }])).toEqual([]);
+    expect(paymentEchoes([kitchen, v3], payments, [{ quoteA: 'v3', quoteB: 'inv' }])).toEqual([]);
+    expect(paymentEchoes([kitchen, v3], payments, [{ quoteA: 'inv', quoteB: 'other' }])).toHaveLength(1);
+  });
+
+  // *It's the deposit* puts V3 inside INV-15879, so it counts once.
+  it('says nothing once the twin is inside the bill', () => {
+    const inside = { ...v3, billedThroughId: 'inv' };
+    expect(paymentEchoes([kitchen, inside], [pay('a', 'inv', 8244.11)])).toEqual([]);
+  });
 });
 
 describe('the rooms a bill’s words name', () => {

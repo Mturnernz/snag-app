@@ -329,9 +329,18 @@ export interface PaymentEcho {
  * Kitchen Mania's INV-15879 ($27,480.37) was paid as $8,244.11 and then
  * $19,236.26 — and V3, the same $8,244.11, is on the job as its own paid
  * invoice. If V3 is the deposit, it is in every total twice. Only the person
- * holding the papers can say, so this is a question on the page, never a fix.
+ * holding the papers can say, so this is a question on the page, never a fix:
+ * `PaidTwiceSheet` puts the two side by side and asks. *It's the deposit* puts
+ * the twin inside the bill (`billed_through_id`, so it counts once); *Two
+ * bills* keeps the pair for the household (`kept_price_pairs`, the look-alike
+ * table), and a kept pair is left out here.
  */
-export function paymentEchoes(quotes: ProjectQuote[], payments: ProjectPayment[]): PaymentEcho[] {
+export function paymentEchoes(
+  quotes: ProjectQuote[],
+  payments: ProjectPayment[],
+  kept: KeptPair[] = [],
+): PaymentEcho[] {
+  const keptKeys = new Set(kept.map((k) => pairKey(k.quoteA, k.quoteB)));
   const live = quotes.filter((q) => q.kind === 'invoice' && q.status !== 'declined' && !q.billedThroughId);
   const echoes: PaymentEcho[] = [];
   for (const payment of payments) {
@@ -343,7 +352,8 @@ export function paymentEchoes(quotes: ProjectQuote[], payments: ProjectPayment[]
     const key = businessKey(bill.supplier);
     const twin = live.find((q) =>
       q.id !== bill.id && key !== null && businessKey(q.supplier) === key
-      && q.amountIncl !== null && Math.abs(q.amountIncl - paid) < 0.01);
+      && q.amountIncl !== null && Math.abs(q.amountIncl - paid) < 0.01
+      && !keptKeys.has(pairKey(bill.id, q.id)));
     if (twin) echoes.push({ bill, payment, twin });
   }
   return echoes;

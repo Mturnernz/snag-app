@@ -30,6 +30,7 @@ import MoneySheet, { type MoneyKind } from '../components/MoneySheet';
 import ThingSheet from '../components/ThingSheet';
 import PriceSheet from '../components/PriceSheet';
 import LookAlikeSheet, { type LookAlikeContext } from '../components/LookAlikeSheet';
+import PaidTwiceSheet from '../components/PaidTwiceSheet';
 import RoomSheet from '../components/RoomSheet';
 import SettleExpectedSheet from '../components/SettleExpectedSheet';
 import Sheet from '../components/Sheet';
@@ -49,7 +50,7 @@ import {
   updateProject, type ProjectPage, type RoomRow,
 } from '../lib/supabase';
 import {
-  asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, reviewQuote, suggestAreas, lookAlikes, paymentEchoes, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
+  asksWhenPaid, billFactsOfReview, dayKey, depositBillFor, describeDuplicate, reviewClaim, reviewQuote, suggestAreas, lookAlikes, paymentEchoes, type PaymentEcho, priceSaysQuote, unlinkedClaims, describeEmailGroup, describeRenameReach, duplicateReviews,
   expectedAmountIncl, expectedPayee, expectedToPay, exportDateStamp, filesBySupplier, formatExactDate,
   formatLooseDate, groupBySupplier, inclGst, matchExpectedEach, pendingReviews, projectDossierTable, projectExportPhotos,
   declinedReviews, remainingTone, reviewGroups, supplierDirectory,
@@ -137,6 +138,8 @@ export default function ProjectDetailScreen({ route }: Props) {
   const [openPrice, setOpenPrice] = useState<string | null>(null);
   // The look-alike prices being compared, by id, from *Worth checking*.
   const [comparing, setComparing] = useState<string[] | null>(null);
+  // The payment a *Paid twice* row is about, by id, from *Worth checking*.
+  const [paidTwice, setPaidTwice] = useState<string | null>(null);
   /** The price sheet opened from a *Paid* press, asking when. */
   const [askPaid, setAskPaid] = useState(false);
   /** Paying every old bill on its own due date, once confirmed. */
@@ -329,6 +332,8 @@ export default function ProjectDetailScreen({ route }: Props) {
     group.bills.push(c.bill);
     claimGroups.set(c.contract.id, group);
   }
+  // A payment on one bill that is exactly another bill, less the pairs kept.
+  const echoes = paymentEchoes(quotes, page.payments, page.keptPairs);
   const checks: Check[] = [
     ...[...claimGroups.values()].map(({ contract, bills }): Check => (bills.length === 1
       ? {
@@ -371,12 +376,18 @@ export default function ProjectDetailScreen({ route }: Props) {
         action: { label: 'Compare', a11y: `Compare the ${g.prices.length} copies of ${paperName(g.prices[0])}`, run: () => setComparing(ids) },
       };
     }),
-    // Opens the deposit's own bill: *Part of* there is the fix.
-    ...paymentEchoes(quotes, page.payments).map((e): Check => ({
+    // A bill beside the payment it looks like, side by side (`PaidTwiceSheet`):
+    // *It's the deposit* or *Two bills*. It used to open the twin alone.
+    ...echoes.map((e): Check => ({
       key: `echo-${e.payment.id}`,
       title: `${paperName(e.twin)} looks like ${paperName(e.bill)}’s deposit`,
       subtitle: `Paid twice · ${money$(inclGst(e.payment.amount, e.payment.amountInclGst) ?? 0)}`,
-      onPress: () => setOpenPrice(e.twin.id),
+      onPress: () => setPaidTwice(e.payment.id),
+      action: {
+        label: 'Compare',
+        a11y: `Compare ${paperName(e.twin)} with ${paperName(e.bill)}`,
+        run: () => setPaidTwice(e.payment.id),
+      },
     })),
     ...quotes
       .filter((q) => !paidAgainst.has(q.id) && !q.againstQuoteId && q.status !== 'declined' && priceSaysQuote(q))
@@ -432,6 +443,22 @@ export default function ProjectDetailScreen({ route }: Props) {
   async function keepLookAlikes(prices: ProjectQuote[]) {
     await keepBothPrices(prices.map((p) => p.id));
     await changed(prices.length === 2 ? 'Kept both' : `Kept all ${prices.length}`);
+  }
+
+  // Read off the page as it stands: once answered, the re-read drops the row
+  // and the sheet with it.
+  const echo = echoes.find((e) => e.payment.id === paidTwice) ?? null;
+
+  // *Part of → Included in*, written from here: the twin leaves Invoiced and
+  // Paid, and the bill's own payments still say what went out.
+  async function itsTheDeposit(e: PaymentEcho) {
+    await updateQuote(e.twin.id, { billedThroughId: e.bill.id });
+    await changed(`${paperName(e.twin)} · included in ${paperName(e.bill)}`);
+  }
+
+  async function twoBills(e: PaymentEcho) {
+    await keepBothPrices([e.bill.id, e.twin.id]);
+    await changed('Kept both');
   }
 
   async function openMove(review: InvoiceReview) {
@@ -1360,6 +1387,15 @@ export default function ProjectDetailScreen({ route }: Props) {
         onDelete={deleteLookAlike}
         onKeepAll={keepLookAlikes}
         onClose={() => setComparing(null)}
+      />
+
+      <PaidTwiceSheet
+        visible={echo !== null}
+        echo={echo}
+        context={lookAlikeContext}
+        onDeposit={itsTheDeposit}
+        onTwoBills={twoBills}
+        onClose={() => setPaidTwice(null)}
       />
 
       <PriceSheet

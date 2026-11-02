@@ -105,6 +105,69 @@ export function cardFacts(price: ProjectQuote, context: LookAlikeContext): Fact[
   ];
 }
 
+async function openDocument(path: string) {
+  const url = await getFileUrl(path);
+  if (!url) {
+    showAlert("Couldn't open that", 'The link to this document could not be made.');
+    return;
+  }
+  openUrl(url);
+}
+
+/**
+ * A price's card, without its buttons: the kind of paper, who it is from, the
+ * figure, its facts, and its files (each opens). Both comparisons draw it —
+ * copies of one price here, and a bill beside the deposit it may hold
+ * (`PaidTwiceSheet`) — so a price reads the same way on either. `bold` names
+ * the facts to mark, `'amount'` among them; `children` sits under the facts.
+ */
+export function PriceFacts({
+  price, facts, bold, tag, children,
+}: {
+  price: ProjectQuote;
+  facts: Fact[];
+  bold: Set<string>;
+  tag?: string;
+  children?: React.ReactNode;
+}) {
+  const isBill = price.kind === 'invoice';
+  return (
+    <>
+      <Text style={styles.kind}>{isBill ? 'INVOICE' : 'QUOTE'}{tag ? ` · ${tag}` : ''}</Text>
+      <Text style={styles.supplier}>{price.supplier ?? 'No supplier'}</Text>
+      <Text style={[styles.amount, bold.has('amount') && styles.differs]}>
+        {formatMoney(price.amountIncl) ?? 'No figure'}
+      </Text>
+      <View style={styles.facts}>
+        {facts.map((fact) => (
+          <View key={fact.name} style={styles.fact}>
+            <Text style={styles.factLabel}>{fact.label}</Text>
+            <Text
+              style={[styles.factValue, bold.has(fact.name) && styles.differs]}
+              accessibilityLabel={`${fact.label}: ${fact.value}${bold.has(fact.name) ? ', differs' : ''}`}
+            >
+              {fact.value}
+            </Text>
+          </View>
+        ))}
+      </View>
+      {children}
+      {price.documentPaths.map((path) => (
+        <Pressable
+          key={path}
+          onPress={() => openDocument(path)}
+          style={styles.file}
+          accessibilityRole="link"
+          accessibilityLabel={`Open ${documentName(path)}`}
+        >
+          <Text style={styles.fileName} numberOfLines={1}>{documentName(path)}</Text>
+          <Text style={styles.fileOpen}>Open</Text>
+        </Pressable>
+      ))}
+    </>
+  );
+}
+
 /**
  * Two or more prices that look like one, compared a card at a time.
  *
@@ -177,7 +240,6 @@ export default function LookAlikeSheet({
   }, [facts, prices]);
 
   const price = prices[index] ?? null;
-  const isBill = price?.kind === 'invoice';
   const noun = group?.kind === 'invoice' ? 'invoice' : 'quote';
 
   function settle() {
@@ -244,15 +306,6 @@ export default function LookAlikeSheet({
     onPanResponderTerminate: () => settle(),
   }), [kept, busy, prices]);
 
-  async function openDocument(path: string) {
-    const url = await getFileUrl(path);
-    if (!url) {
-      showAlert("Couldn't open that", 'The link to this document could not be made.');
-      return;
-    }
-    openUrl(url);
-  }
-
   const payments = confirming ? context.payments.filter((p) => p.quoteId === confirming.id).length : 0;
   const deleteLabel = Animated.multiply(dx, -1).interpolate({ inputRange: [0, SWIPE], outputRange: [0, 1], extrapolate: 'clamp' });
   const keepLabel = dx.interpolate({ inputRange: [0, SWIPE], outputRange: [0, 1], extrapolate: 'clamp' });
@@ -284,36 +337,12 @@ export default function LookAlikeSheet({
                 <Text style={[styles.swipeMark, styles.deleteMark]}>Delete</Text>
               </Animated.View>
             </View>
-            <Text style={styles.kind}>{isBill ? 'INVOICE' : 'QUOTE'}{kept.has(price.id) ? ' · KEPT' : ''}</Text>
-            <Text style={styles.supplier}>{price.supplier ?? 'No supplier'}</Text>
-            <Text style={[styles.amount, differ.has('amount') && styles.differs]}>
-              {formatMoney(price.amountIncl) ?? 'No figure'}
-            </Text>
-            <View style={styles.facts}>
-              {facts[index].map((fact) => (
-                <View key={fact.name} style={styles.fact}>
-                  <Text style={styles.factLabel}>{fact.label}</Text>
-                  <Text
-                    style={[styles.factValue, differ.has(fact.name) && styles.differs]}
-                    accessibilityLabel={`${fact.label}: ${fact.value}${differ.has(fact.name) ? ', differs' : ''}`}
-                  >
-                    {fact.value}
-                  </Text>
-                </View>
-              ))}
-            </View>
-            {price.documentPaths.map((path) => (
-              <Pressable
-                key={path}
-                onPress={() => openDocument(path)}
-                style={styles.file}
-                accessibilityRole="link"
-                accessibilityLabel={`Open ${documentName(path)}`}
-              >
-                <Text style={styles.fileName} numberOfLines={1}>{documentName(path)}</Text>
-                <Text style={styles.fileOpen}>Open</Text>
-              </Pressable>
-            ))}
+            <PriceFacts
+              price={price}
+              facts={facts[index]}
+              bold={differ}
+              tag={kept.has(price.id) ? 'KEPT' : undefined}
+            />
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <View style={styles.actions}>
               <View style={styles.action}>

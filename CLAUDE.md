@@ -2784,7 +2784,27 @@ absent, and the delete and keep writes. The SQL was checked against a local Post
 tables it touches. The checks: every refusal, two households, no direct writes, `anon` and
 `PUBLIC` refused, the page's read, and the cascade.
 
-**Apply `20261101090000` before merging**, then `notify pgrst, 'reload schema'`.
+**Apply `20261101090000` before merging**, then `notify pgrst, 'reload schema'`. (Applied to the
+live database on 1 November 2026.)
+
+**A deposit counted twice is compared too** (`PaidTwiceSheet`). *V3 looks like INV-15879's
+deposit · Paid twice* is a payment on one bill that is exactly another bill from the same business
+(`paymentEchoes`). The row opened V3 alone, which was one side of the question. Now the row and its
+**Compare** pill open both, by the owner's decision:
+- **Both cards on screen at once**, the bill first. Each lists its payments, and the matching
+  figure is marked: the payment on the bill in bold, the twin's own figure in ink. No swipe here,
+  because the question is about the pair, not either card. The card body is `PriceFacts`, shared
+  with `LookAlikeSheet`, so a price reads the same on both.
+- **It's the deposit** puts the twin inside the bill (`billed_through_id`, what *Part of →
+  Included in* writes). It leaves Invoiced and Paid, the bill's own payments still say what went
+  out, and its paperwork stays on the job, which deleting it would not.
+- **Two bills** keeps the pair in `kept_price_pairs`, the look-alike table, for the household.
+  `paymentEchoes` takes the kept pairs and leaves them out. No migration.
+
+`PaidTwiceSheet.test.tsx` pins the order, the payments, what is marked, the two answers, no delete,
+and a refusal held open. `checks.test.ts` pins a kept pair either way round and a twin already
+inside. `ProjectDetailScreen.test.tsx` pins the row and pill opening it, both writes, and the row
+gone after either.
 
 **It is a fifth tab, and five is the ceiling rather than a direction.** List · House · Projects ·
 Schedule · You. Projects sits third because it and House both describe the fabric of the place;

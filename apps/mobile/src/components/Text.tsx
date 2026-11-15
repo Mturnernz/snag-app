@@ -1,5 +1,6 @@
-import React, { createContext, forwardRef, useContext } from 'react';
+import React, { createContext, forwardRef, useContext, useState } from 'react';
 import {
+  Platform,
   Text as RNText,
   TextInput as RNTextInput,
   StyleSheet,
@@ -8,7 +9,7 @@ import {
   type TextProps,
   type TextStyle,
 } from 'react-native';
-import { FontFiles, Fonts, fontFamily } from '../constants/theme';
+import { Colors, FontFiles, Fonts, fontFamily } from '../constants/theme';
 
 /**
  * `Text` and `TextInput`, set in Bone & Glass's two families.
@@ -79,9 +80,35 @@ export const Text = forwardRef<RNText, TextProps>(function Text({ style, ...rest
   return kind === parent ? text : <InText.Provider value={kind}>{text}</InText.Provider>;
 });
 
-export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextInput({ style, ...rest }, ref) {
+/**
+ * A box with the cursor in it wears one ring on the web: 2px of the action
+ * colour, 2px outside, following the box's own corners. The browser's default
+ * was a heavy black outline, rounded on one field and square on the next. A
+ * phone draws its own caret and needs none, so this is web only and costs
+ * native nothing.
+ */
+const WEB_REST = { outlineWidth: 0 } as object;
+const WEB_FOCUS = {
+  outlineStyle: 'solid', outlineWidth: 2, outlineOffset: 2, outlineColor: Colors.primary,
+} as object;
+
+export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextInput(
+  { style, onFocus, onBlur, ...rest }, ref,
+) {
   const font = resolveFont(style, null);
-  return <RNTextInput ref={ref} {...rest} style={font ? [style, font.style] : style} />;
+  const [focused, setFocused] = useState(false);
+  if (Platform.OS !== 'web') {
+    return <RNTextInput ref={ref} {...rest} onFocus={onFocus} onBlur={onBlur} style={font ? [style, font.style] : style} />;
+  }
+  return (
+    <RNTextInput
+      ref={ref}
+      {...rest}
+      onFocus={(e) => { setFocused(true); onFocus?.(e); }}
+      onBlur={(e) => { setFocused(false); onBlur?.(e); }}
+      style={[style, font?.style, focused ? WEB_FOCUS : WEB_REST]}
+    />
+  );
 });
 
 export default Text;

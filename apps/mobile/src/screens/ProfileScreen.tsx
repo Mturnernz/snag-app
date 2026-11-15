@@ -494,10 +494,10 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
     color: Colors.textSecondary,
   },
+  // The app's one field: a sunken well, no border (November 2026). It was a
+  // bordered box here and a well elsewhere.
   input: {
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    backgroundColor: Colors.well,
     borderRadius: Radius.input,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,

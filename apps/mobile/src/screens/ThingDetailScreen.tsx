@@ -17,8 +17,8 @@ import Icon from '../components/Icon';
 import ScreenHeader from '../components/ScreenHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DateField from '../components/DateField';
-import PhotoViewer from '../components/PhotoViewer';
 import PhotoRemoveButton from '../components/PhotoRemoveButton';
+import PhotoViewer from '../components/PhotoViewer';
 import Button from '../components/Button';
 import { openUrl } from '../lib/openUrl';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -238,6 +238,7 @@ export default function ThingDetailScreen() {
     setThingState(next);
   }, []);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [signedOnce, setSignedOnce] = useState(false);
   // Which photo is open full screen, or null. A rating plate is the whole
   // reason this tab exists and is unreadable in a 220px tile.
   const [viewing, setViewing] = useState<number | null>(null);
@@ -304,6 +305,7 @@ export default function ThingDetailScreen() {
       setThing(found);
       setDraft(draftFrom(found));
       setPhotoUrls(await getFileUrls(found.photoPaths));
+      setSignedOnce(true);
       // Never fatal: a page that cannot see the list still shows the record.
       if (KINDS_WITH_SERVICING.includes(found.kind)) {
         let open: Snag[] = [];
@@ -1298,7 +1300,11 @@ export default function ThingDetailScreen() {
                   >
                     <SignedImage uri={photoUrls[path]} style={styles.photo} resizeMode="cover" />
                   </Pressable>
-                  <PhotoRemoveButton onPress={() => removePhoto(path)} disabled={busy} />
+                  {/* Removing is in the viewer; a photo that will not open
+                      keeps the × here, since it has no viewer to open. */}
+                  {signedOnce && !photoUrls[path] ? (
+                    <PhotoRemoveButton onPress={() => removePhoto(path)} disabled={busy} />
+                  ) : null}
                 </View>
               </React.Fragment>
             ))}
@@ -1876,6 +1882,11 @@ export default function ThingDetailScreen() {
         photos={thing.photoPaths.map((path) => photoUrls[path]).filter(Boolean)}
         startIndex={viewing ?? 0}
         onClose={() => setViewing(null)}
+        onRemove={(index) => {
+          const path = thing.photoPaths.filter((one) => photoUrls[one])[index];
+          setViewing(null);
+          if (path) removePhoto(path);
+        }}
       />
 
       {/* ── the servicing regime ──────────────────────────────────────

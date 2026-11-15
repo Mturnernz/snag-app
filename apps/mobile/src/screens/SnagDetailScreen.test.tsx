@@ -905,8 +905,21 @@ describe('repeats, and no due date', () => {
     }
   });
 
-  // One row saying the answer, and nothing behind a Yes: the sheet is Never,
-  // or every so many of a unit — never a list of presets.
+  // The four common answers are one tap each above the box (November 2026):
+  // *monthly* had become three presses and a keyboard.
+  it('sets a common repeat in one tap, and closes', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ repeatDays: 30, dueAt: ahead(30) }));
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
+    await openRepeats(r);
+    await press(byLabel(r, 'Monthly'));
+    expect(mock_updateSnag).toHaveBeenCalledTimes(1);
+    expect(mock_updateSnag.mock.calls[0][1]).toEqual(expect.objectContaining({ repeatDays: 30 }));
+    expect(byLabel(r, 'Monthly')).toBeUndefined();
+  });
+
+  // One pill saying the answer, and nothing behind a Yes: the sheet is the
+  // common answers as chips, then Never, or every so many of a unit.
   it('is one row stating the answer, with Never or every so many behind it', async () => {
     const r = await arrange(snag({ repeatDays: null }));
 
@@ -1545,5 +1558,70 @@ describe('your own note', () => {
     mock_getComments.mockResolvedValue([note({ authorId: 'sam', authorName: 'Sam' })]);
     const r = await arrange();
     expect(byLabel(r, 'Change this note')).toBeUndefined();
+  });
+});
+
+// What a linked item takes is offered under the shopping box, one tap each:
+// the dishwasher's page already knows its tablets. An offer a person presses,
+// never a copy, because adding a part starts the job.
+describe('parts a linked item takes', () => {
+  const linkedTo = (over: Partial<any> = {}) => snag({
+    room: 'Kitchen', parts: [],
+    linkedThings: [{ id: 't1', name: 'Dishwasher', room: 'Kitchen', make: 'Bosch', model: 'SMS', kind: 'appliance' }],
+    ...over,
+  });
+
+  it('offers them, and adds one through the same write a typed part uses', async () => {
+    mock_getThings.mockResolvedValue([thing({ id: 't1', name: 'Dishwasher', room: 'Kitchen', consumables: ['Finish Quantum tablets'] })]);
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(linkedTo({ parts: ['Finish Quantum tablets'] }));
+    const r = await arrange(linkedTo());
+    await TestRenderer.act(async () => {});
+    await press(byLabel(r, 'Add Finish Quantum tablets to the shopping list'));
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { parts: ['Finish Quantum tablets'] });
+  });
+
+  it('offers nothing already on the list, and nothing from an item that is not linked', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: 't1', name: 'Dishwasher', room: 'Kitchen', consumables: ['Finish Quantum tablets'] }),
+      thing({ id: 't2', name: 'Fridge', room: 'Kitchen', consumables: ['Water filter'] }),
+    ]);
+    const r = await arrange(linkedTo({ parts: ['finish quantum tablets'] }));
+    await TestRenderer.act(async () => {});
+    expect(byLabel(r, 'Add Finish Quantum tablets to the shopping list')).toBeUndefined();
+    expect(byLabel(r, 'Add Water filter to the shopping list')).toBeUndefined();
+  });
+});
+
+// Removing a photo is in the viewer, where it has just been looked at. A photo
+// that will not open has no viewer, so only that one keeps a × on the page.
+describe('removing a photo from the viewer', () => {
+  const viewer = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.props?.onRemove === 'function' && Array.isArray(n.props?.photos),
+  )[0];
+  const crosses = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Remove this photo' && !!n.props?.onPress,
+  );
+
+  it('puts no × on a photo that opens, and removes the one the viewer is showing', async () => {
+    mock_getFileUrls.mockResolvedValue({ 'h/a.jpg': 'https://x/a.jpg', 'h/b.jpg': 'https://x/b.jpg' });
+    mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg'] }));
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    await TestRenderer.act(async () => {});
+    expect(crosses(r)).toEqual([]);
+
+    await TestRenderer.act(async () => { await viewer(r).props.onRemove(1); });
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/a.jpg'] });
+    mock_getFileUrls.mockResolvedValue({});
+  });
+
+  it('keeps the × on a photo that has no link to open', async () => {
+    mock_getFileUrls.mockResolvedValue({ 'h/a.jpg': 'https://x/a.jpg' });
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/broken.jpg'] }));
+    await TestRenderer.act(async () => {});
+    expect(crosses(r)).toHaveLength(1);
+    mock_getFileUrls.mockResolvedValue({});
   });
 });

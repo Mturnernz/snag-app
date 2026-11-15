@@ -119,3 +119,19 @@ describe('the way out', () => {
     expect(r.toJSON()).toBeNull();
   });
 });
+
+// Removing lives here, not as a × on every tile: only where the page hands it in.
+describe('removing the photo showing', () => {
+  it('offers no way to remove unless the page gives one', () => {
+    expect(byLabel(viewer(), 'Remove this photo')).toBeUndefined();
+  });
+
+  it('removes the one it is showing', () => {
+    const onRemove = jest.fn();
+    const r = render(
+      <PhotoViewer visible photos={['https://one.jpg', 'https://two.jpg']} startIndex={1} onClose={onClose} onRemove={onRemove} />,
+    );
+    press(byLabel(r, 'Remove this photo'));
+    expect(onRemove).toHaveBeenCalledWith(1);
+  });
+});

@@ -516,9 +516,8 @@ const styles = StyleSheet.create({
   passwordRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    // A well, like every other field.
+    backgroundColor: Colors.well,
     borderRadius: Radius.input,
     minHeight: MIN_TOUCH_TARGET + 4,
   },
@@ -528,6 +527,8 @@ const styles = StyleSheet.create({
     // `min-width: auto` will not shrink below; without this the eye is pushed
     // off the edge of the box.
     minWidth: 0,
+    // The box's own corners, so the focus ring is rounded like the others.
+    borderRadius: Radius.input,
     paddingLeft: Spacing.lg,
     paddingVertical: Spacing.md,
     fontSize: Typography.body,

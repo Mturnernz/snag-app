@@ -991,6 +991,22 @@ describe('capturing from the +', () => {
     expect(mock_navigate).toHaveBeenCalledWith('SnagDetail', { snagId: 'new' });
   });
 
+  // The rooms are offered under the box: a typed job had no room until it was
+  // opened again. Optional, and no room is still an answer (the test above).
+  it('files a typed job in the room tapped under the box', async () => {
+    mock_createSnag.mockResolvedValue(snag({ id: 'new', description: 'Gutters' }));
+    const r = render(<SnagListScreen />);
+    await settle();
+    await hold(r, 'Capture a new job');
+    await press(r, 'Continue without picture');
+    await TestRenderer.act(async () => box(r).props.onChangeText('Dripping tap'));
+    await press(r, 'In the Kitchen');
+    await press(r, 'Add job');
+    expect(mock_createSnag).toHaveBeenCalledWith({
+      propertyId: 'p', description: 'Dripping tap', photoPaths: [], room: 'Kitchen',
+    });
+  });
+
   it('keeps the words when the job cannot be made', async () => {
     mock_createSnag.mockRejectedValue(new Error('offline'));
     const r = render(<SnagListScreen />);

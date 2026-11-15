@@ -3,6 +3,7 @@ import { View, Pressable, StyleSheet } from 'react-native';
 import { Text, TextInput } from './Text';
 
 import { CycleUnit, MAX_CYCLE_DAYS, cycleDays, cycleParts } from '@snag/supabase-queries';
+import { REPEAT_PRESETS } from '@snag/shared-types';
 import Icon from './Icon';
 import Sheet from './Sheet';
 import { Group, RadioRow, Segmented } from './Grouped';
@@ -148,6 +149,23 @@ export default function RepeatSheet({ visible, current, onPick, onClose }: Props
     if (await send(null)) onClose();
   }
 
+  /**
+   * One of the four common answers, in one tap (November 2026). The sheet
+   * became a number and a unit so that *every 8 weeks* had an answer, and that
+   * made *monthly* three presses and a keyboard. Both now: the chips for what
+   * nearly every chore is, the box for the rest. A chip writes and closes, as
+   * *Never* does.
+   */
+  async function pickPreset(days: number) {
+    const parts = cycleParts(days);
+    draftRef.current = String(parts.n);
+    dirtyRef.current = false;
+    setDraft(String(parts.n));
+    setUnit(parts.unit);
+    setTouched(true);
+    if (await send(days)) onClose();
+  }
+
   async function close() {
     if (pendingRef.current && !(await pendingRef.current)) return;
     if (dirtyRef.current && !(await sendEvery(draftRef.current, unit))) return;
@@ -158,6 +176,26 @@ export default function RepeatSheet({ visible, current, onPick, onClose }: Props
 
   return (
     <Sheet visible={visible} title="Repeats" onClose={close} closeLabel="Done">
+      <View style={styles.presets}>
+        {REPEAT_PRESETS.map((preset) => {
+          const on = current === preset.days;
+          return (
+            <Pressable
+              key={preset.days}
+              onPress={() => pickPreset(preset.days)}
+              disabled={busy}
+              style={styles.presetTap}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={preset.label}
+            >
+              <View style={[styles.preset, on && styles.presetOn]}>
+                <Text style={[styles.presetLabel, on && styles.presetLabelOn]}>{preset.label}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
       <Group>
         <RadioRow title="Never" selected={!everyOn} onPress={never} />
         <View style={styles.every}>
@@ -208,6 +246,19 @@ export default function RepeatSheet({ visible, current, onPick, onClose }: Props
 }
 
 const styles = StyleSheet.create({
+  presets: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.sm, marginBottom: Spacing.xs },
+  presetTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  preset: {
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.well,
+  },
+  // A choice already made is ink, never the action colour.
+  presetOn: { backgroundColor: Colors.selected },
+  presetLabel: { fontSize: Typography.footnote, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  presetLabelOn: { color: Colors.onSelected },
   every: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,

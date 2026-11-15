@@ -29,6 +29,13 @@ interface Props {
   /** Which one was tapped. */
   startIndex?: number;
   onClose: () => void;
+  /**
+   * Takes the photo showing off its record. Absent, the viewer offers no way
+   * to. It lives here rather than as a × on every tile (November 2026): a
+   * destructive control sat permanently on the picture the page is opened to
+   * look at, and a photo is only worth removing once it has been looked at.
+   */
+  onRemove?: (index: number) => void;
 }
 
 /** A tap and a second tap are one gesture only if they are this close together. */
@@ -79,7 +86,7 @@ const isZoomed = (t: Transform) => t.scale > MIN_SCALE + 0.01;
  *   scaled-up app. The viewport meta deliberately still allows page zoom
  *   everywhere else, so this is scoped to the surface that handles its own.
  */
-export default function PhotoViewer({ visible, photos, startIndex = 0, onClose }: Props) {
+export default function PhotoViewer({ visible, photos, startIndex = 0, onClose, onRemove }: Props) {
   const { width, height } = useWindowDimensions();
   const insets = useEdgeInsets();
 
@@ -235,7 +242,12 @@ export default function PhotoViewer({ visible, photos, startIndex = 0, onClose }
           {photos.length > 1 ? (
             <Text style={styles.counter}>{index + 1} of {photos.length}</Text>
           ) : <View />}
-          <Round icon="close" label="Close" onPress={onClose} />
+          <View style={styles.topActions}>
+            {onRemove ? (
+              <Round icon="trash-outline" label="Remove this photo" onPress={() => onRemove(index)} />
+            ) : null}
+            <Round icon="close" label="Close" onPress={onClose} />
+          </View>
         </View>
 
         <View
@@ -269,7 +281,7 @@ export default function PhotoViewer({ visible, photos, startIndex = 0, onClose }
 
 function Round({
   icon, label, onPress, disabled,
-}: { icon: 'close' | 'add' | 'remove' | 'scan-outline' | 'chevron-back' | 'chevron-forward';
+}: { icon: 'close' | 'add' | 'remove' | 'scan-outline' | 'chevron-back' | 'chevron-forward' | 'trash-outline';
   label: string; onPress: () => void; disabled?: boolean }) {
   return (
     <Pressable
@@ -298,6 +310,7 @@ const webTouch: ViewStyle | undefined = Platform.OS === 'web'
   : undefined;
 
 const styles = StyleSheet.create({
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   // Near-opaque rather than a scrim. A photo being read closely wants nothing
   // behind it, and the warm ink keeps the viewer from reading as another app.
   root: { flex: 1, backgroundColor: Colors.photoViewerBackdrop },

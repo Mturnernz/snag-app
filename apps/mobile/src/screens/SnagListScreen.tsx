@@ -887,7 +887,7 @@ export default function SnagListScreen() {
    * page opens, where the room and everything else are decided. A refusal
    * says why and rethrows, so the sheet keeps the words.
    */
-  async function captureWords(text: string) {
+  async function captureWords(text: string, room: string | null = null) {
     // Typing never waits on the places loading; only filing needs one. The
     // words stay in the box when there is nowhere to put them yet.
     if (!activeProperty) {
@@ -895,7 +895,10 @@ export default function SnagListScreen() {
       throw new Error('No place yet');
     }
     try {
-      const snag = await createSnag({ propertyId: activeProperty.id, description: text, photoPaths: [] });
+      const snag = await createSnag({
+        propertyId: activeProperty.id, description: text, photoPaths: [], ...(room ? { room } : {}),
+      });
+      if (room) lastRoom.current = { room, at: Date.now() };
       setCapturing(false);
       await load();
       navigation.navigate('SnagDetail', { snagId: snag.id });
@@ -1497,6 +1500,8 @@ export default function SnagListScreen() {
         disabled={!activeProperty}
         onTakePhoto={captureFromCamera}
         onAddWords={captureWords}
+        rooms={locations.map((one) => one.name)}
+        suggestedRoom={recentRoom}
         onClose={() => setCapturing(false)}
       />
 

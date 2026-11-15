@@ -21,8 +21,8 @@ import StatusBadge from '../components/StatusBadge';
 import DueBadge from '../components/DueBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
 import StickyActionBar from '../components/StickyActionBar';
-import PhotoViewer from '../components/PhotoViewer';
 import PhotoRemoveButton from '../components/PhotoRemoveButton';
+import PhotoViewer from '../components/PhotoViewer';
 import AdviceCard from '../components/AdviceCard';
 import SupportCard from '../components/SupportCard';
 import ServicedByPill from '../components/ServicedByPill';
@@ -159,6 +159,9 @@ export default function SnagDetailScreen() {
   const [support, setSupport] = useState<SupportRequest | null>(null);
   const [asking, setAsking] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  // Whether the links have been asked for and answered at least once: a photo
+  // still without one after that is a photo that cannot be opened.
+  const [signedOnce, setSignedOnce] = useState(false);
   // A path with no link yet — the page just opened, a photo was just added
   // here, or the other phone added one — is signed as it arrives. It used to be
   // signed only when the page loaded, so a photo added on this page sat as an
@@ -169,7 +172,11 @@ export default function SnagDetailScreen() {
     if (!paths.some((path) => !photoUrls[path])) return undefined;
     let live = true;
     getFileUrls(paths)
-      .then((urls) => { if (live) setPhotoUrls((prev) => ({ ...prev, ...urls })); })
+      .then((urls) => {
+        if (!live) return;
+        setPhotoUrls((prev) => ({ ...prev, ...urls }));
+        setSignedOnce(true);
+      })
       .catch(() => {});
     return () => { live = false; };
   }, [photoKey]);
@@ -336,8 +343,11 @@ export default function SnagDetailScreen() {
    */
   const roomOf = snag?.room ?? null;
   const placeOf = snag?.propertyId ?? null;
+  const hasLinks = (snag?.linkedThings.length ?? 0) > 0;
   useEffect(() => {
-    if (!roomOf || !placeOf || thingsFor.current === placeOf) return;
+    // A linked item's parts are offered too, so a job with a link reads the
+    // record even when it has no room.
+    if ((!roomOf && !hasLinks) || !placeOf || thingsFor.current === placeOf) return;
     let cancelled = false;
     getThings(placeOf)
       .then((found) => {
@@ -347,7 +357,7 @@ export default function SnagDetailScreen() {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [roomOf, placeOf]);
+  }, [roomOf, hasLinks, placeOf]);
 
   /**
    * Up to three things recorded in the job's room and not already linked —
@@ -360,6 +370,32 @@ export default function SnagDetailScreen() {
     const linkedIds = new Set(linked.map((one) => one.id));
     return thingsInArea(things, roomOf).filter((t) => !linkedIds.has(t.id)).slice(0, 3);
   }, [things, roomOf, linked]);
+
+  /**
+   * What the job's linked items take, and the job is not already waiting on —
+   * offered under the shopping box as one tap each. The dishwasher's page
+   * already knows it takes *Finish Quantum tablets*; typing that again on a
+   * job about the dishwasher was the app asking for what it holds. An offer,
+   * never a copy: adding a part starts the job, so a person presses it
+   * (*Nothing copies a thing's consumables onto a snag's parts list on its
+   * own*). Four at most, so a fridge with a long list does not bury the box.
+   */
+  const partOffers = useMemo(() => {
+    if (!snag) return [];
+    const linkedIds = new Set(linked.map((one) => one.id));
+    const have = new Set(snag.parts.map((one) => one.trim().toLowerCase()));
+    const offers: string[] = [];
+    for (const thing of things) {
+      if (!linkedIds.has(thing.id)) continue;
+      for (const item of thing.consumables) {
+        const key = item.trim().toLowerCase();
+        if (!key || have.has(key)) continue;
+        have.add(key);
+        offers.push(item.trim());
+      }
+    }
+    return offers.slice(0, 4);
+  }, [things, linked, snag]);
 
   /** Replacing the whole set, which is the one call the server offers. */
   async function saveAssets(ids: string[]) {
@@ -878,7 +914,11 @@ export default function SnagDetailScreen() {
             >
               <SignedImage uri={photoUrls[snag.photoPaths[0]]} style={styles.photoHero} resizeMode="cover" />
             </Pressable>
-            <PhotoRemoveButton onPress={() => handleRemovePhoto(snag.photoPaths[0])} disabled={busy} />
+            {/* Removing is in the viewer. A photo that will not open has no
+                viewer to remove it from, so it keeps the × here. */}
+            {signedOnce && !photoUrls[snag.photoPaths[0]] ? (
+              <PhotoRemoveButton onPress={() => handleRemovePhoto(snag.photoPaths[0])} disabled={busy} />
+            ) : null}
           </View>
         ) : snag.photoPaths.length > 1 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
@@ -892,7 +932,11 @@ export default function SnagDetailScreen() {
                 >
                   <SignedImage uri={photoUrls[path]} style={styles.photo} resizeMode="cover" />
                 </Pressable>
-                <PhotoRemoveButton onPress={() => handleRemovePhoto(path)} disabled={busy} />
+                {/* Removing is in the viewer. A photo that will not open has no
+                viewer to remove it from, so it keeps the × here. */}
+            {signedOnce && !photoUrls[path] ? (
+              <PhotoRemoveButton onPress={() => handleRemovePhoto(path)} disabled={busy} />
+            ) : null}
               </View>
             ))}
           </ScrollView>
@@ -1310,6 +1354,25 @@ export default function SnagDetailScreen() {
                 accessibilityLabel="Something to pick up"
               />
             </View>
+            {partOffers.length > 0 ? (
+              <View style={styles.suggestRow}>
+                {partOffers.map((item) => (
+                  <Pressable
+                    key={item}
+                    onPress={() => patch({ parts: [...snag.parts, item] })}
+                    disabled={busy}
+                    style={styles.suggestTap}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${item} to the shopping list`}
+                  >
+                    <View style={styles.suggestChip}>
+                      <Icon name="add" size="sm" color={Colors.primary} />
+                      <Text style={styles.suggestText} numberOfLines={1}>{item}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
 
             <View style={styles.halfRule} />
 
@@ -1542,6 +1605,14 @@ export default function SnagDetailScreen() {
         photos={snag.photoPaths.map((path) => photoUrls[path]).filter(Boolean)}
         startIndex={viewing ?? 0}
         onClose={() => setViewing(null)}
+        // Removing is in the viewer, where the photo has just been looked at.
+        // The viewer closes first: the toast's Undo, and the dialog for a
+        // photo that is all the job has, both belong to the page under it.
+        onRemove={(index) => {
+          const path = snag.photoPaths.filter((one) => photoUrls[one])[index];
+          setViewing(null);
+          if (path) handleRemovePhoto(path);
+        }}
       />
 
       <RepeatSheet

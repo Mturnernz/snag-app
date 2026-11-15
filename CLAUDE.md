@@ -529,17 +529,51 @@ wins**; the passages themselves keep their history.
 - **Snag Line has a 93rd glyph, `more`**, added by hand to `snagLine.ts` for the overflow buttons.
   Add it to `icons.py` when the set is next regenerated.
 
-**From the review and not built**: removing a photo from inside the viewer (the × is still on the
-photo), the install card waiting a few visits, one-tap repeat chips above the custom box, room
-chips on *What's the job?*, a linked item's parts offered as shopping chips, one text-field style,
-and the Schedule, room, Household and sign-in screens.
+**The rest of the review, built the same month:**
+
+- **A photo is removed from inside the viewer** (`PhotoViewer`'s `onRemove`, a bin beside *Close*),
+  on the job page and the item page, reversing *a × in the photo's corner*. A destructive control
+  sat permanently on the picture the page is opened to look at. The viewer closes first, because
+  the toast's *Undo* and the dialog for a photo that is all a job has belong to the page under it.
+  What a removal does is unchanged (`lib/photoEdits.ts`). **A photo with no link to open keeps the
+  × on its tile** (`signedOnce`: only after the links have been answered once), because it has no
+  viewer to be removed from.
+- **The repeat sheet has the four common answers as chips** above *Never* and the box
+  (`REPEAT_PRESETS`), by the owner's go-ahead: the box made *every 8 weeks* possible and *monthly*
+  three presses and a keyboard. A chip writes and closes, as *Never* does. The chip already set
+  is ink.
+- **A typed job can say its room.** *What's the job?* offers the place's rooms as chips under the
+  box, the last room used lit for ten minutes as on the photo's sheet. Optional: no room is still
+  an answer, and `create_snag` is still one call, carrying the room. This is on the capture sheet,
+  where *Do not add a field to the compose bar* says such things belong.
+- **A linked item's parts are offered under the shopping box**, four at most, one tap each
+  (`partOffers`). An offer a person presses, never a copy, because adding a part starts the job.
+  The job page now reads the house record when the job has a link as well as when it has a room.
+- **The list's install card waits for the third opening** (`countInstallVisit`, per device,
+  guarded; absent storage counts as enough). The You tab's row never waits.
+- **A job with no photo shows its room's glyph** (`roomIcon`) in the row's well. The notes glyph
+  is a speech bubble and read as "has notes".
+- **One text field**: a sunken well with no border, on the You tab, Household, setup and the
+  password box, which were bordered. **On the web a focused box wears one ring** (the shared
+  `TextInput`): 2px of the action colour, 2px outside, following the box's corners. The browser's
+  own was black, and square on the password box.
+- **Edit this job is a bottom sheet**, like every other editor. It was the one centred dialog.
+- **Household**: *Make owner* is a quiet word (`TextButton`), where it was a tinted pill, and *Add
+  another home* is one row that opens its box.
+- **Schedule's key leaves out *Project*** for somebody with no Projects tab.
+
+**Still not built**: a room page's *Rename* and *Remove* behind a menu, and any change to the
+sign-in screens beyond the field style.
 
 `Dock.test.tsx` pins the + in the dock's row on every tab, *New job* and one clearance.
 `SnagListScreen.test.tsx` pins the camera on one press, the sheet after no photo and on a hold,
 and the controls behind More. `SnagDetailScreen.test.tsx` pins the one photo pill, Delete behind
 More, the repeat pill above the talk and the silent footer. `ThingDetailScreen.test.tsx` pins the
 read view, Edit and Done, the empty record and an offered pill. `relativeDay.test.ts` pins the
-words.
+words. The second round: `SnagDetailScreen.test.tsx` pins a preset in one tap, the part
+offers and their absence, no × on a photo that opens, the viewer's removal and the × kept on a
+photo with no link; `SnagListScreen.test.tsx` a typed job filed in the room tapped;
+`PhotoViewer.test.tsx` the bin only where the page hands one in; `installState.test.ts` the count.
 
 ## Capture and triage are different moments
 

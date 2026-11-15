@@ -3,6 +3,7 @@ import { View, Pressable, StyleSheet } from 'react-native';
 import { Text } from './Text';
 import SignedImage from './SignedImage';
 import Icon from './Icon';
+import { roomIcon } from '../lib/roomIcon';
 import StatusBadge from './StatusBadge';
 import DueBadge from './DueBadge';
 import { Colors, Fonts, Radius, SETTLED_OPACITY, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -88,10 +89,11 @@ export default function SnagCard({
         {photoUrl ? (
           <SignedImage uri={photoUrl} style={styles.image} resizeMode="cover" />
         ) : (
-          // A job with no photograph gets the notes glyph in a well, never an
-          // empty image frame.
+          // A job with no photograph gets its room's glyph in a well, never an
+          // empty image frame. It was the notes glyph, a speech bubble, which
+          // read as "has notes" beside rows that say so in words.
           <View style={styles.noPhoto}>
-            <Icon name="chatbubble-outline" size="md" color={Colors.textMuted} />
+            <Icon name={roomIcon(snag.room)} size="md" color={Colors.textMuted} />
           </View>
         )}
       </View>

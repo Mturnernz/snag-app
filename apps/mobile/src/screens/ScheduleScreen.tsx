@@ -402,7 +402,11 @@ export default function ScheduleScreen() {
         </View>
 
         <View style={styles.legend}>
-          {(['filed', 'done', 'due', 'next', 'project'] as ScheduleKind[]).map((kind) => (
+          {/* No *Project* in the key while this person has no Projects tab:
+              it named a mark the calendar cannot draw for them. */}
+          {((profile.projectsEnabled
+            ? ['filed', 'done', 'due', 'next', 'project']
+            : ['filed', 'done', 'due', 'next']) as ScheduleKind[]).map((kind) => (
             <View key={kind} style={styles.legendItem}>
               <View
                 style={[

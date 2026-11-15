@@ -5,6 +5,7 @@ import Button from './Button';
 import RoomPicker from './RoomPicker';
 import { Colors, Radius, Shadow, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
+import { useEdgeInsets } from '../hooks/useEdgeInsets';
 import { Location, Snag } from '../types';
 
 interface Props {
@@ -48,6 +49,7 @@ export default function EditSnagSheet({
   visible, snag, locations, busy = false, onSave, onCancel, onCreateRoom,
 }: Props) {
   const keyboard = useKeyboardInset();
+  const edge = useEdgeInsets();
   const [words, setWords] = useState(snag.description ?? '');
   const [room, setRoom] = useState<string | null>(snag.room);
 
@@ -65,9 +67,16 @@ export default function EditSnagSheet({
   const unchanged = trimmed === (snag.description ?? '') && room === snag.room;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
       <View style={styles.overlay}>
-        <View style={[styles.sheet, keyboard > 0 && { marginBottom: keyboard }]}>
+        {/* A bottom sheet, like every other editor in the app. It was the one
+            centred dialog. */}
+        <View
+          style={[
+            styles.sheet,
+            { marginBottom: keyboard, paddingBottom: (keyboard > 0 ? 0 : edge.bottom) + Spacing.lg },
+          ]}
+        >
           <Text style={styles.title}>Edit this job</Text>
 
           <Text style={styles.fieldLabel}>What's wrong?</Text>
@@ -131,14 +140,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.scrim,
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.xl,
+    justifyContent: 'flex-end',
   },
   sheet: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: 640,
     backgroundColor: Colors.surface,
-    borderRadius: Radius.card,
+    borderTopLeftRadius: Radius.sheet,
+    borderTopRightRadius: Radius.sheet,
     padding: Spacing.xl,
     gap: Spacing.xs,
     ...Shadow.lg,

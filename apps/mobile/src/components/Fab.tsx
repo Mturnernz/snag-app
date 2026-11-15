@@ -9,18 +9,19 @@ import { RouteContext, useDock } from '../navigation/Dock';
  * The capture + — the List tab's way to capture a job and the House tab's way
  * to record a thing. One component so the two cannot drift apart.
  *
- * **Inside the app it is drawn by the dock**, floating above the tab bar's
- * right end (`navigation/Dock.tsx`): this hands the dock what it does and
- * draws nothing itself, so the + sits in one place on every tab that has one
- * and the tab bar never changes size for it. Outside a dock — a screen
+ * **Inside the app it is drawn by the dock**, as its centre item
+ * (`navigation/Dock.tsx`): this hands the dock what it does and draws nothing
+ * itself, so the + sits in one place on every tab and covers no row. Outside a dock — a screen
  * rendered on its own, as every screen test is — it draws itself in the
  * bottom-right corner, 56pt and `Spacing.lg` in, as it always did.
  */
 
 export default function Fab({
-  onPress, accessibilityLabel, icon = 'add', bottom = Spacing.lg, disabled = false,
+  onPress, onLongPress, accessibilityLabel, icon = 'add', bottom = Spacing.lg, disabled = false,
 }: {
   onPress: () => void;
+  /** A second door for a desktop or a thumb that wants the choice: hold the +. */
+  onLongPress?: () => void;
   accessibilityLabel: string;
   icon?: IconName;
   bottom?: number;
@@ -33,18 +34,25 @@ export default function Fab({
   // One stable function per mount, so the dock is not re-rendered on every
   // render of the screen; it calls whatever `onPress` is current.
   const stable = useRef(() => latest.current()).current;
+  const latestLong = useRef(onLongPress);
+  latestLong.current = onLongPress;
+  const stableLong = useRef(() => latestLong.current?.()).current;
+  const hasLong = !!onLongPress;
   const handled = !!(dock && route);
 
   useEffect(() => {
     if (!dock || !route) return undefined;
-    dock.register(route.key, { onPress: stable, label: accessibilityLabel, icon, disabled });
+    dock.register(route.key, {
+      onPress: stable, onLongPress: hasLong ? stableLong : undefined, label: accessibilityLabel, icon, disabled,
+    });
     return () => dock.register(route.key, null);
-  }, [dock, route?.key, accessibilityLabel, icon, disabled]);
+  }, [dock, route?.key, accessibilityLabel, icon, disabled, hasLong]);
 
   if (handled) return null;
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       disabled={disabled}
       style={[styles.fab, { bottom }, disabled && styles.off]}
       accessibilityRole="button"

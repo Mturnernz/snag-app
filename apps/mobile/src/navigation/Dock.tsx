@@ -27,17 +27,21 @@ import type { MainTabParamList } from '../types';
  * into each other ("ProjectsSchedule") on exactly the tabs used most. The
  * navigation is the one thing on screen that must not move when the tab does.
  *
- * **The + floats above the dock's right end**, never in its row (October 2026,
- * by the owner's decision). The List's *Capture a new job* and the House tab's
- * *Add something to the house* are each a `Fab` in their own screen, and a
- * `Fab` inside the dock's provider hands itself to the dock rather than drawing
- * itself: one geometry, so the + sits in the same place on every phone, over
- * the right-hand thumb, and appears only on a tab that has one. A screen with
- * no provider around it — every screen test — draws its own.
+ * **The + is the dock's centre item, on every tab** (November 2026, by the
+ * owner's decision, reversing *above the right end, on List and House only*).
+ * Floating over the list it sat on the rows' tick column, so one job's *done*
+ * was always under it. In the dock's row it covers nothing, the dock is still
+ * one width and one arrangement everywhere, and capture is one press from any
+ * tab. The List's *Capture a new job* and the House tab's *Add something to
+ * the house* are each a `Fab` in their own screen, and a `Fab` inside the
+ * dock's provider hands itself to the dock rather than drawing itself. A tab
+ * with no `Fab` of its own (Schedule, You, Projects) gets *New job*, which
+ * goes to the list and opens its capture sheet. A screen with no provider
+ * around it — every screen test — draws its own.
  *
  * **Nothing ends under the glass.** A tab's scroll pads its foot by
- * `useDockClearance()`: the dock's height and its gap, the + above it on a tab
- * that has one, and nothing on a screen with no dock.
+ * `useDockClearance()`: the dock's height and its gap, and nothing on a screen
+ * with no dock.
  *
  * **It gets out of the way of the keyboard.** A floating bar over a box being
  * typed into is a bar in front of the words, so it goes while the keyboard is
@@ -46,11 +50,12 @@ import type { MainTabParamList } from '../types';
 
 export const DOCK_HEIGHT = 64;
 const FAB = 56;
-/** The gap between the top of the dock and the foot of the + above it. */
-const FAB_GAP = Spacing.md;
+/** How far the + stands proud of the dock's top edge. */
+const FAB_LIFT = 14;
 
 interface DockAction {
   onPress: () => void;
+  onLongPress?: () => void;
   label: string;
   icon: IconName;
   disabled: boolean;
@@ -78,17 +83,11 @@ export function useDock(): DockApi | null {
   return useContext(DockContext);
 }
 
-/**
- * How far a tab's scroll must pad its foot so its last row clears the dock —
- * and the + floating above it, on a tab that has one.
- */
+/** How far a tab's scroll must pad its foot so its last row clears the dock. */
 export function useDockClearance(): number {
   const dock = useContext(DockContext);
-  const actions = useContext(DockActions);
-  const route = useContext(RouteContext);
   if (!dock) return 0;
-  const clear = dock.bottom + DOCK_HEIGHT + Spacing.lg;
-  return route && actions[route.key] ? clear + FAB + FAB_GAP : clear;
+  return dock.bottom + DOCK_HEIGHT + Spacing.lg;
 }
 
 const TAB_GLYPHS: Record<keyof MainTabParamList, [IconName, IconName]> = {
@@ -114,7 +113,8 @@ export function DockProvider({ children }: { children: React.ReactNode }) {
         return next;
       }
       if (before && before.label === action.label && before.icon === action.icon
-        && before.disabled === action.disabled && before.onPress === action.onPress) return now;
+        && before.disabled === action.disabled && before.onPress === action.onPress
+        && before.onLongPress === action.onLongPress) return now;
       return { ...now, [routeKey]: action };
     });
   }, []);
@@ -136,9 +136,17 @@ export default function Dock({ state, descriptors, navigation }: BottomTabBarPro
   if (keyboard > 0) return null;
 
   const focused = state.routes[state.index];
-  const action = actions[focused.key];
+  // A tab with no + of its own still offers one: the list's capture sheet.
+  const action: DockAction = actions[focused.key] ?? {
+    label: 'New job',
+    icon: 'add',
+    disabled: false,
+    onPress: () => navigation.navigate('Snags', { newJob: Date.now() }),
+  };
   const crowded = state.routes.length > 4;
   const bottom = dock?.bottom ?? Spacing.xxl;
+  // The + sits between the tabs: after the second of four, the third of five.
+  const plusAfter = Math.ceil(state.routes.length / 2) - 1;
 
   return (
     <>
@@ -159,8 +167,8 @@ export default function Dock({ state, descriptors, navigation }: BottomTabBarPro
             if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
           };
           return (
+            <React.Fragment key={route.key}>
             <Pressable
-              key={route.key}
               onPress={onPress}
               style={styles.tab}
               accessibilityRole="tab"
@@ -181,16 +189,20 @@ export default function Dock({ state, descriptors, navigation }: BottomTabBarPro
                 </Text>
               </View>
             </Pressable>
+            {index === plusAfter ? <View style={styles.plusSlot} /> : null}
+            </React.Fragment>
           );
         })}
       </View>
-      {action ? (
+      {/* Drawn outside the dock's frame, which clips, so it can stand proud of it. */}
+      <View style={[styles.plusRow, { bottom }]} pointerEvents="box-none">
+        <View style={{ flex: plusAfter + 1 }} pointerEvents="none" />
         <Pressable
           onPress={action.onPress}
+          onLongPress={action.onLongPress}
           disabled={action.disabled}
           style={({ pressed }) => [
             styles.fab,
-            { bottom: bottom + DOCK_HEIGHT + FAB_GAP },
             action.disabled && styles.fabOff,
             pressed && styles.pressed,
           ]}
@@ -200,7 +212,8 @@ export default function Dock({ state, descriptors, navigation }: BottomTabBarPro
         >
           <Icon name={action.icon} size="xl" color={Colors.onPrimary} />
         </Pressable>
-      ) : null}
+        <View style={{ flex: state.routes.length - plusAfter - 1 }} pointerEvents="none" />
+      </View>
     </>
   );
 }
@@ -254,10 +267,20 @@ const styles = StyleSheet.create({
   },
   labelCrowded: { fontSize: Typography.xs },
   labelOn: { color: Colors.primary, fontWeight: Typography.semibold },
-  // Above the dock's right end, in line with its edge.
-  fab: {
+  // The gap the tabs leave for the +.
+  plusSlot: { width: FAB + Spacing.sm },
+  // Lays the + over that gap: the same flex shares as the tabs either side.
+  plusRow: {
     position: 'absolute',
+    left: Spacing.lg,
     right: Spacing.lg,
+    height: DOCK_HEIGHT + FAB_LIFT,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: Spacing.xs + 1,
+  },
+  fab: {
+    marginHorizontal: Spacing.xs,
     width: FAB,
     height: FAB,
     borderRadius: FAB / 2,

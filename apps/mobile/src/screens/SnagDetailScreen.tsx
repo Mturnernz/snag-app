@@ -32,6 +32,8 @@ import DoneDialog from '../components/DoneDialog';
 import EditSnagSheet from '../components/EditSnagSheet';
 import LinkAssetsSheet from '../components/LinkAssetsSheet';
 import { Group, Row, SectionTitle } from '../components/Grouped';
+import Sheet from '../components/Sheet';
+import { relativeDay } from '../lib/relativeDay';
 import RepeatSheet from '../components/RepeatSheet';
 import { Colors, Fonts, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
@@ -96,7 +98,7 @@ function linkedHeadline(thing: LinkedThing): string {
 function byline(snag: Snag, me: string): string {
   const parts: string[] = [];
   if (snag.reporterId !== me) parts.push(`Added by ${snag.reporterName}`);
-  if (snag.lastDoneAt) parts.push(`last done ${new Date(snag.lastDoneAt).toLocaleDateString()}`);
+  if (snag.lastDoneAt) parts.push(`last done ${relativeDay(snag.lastDoneAt).toLowerCase()}`);
   const line = parts.join(' · ');
   return line ? line.charAt(0).toUpperCase() + line.slice(1) : '';
 }
@@ -206,6 +208,8 @@ export default function SnagDetailScreen() {
   }, []);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [addingPhoto, setAddingPhoto] = useState(false);
   /** A photo whose × was pressed when it is all the job has, while that is said. */
   const [onlyPhoto, setOnlyPhoto] = useState<string | null>(null);
   /** Whether the congratulations dialog is up. Only a real finish sets it. */
@@ -810,19 +814,24 @@ export default function SnagDetailScreen() {
       {/* ScreenHeader pads the top inset itself; padding here too doubled it. */}
       <View>
         <ScreenHeader
-          title={snag.reference}
+          // The room, not the reference: *SNAG-0106* is the app's word for
+          // the job, not the household's. The reference is in the small print
+          // under the facts.
+          title={snag.room ?? 'Job'}
           onBack={() => navigation.goBack()}
           rightSlot={
             // A 48pt box, not a glyph with `hitSlop`: react-native-web ignores
             // hitSlop, so on the build people install the tap area was the
             // 24pt icon itself, in the screen's top-right corner.
+            // Deleting is rare and final, so it is behind this rather than a
+            // bin in the corner a thumb reaches for the back arrow past.
             <Pressable
-              onPress={() => setConfirmDelete(true)}
+              onPress={() => setMenuOpen(true)}
               style={styles.headerAction}
               accessibilityRole="button"
-              accessibilityLabel="Delete"
+              accessibilityLabel="More"
             >
-              <Icon name="trash-outline" size="md" color={Colors.textMuted} />
+              <Icon name="more" size="md" color={Colors.textPrimary} />
             </Pressable>
           }
         />
@@ -857,7 +866,21 @@ export default function SnagDetailScreen() {
             **And one can be taken off**: a blurry shot, or the wrong job's
             photo. `PhotoRemoveButton`, the thing page's ×: it removes at once
             and the toast offers *Undo*. */}
-        {snag.photoPaths.length > 0 ? (
+        {snag.photoPaths.length === 1 ? (
+          // One photograph gets the page's width: at 220pt it sat beside a
+          // blank half of the screen, on the page opened to look at it.
+          <View style={styles.photoHeroCell}>
+            <Pressable
+              onPress={() => setViewing(0)}
+              disabled={!photoUrls[snag.photoPaths[0]]}
+              accessibilityRole="imagebutton"
+              accessibilityLabel="Open this photo"
+            >
+              <SignedImage uri={photoUrls[snag.photoPaths[0]]} style={styles.photoHero} resizeMode="cover" />
+            </Pressable>
+            <PhotoRemoveButton onPress={() => handleRemovePhoto(snag.photoPaths[0])} disabled={busy} />
+          </View>
+        ) : snag.photoPaths.length > 1 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
             {snag.photoPaths.map((path, i) => (
               <View key={path} style={styles.photoCell}>
@@ -888,36 +911,6 @@ export default function SnagDetailScreen() {
             accessibilityLabel="Edit this job"
           >
             <Icon name="create-outline" size="sm" color={Colors.textMuted} />
-          </Pressable>
-        </View>
-
-        {/* Both ways to add a photo sit under the headline, as pills, whether
-            or not the job has one yet. They were on a scrim over the first
-            photo, which covered the picture the page is opened to read. */}
-        <View style={styles.photoPills}>
-          <Pressable
-            onPress={() => handleAddPhotos('camera')}
-            disabled={busy}
-            style={styles.suggestTap}
-            accessibilityRole="button"
-            accessibilityLabel="Take a photo"
-          >
-            <View style={[styles.suggestChip, busy && styles.photoAddOff]}>
-              <Icon name="camera-outline" size="sm" color={Colors.primary} />
-              <Text style={styles.suggestText}>Take photo</Text>
-            </View>
-          </Pressable>
-          <Pressable
-            onPress={() => handleAddPhotos('library')}
-            disabled={busy}
-            style={styles.suggestTap}
-            accessibilityRole="button"
-            accessibilityLabel="Choose photos"
-          >
-            <View style={[styles.suggestChip, busy && styles.photoAddOff]}>
-              <Icon name="images-outline" size="sm" color={Colors.primary} />
-              <Text style={styles.suggestText}>Choose photos</Text>
-            </View>
           </Pressable>
         </View>
 
@@ -965,15 +958,59 @@ export default function SnagDetailScreen() {
               <Icon name="chevron-down" size="sm" color={Colors.textMuted} />
             </View>
           </Pressable>
+
+          {/* Whether it comes round again, beside the room: both are facts
+              about the job that open a sheet. It was a row at the foot of the
+              page, past every card (November 2026, by the owner's decision).
+              `RepeatSheet` and what a write does are unchanged. */}
+          <Pressable
+            onPress={() => setRepeating(true)}
+            disabled={busy}
+            style={styles.metaChip}
+            accessibilityRole="button"
+            accessibilityLabel={`Repeats: ${repeatLabel(snag)}`}
+          >
+            <View style={styles.roomPill}>
+              <Icon name="repeat" size="sm" color={Colors.textSecondary} />
+              <Text style={styles.roomPillText}>
+                {snag.repeatDays ? repeatLabel(snag) : "Doesn't repeat"}
+              </Text>
+              <Icon name="chevron-down" size="sm" color={Colors.textMuted} />
+            </View>
+          </Pressable>
+
+          {/* One way in for a photo, which then asks camera or library: each
+              is still pressed in a tap of its own, which is what lets a
+              browser open the camera. Two pills on a row of their own under
+              every headline was a line of chrome on a page that is mostly
+              read. */}
+          <Pressable
+            onPress={() => setAddingPhoto(true)}
+            disabled={busy}
+            style={styles.metaChip}
+            accessibilityRole="button"
+            accessibilityLabel="Add a photo"
+          >
+            <View style={[styles.roomPill, busy && styles.photoAddOff]}>
+              <Icon name="camera-outline" size="sm" color={Colors.textSecondary} />
+              <Text style={styles.roomPillText}>Add photo</Text>
+            </View>
+          </Pressable>
         </View>
+
+        {/* The day a repeat next comes round: the one place the day is written. */}
+        {repeatFact(snag) ? <Text style={styles.reportedBy}>{repeatFact(snag)}</Text> : null}
 
         {/* Who filed it is news only when it was somebody else — with no
             notifications, "Added by Sam" is how you learn the other person put
             it here; "Added by you" told you what you already knew. The last
             finish of a repeat is kept either way. */}
-        {byline(snag, profile.id) ? (
-          <Text style={styles.reportedBy}>{byline(snag, profile.id)}</Text>
-        ) : null}
+        <View style={styles.smallPrint}>
+          <Text style={styles.reference}>{snag.reference}</Text>
+          {byline(snag, profile.id) ? (
+            <Text style={styles.reportedBy}>{byline(snag, profile.id)}</Text>
+          ) : null}
+        </View>
 
         {/* ── Notes ──
             The first thing under the facts, above every control. What the
@@ -994,7 +1031,7 @@ export default function SnagDetailScreen() {
                       {mine ? 'You' : comment.authorName}
                       <Text style={styles.commentDate}>
                         {'  '}
-                        {new Date(comment.createdAt).toLocaleDateString()}
+                        {relativeDay(comment.createdAt)}
                         {comment.editedAt ? '  ·  edited' : ''}
                       </Text>
                     </Text>
@@ -1175,7 +1212,7 @@ export default function SnagDetailScreen() {
                     {note.authorName}
                     <Text style={styles.commentDate}>
                       {'  '}
-                      {new Date(note.createdAt).toLocaleDateString()} · {note.snagReference}
+                      {relativeDay(note.createdAt)} · {note.snagReference}
                     </Text>
                   </Text>
                   <LinkedText style={styles.commentBody}>{note.body}</LinkedText>
@@ -1414,16 +1451,6 @@ export default function SnagDetailScreen() {
 
             A repeat is one of the four things that start a job, which is right:
             deciding it comes round is deciding to do it. */}
-        <Group style={styles.repeatGroup}>
-          <Row
-            title="Repeats"
-            value={repeatLabel(snag)}
-            tone={snag.repeatDays ? 'default' : 'muted'}
-            subtitle={repeatFact(snag)}
-            onPress={() => setRepeating(true)}
-            accessibilityLabel={`Repeats: ${repeatLabel(snag)}`}
-          />
-        </Group>
       </ScrollView>
 
       {/* ── Mark done ──
@@ -1441,7 +1468,9 @@ export default function SnagDetailScreen() {
               ? `${unsavedHint(unsaved)} — kept when you leave`
               : noteWaiting
                 ? 'Note not added yet — kept on this device'
-                : 'All changes saved'
+                // Nothing waiting is the resting state, and a line saying so
+                // under the button on every visit was a line of chrome.
+                : undefined
           }
           hintTone={unsaved > 0 || noteWaiting ? 'warn' : 'muted'}
         >
@@ -1464,6 +1493,49 @@ export default function SnagDetailScreen() {
           )}
         </StickyActionBar>
       </View>
+
+      <Sheet visible={menuOpen} title={snag.reference} onClose={() => setMenuOpen(false)}>
+        <Group>
+          <Row
+            title="Edit the words or the room"
+            onPress={() => {
+              setMenuOpen(false);
+              setEditing(true);
+            }}
+          />
+          <Row
+            title="Delete this job"
+            tone="danger"
+            accessibilityLabel="Delete"
+            onPress={() => {
+              setMenuOpen(false);
+              setConfirmDelete(true);
+            }}
+          />
+        </Group>
+      </Sheet>
+
+      <Sheet visible={addingPhoto} title="Add a photo" onClose={() => setAddingPhoto(false)}>
+        <Group>
+          <Row
+            title="Take photo"
+            accessibilityLabel="Take a photo"
+            leading={<Icon name="camera-outline" size="md" color={Colors.primary} />}
+            onPress={() => {
+              setAddingPhoto(false);
+              handleAddPhotos('camera');
+            }}
+          />
+          <Row
+            title="Choose photos"
+            leading={<Icon name="images-outline" size="md" color={Colors.primary} />}
+            onPress={() => {
+              setAddingPhoto(false);
+              handleAddPhotos('library');
+            }}
+          />
+        </Group>
+      </Sheet>
 
       <PhotoViewer
         visible={viewing !== null}
@@ -1641,7 +1713,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   photoCell: { marginRight: Spacing.sm },
-  photoPills: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.sm },
+  photoHeroCell: { marginBottom: Spacing.sm },
+  photoHero: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: Radius.photo,
+    backgroundColor: Colors.border,
+  },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   title: {
     flex: 1,
@@ -1688,6 +1766,8 @@ const styles = StyleSheet.create({
   },
   roomPillText: { fontSize: Typography.sm, color: Colors.textSecondary },
   reportedBy: { fontSize: Typography.sm, color: Colors.textMuted },
+  reference: { fontSize: Typography.xs, color: Colors.textMuted, fontFamily: Fonts.mono },
+  smallPrint: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: Spacing.md },
   aboutRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   about: {
     flex: 1,
@@ -1736,7 +1816,6 @@ const styles = StyleSheet.create({
   },
   // The Repeats row: a V2 group of one, the page's last thing. 28 under the
   // items card, as between every other section.
-  repeatGroup: { marginTop: Spacing.xl },
   // The shopping list. Rows read like a list you'd scan in an aisle; the field
   // below is how you add to it, and is the only text input on this screen
   // besides a note.

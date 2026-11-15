@@ -109,7 +109,10 @@ export default function SnagCard({
         </Text>
 
         <View style={styles.facts}>
-          <StatusBadge status={snag.status} />
+          {/* *Open* is every row's resting state, and a word repeated on every
+              row is a column of noise (the argument that retired priority).
+              A state is said only when it is news: doing, or done. */}
+          {snag.status !== 'open' ? <StatusBadge status={snag.status} /> : null}
           <DueBadge snag={snag} />
           {showRoom && snag.room ? <Text style={styles.room} numberOfLines={1}>{snag.room}</Text> : null}
           {/* What is still to get, never what was listed: a row claiming it

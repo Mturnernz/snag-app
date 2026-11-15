@@ -430,21 +430,21 @@ describe('the shopping list', () => {
     expect(r.queryByText('Pick up on the way')).not.toBeNull();
   });
 
-  // A cart with a number on it says there is shopping to do; it does not say
-  // that pressing it swaps what the screen is showing. The caption names the
-  // view it goes to, and turns round once you are there.
+  // The cart swaps what the screen is showing, so its name says which list a
+  // press shows, and turns round once you are there. The caption under it went
+  // with the header's height (November 2026); the name is the button's own.
   it('names the view it goes to, and says the other one once it is open', async () => {
     withParts();
     const r = render(<SnagListScreen />);
     await settle();
 
-    expect(r.queryByText('View shopping list')).not.toBeNull();
-    expect(r.queryByText('View jobs list')).toBeNull();
+    expect(byLabel(r, 'View shopping list, 2 things to get')).toBeDefined();
+    expect(byLabel(r, 'View jobs list')).toBeUndefined();
+    expect(r.queryByText('View shopping list')).toBeNull();
 
     await TestRenderer.act(async () => byLabel(r, 'View shopping list, 2 things to get').props.onPress());
 
-    expect(r.queryByText('View jobs list')).not.toBeNull();
-    expect(r.queryByText('View shopping list')).toBeNull();
+    expect(byLabel(r, 'View jobs list')).toBeDefined();
   });
 
   // The card names what is left to get and claims nothing about the trip. It
@@ -471,6 +471,7 @@ describe('the shopping list', () => {
 
     expect(byLabel(r, 'Seal, tick off')).toBeDefined();
 
+    await TestRenderer.act(async () => byLabel(r, 'More').props.onPress());
     await TestRenderer.act(async () => byLabel(r, 'Collapse all').props.onPress());
 
     // The rooms on the card fold with everything else, and the headings stay.
@@ -479,6 +480,7 @@ describe('the shopping list', () => {
     expect(byLabel(r, 'Bathroom, 1 to get')).toBeDefined();
 
     // And it now offers the way back, rather than still saying Collapse all.
+    await TestRenderer.act(async () => byLabel(r, 'More').props.onPress());
     await TestRenderer.act(async () => byLabel(r, 'Expand all').props.onPress());
     expect(byLabel(r, 'Seal, tick off')).toBeDefined();
   });
@@ -791,6 +793,9 @@ describe('folding a room away', () => {
   // still open — so the press on offer is never a no-op.
   it('offers to collapse everything, then to expand everything', async () => {
     const r = await withRooms();
+    // Behind the header's More button, not on a line of its own.
+    expect(byLabel(r, 'Collapse all')).toBeUndefined();
+    await press(byLabel(r, 'More'));
     expect(byLabel(r, 'Collapse all')).toBeDefined();
 
     await press(byLabel(r, 'Collapse all'));
@@ -798,6 +803,7 @@ describe('folding a room away', () => {
     expect(texts(r)).not.toContain('Shelf brackets');
     expect(texts(r)).toContain('Kitchen · 1');
 
+    await press(byLabel(r, 'More'));
     expect(byLabel(r, 'Expand all')).toBeDefined();
     await press(byLabel(r, 'Expand all'));
     expect(texts(r)).toContain('Rangehood filter');
@@ -914,9 +920,10 @@ describe('coming back to the app', () => {
   });
 });
 
-// The + replaced the compose bar: one tap to a sheet offering the camera or
-// words. A photo is filed first and asked about after; words are filed only
-// when sent, and the job's page opens.
+// The + goes straight to the camera (November 2026). Coming back without a
+// photo, or holding the +, opens the sheet offering the camera or words. A
+// photo is filed first and asked about after; words are filed only when sent,
+// and the job's page opens.
 describe('capturing from the +', () => {
   const byLabel = (r: ReturnType<typeof render>, label: string) => r.root.findAll(
     (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === label
@@ -924,6 +931,10 @@ describe('capturing from the +', () => {
   )[0];
   const press = async (r: ReturnType<typeof render>, label: string) => {
     await TestRenderer.act(async () => { await byLabel(r, label).props.onPress(); });
+    await settle();
+  };
+  const hold = async (r: ReturnType<typeof render>, label: string) => {
+    await TestRenderer.act(async () => { await byLabel(r, label).props.onLongPress(); });
     await settle();
   };
   const box = (r: ReturnType<typeof render>) => r.root.findAll(
@@ -936,27 +947,39 @@ describe('capturing from the +', () => {
     const r = render(<SnagListScreen />);
     await settle();
     await press(r, 'Capture a new job');
+    // One press: no sheet between the + and the camera.
+    expect(r.queryByText('Continue without picture')).toBeNull();
+    expect(mock_takePhoto).toHaveBeenCalledTimes(1);
+    expect(mock_fileCapturedPhoto.mock.calls[0].slice(0, 3)).toEqual(['file://shot.jpg', 'h', null]);
+  });
+
+  it('files nothing when the camera is closed without a photo, and offers words instead', async () => {
+    mock_takePhoto.mockResolvedValue(null);
+    const r = render(<SnagListScreen />);
+    await settle();
+    await press(r, 'Capture a new job');
+    expect(mock_fileCapturedPhoto).not.toHaveBeenCalled();
+    expect(mock_createSnag).not.toHaveBeenCalled();
+    expect(r.queryByText('Continue without picture')).not.toBeNull();
+  });
+
+  it('opens the sheet without the camera when the + is held, and its Take photo still files one', async () => {
+    mock_takePhoto.mockResolvedValue('file://shot.jpg');
+    const r = render(<SnagListScreen />);
+    await settle();
+    await hold(r, 'Capture a new job');
+    expect(mock_takePhoto).not.toHaveBeenCalled();
     expect(r.queryByText('Continue without picture')).not.toBeNull();
     await press(r, 'Take photo');
     expect(mock_takePhoto).toHaveBeenCalledTimes(1);
     expect(mock_fileCapturedPhoto.mock.calls[0].slice(0, 3)).toEqual(['file://shot.jpg', 'h', null]);
   });
 
-  it('files nothing when the camera is closed without a photo', async () => {
-    mock_takePhoto.mockResolvedValue(null);
-    const r = render(<SnagListScreen />);
-    await settle();
-    await press(r, 'Capture a new job');
-    await press(r, 'Take photo');
-    expect(mock_fileCapturedPhoto).not.toHaveBeenCalled();
-    expect(mock_createSnag).not.toHaveBeenCalled();
-  });
-
   it('without a picture, asks for the words and creates nothing until they are sent', async () => {
     mock_createSnag.mockResolvedValue(snag({ id: 'new', description: 'Gutters' }));
     const r = render(<SnagListScreen />);
     await settle();
-    await press(r, 'Capture a new job');
+    await hold(r, 'Capture a new job');
     await press(r, 'Continue without picture');
     expect(r.queryByText("What's the job?")).not.toBeNull();
     expect(box(r).props.autoFocus).toBe(true);
@@ -972,7 +995,7 @@ describe('capturing from the +', () => {
     mock_createSnag.mockRejectedValue(new Error('offline'));
     const r = render(<SnagListScreen />);
     await settle();
-    await press(r, 'Capture a new job');
+    await hold(r, 'Capture a new job');
     await press(r, 'Continue without picture');
     await TestRenderer.act(async () => box(r).props.onChangeText('Gutters'));
     await press(r, 'Add job');
@@ -983,7 +1006,7 @@ describe('capturing from the +', () => {
   it('walked away from, files nothing', async () => {
     const r = render(<SnagListScreen />);
     await settle();
-    await press(r, 'Capture a new job');
+    await hold(r, 'Capture a new job');
     await press(r, 'Continue without picture');
     await TestRenderer.act(async () => box(r).props.onChangeText('Gutters'));
     await press(r, 'Cancel');
@@ -1043,6 +1066,7 @@ describe('choosing jobs to share', () => {
 
   it('can start from a word, for a desktop with no long press', async () => {
     const r = await withJobs();
+    await tap(r, 'More');
     await tap(r, 'Choose jobs to share');
     expect(texts(r)).toContain('0 selected');
     expect(texts(r)).toContain('Tap the jobs to share');

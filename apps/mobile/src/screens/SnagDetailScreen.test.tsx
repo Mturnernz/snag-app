@@ -555,8 +555,13 @@ describe('the top of the page', () => {
   );
 
   // Both ways in sit under the headline as pills, never on the photo.
-  it('offers the camera and the library as pills, never over the photo', async () => {
+  // One pill, which then asks camera or library (November 2026): two pills on
+  // a row of their own under every headline was a line of chrome.
+  it('offers one Add photo pill that asks camera or library, never over the photo', async () => {
     const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    expect(r.queryByText('Add photo')).not.toBeNull();
+    expect(r.queryByText('Take photo')).toBeNull();
+    await press(byLabel(r, 'Add a photo'));
     expect(r.queryByText('Take photo')).not.toBeNull();
     expect(r.queryByText('Choose photos')).not.toBeNull();
     const doors = pressables(r, 'Open this photo');
@@ -567,10 +572,21 @@ describe('the top of the page', () => {
     }
   });
 
-  it('offers both as pills when there is no photo', async () => {
+  it('offers the same pill when there is no photo', async () => {
     const r = await arrange(snag({ photoPaths: [] }));
+    await press(byLabel(r, 'Add a photo'));
     expect(r.queryByText('Take photo')).not.toBeNull();
     expect(r.queryByText('Choose photos')).not.toBeNull();
+  });
+
+  // The header names the room; the reference is small print, and deleting is
+  // behind More rather than a bin in the corner.
+  it('keeps the reference in the small print and Delete behind More', async () => {
+    const r = await arrange(snag({ room: 'Kitchen' }));
+    expect(r.queryByText('SNAG-0041')).not.toBeNull();
+    expect(byLabel(r, 'Delete')).toBeUndefined();
+    await press(byLabel(r, 'More'));
+    expect(byLabel(r, 'Delete')).toBeDefined();
   });
 
   // Your own job filed by you tells you nothing; somebody else filing it is
@@ -761,6 +777,7 @@ describe('photos added on this phone or the other one', () => {
     mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg'] }));
     mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/mine.jpg'] }));
 
+    await press(byLabel(r, 'Add a photo'));
     await press(byLabel(r, 'Choose photos'));
 
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/a.jpg', 'h/mine.jpg'] });
@@ -776,6 +793,7 @@ describe('photos added on this phone or the other one', () => {
     mock_getFileUrls.mockClear();
     mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/mine.jpg'] }));
 
+    await press(byLabel(r, 'Add a photo'));
     await press(byLabel(r, 'Choose photos'));
 
     expect(mock_getFileUrls).toHaveBeenCalledWith(['h/mine.jpg']);
@@ -1136,7 +1154,8 @@ describe('leaving the page', () => {
     expect(button(r, 'Save')).toBeUndefined();
     expect(button(r, 'Close')).toBeUndefined();
     expect(button(r, 'Mark done')).toBeDefined();
-    expect(texts(r)).toContain('All changes saved');
+    // Nothing waiting is the resting state: the footer says nothing about it.
+    expect(texts(r)).not.toContain('All changes saved');
   });
 
   it('lets the page go without a write when nothing is in a box', async () => {
@@ -1215,8 +1234,9 @@ describe('the order down the page', () => {
     const flat = (node: any): string =>
       (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : flat(c))).join('');
 
-    const wanted = ['Notes', 'Ask SnagHQ about this', 'Items and shopping', 'Add to shopping list',
-      'Linked items', 'Repeats'];
+    // The repeat is a pill beside the room now, above the talk.
+    const wanted = ["Doesn't repeat", 'Notes', 'Ask SnagHQ about this', 'Items and shopping',
+      'Add to shopping list', 'Linked items'];
     const seen = r.getAllByType('Text')
       .map((n: any) => flat(n).trim())
       .filter((t: string) => wanted.includes(t));
@@ -1231,7 +1251,7 @@ describe('the order down the page', () => {
     const order = r.getAllByType('Text')
       .map((n: any) => String(n.props.children ?? ''));
 
-    expect(order.indexOf('Mark done')).toBeGreaterThan(order.indexOf('Repeats'));
+    expect(order.indexOf('Mark done')).toBeGreaterThan(order.indexOf('Linked items'));
     expect(button(r, 'Mark done').props.variant).toBeUndefined();
   });
 });
@@ -1418,7 +1438,6 @@ describe('asking SnagHQ', () => {
     expect(order.indexOf('Notes')).toBeGreaterThan(-1);
     expect(order.indexOf('Ask SnagHQ about this')).toBeGreaterThan(order.indexOf('Notes'));
     expect(order.indexOf('Ask SnagHQ about this')).toBeLessThan(order.indexOf('Items and shopping'));
-    expect(order.indexOf('Ask SnagHQ about this')).toBeLessThan(order.indexOf('Repeats'));
   });
 
   it('shows the question and its state once asked, instead of the row', async () => {

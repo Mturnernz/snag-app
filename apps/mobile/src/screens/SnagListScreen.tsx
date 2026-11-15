@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   SectionList,
@@ -18,7 +18,9 @@ import { useEdgeInsets } from '../hooks/useEdgeInsets';
 
 import SnagCard from '../components/SnagCard';
 import PhotoCard from '../components/PhotoCard';
-import { useDockClearance } from '../navigation/Dock';
+import { RouteContext, useDockClearance } from '../navigation/Dock';
+import Sheet from '../components/Sheet';
+import { Group, Row } from '../components/Grouped';
 import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 import { fileCapturedPhoto } from '../components/ComposeBar';
@@ -47,7 +49,6 @@ import { failureReason } from '../lib/deadline';
 import { takePhoto } from '../lib/photoUpload';
 import { readCollapsed, writeCollapsed } from '../lib/collapsed';
 import { isForeground, NEW_VISIT_MS, RETURN_RELOAD_MS } from '../lib/foreground';
-import FoldAllPill from '../components/FoldAllPill';
 import InstallCard from '../components/InstallCard';
 import HomePickerSheet from '../components/HomePickerSheet';
 import {
@@ -188,6 +189,7 @@ export default function SnagListScreen() {
   const [justAdded, setJustAdded] = useState<Snag | null>(null);
   /** The +'s sheet: Take photo, or Continue without picture. */
   const [capturing, setCapturing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   /**
    * Jobs chosen to share, by id — null while nobody is choosing. A long press
    * on a card starts it; a reload or Cancel ends it, because a choice made of
@@ -305,7 +307,7 @@ export default function SnagListScreen() {
   // The list reads itself again every two minutes while it is what somebody is
   // looking at — see LIST_REFRESH_MS. Not while a sheet is up over it: the
   // sheet is what they are doing, and a list shifting underneath is noise.
-  const sheetUp = justAdded !== null || showExport || placesOpen || capturing || sharing;
+  const sheetUp = justAdded !== null || showExport || placesOpen || capturing || sharing || menuOpen;
   useEffect(() => {
     if (sheetUp) return undefined;
     const timer = setInterval(() => {
@@ -858,6 +860,28 @@ export default function SnagListScreen() {
   }
 
   /**
+   * The + itself: straight to the camera (November 2026, by the owner's
+   * decision). The sheet between the + and the camera cost a tap on every
+   * photo, and a photo is what nearly every job starts with. Coming back
+   * without one opens the sheet, which is where *Continue without picture*
+   * lives; holding the + opens it without the camera, for a desktop or for
+   * somebody who knows they want to type.
+   */
+  async function captureStraightAway() {
+    const pending = takePhoto();
+    const uri = await pending;
+    if (!uri) {
+      setCapturing(true);
+      return;
+    }
+    try {
+      await fileCapturedPhoto(uri, household.id, null, handleAdd);
+    } catch (err: unknown) {
+      showAlert("Couldn't add that photo", failureReason(err) ?? 'Please try again.');
+    }
+  }
+
+  /**
    * *Continue without picture*, then *Add job*. Created only now, from the
    * words — nothing exists while the box is open — and then the job's own
    * page opens, where the room and everything else are decided. A refusal
@@ -886,6 +910,12 @@ export default function SnagListScreen() {
   // wrong and where, like every photo after it. Waits for a place to file it
   // against; `take` empties the hand-off so it can only be filed once.
   const firstCapture = useFirstCapture();
+  // The dock's + pressed on a tab with none of its own: the sheet, since a
+  // camera can only be opened from inside the press that asked for it.
+  const newJob = (useContext(RouteContext) as { params?: { newJob?: number } } | undefined)?.params?.newJob;
+  useEffect(() => {
+    if (newJob) setCapturing(true);
+  }, [newJob]);
   useEffect(() => {
     if (!activeProperty) return;
     const uri = firstCapture.take();
@@ -1009,6 +1039,9 @@ export default function SnagListScreen() {
   const since = describeSince(seenBefore);
   const news = describeNews(freshJobs, freshNotes, since);
   const placeName = placeTitle(activeProperty, properties);
+  const canChoose = snags.length > 0 && !searching;
+  const canFold = !searching && sections.length + shoppingRooms.length > 1;
+  const menuHasSomething = canChoose || canFold;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -1073,14 +1106,23 @@ export default function SnagListScreen() {
                   </View>
                 ) : null}
               </View>
-              {/* A cart with a number on it says there is shopping; it does not
-                  say that pressing it swaps what the screen is showing, and a
-                  control whose whole job is to change the view has to name the
-                  view it changes to. It reads *View jobs list* while the trip
-                  sheet is up, because by then the question has turned round. */}
-              <Text style={styles.shopCaption} numberOfLines={1}>
-                {lens === 'parts' ? 'View jobs list' : 'View shopping list'}
-              </Text>
+              {/* The button carried a caption naming the view it goes to. It
+                  went in November 2026 with the rest of the header's height:
+                  the button turns ink while the trip sheet is up, and its
+                  accessible name still says which list a press shows. */}
+            </Pressable>
+          ) : null}
+          {/* Select and the fold are about the whole list and used rarely, so
+              they sit behind one button rather than on a line of their own
+              above every visit's first job (November 2026). */}
+          {menuHasSomething && !selecting ? (
+            <Pressable
+              onPress={() => setMenuOpen(true)}
+              style={styles.iconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="More"
+            >
+              <Icon name="more" size="md" color={Colors.textPrimary} />
             </Pressable>
           ) : null}
 
@@ -1098,36 +1140,12 @@ export default function SnagListScreen() {
           {/* The count — Bone & Glass's one big number — then one line about the
               list, then the 2px rule. A count of concrete things, never a
               percentage: what is left to do. */}
-          {selecting ? null : (
-            <View style={styles.countRow} accessibilityRole="header">
-              {/* Not "0 to do" before the list has been read: that is a claim
-                  about jobs nobody has looked at yet. */}
-              {loaded ? (
-                <Text style={styles.countLine}>
-                  <Text style={styles.count}>{toDo}</Text>
-                  <Text style={styles.unit}> to do</Text>
-                </Text>
-              ) : (
-                <ActivityIndicator
-                  color={Colors.textMuted}
-                  style={styles.countLoading}
-                  accessibilityLabel="Loading the list"
-                />
-              )}
-            </View>
-          )}
-
-          {/* The one line about the list, and the controls that reach all of it.
-              On the same line because both are *about* the list rather than in
-              it, and because this screen has already evicted two filter rails for
-              charging vertical rent on every visit.
-
-              The fold control says what pressing it does and decides that from
-              whether anything is still open, so the press on offer is never a
-              no-op. */}
+          {/* The count and the one line about the list share a row (November
+              2026): the count was 88pt over a line of its own with two
+              controls on it, and the first job sat below the fold on a phone.
+              Choosing replaces the row with how many are chosen and the way
+              out; the rows' own boxes are what choose. */}
           {selecting ? (
-            // Choosing: the line says how many, and the way out. The rows' own
-            // boxes are what choose.
             <View style={styles.sinceRow}>
               <Text style={styles.selectedCount} accessibilityLiveRegion="polite">
                 {selected!.size} selected
@@ -1142,27 +1160,24 @@ export default function SnagListScreen() {
               </Pressable>
             </View>
           ) : (
-            <View style={styles.sinceRow}>
+            <View style={styles.countRow}>
+              {/* Not "0 to do" before the list has been read: that is a claim
+                  about jobs nobody has looked at yet. */}
+              {loaded ? (
+                <Text style={styles.countLine} accessibilityRole="header">
+                  <Text style={styles.count}>{toDo}</Text>
+                  <Text style={styles.unit}> to do</Text>
+                </Text>
+              ) : (
+                <ActivityIndicator
+                  color={Colors.textMuted}
+                  style={styles.countLoading}
+                  accessibilityLabel="Loading the list"
+                />
+              )}
               <Text style={[styles.since, news && styles.sinceNews]} numberOfLines={2}>
                 {news ?? (since ? `Nothing new ${since}` : 'Everything on the list')}
               </Text>
-              <View style={styles.sinceControls}>
-                {/* A long press chooses on a phone; a desktop has no long press,
-                    so the same thing is a word here. */}
-                {snags.length > 0 && !searching ? (
-                  <Pressable
-                    onPress={() => setSelected(new Set())}
-                    style={styles.selectTap}
-                    accessibilityRole="button"
-                    accessibilityLabel="Choose jobs to share"
-                  >
-                    <Text style={styles.selectLabel}>Select</Text>
-                  </Pressable>
-                ) : null}
-                {!searching && sections.length + shoppingRooms.length > 1 ? (
-                  <FoldAllPill anyOpen={anyOpen} onPress={foldEverything} />
-                ) : null}
-              </View>
             </View>
           )}
           <View style={styles.rule} />
@@ -1453,7 +1468,11 @@ export default function SnagListScreen() {
           />
         </StickyActionBar>
       ) : (
-        <Fab onPress={() => setCapturing(true)} accessibilityLabel="Capture a new job" />
+        <Fab
+          onPress={activeProperty ? captureStraightAway : () => setCapturing(true)}
+          onLongPress={() => setCapturing(true)}
+          accessibilityLabel="Capture a new job"
+        />
       )}
       <ShareJobsSheet
         visible={sharing}
@@ -1493,6 +1512,31 @@ export default function SnagListScreen() {
         onCancel={() => setShowExport(false)}
       />
 
+      <Sheet visible={menuOpen} title="The list" onClose={() => setMenuOpen(false)}>
+        <Group>
+          {canChoose ? (
+            <Row
+              title="Select jobs to share"
+              accessibilityLabel="Choose jobs to share"
+              onPress={() => {
+                setMenuOpen(false);
+                setSelected(new Set());
+              }}
+            />
+          ) : null}
+          {canFold ? (
+            <Row
+              title={anyOpen ? 'Collapse all' : 'Expand all'}
+              accessibilityLabel={anyOpen ? 'Collapse all' : 'Expand all'}
+              onPress={() => {
+                setMenuOpen(false);
+                foldEverything();
+              }}
+            />
+          ) : null}
+        </Group>
+      </Sheet>
+
       <HomePickerSheet visible={placesOpen} onClose={() => setPlacesOpen(false)} />
     </View>
   );
@@ -1531,15 +1575,24 @@ const styles = StyleSheet.create({
   // The list's content is already inset by the gutter; the count's pieces
   // carry their own, so the block steps back out to the screen's edge.
   countBlock: { marginHorizontal: -Spacing.lg, paddingBottom: Spacing.xs },
-  countRow: { paddingHorizontal: Spacing.lg, marginTop: -Spacing.xs },
+  countRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
+  },
   countLine: { color: Colors.textPrimary },
   // The count's own height, so nothing below jumps when the number arrives.
-  countLoading: { height: 84, alignSelf: 'flex-start' },
+  countLoading: { height: 56, alignSelf: 'flex-start' },
+  // 56, where the direction's count is 88: the number still leads the tab, and
+  // three jobs fit under it on a phone.
   count: {
-    fontSize: Typography.count,
-    lineHeight: 84,
+    fontSize: 56,
+    lineHeight: 56,
     fontWeight: Typography.heavy,
-    letterSpacing: -5,
+    letterSpacing: -3,
     color: Colors.textPrimary,
   },
   unit: {
@@ -1561,8 +1614,7 @@ const styles = StyleSheet.create({
   },
   // The trip sheet is up: a selection, so ink rather than the action colour.
   iconBtnOn: { backgroundColor: Colors.selected },
-  shopTap: { alignItems: 'center', gap: Spacing.xs },
-  shopCaption: { fontSize: Typography.xs, color: Colors.textMuted },
+  shopTap: { alignItems: 'center' },
   // The count rides the corner rather than sitting inside the button.
   shopBadge: {
     position: 'absolute',
@@ -1584,11 +1636,11 @@ const styles = StyleSheet.create({
     color: Colors.onPrimary,
   },
   shopBadgeTextOn: { color: Colors.textPrimary },
-  since: { ...LABEL, flex: 1, color: Colors.textMuted, paddingLeft: Spacing.lg },
+  since: { ...LABEL, flex: 1, color: Colors.textMuted, textAlign: 'right', paddingBottom: Spacing.sm },
   sinceNews: { color: Colors.primary },
   selectedCount: {
     flex: 1, fontSize: Typography.title3, fontWeight: Typography.bold, color: Colors.textPrimary,
-    paddingLeft: Spacing.lg, paddingTop: Spacing.lg,
+    paddingLeft: Spacing.lg,
   },
   // The 2px rule under a count. Ink, because it is the edge of the count.
   rule: { height: 2, backgroundColor: Colors.textPrimary, marginHorizontal: Spacing.lg },

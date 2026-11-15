@@ -63,7 +63,8 @@ test('a save that never comes back still stops spinning and says so', async ({ p
     dialog.dismiss().catch(() => {});
   });
 
-  await page.getByLabel('Capture a new job').click();
+  // The + opens the camera; holding it opens the sheet with the typed path.
+  await page.getByLabel('Capture a new job').click({ delay: 700 });
   await page.getByText('Continue without picture', { exact: true }).click();
   await page.getByLabel("What's the job?").fill('Stalled network probe');
   await page.getByLabel('Add job').click();

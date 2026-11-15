@@ -96,7 +96,8 @@ test('a typed snag is not lost when the tab comes back', async ({ page }) => {
 
   // The same unmount took everything else with it, and the words of a job not
   // yet sent are where it costs most.
-  await page.getByLabel('Capture a new job').click();
+  // The + opens the camera; holding it opens the sheet with the typed path.
+  await page.getByLabel('Capture a new job').click({ delay: 700 });
   await page.getByText('Continue without picture', { exact: true }).click();
   await page.getByLabel("What's the job?").fill('Gutters need clearing');
 

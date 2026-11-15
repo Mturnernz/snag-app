@@ -481,6 +481,66 @@ Snag Line icons). It replaces values, not behaviour.
   — with bone words. The action colour is for doing, never for marking a selection. This reverses
   *a sunken well when off, solid fern when on* in *One chip, every rail*.
 
+## The November 2026 design pass
+
+A design review of the v1 app, screen by screen at phone size, and a mock-up the owner approved.
+Several changes reverse rules written above and below. **Where anything disagrees, this section
+wins**; the passages themselves keep their history.
+
+- **The + is the dock's centre item, on every tab**, never floating above its right end. Over the
+  list it sat on the rows' tick column, so one job's *done* was always under it. The dock is still
+  one width and one arrangement everywhere. A tab with no `Fab` of its own (Schedule, You,
+  Projects) gets *New job*, which goes to the list with a `newJob` stamp and opens its capture
+  sheet. `useDockClearance` no longer adds the +'s height.
+- **The list's + opens the camera directly.** `captureStraightAway` calls `takePhoto` in the
+  press. Coming back without a photo opens `CaptureSheet`, which is where *Continue without
+  picture* lives, and **holding the +** opens it without the camera (`Fab`'s `onLongPress`), for a
+  desktop or somebody who knows they want to type. The dock's + from another tab opens the sheet,
+  because a camera can only be opened from inside the press that asked for it.
+- **The list's header is half the height.** The count is 56pt (House too), on one row with the
+  line about the list. *Select* and the fold are behind a **More** button beside the cart
+  (`FoldAllPill` is no longer on this screen; the trip sheet's rooms still fold with it). The cart
+  lost its caption: it turns ink while the trip sheet is up, and its accessible name still says
+  which list a press shows.
+- **A row says a state only when it is not Open.** *Open* on every row was a column of noise, the
+  argument that retired priority. Doing, due and overdue are still said.
+- **The job page.**
+  - One photo is drawn at the page's width (3:2); several are still a strip.
+  - The header's title is the room; the reference is small print under the facts.
+  - Delete is behind **More** in the header, with *Edit the words or the room*.
+  - The two photo pills are one **Add photo** pill that asks camera or library in a sheet. Each
+    is still pressed in a tap of its own.
+  - **The repeat is a pill beside the room**, opening `RepeatSheet` unchanged, where it was a row
+    at the foot. The day it next comes round is a line under the facts.
+  - Notes say *Today*, *Yesterday*, a weekday, or a day-first date (`lib/relativeDay.ts`).
+    `toLocaleDateString()` followed the phone's locale and wrote month-first on a US-English phone.
+  - The footer says nothing when nothing is waiting. *All changes saved* is gone.
+- **The item page opens to read when it has something to read.** A record with a make, a model or
+  a serial opens on the model number at 28pt with **Copy**, and the facts it holds as rows. *Edit*
+  opens the boxes and *Done* puts them away. A record with none of the three opens on the boxes.
+  **The boxes stay mounted while reading** (`display: none`), so the draft, writing on blur and
+  leaving-saves are unchanged. The offered pills sit beside *Edit* and open their box. Section
+  headings are the job page's 20pt sentence case.
+- **The walkthrough's photo step**: the camera is the one filled button, and *Skip for now* is a
+  quiet word under it. It was a grey well over a filled *Skip*.
+- **You**: the name is the heading with a pencil that opens its box; the colour scheme is one row
+  opening the six in a sheet; *Delete my account* is clay (`dangerGhost`) and the paragraph under
+  it is gone, since the confirmation names what goes.
+- **Snag Line has a 93rd glyph, `more`**, added by hand to `snagLine.ts` for the overflow buttons.
+  Add it to `icons.py` when the set is next regenerated.
+
+**From the review and not built**: removing a photo from inside the viewer (the × is still on the
+photo), the install card waiting a few visits, one-tap repeat chips above the custom box, room
+chips on *What's the job?*, a linked item's parts offered as shopping chips, one text-field style,
+and the Schedule, room, Household and sign-in screens.
+
+`Dock.test.tsx` pins the + in the dock's row on every tab, *New job* and one clearance.
+`SnagListScreen.test.tsx` pins the camera on one press, the sheet after no photo and on a hold,
+and the controls behind More. `SnagDetailScreen.test.tsx` pins the one photo pill, Delete behind
+More, the repeat pill above the talk and the silent footer. `ThingDetailScreen.test.tsx` pins the
+read view, Edit and Done, the empty record and an offered pill. `relativeDay.test.ts` pins the
+words.
+
 ## Capture and triage are different moments
 
 This is the load-bearing product decision and the easiest one to erode.

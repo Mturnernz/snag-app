@@ -1716,7 +1716,7 @@ const styles = StyleSheet.create({
   photoHeroCell: { marginBottom: Spacing.sm },
   photoHero: {
     width: '100%',
-    aspectRatio: 4 / 3,
+    aspectRatio: 3 / 2,
     borderRadius: Radius.photo,
     backgroundColor: Colors.border,
   },

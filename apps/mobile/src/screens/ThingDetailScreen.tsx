@@ -278,6 +278,9 @@ export default function ThingDetailScreen() {
   //
   // A ref beside the state, because the calendar fills a box and commits in
   // one gesture, before React has re-rendered with the new value.
+  // The page is opened to read far more often than to edit, so a record that
+  // has an answer in it opens as one: null until somebody presses Edit or Done.
+  const [editingFields, setEditingFields] = useState<boolean | null>(null);
   const [draft, setDraftState] = useState<Draft | null>(null);
   const draftRef = useRef<Draft | null>(null);
   const setDraft = useCallback((next: Draft | null | ((d: Draft | null) => Draft | null)) => {
@@ -1119,6 +1122,48 @@ export default function ThingDetailScreen() {
   };
   const offered = [...specFields, ...dateFields].filter((field) => !shown(field.key));
 
+  // ── Reading it ──
+  // A record with a make, a model or a serial has something to read, and the
+  // read view is what it opens on; one with none opens on the boxes, because
+  // there is nothing to read yet. The boxes stay mounted behind the read view,
+  // so a half-typed draft and leaving-saves work exactly as they did.
+  const hasAnswer = !!(thing.model?.trim() || thing.make?.trim() || thing.serial?.trim());
+  const reading = !(editingFields ?? !hasAnswer);
+  const facts: { label: string; value: string; mono?: boolean; copy?: boolean }[] = [];
+  if (thing.make?.trim()) facts.push({ label: words.make, value: thing.make.trim() });
+  if (KINDS_WITH_SERIAL.includes(thing.kind) && thing.serial?.trim()) {
+    facts.push({ label: 'Serial', value: thing.serial.trim(), mono: true, copy: true });
+  }
+  for (const field of specFields) {
+    const value = (thing.spec[field.key] ?? '').trim();
+    if (value) facts.push({ label: field.label, value, mono: true, copy: field.key === 'tint' });
+  }
+  for (const field of dateFields) {
+    const value = formatLooseDate(thing[field.key]);
+    if (value) facts.push({ label: field.label, value, mono: true });
+  }
+  const pills = offered.length > 0 ? (
+    <View style={styles.offers}>
+      {offered.map((field) => (
+        <Pressable
+          key={field.key}
+          onPress={() => {
+            setEditingFields(true);
+            openOffer(field.key);
+          }}
+          style={styles.offerTap}
+          accessibilityRole="button"
+          accessibilityLabel={`Add ${field.label.toLowerCase()}`}
+        >
+          <View style={styles.offer}>
+            <Icon name="add" size={14} color={Colors.primary} />
+            <Text style={styles.offerLabel}>{field.label}</Text>
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  ) : null;
+
   // Read off the draft, so the tile and the line under it answer while the hex
   // is being typed.
   const hexTyped = (draft?.spec.hex ?? thing.spec.hex ?? '').trim();
@@ -1323,7 +1368,70 @@ export default function ThingDetailScreen() {
             record somebody has already filled in, is an offer to turn a
             dishwasher into a tin of paint. Mis-filed, it is removed and added
             again; that is rarer than the mis-tap it prevents. */}
-        <View style={styles.rows}>
+        {/* ── The answer ──
+            What the page is opened for, eight months later in a shop: the
+            model number, large enough to read at arm's length and one press
+            to copy. It was a 12pt value in the fourth of seven grey boxes
+            (November 2026). The facts under it are rows, only the ones the
+            record holds; *Edit* opens the boxes. */}
+        {reading ? (
+          <View style={styles.read}>
+            {thing.model?.trim() ? (
+              <View style={styles.answer}>
+                <Text style={styles.answerLabel}>{words.model}</Text>
+                <View style={styles.answerRow}>
+                  <Text style={styles.answerValue} numberOfLines={2} selectable>{thing.model.trim()}</Text>
+                  <Pressable
+                    onPress={() => copy(words.model, thing.model!.trim())}
+                    style={styles.answerCopyTap}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Copy ${words.model.toLowerCase()}`}
+                  >
+                    <View style={styles.answerCopy}>
+                      <Icon name="copy-outline" size="sm" color={Colors.primary} />
+                      <Text style={styles.answerCopyLabel}>Copy</Text>
+                    </View>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+            {facts.map((fact) => (
+              <Pressable
+                key={fact.label}
+                onPress={fact.copy ? () => copy(fact.label, fact.value) : undefined}
+                disabled={!fact.copy}
+                style={styles.fact}
+                accessibilityRole={fact.copy ? 'button' : undefined}
+                accessibilityLabel={fact.copy ? `Copy ${fact.label.toLowerCase()}: ${fact.value}` : `${fact.label}: ${fact.value}`}
+              >
+                <Text style={styles.factLabel}>{fact.label}</Text>
+                <Text style={[styles.factValue, fact.mono && styles.factMono]} numberOfLines={2}>{fact.value}</Text>
+                {fact.copy ? <Icon name="copy-outline" size="sm" color={Colors.textMuted} /> : null}
+              </Pressable>
+            ))}
+            {!isPaint && thing.notes?.trim() ? (
+              <Text style={styles.readNotes}>{thing.notes.trim()}</Text>
+            ) : null}
+            <View style={styles.readFoot}>
+              <Pressable
+                onPress={() => setEditingFields(true)}
+                style={styles.offerTap}
+                accessibilityRole="button"
+                accessibilityLabel="Edit the details"
+              >
+                <View style={styles.offer}>
+                  <Icon name="create-outline" size={14} color={Colors.primary} />
+                  <Text style={styles.offerLabel}>Edit</Text>
+                </View>
+              </Pressable>
+              {pills}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Mounted while reading, and not drawn: the draft and leaving-saves
+            belong to these boxes whichever view is up. */}
+        <View style={[styles.rows, reading && styles.hidden]}>
           {/* No example values in any of these boxes.
               A grey "7A204871" in the Serial box and "Nov 2019" in Installed do
               not read as prompts — they read as a serial number and a date
@@ -1402,23 +1510,19 @@ export default function ThingDetailScreen() {
 
           {/* The rarely used fields, named but not given a box each. A tap
               opens the box where it would have sat. */}
-          {offered.length > 0 ? (
-            <View style={styles.offers}>
-              {offered.map((field) => (
-                <Pressable
-                  key={field.key}
-                  onPress={() => openOffer(field.key)}
-                  style={styles.offerTap}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Add ${field.label.toLowerCase()}`}
-                >
-                  <View style={styles.offer}>
-                    <Icon name="add" size={14} color={Colors.primary} />
-                    <Text style={styles.offerLabel}>{field.label}</Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
+          {reading ? null : pills}
+          {hasAnswer ? (
+            <Pressable
+              onPress={() => {
+                commit();
+                setEditingFields(false);
+              }}
+              style={styles.doneTap}
+              accessibilityRole="button"
+              accessibilityLabel="Done editing the details"
+            >
+              <Text style={styles.doneLabel}>Done</Text>
+            </Pressable>
           ) : null}
         </View>
         {/* ── photos and paperwork ───────────────────────────────────────
@@ -2237,14 +2341,66 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
     color: Colors.primary,
   },
+  // The job page's section title: 20pt, sentence case. It was small capitals
+  // here, which made two heading systems across two pages.
   sectionLabel: {
-    fontSize: Typography.xs,
+    fontSize: Typography.title3,
     fontWeight: Typography.bold,
-    letterSpacing: 0.8,
+    letterSpacing: -0.4,
+    color: Colors.textPrimary,
+    marginTop: Spacing.xl,
+  },
+  hidden: { display: 'none' },
+  read: { gap: 0 },
+  answer: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.photo,
+    padding: Spacing.lg,
+    gap: Spacing.xs,
+    marginBottom: Spacing.sm,
+  },
+  answerLabel: {
+    fontFamily: Fonts.mono,
+    fontSize: Typography.label,
+    letterSpacing: 1.4,
     textTransform: 'uppercase',
     color: Colors.textMuted,
-    marginTop: Spacing.lg,
   },
+  answerRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  answerValue: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: Fonts.mono,
+    fontSize: Typography.title1,
+    lineHeight: 34,
+    color: Colors.textPrimary,
+  },
+  answerCopyTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  answerCopy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: 36,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.primaryLight,
+  },
+  answerCopyLabel: { fontSize: Typography.footnote, fontWeight: Typography.semibold, color: Colors.primary },
+  fact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.hairline,
+  },
+  factLabel: { fontSize: Typography.subhead, color: Colors.textSecondary },
+  factValue: { flex: 1, minWidth: 0, textAlign: 'right', fontSize: Typography.subhead, color: Colors.textPrimary },
+  factMono: { fontFamily: Fonts.mono },
+  readNotes: { fontSize: Typography.subhead, lineHeight: 21, color: Colors.textSecondary, paddingTop: Spacing.md },
+  readFoot: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: Spacing.sm, paddingTop: Spacing.xs },
+  doneTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-end', paddingHorizontal: Spacing.sm },
+  doneLabel: { fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.primary },
   sectionHint: { fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19 },
   chipTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },

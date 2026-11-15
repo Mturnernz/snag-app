@@ -597,11 +597,12 @@ const styles = StyleSheet.create({
   countBlock: { marginHorizontal: -Spacing.lg, marginTop: -Spacing.md, marginBottom: Spacing.sm },
   countLine: { color: Colors.textPrimary, paddingHorizontal: Spacing.lg },
   bigCount: {
-    fontSize: Typography.count, lineHeight: 84, fontWeight: Typography.heavy, letterSpacing: -5,
+    // 56, the list's size (November 2026): one count size on both tabs.
+    fontSize: 56, lineHeight: 56, fontWeight: Typography.heavy, letterSpacing: -3,
     color: Colors.textPrimary,
   },
   // The count's own height, so nothing below jumps when the number arrives.
-  countLoading: { height: 84, alignSelf: 'flex-start', marginLeft: Spacing.lg },
+  countLoading: { height: 56, alignSelf: 'flex-start', marginLeft: Spacing.lg },
   unit: { fontSize: Typography.title3, fontWeight: Typography.bold, letterSpacing: -0.4, color: Colors.textPrimary },
   rule: { height: 2, backgroundColor: Colors.textPrimary, marginHorizontal: Spacing.lg, marginTop: Spacing.xs },
   searchRow: {

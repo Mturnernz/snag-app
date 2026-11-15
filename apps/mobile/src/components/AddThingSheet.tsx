@@ -666,7 +666,10 @@ export default function AddThingSheet({
   const specLine = painting
     ? [spec.product, spec.sheen, spec.tint ? `tint ${spec.tint}` : null].filter(Boolean).join(' · ')
     : '';
-  const nextLabel = step === 'photo' && !localUri ? 'Skip for now' : 'Next';
+  // The photo step with no photo yet: the camera is the step's filled button,
+  // and passing it over is a quiet word under it.
+  const skipping = step === 'photo' && !localUri;
+  const nextLabel = skipping ? 'Skip for now' : 'Next';
   const takesList = takes.trim() ? [takes.trim()] : [];
   // The plate gave both halves, so read-label has started looking the model up
   // on the maker's website. Said here so nobody goes looking for the answer in
@@ -720,7 +723,7 @@ export default function AddThingSheet({
                   accessibilityRole="button"
                   accessibilityLabel="Photograph the label"
                 >
-                  <Icon name="camera-outline" size="lg" color={Colors.textSecondary} />
+                  <Icon name="camera-outline" size="lg" color={Colors.onPrimary} />
                   <Text style={styles.shootLabel}>
                     {painting ? 'Take a photo of the tin lid' : 'Take a photo of the rating plate'}
                   </Text>
@@ -1298,6 +1301,7 @@ export default function AddThingSheet({
                 styles.cta,
                 styles.ctaGrow,
                 ((step === 'room' && !canLeaveRoom) || (step === 'what' && !canLeaveWhat)) && styles.ctaOff,
+                skipping && styles.ctaQuiet,
               ]}
               accessibilityRole="button"
               accessibilityLabel={nextLabel}
@@ -1306,6 +1310,7 @@ export default function AddThingSheet({
                 style={[
                   styles.ctaLabel,
                   ((step === 'room' && !canLeaveRoom) || (step === 'what' && !canLeaveWhat)) && styles.ctaLabelOff,
+                  skipping && styles.ctaLabelQuiet,
                 ]}
               >
                 {nextLabel}
@@ -1533,9 +1538,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.sm,
-    minHeight: 88,
-    borderRadius: Radius.card,
-    backgroundColor: Colors.sunken,
+    minHeight: 56,
+    borderRadius: Radius.button,
+    // The step's one filled button (November 2026). It was a grey well over a
+    // filled *Skip for now*, so the loudest control on the step that asks for
+    // a photo was the one that skips it.
+    backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.lg,
   },
   previewRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
@@ -1548,7 +1556,7 @@ const styles = StyleSheet.create({
   shootLabel: {
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
-    color: Colors.textSecondary,
+    color: Colors.onPrimary,
     flexShrink: 1,
   },
   footer: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
@@ -1568,4 +1576,6 @@ const styles = StyleSheet.create({
   ctaOff: { backgroundColor: Colors.sunken },
   ctaLabel: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.white },
   ctaLabelOff: { color: Colors.textMuted },
+  ctaQuiet: { backgroundColor: 'transparent' },
+  ctaLabelQuiet: { color: Colors.primary },
 });

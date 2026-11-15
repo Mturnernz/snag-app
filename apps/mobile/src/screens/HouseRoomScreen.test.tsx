@@ -331,7 +331,10 @@ describe('Whole house', () => {
 // Location tags screen that used to do it went in d1b398d, and one place was
 // found with 27 rooms and no way to remove one.
 describe('the room itself', () => {
+  // Both are behind More in the header (November 2026).
   const tap = async (r: ReturnType<typeof render>, label: string) => {
+    const more = r.root.findAll((n: any) => n.props?.accessibilityLabel === 'More' && n.props?.onPress)[0];
+    await TestRenderer.act(async () => { await more.props.onPress(); });
     const node = r.root.findAll((n: any) => n.props?.accessibilityLabel === label && n.props?.onPress)[0];
     await TestRenderer.act(async () => { await node.props.onPress(); });
   };

@@ -562,8 +562,16 @@ wins**; the passages themselves keep their history.
   another home* is one row that opens its box.
 - **Schedule's key leaves out *Project*** for somebody with no Projects tab.
 
-**Still not built**: a room page's *Rename* and *Remove* behind a menu, and any change to the
-sign-in screens beyond the field style.
+**And the last of it:**
+
+- **A room's *Rename* and *Remove* are behind More in its header**, beside the +. They were two
+  loose links at the foot of every room, the remove one in clay. Whole house still offers neither.
+- **The job page's one photo runs edge to edge**, flush under the header, with square corners.
+- **Add a photo is a camera button beside the headline's pencil**, where it was a third pill in the
+  facts row that wrapped to a line of its own on a narrow phone. It opens the same sheet.
+
+**Not changed**: the Schedule grid (its rows are already at the 48pt minimum), and the sign-in
+screens beyond the field style.
 
 `Dock.test.tsx` pins the + in the dock's row on every tab, *New job* and one clearance.
 `SnagListScreen.test.tsx` pins the camera on one press, the sheet after no photo and on a hold,

@@ -956,6 +956,19 @@ export default function SnagDetailScreen() {
           >
             <Icon name="create-outline" size="sm" color={Colors.textMuted} />
           </Pressable>
+          {/* One way in for a photo, which then asks camera or library: each
+              is still pressed in a tap of its own, which is what lets a
+              browser open the camera. It was a third pill in the facts row,
+              and wrapped to a line of its own on a narrow phone. */}
+          <Pressable
+            onPress={() => setAddingPhoto(true)}
+            disabled={busy}
+            style={[styles.titleEdit, busy && styles.photoAddOff]}
+            accessibilityRole="button"
+            accessibilityLabel="Add a photo"
+          >
+            <Icon name="camera-outline" size="sm" color={Colors.textMuted} />
+          </Pressable>
         </View>
 
         {/* ── The facts at the top ──
@@ -1023,23 +1036,6 @@ export default function SnagDetailScreen() {
             </View>
           </Pressable>
 
-          {/* One way in for a photo, which then asks camera or library: each
-              is still pressed in a tap of its own, which is what lets a
-              browser open the camera. Two pills on a row of their own under
-              every headline was a line of chrome on a page that is mostly
-              read. */}
-          <Pressable
-            onPress={() => setAddingPhoto(true)}
-            disabled={busy}
-            style={styles.metaChip}
-            accessibilityRole="button"
-            accessibilityLabel="Add a photo"
-          >
-            <View style={[styles.roomPill, busy && styles.photoAddOff]}>
-              <Icon name="camera-outline" size="sm" color={Colors.textSecondary} />
-              <Text style={styles.roomPillText}>Add photo</Text>
-            </View>
-          </Pressable>
         </View>
 
         {/* The day a repeat next comes round: the one place the day is written. */}
@@ -1784,11 +1780,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   photoCell: { marginRight: Spacing.sm },
-  photoHeroCell: { marginBottom: Spacing.sm },
+  // Edge to edge, flush under the header: the photo is the page.
+  photoHeroCell: { marginHorizontal: -Spacing.lg, marginTop: -Spacing.lg, marginBottom: Spacing.sm },
   photoHero: {
     width: '100%',
     aspectRatio: 3 / 2,
-    borderRadius: Radius.photo,
     backgroundColor: Colors.border,
   },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },

@@ -557,9 +557,8 @@ describe('the top of the page', () => {
   // Both ways in sit under the headline as pills, never on the photo.
   // One pill, which then asks camera or library (November 2026): two pills on
   // a row of their own under every headline was a line of chrome.
-  it('offers one Add photo pill that asks camera or library, never over the photo', async () => {
+  it('offers one Add a photo button that asks camera or library, never over the photo', async () => {
     const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
-    expect(r.queryByText('Add photo')).not.toBeNull();
     expect(r.queryByText('Take photo')).toBeNull();
     await press(byLabel(r, 'Add a photo'));
     expect(r.queryByText('Take photo')).not.toBeNull();

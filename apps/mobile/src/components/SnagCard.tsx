@@ -3,6 +3,7 @@ import { View, Pressable, StyleSheet } from 'react-native';
 import { Text } from './Text';
 import SignedImage from './SignedImage';
 import Icon from './Icon';
+import { roomIcon } from '../lib/roomIcon';
 import StatusBadge from './StatusBadge';
 import DueBadge from './DueBadge';
 import { Colors, Fonts, Radius, SETTLED_OPACITY, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
@@ -88,10 +89,11 @@ export default function SnagCard({
         {photoUrl ? (
           <SignedImage uri={photoUrl} style={styles.image} resizeMode="cover" />
         ) : (
-          // A job with no photograph gets the notes glyph in a well, never an
-          // empty image frame.
+          // A job with no photograph gets its room's glyph in a well, never an
+          // empty image frame. It was the notes glyph, a speech bubble, which
+          // read as "has notes" beside rows that say so in words.
           <View style={styles.noPhoto}>
-            <Icon name="chatbubble-outline" size="md" color={Colors.textMuted} />
+            <Icon name={roomIcon(snag.room)} size="md" color={Colors.textMuted} />
           </View>
         )}
       </View>
@@ -109,7 +111,10 @@ export default function SnagCard({
         </Text>
 
         <View style={styles.facts}>
-          <StatusBadge status={snag.status} />
+          {/* *Open* is every row's resting state, and a word repeated on every
+              row is a column of noise (the argument that retired priority).
+              A state is said only when it is news: doing, or done. */}
+          {snag.status !== 'open' ? <StatusBadge status={snag.status} /> : null}
           <DueBadge snag={snag} />
           {showRoom && snag.room ? <Text style={styles.room} numberOfLines={1}>{snag.room}</Text> : null}
           {/* What is still to get, never what was listed: a row claiming it

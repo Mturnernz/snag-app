@@ -555,8 +555,12 @@ describe('the top of the page', () => {
   );
 
   // Both ways in sit under the headline as pills, never on the photo.
-  it('offers the camera and the library as pills, never over the photo', async () => {
+  // One pill, which then asks camera or library (November 2026): two pills on
+  // a row of their own under every headline was a line of chrome.
+  it('offers one Add a photo button that asks camera or library, never over the photo', async () => {
     const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    expect(r.queryByText('Take photo')).toBeNull();
+    await press(byLabel(r, 'Add a photo'));
     expect(r.queryByText('Take photo')).not.toBeNull();
     expect(r.queryByText('Choose photos')).not.toBeNull();
     const doors = pressables(r, 'Open this photo');
@@ -567,10 +571,21 @@ describe('the top of the page', () => {
     }
   });
 
-  it('offers both as pills when there is no photo', async () => {
+  it('offers the same pill when there is no photo', async () => {
     const r = await arrange(snag({ photoPaths: [] }));
+    await press(byLabel(r, 'Add a photo'));
     expect(r.queryByText('Take photo')).not.toBeNull();
     expect(r.queryByText('Choose photos')).not.toBeNull();
+  });
+
+  // The header names the room; the reference is small print, and deleting is
+  // behind More rather than a bin in the corner.
+  it('keeps the reference in the small print and Delete behind More', async () => {
+    const r = await arrange(snag({ room: 'Kitchen' }));
+    expect(r.queryByText('SNAG-0041')).not.toBeNull();
+    expect(byLabel(r, 'Delete')).toBeUndefined();
+    await press(byLabel(r, 'More'));
+    expect(byLabel(r, 'Delete')).toBeDefined();
   });
 
   // Your own job filed by you tells you nothing; somebody else filing it is
@@ -761,6 +776,7 @@ describe('photos added on this phone or the other one', () => {
     mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg'] }));
     mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/mine.jpg'] }));
 
+    await press(byLabel(r, 'Add a photo'));
     await press(byLabel(r, 'Choose photos'));
 
     expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/a.jpg', 'h/mine.jpg'] });
@@ -776,6 +792,7 @@ describe('photos added on this phone or the other one', () => {
     mock_getFileUrls.mockClear();
     mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/mine.jpg'] }));
 
+    await press(byLabel(r, 'Add a photo'));
     await press(byLabel(r, 'Choose photos'));
 
     expect(mock_getFileUrls).toHaveBeenCalledWith(['h/mine.jpg']);
@@ -887,8 +904,21 @@ describe('repeats, and no due date', () => {
     }
   });
 
-  // One row saying the answer, and nothing behind a Yes: the sheet is Never,
-  // or every so many of a unit — never a list of presets.
+  // The four common answers are one tap each above the box (November 2026):
+  // *monthly* had become three presses and a keyboard.
+  it('sets a common repeat in one tap, and closes', async () => {
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ repeatDays: 30, dueAt: ahead(30) }));
+    const r = await arrange(snag({ repeatDays: null, dueAt: null }));
+    await openRepeats(r);
+    await press(byLabel(r, 'Monthly'));
+    expect(mock_updateSnag).toHaveBeenCalledTimes(1);
+    expect(mock_updateSnag.mock.calls[0][1]).toEqual(expect.objectContaining({ repeatDays: 30 }));
+    expect(byLabel(r, 'Monthly')).toBeUndefined();
+  });
+
+  // One pill saying the answer, and nothing behind a Yes: the sheet is the
+  // common answers as chips, then Never, or every so many of a unit.
   it('is one row stating the answer, with Never or every so many behind it', async () => {
     const r = await arrange(snag({ repeatDays: null }));
 
@@ -1136,7 +1166,8 @@ describe('leaving the page', () => {
     expect(button(r, 'Save')).toBeUndefined();
     expect(button(r, 'Close')).toBeUndefined();
     expect(button(r, 'Mark done')).toBeDefined();
-    expect(texts(r)).toContain('All changes saved');
+    // Nothing waiting is the resting state: the footer says nothing about it.
+    expect(texts(r)).not.toContain('All changes saved');
   });
 
   it('lets the page go without a write when nothing is in a box', async () => {
@@ -1215,8 +1246,9 @@ describe('the order down the page', () => {
     const flat = (node: any): string =>
       (node.children ?? []).map((c: any) => (typeof c === 'string' ? c : flat(c))).join('');
 
-    const wanted = ['Notes', 'Ask SnagHQ about this', 'Items and shopping', 'Add to shopping list',
-      'Linked items', 'Repeats'];
+    // The repeat is a pill beside the room now, above the talk.
+    const wanted = ["Doesn't repeat", 'Notes', 'Ask SnagHQ about this', 'Items and shopping',
+      'Add to shopping list', 'Linked items'];
     const seen = r.getAllByType('Text')
       .map((n: any) => flat(n).trim())
       .filter((t: string) => wanted.includes(t));
@@ -1231,7 +1263,7 @@ describe('the order down the page', () => {
     const order = r.getAllByType('Text')
       .map((n: any) => String(n.props.children ?? ''));
 
-    expect(order.indexOf('Mark done')).toBeGreaterThan(order.indexOf('Repeats'));
+    expect(order.indexOf('Mark done')).toBeGreaterThan(order.indexOf('Linked items'));
     expect(button(r, 'Mark done').props.variant).toBeUndefined();
   });
 });
@@ -1418,7 +1450,6 @@ describe('asking SnagHQ', () => {
     expect(order.indexOf('Notes')).toBeGreaterThan(-1);
     expect(order.indexOf('Ask SnagHQ about this')).toBeGreaterThan(order.indexOf('Notes'));
     expect(order.indexOf('Ask SnagHQ about this')).toBeLessThan(order.indexOf('Items and shopping'));
-    expect(order.indexOf('Ask SnagHQ about this')).toBeLessThan(order.indexOf('Repeats'));
   });
 
   it('shows the question and its state once asked, instead of the row', async () => {
@@ -1526,5 +1557,70 @@ describe('your own note', () => {
     mock_getComments.mockResolvedValue([note({ authorId: 'sam', authorName: 'Sam' })]);
     const r = await arrange();
     expect(byLabel(r, 'Change this note')).toBeUndefined();
+  });
+});
+
+// What a linked item takes is offered under the shopping box, one tap each:
+// the dishwasher's page already knows its tablets. An offer a person presses,
+// never a copy, because adding a part starts the job.
+describe('parts a linked item takes', () => {
+  const linkedTo = (over: Partial<any> = {}) => snag({
+    room: 'Kitchen', parts: [],
+    linkedThings: [{ id: 't1', name: 'Dishwasher', room: 'Kitchen', make: 'Bosch', model: 'SMS', kind: 'appliance' }],
+    ...over,
+  });
+
+  it('offers them, and adds one through the same write a typed part uses', async () => {
+    mock_getThings.mockResolvedValue([thing({ id: 't1', name: 'Dishwasher', room: 'Kitchen', consumables: ['Finish Quantum tablets'] })]);
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(linkedTo({ parts: ['Finish Quantum tablets'] }));
+    const r = await arrange(linkedTo());
+    await TestRenderer.act(async () => {});
+    await press(byLabel(r, 'Add Finish Quantum tablets to the shopping list'));
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { parts: ['Finish Quantum tablets'] });
+  });
+
+  it('offers nothing already on the list, and nothing from an item that is not linked', async () => {
+    mock_getThings.mockResolvedValue([
+      thing({ id: 't1', name: 'Dishwasher', room: 'Kitchen', consumables: ['Finish Quantum tablets'] }),
+      thing({ id: 't2', name: 'Fridge', room: 'Kitchen', consumables: ['Water filter'] }),
+    ]);
+    const r = await arrange(linkedTo({ parts: ['finish quantum tablets'] }));
+    await TestRenderer.act(async () => {});
+    expect(byLabel(r, 'Add Finish Quantum tablets to the shopping list')).toBeUndefined();
+    expect(byLabel(r, 'Add Water filter to the shopping list')).toBeUndefined();
+  });
+});
+
+// Removing a photo is in the viewer, where it has just been looked at. A photo
+// that will not open has no viewer, so only that one keeps a × on the page.
+describe('removing a photo from the viewer', () => {
+  const viewer = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.props?.onRemove === 'function' && Array.isArray(n.props?.photos),
+  )[0];
+  const crosses = (r: ReturnType<typeof render>) => r.root.findAll(
+    (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === 'Remove this photo' && !!n.props?.onPress,
+  );
+
+  it('puts no × on a photo that opens, and removes the one the viewer is showing', async () => {
+    mock_getFileUrls.mockResolvedValue({ 'h/a.jpg': 'https://x/a.jpg', 'h/b.jpg': 'https://x/b.jpg' });
+    mock_getSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    mock_updateSnag.mockClear();
+    mock_updateSnag.mockResolvedValue(snag({ photoPaths: ['h/a.jpg'] }));
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/b.jpg'] }));
+    await TestRenderer.act(async () => {});
+    expect(crosses(r)).toEqual([]);
+
+    await TestRenderer.act(async () => { await viewer(r).props.onRemove(1); });
+    expect(mock_updateSnag).toHaveBeenCalledWith('s1', { photoPaths: ['h/a.jpg'] });
+    mock_getFileUrls.mockResolvedValue({});
+  });
+
+  it('keeps the × on a photo that has no link to open', async () => {
+    mock_getFileUrls.mockResolvedValue({ 'h/a.jpg': 'https://x/a.jpg' });
+    const r = await arrange(snag({ photoPaths: ['h/a.jpg', 'h/broken.jpg'] }));
+    await TestRenderer.act(async () => {});
+    expect(crosses(r)).toHaveLength(1);
+    mock_getFileUrls.mockResolvedValue({});
   });
 });

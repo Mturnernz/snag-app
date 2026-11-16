@@ -10,7 +10,8 @@ import { Spacing } from '../constants/theme';
 // The dock is the one thing on screen that must not move when the tab does.
 // It used to give up the + 's width on List and House, so it was a different
 // size there from Projects, Schedule and You, and its labels ran together.
-// These pin one width on every tab and the + floating above it instead.
+// These pin one width on every tab, and the + as the dock's own centre item
+// on all of them (November 2026): floating above the list it covered a tick.
 
 jest.mock('expo-blur', () => ({ BlurView: () => null }));
 
@@ -65,14 +66,14 @@ function dockFrame(tree: TestRenderer.ReactTestRenderer) {
   return StyleSheet.flatten(frames[0].props.style);
 }
 
-const fab = (tree: TestRenderer.ReactTestRenderer) =>
-  tree.root.findAll((n) => typeof n.type === 'string' && n.props.accessibilityLabel === 'Capture a new job');
+const plus = (tree: TestRenderer.ReactTestRenderer, label: string) =>
+  tree.root.findAll((n) => typeof n.type === 'string' && n.props.accessibilityLabel === label);
 
 const clearance = (tree: TestRenderer.ReactTestRenderer) =>
   Number(tree.root.findByProps({ testID: 'clearance' }).props.children);
 
 describe('Dock', () => {
-  it('is the same full width on a tab with a + and on one without', () => {
+  it('is the same full width on a tab with a + of its own and on one without', () => {
     const withPlus = dockFrame(renderTab(0, true));
     const without = dockFrame(renderTab(3, false));
 
@@ -84,23 +85,36 @@ describe('Dock', () => {
     expect(withPlus.bottom).toBe(without.bottom);
   });
 
-  it('floats the + above the dock, in line with its right-hand edge', () => {
+  it("draws the tab's own + in the dock's row, never floating over the list", () => {
     const tree = renderTab(0, true);
-    const frame = dockFrame(tree);
-    const plus = fab(tree);
-    expect(plus).toHaveLength(1);
-
-    const style = StyleSheet.flatten(plus[0].props.style);
-    expect(style.position).toBe('absolute');
-    expect(style.right).toBe(frame.right);
-    expect(style.bottom).toBeGreaterThanOrEqual((frame.bottom as number) + DOCK_HEIGHT);
+    const found = plus(tree, 'Capture a new job');
+    expect(found).toHaveLength(1);
+    // In the flow of its row: nothing absolutely placed over the rows' ticks.
+    expect(StyleSheet.flatten(found[0].props.style).position).toBeUndefined();
+    expect(plus(tree, 'New job')).toHaveLength(0);
   });
 
-  it('draws no + on a tab that has none', () => {
-    expect(fab(renderTab(3, false))).toHaveLength(0);
+  it('offers New job on a tab with no + of its own, which opens the list on its capture sheet', () => {
+    const route = ROUTES[3];
+    const props = dockProps(3);
+    let tree!: TestRenderer.ReactTestRenderer;
+    TestRenderer.act(() => {
+      tree = TestRenderer.create(
+        <DockProvider>
+          <NavigationRouteContext.Provider value={route as any}>
+            <Screen withFab={false} />
+          </NavigationRouteContext.Provider>
+          <Dock {...props} />
+        </DockProvider>,
+      );
+    });
+    const found = plus(tree, 'New job');
+    expect(found).toHaveLength(1);
+    TestRenderer.act(() => found[0].props.onClick?.() ?? found[0].props.onPress?.());
+    expect(props.navigation.navigate).toHaveBeenCalledWith('Snags', { newJob: expect.any(Number) });
   });
 
-  it('pads a tab with a + further, so its last row clears the + as well', () => {
-    expect(clearance(renderTab(0, true))).toBeGreaterThan(clearance(renderTab(3, false)));
+  it('pads every tab the same, since the + is in the dock', () => {
+    expect(clearance(renderTab(0, true))).toBe(clearance(renderTab(3, false)));
   });
 });

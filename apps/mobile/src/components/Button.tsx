@@ -17,7 +17,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const DISABLED_OPACITY = 0.5;
 const PRESSED_OPACITY = 0.85;
 
-type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerOutline';
+type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerOutline' | 'dangerGhost';
 
 // Only the filled CTA gets the press-scale + haptic treatment —
 // outline/ghost/secondary/danger read as secondary actions, not the primary
@@ -40,6 +40,8 @@ const VARIANT_STYLES: Record<Variant, { bg: string; text: string; border?: strin
   secondary: { bg: Colors.primaryLight, text: Colors.primary },
   outline: { bg: 'transparent', text: Colors.textPrimary, border: Colors.border },
   ghost: { bg: 'transparent', text: Colors.primary },
+  // A destructive door that must stay quiet: no fill, no border, clay words.
+  dangerGhost: { bg: 'transparent', text: Colors.danger },
   danger: { bg: Colors.danger, text: Colors.white, shadow: true },
   dangerOutline: { bg: 'transparent', text: Colors.danger, border: Colors.danger },
 };

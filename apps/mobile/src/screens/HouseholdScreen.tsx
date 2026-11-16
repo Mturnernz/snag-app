@@ -82,6 +82,7 @@ export default function HouseholdScreen() {
   const { showToast } = useToast();
 
   const [newPlace, setNewPlace] = useState('');
+  const [addHomeOpen, setAddHomeOpen] = useState(false);
   const [addingPlace, setAddingPlace] = useState(false);
   /** Who is on each place, and who owns it. */
   const [people, setPeople] = useState<PlaceMember[]>([]);
@@ -578,7 +579,9 @@ export default function HouseholdScreen() {
                       />
                     ) : null}
                     {!isYou && owner && person.role !== 'owner' ? (
-                      <Pill
+                      // Rare and heavy, so a quiet word: as a tinted pill it was
+                      // the loudest thing on the screen.
+                      <TextButton
                         label="Make owner"
                         accessibilityLabel={`Make ${person.displayName} an owner of ${place.name}`}
                         onPress={() => setConfirmOwner({
@@ -702,6 +705,22 @@ export default function HouseholdScreen() {
           );
         })}
 
+        {/* One row until somebody wants it: an explanation, a box and a button
+            sat open on a screen people visit to see who is here. */}
+        {addHomeOpen ? null : (
+          <Pressable
+            onPress={() => setAddHomeOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Add another home"
+          >
+            <Card elevation="md" style={styles.addHomeRow}>
+              <Icon name="add" size="md" color={Colors.primary} />
+              <Text style={styles.addHomeLabel}>Add another home</Text>
+              <Icon name="chevron-forward" size="md" color={Colors.textMuted} />
+            </Card>
+          </Pressable>
+        )}
+        {addHomeOpen ? (
         <Card elevation="md" style={styles.section}>
           <Text style={styles.sectionTitle}>Add another home</Text>
           <Text style={styles.sectionHint}>
@@ -727,6 +746,7 @@ export default function HouseholdScreen() {
             icon="add-outline"
           />
         </Card>
+        ) : null}
 
         <View style={styles.note}>
           <Icon name="information-circle-outline" size="sm" color={Colors.textMuted} />
@@ -930,10 +950,10 @@ const styles = StyleSheet.create({
   linkLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
   linkLabelOn: { color: Colors.white, fontWeight: Typography.semibold },
   addRow: { marginTop: Spacing.xs },
+  // The app's one field: a sunken well, no border (November 2026). It was a
+  // bordered box here and a well elsewhere.
   input: {
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    backgroundColor: Colors.well,
     borderRadius: Radius.input,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
@@ -942,6 +962,8 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
     marginBottom: Spacing.sm,
   },
+  addHomeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, minHeight: MIN_TOUCH_TARGET },
+  addHomeLabel: { flex: 1, fontSize: Typography.body, color: Colors.textPrimary },
   note: { flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.xs },
   noteText: { flex: 1, fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 19 },
   leave: { marginBottom: Spacing.xxxl },

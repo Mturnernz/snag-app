@@ -2299,8 +2299,11 @@ export type MainTabParamList = {
    * this screen, not a place you navigate to. Opening on the list is how one
    * person finds out what the other added — with no notifications anywhere in
    * this product, it is the only channel there is.
+   *
+   * `newJob` is the dock's + pressed on a tab with no + of its own: a stamp,
+   * new each press, that opens the list's capture sheet.
    */
-  Snags: undefined;
+  Snags: { newJob?: number } | undefined;
   /**
    * The house record — what's *there*, beside the list of what's wrong.
    *

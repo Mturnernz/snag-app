@@ -194,7 +194,8 @@ describe('deleting your account', () => {
       )[0];
 
     expect(button('Sign out').props.variant).toBe('outline');
-    expect(button('Delete my account').props.variant).toBe('ghost');
+    // Quiet, and clay: it used to be the action colour, like Download my data.
+    expect(button('Delete my account').props.variant).toBe('dangerGhost');
   });
 });
 

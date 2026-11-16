@@ -93,6 +93,40 @@ export function readInstallDismissed(): boolean {
   }
 }
 
+const VISITS_KEY = 'snag.install.visits';
+/** The list's card waits for this many openings of the app before it asks. */
+export const INSTALL_AFTER_VISITS = 3;
+let countedThisLoad = false;
+
+/**
+ * How many times the app has been opened on this device, counting this one
+ * once per page load.
+ *
+ * The card sat at the top of the list from the first minute, above the first
+ * job, asking somebody who had not yet used the app to install it. It waits
+ * for the third opening now: by then they know what they would be installing.
+ * Where storage is absent or throws, the answer is "enough" — the card showing
+ * is the smaller failure, as it is for a dismissal that cannot be remembered.
+ */
+export function countInstallVisit(): number {
+  try {
+    const store = globalThis.localStorage;
+    if (!store) return INSTALL_AFTER_VISITS;
+    const before = Number(store.getItem(VISITS_KEY)) || 0;
+    if (countedThisLoad) return before;
+    countedThisLoad = true;
+    store.setItem(VISITS_KEY, String(before + 1));
+    return before + 1;
+  } catch {
+    return INSTALL_AFTER_VISITS;
+  }
+}
+
+/** For tests: forget that this load was counted. */
+export function resetInstallVisitCount(): void {
+  countedThisLoad = false;
+}
+
 export function writeInstallDismissed(): void {
   try {
     globalThis.localStorage?.setItem(DISMISSED_KEY, '1');

@@ -520,6 +520,8 @@ describe('another home', () => {
 
     // Never a second place in this household: nobody here would be kept out.
     expect(r.queryByText('Add a place')).toBeNull();
+    // One row until somebody wants it; a press opens the box.
+    await press(byLabel(r, 'Add another home'));
     const box = input(r, (p) => p.placeholder === 'The bach');
     await TestRenderer.act(async () => box.props.onChangeText('Martins Bay'));
     const button = r.root.findAll(
@@ -543,6 +545,8 @@ describe('another home', () => {
     const r = render(<HouseholdScreen />);
     await settle();
 
+    // One row until somebody wants it; a press opens the box.
+    await press(byLabel(r, 'Add another home'));
     const box = input(r, (p) => p.placeholder === 'The bach');
     await TestRenderer.act(async () => box.props.onChangeText('Martins Bay'));
     const button = r.root.findAll(

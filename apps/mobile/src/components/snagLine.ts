@@ -7,6 +7,8 @@
 export const GLYPHS = {
   "add": "<path d=\"M12 5v14M5 12h14\"/>",
   "remove": "<path d=\"M5 12h14\"/>",
+  // Added by hand in November 2026 for the overflow menus; add it to icons.py too.
+  "more": "<circle cx=\"5.5\" cy=\"12\" r=\"1.4\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"12\" cy=\"12\" r=\"1.4\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"18.5\" cy=\"12\" r=\"1.4\" fill=\"currentColor\" stroke=\"none\"/>",
   "close": "<path d=\"M6.5 6.5l11 11M17.5 6.5l-11 11\"/>",
   "check": "<path d=\"M4.75 12.75l4.75 4.5L19.25 7\"/>",
   "send": "<path d=\"M12 19.25V5.25M6.25 11L12 5.25 17.75 11\"/>",

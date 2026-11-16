@@ -6,7 +6,7 @@ import Icon from './Icon';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import {
-  currentInstallEnv, readInstallDismissed, shouldOfferInstall, writeInstallDismissed,
+  INSTALL_AFTER_VISITS, countInstallVisit, currentInstallEnv, readInstallDismissed, shouldOfferInstall, writeInstallDismissed,
   type InstallPlatform,
 } from '../lib/installState';
 
@@ -38,11 +38,14 @@ interface Props {
 export default function InstallCard({ variant = 'card', env }: Props) {
   const [dismissed, setDismissed] = useState(() => (variant === 'card' ? readInstallDismissed() : false));
   const [installed, setInstalled] = useState(false);
+  // The list's card waits a few openings; the You tab's row never does.
+  const [visits] = useState(() => (variant === 'card' ? countInstallVisit() : INSTALL_AFTER_VISITS));
   const { canPrompt, prompt } = useInstallPrompt();
 
   const seen = env ?? { web: Platform.OS === 'web', ...currentInstallEnv() };
   if (
     installed ||
+    visits < INSTALL_AFTER_VISITS ||
     !shouldOfferInstall({ web: seen.web, installed: seen.installed, platform: seen.platform, dismissed })
   ) {
     return null;

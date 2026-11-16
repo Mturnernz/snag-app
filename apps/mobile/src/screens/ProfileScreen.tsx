@@ -12,6 +12,7 @@ import Icon from '../components/Icon';
 import ConfirmDialog from '../components/ConfirmDialog';
 import InstallCard from '../components/InstallCard';
 import Sheet from '../components/Sheet';
+import { SCHEMES } from '../constants/schemes';
 import TourCards from '../components/TourCards';
 import SchemePicker from '../components/SchemePicker';
 import ChangePasswordSheet from '../components/ChangePasswordSheet';
@@ -51,6 +52,8 @@ export default function ProfileScreen() {
   const { showToast } = useToast();
 
   const [name, setName] = useState(profile.displayName);
+  const [nameOpen, setNameOpen] = useState(false);
+  const [schemeOpen, setSchemeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [ends, setEnds] = useState<LooseEnd[]>([]);
   const [endsOpen, setEndsOpen] = useState(false);
@@ -188,11 +191,24 @@ export default function ProfileScreen() {
       <View style={styles.header}>
         <Avatar name={profile.displayName} size={64} ring />
         <Text style={styles.name}>{profile.displayName}</Text>
+        {/* The name was said twice: this heading, and a box under it always
+            open on the same word. The pencil opens the box (November 2026). */}
+        <Pressable
+          onPress={() => setNameOpen((open) => !open)}
+          style={styles.nameEdit}
+          accessibilityRole="button"
+          accessibilityLabel="Change your name"
+          accessibilityState={{ expanded: nameOpen }}
+        >
+          <Icon name="create-outline" size="sm" color={Colors.textMuted} />
+        </Pressable>
       </View>
 
+      {nameOpen ? (
       <Card elevation="md" style={styles.section}>
         <Text style={styles.sectionTitle}>Your name</Text>
         <TextInput
+          autoFocus
           style={styles.input}
           value={name}
           onChangeText={setName}
@@ -203,6 +219,7 @@ export default function ProfileScreen() {
           <Button label="Save" onPress={handleSave} loading={saving} fullWidth />
         ) : null}
       </Card>
+      ) : null}
 
       {/* ── Worth finishing ───────────────────────────────────────────
           **Quiet, and absent at zero.** One muted line that expands, sitting
@@ -317,10 +334,25 @@ export default function ProfileScreen() {
           Per device, like the list's folds: it is about one person's screen,
           not the house. Six schemes, each measured to the same contrast floors
           as fern (constants/schemes.ts). */}
-      <Card elevation="md" style={styles.section}>
-        <Text style={styles.sectionTitle}>Colour scheme</Text>
+      {/* One row saying which, opening the six: the picker was the largest
+          block on a page somebody opens to sign out or change a password. */}
+      <Pressable
+        onPress={() => setSchemeOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`Colour scheme: ${SCHEMES[scheme].label}`}
+      >
+        <Card elevation="md" style={styles.linkRow}>
+          <View style={[styles.swatch, { backgroundColor: SCHEMES[scheme].primary }]} />
+          <View style={styles.linkBody}>
+            <Text style={styles.linkTitle}>Colour</Text>
+            <Text style={styles.linkHint}>{SCHEMES[scheme].label}</Text>
+          </View>
+          <Icon name="chevron-forward" size="md" color={Colors.textMuted} />
+        </Card>
+      </Pressable>
+      <Sheet visible={schemeOpen} title="Colour scheme" onClose={() => setSchemeOpen(false)}>
         <SchemePicker current={scheme} onChoose={pickScheme} />
-      </Card>
+      </Sheet>
 
       {/* Changing the password without asking for an email: the reset link on
           the website was the only way, for something you already know. */}
@@ -380,16 +412,15 @@ export default function ProfileScreen() {
           sits below, quieter, and asks for the name to be typed — the same gate
           deleting a place uses, for the same reason: this one takes other
           people's work with it if you are the only one in the house. */}
+      {/* Clay, where it was the action colour: it read exactly like *Download
+          my data* above it. What goes with the account is said by the
+          confirmation, which names it, rather than in a paragraph here. */}
       <Button
         label="Delete my account"
-        variant="ghost"
+        variant="dangerGhost"
         onPress={askDeleteAccount}
         fullWidth
       />
-      <Text style={styles.deleteHint}>
-        A household goes with you only if you made it and nobody else is in it. Ones you share
-        stay, and a place you own that somebody else is on is handed to them.
-      </Text>
 
       {/* The statement Create account links to, reachable again once signed
           in — the right to see and correct what is kept is not only for the
@@ -463,10 +494,10 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
     color: Colors.textSecondary,
   },
+  // The app's one field: a sunken well, no border (November 2026). It was a
+  // bordered box here and a well elsewhere.
   input: {
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    backgroundColor: Colors.well,
     borderRadius: Radius.input,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
@@ -487,6 +518,16 @@ const styles = StyleSheet.create({
   // using it for one rail and solid fern for another made two controls doing
   // the same job look like two different controls.
   signOut: { marginTop: Spacing.md },
+  nameEdit: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swatch: { width: 24, height: 24, borderRadius: Radius.pill },
   // No card, no elevation, no hue. Everything else on this screen is a white
   // card on the plaster ground; this is deliberately quieter than all of it.
   ends: { marginBottom: Spacing.md },
@@ -526,10 +567,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
   },
   privacyText: { fontSize: Typography.sm, color: Colors.textMuted },
-  deleteHint: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 19,
-  },
 });

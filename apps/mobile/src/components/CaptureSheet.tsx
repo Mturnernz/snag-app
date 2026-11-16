@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Text, TextInput } from './Text';
 
 import Sheet from './Sheet';
@@ -21,7 +21,15 @@ interface Props {
    * The words, on *Add job*. Resolves once the job exists; a rejection keeps
    * the sheet open with the words still in the box.
    */
-  onAddWords: (text: string) => Promise<void>;
+  onAddWords: (text: string, room: string | null) => Promise<void>;
+  /**
+   * The place's rooms, offered under the box as chips. Optional, and no room
+   * is an answer: a typed job with no room used to be the only kind there was,
+   * and saying where it is meant opening it again afterwards.
+   */
+  rooms?: string[];
+  /** The room the last capture used, lit to start with. A tap puts it out. */
+  suggestedRoom?: string | null;
   onClose: () => void;
 }
 
@@ -41,7 +49,10 @@ interface Props {
  * shutter files first and asks afterwards, because a photograph is already a
  * complete entry and an empty box is not.
  */
-export default function CaptureSheet({ visible, disabled, onTakePhoto, onAddWords, onClose }: Props) {
+export default function CaptureSheet({
+  visible, disabled, onTakePhoto, onAddWords, rooms = [], suggestedRoom = null, onClose,
+}: Props) {
+  const [room, setRoom] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -52,6 +63,7 @@ export default function CaptureSheet({ visible, disabled, onTakePhoto, onAddWord
       setWriting(false);
       setDraft('');
       setBusy(false);
+      setRoom(suggestedRoom && rooms.includes(suggestedRoom) ? suggestedRoom : null);
     }
   }, [visible]);
 
@@ -61,7 +73,7 @@ export default function CaptureSheet({ visible, disabled, onTakePhoto, onAddWord
     if (!text || busy) return;
     setBusy(true);
     try {
-      await onAddWords(text);
+      await onAddWords(text, room);
     } catch {
       // The screen has said why; the words stay so nothing is retyped.
     } finally {
@@ -97,6 +109,33 @@ export default function CaptureSheet({ visible, disabled, onTakePhoto, onAddWord
           onSubmitEditing={send}
           accessibilityLabel="What's the job?"
         />
+        {rooms.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            style={styles.rooms}
+            contentContainerStyle={styles.roomsRow}
+          >
+            {rooms.map((name) => {
+              const on = room === name;
+              return (
+                <Pressable
+                  key={name}
+                  onPress={() => setRoom(on ? null : name)}
+                  style={styles.roomTap}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={on ? `In the ${name} — tap to clear` : `In the ${name}`}
+                >
+                  <View style={[styles.room, on && styles.roomOn]}>
+                    <Text style={[styles.roomLabel, on && styles.roomLabelOn]}>{name}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
       </Sheet>
     );
   }
@@ -133,5 +172,19 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     textAlignVertical: 'top',
   },
+  rooms: { marginTop: Spacing.sm, marginHorizontal: -Spacing.lg },
+  roomsRow: { paddingHorizontal: Spacing.lg, gap: Spacing.sm },
+  roomTap: { minHeight: MIN_TOUCH_TARGET, justifyContent: 'center' },
+  room: {
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.well,
+  },
+  // A choice already made is ink.
+  roomOn: { backgroundColor: Colors.selected },
+  roomLabel: { fontSize: Typography.footnote, fontWeight: Typography.semibold, color: Colors.textPrimary },
+  roomLabelOn: { color: Colors.onSelected },
   hint: { fontSize: Typography.footnote, color: Colors.textMuted, marginTop: Spacing.sm },
 });

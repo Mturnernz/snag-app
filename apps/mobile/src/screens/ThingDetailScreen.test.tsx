@@ -1326,3 +1326,49 @@ describe('a consumable', () => {
     expect(mock_push).toHaveBeenCalledWith('ThingDetail', { thingId: 'c1' });
   });
 });
+
+// The page is opened to read: a model number, eight months later, in a shop.
+// A record with an answer opens on it, large and one press to copy; the boxes
+// are behind Edit, still mounted so a draft and leaving-saves are unchanged.
+describe('reading a record', () => {
+  const { StyleSheet } = require('react-native');
+  /** Whether the card of boxes is drawn. */
+  const boxesDrawn = (r: RenderResult) => {
+    let node = boxes(r).Name;
+    while (node) {
+      if (StyleSheet.flatten(node.props?.style)?.display === 'none') return false;
+      node = node.parent;
+    }
+    return true;
+  };
+
+  it('opens on the model, with Copy, when the record holds one', async () => {
+    const r = await open({ name: 'Dishwasher', make: 'Bosch', model: 'SMS6HAI01A', serial: '7A204871' });
+    expect(texts(r)).toContain('SMS6HAI01A');
+    expect(pressable(r, 'Copy model')).toBeTruthy();
+    expect(pressable(r, 'Copy serial: 7A204871')).toBeTruthy();
+    expect(boxesDrawn(r)).toBe(false);
+  });
+
+  it('opens the boxes on Edit, and puts them away on Done', async () => {
+    const r = await open({ name: 'Dishwasher', make: 'Bosch', model: 'SMS6HAI01A' });
+    await TestRenderer.act(async () => { pressable(r, 'Edit the details').props.onPress(); });
+    expect(boxesDrawn(r)).toBe(true);
+    expect(pressable(r, 'Copy model')).toBeFalsy();
+    await TestRenderer.act(async () => { pressable(r, 'Done editing the details').props.onPress(); });
+    expect(boxesDrawn(r)).toBe(false);
+  });
+
+  it('opens on the boxes when there is nothing to read yet', async () => {
+    const r = await open();
+    expect(boxesDrawn(r)).toBe(true);
+    expect(pressable(r, 'Edit the details')).toBeFalsy();
+  });
+
+  it('opens the box of a field offered as a pill', async () => {
+    const r = await open({ make: 'Bosch', model: 'SMS6HAI01A' });
+    await TestRenderer.act(async () => { pressable(r, 'Add year made').props.onPress(); });
+    expect(boxesDrawn(r)).toBe(true);
+    expect(boxes(r)['Year made']).toBeTruthy();
+  });
+});

@@ -65,3 +65,34 @@ describe('shouldOfferInstall', () => {
     expect(shouldOfferInstall({ ...base, platform: 'other' })).toBe(false);
   });
 });
+
+// The list's card waits for the third opening: on the first it sat above the
+// first job, asking somebody who had not used the app yet to install it.
+describe('countInstallVisit', () => {
+  const { countInstallVisit, resetInstallVisitCount, INSTALL_AFTER_VISITS } = require('./installState');
+  const real = (globalThis as any).localStorage;
+  afterEach(() => { (globalThis as any).localStorage = real; resetInstallVisitCount(); });
+
+  it('counts each load once, and reaches the threshold on the third', () => {
+    const held: Record<string, string> = {};
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => held[k] ?? null,
+      setItem: (k: string, v: string) => { held[k] = v; },
+    };
+    resetInstallVisitCount();
+    expect(countInstallVisit()).toBe(1);
+    expect(countInstallVisit()).toBe(1);
+    resetInstallVisitCount();
+    expect(countInstallVisit()).toBe(2);
+    resetInstallVisitCount();
+    expect(countInstallVisit()).toBe(INSTALL_AFTER_VISITS);
+  });
+
+  it('says enough when storage is absent or throws, so the card still shows', () => {
+    (globalThis as any).localStorage = undefined;
+    expect(countInstallVisit()).toBe(INSTALL_AFTER_VISITS);
+    (globalThis as any).localStorage = { getItem: () => { throw new Error('no'); }, setItem: () => {} };
+    resetInstallVisitCount();
+    expect(countInstallVisit()).toBe(INSTALL_AFTER_VISITS);
+  });
+});

@@ -481,6 +481,108 @@ Snag Line icons). It replaces values, not behaviour.
   — with bone words. The action colour is for doing, never for marking a selection. This reverses
   *a sunken well when off, solid fern when on* in *One chip, every rail*.
 
+## The November 2026 design pass
+
+A design review of the v1 app, screen by screen at phone size, and a mock-up the owner approved.
+Several changes reverse rules written above and below. **Where anything disagrees, this section
+wins**; the passages themselves keep their history.
+
+- **The + is the dock's centre item, on every tab**, never floating above its right end. Over the
+  list it sat on the rows' tick column, so one job's *done* was always under it. The dock is still
+  one width and one arrangement everywhere. A tab with no `Fab` of its own (Schedule, You,
+  Projects) gets *New job*, which goes to the list with a `newJob` stamp and opens its capture
+  sheet. `useDockClearance` no longer adds the +'s height.
+- **The list's + opens the camera directly.** `captureStraightAway` calls `takePhoto` in the
+  press. Coming back without a photo opens `CaptureSheet`, which is where *Continue without
+  picture* lives, and **holding the +** opens it without the camera (`Fab`'s `onLongPress`), for a
+  desktop or somebody who knows they want to type. The dock's + from another tab opens the sheet,
+  because a camera can only be opened from inside the press that asked for it.
+- **The list's header is half the height.** The count is 56pt (House too), on one row with the
+  line about the list. *Select* and the fold are behind a **More** button beside the cart
+  (`FoldAllPill` is no longer on this screen; the trip sheet's rooms still fold with it). The cart
+  lost its caption: it turns ink while the trip sheet is up, and its accessible name still says
+  which list a press shows.
+- **A row says a state only when it is not Open.** *Open* on every row was a column of noise, the
+  argument that retired priority. Doing, due and overdue are still said.
+- **The job page.**
+  - One photo is drawn at the page's width (3:2); several are still a strip.
+  - The header's title is the room; the reference is small print under the facts.
+  - Delete is behind **More** in the header, with *Edit the words or the room*.
+  - The two photo pills are one **Add photo** pill that asks camera or library in a sheet. Each
+    is still pressed in a tap of its own.
+  - **The repeat is a pill beside the room**, opening `RepeatSheet` unchanged, where it was a row
+    at the foot. The day it next comes round is a line under the facts.
+  - Notes say *Today*, *Yesterday*, a weekday, or a day-first date (`lib/relativeDay.ts`).
+    `toLocaleDateString()` followed the phone's locale and wrote month-first on a US-English phone.
+  - The footer says nothing when nothing is waiting. *All changes saved* is gone.
+- **The item page opens to read when it has something to read.** A record with a make, a model or
+  a serial opens on the model number at 28pt with **Copy**, and the facts it holds as rows. *Edit*
+  opens the boxes and *Done* puts them away. A record with none of the three opens on the boxes.
+  **The boxes stay mounted while reading** (`display: none`), so the draft, writing on blur and
+  leaving-saves are unchanged. The offered pills sit beside *Edit* and open their box. Section
+  headings are the job page's 20pt sentence case.
+- **The walkthrough's photo step**: the camera is the one filled button, and *Skip for now* is a
+  quiet word under it. It was a grey well over a filled *Skip*.
+- **You**: the name is the heading with a pencil that opens its box; the colour scheme is one row
+  opening the six in a sheet; *Delete my account* is clay (`dangerGhost`) and the paragraph under
+  it is gone, since the confirmation names what goes.
+- **Snag Line has a 93rd glyph, `more`**, added by hand to `snagLine.ts` for the overflow buttons.
+  Add it to `icons.py` when the set is next regenerated.
+
+**The rest of the review, built the same month:**
+
+- **A photo is removed from inside the viewer** (`PhotoViewer`'s `onRemove`, a bin beside *Close*),
+  on the job page and the item page, reversing *a × in the photo's corner*. A destructive control
+  sat permanently on the picture the page is opened to look at. The viewer closes first, because
+  the toast's *Undo* and the dialog for a photo that is all a job has belong to the page under it.
+  What a removal does is unchanged (`lib/photoEdits.ts`). **A photo with no link to open keeps the
+  × on its tile** (`signedOnce`: only after the links have been answered once), because it has no
+  viewer to be removed from.
+- **The repeat sheet has the four common answers as chips** above *Never* and the box
+  (`REPEAT_PRESETS`), by the owner's go-ahead: the box made *every 8 weeks* possible and *monthly*
+  three presses and a keyboard. A chip writes and closes, as *Never* does. The chip already set
+  is ink.
+- **A typed job can say its room.** *What's the job?* offers the place's rooms as chips under the
+  box, the last room used lit for ten minutes as on the photo's sheet. Optional: no room is still
+  an answer, and `create_snag` is still one call, carrying the room. This is on the capture sheet,
+  where *Do not add a field to the compose bar* says such things belong.
+- **A linked item's parts are offered under the shopping box**, four at most, one tap each
+  (`partOffers`). An offer a person presses, never a copy, because adding a part starts the job.
+  The job page now reads the house record when the job has a link as well as when it has a room.
+- **The list's install card waits for the third opening** (`countInstallVisit`, per device,
+  guarded; absent storage counts as enough). The You tab's row never waits.
+- **A job with no photo shows its room's glyph** (`roomIcon`) in the row's well. The notes glyph
+  is a speech bubble and read as "has notes".
+- **One text field**: a sunken well with no border, on the You tab, Household, setup and the
+  password box, which were bordered. **On the web a focused box wears one ring** (the shared
+  `TextInput`): 2px of the action colour, 2px outside, following the box's corners. The browser's
+  own was black, and square on the password box.
+- **Edit this job is a bottom sheet**, like every other editor. It was the one centred dialog.
+- **Household**: *Make owner* is a quiet word (`TextButton`), where it was a tinted pill, and *Add
+  another home* is one row that opens its box.
+- **Schedule's key leaves out *Project*** for somebody with no Projects tab.
+
+**And the last of it:**
+
+- **A room's *Rename* and *Remove* are behind More in its header**, beside the +. They were two
+  loose links at the foot of every room, the remove one in clay. Whole house still offers neither.
+- **The job page's one photo runs edge to edge**, flush under the header, with square corners.
+- **Add a photo is a camera button beside the headline's pencil**, where it was a third pill in the
+  facts row that wrapped to a line of its own on a narrow phone. It opens the same sheet.
+
+**Not changed**: the Schedule grid (its rows are already at the 48pt minimum), and the sign-in
+screens beyond the field style.
+
+`Dock.test.tsx` pins the + in the dock's row on every tab, *New job* and one clearance.
+`SnagListScreen.test.tsx` pins the camera on one press, the sheet after no photo and on a hold,
+and the controls behind More. `SnagDetailScreen.test.tsx` pins the one photo pill, Delete behind
+More, the repeat pill above the talk and the silent footer. `ThingDetailScreen.test.tsx` pins the
+read view, Edit and Done, the empty record and an offered pill. `relativeDay.test.ts` pins the
+words. The second round: `SnagDetailScreen.test.tsx` pins a preset in one tap, the part
+offers and their absence, no × on a photo that opens, the viewer's removal and the × kept on a
+photo with no link; `SnagListScreen.test.tsx` a typed job filed in the room tapped;
+`PhotoViewer.test.tsx` the bin only where the page hands one in; `installState.test.ts` the count.
+
 ## Capture and triage are different moments
 
 This is the load-bearing product decision and the easiest one to erode.

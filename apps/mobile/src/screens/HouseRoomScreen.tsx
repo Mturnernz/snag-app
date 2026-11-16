@@ -14,7 +14,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { Text, TextInput } from '../components/Text';
 import Icon from '../components/Icon';
 import AddThingSheet from '../components/AddThingSheet';
-import { Group, SectionTitle, groupedStyles } from '../components/Grouped';
+import { Group, Row, SectionTitle, groupedStyles } from '../components/Grouped';
 import { Colors, Radius, Spacing, Typography, MIN_TOUCH_TARGET } from '../constants/theme';
 import { useHousehold } from '../hooks/useHousehold';
 import { useAddThing } from '../hooks/useAddThing';
@@ -68,6 +68,7 @@ export default function HouseRoomScreen({ route }: Props) {
   const [newName, setNewName] = useState('');
   const [renameProblem, setRenameProblem] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const renameBusy = useRef(false);
 
   const [things, setThings] = useState<Thing[]>([]);
@@ -205,16 +206,31 @@ export default function HouseRoomScreen({ route }: Props) {
         // never meets the concept.
         subtitle={properties.length > 1 ? activeProperty?.name : undefined}
         rightSlot={
-          <Pressable
-            // `null` is a choice, not an absence: Whole house was picked, so the
-            // walkthrough opens on "what is it" rather than asking the room.
-            onPress={() => adding.open({ room })}
-            style={styles.add}
-            accessibilityRole="button"
-            accessibilityLabel={`Add something to ${name}`}
-          >
-            <Icon name="add" size={26} color={Colors.primary} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            {/* Renaming and removing are rare, so they are behind this
+                (November 2026). They were two loose links at the foot of
+                the page, the remove one in clay under every room. */}
+            {location ? (
+              <Pressable
+                onPress={() => setMenuOpen(true)}
+                style={styles.add}
+                accessibilityRole="button"
+                accessibilityLabel="More"
+              >
+                <Icon name="more" size="md" color={Colors.textPrimary} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              // `null` is a choice, not an absence: Whole house was picked, so the
+              // walkthrough opens on "what is it" rather than asking the room.
+              onPress={() => adding.open({ room })}
+              style={styles.add}
+              accessibilityRole="button"
+              accessibilityLabel={`Add something to ${name}`}
+            >
+              <Icon name="add" size={26} color={Colors.primary} />
+            </Pressable>
+          </View>
         }
       />
 
@@ -274,31 +290,31 @@ export default function HouseRoomScreen({ route }: Props) {
           />
         ) : null}
 
-        {/* The room itself: renamed or taken away here, where it is shown.
-            Quiet, at the foot, and only for a room the place still has. */}
-        {location ? (
-          <View style={styles.roomActions}>
-            <Pressable
-              onPress={() => { setNewName(location.name); setRenameProblem(null); setRenaming(true); }}
-              style={styles.roomAction}
-              accessibilityRole="button"
-              accessibilityLabel={`Rename ${location.name}`}
-            >
-              <Icon name="pencil-outline" size="sm" color={Colors.textSecondary} />
-              <Text style={styles.roomActionLabel}>Rename this room</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setRemoving(true)}
-              style={styles.roomAction}
-              accessibilityRole="button"
-              accessibilityLabel={`Remove ${location.name}`}
-            >
-              <Icon name="trash-outline" size="sm" color={Colors.danger} />
-              <Text style={[styles.roomActionLabel, styles.roomActionDanger]}>Remove this room</Text>
-            </Pressable>
-          </View>
-        ) : null}
       </ScrollView>
+
+      <Sheet visible={menuOpen && !!location} title={name} onClose={() => setMenuOpen(false)}>
+        <Group>
+          <Row
+            title="Rename this room"
+            accessibilityLabel={`Rename ${name}`}
+            onPress={() => {
+              setMenuOpen(false);
+              setNewName(location?.name ?? '');
+              setRenameProblem(null);
+              setRenaming(true);
+            }}
+          />
+          <Row
+            title="Remove this room"
+            tone="danger"
+            accessibilityLabel={`Remove ${name}`}
+            onPress={() => {
+              setMenuOpen(false);
+              setRemoving(true);
+            }}
+          />
+        </Group>
+      </Sheet>
 
       <Sheet
         visible={renaming}
@@ -346,12 +362,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ghosts: { gap: Spacing.sm },
-  roomActions: { marginTop: Spacing.xxl, gap: Spacing.xs },
-  roomAction: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: MIN_TOUCH_TARGET,
-  },
-  roomActionLabel: { fontSize: Typography.subhead, color: Colors.textSecondary },
-  roomActionDanger: { color: Colors.danger },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
   renameBox: {
     minHeight: MIN_TOUCH_TARGET,
     borderRadius: Radius.input,

@@ -5590,6 +5590,51 @@ export async function getProjectPage(
  * and only for cards that show the line. The pool is ten connections; see
  * *What a press costs* in CLAUDE.md.
  */
+/**
+ * Every price on these projects, in **one** request — the list and a project
+ * page both read the money through `projectLedger` from this alone. Columns
+ * named, so a missing one is a loud 400 rather than a quiet default.
+ */
+const PRICE_COLUMNS = [
+  'id', 'item_id', 'element_id', 'project_id', 'reach_project_id', 'supplier', 'detail', 'amount',
+  'amount_incl_gst', 'kind', 'status', 'basis', 'dated', 'due_on', 'notes', 'billed_through_id',
+  'against_quote_id', 'invoice_number', 'photo_paths', 'document_paths', 'created_at', 'created_by',
+  'amount_incl', 'paid_total', 'unpaid',
+].join(', ');
+
+export async function getProjectPrices(
+  client: SupabaseClient,
+  projectIds: string[]
+): Promise<Map<string, ProjectQuote[]>> {
+  const byProject = new Map<string, ProjectQuote[]>(projectIds.map((id) => [id, []]));
+  if (projectIds.length === 0) return byProject;
+  const { data, error } = await client
+    .from('project_quotes_with_totals')
+    .select(PRICE_COLUMNS)
+    .in('reach_project_id', projectIds);
+  if (error) throw asError(error, "Couldn't load the prices");
+  for (const row of (data ?? []) as unknown as Row[]) {
+    const list = byProject.get(row.reach_project_id);
+    if (list) list.push(mapQuote(row));
+  }
+  return byProject;
+}
+
+/** Emailed papers on this project still waiting to be added or removed. */
+export async function getPendingReviews(client: SupabaseClient, projectId: string): Promise<InvoiceReview[]> {
+  const { data, error } = await client
+    .from('invoice_reviews')
+    .select(
+      'id, project_id, kind, addressed_to, supplier, detail, amount, amount_incl_gst, invoice_number, ' +
+        'dated, due_on, paid, paid_on, state, created_at, photo_paths, document_paths, source_subject, source_at'
+    )
+    .eq('project_id', projectId)
+    .eq('state', 'pending')
+    .order('created_at', { ascending: true });
+  if (error) throw asError(error, "Couldn't load the emailed bills");
+  return ((data ?? []) as unknown as Row[]).map(mapInvoiceReview);
+}
+
 export async function getExpectedTotal(
   client: SupabaseClient,
   projectId: string
@@ -7333,3 +7378,4 @@ export * from './suppliers';
 export * from './projectDates';
 export * from './expectations';
 export * from './checks';
+export * from './ledger';

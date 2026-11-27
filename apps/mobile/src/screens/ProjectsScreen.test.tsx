@@ -5,13 +5,9 @@ import ProjectsScreen from './ProjectsScreen';
 import { Colors } from '../constants/theme';
 
 /**
- * The Projects tab.
- *
- * Four things here can silently go wrong and each of them matters more than it
- * looks: a total rendered without its denominator, a finished project behaving
- * like a finished snag and leaving, the empty state inventing a project the way
- * the House tab invents a rangehood, and a compose bar arriving on a tab that
- * must never have one.
+ * The Projects tab, as Alyssa's wireframe has it (November 2026): total spend
+ * on the property, then In progress, Completed and Planned, each card in its
+ * own shape, from one read of every price.
  */
 
 jest.mock('react-native-safe-area-context', () => ({
@@ -54,21 +50,18 @@ jest.mock('../components/AddProjectSheet', () => {
 
 const mock_getProjects = jest.fn();
 const mock_createProject = jest.fn();
-const mock_getProjectsQuoted = jest.fn();
-const mock_getExpectedTotal = jest.fn();
+const mock_getProjectPrices = jest.fn();
 jest.mock('../lib/supabase', () => {
   const real = jest.requireActual('@snag/supabase-queries');
   return {
     getProjects: (...a: unknown[]) => mock_getProjects(...a),
-    getProjectsQuoted: (...a: unknown[]) => mock_getProjectsQuoted(...a),
-    getExpectedTotal: (...a: unknown[]) => mock_getExpectedTotal(...a),
+    getProjectPrices: (...a: unknown[]) => mock_getProjectPrices(...a),
     createProject: (...a: unknown[]) => mock_createProject(...a),
     // The pure helpers are the real ones: mocking `describeTotals` would mock
     // away the exact rule these specs exist to hold.
     createLocation: jest.fn(),
     formatMoney: real.formatMoney,
     inclGst: real.inclGst,
-    projectSubtitle: real.projectSubtitle,
   };
 });
 jest.mock('../lib/exportFile', () => ({
@@ -99,8 +92,7 @@ const project = (over: Partial<any> = {}): any => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mock_getProjectsQuoted.mockResolvedValue(new Map());
-  mock_getExpectedTotal.mockRejectedValue(new Error('not asked for'));
+  mock_getProjectPrices.mockResolvedValue(new Map());
   (global as any).__nav = { navigate: mock_navigate, addListener: () => () => {} };
   (global as any).__household = {
     household: { id: 'h', name: 'Home', createdAt: '2026-01-01T00:00:00Z' },
@@ -116,6 +108,16 @@ beforeEach(() => {
   };
 });
 
+const price = (over: any): any => ({
+  id: over.id ?? Math.random().toString(36), itemId: null, elementId: null, projectId: 'p1', supplier: 'ReliaBuilder',
+  detail: null, amount: over.amountIncl, amountInclGst: true, kind: 'invoice', status: 'tbc', basis: 'fixed',
+  dated: null, notes: null, supersedesLineId: null, dueOn: null, billedThroughId: null, settlesMilestoneId: null,
+  againstQuoteId: null, invoiceNumber: null, photoPaths: [], documentPaths: [], createdAt: '2026-04-01T00:00:00Z',
+  createdBy: null, amountIncl: null, lineCount: 0, linesTotal: null, buildUp: null, allowanceOpen: 0,
+  additionalOpen: 0, effectiveAmount: null, paidTotal: null, unpaid: over.unpaid ?? (over.kind === 'quote' ? null : over.amountIncl),
+  claimedTotal: null, ...over,
+});
+
 /** The card's own pressable, found by the label rather than by walking parents. */
 function cardFor(r: ReturnType<typeof render>, name: string) {
   const found = r.root.findAll(
@@ -126,374 +128,121 @@ function cardFor(r: ReturnType<typeof render>, name: string) {
   return found[0];
 }
 
-async function arrange(
-  projects: any[],
-  quoted: Record<string, number> = {},
-  expected: Record<string, number> = {},
-) {
+const texts = (node: any): string[] =>
+  node.findAll((n: any) => n.type === 'Text', { deep: true }).map((n: any) => n.children.join(''));
+
+async function arrange(projects: any[], prices: Record<string, any[]> = {}) {
   mock_getProjects.mockResolvedValue(projects);
-  mock_getProjectsQuoted.mockResolvedValue(new Map(Object.entries(quoted)));
-  mock_getExpectedTotal.mockImplementation(async (id: string) => {
-    if (!(id in expected)) throw new Error('offline');
-    return expected[id];
-  });
+  mock_getProjectPrices.mockResolvedValue(new Map(projects.map((p) => [p.id, prices[p.id] ?? []])));
   const r = render(<ProjectsScreen />);
   await TestRenderer.act(async () => {});
   return r;
 }
 
 describe('the tab', () => {
-  it('groups by state, underway first and complete last', async () => {
+  it('groups In progress, then Completed, then Planned', async () => {
     const r = await arrange([
-      project({ id: 'a', name: 'Heat pump install', status: 'done' }),
-      project({ id: 'b', name: 'Back deck', status: 'planned' }),
-      project({ id: 'c', name: 'Downstairs laundry', status: 'underway' }),
+      project({ id: 'a', name: 'Curtains', status: 'done' }),
+      project({ id: 'b', name: 'Tree trimming', status: 'planned' }),
+      project({ id: 'c', name: 'Downstairs', status: 'underway' }),
     ]);
-    const seen: string[] = [];
-    for (const node of r.getAllByType('Text')) {
-      const text = node.children.join('');
-      if (['Underway', 'Planned', 'Complete'].includes(text) && !seen.includes(text)) seen.push(text);
-    }
-    // The enum is still `done`; the word on the tab is Complete.
-    expect(seen).toEqual(['Underway', 'Planned', 'Complete']);
-    expect(r.queryByText('Done')).toBeNull();
-    // The headings count the jobs; a line under the title saying so again is gone.
-    expect(r.getAllByType('Text').map((n) => n.children.join('')).join(' ')).not.toMatch(/\d underway/);
+    const seen = r.getAllByType('Text').map((n) => n.children.join(''))
+      .filter((t) => ['In progress', 'Completed', 'Planned'].includes(t));
+    expect(seen).toEqual(['In progress', 'Completed', 'Planned']);
   });
 
-  it('shows what was budgeted, what has been quoted and what has been paid', async () => {
+  it('reads every price in one request', async () => {
+    await arrange([project({ id: 'a' }), project({ id: 'b', name: 'Roof' })]);
+    expect(mock_getProjectPrices).toHaveBeenCalledTimes(1);
+    expect(mock_getProjectPrices).toHaveBeenCalledWith(['a', 'b']);
+  });
+
+  it('heads the list with what has been spent across the property', async () => {
     const r = await arrange(
-      [project({ id: 'p1', budget: 230000, paidTotal: 50000 })],
-      { p1: 210000 },
+      [project({ id: 'a', name: 'Curtains', status: 'done' }), project({ id: 'b', name: 'Downstairs' })],
+      {
+        a: [price({ supplier: 'Curtain Co', amountIncl: 2000, unpaid: 0 })],
+        b: [price({ amountIncl: 1000, unpaid: 400 })],
+      },
     );
-    r.getByText('Budgeted');
-    r.getByText('$230,000');
-    r.getByText('Quoted');
-    r.getByText('$210,000');
-    r.getByText('Paid');
-    r.getByText('$50,000');
-    expect(mock_getProjectsQuoted).toHaveBeenCalledWith(['p1']);
+    r.getByText('Total spent on the property');
+    r.getByText('$2,600');
   });
 
-  it('grosses an ex-GST budget before showing it', async () => {
-    const r = await arrange([project({ budget: 100000, budgetInclGst: false })]);
-    r.getByText('$115,000');
+  it('an in-progress card: budget, paid, outstanding and the difference', async () => {
+    const r = await arrange([project({ id: 'p1', name: 'Downstairs', budget: 200000 })], {
+      p1: [
+        price({ kind: 'quote', status: 'accepted', amountIncl: 155480 }),
+        price({ amountIncl: 43987.5, unpaid: 0 }),
+        price({ amountIncl: 22913.75, unpaid: 22913.75 }),
+        price({ supplier: 'Gibson Architects', amountIncl: 2650.75, unpaid: 0 }),
+      ],
+    });
+    const card = texts(cardFor(r, 'Downstairs'));
+    expect(card).toEqual(expect.arrayContaining(['Budget', '$200,000', 'Paid', '$46,638.25', 'Outstanding', '$22,913.75', 'Difference']));
+    // 200,000 − (155,480 accepted + 2,650.75 architect)
+    expect(card).toContain('$41,869.25 under');
+    expect(card).not.toContain('Expected total');
   });
 
-  it('says what nobody has in words, never as $0', async () => {
-    const r = await arrange([project({ id: 'p1' })]);
-    r.getByText('Not set');
-    r.getByText('No quotes');
-    r.getByText('Nothing yet');
-    expect(r.queryByText('$0')).toBeNull();
+  it('hides Outstanding when nothing is owed, and says over budget in clay', async () => {
+    const r = await arrange([project({ id: 'p1', name: 'Bathroom', budget: 1000 })], {
+      p1: [price({ amountIncl: 1200, unpaid: 0 })],
+    });
+    const card = texts(cardFor(r, 'Bathroom'));
+    expect(card).not.toContain('Outstanding');
+    const over = r.getByText('$200 over');
+    expect(flattenStyle(over.props.style).color).toBe(Colors.danger);
   });
 
-  it('never claims nobody has quoted when the quoted read has not answered', async () => {
-    mock_getProjects.mockResolvedValue([project({ name: 'Downstairs laundry' })]);
-    mock_getProjectsQuoted.mockRejectedValue(new Error('offline'));
-    const r = render(<ProjectsScreen />);
+  it('a completed card says what it cost and nothing else', async () => {
+    const r = await arrange([project({ id: 'p1', name: 'Curtains', status: 'done', budget: 5000 })], {
+      p1: [price({ amountIncl: 3200, unpaid: 0 })],
+    });
+    expect(texts(cardFor(r, 'Curtains'))).toEqual(['Curtains', 'Cost', '$3,200']);
+  });
+
+  it('a planned card: budget and the quotes as a range', async () => {
+    const r = await arrange([project({ id: 'p1', name: 'Tree trimming', status: 'planned', budget: 1000 })], {
+      p1: [
+        price({ kind: 'quote', amountIncl: 850 }),
+        price({ kind: 'quote', amountIncl: 1400, supplier: 'Arborist' }),
+        price({ kind: 'quote', amountIncl: 1100, supplier: 'Tree Co' }),
+      ],
+    });
+    expect(texts(cardFor(r, 'Tree trimming'))).toEqual(
+      ['Tree trimming', 'Budget', '$1,000', 'Quoted', '3 quotes · $850–$1,400'],
+    );
+  });
+
+  it('says No quotes yet on a planned card with none, and — while prices cannot be read', async () => {
+    let r = await arrange([project({ id: 'p1', name: 'Fence', status: 'planned' })]);
+    expect(texts(cardFor(r, 'Fence'))).toContain('No quotes yet');
+    r.unmount?.();
+    mock_getProjects.mockResolvedValue([project({ id: 'p1', name: 'Fence', status: 'planned' })]);
+    mock_getProjectPrices.mockRejectedValue(new Error('offline'));
+    r = render(<ProjectsScreen />);
     await TestRenderer.act(async () => {});
-    cardFor(r, 'Downstairs laundry');
-    expect(r.queryByText('No quotes')).toBeNull();
-    r.getByText('—');
+    expect(texts(cardFor(r, 'Fence'))).toContain('—');
   });
 
-  it('never shows a figure without saying what is still undecided', async () => {
-    // The denominator rule: $8,990 paid on a job with four things nobody has
-    // chosen is not the cost of the job, and the card says so in the same breath.
-    const r = await arrange([
-      project({ paidTotal: 8990, itemCount: 9, pricedCount: 5, dueToPay: 5000 }),
-    ]);
-    r.getByText('$8,990');
-    r.getByText('4 to decide   ·   $5,000 to pay');
+  it('opens a project on a press', async () => {
+    const r = await arrange([project({ id: 'p1', name: 'Downstairs' })]);
+    await TestRenderer.act(async () => cardFor(r, 'Downstairs').props.onClick?.() ?? cardFor(r, 'Downstairs').props.onPress?.());
+    expect(mock_navigate).toHaveBeenCalledWith('ProjectDetail', { projectId: 'p1' });
   });
 
-  it('says nothing about money it has not got', async () => {
-    const r = await arrange([project({ itemCount: 2 })]);
-    r.getByText('2 to decide');
-    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
-    expect(text).not.toContain('to pay');
-    expect(text).not.toContain('Budget remaining');
-  });
-});
-
-describe('budget remaining', () => {
-  const textOf = (r: ReturnType<typeof render>) => r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
-  const colourOf = (r: ReturnType<typeof render>, text: string) => flattenStyle(r.getByText(text).props.style).color;
-
-  it('is absent until something has been paid, and asks for nothing', async () => {
-    const r = await arrange([project({ budget: 100000, paidTotal: null })]);
-    expect(r.queryByText('Budget remaining')).toBeNull();
-    expect(r.queryByText('Expected total')).toBeNull();
-    expect(mock_getExpectedTotal).not.toHaveBeenCalled();
-  });
-
-  it('is absent without a budget, whatever has been paid', async () => {
-    const r = await arrange([project({ budget: null, paidTotal: 40000 })]);
-    expect(r.queryByText('Budget remaining')).toBeNull();
-    expect(r.queryByText('Over budget')).toBeNull();
-    expect(mock_getExpectedTotal).not.toHaveBeenCalled();
-  });
-
-  it('counts what is expected, not only what is paid — two claims earmarked put a job over', async () => {
-    // The live job: paid alone left $68,101.19 of $180,000, and the card said
-    // so while its own page said $54,230.18 over.
-    const r = await arrange(
-      [project({ budget: 180000, paidTotal: 111898.81, invoicedTotal: 146255.18 })],
-      {},
-      { p1: 234230.18 },
-    );
-    expect(mock_getExpectedTotal).toHaveBeenCalledWith('p1');
-    r.getByText('Expected total');
-    r.getByText('$234,230.18');
-    r.getByText('Over budget');
-    expect(r.queryByText('Budget remaining')).toBeNull();
-    expect(colourOf(r, '$54,230.18')).toBe(Colors.danger);
-    r.getByText('30% over · $87,975 not billed yet');
-    expect(textOf(r)).not.toContain('68,101');
-  });
-
-  it('never cuts the figure short: it stands alone, the percentage beneath it', async () => {
-    const r = await arrange([project({ budget: 180000, paidTotal: 111898.81, invoicedTotal: 180000 - 68101.19 })], {}, { p1: 180000 - 68101.19 });
-    const figure = r.getByText('$68,101.19');
-    expect(figure.props.numberOfLines).toBe(1);
-    expect(flattenStyle(figure.props.style).flexShrink).toBe(0);
-    r.getByText('38% left');
-  });
-
-  it('is in fern while more than 15% is left', async () => {
-    const r = await arrange([project({ budget: 100000, paidTotal: 50000, invoicedTotal: 84000 })], {}, { p1: 84000 });
-    r.getByText('Budget remaining');
-    expect(colourOf(r, '$16,000')).toBe(Colors.primary);
-    r.getByText('16% left');
-  });
-
-  it('turns brass at 15% left, and stays brass down to just over 5%', async () => {
-    const at15 = await arrange([project({ budget: 100000, paidTotal: 50000, invoicedTotal: 85000 })], {}, { p1: 85000 });
-    expect(colourOf(at15, '$15,000')).toBe(Colors.status.doing);
-    at15.unmount();
-    const at6 = await arrange([project({ budget: 100000, paidTotal: 50000, invoicedTotal: 94000 })], {}, { p1: 94000 });
-    expect(colourOf(at6, '$6,000')).toBe(Colors.status.doing);
-  });
-
-  it('turns clay at 5% left', async () => {
-    const r = await arrange([project({ budget: 100000, paidTotal: 50000, invoicedTotal: 95000 })], {}, { p1: 95000 });
-    expect(colourOf(r, '$5,000')).toBe(Colors.danger);
-  });
-
-  it('measures against the budget grossed up when it was typed ex GST', async () => {
-    // $100,000 + GST is $115,000; $100,000 expected leaves $15,000, 13% — brass.
-    const r = await arrange(
-      [project({ budget: 100000, budgetInclGst: false, paidTotal: 50000, invoicedTotal: 100000 })],
-      {},
-      { p1: 100000 },
-    );
-    expect(colourOf(r, '$15,000')).toBe(Colors.status.doing);
-    r.getByText('14% left');
-  });
-
-  it('says — until the page’s figure arrives, never budget less paid in the meantime', async () => {
-    mock_getProjects.mockResolvedValue([project({ budget: 180000, paidTotal: 111898.81 })]);
-    mock_getExpectedTotal.mockReturnValue(new Promise(() => {}));
-    const r = render(<ProjectsScreen />);
-    await TestRenderer.act(async () => {});
-    r.getByText('Budget remaining');
-    expect(r.getAllByText('—').length).toBeGreaterThanOrEqual(2);
-    expect(textOf(r)).not.toContain('68,101');
-    expect(r.queryByText('Over budget')).toBeNull();
-  });
-
-  it('says — when the page could not be read, and the card still draws', async () => {
-    const r = await arrange([project({ budget: 180000, paidTotal: 111898.81 })]);
-    r.getByText('Downstairs laundry');
-    r.getByText('$111,898.81');
-    expect(textOf(r)).not.toContain('68,101');
-    expect(r.queryByText('Over budget')).toBeNull();
-  });
-
-  it('reads one page at a time, never all at once', async () => {
-    let answer!: (n: number) => void;
-    mock_getProjects.mockResolvedValue([
-      project({ id: 'a', name: 'Bathroom', budget: 30000, paidTotal: 1000 }),
-      project({ id: 'b', name: 'Deck', budget: 20000, paidTotal: 1000 }),
-      project({ id: 'c', name: 'Shed', budget: 5000, paidTotal: null }),
-    ]);
-    mock_getExpectedTotal.mockImplementation(() => new Promise<number>((resolve) => { answer = resolve; }));
-    render(<ProjectsScreen />);
-    await TestRenderer.act(async () => {});
-    expect(mock_getExpectedTotal).toHaveBeenCalledTimes(1);
-    await TestRenderer.act(async () => { answer(12000); });
-    expect(mock_getExpectedTotal).toHaveBeenCalledTimes(2);
-    await TestRenderer.act(async () => { answer(9000); });
-    // Nothing paid on the shed: it never asks.
-    expect(mock_getExpectedTotal.mock.calls.map((c) => c[0])).toEqual(['a', 'b']);
-  });
-
-  it('gives way on a complete project to one line saying what it cost', async () => {
-    const r = await arrange(
-      [project({ id: 'k', name: 'Kitchen', status: 'done', budget: 62000, paidTotal: 58300, invoicedTotal: 58300, finishedOn: '2024-11-20' })],
-      {},
-      { k: 58300 },
-    );
-    r.getByText('Cost $58,300 · $3,700 under budget');
-    for (const gone of ['Budgeted', 'Quoted', 'Paid', 'Expected total', 'Budget remaining']) {
-      expect(r.queryByText(gone)).toBeNull();
-    }
-    expect(flattenStyle(cardFor(r, 'Kitchen').props.style).opacity).toBe(0.62);
-  });
-
-  it('reads a finished job’s cost even without a budget, and says it alone', async () => {
-    const r = await arrange(
-      [project({ id: 'k', name: 'Shed', status: 'done', paidTotal: 4200, invoicedTotal: 4200 })],
-      {},
-      { k: 4200 },
-    );
-    expect(mock_getExpectedTotal).toHaveBeenCalledWith('k');
-    r.getByText('Cost $4,200');
-  });
-
-  it('says a finished job with no money on it has none, and asks for nothing', async () => {
-    const r = await arrange([project({ id: 'k', name: 'Shed', status: 'done' })]);
-    r.getByText('No costs recorded');
-    expect(mock_getExpectedTotal).not.toHaveBeenCalled();
-  });
-});
-
-describe('reading the figures without swamping the database', () => {
-  /**
-   * 31 October 2026: the list read every card's page again each time it came
-   * into view, and kept reading behind a project just opened. Tapping in and
-   * out stacked those reads past the 8s statement timeout, and the tab stopped
-   * loading. These hold the two halves of the fix.
-   */
-  const two = () => [
-    project({ id: 'a', name: 'Bathroom', budget: 30000, paidTotal: 1000 }),
-    project({ id: 'k', name: 'Kitchen', status: 'done', paidTotal: 4200, invoicedTotal: 4200 }),
-  ];
-  const asked = () => mock_getExpectedTotal.mock.calls.map((c) => c[0]);
-  const pressCard = async (r: ReturnType<typeof render>, name: string) => {
-    const card = r.root.findAll(
-      (n: any) => typeof n.type !== 'string' && n.props?.accessibilityLabel === name && n.props?.onPress,
-      { deep: true }
-    )[0];
-    await TestRenderer.act(async () => { card.props.onPress(); });
-  };
-
-  it('stops reading when the list is left', async () => {
-    let answer!: (n: number) => void;
-    mock_getProjects.mockResolvedValue([
-      project({ id: 'a', name: 'Bathroom', budget: 30000, paidTotal: 1000 }),
-      project({ id: 'b', name: 'Deck', budget: 20000, paidTotal: 1000 }),
-    ]);
-    mock_getExpectedTotal.mockImplementation(() => new Promise<number>((resolve) => { answer = resolve; }));
-    render(<ProjectsScreen />);
-    await TestRenderer.act(async () => {});
-    expect(asked()).toEqual(['a']);
-    await leave();
-    await TestRenderer.act(async () => { answer(12000); });
-    expect(asked()).toEqual(['a']);
-  });
-
-  it('reads nothing again on coming back when no project has changed', async () => {
-    const r = await arrange(two(), {}, { a: 31000, k: 4200 });
-    expect(asked()).toEqual(['a', 'k']);
+  it('reads again when it comes back into view', async () => {
+    await arrange([project({ id: 'p1' })]);
     await leave();
     await comeBack();
-    expect(asked()).toEqual(['a', 'k']);
-    expect(mock_getProjects).toHaveBeenCalledTimes(2);
-    r.getByText('Cost $4,200');
+    expect(mock_getProjectPrices).toHaveBeenCalledTimes(2);
   });
 
-  it('reads a project again once its row has moved', async () => {
-    await arrange(two(), {}, { a: 31000, k: 4200 });
-    mock_getProjects.mockResolvedValue([
-      project({ id: 'a', name: 'Bathroom', budget: 30000, paidTotal: 6000 }),
-      project({ id: 'k', name: 'Kitchen', status: 'done', paidTotal: 4200, invoicedTotal: 4200 }),
-    ]);
-    await leave();
-    await comeBack();
-    expect(asked()).toEqual(['a', 'k', 'a']);
-  });
-
-  it('reads the project just opened again, and only that one', async () => {
-    const r = await arrange(two(), {}, { a: 31000, k: 4200 });
-    await pressCard(r, 'Kitchen');
-    expect(mock_navigate).toHaveBeenCalledWith('ProjectDetail', { projectId: 'k' });
-    await leave();
-    await comeBack();
-    expect(asked()).toEqual(['a', 'k', 'k']);
-    // Read once on the way back, not on every return after it.
-    await leave();
-    await comeBack();
-    expect(asked()).toEqual(['a', 'k', 'k']);
-  });
-
-  it('asks again after a read that failed', async () => {
-    await arrange(two(), {}, { k: 4200 });
-    expect(asked()).toEqual(['a', 'k']);
-    await leave();
-    await comeBack();
-    expect(asked()).toEqual(['a', 'k', 'a']);
-  });
-
-  it('reads every figure on a pull to refresh', async () => {
-    const r = await arrange(two(), {}, { a: 31000, k: 4200 });
-    const list = r.root.findAll((n: any) => n.props?.refreshControl, { deep: true })[0];
-    await TestRenderer.act(async () => { await list.props.refreshControl.props.onRefresh(); });
-    expect(asked()).toEqual(['a', 'k', 'a', 'k']);
-  });
-});
-
-describe('the tab, still', () => {
-  it('dims a finished project rather than letting it leave', async () => {
-    const r = await arrange([project({ id: 'a', name: 'Heat pump install', status: 'done' })]);
-    // "Done leaves" is the *list's* rule, and the reward there is a shorter
-    // list. A renovation is the opposite: the finished one is the record you
-    // open in four years in front of a valuer.
-    expect(flattenStyle(cardFor(r, 'Heat pump install').props.style).opacity).toBe(0.62);
-  });
-
-  it('leaves an underway project at full strength', async () => {
-    const r = await arrange([project({ name: 'Downstairs laundry', status: 'underway' })]);
-    expect(flattenStyle(cardFor(r, 'Downstairs laundry').props.style).opacity).toBeUndefined();
-  });
-});
-
-describe('day one', () => {
-  it('is genuinely empty — nothing here invents a project', async () => {
+  it('invents nothing on day one', async () => {
     const r = await arrange([]);
     r.getByText('Nothing on the go');
-    // The House tab arrives furnished because a catalogue can guess a kitchen
-    // has a rangehood. Nothing can guess a renovation, and a suggested one
-    // would be a fabrication rather than a prompt.
-    expect(r.queryByText('Bathroom renovation')).toBeNull();
-    expect(r.queryByText('Kitchen renovation')).toBeNull();
-  });
-
-  it('names the second use, so the empty screen still answers something', async () => {
-    const r = await arrange([]);
-    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
-    expect(text).toContain('already finished');
-  });
-});
-
-describe('what is deliberately absent', () => {
-  it('has no compose bar — a project is started at a desk, not in a doorway', async () => {
-    const r = await arrange([project()]);
-    const text = r.getAllByType('Text').map((n) => n.children.join('')).join(' ');
-    expect(text).not.toContain('Add a note');
-    expect(
-      r.root.findAll((n: any) => typeof n.type === 'string' && n.type === 'TextInput', { deep: true })
-    ).toHaveLength(0);
-  });
-
-  it('has no filter rail over three rows', async () => {
-    const r = await arrange([project()]);
-    expect(r.queryByText('Show me')).toBeNull();
-  });
-
-  it('puts the export at the foot of the scrolled content, not on a bar', async () => {
-    const r = await arrange([project()]);
-    r.getByText('Export what’s been done');
+    expect(r.queryByText('Total spent on the property')).toBeNull();
+    expect(mock_getProjectPrices).toHaveBeenCalledWith([]);
   });
 });

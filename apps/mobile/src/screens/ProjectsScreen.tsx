@@ -22,19 +22,24 @@ import { useHousehold } from '../hooks/useHousehold';
 import { useDockClearance } from '../navigation/Dock';
 import { useToast } from '../hooks/useToast';
 import {
-  createLocation, createProject, formatMoney, getExpectedTotal, getProjects, getProjectsQuoted, inclGst,
-  projectSubtitle,
+  createProject, formatMoney, getProjectPrices, getProjects, inclGst,
 } from '../lib/supabase';
 import type { ProjectInput } from '@snag/supabase-queries';
 import {
-  budgetRemaining, describeFinishedCost, describeRemaining, exportDateStamp, hasCost, groupProjectsByStatus, placeTitle,
-  projectExportTable, showsBudgetRemaining, type RemainingTone,
+  describeDifference, describeQuoted, exportDateStamp, groupProjectsByStatus, placeTitle,
+  projectExportTable, projectLedger, type ProjectLedger,
 } from '@snag/supabase-queries';
 import { writeExport, type ExportFormat } from '../lib/exportFile';
 import { showAlert } from '../lib/alert';
 import {
-  Project, PROJECT_STATUS_LABELS, RootStackParamList,
+  Project, ProjectStatus, RootStackParamList,
 } from '../types';
+
+const SECTION_TITLES: Record<ProjectStatus, string> = {
+  underway: 'In progress',
+  done: 'Completed',
+  planned: 'Planned',
+};
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -46,8 +51,8 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * a budget, a span of rooms, a folder of quotes, and an answer to "what did the
  * bathroom actually cost".
  *
- * **Grouped by state, never by date.** Underway, then Planned, then Complete — the
- * order somebody actually cares about them in, and the reason there is no
+ * **Grouped by state, never by date.** In progress, then Completed, then
+ * Planned — the order of Alyssa's wireframe (November 2026), and the reason there is no
  * filter rail on this screen. A household has three or four projects, not
  * forty; a filter over four rows is a control charging vertical rent to answer
  * a question the rows already answer.
@@ -77,22 +82,15 @@ export default function ProjectsScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useEdgeInsets();
   const {
-    household, properties, activeProperty, locations, reloadLocations,
+    household, properties, activeProperty,
   } = useHousehold();
   const { showToast } = useToast();
 
   const [projects, setProjects] = useState<Project[]>([]);
-  // Null until the quoted read answers, and again if it fails: "No quotes" is
-  // a claim, and a read that has not come back cannot make it.
-  const [quoted, setQuoted] = useState<Map<string, number> | null>(null);
-  // Each card with a budget line needs its page's Expected total. Absent until
-  // that read answers, and after one that failed: the line says — rather than
-  // falling back to a figure the page would contradict.
-  const [expected, setExpected] = useState<Map<string, number>>(() => new Map());
-  // The project row each figure was read against, and the project last opened.
-  // See `readExpected`.
-  const readAgainst = useRef(new Map<string, string>());
-  const opened = useRef<string | null>(null);
+  // One ledger per project, from one read of every price on them. Absent
+  // while that read is out, or when it failed: a card then says — rather than
+  // a figure it cannot back.
+  const [ledgers, setLedgers] = useState<Map<string, ProjectLedger> | null>(null);
   const generation = useRef(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -101,15 +99,23 @@ export default function ProjectsScreen() {
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const load = useCallback(async (force = false) => {
+  const load = useCallback(async () => {
     if (!activeProperty) return;
     const run = ++generation.current;
     try {
       const next = await getProjects(activeProperty.id);
+      if (run !== generation.current) return;
       setProjects(next);
-      // Never fatal: a card without its quoted line is still a card.
-      getProjectsQuoted(next.map((p) => p.id)).then(setQuoted, () => setQuoted(null));
-      readExpected(next, run, force);
+      try {
+        const prices = await getProjectPrices(next.map((p) => p.id));
+        if (run !== generation.current) return;
+        setLedgers(new Map(next.map((p) => [
+          p.id,
+          projectLedger(prices.get(p.id) ?? [], inclGst(p.budget, p.budgetInclGst)),
+        ])));
+      } catch {
+        if (run === generation.current) setLedgers(null);
+      }
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Couldn't load the projects");
     } finally {
@@ -117,63 +123,13 @@ export default function ProjectsScreen() {
     }
   }, [activeProperty?.id]);
 
-  /**
-   * The Expected total behind each card's budget line, **one project at a
-   * time**. It is the page's whole read (`project_page`) and the page's own
-   * arithmetic, so it is the heaviest request in the app; firing one per card
-   * at once is the fan-out *What a press costs* in CLAUDE.md is about. Only
-   * cards that show the line ask, and finished jobs with money on them, whose
-   * card says what they cost. A newer load abandons an older loop, and
-   * what an older loop already read stays on screen until it is replaced
-   * rather than flashing back to —.
-   *
-   * **A figure is read again only when it can have changed** (31 October
-   * 2026). The list is read every time it comes into view, and it used to read
-   * every page again with it: four pages on the live household, one after
-   * another, on every return from a project. Each is half a second alone and
-   * five to nine when two overlap on this database, so tapping in and out
-   * stacked them past the 8s statement timeout and the tab stopped loading.
-   * Now a figure is kept while its project's row (every total on it, and when
-   * it was changed) is what it was read against, and read again when that row
-   * moves, when it is the project just opened (most edits happen there and not
-   * all of them move a total on the row), after a read that failed, or on a
-   * pull to refresh.
-   */
-  async function readExpected(list: Project[], run: number, force: boolean) {
-    for (const p of list.filter((x) => showsBudgetRemaining(x) || (x.status === 'done' && hasCost(x)))) {
-      if (run !== generation.current) return;
-      const row = JSON.stringify(p);
-      if (!force && p.id !== opened.current && readAgainst.current.get(p.id) === row) continue;
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        const total = await getExpectedTotal(p.id);
-        if (run !== generation.current) return;
-        readAgainst.current.set(p.id, row);
-        if (opened.current === p.id) opened.current = null;
-        setExpected((m) => new Map(m).set(p.id, total));
-      } catch {
-        if (run !== generation.current) return;
-        readAgainst.current.delete(p.id);
-        setExpected((m) => {
-          const next = new Map(m);
-          next.delete(p.id);
-          return next;
-        });
-      }
-    }
-  }
-
-  /** Opens a project, and marks its figure to be read again on the way back. */
   function openProject(projectId: string) {
-    opened.current = projectId;
     navigation.navigate('ProjectDetail', { projectId });
   }
 
   useFocusEffect(
     useCallback(() => {
       load();
-      // Leaving the list ends its reads. They went on behind the project just
-      // opened, competing with that page's own read for the same database.
       return () => {
         generation.current += 1;
       };
@@ -182,36 +138,16 @@ export default function ProjectsScreen() {
 
   const sections = useMemo(
     () =>
-      groupProjectsByStatus(projects).map((group) => ({
-        title: PROJECT_STATUS_LABELS[group.status],
-        status: group.status,
-        data: group.projects,
-      })),
+      // The wireframe's order: what is happening, what is done, what is next.
+      (['underway', 'done', 'planned'] as const)
+        .map((status) => ({
+          title: SECTION_TITLES[status],
+          status,
+          data: groupProjectsByStatus(projects).find((g) => g.status === status)?.projects ?? [],
+        }))
+        .filter((section) => section.data.length > 0),
     [projects]
   );
-
-  /**
-   * A room added here is a room everywhere.
-   *
-   * Same RPC, same property and the same `reloadLocations()` the House tab's
-   * *Add a room* line calls — rooms are a property's vocabulary, not one
-   * screen's, and two screens keeping separate ideas of what rooms exist is how
-   * the tabs stop describing the same house.
-   */
-  async function addRoom(name: string): Promise<boolean> {
-    if (!activeProperty) return false;
-    try {
-      await createLocation(activeProperty.id, name);
-      await reloadLocations();
-      showToast(`${name} added`);
-      return true;
-    } catch (err: unknown) {
-      // The RPC refuses a blank name and a duplicate in words, so this is worth
-      // showing rather than swallowing.
-      showAlert("Couldn't add that room", err instanceof Error ? err.message : 'Please try again.');
-      return false;
-    }
-  }
 
   async function start(input: ProjectInput) {
     try {
@@ -258,6 +194,8 @@ export default function ProjectsScreen() {
   // The headings below already count the jobs by state, so the line under the
   // title names only the home, and only when there is more than one.
   const placeName = placeTitle(activeProperty, properties);
+  // What has actually gone out, across every project at this place.
+  const totalSpent = ledgers ? [...ledgers.values()].reduce((n, l) => n + l.paid, 0) : 0;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -307,7 +245,7 @@ export default function ProjectsScreen() {
               refreshing={refreshing}
               onRefresh={async () => {
                 setRefreshing(true);
-                await load(true);
+                await load();
                 setRefreshing(false);
               }}
               tintColor={Colors.primary}
@@ -316,12 +254,20 @@ export default function ProjectsScreen() {
           renderSectionHeader={({ section }) => (
             <Text style={styles.group} accessibilityRole="header">{section.title}</Text>
           )}
-          renderItem={({ item, section }) => (
+          ListHeaderComponent={
+            projects.length > 0 ? (
+              <View style={styles.spend}>
+                <Text style={styles.spendLabel}>Total spent on the property</Text>
+                <Text style={styles.spendValue} numberOfLines={1} adjustsFontSizeToFit>
+                  {ledgers ? formatMoney(totalSpent) ?? '$0' : '—'}
+                </Text>
+              </View>
+            ) : null
+          }
+          renderItem={({ item }) => (
             <ProjectCard
               project={item}
-              quoted={quoted ? quoted.get(item.id) ?? null : undefined}
-              expected={expected.get(item.id)}
-              dim={section.status === 'done'}
+              ledger={ledgers?.get(item.id)}
               onPress={() => openProject(item.id)}
             />
           )}
@@ -369,8 +315,6 @@ export default function ProjectsScreen() {
       <AddProjectSheet
         visible={sheetOpen}
         propertyId={activeProperty?.id ?? ''}
-        locations={locations}
-        onAddRoom={addRoom}
         onCancel={() => setSheetOpen(false)}
         onCreate={start}
       />
@@ -381,175 +325,80 @@ export default function ProjectsScreen() {
 }
 
 /**
- * One project on the tab: what was budgeted, what the suppliers have quoted,
- * and what has actually been paid.
+ * One project on the tab, in the shape the wireframe gave each state.
  *
- * **Three figures, stacked.** Label left, figure right, one line each: a
- * project's totals are the longest answers in the app, and three across a
- * phone is where `$182,103.71` gets cut in half. Each is the page's own figure
- * or the view's — Budgeted is the typed budget grossed to incl GST, Quoted is
- * the supplier rows' sum (`getProjectsQuoted`, never fatal), Paid is
- * `paid_total` — so nothing here is a second way of adding something up. A
- * figure nobody has is said in words, never as `$0`. **A figure never
- * shrinks**; the label beside it gives way instead, because half a number is
- * worse than a clipped noun.
+ * - **In progress**: Budget, Paid, Outstanding (only when something is owed)
+ *   and Difference — budget less the expected total, in words, clay when over.
+ *   The expected total itself is on the project's page.
+ * - **Completed**: what it cost — what was paid — and nothing else.
+ * - **Planned**: Budget and what has been quoted ("3 quotes · $850–$1,400").
  *
- * **Once money has gone out, the card says where the budget is heading.** A
- * fourth row, *Expected total*, is the page's own figure — paid, owed, agreed,
- * earmarked and still to decide — and under a bar comes *Budget remaining* or
- * *Over budget*: budget less that total, not budget less paid. Two payments
- * earmarked for the builder are money the budget still has to cover, and a
- * card reading "$68,101 left" over a job its own page calls $54,230 over is
- * the card the household stops believing. The line takes fern above 15% left,
- * brass down to 5%, clay at 5% or less and over, and says the percentage and
- * what is not billed yet underneath, so colour is never the only way to read
- * it. See `budgetRemaining`.
- *
- * **The bar is paid, then the rest of what is expected, against the budget.**
- * Paid is solid; the rest is the same hue, lighter, because it has not gone
- * out yet. When the total runs past the budget the bar is drawn to the total
- * and a notch marks where the budget ends, so the overrun is the part of the
- * bar past the notch.
- *
- * Under it: how many things are left to decide and what is owed — counts and
- * sums, nothing to believe.
- *
- * **A complete project says what it cost, and only that** (by the owner's
- * decision): its name, when it finished, and one line — *Cost $58,868 ·
- * $1,132 under budget* — dimmed. No figures to add up and no bar: a finished
- * job is opened to answer "what did it cost", and the budget it no longer has
- * to fit inside is a comparison, not a figure still moving. See
- * `describeFinishedCost`.
+ * A figure nobody has is said in words, never `$0`; a figure never shrinks,
+ * the label beside it gives way.
  */
-const TONE: Record<RemainingTone, string> = {
-  good: Colors.primary,
-  warn: Colors.status.doing,
-  danger: Colors.danger,
-};
-
 function ProjectCard({
   project,
-  quoted,
-  expected,
-  dim,
+  ledger,
   onPress,
 }: {
   project: Project;
-  /** Undefined while the quoted read is out or has failed; null when nobody has quoted. */
-  quoted: number | null | undefined;
-  /** The page's Expected total; undefined until it has been read, or when it could not be. */
-  expected: number | undefined;
-  dim: boolean;
+  /** Undefined while the prices are being read, or when they could not be. */
+  ledger: ProjectLedger | undefined;
   onPress: () => void;
 }) {
   const money = (n: number) => formatMoney(n) ?? '';
   const budget = inclGst(project.budget, project.budgetInclGst);
-  const paid = project.paidTotal;
-  const shows = showsBudgetRemaining(project);
-  const left = shows && expected !== undefined ? budgetRemaining(project, expected) : null;
-  const remaining = left ? describeRemaining(left, money) : null;
-  const toDecide = Math.max(project.itemCount - project.pricedCount, 0);
-  const facts = [
-    toDecide > 0 ? `${toDecide} to decide` : null,
-    project.dueToPay > 0.005 ? `${formatMoney(project.dueToPay)} to pay` : null,
-    project.openSnagCount > 0 ? `${project.openSnagCount} to sort out` : null,
-  ].filter(Boolean);
+  const dash = '—';
+  const rows: { label: string; value: string | null; blank: string; tone?: 'over' | 'under' }[] = [];
 
-  const figures: { label: string; value: string | null; blank: string }[] = [
-    { label: 'Budgeted', value: budget !== null && budget > 0 ? formatMoney(budget) : null, blank: 'Not set' },
-    {
+  if (project.status === 'done') {
+    rows.push({ label: 'Cost', value: ledger && ledger.paid > 0.005 ? money(ledger.paid) : null, blank: ledger ? 'Nothing recorded' : dash });
+  } else if (project.status === 'planned') {
+    rows.push({ label: 'Budget', value: budget !== null && budget > 0 ? money(budget) : null, blank: 'Not set' });
+    rows.push({
       label: 'Quoted',
-      value: quoted !== undefined && quoted !== null ? formatMoney(quoted) : null,
-      blank: quoted === undefined ? '—' : 'No quotes',
-    },
-    { label: 'Paid', value: paid !== null && paid > 0.005 ? formatMoney(paid) : null, blank: 'Nothing yet' },
-  ];
-  if (shows) {
-    figures.push({ label: 'Expected total', value: expected !== undefined ? money(expected) : null, blank: '—' });
+      value: ledger ? describeQuoted(ledger.quotedRange, money) : null,
+      blank: ledger ? 'No quotes yet' : dash,
+    });
+  } else {
+    rows.push({ label: 'Budget', value: budget !== null && budget > 0 ? money(budget) : null, blank: 'Not set' });
+    rows.push({ label: 'Paid', value: ledger && ledger.paid > 0.005 ? money(ledger.paid) : null, blank: ledger ? 'Nothing yet' : dash });
+    if (ledger && ledger.outstanding > 0.005) rows.push({ label: 'Outstanding', value: money(ledger.outstanding), blank: '' });
+    if (ledger && ledger.difference !== null) {
+      const d = describeDifference(ledger.difference, money);
+      rows.push({ label: 'Difference', value: d.text, blank: '', tone: d.over ? 'over' : 'under' });
+    }
   }
 
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.card, dim && styles.cardDone]}
+      style={[styles.card, project.status === 'done' && styles.cardDone]}
       accessibilityRole="button"
       accessibilityLabel={project.name}
     >
       <View style={styles.cardTop}>
-        <View style={styles.cardTitles}>
-          <Text style={styles.cardName}>{project.name}</Text>
-          {dim ? <Text style={styles.cardSub} numberOfLines={1}>{projectSubtitle(project)}</Text> : null}
-        </View>
+        <Text style={styles.cardName}>{project.name}</Text>
         <Icon name="chevron-forward" size={16} color={Colors.chevron} />
       </View>
-      {dim ? (
-        <Text style={styles.costLine}>
-          {hasCost(project) ? describeFinishedCost(expected, budget, money) : 'No costs recorded'}
-        </Text>
-      ) : (
-        <View style={styles.figures}>
-          {figures.map((f) => (
-            <View key={f.label} style={styles.figureRow}>
-              <Text style={styles.figureLabel}>{f.label}</Text>
-              <Text style={[styles.figureValue, f.value === null && styles.figureBlank]} numberOfLines={1}>
-                {f.value ?? f.blank}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-      {shows && !dim ? (
-        <View style={styles.remaining}>
-          <BudgetBar
-            budget={budget ?? 0}
-            paid={paid ?? 0}
-            expected={expected}
-            colour={left ? TONE[left.tone] : Colors.chevron}
-          />
-          <View style={styles.figureRow}>
-            <Text style={styles.remainingLabel}>{remaining?.label ?? 'Budget remaining'}</Text>
+      <View style={styles.figures}>
+        {rows.map((f) => (
+          <View key={f.label} style={styles.figureRow}>
+            <Text style={styles.figureLabel}>{f.label}</Text>
             <Text
-              style={[styles.remainingValue, left ? { color: TONE[left.tone] } : styles.figureBlank]}
+              style={[
+                styles.figureValue,
+                f.value === null && styles.figureBlank,
+                f.tone === 'over' && styles.over,
+              ]}
               numberOfLines={1}
             >
-              {remaining?.value ?? '—'}
+              {f.value ?? f.blank}
             </Text>
           </View>
-          {remaining?.caption ? <Text style={styles.remainingCaption}>{remaining.caption}</Text> : null}
-        </View>
-      ) : null}
-      {facts.length > 0 ? (
-        <Text style={[styles.facts, project.overdueTotal > 0.005 && styles.factsOverdue]}>
-          {facts.join('   ·   ')}
-        </Text>
-      ) : null}
+        ))}
+      </View>
     </Pressable>
-  );
-}
-
-/**
- * Paid, then the rest of the expected total, measured against whichever is
- * larger of the budget and that total — with a notch where the budget ends
- * once the total has run past it. Until the total is known it is paid against
- * the budget and nothing else.
- */
-function BudgetBar({
-  budget, paid, expected, colour,
-}: {
-  budget: number;
-  paid: number;
-  expected: number | undefined;
-  colour: string;
-}) {
-  const base = Math.max(budget, paid, expected ?? 0, 1);
-  const pct = (n: number) => `${Math.min(Math.max(n / base, 0), 1) * 100}%` as const;
-  const rest = expected !== undefined ? Math.max(expected - paid, 0) : 0;
-  return (
-    <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <View style={[styles.barFill, { width: pct(paid), backgroundColor: colour }]} />
-      <View style={[styles.barFill, styles.barRest, { width: pct(rest), backgroundColor: colour }]} />
-      {base > budget + 0.005 ? <View style={[styles.barNotch, { left: pct(budget) }]} /> : null}
-    </View>
   );
 }
 
@@ -590,11 +439,15 @@ const styles = StyleSheet.create({
   // reason: there is nothing to do about this one, and it stays findable.
   cardDone: { opacity: 0.62 },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  cardTitles: { flex: 1, minWidth: 0, gap: 2 },
-  cardName: { fontSize: Typography.body, lineHeight: 22, fontWeight: Typography.semibold, color: Colors.textPrimary },
-  cardSub: { fontSize: Typography.subhead, color: Colors.textMuted },
+  cardName: { flex: 1, minWidth: 0, fontSize: Typography.body, lineHeight: 22, fontWeight: Typography.semibold, color: Colors.textPrimary },
   figures: { gap: Spacing.xs + 2 },
-  costLine: { fontSize: Typography.body, color: Colors.textPrimary, fontVariant: ['tabular-nums'] },
+  over: { color: Colors.danger, fontWeight: Typography.semibold },
+  spend: { paddingHorizontal: 4, paddingTop: Spacing.md, gap: 2 },
+  spendLabel: { fontSize: Typography.subhead, color: Colors.textMuted },
+  spendValue: {
+    fontSize: 40, lineHeight: 46, fontWeight: Typography.bold, color: Colors.textPrimary,
+    letterSpacing: -1, fontVariant: ['tabular-nums'],
+  },
   figureRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.md },
   figureLabel: { fontSize: Typography.subhead, color: Colors.textMuted, flexShrink: 1, minWidth: 0 },
   figureValue: {
@@ -602,24 +455,6 @@ const styles = StyleSheet.create({
     flexShrink: 0, textAlign: 'right',
   },
   figureBlank: { fontSize: Typography.subhead, color: Colors.textMuted },
-  remaining: { gap: Spacing.sm, marginTop: Spacing.xs },
-  remainingLabel: {
-    fontSize: Typography.subhead, fontWeight: Typography.semibold, color: Colors.textPrimary,
-    flexShrink: 1, minWidth: 0,
-  },
-  remainingValue: {
-    fontSize: Typography.body, fontWeight: Typography.semibold, fontVariant: ['tabular-nums'],
-    flexShrink: 0, textAlign: 'right',
-  },
-  remainingCaption: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'], marginTop: -Spacing.xs },
-  bar: { height: 6, borderRadius: 3, backgroundColor: Colors.track, overflow: 'hidden', flexDirection: 'row' },
-  barFill: { height: 6 },
-  // Not gone out yet: the same hue as paid, lighter. No new colour.
-  barRest: { opacity: 0.35 },
-  // Where the budget ends, cut into the bar in the card's own white.
-  barNotch: { position: 'absolute', top: 0, bottom: 0, width: 2, marginLeft: -1, backgroundColor: Colors.surface },
-  facts: { fontSize: Typography.subhead, color: Colors.textMuted, fontVariant: ['tabular-nums'] },
-  factsOverdue: { color: Colors.danger },
 
   empty: { alignItems: 'center', paddingHorizontal: Spacing.xl },
   emptyTitle: {

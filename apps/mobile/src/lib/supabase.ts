@@ -431,21 +431,18 @@ export const getProjects = (propertyId: string) => queries.getProjects(supabase,
 
 export const getAllProjects = () => queries.getAllProjects(supabase);
 
-export const getProjectsQuoted = (projectIds: readonly string[]) =>
-  queries.getProjectsQuoted(supabase, projectIds);
 
 export const getSupplierNames = () => queries.getSupplierNames(supabase);
 
 export const getProject = (projectId: string) => queries.getProject(supabase, projectId);
 
 
-/** The whole project page in one round trip. See `getProjectPage` for why. */
-export const getProjectPage = (projectId: string) =>
-  queries.getProjectPage(supabase, projectId);
 
 /** The page's Expected total, for a project card. One project per call. */
-export const getExpectedTotal = (projectId: string) =>
-  queries.getExpectedTotal(supabase, projectId);
+/** Every price on these projects, one request. Read through `projectLedger`. */
+export const getProjectPrices = (projectIds: string[]) => queries.getProjectPrices(supabase, projectIds);
+/** Emailed papers on a project still waiting. */
+export const getPendingReviews = (projectId: string) => queries.getPendingReviews(supabase, projectId);
 
 
 export const createProject = (input: queries.ProjectInput) =>

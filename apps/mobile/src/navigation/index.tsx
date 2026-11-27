@@ -9,7 +9,8 @@ import SnagListScreen from '../screens/SnagListScreen';
 import ScheduleScreen from '../screens/ScheduleScreen';
 import HouseScreen from '../screens/HouseScreen';
 import ProjectsScreen from '../screens/ProjectsScreen';
-import ProjectDetailScreen from '../screens/ProjectDetailScreen';
+import ProjectScreen from '../screens/ProjectScreen';
+import SupplierScreen from '../screens/SupplierScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SnagDetailScreen from '../screens/SnagDetailScreen';
 import HouseholdScreen from '../screens/HouseholdScreen';
@@ -105,7 +106,8 @@ export default function RootNavigator() {
           rather than fall through to the list with no explanation. The setting
           is about what the app offers, not about what it refuses to show when
           asked directly. */}
-      <Stack.Screen name="ProjectDetail" component={ProjectDetailScreen} />
+      <Stack.Screen name="ProjectDetail" component={ProjectScreen} />
+      <Stack.Screen name="ProjectSupplier" component={SupplierScreen} />
       {/* A push, like ProjectDetail. A room is a page of things read one after
           another, and each of them opens ThingDetail as a sheet over it — which
           a room drawn as a sheet itself could not have under it, because a

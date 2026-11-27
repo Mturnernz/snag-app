@@ -2289,6 +2289,8 @@ export type RootStackParamList = {
    * the list it is covering.
    */
   ProjectDetail: { projectId: string };
+  /** One supplier on a project: their quotes and invoices. `supplierKey` is `supplierKeyOf`. */
+  ProjectSupplier: { projectId: string; supplierKey: string };
 };
 
 export type MainTabParamList = {

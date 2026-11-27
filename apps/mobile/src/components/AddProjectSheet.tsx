@@ -18,30 +18,20 @@ import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import {
   parseLooseDate, formatDayFirst, formatLooseDate, orderProjectDates, type ProjectDateBox, type ProjectInput,
 } from '@snag/supabase-queries';
-import { Location, ProjectStatus, PROJECT_STATUS_LABELS } from '../types';
+import { ProjectStatus, PROJECT_STATUS_LABELS } from '../types';
 
-type Step = 'name' | 'rooms' | 'when';
-const STEPS: Step[] = ['name', 'rooms', 'when'];
+type Step = 'name' | 'when';
+const STEPS: Step[] = ['name', 'when'];
 
 interface Props {
   visible: boolean;
   propertyId: string;
-  locations: Location[];
-  /**
-   * Creates a room tag and says whether it worked.
-   *
-   * The same prop `AddThingSheet` takes, calling the same `home.create_location`
-   * against the same property — because a room is a property's vocabulary, not
-   * one sheet's. A room added here joins the tags the List tab groups by, the
-   * House tab sections on and capture offers.
-   */
-  onAddRoom: (name: string) => Promise<boolean>;
   onCancel: () => void;
   onCreate: (input: ProjectInput) => Promise<void>;
 }
 
 /**
- * Starting a project, in three questions, of which only the first is required.
+ * Starting a project, in two steps, of which only the name is required.
  *
  * The same bargain `AddThingSheet` makes and for the same reason: every
  * house-inventory product ever shipped opens on an empty thirty-field form, and
@@ -49,28 +39,9 @@ interface Props {
  * it once, find nothing, and never check again. A project with a name and
  * nothing else is a perfectly good row.
  *
- * Three things here are load-bearing.
- *
- * **Elements come from step two, not from a concept anybody has to learn.**
- * "Which rooms does it touch" produces one element per room, already named, and
- * the sheet says so in one line under the chips. Pick one room and elements
- * never appear at all — the middle layer has not earned its place, so the server
- * makes it implicit and the client never draws it. Nobody is ever asked to
- * understand the hierarchy before they can record a renovation.
- *
- * **And a room the seed never guessed at can be made right here**, for exactly
- * the reason the walkthrough's *Add a room…* chip sits on its first step: the
- * moment somebody notices the storage area under the house is not on the list is
- * the moment they are describing a renovation that touches it, and sending them
- * to Profile → Location tags and back loses the flow they were in. It calls the
- * same `home.create_location` against the same property, so a room added here is
- * a room on the List tab and the House tab too — one vocabulary, or the tabs
- * stop describing the same house.
- *
- * The new room is **selected as soon as it exists**, because somebody who has
- * just typed "Storage area" into a question asking which rooms are touched has
- * plainly answered it. Making them tap the chip they just created would be the
- * sheet asking twice.
+ * **No rooms step since the November 2026 reset.** A project is its
+ * suppliers and their quotes and invoices; the server still makes one
+ * implicit part, which nothing draws.
  *
  * **"Already finished" is a first-class answer**, not an edge case. Recording
  * the bathroom you did in 2024 is how the record becomes useful before the next
@@ -82,20 +53,17 @@ interface Props {
  * household-wide GST setting anywhere in this app, deliberately — see
  * `MoneyField`.
  *
- * Nothing is written until the last step, which is forced rather than chosen:
- * `create_project` needs a name and the rooms in one call, because it creates
- * the elements in the same transaction. A project half-created by somebody who
- * walked away mid-flow would be a row with no parts to hang anything off.
+ * Nothing is written until the last step: a project half-created by somebody
+ * who walked away mid-flow is a row nobody asked for.
  */
 export default function AddProjectSheet({
-  visible, propertyId, locations, onAddRoom, onCancel, onCreate,
+  visible, propertyId, onCancel, onCreate,
 }: Props) {
   const insets = useEdgeInsets();
   const keyboard = useKeyboardInset();
 
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
-  const [rooms, setRooms] = useState<string[]>([]);
   const [status, setStatus] = useState<ProjectStatus>('planned');
   const [startedOn, setStartedOn] = useState('');
   const [targetOn, setTargetOn] = useState('');
@@ -108,14 +76,11 @@ export default function AddProjectSheet({
   const [budget, setBudget] = useState('');
   const [budgetIncl, setBudgetIncl] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [namingRoom, setNamingRoom] = useState(false);
-  const [roomDraft, setRoomDraft] = useState('');
 
   useEffect(() => {
     if (!visible) return;
     setStep('name');
     setName('');
-    setRooms([]);
     setStatus('planned');
     setStartedOn('');
     setTargetOn('');
@@ -126,8 +91,6 @@ export default function AddProjectSheet({
     setBudget('');
     setBudgetIncl(true);
     setBusy(false);
-    setNamingRoom(false);
-    setRoomDraft('');
   }, [visible]);
 
   const index = STEPS.indexOf(step);
@@ -137,56 +100,7 @@ export default function AddProjectSheet({
       onCancel();
       return;
     }
-    if (step === 'rooms') {
-      // Backwards too: a name typed here is lost just as completely by going
-      // back to the title as by going on.
-      leaveRooms('name');
-      return;
-    }
     setStep(STEPS[index - 1]);
-  }
-
-  function toggleRoom(room: string) {
-    setRooms((current) =>
-      current.includes(room) ? current.filter((r) => r !== room) : [...current, room]
-    );
-  }
-
-  async function addRoom(): Promise<boolean> {
-    const name = roomDraft.trim();
-    if (!name || busy) return true;
-    setBusy(true);
-    try {
-      if (!(await onAddRoom(name))) return false;
-      // Selected on the way in: the question on screen is which rooms it
-      // touches, and typing one is an answer to it.
-      setRooms((current) => (current.includes(name) ? current : [...current, name]));
-      setRoomDraft('');
-      setNamingRoom(false);
-      return true;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /**
-   * Leaving step two commits a room that was typed and not ticked.
-   *
-   * **This was a real bug and it lost people's work in silence.** The tick
-   * beside the field was the only thing that created the room, so somebody who
-   * typed "Workshop", pressed *Next*, and finished the project got a project
-   * with one fewer part than they had asked for — and no room created either.
-   * Nothing said so, because from the sheet's point of view nothing had
-   * happened. A half-typed answer sitting in a box is still an answer, and the
-   * only honest readings of *Next* are "take it" or "say why you can't".
-   *
-   * A refusal — `create_location` rejects a duplicate in words — keeps the step
-   * open with the words still in the box, rather than advancing past a name it
-   * did not take.
-   */
-  async function leaveRooms(to: Step): Promise<void> {
-    if (roomDraft.trim() && !(await addRoom())) return;
-    setStep(to);
   }
 
   function typeDate(box: ProjectDateBox, text: string) {
@@ -225,7 +139,6 @@ export default function AddProjectSheet({
         propertyId,
         name: name.trim(),
         status,
-        rooms,
         startedOn: ordered.started,
         targetOn: parseLooseDate(targetOn) ?? null,
         finishedOn: ordered.finished,
@@ -253,7 +166,7 @@ export default function AddProjectSheet({
             <Icon name="chevron-back" size="md" color={Colors.textMuted} />
           </Pressable>
           <Text style={styles.step}>
-            Step {index + 1} of 3{step === 'name' ? ' · required' : ''}
+            Step {index + 1} of {STEPS.length}{step === 'name' ? ' · required' : ''}
           </Text>
           <Pressable onPress={onCancel} style={styles.headTap} accessibilityRole="button" accessibilityLabel="Cancel">
             <Icon name="close" size="md" color={Colors.textMuted} />
@@ -276,82 +189,6 @@ export default function AddProjectSheet({
           </View>
         ) : null}
 
-        {/* ── 2. which rooms — and where elements come from ───────────── */}
-        {step === 'rooms' ? (
-          <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
-            <Text style={styles.question}>Which rooms does it touch?</Text>
-            <View style={styles.chips}>
-              {locations.map((location) => {
-                const on = rooms.includes(location.name);
-                return (
-                  <Pressable
-                    key={location.id}
-                    onPress={() => toggleRoom(location.name)}
-                    style={styles.chipTap}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                    accessibilityLabel={location.name}
-                  >
-                    <View style={[styles.chip, on && styles.chipOn]}>
-                      <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>
-                        {location.name}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-              {/* Dashed rather than sunken, so it reads as a way to make one
-                  rather than as a room that exists — the same distinction the
-                  House tab draws between a ghost and a record. */}
-              <Pressable
-                onPress={() => setNamingRoom(true)}
-                style={styles.chipTap}
-                accessibilityRole="button"
-                accessibilityLabel="Add a room"
-              >
-                <View style={[styles.chip, styles.chipNew]}>
-                  <Text style={styles.chipNewLabel}>+ Add a room…</Text>
-                </View>
-              </Pressable>
-            </View>
-
-            {namingRoom ? (
-              <View style={styles.newRoomRow}>
-                <TextInput
-                  style={styles.newRoomInput}
-                  value={roomDraft}
-                  onChangeText={setRoomDraft}
-                  placeholder="Storage area · Conservatory · Sleepout"
-                  placeholderTextColor={Colors.textMuted}
-                  onSubmitEditing={addRoom}
-                  returnKeyType="done"
-                  maxLength={40}
-                  autoFocus
-                  accessibilityLabel="Name the room"
-                />
-                <Pressable
-                  onPress={addRoom}
-                  disabled={busy || !roomDraft.trim()}
-                  style={styles.newRoomGo}
-                  accessibilityRole="button"
-                  accessibilityLabel="Add it"
-                >
-                  {busy ? (
-                    <ActivityIndicator color={Colors.primary} />
-                  ) : (
-                    <Icon
-                      name="checkmark"
-                      size="md"
-                      color={roomDraft.trim() ? Colors.primary : Colors.textMuted}
-                    />
-                  )}
-                </Pressable>
-              </View>
-            ) : null}
-          </ScrollView>
-        ) : null}
-
-        {/* ── 3. where's it up to ─────────────────────────────────────── */}
         {step === 'when' ? (
           <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
             <Text style={styles.question}>Where’s it up to?</Text>
@@ -422,9 +259,7 @@ export default function AddProjectSheet({
         <View style={styles.footer}>
           <Pressable
             onPress={() =>
-              step === 'when' ? save()
-                : step === 'rooms' ? leaveRooms('when')
-                  : setStep(STEPS[index + 1])
+              step === 'when' ? save() : setStep(STEPS[index + 1])
             }
             disabled={busy || (step === 'name' && !name.trim())}
             style={[styles.cta, (busy || (step === 'name' && !name.trim())) && styles.ctaOff]}
@@ -444,16 +279,6 @@ export default function AddProjectSheet({
               </Text>
             )}
           </Pressable>
-          {step === 'rooms' ? (
-            <Pressable
-              onPress={() => leaveRooms('when')}
-              style={styles.skip}
-              accessibilityRole="button"
-              accessibilityLabel="Skip for now"
-            >
-              <Text style={styles.skipLabel}>Skip for now</Text>
-            </Pressable>
-          ) : null}
         </View>
       </View>
     </Modal>

@@ -2339,12 +2339,72 @@ the case where a thing filed as "Bosch dishwasher" counts as having answered the
 prompt, and the paint rules above: one general prompt per room, answered by any finish in it and
 by nothing in another room, with the colour leading and the code searchable.
 
-## Projects: what we're *changing*
+## Projects: what we're *changing* (reset, November 2026)
 
 `ProjectsScreen` is the **Projects** tab, and `home.projects` is the table behind it. The third
-noun. The list holds what is wrong with the house; the House tab holds what is in it; neither could
-hold a renovation — a body of work with a budget, a span of rooms, a folder of quotes, and an
-answer to "what did the bathroom actually cost".
+noun: a renovation, a rebuild, a tree to trim — work with a budget, suppliers, and an answer to
+"what did it cost".
+
+**The tab was started again from a paper wireframe Alyssa drew** (27 November 2026), because it
+had grown into an accounting system — a 1,762-line page and twenty-odd sheets of parts, items,
+allowances, set-asides, look-alikes, room splits and claim links — that a household could not
+read. **This section is the whole of how Projects works now. Where anything under *Projects
+before the November 2026 reset* disagrees, this wins**; that history is kept as a record of why the
+data looks as it does, not as rules.
+
+**Three screens, three nouns: project → supplier → quotes and invoices.**
+
+- **The list** (`ProjectsScreen`): *Total spent on the property* (every project's Paid) at the top,
+  then **In progress**, **Completed**, **Planned**, in that order.
+  - In progress card: Budget, Paid, Outstanding (only when something is owed), Difference
+    (*$X under* / *$X over*, clay when over).
+  - Completed card: **Cost** — what was paid — and nothing else. Dimmed.
+  - Planned card: Budget, **Quoted** (one amount, or *3 quotes · $850–$1,400*, or *No quotes yet*).
+  - **One read for the whole list**: `getProjects` then `getProjectPrices(ids)`. The per-card
+    `project_page` loop is gone, and with it the 8s-timeout storm *What a press costs* describes.
+- **The project** (`ProjectScreen`, route `ProjectDetail`): title, status pill, the figures by
+  state (In progress leads with **Expected total**), *New from email* while emailed papers wait
+  (Add / File / Remove), then **Suppliers**: one card each. A planned project lists **Supplier
+  quotes** with **Accept** on each. The + adds a quote or invoice (`AddPriceSheet`).
+- **The supplier** (`SupplierScreen`, route `ProjectSupplier { projectId, supplierKey }`): their
+  figures, then **Invoices | Quotes** (invoices only once the project is complete). A row opens
+  `BillSheet`: amount, dates, files, **Mark as paid** (asks the day when past due), **Accept**,
+  Delete.
+
+**The arithmetic is one pure function, `projectLedger` (`packages/supabase-queries/src/ledger.ts`)**,
+over the rows of `project_quotes_with_totals`. By the owner's decisions:
+
+- A supplier's **Total** is what they have **invoiced**; Paid and Outstanding follow from each
+  bill's `unpaid`. A card with nothing owed shows only **Total (paid)** (Alyssa's note).
+- **Expected total** = for each supplier, whichever is more: invoiced, or quotes **accepted**. A
+  signed contract counts in full while its claims come in; an architect billing monthly counts at
+  what they've billed. A quote nobody accepted counts nothing.
+- **Difference** = budget (incl GST) − expected total.
+- **Accepting a quote starts the project**: a planned project becomes underway, started today.
+- Suppliers are grouped by `businessKey`, so *RELIABUILDER LIMITED* and *ReliaBuilder* are one
+  card, named by the newest spelling. A declined price counts nothing. A bill with
+  `billed_through_id` (inside another bill) is listed, marked *Included in another invoice*, and
+  counted once — through the bill holding it. Nothing in the UI sets that link any more; the rows
+  that have it are history, and a wrong one is fixed in data.
+
+`ledger.test.ts` pins every rule above; `ProjectsScreen.test.tsx`, `ProjectScreen.test.tsx`
+(both pages), `AddPriceSheet.test.tsx` and `AddProjectSheet.test.tsx` the screens.
+
+**Nothing was dropped.** Parts (`project_elements`), items, quote lines and allowances, expected
+costs, milestones, room shares, file tags, kept look-alike pairs and the rest are still in the
+database with their rows; the app no longer reads or writes them, and the export still carries
+them. `create_project` still makes its implicit part. The pure helpers that read them
+(`projectSummary`, `checks.ts`, `expectations.ts`, …) stay in the queries package with their tests;
+the mobile sheets that drove them were deleted. **Emailed bills still arrive**: `inbound-bill` is
+unchanged, and a card is added with `approve_invoice_review` (no claim, no rooms) or filed with
+`file_review_paperwork`.
+
+Adding a project asks two things now: a name, then where it's up to with its dates and budget. The
+rooms step is gone.
+
+## Projects before the November 2026 reset
+
+Kept as history. The screens below no longer exist; the tables do.
 
 ### V2: the page somebody who has never run a renovation can read
 
